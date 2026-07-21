@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>intranet · JAIN-E · Jain Group</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="nexus.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div id="authLoad"><div class="loader"><div class="spin"></div><div style="margin-top:14px">Loading your workspace…</div></div></div>
+<div id="shell"><div class="sb-backdrop" id="sbBackdrop"></div>
+  <aside class="sidebar">
+    <a href="index.html" class="sb-brand" style="text-decoration:none" title="Back to Home">
+      <div class="mk">J</div><div class="nm">JAIN-E<small>Operations Portal</small></div>
+    </a>
+    <nav class="sb-nav" id="sbNav"></nav>
+    <div class="sb-foot">v1.0 · Operations Portal</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="hamburger" id="hamburger" aria-label="Menu"><i class="fa-solid fa-bars"></i></button><div class="crumb" id="crumb"></div>
+      <div class="search-box"><i class="fa-solid fa-magnifying-glass"></i><input id="globalSearch" placeholder="Search documents, tasks, people…"></div>
+      <div class="topbar-actions">
+        <button class="ic-btn" id="notifBtn" title="Notifications"><i class="fa-regular fa-bell"></i><span class="dot"></span></button>
+        <div class="profile-wrap"><div class="avatar" id="profileBtn"></div><div class="dropdown" id="notifDd"></div><div class="dropdown" id="profileDd"></div></div>
+      </div>
+    </header>
+    <main class="view" id="view"></main>
+  </div>
+</div>
+<div class="overlay" id="overlay"><div id="modalHost"></div></div>
+<div id="toasts"></div>
+<script>window.PAGE='intranet';</script>
+<script src="nexus-core.js"></script>
+</body>
+</html>

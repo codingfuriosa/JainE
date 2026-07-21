@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JAIN-E</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f4f6fb;min-height:100vh}
+#fallback{display:none;font-family:system-ui,sans-serif;color:#0b1220;min-height:100vh;align-items:center;justify-content:center;padding:24px;text-align:center;flex-direction:column;gap:12px}
+#fallback.show{display:flex}
+#fallback a{color:#1d4ed8;font-weight:600;text-decoration:none}
+</style>
+</head>
+<body>
+<!--
+  This page is just a passthrough: Google's OAuth redirect has to land
+  somewhere, so it lands here, then forwards straight to index.html with the
+  original intent (login/signup) attached. All the actual "does this account
+  exist / has it completed setup / deny or provision" logic lives in boot()
+  in nexus-core.js now -- nothing is decided or shown here, so there's no
+  separate visible page between signing in with Google and the dashboard.
+-->
+<div id="fallback">
+  <p>We couldn't confirm your Google sign-in.</p>
+  <p><a href="login.html">Back to sign in</a> &nbsp;&middot;&nbsp; <a href="signup.html">Create account</a></p>
+</div>
+<script>
+const SUPABASE_URL='https://rkxsgtauigjrpcjkmccu.supabase.co';
+const SUPABASE_KEY='sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+let handled=false;
+
+function intentParam(){ try{ return new URLSearchParams(location.search).get('intent')||'signup'; }catch(e){ return 'signup'; } }
+
+function go(){
+  if(handled)return; handled=true;
+  location.replace('index.html?intent='+encodeURIComponent(intentParam()));
+}
+
+sb.auth.onAuthStateChange((event,session)=>{
+  if(event==='SIGNED_IN' && session && session.user){ go(); }
+});
+
+(async()=>{
+  const {data}=await sb.auth.getSession();
+  if(data && data.session && data.session.user){ go(); return; }
+  // Supabase JS is still parsing the redirect URL / settling the session --
+  // give it one more beat before concluding something actually went wrong.
+  setTimeout(async()=>{
+    if(handled)return;
+    const {data:d2}=await sb.auth.getSession();
+    if(d2 && d2.session && d2.session.user){ go(); }
+    else{ document.getElementById('fallback').className='show'; }
+  },2500);
+})();
+</script>
+</body>
+</html>
