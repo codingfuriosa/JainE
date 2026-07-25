@@ -163,9 +163,14 @@ $('forgot').addEventListener('click',async function(){
   let onboarded=false;
   try{ const {data}=await sb.schema('acc').rpc('check_onboarded',{p_email:email}); onboarded=!!data; }catch(e){}
   if(!onboarded){ btn.disabled=false; msg('There\u2019s no JAIN-E account for '+email+' yet. Use "Create an account" below instead.','err'); return; }
-  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname.replace('login.html','reset-password.html')});
+  let resp,j;
+  try{
+    resp=await fetch(SUPABASE_URL+'/functions/v1/password-reset-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    j=await resp.json();
+  }catch(e){ btn.disabled=false; msg('Could not reach the server. Please try again.','err'); return; }
   btn.disabled=false;
-  if(error)msg(error.message,'err');else msg('Password reset link sent to '+email+'.','ok');
+  if(!resp.ok||j.error) msg(j.error||'Something went wrong. Please try again.','err');
+  else msg('Check your email — open it and enter your new password right there to reset it.','ok');
 });
 
 $('googleBtn').addEventListener('click',async function(){

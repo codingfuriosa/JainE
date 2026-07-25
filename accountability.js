@@ -21,6 +21,17 @@
   const nowISO = () => new Date().toISOString();
   const todayStr = () => new Date().toDateString();
   const todayISO = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+  // Kolkata (IST, UTC+5:30 fixed, no DST) wall-clock "now" — computed from the epoch timestamp
+  // (Date.now(), which is timezone-independent) plus a fixed offset, read back via the UTC getters.
+  // This is deliberately NOT `new Date()`/todayISO() above: those reflect whatever timezone the
+  // browser's OS happens to be set to, which every Meeting-related backend piece (acc.meetings
+  // cron functions, google-meet-live-completion) does NOT assume — they all compute against
+  // Asia/Kolkata specifically. If a device's clock/timezone is off, todayISO()-based checks can
+  // silently disagree with the backend ("the time sometimes is weird") — istNow()/istTodayISO()/
+  // istNowMinutes() give the real Kolkata time no matter what the local machine thinks it is.
+  const istNow = () => new Date(Date.now() + 5.5*60*60*1000);
+  const istTodayISO = () => { const d=istNow(); return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0'); };
+  const istNowMinutes = () => { const d=istNow(); return d.getUTCHours()*60+d.getUTCMinutes(); };
   const STATUSES = ['Pending','Awaiting Approval','Completed'];
 
   function injectCss(){
@@ -30,7 +41,7 @@
     .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
     .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
     .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
-    @media(max-width:700px){.ac-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-bottom:0}.ac-tab{justify-content:center;border:1px solid var(--line);border-radius:9px;padding:10px 8px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}}
+    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:7px;border-bottom:0;padding:2px 2px 6px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:12.5px;gap:5px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}}
     .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
     .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
     .ac-pbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
@@ -129,7 +140,7 @@
     .gcal-main{flex:1;min-width:0;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
     .gcal-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #e5e7eb}
     .gcal-tb-nav{display:flex;align-items:center;gap:8px}
-    .gcal-tbtn{border:1px solid #e5e7eb;background:#fff;color:#1f2937;border-radius:8px;height:34px;padding:0 12px;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s}
+    .gcal-tbtn{border:1px solid #e5e7eb;background:#fff;color:#1f2937;border-radius:8px;height:34px;padding:0 12px;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s;flex-shrink:0}
     .gcal-tbtn:hover{background:#f8fafc}
     .gcal-tbtn.ic{width:34px;padding:0}
     .gcal-toolbar-title{font-size:19px;font-weight:600;color:#1f2937;margin:0 6px;white-space:nowrap}
@@ -151,6 +162,11 @@
     .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
     .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
     .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%}
+    .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
+    .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}
+    .gcal-mev.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:1px}
+    .gcal-mcell.gcal-drop-hover,.gcal-allday-col.gcal-drop-hover{outline:2px dashed #2563eb;outline-offset:-2px;background:rgba(37,99,235,.08)}
     .gcal-wrap{display:flex;flex-direction:column;max-height:66vh;overflow:auto}
     .gcal-allday{display:flex;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
     .gcal-allday-label{width:56px;flex:none;font-size:10.5px;color:#6b7280;padding:6px 6px 6px 0;text-align:right}
@@ -167,16 +183,39 @@
     .gcal-daycolhead{text-align:center;padding:8px 0;border-left:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#6b7280}
     .gcal-daycolhead .n{font-size:16px;color:#1f2937;font-weight:700;display:block;margin-top:2px}
     .gcal-daycolhead.today .n{color:#2563eb}
-    .gcal-yeargrid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;padding:18px}
+    /* Name + time sit on ONE line (flex row) instead of stacking — keeps short meetings from
+       looking "thick"/oversized. left/width are set inline per-block by gcalMtgLayout() so
+       meetings that overlap in time sit side-by-side instead of drawing on top of each other. */
+    .gcal-mtgblock{position:absolute;display:flex;align-items:center;gap:6px;border-radius:6px;color:#fff;padding:3px 7px;overflow:hidden;cursor:pointer;font-size:11px;line-height:1.35;box-shadow:0 1px 2px rgba(0,0,0,.15);z-index:2}
+    .gcal-mtgblock b{flex:1;min-width:0;font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .gcal-mtgblock span{flex:none;font-size:10px;opacity:.9;white-space:nowrap}
+    .gcal-mtgblock[data-meeting-time]{cursor:grab;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:none}
+    .gcal-mtgblock.gcal-dragging{opacity:.55;cursor:grabbing;box-shadow:0 4px 10px rgba(0,0,0,.3)}
+    .gcal-tbtn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+    /* Agenda list (used by Week view, and by Month's day-click slide-in panel) */
+    .gcal-list-wrap{max-height:66vh;overflow:auto}
+    .gcal-list{padding:4px 0}
+    .gcal-lday{border-bottom:1px solid #eef1f4;padding:10px 16px}
+    .gcal-lday:last-child{border-bottom:0}
+    .gcal-lday-head{font-size:13px;font-weight:700;color:#1f2937;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+    .gcal-lday.today .gcal-lday-head{color:#2563eb}
+    .gcal-lday-badge{background:#2563eb;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px}
+    .gcal-lday-rows{display:flex;flex-direction:column;gap:5px}
+    .gcal-lrow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;font-size:13px;color:#1f2937;cursor:pointer;transition:background .1s}
+    .gcal-lrow:hover{background:#f8fafc}
+    .gcal-lrow.empty{color:#9ca3af;cursor:default;font-size:12.5px}
+    .gcal-lrow.empty:hover{background:transparent}
+    .gcal-lrow-dot{width:9px;height:9px;border-radius:50%;flex:none}
+    .gcal-lrow-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+    .gcal-lrow-tag{font-size:11px;color:#6b7280;flex:none}
+    .gcal-lrow[data-task],.gcal-lrow[data-meeting]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-lrow.gcal-dragging{opacity:.4;cursor:grabbing;background:#eff6ff}
+    .gcal-lrow.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:-2px}
+    .gcal-lday.gcal-drop-hover{background:rgba(37,99,235,.06);outline:2px dashed #2563eb;outline-offset:-2px}
+    .gcal-yeargrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;padding:18px}
     .gcal-year-month{border:1px solid #e5e7eb;border-radius:10px;padding:10px}
     .gcal-year-month-title{font-size:12.5px;font-weight:700;color:#1f2937;margin-bottom:6px;cursor:pointer;text-align:center}
     .gcal-year-month-title:hover{color:#2563eb}
-    .gcal-sched-date{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:14px 16px 6px}
-    .gcal-sched-row{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer}
-    .gcal-sched-row:hover{background:#f8fafc}
-    .gcal-sched-dot{width:10px;height:10px;border-radius:3px;flex:none}
-    .gcal-sched-time{width:70px;flex:none;font-size:12px;color:#6b7280}
-    .gcal-sched-title{flex:1;font-size:13.5px;color:#1f2937;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .gcal-empty-view{padding:60px 20px;text-align:center;color:#9ca3af;font-size:13.5px}
     .gcal-panel{position:fixed;top:0;right:0;height:100%;width:360px;max-width:92vw;background:#fff;border-left:1px solid #e5e7eb;box-shadow:-6px 0 24px rgba(15,23,42,.10);transform:translateX(100%);transition:transform .22s ease;z-index:200;display:flex;flex-direction:column}
     .gcal-panel.open{transform:translateX(0)}
@@ -195,23 +234,100 @@
     .gcal-fab.disabled{background:#cbd5e1;box-shadow:none;cursor:not-allowed}
     .gcal-fab.disabled:hover{transform:none;box-shadow:none}
     @media(max-width:900px){
-      .gcal-shell{flex-direction:column}
+      .gcal-shell{flex-direction:column;align-items:stretch}
+      .gcal-main{width:100%}
       .gcal-sidebar{width:100%;flex-direction:row;flex-wrap:wrap}
       .gcal-mini{flex:1;min-width:220px}
       .gcal-filters{flex:1;min-width:200px}
       .gcal-create{width:100%}
       .gcal-toolbar{flex-direction:column;align-items:stretch}
       .gcal-tb-nav{width:100%;justify-content:center}
-      .gcal-toolbar-title{font-size:16px;flex:1;text-align:center}
+      .gcal-toolbar-title{font-size:16px;flex:1;text-align:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .gcal-search{width:100%;max-width:none;flex:none}
       .gcal-views{width:100%;margin-left:0;flex-wrap:wrap}
       .gcal-views .gcal-view-btn{flex:1 1 auto}
-      .gcal-yeargrid{grid-template-columns:repeat(2,1fr);gap:12px;padding:12px}
+      .gcal-yeargrid{grid-template-columns:repeat(1,1fr);gap:12px;padding:12px}
       .gcal-mcell{min-height:56px}
       .gcal-mevents{flex-direction:row;flex-wrap:wrap;gap:4px}
-      .gcal-mev{font-size:0;line-height:0;padding:0;width:6px;height:6px;min-width:6px;border-radius:50%;white-space:normal;overflow:visible}
+      .gcal-mevents .gcal-mev{font-size:0;line-height:0;padding:0;width:6px;height:6px;min-width:6px;border-radius:50%;white-space:normal;overflow:visible}
       .gcal-panel{width:100%;max-width:100%}
       .gcal-fab{right:18px;bottom:18px}
+    }
+    /* meetings */
+    .mtg-page{color:#1f2937}
+    .mtg-main{width:100%;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .mtg-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px;border-bottom:1px solid #e5e7eb}
+    .mtg-toolbar-title{font-size:19px;font-weight:600;color:#1f2937}
+    .mtg-create{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--brand);border:1px solid var(--brand);border-radius:20px;padding:0 16px;height:38px;font-weight:600;font-size:13.5px;color:#fff;cursor:pointer;margin-left:auto}
+    .mtg-gstatus{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:16px}
+    .mtg-gstatus.connected{background:#dcfce7;color:#16a34a}
+    .mtg-gstatus.connect{background:#fff;border:1px solid #d1d5db;color:#374151;cursor:pointer}
+    .mtg-gstatus.connect:hover{background:#f9fafb}
+    .mtg-gate{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding:70px 24px;min-height:320px}
+    .mtg-gate .mtg-gate-icon{font-size:34px;color:#4285f4}
+    .mtg-gate h3{font-size:17px;font-weight:600;color:#1f2937;margin:0}
+    .mtg-gate p{font-size:13px;color:var(--slate);max-width:340px;margin:0}
+    .mtg-gate-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;max-width:360px;display:flex;align-items:center;gap:6px;text-align:left}
+    .mtg-gate button{display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;border:1px solid #d1d5db;border-radius:20px;padding:0 20px;height:42px;font-weight:600;font-size:13.5px;color:#374151;cursor:pointer}
+    .mtg-gate button:hover{background:#f9fafb}
+    .mtg-gate button i{color:#4285f4}
+    .mtg-auto-link{font-size:12.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:6px}
+    .mtg-auto-link.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+    .mtg-auto-link a{color:inherit;font-weight:600;text-decoration:underline}
+    /* Non-blocking scheduling-conflict warning shown in the meeting form's attendee picker */
+    .mtg-conflict-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:6px;line-height:1.5}
+    .mtg-conflict-mark{margin-left:2px}
+    .mtg-log-attendee{font-size:13px;color:var(--body);padding:4px 0;display:flex;align-items:center;gap:8px}
+    .mtg-create:hover{filter:brightness(.94)}
+    .mtg-grouptabs{display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
+    .mtg-gtab{border:1px solid #e5e7eb;background:#fff;color:#475569;font-size:13px;font-weight:600;padding:0 16px;height:34px;border-radius:8px;cursor:pointer}
+    .mtg-gtab.active{background:var(--brand);border-color:var(--brand);color:#fff}
+    .mtg-body{padding:16px}
+    .mtg-sec-label{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin:18px 0 10px}
+    .mtg-sec-label:first-child{margin-top:0}
+    .mtg-log-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e5e7eb;border-radius:10px;padding:11px 14px;margin-bottom:8px;cursor:pointer;transition:box-shadow .12s,border-color .12s}
+    .mtg-log-row:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    .mtg-log-title{font-size:13.5px;font-weight:700;color:#1f2937}
+    .mtg-log-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .mtg-log-badge{flex:none;font-size:11px;font-weight:600;padding:4px 10px;border-radius:99px;white-space:nowrap}
+    .mtg-log-badge.ready{background:#dcfce7;color:#16a34a}
+    .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
+    .mtg-log-badge.none{background:#f1f5f9;color:#94a3b8}
+    .mtg-log-transcript{margin-top:6px;font-size:13px;color:#334155;line-height:1.6;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:12px}
+    .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
+    .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+    .mtg-bar{width:4px;border-radius:3px;flex:none}
+    .mtg-time{width:132px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:2px;line-height:1.35}
+    .mtg-info{flex:1;min-width:0}
+    .mtg-title{font-size:14px;font-weight:700;color:#1f2937;margin-bottom:4px}
+    .mtg-recur-tag{font-size:10.5px;font-weight:600;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:10px;margin-left:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+    .mtg-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:#6b7280;flex-wrap:wrap}
+    .mtg-avatars{display:flex;margin-left:6px}
+    .mtg-avatar{width:20px;height:20px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-6px}
+    .mtg-avatar:first-child{margin-left:0}
+    .mtg-actions{display:flex;align-items:center;flex:none}
+    .mtg-join{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:8px;height:32px;padding:0 14px;font-size:12.5px;font-weight:600;cursor:pointer;text-decoration:none}
+    .mtg-join:hover{filter:brightness(.94)}
+    .mtg-join.disabled{border-color:#e5e7eb;background:#f8fafc;color:#9ca3af;cursor:not-allowed}
+    .mtg-join.ghost{border-color:#e5e7eb;background:#fff;color:#475569;cursor:default}
+    .mtg-del{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 8px;height:32px;border-radius:6px;margin-left:6px}
+    .mtg-del:hover{color:#dc2626;background:#fef2f2}
+    .mtg-static-hint{height:38px;display:flex;align-items:center;color:#94a3b8;font-size:13px;font-style:italic}
+    @media(max-width:900px){
+      .mtg-toolbar{flex-direction:column;align-items:stretch}
+      .mtg-create{margin-left:0;width:100%}
+      .mtg-grouptabs{gap:6px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:10px 14px}
+      .mtg-grouptabs::-webkit-scrollbar{display:none}
+      .mtg-gtab{flex:0 0 auto;white-space:nowrap;padding:0 13px;font-size:12.5px}
+      .mtg-card{flex-direction:column;align-items:stretch;gap:2px;position:relative;padding:6px 10px 6px 14px;margin-bottom:6px}
+      .mtg-bar{position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:2px}
+      .mtg-time{width:auto;order:1;padding-top:0;line-height:1.15;font-size:11px}
+      .mtg-info{order:2}
+      .mtg-title{font-size:13px;margin-bottom:1px}
+      .mtg-meta{font-size:11px}
+      .mtg-actions{order:3;width:100%;justify-content:flex-end;gap:0;margin-top:2px}
+      .mtg-join{height:26px;padding:0 10px;font-size:11.5px}
+      .mtg-del{height:26px;width:26px}
     }
     /* task page */
     .tp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
@@ -337,7 +453,7 @@
     dd.innerHTML=`<div style="padding:11px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center"><b style="font-size:13px">Notifications</b><button class="ac-btn" style="margin-left:auto;height:26px;padding:0 9px;font-size:11px" onclick="accNotifReadAll()">Mark all read</button></div><div style="max-height:440px;overflow:auto">${body}</div>`;
   }
   window.accNotifGoto=function(tid){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+tid;renderPage();} else location.href='tasks.html#/task/'+tid; };
-  window.accNotifOpen=async function(id){ const n=NOTIFS.find(x=>x.id===id); if(!n)return; if(!n.read){try{await ACC().from('notifications').update({read:true}).eq('id',id);n.read=true;notifPaint();}catch(e){}} accNotifGoto(n.task_id); };
+  window.accNotifOpen=async function(id){ const n=NOTIFS.find(x=>x.id===id); if(!n)return; if(!n.read){try{await ACC().from('notifications').update({read:true}).eq('id',id);n.read=true;notifPaint();}catch(e){}} if(n.kind==='meeting'||n.kind==='meeting_cancel'||n.kind==='meeting_update'||n.kind==='meeting_reminder'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); navTo('tasks/meetings'); return; } accNotifGoto(n.task_id); };
   window.accNotifReadAll=async function(){ try{await ACC().from('notifications').update({read:true}).eq('recipient',me()).eq('read',false).neq('kind','approval');}catch(e){} await notifLoad(); await computeUrgent(); paintBell(); const dd=$('notifDd'); if(dd&&dd.classList.contains('show'))notifPaint2(); };
   function wireBell(){ const b=$('notifBtn'); if(b)b._accW=true; }
 
@@ -419,6 +535,8 @@
   VIEWS.tasks = async function(v, seg){
     injectCss();
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
+    if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
+    if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
     if (seg[0]==='profile' && typeof taskProfile==='function') { ROUTE={tab:'profile',taskId:null}; return taskProfile(v); }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
     ROUTE={tab:tab,taskId:null};
@@ -427,19 +545,27 @@
     <div class="ac-tabs">
       <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
+      <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
       <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
     if (tab==='scoreboard') return scoreboardTab();
+    if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
     if (tab==='archive') return archiveTab();
     return tasksScreen();
   };
 
   /* ---------- shared row/card renderers ---------- */
-  function dueBadge(due){
+  function dueBadge(due,completedAt){
     const d=parseD(due); if(!d) return '';
     d.setHours(0,0,0,0);
+    if(completedAt){
+      const c=parseD(completedAt); if(!c) return '';
+      c.setHours(0,0,0,0);
+      if(c.getTime()>d.getTime()) return '<span class="ac-chip" style="background:#fee2e2;color:#b91c1c;margin-left:6px">Overdue</span>';
+      return '<span class="ac-chip" style="background:#dcfce7;color:#15803d;margin-left:6px">On time</span>';
+    }
     const today=new Date(); today.setHours(0,0,0,0);
     if(d.getTime()<today.getTime()) return '<span class="ac-chip" style="background:#fee2e2;color:#b91c1c;margin-left:6px">Overdue</span>';
     if(d.getTime()===today.getTime()) return '<span class="ac-chip" style="background:#ffedd5;color:#c2410c;margin-left:6px">Due today</span>';
@@ -453,7 +579,7 @@
     if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
     if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
-    return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date)}${emails.length?avatars(list,emails):''}</div></div>`;
+    return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${emails.length?avatars(list,emails):''}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
@@ -473,8 +599,9 @@
 
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
-  let GCAL_FILTERS=new Set(['toMe','byMe']);
+  let GCAL_FILTERS=new Set(['toMe','byMe','meeting']);
   let GCAL_LAST=null; // {byDate,list,asg}
+  let GCAL_PANEL_ANCHOR=null; // date the slide-in panel's day-list is anchored to, or null when the panel shows something else (a task/meeting detail) or is closed
   function calShiftISO(iso,delta){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+delta); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
   function gcalWeekBounds(dateStr){
     const d=new Date(dateStr+'T00:00:00'); const off=(d.getDay()+6)%7;
@@ -484,7 +611,7 @@
     return [iso(mon),iso(sun)];
   }
   async function gcalLoadData(){
-    const [list,{tasks,asg}]=await Promise.all([people(), loadAll()]);
+    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData()]).then(r=>[r[0],r[1]]);
     // Completed tasks never appear on the calendar (matches the old behaviour) — only active, dated tasks.
     const withDue=tasks.filter(t=>t.due_date && stOf(t)!=='approved');
     const byDate={};
@@ -496,13 +623,20 @@
   }
   function gcalVisibleItems(dateStr){
     const items=(GCAL_LAST&&GCAL_LAST.byDate[dateStr])||[];
-    return items.filter(x=>{
+    const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
+    return items.concat(mtgItems).filter(x=>{
       if(!GCAL_FILTERS.has(x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':'#16a34a'; }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':'#16a34a'); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : String(x.t.id); }
+  window.gcalOpenItem=function(key){
+    key=String(key);
+    if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
+    else { window.gcalOpenTask(Number(key)); }
+  };
 
   /* ---- sidebar: mini month calendar ---- */
   function gcalMiniHtml(){
@@ -518,7 +652,7 @@
     for(let i=0;i<startOffset;i++){ const dnum=prevDays-startOffset+i+1; cells+='<div class="gcal-mini-day other">'+dnum+'</div>'; }
     for(let d=1;d<=daysInMonth;d++){
       const dateStr=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-      const has=!!(GCAL_LAST&&GCAL_LAST.byDate[dateStr]&&GCAL_LAST.byDate[dateStr].length);
+      const has=!!(GCAL_LAST&&gcalVisibleItems(dateStr).length);
       const cls='gcal-mini-day'+(dateStr===todayStr?' today':'')+(dateStr===GCAL_DATE?' selected':'')+(has?' has':'');
       cells+='<div class="'+cls+'" onclick="gcalMiniPick(\''+dateStr+'\')">'+d+'</div>';
     }
@@ -528,7 +662,7 @@
     return '<div class="gcal-mini"><div class="gcal-mini-head"><div class="gcal-mini-title">'+esc2(label)+'</div><div class="gcal-mini-nav"><button onclick="gcalMiniNav(-1)"><i class="fa-solid fa-chevron-left"></i></button><button onclick="gcalMiniNav(1)"><i class="fa-solid fa-chevron-right"></i></button></div></div><div class="gcal-mini-grid">'+dow.map(d=>'<div class="gcal-mini-dow">'+d+'</div>').join('')+cells+'</div></div>';
   }
   window.gcalMiniNav=function(delta){ if(!GCAL_MINI_MONTH)GCAL_MINI_MONTH=new Date(); const d=new Date(GCAL_MINI_MONTH); d.setMonth(d.getMonth()+delta); GCAL_MINI_MONTH=d; gcalRenderOnly(); };
-  // Picking a date from the mini calendar always jumps straight to that day, whichever view (Year/Month/Week/Schedule) you were on.
+  // Picking a date from the mini calendar always jumps straight to that day, whichever view (Year/Month/Week) you were on.
   window.gcalMiniPick=function(dateStr){ GCAL_DATE=dateStr; const d=new Date(dateStr+'T00:00:00'); GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1); GCAL_VIEW='day'; gcalRenderOnly(); };
 
   /* ---- sidebar: quick filters ---- */
@@ -537,7 +671,7 @@
       return '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has(f[0])?'checked':'')+' onchange="gcalToggleFilter(\''+f[0]+'\',this.checked)"><span class="gcal-filter-dot" style="background:'+f[2]+'"></span>'+f[1]+'</label>';
     }).join('');
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
-      +'<div class="gcal-filter-row soon"><span class="gcal-filter-dot" style="background:#e5e7eb"></span>Meetings<span style="margin-left:auto;font-size:10.5px">Soon</span></div>'
+      +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
       +'</div>';
   }
   window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k); gcalRenderOnly(); };
@@ -547,18 +681,22 @@
     let title='';
     if(GCAL_VIEW==='month'){ title=new Date(GCAL_DATE+'T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'}); }
     else if(GCAL_VIEW==='week'){
-      const b=gcalWeekBounds(GCAL_DATE), sd=new Date(b[0]+'T00:00:00'), ed=new Date(b[1]+'T00:00:00');
+      // Week is now a 10-day agenda list anchored on GCAL_DATE (2 days before it, itself, 7 days
+      // after) rather than a Mon–Sun grid — the title reflects that span instead of a calendar week.
+      const days=gcalListRange(GCAL_DATE), sd=new Date(days[0]+'T00:00:00'), ed=new Date(days[days.length-1]+'T00:00:00');
       title = sd.getMonth()===ed.getMonth() ? (sd.toLocaleDateString('en-IN',{month:'long'})+' '+sd.getDate()+'–'+ed.getDate()+', '+ed.getFullYear()) : (sd.toLocaleDateString('en-IN',{month:'short',day:'numeric'})+' – '+ed.toLocaleDateString('en-IN',{month:'short',day:'numeric',year:'numeric'}));
     }
-    else if(GCAL_VIEW==='day'){ title=new Date(GCAL_DATE+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
     else if(GCAL_VIEW==='year'){ title=String(new Date(GCAL_DATE+'T00:00:00').getFullYear()); }
-    else { title='Schedule'; }
-    const views=[['day','Day'],['week','Week'],['month','Month'],['year','Year'],['schedule','Schedule']];
+    else { title=new Date(GCAL_DATE+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); } // day
+    const views=[['day','Day'],['week','Week'],['month','Month'],['year','Year']];
+    // Week's list is anchored on the chosen date, not paged — Prev/Next don't apply there (pick a new
+    // date instead, via the mini calendar, Month, or Year), so they're disabled in that view.
+    const weekNavDisabled = GCAL_VIEW==='week';
     return '<div class="gcal-toolbar">'
       +'<div class="gcal-tb-nav">'
       +'<button class="gcal-tbtn" onclick="gcalToday()">Today</button>'
-      +'<button class="gcal-tbtn ic" onclick="gcalNav(-1)" title="Previous"><i class="fa-solid fa-chevron-left"></i></button>'
-      +'<button class="gcal-tbtn ic" onclick="gcalNav(1)" title="Next"><i class="fa-solid fa-chevron-right"></i></button>'
+      +'<button class="gcal-tbtn ic" '+(weekNavDisabled?'disabled':'onclick="gcalNav(-1)"')+' title="Previous"><i class="fa-solid fa-chevron-left"></i></button>'
+      +'<button class="gcal-tbtn ic" '+(weekNavDisabled?'disabled':'onclick="gcalNav(1)"')+' title="Next"><i class="fa-solid fa-chevron-right"></i></button>'
       +'<div class="gcal-toolbar-title">'+esc2(title)+'</div>'
       +'</div>'
       +'<div class="gcal-search"><i class="fa-solid fa-magnifying-glass"></i><input placeholder="Search" value="'+esc2(GCAL_Q)+'" oninput="gcalSearch(this.value)"></div>'
@@ -568,17 +706,16 @@
   window.gcalSetView=function(v){ GCAL_VIEW=v; gcalRenderOnly(); };
   window.gcalToday=function(){ GCAL_DATE=todayISO(); const d=new Date(); GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1); gcalRenderOnly(); };
   window.gcalNav=function(delta){
+    if(GCAL_VIEW==='week') return; // no-op — see the toolbar note above
     const d=new Date(GCAL_DATE+'T00:00:00');
     if(GCAL_VIEW==='month'){ d.setDate(1); d.setMonth(d.getMonth()+delta); }
-    else if(GCAL_VIEW==='week'){ d.setDate(d.getDate()+delta*7); }
     else if(GCAL_VIEW==='day'){ d.setDate(d.getDate()+delta); }
-    else if(GCAL_VIEW==='year'){ d.setFullYear(d.getFullYear()+delta); }
-    else { d.setMonth(d.getMonth()+delta); } // schedule: page by month
+    else { d.setFullYear(d.getFullYear()+delta); } // year
     GCAL_DATE=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1);
     gcalRenderOnly();
   };
-  window.gcalSearch=function(v){ GCAL_Q=(v||'').trim().toLowerCase(); const body=$('gcalBody'); if(body)body.innerHTML=gcalBodyHtml(); };
+  window.gcalSearch=function(v){ GCAL_Q=(v||'').trim().toLowerCase(); const body=$('gcalBody'); if(body){body.innerHTML=gcalBodyHtml(); gcalWireDrag(body); gcalWireTimeDrag();} };
 
   /* ---- Month view ---- */
   function gcalMonthHtml(){
@@ -597,10 +734,11 @@
       const items=gcalVisibleItems(dateStr);
       // Show every task for the day (row height grows to fit) — the title itself still truncates with an ellipsis so long names don't widen the cell.
       const evs=items.map(function(x){
-        return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'" onclick="event.stopPropagation();gcalOpenTask('+x.t.id+')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
+        const dragAttrs=x.kind!=='meeting'?(' data-task="'+x.t.id+'" data-date="'+dateStr+'"'):'';
+        return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'"'+dragAttrs+' onclick="event.stopPropagation();if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
       }).join('');
       const cls='gcal-mcell'+(dateStr===todayStr?' today':'');
-      cells+='<div class="'+cls+'" onclick="gcalOpenDay(\''+dateStr+'\')"><div class="gcal-mnum">'+d+'</div><div class="gcal-mevents">'+evs+'</div></div>';
+      cells+='<div class="'+cls+'" data-date="'+dateStr+'" onclick="gcalOpenDay(\''+dateStr+'\')"><div class="gcal-mnum">'+d+'</div><div class="gcal-mevents">'+evs+'</div></div>';
     }
     const trailing=(7-((startOffset+daysInMonth)%7))%7;
     for(let i=1;i<=trailing;i++) cells+='<div class="gcal-mcell other"><div class="gcal-mnum">'+i+'</div></div>';
@@ -621,7 +759,7 @@
       for(let i=0;i<startOffset;i++) cells+='<div class="gcal-mini-day other"></div>';
       for(let d=1;d<=daysInMonth;d++){
         const dateStr=y+'-'+String(mi+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-        const has=!!(GCAL_LAST&&GCAL_LAST.byDate[dateStr]&&gcalVisibleItems(dateStr).length);
+        const has=!!(GCAL_LAST&&gcalVisibleItems(dateStr).length);
         const cls='gcal-mini-day'+(dateStr===todayStr?' today':'')+(has?' has':'');
         cells+='<div class="'+cls+'" onclick="gcalYearPick(\''+dateStr+'\')">'+d+'</div>';
       }
@@ -629,88 +767,132 @@
     }
     return '<div class="gcal-yeargrid">'+months+'</div>';
   }
-  window.gcalYearPick=function(dateStr){ GCAL_DATE=dateStr; GCAL_VIEW='day'; const d=new Date(dateStr+'T00:00:00'); GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1); gcalRenderOnly(); };
+  window.gcalYearPick=function(dateStr){ GCAL_DATE=dateStr; GCAL_VIEW='week'; const d=new Date(dateStr+'T00:00:00'); GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1); gcalRenderOnly(); };
   window.gcalYearMonthOpen=function(y,mi){ GCAL_DATE=y+'-'+String(mi+1).padStart(2,'0')+'-01'; GCAL_VIEW='month'; GCAL_MINI_MONTH=new Date(y,mi,1); gcalRenderOnly(); };
 
   /* ---- Week view ---- */
   function gcalHourLabel(h){ return h===0?'12 AM':(h<12?h+' AM':(h===12?'12 PM':(h-12)+' PM')); }
+  // Week is now a 10-day agenda list (2 days before GCAL_DATE, GCAL_DATE itself, 7 days after) instead
+  // of a Mon–Sun grid — see gcalListHtml above. Prev/Next are disabled for this view (see toolbar).
   function gcalWeekHtml(){
-    const b=gcalWeekBounds(GCAL_DATE);
-    const days=[]; let cur=b[0];
-    for(let i=0;i<7;i++){ days.push(cur); cur=calShiftISO(cur,1); }
-    const todayStr=todayISO();
-    const heads=days.map(function(dateStr){
-      const d=new Date(dateStr+'T00:00:00'); const isToday=dateStr===todayStr;
-      return '<div class="gcal-daycolhead'+(isToday?' today':'')+'">'+d.toLocaleDateString('en-IN',{weekday:'short'})+'<span class="n">'+d.getDate()+'</span></div>';
-    }).join('');
-    const alldayCols=days.map(function(dateStr){
-      const items=gcalVisibleItems(dateStr);
-      const chips=items.map(function(x){ return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'" onclick="gcalOpenTask('+x.t.id+')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>'; }).join('');
-      return '<div class="gcal-allday-col">'+chips+'</div>';
-    }).join('');
-    const hours=[]; for(let h=0;h<24;h++) hours.push(h);
-    const hourLabels=hours.map(function(h){ return '<div class="gcal-hour">'+gcalHourLabel(h)+'</div>'; }).join('');
-    const dayCols=days.map(function(dateStr){
-      let inner=hours.map(function(){ return '<div class="gcal-hourline"></div>'; }).join('');
-      if(dateStr===todayStr){ const now=new Date(); const pct=((now.getHours()*60+now.getMinutes())/1440)*100; inner+='<div class="gcal-nowline" style="top:'+pct+'%"><div class="gcal-nowdot"></div></div>'; }
-      return '<div class="gcal-daycol">'+inner+'</div>';
-    }).join('');
-    return '<div class="gcal-wrap">'
-      +'<div style="display:flex;border-bottom:1px solid #e5e7eb"><div style="width:56px;flex:none"></div><div style="flex:1;display:grid;grid-template-columns:repeat(7,1fr)">'+heads+'</div></div>'
-      +'<div class="gcal-allday"><div class="gcal-allday-label">All-day</div><div class="gcal-allday-cols" style="grid-template-columns:repeat(7,1fr)">'+alldayCols+'</div></div>'
-      +'<div class="gcal-timegrid"><div class="gcal-hours">'+hourLabels+'</div><div class="gcal-daycols" style="grid-template-columns:repeat(7,1fr)">'+dayCols+'</div></div>'
-      +'</div>';
+    return gcalListHtml(GCAL_DATE);
   }
 
   /* ---- Day view ---- */
+  // Tasks (no time-of-day) stay in the All-day strip. Meetings are positioned in the hour grid by
+  // their actual start/end time and can be dragged vertically to change the time — see
+  // gcalWireTimeDrag/gcalMeetingTimeDrop. Full rescheduling (a different date, or recurrence) goes
+  // through the meeting panel's Reschedule button instead, since only one day is visible here.
+  function gcalMtgMinutes(t){ if(!t)return 0; const p=String(t).split(':'); return (parseInt(p[0],10)||0)*60+(parseInt(p[1],10)||0); }
+  // Classic day-view collision layout: meetings that overlap in time are grouped into a cluster
+  // and each gets a column index within that cluster (+ the cluster's total column count), so
+  // gcalMtgBlockHtml can render them side-by-side instead of stacked on top of each other.
+  // Returns a map of meeting id -> {col, cols}.
+  function gcalMtgLayout(items){
+    const withRange=items.map(function(m){
+      const s=gcalMtgMinutes(m.start_time);
+      const e=m.end_time?gcalMtgMinutes(m.end_time):(s+45);
+      return {m:m, s:s, e:Math.max(s+20,e)};
+    }).sort(function(a,b){ return a.s-b.s || a.e-b.e; });
+    const layout={};
+    let cluster=[], clusterEnd=-Infinity;
+    function flush(){
+      if(!cluster.length) return;
+      const colEnds=[];
+      cluster.forEach(function(it){
+        let col=0;
+        while(colEnds[col]!=null && colEnds[col]>it.s) col++;
+        colEnds[col]=it.e;
+        it.col=col;
+      });
+      const cols=colEnds.length;
+      cluster.forEach(function(it){ layout[it.m.id]={col:it.col,cols:cols}; });
+      cluster=[]; clusterEnd=-Infinity;
+    }
+    withRange.forEach(function(it){
+      if(cluster.length && it.s>=clusterEnd) flush();
+      cluster.push(it);
+      clusterEnd=Math.max(clusterEnd,it.e);
+    });
+    flush();
+    return layout;
+  }
+  function gcalMtgBlockHtml(m,dateStr,pos){
+    const startMin=gcalMtgMinutes(m.start_time);
+    const endMin=m.end_time?gcalMtgMinutes(m.end_time):(startMin+45);
+    const durMin=Math.max(20,endMin-startMin);
+    const topPx=(startMin/60)*48;
+    const hPx=Math.max(20,(durMin/60)*48);
+    const cols=(pos&&pos.cols)||1, col=(pos&&pos.col)||0;
+    const leftCss='calc(4px + (100% - 8px) * '+col+' / '+cols+')';
+    const widthCss=cols>1?('calc((100% - 8px) / '+cols+' - 3px)'):'calc(100% - 8px)';
+    const draggable=!m.recur_type||m.recur_type==='none';
+    const dragAttrs=draggable?(' data-meeting-time="'+m.id+'" data-start="'+startMin+'" data-dur="'+durMin+'" data-date="'+dateStr+'"'):'';
+    return '<div class="gcal-mtgblock" style="top:'+topPx+'px;height:'+hPx+'px;left:'+leftCss+';width:'+widthCss+';background:'+gcalEvColor('meeting')+'"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenMeetingPanel('+m.id+')" title="'+esc2(m.title)+'"><b>'+esc2(m.title)+'</b><span>'+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'')+'</span></div>';
+  }
   function gcalDayHtml(){
     const dateStr=GCAL_DATE;
     const items=gcalVisibleItems(dateStr);
-    const chips=items.map(function(x){ return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'" onclick="gcalOpenTask('+x.t.id+')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>'; }).join('');
+    const taskItems=items.filter(function(x){return x.kind!=='meeting';});
+    const mtgItems=items.filter(function(x){return x.kind==='meeting';});
+    const chips=taskItems.map(function(x){
+      const dragAttrs=' data-task="'+x.t.id+'" data-date="'+dateStr+'"';
+      return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
+    }).join('');
     const hours=[]; for(let h=0;h<24;h++) hours.push(h);
     const hourLabels=hours.map(function(h){ return '<div class="gcal-hour">'+gcalHourLabel(h)+'</div>'; }).join('');
     const todayStr=todayISO();
     let dayInner=hours.map(function(){ return '<div class="gcal-hourline"></div>'; }).join('');
     if(dateStr===todayStr){ const now=new Date(); const pct=((now.getHours()*60+now.getMinutes())/1440)*100; dayInner+='<div class="gcal-nowline" style="top:'+pct+'%"><div class="gcal-nowdot"></div></div>'; }
+    const mtgLayout=gcalMtgLayout(mtgItems.map(function(x){return x.t;}));
+    dayInner+=mtgItems.map(function(x){ return gcalMtgBlockHtml(x.t,dateStr,mtgLayout[x.t.id]); }).join('');
     return '<div class="gcal-wrap">'
       +'<div class="gcal-allday"><div class="gcal-allday-label">All-day</div><div class="gcal-allday-cols" style="grid-template-columns:1fr"><div class="gcal-allday-col">'+(chips||'<span style="font-size:11.5px;color:#9ca3af">No tasks due</span>')+'</div></div></div>'
-      +'<div class="gcal-timegrid"><div class="gcal-hours">'+hourLabels+'</div><div class="gcal-daycols" style="grid-template-columns:1fr"><div class="gcal-daycol">'+dayInner+'</div></div></div>'
+      +'<div class="gcal-timegrid"><div class="gcal-hours">'+hourLabels+'</div><div class="gcal-daycols" style="grid-template-columns:1fr"><div class="gcal-daycol" data-date="'+dateStr+'">'+dayInner+'</div></div></div>'
       +'</div>';
-  }
-
-  /* ---- Schedule / agenda view ---- */
-  function gcalScheduleHtml(){
-    let rows='', cur=GCAL_DATE, any=false;
-    for(let i=0;i<60;i++){
-      const items=gcalVisibleItems(cur);
-      if(items.length){
-        any=true;
-        const d=new Date(cur+'T00:00:00');
-        rows+='<div class="gcal-sched-date">'+d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})+'</div>';
-        items.forEach(function(x){
-          rows+='<div class="gcal-sched-row" onclick="gcalOpenTask('+x.t.id+')">'
-            +'<span class="gcal-sched-dot" style="background:'+gcalEvColor(x.kind)+'"></span>'
-            +'<span class="gcal-sched-time">'+(x.kind==='toMe'?'To me':'By me')+'</span>'
-            +'<span class="gcal-sched-title">'+esc2(x.t.title)+'</span>'
-            +'</div>';
-        });
-      }
-      cur=calShiftISO(cur,1);
-    }
-    if(!any) rows='<div class="gcal-empty-view"><i class="fa-regular fa-calendar-check" style="font-size:26px;display:block;margin-bottom:8px"></i>No upcoming items in the next 60 days</div>';
-    return rows;
   }
 
   function gcalBodyHtml(){
     if(GCAL_VIEW==='month') return gcalMonthHtml();
     if(GCAL_VIEW==='week') return gcalWeekHtml();
-    if(GCAL_VIEW==='day') return gcalDayHtml();
     if(GCAL_VIEW==='year') return gcalYearHtml();
-    return gcalScheduleHtml();
+    return gcalDayHtml();
+  }
+
+  /* ---- shared 10-day agenda list: 2 days before the anchor date, the anchor date itself, and 7 days
+     after (2+1+7 = 10 days). This single renderer backs two places: the Week view body, and the
+     list that opens in the slide-in panel when a day is clicked in Month view. Both places wire the
+     same drag-and-drop (gcalWireDrag) so tasks and one-time meetings can be dragged onto a different
+     day's section to reschedule them. ---- */
+  function gcalListRange(anchorDate){
+    const days=[];
+    for(let i=-2;i<=7;i++) days.push(calShiftISO(anchorDate,i));
+    return days;
+  }
+  function gcalListDayHtml(dateStr,todayStr){
+    const items=gcalVisibleItems(dateStr);
+    const d=new Date(dateStr+'T00:00:00');
+    const label=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+    const isToday=dateStr===todayStr;
+    const rows=items.length?items.map(function(x){
+      const oneTimeMeeting = x.kind==='meeting' && (!x.t.recur_type||x.t.recur_type==='none');
+      const draggable = x.kind!=='meeting' || oneTimeMeeting;
+      let dragAttrs='';
+      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"');
+      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='toMe'?'To me':'By me');
+      return '<div class="gcal-lrow"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'"><span class="gcal-lrow-dot" style="background:'+gcalEvColor(x.kind)+'"></span><span class="gcal-lrow-title">'+esc2(x.t.title)+'</span><span class="gcal-lrow-tag">'+esc2(tag)+'</span></div>';
+    }).join(''):'<div class="gcal-lrow empty">Nothing scheduled</div>';
+    return '<div class="gcal-lday'+(isToday?' today':'')+'" data-date="'+dateStr+'"><div class="gcal-lday-head">'+esc2(label)+(isToday?' <span class="gcal-lday-badge">Today</span>':'')+'</div><div class="gcal-lday-rows">'+rows+'</div></div>';
+  }
+  function gcalListHtml(anchorDate){
+    const todayStr=todayISO();
+    const days=gcalListRange(anchorDate);
+    return '<div class="gcal-list-wrap"><div class="gcal-list">'+days.map(function(dateStr){ return gcalListDayHtml(dateStr,todayStr); }).join('')+'</div></div>';
   }
 
   /* ---- right details panel ---- */
   function gcalShowPanel(bodyHtml,tid){
+    GCAL_PANEL_ANCHOR=null;
     const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
     const bodyEl=panel.querySelector('.gcal-panel-body'); if(bodyEl)bodyEl.innerHTML=bodyHtml;
     const foot=panel.querySelector('.gcal-panel-foot');
@@ -719,16 +901,26 @@
       : '<button class="ac-btn" onclick="gcalClosePanel()">Close</button>';
     panel.classList.add('open'); if(backdrop)backdrop.classList.add('open');
   }
-  window.gcalClosePanel=function(){ const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(panel)panel.classList.remove('open'); if(backdrop)backdrop.classList.remove('open'); };
-  window.gcalOpenDay=function(dateStr){
-    const items=gcalVisibleItems(dateStr);
+  window.gcalClosePanel=function(){ GCAL_PANEL_ANCHOR=null; const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(panel)panel.classList.remove('open'); if(backdrop)backdrop.classList.remove('open'); };
+  // Clicking a day in Month view opens this same 10-day agenda list (anchored on the clicked day) in
+  // the slide-in panel — not a single flat day list — and picking that day also becomes the calendar's
+  // chosen date (so the mini calendar highlight, and Week view if you switch to it, follow along).
+  function gcalRenderDayPanel(dateStr){
+    GCAL_PANEL_ANCHOR=dateStr;
+    const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
     const label=new Date(dateStr+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-    const rows=items.length?items.map(function(x){
-      return '<div class="gcal-panel-row" style="cursor:pointer" onclick="gcalOpenTask('+x.t.id+')"><i class="fa-solid fa-circle" style="font-size:8px;color:'+gcalEvColor(x.kind)+';margin-top:5px"></i><div style="flex:1">'+esc2(x.t.title)+'</div></div>';
-    }).join(''):'<div style="color:#9ca3af;font-size:13px">No tasks this day</div>';
-    gcalShowPanel('<div class="gcal-panel-title">'+esc2(label)+'</div>'+rows, null);
+    const bodyEl=panel.querySelector('.gcal-panel-body');
+    if(bodyEl){ bodyEl.innerHTML='<div class="gcal-panel-title">'+esc2(label)+'</div>'+gcalListHtml(dateStr); gcalWireDrag(bodyEl); }
+    const foot=panel.querySelector('.gcal-panel-foot');
+    if(foot)foot.innerHTML='<button class="ac-btn" onclick="gcalClosePanel()">Close</button>';
+    panel.classList.add('open'); if(backdrop)backdrop.classList.add('open');
+  }
+  window.gcalOpenDay=function(dateStr){
+    GCAL_DATE=dateStr;
+    gcalRenderDayPanel(dateStr);
   };
   window.gcalOpenTask=function(tid){
+    GCAL_PANEL_ANCHOR=null;
     if(!GCAL_LAST)return;
     let t=null,kind=null;
     for(const k in GCAL_LAST.byDate){ const hit=GCAL_LAST.byDate[k].find(function(x){return x.t.id===tid;}); if(hit){ t=hit.t; kind=hit.kind; break; } }
@@ -751,24 +943,842 @@
   /* ---- Create button + floating action button ----
      Task-creation from the calendar is disabled for now — once Meetings exist this
      will be redesigned around them rather than quietly creating a plain Task. */
-  window.gcalQuickAdd=function(){ toast('Creating from the Calendar is disabled for now — it\'ll come back in a different form once Meetings are added.',''); };
+  window.gcalQuickAdd=function(){ window._mtgAutoOpenCreate=true; navTo('tasks/meetings'); };
+
+  /* ---- drag & drop: dragging a task or one-time-meeting chip/row onto another day moves its date ----
+     Uses pointer events (not native HTML5 DnD) to match the touch-friendly drag pattern already used
+     elsewhere in this file (wirePointerDrag/wireSwapDrag). Works in three places: Month view's grid
+     chips (.gcal-mev[data-task] — meetings aren't draggable there), and the shared 10-day agenda list
+     used by Week view and Month's day-click panel (.gcal-lrow[data-task]/.gcal-lrow[data-meeting] —
+     one-time meetings ARE draggable there, recurring ones aren't since "the date" isn't a single field
+     for them). `root` scopes the query so it can be wired inside the slide-in panel too, not just #gcalBody.
+     Mouse/pen: a small movement threshold distinguishes a drag from a normal click.
+     Touch: a movement threshold alone doesn't work on phones — the very first finger move is
+     indistinguishable from "the user is trying to scroll the calendar", so instant-arm-on-move would
+     fight the page's native scrolling. Instead touch uses a long-press-to-pick-up gesture (like
+     reordering a card in Trello/Asana's mobile apps): hold still for ~380ms to arm the drag; moving
+     more than a few px before that timer fires cancels arming and lets the normal scroll happen.
+     Exception: inside the Month grid itself, touch dragging is skipped entirely — the chips there are
+     tiny mobile dots that are too fragile to drag reliably even with long-press. On mobile, tap a day
+     in Month view instead to open the agenda-list panel, which has properly-sized draggable rows. */
+  function gcalWireDrag(root){
+    const body=root||$('gcalBody'); if(!body)return;
+    body.querySelectorAll('.gcal-mev[data-task], .gcal-lrow[data-task], .gcal-lrow[data-meeting]').forEach(function(chip){
+      if(chip._dragWired)return; chip._dragWired=true;
+      const inMonthGrid=!!chip.closest('.gcal-mcell');
+      chip.style.touchAction='none';
+      chip.addEventListener('pointerdown',function(e){
+        if(e.button!=null && e.button!==0)return;
+        const isTouch=e.pointerType==='touch';
+        if(isTouch && inMonthGrid) return; // Month grid dots: no touch drag — see note above.
+        const startX=e.clientX, startY=e.clientY;
+        const tid=chip.dataset.task!=null?Number(chip.dataset.task):null;
+        const mid=chip.dataset.meeting!=null?Number(chip.dataset.meeting):null;
+        const fromDate=chip.dataset.date;
+        let armed=false, curTarget=null, longPressTimer=null;
+        function arm(){
+          if(armed)return;
+          armed=true; window._dragging=true;
+          chip.classList.remove('gcal-armed'); chip.classList.add('gcal-dragging');
+          try{ if(isTouch && navigator.vibrate) navigator.vibrate(12); }catch(_e){}
+        }
+        function clearTimer(){ if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; chip.classList.remove('gcal-armed'); } }
+        function onMove(ev){
+          const dx=ev.clientX-startX, dy=ev.clientY-startY;
+          if(!armed){
+            if(isTouch){
+              // Waiting on the long-press timer — real finger travel means "scrolling", not "holding".
+              if(Math.abs(dx)>10||Math.abs(dy)>10) clearTimer();
+              return;
+            }
+            if(Math.abs(dx)>6||Math.abs(dy)>6){ arm(); }
+            else return;
+          }
+          ev.preventDefault();
+          const el=document.elementFromPoint(ev.clientX,ev.clientY);
+          let cell=el&&el.closest&&el.closest('.gcal-mcell[data-date],.gcal-allday-col[data-date],.gcal-lday[data-date]');
+          if(cell && !body.contains(cell)) cell=null; // dragging inside the slide-in panel shouldn't be able to drop onto the Month grid visible behind it
+          if(curTarget&&curTarget!==cell) curTarget.classList.remove('gcal-drop-hover');
+          if(cell){ cell.classList.add('gcal-drop-hover'); curTarget=cell; } else curTarget=null;
+        }
+        function onUp(){
+          clearTimer();
+          document.removeEventListener('pointermove',onMove);
+          document.removeEventListener('pointerup',onUp);
+          document.removeEventListener('pointercancel',onUp);
+          chip.classList.remove('gcal-dragging','gcal-armed'); window._dragging=false;
+          if(curTarget) curTarget.classList.remove('gcal-drop-hover');
+          if(armed){
+            // No pointer capture is taken, so the mouseup/click this gesture produces (if any) lands
+            // on whatever element the pointer is actually over — not necessarily this chip. The flag
+            // below is a belt-and-suspenders guard: the chip's own onclick (in the render template)
+            // checks it first, in case the browser still resolves the click back onto the chip.
+            chip._suppressClick=true;
+            if(curTarget){
+              const newDate=curTarget.dataset.date;
+              if(newDate && newDate!==fromDate){
+                if(tid!=null) gcalTaskDrop(tid,newDate);
+                else if(mid!=null) gcalMeetingDateDrop(mid,newDate);
+              }
+            }
+          }
+        }
+        document.addEventListener('pointermove',onMove);
+        document.addEventListener('pointerup',onUp);
+        document.addEventListener('pointercancel',onUp);
+        if(isTouch){ chip.classList.add('gcal-armed'); longPressTimer=setTimeout(arm,380); }
+      });
+    });
+  }
+  // Lightweight post-drop refresh: rebuilds just #gcalBody (and the day-panel list, if one is open)
+  // instead of gcalRenderOnly()'s full shell rebuild, which would tear down and re-close the slide-in
+  // panel mid-gesture (its markup is regenerated closed every time). Full rebuilds are still fine (and
+  // wanted, to close any open panel) for real navigation — Today/Nav/SetView — just not after a drop.
+  async function gcalRefresh(){
+    const body=$('gcalBody');
+    if(body){ body.innerHTML=gcalBodyHtml(); gcalWireDrag(body); gcalWireTimeDrag(); }
+    if(GCAL_PANEL_ANCHOR!=null) gcalRenderDayPanel(GCAL_PANEL_ANCHOR);
+  }
+  window.gcalTaskDrop=async function(tid,newDate){
+    try{
+      if(newDate<todayISO()){ toast('Cannot move a task to a date before today','err'); return; }
+      const {data:old}=await ACC().from('ptasks').select('due_date').eq('id',tid).single();
+      const prevDue=old?old.due_date:null;
+      if((prevDue||'')===(newDate||''))return;
+      await ACC().from('ptasks').update({due_date:newDate,overdue_emailed:false,due_emailed:false}).eq('id',tid);
+      await ACC().from('ptask_activity').insert({task_id:tid,action:'due date changed',detail:'Due date '+(prevDue?fmtDateY(prevDue):'none')+' → '+fmtDateY(newDate)});
+      await sysMsg(tid, prevDue?('changed the due date from '+fmtDateY(prevDue)+' to '+fmtDateY(newDate)):('set the due date to '+fmtDateY(newDate)));
+      const _d=parseD(newDate), _t=new Date(); _t.setHours(0,0,0,0);
+      if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); }catch(_e){} }
+      toast('Moved to '+fmtDateY(newDate),'ok');
+      await gcalLoadData();
+      await gcalRefresh();
+    }catch(e){ toast('Failed to move task','err'); }
+  };
+  // Dragging a one-time meeting onto another day's section changes its meeting_date. This resyncs
+  // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
+  // re-emails attendees with the new date/time, and posts an in-app "meeting_update" notification too —
+  // consistent with what a full edit via the meeting form already does on any change.
+  window.gcalMeetingDateDrop=async function(mid,newDate){
+    const m=(MTG_LIST||[]).find(function(x){return x.id===mid;});
+    if(!m) return;
+    if(m.recur_type && m.recur_type!=='none'){ toast('Recurring meetings can\'t be rescheduled by dragging — use Reschedule instead','err'); return; }
+    if(newDate===m.meeting_date) return;
+    try{
+      await ACC().from('meetings').update({meeting_date:newDate}).eq('id',mid);
+      const attendees=(MTG_ATT&&MTG_ATT[mid])||[];
+      if(attendees.length){
+        try{ await ACC().from('meeting_attendees').delete().eq('meeting_id',mid); }catch(e){}
+        try{ await ACC().from('meeting_attendees').insert(attendees.map(function(e){return {meeting_id:mid,email:e};})); }catch(e){}
+        try{
+          const plist=await people(); const organizerName=nameOf(plist,me());
+          const when=fmtDateY(newDate)+' · '+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
+          await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:'meeting_update',title:'Meeting rescheduled: '+m.title,body:when+' — updated by '+organizerName};}));
+        }catch(e){}
+      }
+      toast('Meeting moved to '+fmtDateY(newDate),'ok');
+      if(m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
+      await gcalLoadData();
+      await gcalRefresh();
+    }catch(e){ toast('Failed to move meeting','err'); }
+  };
+  /* ---- Day view: dragging a meeting block vertically changes its time ----
+     Vertical-only (only one day is visible in Day view, so there's nothing to drop onto to change the
+     date — that goes through the Reschedule button instead). Same touch-long-press vs mouse-threshold
+     split as gcalWireDrag, but repositions the block live instead of highlighting a drop target. */
+  function gcalWireTimeDrag(){
+    const body=$('gcalBody'); if(!body)return;
+    body.querySelectorAll('.gcal-mtgblock[data-meeting-time]').forEach(function(block){
+      if(block._dragWired)return; block._dragWired=true;
+      block.addEventListener('pointerdown',function(e){
+        if(e.button!=null && e.button!==0)return;
+        const isTouch=e.pointerType==='touch';
+        const startY=e.clientY;
+        const mid=Number(block.dataset.meetingTime), origStart=Number(block.dataset.start), dur=Number(block.dataset.dur);
+        const origTop=parseFloat(block.style.top)||0;
+        const PX_PER_MIN=48/60;
+        let armed=false, longPressTimer=null, deltaMin=0;
+        function arm(){ if(armed)return; armed=true; window._dragging=true; block.classList.add('gcal-dragging'); try{ if(isTouch&&navigator.vibrate) navigator.vibrate(12); }catch(_e){} }
+        function clearTimer(){ if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; } }
+        function onMove(ev){
+          const dy=ev.clientY-startY;
+          if(!armed){
+            if(isTouch){ if(Math.abs(dy)>10) clearTimer(); return; }
+            if(Math.abs(dy)>6){ arm(); } else return;
+          }
+          ev.preventDefault();
+          let newStart=origStart+Math.round(dy/PX_PER_MIN/15)*15;
+          newStart=Math.max(0,Math.min(1440-dur,newStart));
+          deltaMin=newStart-origStart;
+          block.style.top=(origTop+deltaMin*PX_PER_MIN)+'px';
+        }
+        function finish(){
+          clearTimer();
+          document.removeEventListener('pointermove',onMove);
+          document.removeEventListener('pointerup',onUp);
+          document.removeEventListener('pointercancel',onUp);
+          block.classList.remove('gcal-dragging'); window._dragging=false;
+          if(armed && deltaMin!==0){
+            block._suppressClick=true;
+            const fmt=function(m){ return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); };
+            gcalMeetingTimeDrop(mid, fmt(origStart+deltaMin), fmt(origStart+deltaMin+dur));
+          } else if(armed){
+            block.style.top=origTop+'px';
+          }
+        }
+        function onUp(){ finish(); }
+        document.addEventListener('pointermove',onMove);
+        document.addEventListener('pointerup',onUp);
+        document.addEventListener('pointercancel',onUp);
+        if(isTouch){ longPressTimer=setTimeout(arm,380); }
+      });
+    });
+  }
+  window.gcalMeetingTimeDrop=async function(mid,newStart,newEnd){
+    try{
+      await ACC().from('meetings').update({start_time:newStart,end_time:newEnd}).eq('id',mid);
+      toast('Meeting time updated','ok');
+      const m=(MTG_LIST||[]).find(function(x){return x.id===mid;});
+      if(m&&m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
+      await gcalLoadData();
+      await gcalRefresh();
+    }catch(e){ toast('Failed to update meeting time','err'); }
+  };
 
   /* ---- shell / entry point ---- */
   function gcalRenderOnly(){
     const b=$('acBody'); if(!b)return;
+    GCAL_PANEL_ANCHOR=null; // this always rebuilds the panel fresh and closed — don't let a stale anchor reopen it later
     b.innerHTML='<div class="gcal-shell">'
-      +'<div class="gcal-sidebar"><div class="gcal-create disabled" onclick="gcalQuickAdd()" title="Coming soon with Meetings"><i class="fa-solid fa-plus"></i> Create</div>'+gcalMiniHtml()+gcalFiltersHtml()+'</div>'
+      +'<div class="gcal-sidebar">'+gcalMiniHtml()+gcalFiltersHtml()+'</div>'
       +'<div class="gcal-main">'+gcalToolbarHtml()+'<div class="gcal-body" id="gcalBody">'+gcalBodyHtml()+'</div></div>'
       +'</div>'
       +'<div class="gcal-backdrop" id="gcalBackdrop" onclick="gcalClosePanel()"></div>'
       +'<div class="gcal-panel" id="gcalPanel"><div class="gcal-panel-head"><b>Details</b><div class="x" onclick="gcalClosePanel()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body"></div><div class="gcal-panel-foot"></div></div>'
-      +'<button class="gcal-fab disabled" onclick="gcalQuickAdd()" title="Coming soon with Meetings"><i class="fa-solid fa-plus"></i></button>';
+      +'<button class="gcal-fab" onclick="gcalQuickAdd()" title="Schedule a meeting"><i class="fa-solid fa-plus"></i></button>';
+    gcalWireDrag($('gcalBody'));
+    gcalWireTimeDrag();
   }
   async function calendarTab(){
     if(!GCAL_DATE) GCAL_DATE=todayISO();
     if(!GCAL_MINI_MONTH){ const d=new Date(GCAL_DATE+'T00:00:00'); GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1); }
     await gcalLoadData();
     gcalRenderOnly();
+  }
+
+  /* ---------- MEETINGS ---------- */
+  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[];
+  let GOOGLE_CONNECTED=null;
+  let MTG_GROUP='all';
+  function mtgDurationMinutes(start,end){
+    if(!start||!end) return null;
+    const sp=String(start).split(':'), ep=String(end).split(':');
+    let mins=(Number(ep[0])*60+Number(ep[1]))-(Number(sp[0])*60+Number(sp[1]));
+    if(mins<0) mins+=1440;
+    return mins;
+  }
+  function mtgLogTimeLabel(log){
+    const mins=mtgDurationMinutes(log.scheduled_start,log.scheduled_end);
+    const range=mtgFmtTime(log.scheduled_start)+(log.scheduled_end?(' – '+mtgFmtTime(log.scheduled_end)):'');
+    return range+(mins?(' ('+mins+' min)'):'');
+  }
+  function mtgFmtTime(t){
+    if(!t)return '';
+    const parts=String(t).split(':'); let h=parseInt(parts[0],10); const mnt=parts[1]||'00';
+    if(isNaN(h))return '';
+    const ap=h>=12?'PM':'AM'; let h12=h%12; if(h12===0)h12=12;
+    return h12+':'+mnt+' '+ap;
+  }
+  function mtgOrdinalSuffix(n){ n=Number(n); const s=['th','st','nd','rd'], v=n%100; return s[(v-20)%10]||s[v]||s[0]; }
+  function mtgModeLabel(m){ return m.mode==='offline' ? 'Offline' : 'Online'; }
+  function mtgRecurLabel(m){
+    const rt=m.recur_type||'none';
+    if(rt==='daily')return 'Daily';
+    if(rt==='weekly'){ const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return 'Weekly · '+(days[m.recur_day]||''); }
+    if(rt==='monthly')return 'Monthly · '+m.recur_date+mtgOrdinalSuffix(m.recur_date);
+    return null;
+  }
+  // Does this meeting occur on the given yyyy-mm-dd date? Used by the Calendar tab so
+  // recurring meetings (daily/weekly/monthly) show up on every date they apply to,
+  // without pre-expanding every occurrence up front.
+  function mtgOccursOn(m,dateStr){
+    const rt=m.recur_type||'none';
+    if(rt==='daily')return true;
+    if(rt==='weekly')return new Date(dateStr+'T00:00:00').getDay()===m.recur_day;
+    if(rt==='monthly')return new Date(dateStr+'T00:00:00').getDate()===Number(m.recur_date);
+    return m.meeting_date===dateStr;
+  }
+  // One-time meetings whose end time has already passed today are hidden from the Today/All
+  // view immediately (the backend cron still actually deletes/archives the row within a minute —
+  // this just avoids the meeting sitting there looking "stuck" in the gap before that runs).
+  // Recurring meetings are never hidden this way — they're always meant to stay visible.
+  function mtgEndedToday(m){
+    if((m.recur_type||'none')!=='none') return false;
+    if(!m.end_time) return false;
+    if(m.meeting_date!==istTodayISO()) return false; // BUG FIX: this was always comparing against
+    // today's date regardless of the meeting's actual date, so a one-time meeting scheduled for
+    // tomorrow (or any future day) whose end_time clock value happened to be earlier than the
+    // current clock time got wrongly treated as "already ended today" and hidden from every tab.
+    // Compared against Kolkata (IST) time specifically, not the browser's local clock/timezone —
+    // see istNow() above for why.
+    const parts=String(m.end_time).split(':');
+    const endMin=(Number(parts[0])||0)*60+(Number(parts[1])||0);
+    return istNowMinutes()>endMin;
+  }
+  function mtgAllAttendees(m){
+    const set=[m.created_by].concat(MTG_ATT[m.id]||[]);
+    const seen={}, out=[];
+    set.forEach(function(e){ const k=String(e||'').toLowerCase(); if(k&&!seen[k]){ seen[k]=true; out.push(k); } });
+    return out;
+  }
+  // Sort key used within every group: recurring meetings float to the top (they're
+  // always "live"), then one-time meetings in chronological order.
+  function mtgSortKey(m){
+    const rt=m.recur_type||'none';
+    return rt!=='none' ? ('0'+String(m.start_time||'')) : ('1'+String(m.meeting_date||'9999-99-99')+String(m.start_time||''));
+  }
+  // Splits a list of meetings into Today / Tomorrow / This Week (the remaining days of the
+  // week after tomorrow). A daily-recurring meeting occurs every one of those remaining days —
+  // rather than listing it once per day (spammy), it's shown ONCE in "This Week" with a
+  // _weekCount attached (how many more times it occurs this week) for the card to badge.
+  function mtgDayBuckets(items){
+    const todayS=istTodayISO(), tomS=calShiftISO(todayS,1), weekEnd=gcalWeekBounds(todayS)[1]; // Kolkata-anchored, matches mtgEndedToday
+    const today=[], tomorrow=[], week=[];
+    items.forEach(function(m){
+      if(mtgOccursOn(m,todayS)) today.push(m);
+      if(mtgOccursOn(m,tomS)) tomorrow.push(m);
+      if((m.recur_type||'none')==='daily'){
+        let d=calShiftISO(tomS,1), count=0;
+        while(d<=weekEnd){ count++; d=calShiftISO(d,1); }
+        if(count>0){ m._weekCount=count; week.push(m); }
+      } else {
+        let d=calShiftISO(tomS,1), inWeek=false;
+        while(d<=weekEnd){ if(mtgOccursOn(m,d)){ inWeek=true; break; } d=calShiftISO(d,1); }
+        if(inWeek) week.push(m);
+      }
+    });
+    return [
+      {label:'Today',items:today},
+      {label:'Tomorrow',items:tomorrow},
+      {label:'This Week',items:week}
+    ].filter(function(g){return g.items.length;});
+  }
+  // Applies the Today/Tomorrow/This-Week split within one already-filtered category, prefixing
+  // each resulting section's label with the category name (e.g. "Online — Tomorrow").
+  function mtgApplyDayBuckets(catLabel,items){
+    return mtgDayBuckets(items).map(function(b){ return {label:catLabel+' — '+b.label,items:b.items}; });
+  }
+  // Builds the section list for the currently-selected group tab (All / Mode / Recurring /
+  // Participants). Every tab follows the same Today/Tomorrow/This-Week rule. Categories (and
+  // day-buckets within them) with zero meetings are dropped entirely.
+  function mtgGroupedSections(group){
+    // Hide one-time meetings that already ended today from every group view (not just "All") —
+    // otherwise a meeting that's already vanished from All can still show up under Mode/
+    // Recurring/Participants until the backend cron actually deletes the row.
+    const list=(MTG_LIST||[]).filter(function(m){ return !mtgEndedToday(m); });
+    if(group==='all'){
+      return mtgDayBuckets(list);
+    }
+    if(group==='recurring'){
+      const cats=[['none','One-Time'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']];
+      let out=[]; cats.forEach(function(c){ out=out.concat(mtgApplyDayBuckets(c[1],list.filter(function(m){return (m.recur_type||'none')===c[0];}))); });
+      return out;
+    }
+    if(group==='participants'){
+      const byPerson={};
+      list.forEach(function(m){ mtgAllAttendees(m).forEach(function(e){ (byPerson[e]=byPerson[e]||[]).push(m); }); });
+      const emails=Object.keys(byPerson);
+      emails.sort(function(a,b){ return nameOf(MTG_PPL||[],a).localeCompare(nameOf(MTG_PPL||[],b)); });
+      let out=[]; emails.forEach(function(e){ out=out.concat(mtgApplyDayBuckets(nameOf(MTG_PPL||[],e),byPerson[e])); });
+      return out;
+    }
+    // mode (default)
+    const cats=[['online','Online'],['offline','Offline']];
+    let out=[]; cats.forEach(function(c){ out=out.concat(mtgApplyDayBuckets(c[1],list.filter(function(m){return m.mode===c[0];}))); });
+    return out;
+  }
+  async function mtgLoadData(){
+    const my=me();
+    let mine=[],invited=[];
+    // These used to fail silently (empty catch) — if a session/token issue on a specific
+    // browser ever causes one of these calls to error, that showed up as "nothing in any tab"
+    // with zero clue why. Now it surfaces a toast instead of pretending the list is just empty.
+    try{ const {data,error}=await ACC().from('meetings').select('*').eq('created_by',my); if(error)throw error; mine=data||[]; }catch(e){ toast('Could not load your meetings: '+((e&&e.message)||e),'err'); }
+    try{
+      const {data:attRows,error:attErr}=await ACC().from('meeting_attendees').select('meeting_id').eq('email',my);
+      if(attErr)throw attErr;
+      const ids=[...new Set((attRows||[]).map(function(r){return r.meeting_id;}))];
+      if(ids.length){ const {data,error}=await ACC().from('meetings').select('*').in('id',ids); if(error)throw error; invited=data||[]; }
+    }catch(e){ toast('Could not load meetings you\'re invited to: '+((e&&e.message)||e),'err'); }
+    const map={}; mine.concat(invited).forEach(function(m){ map[m.id]=m; });
+    const list=Object.values(map);
+    const ids=list.map(function(m){return m.id;});
+    const attMap={};
+    if(ids.length){
+      try{ const {data:allAtt}=await ACC().from('meeting_attendees').select('*').in('meeting_id',ids); (allAtt||[]).forEach(function(a){ (attMap[a.meeting_id]=attMap[a.meeting_id]||[]).push(a.email); }); }catch(e){}
+    }
+    MTG_LIST=list; MTG_ATT=attMap;
+    MTG_PPL=await people();
+    return {list,attMap};
+  }
+  // Google Calendar/Meet integration: each user connects their own Google account once
+  // (per-user OAuth, see google-oauth-start/callback edge functions); acc.google_connections
+  // is a safe view (email + connected_at only, no tokens) used just to show connect status.
+  async function mtgCheckGoogleConnected(){
+    try{ const {data}=await ACC().from('google_connections').select('email').eq('email',me()).maybeSingle(); GOOGLE_CONNECTED=!!data; }
+    catch(e){ GOOGLE_CONNECTED=false; }
+  }
+  function mtgGoogleStatusHtml(){
+    if(GOOGLE_CONNECTED===true) return '<span class="mtg-gstatus connected"><i class="fa-brands fa-google"></i> Connected to Google</span>';
+    if(GOOGLE_CONNECTED===false) return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
+    return '';
+  }
+  window.googleConnect=function(){
+    location.href='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-oauth-start?email='+encodeURIComponent(me());
+  };
+  // Attendee picker is restricted to people who've connected Google (per user decision) — everyone
+  // in this org is domain-restricted already (acc.user_profile only ever has thejaingroup.com
+  // accounts), so this is purely about connection status, not domain.
+  async function mtgConnectedEmails(){
+    try{ const {data}=await ACC().from('google_connections').select('email'); return new Set((data||[]).map(function(r){return String(r.email||'').toLowerCase();})); }
+    catch(e){ return new Set(); }
+  }
+  // Fires the real Calendar/Meet API call for a meeting (create/update/cancel). Silently
+  // no-ops (connected:false) if the organizer hasn't connected Google yet — the meeting still
+  // saves normally either way, this just skips getting a real meet_link/google_event_id.
+  async function mtgSyncGoogle(meetingId,action){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      await fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-calendar-sync',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+((session&&session.access_token)||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify({meeting_id:meetingId,action:action||'sync'})
+      });
+    }catch(e){}
+  }
+  function mtgAvatars(emails){
+    if(!emails||!emails.length)return '';
+    return '<span class="mtg-avatars">'+emails.slice(0,4).map(function(e){
+      const nm=nameOf(MTG_PPL||[],e);
+      return '<span class="mtg-avatar" style="background:'+colorFor(e)+'" title="'+esc2(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>';
+    }).join('')+(emails.length>4?'<span class="mtg-avatar" style="background:#94a3b8">+'+(emails.length-4)+'</span>':'')+'</span>';
+  }
+  function mtgCard(m,weekCount){
+    const modeColor = m.mode==='offline' ? '#64748b' : '#2563eb';
+    const people2=mtgAllAttendees(m);
+    const rt=m.recur_type||'none';
+    const dateLbl = rt==='none' ? (fmtDate(m.meeting_date)+', ') : '';
+    const timeLabel=dateLbl+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
+    const recurLbl=mtgRecurLabel(m);
+    const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
+    let join;
+    if(m.mode==='online' && m.meet_link) join='<a class="mtg-join" href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Join</a>';
+    else if(m.mode==='offline') join='<span class="mtg-join ghost">Offline</span>';
+    else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
+    const mine = eq(m.created_by,me());
+    const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
+    const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
+    const delBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgCancelAsk('+m.id+')" title="Cancel meeting"><i class="fa-solid fa-trash"></i></button>' : '';
+    // Recurring meetings: clicking anywhere on the free space of the card opens its Logs
+    // (past occurrences) — no separate Logs button needed. One-time meetings aren't clickable
+    // here (they have no history yet; their completed record only exists after in Archive).
+    const cardClick = isRecurring ? ' onclick="navTo(\'tasks/meetings/logs/'+m.id+'\')" style="cursor:pointer" title="View past occurrences"' : '';
+    return '<div class="mtg-card"'+cardClick+'>'
+      +'<div class="mtg-bar" style="background:'+modeColor+'"></div>'
+      +'<div class="mtg-time">'+esc2(timeLabel)+'</div>'
+      +'<div class="mtg-info"><div class="mtg-title">'+esc2(m.title)+(recurLbl?(' <span class="mtg-recur-tag"><i class="fa-solid fa-rotate"></i> '+esc2(recurLbl)+'</span>'):'')+(weekCount?(' <span class="mtg-recur-tag" style="color:#0369a1;background:#eff6ff">×'+weekCount+' more this week</span>'):'')+'</div><div class="mtg-meta">'+whereHtml+' · <span style="color:'+modeColor+';font-weight:600">'+mtgModeLabel(m)+'</span>'+mtgAvatars(people2)+'</div></div>'
+      +'<div class="mtg-actions">'+join+editBtn+delBtn+'</div>'
+      +'</div>';
+  }
+  function mtgDateFieldHtml(recur,m){
+    const val = (m&&m.meeting_date)?m.meeting_date:'';
+    if(recur==='daily') return '<label>Date</label><div class="mtg-static-hint">Repeats every day</div>';
+    if(recur==='weekly'){
+      const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const cur=(m&&m.recur_day!=null)?m.recur_day:1;
+      return '<label>Day</label><select id="mtgRecurDay">'+days.map(function(d,i){return '<option value="'+i+'"'+(i===cur?' selected':'')+'>'+d+'</option>';}).join('')+'</select>';
+    }
+    if(recur==='monthly'){
+      const cur=(m&&m.recur_date!=null)?m.recur_date:'';
+      return '<label>Date of month</label><input type="number" id="mtgRecurDate" min="1" max="31" value="'+esc2(cur)+'" placeholder="e.g. 15">';
+    }
+    return '<label>Date</label><input type="date" id="mtgDate" min="'+todayISO()+'" value="'+esc2(val)+'">';
+  }
+  // No manual link field anymore — real Meet links are auto-created by mtgSyncGoogle on save,
+  // shown here as a status line instead of an editable input.
+  function mtgLinkFieldHtml(mode,m){
+    if(mode!=='online')return '';
+    if(GOOGLE_CONNECTED===true) return '<div class="mtg-auto-link"><i class="fa-brands fa-google"></i> A Google Meet link is created automatically — attendees just click Join.</div>';
+    return '<div class="mtg-auto-link warn"><i class="fa-solid fa-triangle-exclamation"></i> Connect your Google account to auto-generate a Meet link for this meeting. <a href="#" onclick="event.preventDefault();googleConnect()">Connect Google</a></div>';
+  }
+  window.mtgRecurChange=function(){ const wrap=$('mtgDateWrap'); if(!wrap)return; wrap.innerHTML=mtgDateFieldHtml($('mtgRecur').value,null); mtgRefreshConflicts(); };
+  window.mtgModeChange=function(){ const wrap=$('mtgLinkWrap'); if(!wrap)return; wrap.innerHTML=mtgLinkFieldHtml($('mtgMode').value,null); };
+  window.mtgSetGroup=function(g){ MTG_GROUP=g; mtgRenderOnly(); };
+
+  // ---- Attendee scheduling-conflict warning (non-blocking) ----
+  // Represents this meeting's next real occurrence as a single yyyy-mm-dd date, so a
+  // recurring meeting can still be checked against other people's schedules without having
+  // to enumerate every future occurrence.
+  function mtgOwnRepDate(recur,meeting_date,recur_day,recur_date){
+    const t=todayISO();
+    if(recur==='none') return meeting_date||null;
+    if(recur==='daily') return t;
+    if(recur==='weekly'){
+      const rd=Number(recur_day);
+      for(let i=0;i<7;i++){ const d=calShiftISO(t,i); if(new Date(d+'T00:00:00').getDay()===rd) return d; }
+      return t;
+    }
+    if(recur==='monthly'){
+      const rd=Number(recur_date);
+      for(let i=0;i<31;i++){ const d=calShiftISO(t,i); if(new Date(d+'T00:00:00').getDate()===rd) return d; }
+      return t;
+    }
+    return t;
+  }
+  // Pulls in every OTHER meeting that any of the given people organize or attend — MTG_LIST only
+  // has the current user's own meetings, so this is a separate query (RLS on acc.meetings/
+  // meeting_attendees is wide open, same as everywhere else in this app, so it's safe to read
+  // across people for this purpose). excludeId leaves out the meeting currently being edited.
+  async function mtgConflictCandidates(emails,excludeId){
+    const lowered=[...new Set((emails||[]).map(function(e){return String(e||'').toLowerCase();}))].filter(Boolean);
+    if(!lowered.length) return [];
+    let byCreator=[], attRows=[];
+    try{ const r=await ACC().from('meetings').select('*').in('created_by',lowered); byCreator=(r&&r.data)||[]; }catch(e){}
+    try{ const r=await ACC().from('meeting_attendees').select('meeting_id,email').in('email',lowered); attRows=(r&&r.data)||[]; }catch(e){}
+    const ids=[...new Set(attRows.map(function(r){return r.meeting_id;}))];
+    let byAttendee=[];
+    if(ids.length){ try{ const r=await ACC().from('meetings').select('*').in('id',ids); byAttendee=(r&&r.data)||[]; }catch(e){} }
+    const map={};
+    byCreator.concat(byAttendee).forEach(function(m){ if(excludeId==null||m.id!==excludeId) map[m.id]=m; });
+    return Object.values(map);
+  }
+  let MTG_CONFLICT_EDIT_ID=null, MTG_CONFLICT_GEN=0;
+  function mtgClearConflictMarks(){
+    const attBox=$('mtgAttBox'); if(attBox) attBox.querySelectorAll('.mtg-conflict-mark').forEach(function(n){n.remove();});
+    const box=$('mtgConflictBox'); if(box) box.innerHTML='';
+  }
+  async function mtgRefreshConflicts(){
+    const box=$('mtgConflictBox'), attBox=$('mtgAttBox');
+    if(!box||!attBox) return;
+    const emails=(typeof msGet==='function'?msGet('mtgAttBox'):[]).filter(function(e){return !eq(e,me());});
+    const startEl=$('mtgStart'), start=startEl?startEl.value:'';
+    if(!emails.length||!start){ mtgClearConflictMarks(); return; }
+    const recur=$('mtgRecur')?$('mtgRecur').value||'none':'none';
+    const meeting_date=$('mtgDate')?$('mtgDate').value:'';
+    const recur_day=$('mtgRecurDay')?$('mtgRecurDay').value:null;
+    const recur_date=$('mtgRecurDate')?$('mtgRecurDate').value:null;
+    const end=$('mtgEnd')?$('mtgEnd').value:'';
+    const repDate=mtgOwnRepDate(recur,meeting_date,recur_day,recur_date);
+    if(!repDate){ mtgClearConflictMarks(); return; }
+    const gen=++MTG_CONFLICT_GEN;
+    const sMin=gcalMtgMinutes(start), eMin=end?gcalMtgMinutes(end):sMin+1;
+    let candidates=[];
+    try{ candidates=await mtgConflictCandidates(emails,MTG_CONFLICT_EDIT_ID); }catch(e){ return; }
+    if(gen!==MTG_CONFLICT_GEN) return; // a newer check started after this one — drop this stale result
+    const conflicts={};
+    candidates.forEach(function(m){
+      if(!mtgOccursOn(m,repDate)) return;
+      const mS=gcalMtgMinutes(m.start_time), mE=m.end_time?gcalMtgMinutes(m.end_time):mS+45;
+      if(!(sMin<mE && mS<eMin)) return;
+      mtgAllAttendees(m).forEach(function(att){ (conflicts[att]=conflicts[att]||[]).push(m); });
+    });
+    mtgClearConflictMarks();
+    const flagged=Object.keys(conflicts).filter(function(e){ return emails.some(function(x){return String(x).toLowerCase()===e;}); });
+    if(!flagged.length) return;
+    attBox.querySelectorAll('.ms-row').forEach(function(rowEl){
+      const inp=rowEl.querySelector('input[type=checkbox]'); if(!inp) return;
+      const val=String(inp.value||'').toLowerCase();
+      if(conflicts[val]){
+        const mark=document.createElement('span');
+        mark.className='mtg-conflict-mark';
+        mark.title='Conflicts with "'+conflicts[val][0].title+'"';
+        mark.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i>';
+        rowEl.appendChild(mark);
+      }
+    });
+    const list=(typeof MTG_PPL!=='undefined'&&MTG_PPL)||[];
+    const lines=flagged.map(function(e){
+      const first=conflicts[e][0];
+      const timeLbl=mtgFmtTime(first.start_time)+(first.end_time?(' – '+mtgFmtTime(first.end_time)):'');
+      const extra=conflicts[e].length>1?(' +'+(conflicts[e].length-1)+' more'):'';
+      return esc2(nameOf(list,e))+' already has "'+esc2(first.title)+'" ('+esc2(timeLbl)+') on '+esc2(repDate)+esc2(extra);
+    });
+    box.innerHTML='<div class="mtg-conflict-warn"><i class="fa-solid fa-triangle-exclamation"></i> '+lines.join('<br>')+'</div>';
+  }
+  function mtgConflictFieldHandler(e){
+    const t=e.target; if(!t) return;
+    if(t.closest && t.closest('#mtgAttBox')){ mtgRefreshConflicts(); return; }
+    if(t.id && ['mtgStart','mtgEnd','mtgDate','mtgRecurDay','mtgRecurDate'].indexOf(t.id)!==-1) mtgRefreshConflicts();
+  }
+  function mtgWireConflictCheckOnce(){
+    if(window._mtgConflictWired) return;
+    const host=$('modalHost'); if(!host) return;
+    host.addEventListener('change',mtgConflictFieldHandler);
+    host.addEventListener('input',mtgConflictFieldHandler);
+    window._mtgConflictWired=true;
+  }
+  window.mtgOpenCreate=async function(id){
+    const editing = id!=null;
+    let m=null;
+    if(editing){ m=(MTG_LIST||[]).find(function(x){return x.id===id;}); if(!m){toast('Meeting not found','err');return;} }
+    const list=await people(); const my=me();
+    const selAtt = editing ? (MTG_ATT[id]||[]).filter(function(e){return !eq(e,m.created_by);}) : [];
+    const connected = await mtgConnectedEmails();
+    const selSet = new Set(selAtt.map(function(e){return String(e||'').toLowerCase();}));
+    // Only connected accounts are pickable going forward, but anyone already invited stays visible
+    // and checked so editing/saving an older meeting never silently drops them.
+    const pickable = list.filter(function(p){ const e=String(p.email||'').toLowerCase(); return !eq(p.email,my) && (connected.has(e) || selSet.has(e)); });
+    const recurVal = m ? (m.recur_type||'none') : 'none';
+    const modeVal = m ? (m.mode||'online') : 'online';
+    const recurOpts=[['none','One-time'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']];
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-video"></i> '+(editing?'Edit Meeting':'Schedule Meeting')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
+      +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
+      +'<div class="two"><div><label>Start time</label><input type="time" id="mtgStart" value="'+(m?esc2(m.start_time||''):'')+'"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label><input type="time" id="mtgEnd" value="'+(m?esc2(m.end_time||''):'')+'"></div></div>'
+      +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
+      +'<label>Attendees <span style="color:var(--slate);font-weight:400">(optional — only people who\'ve connected Google can be added)</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
+      +(pickable.length?'':'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>')
+      +'<div id="mtgConflictBox"></div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" id="mtgSaveBtn" onclick="mtgFormSave('+(editing?id:'null')+')"><i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule')+'</button></div>');
+    MTG_CONFLICT_EDIT_ID = editing ? id : null;
+    mtgWireConflictCheckOnce();
+    mtgRefreshConflicts();
+  };
+  window.mtgFormSave=async function(id){
+    const editing = id!=null;
+    const title=($('mtgTitle').value||'').trim(); if(!title){toast('Enter a meeting title','err');return;}
+    const recur=$('mtgRecur').value||'none';
+    const mode=$('mtgMode').value||'online';
+    let meeting_date=null, recur_day=null, recur_date=null;
+    if(recur==='none'){ meeting_date=$('mtgDate')?$('mtgDate').value:''; if(!meeting_date){toast('Pick a date','err');return;} }
+    else if(recur==='weekly'){ recur_day=$('mtgRecurDay')?Number($('mtgRecurDay').value):NaN; if(isNaN(recur_day)){toast('Pick a day','err');return;} }
+    else if(recur==='monthly'){ recur_date=$('mtgRecurDate')?Number($('mtgRecurDate').value):0; if(!recur_date||recur_date<1||recur_date>31){toast('Enter a valid date of month (1–31)','err');return;} }
+    const start=$('mtgStart').value; if(!start){toast('Pick a start time','err');return;}
+    const end=$('mtgEnd').value||null;
+    // Guard against scheduling a one-time meeting whose START time is already in the past —
+    // checked against real Kolkata (IST) wall-clock time specifically (istTodayISO/istNowMinutes
+    // above), not the browser's own clock/timezone, since every backend piece (cron functions,
+    // google-meet-live-completion) assumes meeting_date+start_time/end_time are IST. Previously
+    // this only checked end||start, so a meeting with a past start but a later end (e.g. start
+    // already gone, end still ahead) slipped through; now the start time itself is validated.
+    // Without this, acc.log_completed_meetings()'s grace-period fallback can still eventually
+    // archive a meeting nobody ever actually joined, since as far as the backend can tell a
+    // meeting whose scheduled window has passed with no real activity is a no-show.
+    if(recur==='none'){
+      const todayIst=istTodayISO();
+      if(meeting_date<todayIst){
+        toast('Pick a date that is today or later.','err');
+        return;
+      }
+      if(meeting_date===todayIst){
+        const sp=start.split(':'); const startMin=(Number(sp[0])||0)*60+(Number(sp[1])||0);
+        if(startMin<=istNowMinutes()){
+          toast('That start time is already in the past (IST) — pick a time later than now.','err');
+          return;
+        }
+      }
+    }
+    const attendees=(typeof msGet==='function'?msGet('mtgAttBox'):[]).filter(function(e){return !eq(e,me());});
+    const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
+    const row={title:title,mode:mode,recur_type:recur,meeting_date:meeting_date,recur_day:recur_day,recur_date:recur_date,start_time:start,end_time:end};
+    if(mode==='offline') row.meet_link=null; // real Meet links only ever exist for online meetings — clear any stale one if switched away from online
+    let mtgId=id, err=null;
+    if(editing){
+      const {error}=await ACC().from('meetings').update(row).eq('id',id); err=error;
+    } else {
+      row.created_by=me();
+      const {data,error}=await ACC().from('meetings').insert(row).select().single(); err=error; if(data)mtgId=data.id;
+    }
+    if(err){ toast(err.message,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule');} return; }
+    try{ await ACC().from('meeting_attendees').delete().eq('meeting_id',mtgId); }catch(e){}
+    if(attendees.length){ try{ await ACC().from('meeting_attendees').insert(attendees.map(function(e){return {meeting_id:mtgId,email:e};})); }catch(e){} }
+    if(attendees.length){
+      try{
+        const plist=await people(); const organizerName=nameOf(plist,me());
+        const when = recur==='none' ? (fmtDateY(meeting_date)+' · '+mtgFmtTime(start)+(end?(' – '+mtgFmtTime(end)):'')) : (recur.charAt(0).toUpperCase()+recur.slice(1)+' · '+mtgFmtTime(start)+(end?(' – '+mtgFmtTime(end)):''));
+        const kind = editing?'meeting_update':'meeting';
+        const titlePrefix = editing?'Meeting updated: ':'Meeting invite: ';
+        const bodyTxt = editing?(when+' — updated by '+organizerName):(when+' — invited by '+organizerName);
+        await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:kind,title:titlePrefix+title,body:bodyTxt};}));
+      }catch(e){}
+    }
+    closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
+    if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
+    await mtgLoadData(); mtgRenderOnly();
+  };
+  window.mtgCancelAsk=function(id){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-triangle-exclamation" style="color:#dc2626"></i> Cancel meeting?</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body"><p style="font-size:13.5px;color:var(--slate)">This removes the meeting for everyone invited. This can\'t be undone.</p></div>'
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Keep it</button><button class="ac-btn" style="background:#dc2626;border-color:#dc2626;color:#fff" onclick="mtgCancelDo('+id+')">Cancel meeting</button></div>');
+  };
+  window.mtgCancelDo=async function(id){
+    const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
+    const attendees=(MTG_ATT&&MTG_ATT[id])||[];
+    if(m&&m.mode==='online'&&m.google_event_id){ await mtgSyncGoogle(id,'cancel'); }
+    try{ await ACC().from('meetings').delete().eq('id',id); }catch(e){}
+    if(m&&attendees.length){
+      try{ await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:'meeting_cancel',title:'Meeting cancelled: '+m.title,body:(m.recur_type&&m.recur_type!=='none'?'A recurring':fmtDateY(m.meeting_date))+' meeting was cancelled by the organizer.'};})); }catch(e){}
+    }
+    closeModal(); toast('Meeting cancelled','ok');
+    await mtgLoadData(); mtgRenderOnly();
+  };
+  window.gcalOpenMeetingPanel=function(id){
+    GCAL_PANEL_ANCHOR=null;
+    const m=(MTG_LIST||[]).find(function(x){return x.id===id;}); if(!m)return;
+    const modeColor = m.mode==='offline' ? '#64748b' : '#2563eb';
+    const names=mtgAllAttendees(m).map(function(e){return nameOf(MTG_PPL&&MTG_PPL.length?MTG_PPL:(GCAL_LAST?GCAL_LAST.list:[]),e);}).filter(Boolean).join(', ');
+    const recurLbl=mtgRecurLabel(m);
+    let html='<div class="gcal-panel-title">'+esc2(m.title)+'</div>';
+    html+='<div class="gcal-panel-row"><i class="fa-solid fa-circle" style="font-size:8px;color:'+modeColor+';margin-top:5px"></i> '+mtgModeLabel(m)+(recurLbl?(' · '+esc2(recurLbl)):'')+'</div>';
+    if(m.recur_type==='none'||!m.recur_type) html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> '+fmtDateY(m.meeting_date)+' · '+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'')+'</div>';
+    else html+='<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'')+'</div>';
+    html+='<div class="gcal-panel-row"><i class="fa-solid '+(m.mode==='offline'?'fa-people-group':'fa-video')+'"></i> '+mtgModeLabel(m)+'</div>';
+    if(names) html+='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> '+esc2(names)+'</div>';
+    const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
+    const bodyEl=panel.querySelector('.gcal-panel-body'); if(bodyEl)bodyEl.innerHTML=html;
+    const foot=panel.querySelector('.gcal-panel-foot'); const joinUrl=(m.mode==='online')?m.meet_link:null;
+    const rescheduleBtn='<button class="ac-btn" onclick="gcalClosePanel();mtgOpenCreate('+id+')"><i class="fa-solid fa-pen"></i> Reschedule</button>';
+    if(foot)foot.innerHTML = '<button class="ac-btn" onclick="gcalClosePanel()">Close</button>'+rescheduleBtn+(joinUrl?('<a class="ac-btn primary" href="'+esc2(joinUrl)+'" target="_blank" rel="noopener"><i class="fa-solid fa-video"></i> Join</a>'):'');
+    panel.classList.add('open'); if(backdrop)backdrop.classList.add('open');
+  };
+  async function meetingsTab(){
+    await mtgLoadData();
+    await mtgCheckGoogleConnected();
+    mtgRenderOnly();
+    if(window._mtgAutoOpenCreate){ window._mtgAutoOpenCreate=false; mtgOpenCreate(); }
+  }
+  function mtgGroupTabsHtml(){
+    const tabs=[['all','All'],['mode','Mode'],['recurring','Recurring'],['participants','Participants']];
+    return '<div class="mtg-grouptabs">'+tabs.map(function(t){ return '<button class="mtg-gtab'+(MTG_GROUP===t[0]?' active':'')+'" onclick="mtgSetGroup(\''+t[0]+'\')">'+t[1]+'</button>'; }).join('')+'</div>';
+  }
+  // Real duration once Google's Meet API has actually returned it (see google-meet-attendance-sync)
+  // — not the scheduled start/end from the meeting form, the true conference start/end.
+  function mtgActualDurationText(l){
+    if(l.attendance_status==='fetched' && l.actual_start && l.actual_end){
+      const mins=Math.round((new Date(l.actual_end)-new Date(l.actual_start))/60000);
+      if(mins>0){ const h=Math.floor(mins/60), m=mins%60; return (h?(h+'h '):'')+m+'m'; }
+    }
+    return null;
+  }
+  // Small "N of M joined" badge for list rows — shown instead of a generic Online/Offline tag once
+  // real attendance data exists, falls back gracefully while it's still pending or unavailable.
+  function mtgAttendanceBadgeHtml(l){
+    if(l.mode==='offline') return '<span class="mtg-log-badge none">Offline</span>';
+    const invited=(l.attendee_emails||[]).length;
+    if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+(l.participants||[]).length+' of '+invited+' joined</span>';
+    if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Fetching attendance…</span>';
+    return '<span class="mtg-log-badge none">No attendance data</span>';
+  }
+  // A meeting occurrence's detail — real routed page (not a modal), reached via
+  // navTo('tasks/meetings/log/<id>') from either the global Archive tab (one-time meetings) or a
+  // recurring meeting's own Logs list page (mtgLogsPage). Self-contained: fetches the row itself
+  // rather than relying on any page-specific cached list, so it works from either place.
+  async function mtgLogPage(v,id){
+    injectCss(); setCrumb(['Accountability','Meeting Log']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let l=null;
+    try{ const {data}=await ACC().from('meeting_logs').select('*').eq('id',id).maybeSingle(); l=data; }catch(e){}
+    if(!l){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Log not found.</div></div>'; return; }
+    const plist=await people();
+    const invitedNames=(l.attendee_emails||[]).map(function(e){ return nameOf(plist,e)||e; });
+    const actualDur=mtgActualDurationText(l);
+    const durationHtml = '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgLogTimeLabel(l))
+      +(actualDur?(' <span style="color:#166534;font-weight:600;margin-left:6px">'+esc2(actualDur)+' actual</span>'):' <span style="color:var(--slate);font-weight:400;margin-left:6px">(scheduled)</span>')
+      +'</div>';
+    let attendeesHtml;
+    if(l.mode==='offline'){
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> '+esc2(invitedNames.join(', ')||'—')+'</div>';
+    } else if(l.attendance_status==='fetched'){
+      const parts=(l.participants||[]);
+      const joinedRows=parts.length?parts.map(function(p){
+        const durLbl=p.duration_min!=null?(' · '+p.duration_min+' min'):'';
+        const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
+        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+durLbl+rejoinLbl+'</div>';
+      }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+        +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
+    } else if(l.attendance_status==='pending'){
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+        +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Fetching who actually joined from Google Meet — check back shortly.</p>';
+    } else {
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+        +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No attendance data for this meeting — either it wasn\'t actually held, or the organizer wasn\'t connected to Google at the time.</p>';
+    }
+    let transcriptHtml;
+    if(l.transcript_status==='ready') transcriptHtml='<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+    else if(l.transcript_status==='pending') transcriptHtml='<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript is being fetched from Google Meet…</p>';
+    else transcriptHtml='<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript — needs a Workspace plan with Meet transcription (Business Standard or higher) and someone starting it live in the call.</p>';
+    const recordingHtml = l.mode==='offline'
+      ? '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Offline meetings aren\'t recorded through Google Meet.</p>'
+      : '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Recording isn\'t available on your current Google Workspace plan (requires Business Standard or higher).</p>';
+    // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
+    // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
+    // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
+    // own Logs page instead.
+    const backTarget = l.meeting_id!=null ? ('tasks/meetings/logs/'+l.meeting_id) : 'tasks/archive';
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
+      +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\''+backTarget+'\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'</div>'
+      +'<div class="tp-card">'
+      +durationHtml
+      +'<div class="gcal-panel-row"><i class="fa-solid '+(l.mode==='offline'?'fa-people-group':'fa-video')+'"></i> '+(l.mode==='offline'?'Offline':'Online')+'</div>'
+      +'<div style="margin-top:12px">'+attendeesHtml+'</div>'
+      +'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-circle-play" style="color:#64748b"></i> Recording</h3>'+recordingHtml+'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3>'+transcriptHtml+'</div>';
+  }
+  // Recurring meetings never go to Archive — clicking anywhere on their card (mtgCard) navigates
+  // here instead, listing every past completed occurrence; each row navigates to mtgLogPage above.
+  async function mtgLogsPage(v,meetingId){
+    injectCss(); setCrumb(['Accountability','Meeting Logs']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    let logs=[];
+    try{ const {data}=await ACC().from('meeting_logs').select('*').eq('meeting_id',meetingId).order('occurrence_date',{ascending:false}).limit(100); logs=data||[]; }catch(e){}
+    const rows=logs.length?logs.map(function(l){
+      return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+        +'<div><div class="mtg-log-title">'+esc2(fmtDateY(l.occurrence_date))+'</div><div class="mtg-log-meta">'+esc2(mtgLogTimeLabel(l))+'</div></div>'
+        +mtgAttendanceBadgeHtml(l)
+        +'</div>';
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed occurrences yet</div>';
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-clock-rotate-left" style="color:#7c3aed"></i> Logs — '+esc2(m?m.title:'Meeting')+'</div>'
+      +'<div class="tp-sub">Past completed occurrences</div></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'</div>'
+      +'<div class="tp-card">'+rows+'</div>';
+  }
+  function mtgRenderOnly(){
+    const b=$('acBody'); if(!b)return;
+    if(GOOGLE_CONNECTED!==true){
+      const myEmail=me();
+      const offDomain=!/@thejaingroup\.com$/i.test(myEmail||'');
+      const warnHtml=offDomain?('<div class="mtg-gate-warn"><i class="fa-solid fa-triangle-exclamation"></i> Google Meet only works with a thejaingroup.com account — you\'re signed in as '+esc2(myEmail)+', so this won\'t be able to connect.</div>'):'';
+      b.innerHTML='<div class="mtg-page"><div class="mtg-main"><div class="mtg-gate">'
+        +'<i class="fa-brands fa-google mtg-gate-icon"></i>'
+        +'<h3>Connect Google to use Meetings</h3>'
+        +'<p>Connect your Google account to schedule meetings, get a real Google Meet link, and see who\'s attending.</p>'
+        +warnHtml
+        +'<button onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
+        +'</div></div></div>';
+      return;
+    }
+    const groups=mtgGroupedSections(MTG_GROUP);
+    groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
+    let body=groups.map(function(g){ const isWeek=/This Week$/.test(g.label); return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m,isWeek?m._weekCount:null); }).join(''); }).join('');
+    if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
+    b.innerHTML='<div class="mtg-page">'
+      +'<div class="mtg-main">'
+      +'<div class="mtg-toolbar"><div class="mtg-toolbar-title">Meetings</div>'+mtgGoogleStatusHtml()+'<button class="mtg-create" onclick="mtgOpenCreate()"><i class="fa-solid fa-plus"></i> Schedule Meeting</button></div>'
+      +mtgGroupTabsHtml()
+      +'<div class="mtg-body">'+body+'</div>'
+      +'</div></div>';
   }
 
   /* ---------- ARCHIVE (all-time completed tasks; Reopen-only detail view) ---------- */
@@ -786,7 +1796,18 @@
     const self=done.filter(t=>isSelf(t,asg));
     const grp=(label,arr,opt)=> arr.length?(`<div class="ac-seclbl">${label}</div>`+arr.map(t=>miniRow(t,list,asg,opt)).join('')):'';
     const inner=(byMe.length||toMe.length||self.length)?(grp('Assigned by me',byMe,{showDoneDate:true,ro:true})+grp('Assigned to me',toMe,{ownerAvatar:true,showDoneDate:true,ro:true})+grp('Self Tasks',self,{showDoneDate:true,ro:true})):'<div class="ac-empty" style="cursor:default">No completed tasks yet</div>';
-    b.innerHTML=`<div class="ac-card"><div class="hd"><i class="fa-solid fa-box-archive"></i> All completed tasks<span class="cnt">${done.length}</span></div><div class="bd" style="height:auto;max-height:none;overflow:visible">${inner}</div></div>`;
+    // One-time completed meetings land here. Recurring meetings never appear in Archive — their
+    // history lives under each meeting's own "Logs" button on the Meetings page (mtgOpenMeetingLogs).
+    let mtgLogs=[];
+    try{ const my=me(); const {data}=await ACC().from('meeting_logs').select('*').eq('recur_type','none').contains('attendee_emails',[my]).order('occurrence_date',{ascending:false}).limit(200); mtgLogs=data||[]; }catch(e){}
+    const mtgInner=mtgLogs.length?mtgLogs.map(function(l){
+      return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+        +'<div><div class="mtg-log-title">'+esc2(l.title)+'</div><div class="mtg-log-meta">'+esc2(fmtDateY(l.occurrence_date))+' · '+esc2(mtgLogTimeLabel(l))+'</div></div>'
+        +mtgAttendanceBadgeHtml(l)
+        +'</div>';
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed one-time meetings yet</div>';
+    b.innerHTML=`<div class="ac-card"><div class="hd"><i class="fa-solid fa-box-archive"></i> All completed tasks<span class="cnt">${done.length}</span></div><div class="bd" style="height:auto;max-height:none;overflow:visible">${inner}</div></div>`
+      +`<div class="ac-card" style="margin-top:28px"><div class="hd"><i class="fa-solid fa-box-archive"></i> Completed meetings<span class="cnt">${mtgLogs.length}</span></div><div class="bd" style="height:auto;max-height:none;overflow:visible">${mtgInner}</div></div>`;
   }
 
   /* ---------- TASKS SCREEN ---------- */
@@ -1282,7 +2303,7 @@
     const locked=ro&&st==='approved';
     const canEdit=amOwner&&!locked;
     const dueHist=acts.filter(a=>a.action==='due date changed');
-    window._tp={dueHist,list,amOwner,tid,canApprove:(amOwner&&st==='await'),selfTask,comments};
+    window._tp={dueHist,list,amOwner,amMember,tid,canApprove:(amOwner&&st==='await'),selfTask,comments};
     let A='';
     if(locked){
       // Archive / Completed-this-week view, still completed: no workflow actions here —
@@ -1291,7 +2312,7 @@
       if(st==='open') A=`<button class="ac-btn primary" onclick="accMarkDone(${tid},true)"><i class="fa-regular fa-circle-check"></i> Mark Done</button>`;
     } else {
       if(amMember&&st==='open') A+=`<button class="ac-btn primary" onclick="accMarkDone(${tid},false)"><i class="fa-regular fa-circle-check"></i> Mark Done</button>`;
-      else if(amMember&&st==='await') A+=`<button class="ac-btn" disabled><i class="fa-solid fa-hourglass-half"></i> Awaiting Approval</button>`;
+      else if(amMember&&st==='await') A+=`<button class="ac-btn" disabled><i class="fa-solid fa-hourglass-half"></i> Awaiting Approval</button><button class="ac-btn" onclick="accRevert(${tid})"><i class="fa-solid fa-rotate-left"></i> Revert</button>`;
       if(amOwner&&st==='await') A+=`<button class="ac-btn ok" onclick="accApprove(${tid},true)"><i class="fa-solid fa-check"></i> Approve</button><button class="ac-btn danger" onclick="accDecline(${tid})"><i class="fa-solid fa-xmark"></i> Decline</button>`;
       else if(amOwner&&st==='open') A+=`<button class="ac-btn primary" onclick="accMarkDone(${tid},true)"><i class="fa-regular fa-circle-check"></i> Mark Done</button>`;
     }
@@ -1424,6 +2445,24 @@
     else { if(n){n.style.display='none';n.value='';} window._etProjLabel=val?(el.querySelector('.ms-nm').textContent.trim()):''; }
   };
   window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Failed','err');} }); };
+  window.accRevert=function(tid){
+    if(!(window._tp&&window._tp.amMember)){toast('Only someone assigned to this task can revert it','err');return;}
+    accConfirm('Revert this task back to Pending? It leaves Awaiting Approval and returns to your active tasks — and the task owner\'s "Assigned by Me" list.', async function(){
+      try{
+        const cur=await ACC().from('ptasks').select('delegator,title').eq('id',tid).single();
+        const delegator=cur.data&&cur.data.delegator, title=(cur.data&&cur.data.title)||'';
+        await ACC().from('ptasks').update({status:'Pending',approval_state:'open',completed_at:null,progress:0}).eq('id',tid);
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'reverted',detail:'Reverted from Awaiting Approval back to Pending'});
+        await sysMsg(tid,'reverted the task — back to Pending');
+        if(delegator){
+          try{ await ACC().from('notifications').update({read:true}).eq('task_id',tid).eq('kind','approval').eq('recipient',delegator); }catch(e){}
+          try{ await ACC().from('notifications').insert({recipient:delegator,kind:'approval',task_id:tid,title:'Task reverted: '+title,body:me()+' reverted this task — it is no longer awaiting your approval.'}); }catch(e){}
+        }
+        toast('Reverted','ok');
+        renderPage();
+      }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+    });
+  };
   window.accChatFilePicked=function(inputEl){ const f=inputEl&&inputEl.files&&inputEl.files[0]; if(!f)return; window._chatPastedFile=null; const chip=$('chatFileChip'),nm=$('chatFileName'); if(chip&&nm){nm.textContent=f.name;chip.style.display='flex';} };
   window.accChatPaste=function(e){
     const items=(e.clipboardData&&e.clipboardData.items)||[];
@@ -1588,6 +2627,33 @@
     }
   });
 
-  function init(){ injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',notifLoad); }
+  function init(){
+    injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',notifLoad);
+    try{
+      const qs=new URLSearchParams(location.search);
+      const g=qs.get('google');
+      if(g){
+        if(g==='ok') toast('Google account connected','ok');
+        else toast('Google connection failed'+(qs.get('msg')?(': '+decodeURIComponent(qs.get('msg'))):''),'err');
+        qs.delete('google'); qs.delete('msg');
+        const rest=qs.toString();
+        history.replaceState(null,'',location.pathname+(rest?('?'+rest):'')+location.hash);
+      }
+    }catch(e){}
+  }
   if(document.readyState==='complete'||document.readyState==='interactive') setTimeout(init,500); else window.addEventListener('load',()=>setTimeout(init,500));
+
+  // Defensive re-render: nexus-core.js's boot sequence calls renderPage() inside an async
+  // function, right after awaiting the auth check. With a warm/cached session that await can
+  // resolve via microtasks fast enough to fire BEFORE this script (loaded after nexus-core.js)
+  // has even finished downloading — so the page paints nexus-core.js's own legacy VIEWS.tasks
+  // ("Home"/"Projects"/"Scoreboard") instead of the real Accountability UI, and nothing repaints
+  // it until a hard refresh changes the timing. If that race already happened (shell is visible
+  // by the time we get here), force one fresh render now that the real VIEWS.tasks is in place.
+  try{
+    if(window.PAGE==='tasks' && typeof renderPage==='function'){
+      const shell=document.getElementById('shell');
+      if(shell && shell.style.display==='block') renderPage();
+    }
+  }catch(e){}
 })();
