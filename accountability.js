@@ -69,6 +69,7 @@
     .ac-seclbl{font-size:10.5px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.05em;margin:8px 2px 6px}
     .ac-seclbl:first-child{margin-top:0}
     .ac-seclist{min-height:6px}
+    .ac-arch-list{display:flex;flex-direction:column;gap:8px}
     .ac-row{display:flex;align-items:center;gap:11px;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;margin-bottom:0;cursor:pointer;transition:border-color .1s}
     .ac-row:hover{border-color:var(--brand);box-shadow:0 1px 6px rgba(2,6,23,.05)}
     .ac-row.drag{opacity:.4}
@@ -1794,7 +1795,7 @@
     const byMe=done.filter(t=>isOwner(t)&&!isSelf(t,asg)&&!t.parent_task_id);
     const toMe=done.filter(t=>isMemb(t,asg)&&!isSelf(t,asg));
     const self=done.filter(t=>isSelf(t,asg));
-    const grp=(label,arr,opt)=> arr.length?(`<div class="ac-seclbl">${label}</div>`+arr.map(t=>miniRow(t,list,asg,opt)).join('')):'';
+    const grp=(label,arr,opt)=> arr.length?(`<div class="ac-seclbl">${label}</div><div class="ac-arch-list">`+arr.map(t=>miniRow(t,list,asg,opt)).join('')+`</div>`):'';
     const inner=(byMe.length||toMe.length||self.length)?(grp('Assigned by me',byMe,{showDoneDate:true,ro:true})+grp('Assigned to me',toMe,{ownerAvatar:true,showDoneDate:true,ro:true})+grp('Self Tasks',self,{showDoneDate:true,ro:true})):'<div class="ac-empty" style="cursor:default">No completed tasks yet</div>';
     // One-time completed meetings land here. Recurring meetings never appear in Archive — their
     // history lives under each meeting's own "Logs" button on the Meetings page (mtgOpenMeetingLogs).
