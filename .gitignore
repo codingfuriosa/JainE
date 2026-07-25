@@ -2,3 +2,10 @@
 Thumbs.db
 *.log
 node_modules/
+
+# SSH deploy key used for automated push/pull to GitHub — never commit this
+.deploy_key/
+
+# Generated reports with real business/employee data — not meant for version control
+*.xlsx
+*.xls
