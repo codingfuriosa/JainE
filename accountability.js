@@ -548,12 +548,14 @@
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
+      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
       <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
     if (tab==='scoreboard') return scoreboardTab();
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
     if (tab==='archive') return archiveTab();
+    if (tab==='workflow') return workflowTab();
     return tasksScreen();
   };
 
@@ -592,6 +594,12 @@
       row.style.display=(!q||txt.includes(q))?'':'none';
     });
   };
+
+  /* ---------- WORKFLOW ---------- */
+  async function workflowTab(){
+    const b=$('acBody');
+    b.innerHTML=`<div class="ac-card"><div class="hd"><i class="fa-solid fa-diagram-project"></i> Workflow<span class="cnt">0</span></div><div class="bd" style="height:auto;max-height:none;overflow:visible"><div class="ac-empty" style="cursor:default">Workflow — coming soon</div></div></div>`;
+  }
 
   /* ---------- SCOREBOARD ---------- */
   async function scoreboardTab(){ const b=$('acBody'); let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){} const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
