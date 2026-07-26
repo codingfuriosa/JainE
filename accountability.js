@@ -1829,11 +1829,12 @@
     if(recur==='none'){ meeting_date=$('mtgDate')?$('mtgDate').value:''; if(!meeting_date){toast('Pick a date','err');return;} }
     else if(recur==='weekly'){ recur_day=$('mtgRecurDay')?Number($('mtgRecurDay').value):NaN; if(isNaN(recur_day)){toast('Pick a day','err');return;} }
     else if(recur==='monthly'){ recur_date=$('mtgRecurDate')?Number($('mtgRecurDate').value):0; if(!recur_date||recur_date<1||recur_date>31){toast('Enter a valid date of month (1–31)','err');return;} }
-    const start=($('mtgStart').value||'').trim();
+    let start=($('mtgStart').value||'').trim();
     if(!/^\d{1,2}:[0-5]\d$/.test(start)||parseInt(start,10)>23){ toast('Enter a start time as HH:MM (24-hour, 00–23)','err'); return; }
+    start=mtgTimeVal(start); // always store zero-padded HH:MM — google-calendar-sync builds an RFC3339 string from this
     const endRaw=($('mtgEnd').value||'').trim();
     if(endRaw&&(!/^\d{1,2}:[0-5]\d$/.test(endRaw)||parseInt(endRaw,10)>23)){ toast('Enter the end time as HH:MM (24-hour, 00–23)','err'); return; }
-    const end=endRaw||null;
+    const end=endRaw?mtgTimeVal(endRaw):null;
     // Guard against scheduling a one-time meeting whose START time is already in the past —
     // checked against real Kolkata (IST) wall-clock time specifically (istTodayISO/istNowMinutes
     // above), not the browser's own clock/timezone, since every backend piece (cron functions,
