@@ -2134,6 +2134,7 @@
   };
   window.mtgRecStop=async function(){
     const R=MTG_REC; if(!R||!R.rec)return;
+    if(R.stopping) return; R.stopping=true;  // guard against a double Stop firing save-recording twice
     const sp=$('mtgRecStop'); if(sp){sp.disabled=true;sp.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Finishing…';}
     if(R.timer){clearInterval(R.timer);R.timer=null;}
     const endedAt=new Date().toISOString();
