@@ -2170,17 +2170,13 @@
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
     let l=null; try{ const {data}=await ACC().from('meeting_logs').select('*').eq('id',logId).maybeSingle(); l=data; }catch(e){}
     if(!l){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Log not found.</div></div>'; return; }
-    const list=await people();
+    const dir=await people();
     const invited=(l.attendee_emails||[]);
-    // The invited list can include people not in the staff directory (e.g. system accounts) — add
-    // them (and the current recorder) so they actually appear as ticked-able rows in the picker.
-    const seen={}; list.forEach(function(p){ seen[String(p.email||'').toLowerCase()]=true; });
-    const augmented=list.slice();
-    invited.forEach(function(e){ const k=String(e||'').toLowerCase(); if(e&&!seen[k]){ augmented.push({email:e,name:e,depts:[]}); seen[k]=true; } });
-    const meEmail=(typeof me==='function'?me():'')||'';
-    if(meEmail && !seen[meEmail.toLowerCase()]){ augmented.push({email:meEmail,name:meEmail,depts:[]}); seen[meEmail.toLowerCase()]=true; }
-    const presel=(l.present_emails&&l.present_emails.length)?l.present_emails:(invited.length?invited.slice():(meEmail?[meEmail]:[]));
-    MTG_WRAP={logId:logId, invited:invited, people:augmented, l:l};
+    // Members list = ONLY the people invited when the meeting was created (this already includes the
+    // organiser). Tick who actually attended; the rest are marked absent.
+    const memberList=invited.map(function(e){ const p=dir.find(function(x){return eq(x.email,e);}); return {email:e, name:(p?p.name:e), depts:(p&&p.depts)?p.depts:[]}; });
+    const presel=(l.present_emails&&l.present_emails.length)?l.present_emails:invited.slice();
+    MTG_WRAP={logId:logId, invited:invited, people:memberList, l:l};
     const dateIST=fmtDateY(l.occurrence_date);
     const recRange=(l.actual_start&&l.actual_end)?(mtgClockIST(l.actual_start)+' – '+mtgClockIST(l.actual_end)):'';
     const durTxt=(l.actual_start&&l.actual_end)?mtgSecFmt(Math.round((new Date(l.actual_end)-new Date(l.actual_start))/1000)):'';
@@ -2194,7 +2190,7 @@
       +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3><div id="mtgWrapTranscript">'+mtgTranscriptHtml(l)+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-users" style="color:#e0121c"></i> Members present <span style="color:#e0121c">*</span></h3>'
         +'<p style="color:var(--slate);font-size:12.5px;margin:0 0 8px">Tick everyone who actually attended — this is required before saving.</p>'
-        +msWidget('mtgWrapMembers',augmented,presel)
+        +msWidget('mtgWrapMembers',memberList,presel)
         +'<div id="mtgWrapMissing" style="margin-top:10px"></div>'
       +'</div>'
       +'<div class="wf-actions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button class="ac-btn primary" id="mtgWrapSave" onclick="mtgWrapSave()"><i class="fa-solid fa-floppy-disk"></i> Save to Logs</button></div>'
@@ -2305,6 +2301,7 @@
   }
 
   function mtgRenderOnly(){
+    try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
     if(GOOGLE_CONNECTED!==true){
       const myEmail=me();
