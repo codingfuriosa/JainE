@@ -130,7 +130,19 @@
     .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600}
     .wf-dept{font-size:11.5px;color:var(--slate);margin-left:7px}
     .wf-dur{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:5px}
-    @media(max-width:700px){.wf-step-sub{flex-wrap:wrap}.wf-step-sub .wf-s-person{flex:1 1 100%}.wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 44%}}
+    @media(max-width:700px){.wf-step-sub{flex-wrap:wrap}.wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}.wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 44%}}
+    /* Workflow step person picker (avatar + department-grouped) */
+    .wf-step-sub .wf-pp{flex:2;min-width:0}
+    .wf-pp{position:relative}
+    .wf-pp-btn{width:100%;display:flex;align-items:center;gap:9px;text-align:left;cursor:pointer;padding:6px 10px;min-height:40px}
+    .wf-pp-av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;flex:none}
+    .wf-pp-nm{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .wf-pp-ph{font-size:13px;color:var(--slate)}
+    .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px}
+    .wf-pp-panel{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:220px;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;display:none;max-height:280px;overflow:auto}
+    .wf-pp.open .wf-pp-panel{display:block}
+    .wf-pp-panel .ms-search{margin-bottom:6px}
+    .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
     .ac-addrow{display:flex;gap:8px;margin:3px 0}
     .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
     .ac-addrow-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10)}
@@ -633,14 +645,48 @@
      A workflow = a named business process with a triggering event and an ordered
      list of steps. Each step is carried out by one designated person within a set
      duration. Stored in acc.flows (the workflow) + acc.flow_steps (its steps). */
-  let WF_PEOPLE=null;
+  let WF_PEOPLE=null, WF_PID=0;
 
-  function wfPersonOptions(sel){
-    return '<option value="">Assign person…</option>'+(WF_PEOPLE||[]).map(function(p){
-      const dept=(Array.isArray(p.depts)&&p.depts.length)?(' — '+p.depts.join(', ')):'';
-      return '<option value="'+esc2(p.email)+'"'+(sel&&eq(sel,p.email)?' selected':'')+'>'+esc2(p.name)+esc2(dept)+'</option>';
-    }).join('');
+  // Single-select person picker for a workflow step: shows a coloured avatar circle + name,
+  // and the dropdown groups people by department (mirrors the msWidget attendee list). The
+  // chosen email lives in a hidden .wf-s-person input so wfSave reads it exactly as before.
+  function wfPersonPickerHtml(sel){
+    const pid='wfpp'+(++WF_PID);
+    const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,sel);});
+    const trig=p
+      ? '<span class="wf-pp-av" style="background:'+colorFor(p.email)+'">'+esc2(iniOf(p.name).toUpperCase())+'</span><span class="wf-pp-nm">'+esc2(p.name)+'</span>'
+      : '<span class="wf-pp-ph">Assign person…</span>';
+    const groups={}; (WF_PEOPLE||[]).forEach(function(pp){ const ds=(Array.isArray(pp.depts)?pp.depts:[]).map(function(d){return String(d||'').trim();}).filter(Boolean); const key=ds.length?ds.slice().sort().join(', '):'Unassigned'; (groups[key]=groups[key]||[]).push(pp); });
+    const order=Object.keys(groups).sort(function(a,b){ return a==='Unassigned'?1:(b==='Unassigned'?-1:a.localeCompare(b)); });
+    let listHtml='';
+    order.forEach(function(d){ listHtml+='<div class="ms-grp">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ const on=eq(pp.email,sel); listHtml+='<div class="ms-row'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)"><span class="ms-av" style="background:'+colorFor(pp.email)+'">'+esc2(iniOf(pp.name).toUpperCase())+'</span><span class="ms-nm">'+esc2(pp.name)+'</span><i class="fa-solid fa-check ms-ck"></i></div>'; }); });
+    return '<div class="wf-pp" id="'+pid+'">'
+      +'<input type="hidden" class="wf-s-person" value="'+esc2(sel||'')+'">'
+      +'<button type="button" class="ac-in wf-pp-btn" onclick="wfPersonToggle(this)">'+trig+'<i class="fa-solid fa-chevron-down wf-pp-caret"></i></button>'
+      +'<div class="wf-pp-panel"><input class="ac-in ms-search" placeholder="Search people…" oninput="wfPersonFilter(this)"><div class="ms-list">'+listHtml+'</div></div>'
+    +'</div>';
   }
+  window.wfPersonToggle=function(btn){
+    const pp=btn.closest('.wf-pp'); if(!pp)return;
+    const isOpen=pp.classList.contains('open');
+    document.querySelectorAll('.wf-pp.open').forEach(function(x){x.classList.remove('open');});
+    if(!isOpen){ pp.classList.add('open'); const s=pp.querySelector('.ms-search'); if(s){ s.value=''; wfPersonFilter(s); try{s.focus();}catch(_){} } }
+  };
+  window.wfPersonPick=function(row){
+    const pp=row.closest('.wf-pp'); if(!pp)return;
+    const email=row.getAttribute('data-email')||'', name=row.getAttribute('data-name')||email;
+    const hid=pp.querySelector('.wf-s-person'); if(hid)hid.value=email;
+    const btn=pp.querySelector('.wf-pp-btn'); if(btn)btn.innerHTML='<span class="wf-pp-av" style="background:'+colorFor(email)+'">'+esc2(iniOf(name).toUpperCase())+'</span><span class="wf-pp-nm">'+esc2(name)+'</span><i class="fa-solid fa-chevron-down wf-pp-caret"></i>';
+    pp.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
+    row.classList.add('on');
+    pp.classList.remove('open');
+  };
+  window.wfPersonFilter=function(inp){
+    const panel=inp.closest('.wf-pp-panel'); if(!panel)return; const box=panel.querySelector('.ms-list'); if(!box)return;
+    const q=(inp.value||'').toLowerCase();
+    box.querySelectorAll('.ms-row').forEach(function(l){ l.style.display=(!q||(l.dataset.n||'').includes(q))?'':'none'; });
+    box.querySelectorAll('.ms-grp').forEach(function(g){ let n=g.nextElementSibling,vis=false; while(n&&n.classList&&n.classList.contains('ms-row')){ if(n.style.display!=='none')vis=true; n=n.nextElementSibling; } g.style.display=vis?'':'none'; });
+  };
 
   async function workflowTab(){
     const b=$('acBody');
@@ -675,9 +721,10 @@
     return '<div class="wf-step">'
       +'<span class="wf-step-num">'+idx+'</span>'
       +'<div class="wf-step-fields">'
-        +'<input class="ac-in wf-s-title" placeholder="What happens in this step? (e.g. User dept checks &amp; approves the invoice)" value="'+esc2(step.title||'')+'">'
+        +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
+        +'<input class="ac-in wf-s-desc" placeholder="Write the Description" value="'+esc2(step.description||'')+'">'
         +'<div class="wf-step-sub">'
-          +'<select class="ac-in wf-s-person">'+wfPersonOptions(step.owner_email)+'</select>'
+          +wfPersonPickerHtml(step.owner_email)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
           +'<select class="ac-in wf-s-unit">'
             +'<option value="hours"'+(unit==='hours'?' selected':'')+'>Hours</option>'
@@ -693,6 +740,8 @@
   async function wfForm(id){
     const b=$('acBody');
     b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+    if(!window._wfPpWired){ document.addEventListener('click',function(e){ if(!e.target||!e.target.closest||!e.target.closest('.wf-pp')) document.querySelectorAll('.wf-pp.open').forEach(function(x){x.classList.remove('open');}); }); window._wfPpWired=true; }
     let flow={name:'',description:'',trigger_event:''}, steps=[];
     if(id){
       try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); if(data)flow=data; }catch(e){}
@@ -726,7 +775,7 @@
   };
   window.wfRemoveStep=function(btn){
     const wrap=$('wfSteps'); const row=btn.closest('.wf-step'); if(!row||!wrap)return;
-    if(wrap.querySelectorAll('.wf-step').length<=1){ toast('A workflow needs at least one step','warn'); return; }
+    if(wrap.querySelectorAll('.wf-step').length<=2){ toast('A workflow needs at least two steps','warn'); return; }
     row.remove(); wfRenumber();
   };
   function wfRenumber(){
@@ -741,17 +790,23 @@
     if(!name){ toast('Please enter a workflow name','warn'); return; }
     if(!trigger){ toast('Please enter the triggering event','warn'); return; }
     const rows=[].slice.call(document.querySelectorAll('#wfSteps .wf-step'));
-    const steps=[];
-    rows.forEach(function(r){
+    if(rows.length<2){ toast('A workflow needs at least two steps','warn'); return; }
+    const steps=[]; let bad='';
+    rows.forEach(function(r,i){
       const t=((r.querySelector('.wf-s-title')||{}).value||'').trim();
-      if(!t) return; // skip blank rows
+      const desc=((r.querySelector('.wf-s-desc')||{}).value||'').trim();
       const person=(r.querySelector('.wf-s-person')||{}).value||'';
       const durRaw=(r.querySelector('.wf-s-dur')||{}).value;
       const unit=(r.querySelector('.wf-s-unit')||{}).value||'days';
-      const dur=(durRaw!==''&&durRaw!=null)?parseInt(durRaw,10):null;
-      steps.push({seq:steps.length+1,title:t,owner_email:person||null,duration_value:(dur!=null&&!isNaN(dur))?dur:null,duration_unit:unit});
+      const dur=(durRaw!==''&&durRaw!=null)?parseInt(durRaw,10):NaN;
+      if(!bad){
+        if(!t) bad='Step '+(i+1)+': add a title (what happens in this step).';
+        else if(!person) bad='Step '+(i+1)+': assign a person.';
+        else if(!(dur>=1)) bad='Step '+(i+1)+': set a duration.';
+      }
+      steps.push({seq:steps.length+1,title:t,description:desc||null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
     });
-    if(!steps.length){ toast('Please add at least one step with a description','warn'); return; }
+    if(bad){ toast(bad,'warn'); return; }
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
@@ -762,7 +817,7 @@
       }else{
         const {data,error}=await ACC().from('flows').insert({name:name,description:desc||null,trigger_event:trigger}).select().single(); if(error)throw error; flowId=data.id;
       }
-      const stepRows=steps.map(function(s){ return {flow_id:flowId,seq:s.seq,title:s.title,owner_email:s.owner_email,duration_value:s.duration_value,duration_unit:s.duration_unit}; });
+      const stepRows=steps.map(function(s){ return {flow_id:flowId,seq:s.seq,title:s.title,description:s.description,owner_email:s.owner_email,duration_value:s.duration_value,duration_unit:s.duration_unit}; });
       const {error:se}=await ACC().from('flow_steps').insert(stepRows); if(se)throw se;
       toast('Workflow saved','ok');
       await wfRenderList();
@@ -784,7 +839,7 @@
         ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(s.owner_email)+'">'+esc2(iniOf(p?p.name:s.owner_email).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(p?p.name:s.owner_email)+'</span>'+dept+'</span>')
         :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
       const dur=durLabel(s); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
-      return '<div class="wf-tl-item"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
+      return '<div class="wf-tl-item"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
     }).join('');
     b.innerHTML='<div style="display:flex;gap:8px;margin-bottom:12px"><button class="ac-btn" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i> Back</button><div style="flex:1"></div><button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i> Edit</button><button class="ac-btn danger" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete</button></div>'
       +'<div class="ac-card"><div class="hd"><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</div><div class="bd" style="height:auto;max-height:none;overflow:visible">'
