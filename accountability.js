@@ -1785,6 +1785,11 @@
     host.addEventListener('input',mtgConflictFieldHandler);
     window._mtgConflictWired=true;
   }
+  // Start/End time are a single text field masked to 24-hour HH:MM (00–23 : 00–59) — one field,
+  // no native AM/PM segment, consistent across every browser. Stored/read value stays "HH:MM".
+  function mtgTimeVal(t){ if(!t)return''; const p=String(t).split(':'); if(p.length<2)return''; return String(parseInt(p[0],10)||0).padStart(2,'0')+':'+String(parseInt(p[1],10)||0).padStart(2,'0'); }
+  window.mtgTimeMask=function(el){ const v=(el.value||'').replace(/[^0-9]/g,'').slice(0,4); el.value=(v.length>2)?(v.slice(0,2)+':'+v.slice(2)):v; };
+  window.mtgTimeNorm=function(el){ const raw=(el.value||'').replace(/[^0-9]/g,''); if(!raw){ el.value=''; return; } let h,m; if(raw.length<=2){ h=raw; m='0'; } else { h=raw.slice(0,raw.length-2); m=raw.slice(-2); } h=Math.max(0,Math.min(23,parseInt(h,10)||0)); m=Math.max(0,Math.min(59,parseInt(m,10)||0)); el.value=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_){} };
   window.mtgOpenCreate=async function(id){
     const editing = id!=null;
     let m=null;
@@ -1804,7 +1809,7 @@
       +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
       +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
-      +'<div class="two"><div><label>Start time</label><input type="time" lang="en-GB" id="mtgStart" value="'+(m?esc2(m.start_time||''):'')+'"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label><input type="time" lang="en-GB" id="mtgEnd" value="'+(m?esc2(m.end_time||''):'')+'"></div></div>'
+      +'<div class="two"><div><label>Start time <span style="color:var(--slate);font-weight:400">(24h)</span></label><input type="text" id="mtgStart" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.start_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional, 24h)</span></label><input type="text" id="mtgEnd" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.end_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div></div>'
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">(optional — only people who\'ve connected Google can be added)</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +(pickable.length?'':'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>')
@@ -1824,8 +1829,11 @@
     if(recur==='none'){ meeting_date=$('mtgDate')?$('mtgDate').value:''; if(!meeting_date){toast('Pick a date','err');return;} }
     else if(recur==='weekly'){ recur_day=$('mtgRecurDay')?Number($('mtgRecurDay').value):NaN; if(isNaN(recur_day)){toast('Pick a day','err');return;} }
     else if(recur==='monthly'){ recur_date=$('mtgRecurDate')?Number($('mtgRecurDate').value):0; if(!recur_date||recur_date<1||recur_date>31){toast('Enter a valid date of month (1–31)','err');return;} }
-    const start=$('mtgStart').value; if(!start){toast('Pick a start time','err');return;}
-    const end=$('mtgEnd').value||null;
+    const start=($('mtgStart').value||'').trim();
+    if(!/^\d{1,2}:[0-5]\d$/.test(start)||parseInt(start,10)>23){ toast('Enter a start time as HH:MM (24-hour, 00–23)','err'); return; }
+    const endRaw=($('mtgEnd').value||'').trim();
+    if(endRaw&&(!/^\d{1,2}:[0-5]\d$/.test(endRaw)||parseInt(endRaw,10)>23)){ toast('Enter the end time as HH:MM (24-hour, 00–23)','err'); return; }
+    const end=endRaw||null;
     // Guard against scheduling a one-time meeting whose START time is already in the past —
     // checked against real Kolkata (IST) wall-clock time specifically (istTodayISO/istNowMinutes
     // above), not the browser's own clock/timezone, since every backend piece (cron functions,
