@@ -1674,13 +1674,13 @@
     const box=$('mtgConflictBox'), attBox=$('mtgAttBox');
     if(!box||!attBox) return;
     const emails=(typeof msGet==='function'?msGet('mtgAttBox'):[]).filter(function(e){return !eq(e,me());});
-    const start=mtgReadTime('mtgStartH','mtgStartM');
+    const startEl=$('mtgStart'), start=startEl?startEl.value:'';
     if(!emails.length||!start){ mtgClearConflictMarks(); return; }
     const recur=$('mtgRecur')?$('mtgRecur').value||'none':'none';
     const meeting_date=$('mtgDate')?$('mtgDate').value:'';
     const recur_day=$('mtgRecurDay')?$('mtgRecurDay').value:null;
     const recur_date=$('mtgRecurDate')?$('mtgRecurDate').value:null;
-    const end=mtgReadTime('mtgEndH','mtgEndM');
+    const end=$('mtgEnd')?$('mtgEnd').value:'';
     const repDate=mtgOwnRepDate(recur,meeting_date,recur_day,recur_date);
     if(!repDate){ mtgClearConflictMarks(); return; }
     const gen=++MTG_CONFLICT_GEN;
@@ -1721,7 +1721,7 @@
   function mtgConflictFieldHandler(e){
     const t=e.target; if(!t) return;
     if(t.closest && t.closest('#mtgAttBox')){ mtgRefreshConflicts(); return; }
-    if(t.id && ['mtgStartH','mtgStartM','mtgEndH','mtgEndM','mtgDate','mtgRecurDay','mtgRecurDate'].indexOf(t.id)!==-1) mtgRefreshConflicts();
+    if(t.id && ['mtgStart','mtgEnd','mtgDate','mtgRecurDay','mtgRecurDate'].indexOf(t.id)!==-1) mtgRefreshConflicts();
   }
   function mtgWireConflictCheckOnce(){
     if(window._mtgConflictWired) return;
@@ -1730,27 +1730,6 @@
     host.addEventListener('input',mtgConflictFieldHandler);
     window._mtgConflictWired=true;
   }
-  // Two-field time picker (hour + minute) — replaces the native <input type="time">, whose
-  // 12h locales render a third AM/PM segment. Value read/saved stays "HH:MM" (24h). Minutes are
-  // 5-min steps; any off-step value on an existing meeting is injected so nothing is lost on edit.
-  function mtgTimeSelectsHtml(idH,idM,val){
-    const parts=String(val||'').split(':');
-    const curH=(parts[0]!=null&&parts[0]!=='')?String(parts[0]).padStart(2,'0'):'';
-    const curM=(parts[1]!=null&&parts[1]!=='')?String(parts[1]).padStart(2,'0'):'';
-    let hOpts='<option value=""'+(curH===''?' selected':'')+'>--</option>';
-    for(let h=0;h<24;h++){ const hh=String(h).padStart(2,'0'); hOpts+='<option value="'+hh+'"'+(hh===curH?' selected':'')+'>'+hh+'</option>'; }
-    const mins=[]; for(let mm=0;mm<60;mm+=5) mins.push(String(mm).padStart(2,'0'));
-    if(curM!==''&&mins.indexOf(curM)===-1) mins.push(curM);
-    mins.sort();
-    let mOpts='<option value=""'+(curM===''?' selected':'')+'>--</option>';
-    mins.forEach(function(mm){ mOpts+='<option value="'+mm+'"'+(mm===curM?' selected':'')+'>'+mm+'</option>'; });
-    return '<div style="display:flex;align-items:center;gap:7px">'
-      +'<select id="'+idH+'" style="flex:1" aria-label="Hour">'+hOpts+'</select>'
-      +'<span style="color:var(--slate);font-weight:700">:</span>'
-      +'<select id="'+idM+'" style="flex:1" aria-label="Minute">'+mOpts+'</select>'
-      +'</div>';
-  }
-  function mtgReadTime(idH,idM){ const h=$(idH),m=$(idM); if(!h||!m) return ''; const hv=h.value,mv=m.value; if(hv===''||mv==='') return ''; return hv+':'+mv; }
   window.mtgOpenCreate=async function(id){
     const editing = id!=null;
     let m=null;
@@ -1770,7 +1749,7 @@
       +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
       +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
-      +'<div class="two"><div><label>Start time</label>'+mtgTimeSelectsHtml('mtgStartH','mtgStartM',m?(m.start_time||''):'')+'</div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label>'+mtgTimeSelectsHtml('mtgEndH','mtgEndM',m?(m.end_time||''):'')+'</div></div>'
+      +'<div class="two"><div><label>Start time</label><input type="time" lang="en-GB" id="mtgStart" value="'+(m?esc2(m.start_time||''):'')+'"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label><input type="time" lang="en-GB" id="mtgEnd" value="'+(m?esc2(m.end_time||''):'')+'"></div></div>'
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">(optional — only people who\'ve connected Google can be added)</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +(pickable.length?'':'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>')
@@ -1790,8 +1769,8 @@
     if(recur==='none'){ meeting_date=$('mtgDate')?$('mtgDate').value:''; if(!meeting_date){toast('Pick a date','err');return;} }
     else if(recur==='weekly'){ recur_day=$('mtgRecurDay')?Number($('mtgRecurDay').value):NaN; if(isNaN(recur_day)){toast('Pick a day','err');return;} }
     else if(recur==='monthly'){ recur_date=$('mtgRecurDate')?Number($('mtgRecurDate').value):0; if(!recur_date||recur_date<1||recur_date>31){toast('Enter a valid date of month (1–31)','err');return;} }
-    const start=mtgReadTime('mtgStartH','mtgStartM'); if(!start){toast('Pick a start time','err');return;}
-    const end=mtgReadTime('mtgEndH','mtgEndM')||null;
+    const start=$('mtgStart').value; if(!start){toast('Pick a start time','err');return;}
+    const end=$('mtgEnd').value||null;
     // Guard against scheduling a one-time meeting whose START time is already in the past —
     // checked against real Kolkata (IST) wall-clock time specifically (istTodayISO/istNowMinutes
     // above), not the browser's own clock/timezone, since every backend piece (cron functions,
