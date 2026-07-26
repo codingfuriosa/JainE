@@ -2077,6 +2077,19 @@
       return await res.json().catch(function(){return {error:'bad response'};});
     }catch(e){ return {error:String(e)}; }
   }
+  // Upload recording audio THROUGH Supabase (meeting-audio-upload) rather than browser->S3 directly,
+  // so it works from any site origin (the S3 bucket's CORS only trusts the production domain).
+  // Returns the same shape as uploadFileToS3: {data:{path}} | {error}.
+  async function mtgUploadAudio(key, blob){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token;
+      const res=await fetch(SUPABASE_URL+'/functions/v1/meeting-audio-upload?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},body:blob});
+      const out=await res.json().catch(function(){return {};});
+      if(!res.ok||out.error) return {error:{message:out.error||('upload HTTP '+res.status)}};
+      return {data:{path:out.path}};
+    }catch(e){ return {error:{message:String(e)}}; }
+  }
   async function mtgRecordPage(v, meetingId){
     injectCss(); mtgInjectRecCss(); setCrumb(['Accountability','Record Meeting']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -2132,7 +2145,7 @@
     let audioPath=null;
     if(blob.size){
       const key='accountability/meeting-audio/'+R.meeting.id+'-'+occ+'-'+Date.now()+'.'+ext;
-      const up=await uploadFileToS3(key,blob);
+      const up=await mtgUploadAudio(key,blob);
       if(up&&up.data)audioPath=up.data.path; else toast('Audio upload failed — you can still log attendees, but there will be no transcript.','warn');
     }
     const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
