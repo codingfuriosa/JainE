@@ -596,7 +596,7 @@
     if(completedAt){
       const c=parseD(completedAt); if(!c) return '';
       c.setHours(0,0,0,0);
-      if(c.getTime()>d.getTime()) return '<span class="ac-chip" style="background:#fee2e2;color:#b91c1c;margin-left:6px">Overdue</span>';
+      if(c.getTime()>d.getTime()) return '<span class="ac-chip" title="Overdue" style="background:#fee2e2;color:#b91c1c;margin-left:6px">O</span>';
       return '<span class="ac-chip" style="background:#dcfce7;color:#15803d;margin-left:6px">On time</span>';
     }
     const today=new Date(); today.setHours(0,0,0,0);
@@ -608,9 +608,13 @@
     opt=opt||{};
     const emails=opt.ownerAvatar?[t.delegator].filter(Boolean):((asg&&asg[t.id])||[]);
     const metaParts=[];
-    if(opt.showDoneDate&&t.completed_at) metaParts.push(`<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Marked done ${fmtDate(t.completed_at)}`);
-    if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
-    if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
+    if(opt.showDoneDate){
+      // Completed / Archive rows: show only the marked-done date (date icon) — no tag/due-date.
+      if(t.completed_at) metaParts.push(`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`);
+    } else {
+      if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
+      if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
+    }
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${emails.length?avatars(list,emails):''}</div></div>`;
   }
@@ -1745,7 +1749,7 @@
       +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
       +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
-      +'<div class="two"><div><label>Start time</label><input type="time" id="mtgStart" value="'+(m?esc2(m.start_time||''):'')+'"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label><input type="time" id="mtgEnd" value="'+(m?esc2(m.end_time||''):'')+'"></div></div>'
+      +'<div class="two"><div><label>Start time</label><input type="time" lang="en-GB" id="mtgStart" value="'+(m?esc2(m.start_time||''):'')+'"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label><input type="time" lang="en-GB" id="mtgEnd" value="'+(m?esc2(m.end_time||''):'')+'"></div></div>'
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">(optional — only people who\'ve connected Google can be added)</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +(pickable.length?'':'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>')
@@ -2390,10 +2394,17 @@
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
-    const doneDate=(opt.showDoneDate&&t.completed_at)?`<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Marked done ${fmtDate(t.completed_at)}`:'';
-    const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:'',doneDate].filter(Boolean);
-    const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${emails.length?avatars(list,emails):''}</div>${approve}</div>`;
+    let meta='', doneBadge2='';
+    if(opt.showDoneDate){
+      // Awaiting Approval rows: only the marked-done date (date icon) + on-time/overdue badge + members.
+      const dd=t.completed_at?`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`:'';
+      meta=dd?`<div class="rtd">${dd}</div>`:'';
+      doneBadge2=dueBadge(t.due_date,t.completed_at);
+    } else {
+      const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:''].filter(Boolean);
+      meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
+    }
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${emails.length?avatars(list,emails):''}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
