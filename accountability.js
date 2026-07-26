@@ -1482,6 +1482,10 @@
   // Recurring meetings are never hidden this way — they're always meant to stay visible.
   function mtgEndedToday(m){
     if((m.recur_type||'none')!=='none') return false;
+    // Online meetings are never hidden on the basis of the clock — they stay visible until real
+    // Google Meet activity archives them (or they're marked "Not held" the next day). This is what
+    // keeps a rescheduled-but-not-updated online meeting from vanishing at its scheduled end time.
+    if((m.mode||'online')==='online') return false;
     if(!m.end_time) return false;
     if(m.meeting_date!==istTodayISO()) return false; // BUG FIX: this was always comparing against
     // today's date regardless of the meeting's actual date, so a one-time meeting scheduled for
@@ -1947,6 +1951,7 @@
     const invited=(l.attendee_emails||[]).length;
     if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+(l.participants||[]).length+' of '+invited+' joined</span>';
     if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Fetching attendance…</span>';
+    if(l.attendance_status==='not_held') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not held</span>';
     return '<span class="mtg-log-badge none">No attendance data</span>';
   }
   // A meeting occurrence's detail — real routed page (not a modal), reached via
@@ -1980,6 +1985,9 @@
     } else if(l.attendance_status==='pending'){
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Fetching who actually joined from Google Meet — check back shortly.</p>';
+    } else if(l.attendance_status==='not_held'){
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+        +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">This meeting was <b>not held</b> — no Google Meet call took place on the scheduled day. It stayed active that day and moved to Archive the following day.</p>';
     } else {
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No attendance data for this meeting — either it wasn\'t actually held, or the organizer wasn\'t connected to Google at the time.</p>';
