@@ -2214,6 +2214,75 @@
     else navTo('tasks/meetings/log/'+lid);
   };
 
+  /* ---------- WAY A: in-browser transcription worker (transformers.js, WASM/WebGPU) ----------
+     Distributed & free: whichever logged-in DESKTOP browser has the portal open picks up pending
+     offline-meeting recordings, transcribes them locally (no install, no dedicated machine), and
+     posts the text back. Jobs are claimed atomically server-side so two open browsers never do the
+     same one. Gated to desktop + visible tab to avoid draining phones / background machines. */
+  const WT_CDN='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3';
+  const WT_MODEL='onnx-community/whisper-base';   // multilingual (hi/en/bn); small enough for browsers
+  let WT_started=false, WT_pipe=null, WT_pipePromise=null, WT_busy=false;
+  function wtIsMobile(){ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent||''); }
+  function wtChip(show,txt){
+    let c=document.getElementById('wtChip');
+    if(!show){ if(c)c.remove(); return; }
+    mtgInjectRecCss();
+    if(!c){ c=document.createElement('div'); c.id='wtChip'; c.style.cssText='position:fixed;bottom:16px;right:16px;z-index:9999;background:#0a0a0c;color:#fff;border:1px solid rgba(224,18,28,.5);border-radius:10px;padding:8px 12px;font:600 12px Segoe UI,Arial,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.28);display:flex;align-items:center;gap:8px'; document.body.appendChild(c); }
+    c.innerHTML='<span style="width:8px;height:8px;border-radius:50%;background:#e0121c;display:inline-block;animation:mtgpulse 1.2s infinite"></span> '+esc2(txt);
+  }
+  async function wtLoadPipe(){
+    if(WT_pipe) return WT_pipe;
+    if(WT_pipePromise) return WT_pipePromise;
+    WT_pipePromise=(async function(){
+      const mod=await import(WT_CDN);
+      const opts={};
+      try{ if(navigator.gpu) opts.device='webgpu'; }catch(_e){}
+      WT_pipe=await mod.pipeline('automatic-speech-recognition', WT_MODEL, opts);
+      return WT_pipe;
+    })();
+    return WT_pipePromise;
+  }
+  async function wtDecode(url){
+    const res=await fetch(url); if(!res.ok) throw new Error('audio fetch '+res.status);
+    const buf=await res.arrayBuffer();
+    const AC=window.AudioContext||window.webkitAudioContext;
+    const ctx=new AC({sampleRate:16000});
+    const audio=await ctx.decodeAudioData(buf);
+    const data=audio.getChannelData(0).slice();
+    try{ ctx.close(); }catch(_e){}
+    return data;
+  }
+  async function wtTick(){
+    if(!WT_started) return;
+    const again=function(ms){ setTimeout(wtTick,ms); };
+    if(document.visibilityState!=='visible' || WT_busy){ return again(15000); }
+    let job=null;
+    try{ const r=await mtgRecCall({action:'claim-transcription'}); if(r&&r.log_id)job=r; }catch(_e){}
+    if(!job){ return again(60000); }
+    WT_busy=true; wtChip(true,'Transcribing a meeting…');
+    try{
+      const pipe=await wtLoadPipe();
+      let src=job.audio_url;
+      if(typeof src==='string' && src.indexOf('s3:')===0){ const {data}=await s3Sign('get',src.slice(3)); src=data&&data.url; }
+      if(!src) throw new Error('no audio url');
+      const audio=await wtDecode(src);
+      const out=await pipe(audio,{chunk_length_s:30,stride_length_s:5,task:'transcribe'});
+      const text=(out&&out.text!=null?String(out.text):'').trim();
+      await mtgRecCall({action:'save-transcript',log_id:job.log_id,transcript:text,status:'ready'});
+    }catch(e){
+      // release the job so another browser/attempt can try (claim() gives up after 3 tries)
+      try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
+    }finally{ WT_busy=false; wtChip(false); again(3000); }
+  }
+  function mtgStartBrowserTranscriber(){
+    if(WT_started) return;
+    if(wtIsMobile()) return;                                   // don't drain phones/tablets
+    if(!(window.AudioContext||window.webkitAudioContext)) return;
+    if(typeof me!=='function' || !me()) return;                // only for a signed-in user
+    WT_started=true;
+    setTimeout(wtTick, 8000);                                  // begin shortly after load
+  }
+
   function mtgRenderOnly(){
     const b=$('acBody'); if(!b)return;
     if(GOOGLE_CONNECTED!==true){
@@ -3096,6 +3165,7 @@
 
   function init(){
     injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',notifLoad);
+    try{ mtgStartBrowserTranscriber(); }catch(e){}
     try{
       const qs=new URLSearchParams(location.search);
       const g=qs.get('google');
