@@ -1,0 +1,5 @@
+faster-whisper>=1.0.0
+requests>=2.31
+# Optional: install PyTorch only if you want automatic CUDA-GPU detection with WHISPER_DEVICE=auto.
+# Not required — faster-whisper itself uses CTranslate2, not torch. For a GPU box you can instead
+# just set WHISPER_DEVICE=cuda explicitly and skip torch.
