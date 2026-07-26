@@ -1481,21 +1481,12 @@
   // this just avoids the meeting sitting there looking "stuck" in the gap before that runs).
   // Recurring meetings are never hidden this way — they're always meant to stay visible.
   function mtgEndedToday(m){
-    if((m.recur_type||'none')!=='none') return false;
-    // Online meetings are never hidden on the basis of the clock — they stay visible until real
-    // Google Meet activity archives them (or they're marked "Not held" the next day). This is what
-    // keeps a rescheduled-but-not-updated online meeting from vanishing at its scheduled end time.
-    if((m.mode||'online')==='online') return false;
-    if(!m.end_time) return false;
-    if(m.meeting_date!==istTodayISO()) return false; // BUG FIX: this was always comparing against
-    // today's date regardless of the meeting's actual date, so a one-time meeting scheduled for
-    // tomorrow (or any future day) whose end_time clock value happened to be earlier than the
-    // current clock time got wrongly treated as "already ended today" and hidden from every tab.
-    // Compared against Kolkata (IST) time specifically, not the browser's local clock/timezone —
-    // see istNow() above for why.
-    const parts=String(m.end_time).split(':');
-    const endMin=(Number(parts[0])||0)*60+(Number(parts[1])||0);
-    return istNowMinutes()>endMin;
+    // A meeting is never hidden from the active list on the basis of the clock. It stays visible
+    // until it's actually closed out — online on real Google Meet activity, offline when the
+    // organizer records it in-app — and once its scheduled day has fully passed with nothing
+    // logged, the daily archive job moves it out as 'not_held' / 'not_marked_done'. So a meeting
+    // whose scheduled time slipped by (e.g. rescheduled but not updated) never silently vanishes.
+    return false;
   }
   function mtgAllAttendees(m){
     const set=[m.created_by].concat(MTG_ATT[m.id]||[]);
@@ -1947,7 +1938,10 @@
   // Small "N of M joined" badge for list rows — shown instead of a generic Online/Offline tag once
   // real attendance data exists, falls back gracefully while it's still pending or unavailable.
   function mtgAttendanceBadgeHtml(l){
-    if(l.mode==='offline') return '<span class="mtg-log-badge none">Offline</span>';
+    if(l.mode==='offline'){
+      if(l.attendance_status==='not_marked_done') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not marked done</span>';
+      return '<span class="mtg-log-badge none">Offline</span>';
+    }
     const invited=(l.attendee_emails||[]).length;
     if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+(l.participants||[]).length+' of '+invited+' joined</span>';
     if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Fetching attendance…</span>';
@@ -1972,7 +1966,8 @@
       +'</div>';
     let attendeesHtml;
     if(l.mode==='offline'){
-      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> '+esc2(invitedNames.join(', ')||'—')+'</div>';
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> '+esc2(invitedNames.join(', ')||'—')+'</div>'
+        +(l.attendance_status==='not_marked_done'?'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">This meeting was <b>not marked done</b> — it wasn\'t recorded on the scheduled day, so it moved to Archive the following day.</p>':'');
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
