@@ -580,6 +580,8 @@
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
+    if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
+    if (seg[0]==='meetings' && seg[1]==='wrap' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgWrapPage(v, Number(seg[2])); }
     if (seg[0]==='profile' && typeof taskProfile==='function') { ROUTE={tab:'profile',taskId:null}; return taskProfile(v); }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
     ROUTE={tab:tab,taskId:null};
@@ -1636,7 +1638,7 @@
     const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
     let join;
     if(m.mode==='online' && m.meet_link) join='<a class="mtg-join" href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Join</a>';
-    else if(m.mode==='offline') join='<span class="mtg-join ghost">Offline</span>';
+    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();navTo(\'tasks/meetings/record/'+m.id+'\')" title="Record this meeting"><i class="fa-solid fa-microphone"></i> Record</button>';
     else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
     const mine = eq(m.created_by,me());
     const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
@@ -1940,6 +1942,8 @@
   function mtgAttendanceBadgeHtml(l){
     if(l.mode==='offline'){
       if(l.attendance_status==='not_marked_done') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not marked done</span>';
+      if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Members pending</span>';
+      if(l.attendance_status==='recorded') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+((l.present_emails||[]).length)+' present</span>';
       return '<span class="mtg-log-badge none">Offline</span>';
     }
     const invited=(l.attendee_emails||[]).length;
@@ -1961,13 +1965,29 @@
     const plist=await people();
     const invitedNames=(l.attendee_emails||[]).map(function(e){ return nameOf(plist,e)||e; });
     const actualDur=mtgActualDurationText(l);
+    let audioSrc=null;
+    if(l.mode==='offline' && l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
     const durationHtml = '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgLogTimeLabel(l))
       +(actualDur?(' <span style="color:#166534;font-weight:600;margin-left:6px">'+esc2(actualDur)+' actual</span>'):' <span style="color:var(--slate);font-weight:400;margin-left:6px">(scheduled)</span>')
       +'</div>';
     let attendeesHtml;
     if(l.mode==='offline'){
-      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> '+esc2(invitedNames.join(', ')||'—')+'</div>'
-        +(l.attendance_status==='not_marked_done'?'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">This meeting was <b>not marked done</b> — it wasn\'t recorded on the scheduled day, so it moved to Archive the following day.</p>':'');
+      if(l.attendance_status==='not_marked_done'){
+        attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+          +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">This meeting was <b>not marked done</b> — it wasn\'t recorded on the scheduled day, so it moved to Archive the following day.</p>';
+      } else {
+        const present=(l.present_emails||[]);
+        const presentL=present.map(function(e){return String(e).toLowerCase();});
+        const missingEmails=(l.attendee_emails||[]).filter(function(e){return presentL.indexOf(String(e).toLowerCase())===-1;});
+        if(!present.length){
+          attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+            +'<p style="color:#b45309;font-size:13px;margin:6px 0 0"><b>Members pending</b> — nobody has been recorded as present yet.</p>';
+        } else {
+          attendeesHtml='<div style="margin-bottom:6px"><b style="font-size:12.5px;color:var(--slate)">Present ('+present.length+')</b></div>'
+            +present.map(function(e){ return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(nameOf(plist,e)||e)+'</div>'; }).join('')
+            +(missingEmails.length?('<div style="margin-top:10px"><b style="font-size:12.5px;color:#b45309">Invited but absent ('+missingEmails.length+')</b></div>'+missingEmails.map(function(e){ return '<div class="mtg-log-attendee"><i class="fa-solid fa-user-xmark" style="color:#b45309"></i> '+esc2(nameOf(plist,e)||e)+'</div>'; }).join('')):'');
+        }
+      }
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
@@ -1987,12 +2007,9 @@
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No attendance data for this meeting — either it wasn\'t actually held, or the organizer wasn\'t connected to Google at the time.</p>';
     }
-    let transcriptHtml;
-    if(l.transcript_status==='ready') transcriptHtml='<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
-    else if(l.transcript_status==='pending') transcriptHtml='<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript is being fetched from Google Meet…</p>';
-    else transcriptHtml='<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript — needs a Workspace plan with Meet transcription (Business Standard or higher) and someone starting it live in the call.</p>';
+    const transcriptHtml=mtgTranscriptHtml(l);
     const recordingHtml = l.mode==='offline'
-      ? '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Offline meetings aren\'t recorded through Google Meet.</p>'
+      ? (audioSrc?('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>'):'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.</p>')
       : '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Recording isn\'t available on your current Google Workspace plan (requires Business Standard or higher).</p>';
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
@@ -2034,6 +2051,169 @@
       +'</div>'
       +'<div class="tp-card">'+rows+'</div>';
   }
+
+  /* ---------- OFFLINE MEETING RECORDING + WRAP-UP (record -> transcribe -> members -> log) ---------- */
+  let MTG_REC=null, MTG_WRAP=null;
+  function mtgSecFmt(s){ s=Math.max(0,s|0); const m=Math.floor(s/60), ss=s%60; return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
+  function mtgClockIST(iso){ try{ return new Date(iso).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}); }catch(e){ return ''; } }
+  function mtgTranscriptHtml(l){
+    if(l.transcript_status==='ready') return '<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+    if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
+    if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
+    if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
+    return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript for this meeting.</p>';
+  }
+  function mtgInjectRecCss(){
+    if(document.getElementById('mtgRecCss'))return;
+    const s=document.createElement('style'); s.id='mtgRecCss';
+    s.textContent='.mtg-rec-card{text-align:center;padding:28px 20px}.mtg-rec-dot{width:16px;height:16px;border-radius:50%;background:#cbd5e1;margin:0 auto 14px}.mtg-rec-dot.on{background:#e0121c;animation:mtgpulse 1.2s infinite}@keyframes mtgpulse{0%{box-shadow:0 0 0 0 rgba(224,18,28,.5)}70%{box-shadow:0 0 0 13px rgba(224,18,28,0)}100%{box-shadow:0 0 0 0 rgba(224,18,28,0)}}.mtg-rec-timer{font-size:42px;font-weight:800;letter-spacing:1px;color:var(--ink)}.mtg-rec-hint{color:var(--slate);font-size:13px;max-width:440px;margin:12px auto 22px;line-height:1.55}.mtg-rec-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}.ac-btn.lg{padding:12px 22px;font-size:15px}.mtg-miss{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:8px 11px;font-size:12.5px}.mtg-log-transcript{white-space:pre-wrap;font-size:13.5px;line-height:1.6;color:var(--ink);max-height:420px;overflow:auto}';
+    document.head.appendChild(s);
+  }
+  async function mtgRecCall(payload){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token;
+      const res=await fetch(SUPABASE_URL+'/functions/v1/meeting-record',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},body:JSON.stringify(payload)});
+      return await res.json().catch(function(){return {error:'bad response'};});
+    }catch(e){ return {error:String(e)}; }
+  }
+  async function mtgRecordPage(v, meetingId){
+    injectCss(); mtgInjectRecCss(); setCrumb(['Accountability','Record Meeting']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    if(!m){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Meeting not found (it may already be archived).</div><div style="margin-top:12px"><button class="ac-btn" onclick="navTo(\'tasks/meetings\')">Back to Meetings</button></div></div>'; return; }
+    MTG_REC={meeting:m, rec:null, chunks:[], stream:null, startedAt:null, wakeLock:null, secs:0, timer:null, mime:''};
+    const when=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Record — '+esc2(m.title)+'</div><div class="tp-sub">'+esc2(when)+' · Offline</div></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Cancel" onclick="mtgRecCancel()"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'</div>'
+      +'<div class="tp-card mtg-rec-card">'
+        +'<div class="mtg-rec-dot" id="mtgRecDot"></div>'
+        +'<div class="mtg-rec-timer" id="mtgRecTimer">00:00</div>'
+        +'<div class="mtg-rec-hint" id="mtgRecHint">Tap Start when the meeting begins. Keep this screen open — recording captures this device\'s microphone.</div>'
+        +'<div class="mtg-rec-btns">'
+          +'<button class="ac-btn primary lg" id="mtgRecStart" onclick="mtgRecStart()"><i class="fa-solid fa-microphone"></i> Start recording</button>'
+          +'<button class="ac-btn danger lg" id="mtgRecStop" style="display:none" onclick="mtgRecStop()"><i class="fa-solid fa-stop"></i> Stop &amp; finish</button>'
+        +'</div>'
+      +'</div>';
+  }
+  window.mtgRecStart=async function(){
+    const R=MTG_REC; if(!R||!R.meeting)return;
+    if(typeof MediaRecorder==='undefined'||!navigator.mediaDevices){ toast('Recording isn\'t supported on this browser.','err'); return; }
+    let stream;
+    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ toast('Microphone permission is needed to record.','err'); return; }
+    let mime='audio/webm';
+    if(!MediaRecorder.isTypeSupported(mime)) mime=MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'';
+    let rec; try{ rec=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream); }catch(e){ rec=new MediaRecorder(stream); }
+    R.stream=stream; R.rec=rec; R.chunks=[]; R.mime=rec.mimeType||mime||'audio/webm';
+    rec.ondataavailable=function(e){ if(e.data&&e.data.size)R.chunks.push(e.data); };
+    rec.start(1000);
+    R.startedAt=new Date().toISOString(); R.secs=0;
+    R.timer=setInterval(function(){ R.secs++; const el=$('mtgRecTimer'); if(el)el.textContent=mtgSecFmt(R.secs); },1000);
+    const dot=$('mtgRecDot'); if(dot)dot.classList.add('on');
+    const st=$('mtgRecStart'), sp=$('mtgRecStop'), h=$('mtgRecHint');
+    if(st)st.style.display='none'; if(sp)sp.style.display='';
+    if(h)h.textContent='Recording… keep this screen on and the app open. Tap Stop when the meeting ends.';
+    try{ if(navigator.wakeLock&&navigator.wakeLock.request) R.wakeLock=await navigator.wakeLock.request('screen'); }catch(_e){}
+  };
+  window.mtgRecStop=async function(){
+    const R=MTG_REC; if(!R||!R.rec)return;
+    const sp=$('mtgRecStop'); if(sp){sp.disabled=true;sp.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Finishing…';}
+    if(R.timer){clearInterval(R.timer);R.timer=null;}
+    const endedAt=new Date().toISOString();
+    await new Promise(function(resolve){ try{ R.rec.onstop=resolve; R.rec.stop(); }catch(_e){ resolve(); } });
+    try{ (R.stream.getTracks()||[]).forEach(function(t){t.stop();}); }catch(_e){}
+    try{ if(R.wakeLock){R.wakeLock.release();R.wakeLock=null;} }catch(_e){}
+    const blob=new Blob(R.chunks,{type:R.mime||'audio/webm'});
+    const occ=istTodayISO();
+    const ext=(R.mime&&R.mime.indexOf('mp4')>=0)?'mp4':'webm';
+    let audioPath=null;
+    if(blob.size){
+      const key='accountability/meeting-audio/'+R.meeting.id+'-'+occ+'-'+Date.now()+'.'+ext;
+      const up=await uploadFileToS3(key,blob);
+      if(up&&up.data)audioPath=up.data.path; else toast('Audio upload failed — you can still log attendees, but there will be no transcript.','warn');
+    }
+    const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
+    if(!resp||!resp.log_id){ toast('Could not save the recording: '+((resp&&resp.error)||'unknown error'),'err'); if(sp){sp.disabled=false;sp.innerHTML='<i class="fa-solid fa-stop"></i> Stop &amp; finish';} return; }
+    MTG_REC=null;
+    navTo('tasks/meetings/wrap/'+resp.log_id);
+  };
+  window.mtgRecCancel=function(){
+    const R=MTG_REC;
+    if(R&&R.rec&&R.rec.state&&R.rec.state!=='inactive'){
+      if(!window.confirm('Discard this recording? Nothing will be saved.'))return;
+      if(R.timer)clearInterval(R.timer);
+      try{R.rec.stop();}catch(_e){}
+      try{(R.stream.getTracks()||[]).forEach(function(t){t.stop();});}catch(_e){}
+      try{ if(R.wakeLock)R.wakeLock.release(); }catch(_e){}
+    }
+    MTG_REC=null; navTo('tasks/meetings');
+  };
+  async function mtgWrapPage(v, logId){
+    injectCss(); mtgInjectRecCss(); setCrumb(['Accountability','Meeting Wrap-up']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let l=null; try{ const {data}=await ACC().from('meeting_logs').select('*').eq('id',logId).maybeSingle(); l=data; }catch(e){}
+    if(!l){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Log not found.</div></div>'; return; }
+    const list=await people();
+    const invited=(l.attendee_emails||[]);
+    const presel=(l.present_emails&&l.present_emails.length)?l.present_emails:invited.slice();
+    MTG_WRAP={logId:logId, invited:invited, people:list, l:l};
+    const dateIST=fmtDateY(l.occurrence_date);
+    const recRange=(l.actual_start&&l.actual_end)?(mtgClockIST(l.actual_start)+' – '+mtgClockIST(l.actual_end)):'';
+    const durTxt=(l.actual_start&&l.actual_end)?mtgSecFmt(Math.round((new Date(l.actual_end)-new Date(l.actual_start))/1000)):'';
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#16a34a"></i> Wrap up — '+esc2(l.title)+'</div><div class="tp-sub">'+esc2(dateIST)+' · Offline</div></div>'
+      +'</div>'
+      +'<div class="tp-card">'
+        +'<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Date (IST): <b>'+esc2(dateIST)+'</b></div>'
+        +(recRange?('<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> Recording: <b>'+esc2(recRange)+'</b>'+(durTxt?(' <span style="color:var(--slate)">('+esc2(durTxt)+')</span>'):'')+' <span style="color:var(--slate);font-size:12px">IST</span></div>'):'')
+      +'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3><div id="mtgWrapTranscript">'+mtgTranscriptHtml(l)+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-users" style="color:#e0121c"></i> Members present <span style="color:#e0121c">*</span></h3>'
+        +'<p style="color:var(--slate);font-size:12.5px;margin:0 0 8px">Tick everyone who actually attended — this is required before saving.</p>'
+        +msWidget('mtgWrapMembers',list,presel)
+        +'<div id="mtgWrapMissing" style="margin-top:10px"></div>'
+      +'</div>'
+      +'<div class="wf-actions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button class="ac-btn primary" id="mtgWrapSave" onclick="mtgWrapSave()"><i class="fa-solid fa-floppy-disk"></i> Save to Logs</button></div>'
+      +'<div style="color:var(--slate);font-size:12px;margin-top:8px;text-align:right">Members are required — leaving without saving keeps this occurrence marked <b>Pending</b>.</div>';
+    const mb=document.getElementById('mtgWrapMembers'); if(mb){ mb.addEventListener('click',function(){ setTimeout(mtgWrapUpdateMissing,0); }); }
+    mtgWrapUpdateMissing();
+    mtgWrapPollTranscript(logId);
+  }
+  function mtgWrapUpdateMissing(){
+    const box=document.getElementById('mtgWrapMissing'); if(!box||!MTG_WRAP)return;
+    const present=(typeof msGet==='function'?msGet('mtgWrapMembers'):[]);
+    const presentL=present.map(function(e){return String(e).toLowerCase();});
+    const missing=(MTG_WRAP.invited||[]).filter(function(e){return presentL.indexOf(String(e).toLowerCase())===-1;});
+    if(missing.length){ box.innerHTML='<div class="mtg-miss"><i class="fa-solid fa-user-xmark"></i> Invited but not ticked present: '+missing.map(function(e){return esc2(nameOf(MTG_WRAP.people,e)||e);}).join(', ')+'</div>'; }
+    else box.innerHTML='';
+  }
+  function mtgWrapPollTranscript(logId){
+    let n=0;
+    const iv=setInterval(async function(){
+      n++;
+      const el=document.getElementById('mtgWrapTranscript');
+      if(!el||n>120){ clearInterval(iv); return; }
+      try{ const {data}=await ACC().from('meeting_logs').select('transcript,transcript_status').eq('id',logId).maybeSingle();
+        if(data){ el.innerHTML=mtgTranscriptHtml(data); if(data.transcript_status==='ready'||data.transcript_status==='failed'||data.transcript_status==='none'){ clearInterval(iv); } }
+      }catch(e){}
+    },5000);
+  }
+  window.mtgWrapSave=async function(){
+    if(!MTG_WRAP)return;
+    const present=(typeof msGet==='function'?msGet('mtgWrapMembers'):[]);
+    if(!present.length){ toast('Add at least the members who attended before saving.','warn'); mtgWrapUpdateMissing(); return; }
+    const btn=$('mtgWrapSave'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
+    const resp=await mtgRecCall({action:'save-members',log_id:MTG_WRAP.logId,present_emails:present});
+    if(!resp||!resp.ok){ toast('Could not save: '+((resp&&resp.error)||'unknown error'),'err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save to Logs';} return; }
+    toast('Saved to Logs','ok');
+    const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
+    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
+    else navTo('tasks/meetings/log/'+lid);
+  };
+
   function mtgRenderOnly(){
     const b=$('acBody'); if(!b)return;
     if(GOOGLE_CONNECTED!==true){
