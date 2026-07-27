@@ -893,7 +893,7 @@
   }
   function gcalVisibleItems(dateStr){
     const items=(GCAL_LAST&&GCAL_LAST.byDate[dateStr])||[];
-    const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
+    const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr) && !MTG_DONE.has(m.id+'|'+dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
     return items.concat(mtgItems).filter(x=>{
       if(!GCAL_FILTERS.has(x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
@@ -1437,7 +1437,7 @@
   }
 
   /* ---------- MEETINGS ---------- */
-  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[];
+  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set();
   let GOOGLE_CONNECTED=null;
   let MTG_GROUP='all';
   function mtgDurationMinutes(start,end){
@@ -1583,6 +1583,10 @@
       try{ const {data:allAtt}=await ACC().from('meeting_attendees').select('*').in('meeting_id',ids); (allAtt||[]).forEach(function(a){ (attMap[a.meeting_id]=attMap[a.meeting_id]||[]).push(a.email); }); }catch(e){}
     }
     MTG_LIST=list; MTG_ATT=attMap;
+    // Which occurrences are already done (a log exists). Recurring meetings keep meeting_id on their
+    // logs; one-time meetings are deleted when done so they simply drop off the list. Used to turn the
+    // Record button into "Done" and to hide a done occurrence from that day in the calendar.
+    try{ const {data:lg}=await ACC().from('meeting_logs').select('meeting_id,occurrence_date').not('meeting_id','is',null); const s=new Set(); (lg||[]).forEach(function(r){ s.add(r.meeting_id+'|'+r.occurrence_date); }); MTG_DONE=s; }catch(e){ MTG_DONE=new Set(); }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -1628,6 +1632,22 @@
       return '<span class="mtg-avatar" style="background:'+colorFor(e)+'" title="'+esc2(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>';
     }).join('')+(emails.length>4?'<span class="mtg-avatar" style="background:#94a3b8">+'+(emails.length-4)+'</span>':'')+'</span>';
   }
+  // Warn before recording/joining a meeting whose scheduled date is still in the future.
+  window.mtgTryRecord=function(id){
+    const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
+    if(m && (m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
+      if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Record it now anyway?')) return;
+    }
+    navTo('tasks/meetings/record/'+id);
+  };
+  window.mtgTryJoin=function(id){
+    const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
+    if(!m||!m.meet_link) return;
+    if((m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
+      if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Join it now anyway?')) return;
+    }
+    window.open(m.meet_link,'_blank','noopener');
+  };
   function mtgCard(m,weekCount){
     const modeColor = m.mode==='offline' ? '#64748b' : '#2563eb';
     const people2=mtgAllAttendees(m);
@@ -1636,9 +1656,11 @@
     const timeLabel=dateLbl+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     const recurLbl=mtgRecurLabel(m);
     const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
+    const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
     let join;
-    if(m.mode==='online' && m.meet_link) join='<a class="mtg-join" href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Join</a>';
-    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();navTo(\'tasks/meetings/record/'+m.id+'\')" title="Record this meeting"><i class="fa-solid fa-microphone"></i> Record</button>';
+    if(doneToday) join='<button class="mtg-join" disabled title="Already done today"><i class="fa-solid fa-check"></i> Done</button>';
+    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
+    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting"><i class="fa-solid fa-microphone"></i> Record</button>';
     else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
     const mine = eq(m.created_by,me());
     const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
@@ -1969,7 +1991,8 @@
     if(l.mode==='offline' && l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
     const durationHtml = '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgLogTimeLabel(l))
       +(actualDur?(' <span style="color:#166534;font-weight:600;margin-left:6px">'+esc2(actualDur)+' actual</span>'):' <span style="color:var(--slate);font-weight:400;margin-left:6px">(scheduled)</span>')
-      +'</div>';
+      +'</div>'
+      +((l.actual_start&&l.actual_end)?('<div class="gcal-panel-row"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Recorded <b>'+esc2(mtgClockIST(l.actual_start)+' – '+mtgClockIST(l.actual_end))+'</b> <span style="color:var(--slate);font-size:12px">IST</span></div>'):'');
     let attendeesHtml;
     if(l.mode==='offline'){
       if(l.attendance_status==='not_marked_done'){
