@@ -1932,10 +1932,15 @@
     const endRaw=($('mtgEnd').value||'').trim();
     if(endRaw&&(!/^\d{1,2}:[0-5]\d$/.test(endRaw)||parseInt(endRaw,10)>23)){ toast('Enter the end time as HH:MM (24-hour, 00–23)','err'); return; }
     const end=endRaw?mtgTimeVal(endRaw):null;
-    // Editing a recurring meeting requires choosing scope (mandatory). "This occurrence only" moves
-    // just the next occurrence (skip it + create a one-time copy at the form's time); "All" falls
-    // through to the normal series update below.
-    if(editing && recur!=='none'){
+    // The scope choice (this occurrence vs all) only applies when the meeting was ALREADY recurring —
+    // that's the only case where the scope selector is actually shown in the form. A one-time meeting
+    // being edited (INCLUDING one being converted to Daily/Weekly/Monthly) has just a single occurrence,
+    // so it falls through to the normal update below. Keying this off the ORIGINAL recur type (not the
+    // new form value) fixes the bug where converting One-time → recurring demanded a scope choice whose
+    // dropdown never existed, leaving the user unable to save.
+    const origMtg = editing ? (MTG_LIST||[]).find(function(x){return x.id===id;}) : null;
+    const origRecur = (origMtg && origMtg.recur_type) ? origMtg.recur_type : 'none';
+    if(editing && origRecur!=='none'){
       const scope=$('mtgScope')?$('mtgScope').value:'';
       if(!scope){ toast('Choose whether changes apply to this occurrence or all occurrences','warn'); return; }
       if(scope==='this'){
