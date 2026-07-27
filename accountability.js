@@ -3288,7 +3288,16 @@
       const qs=new URLSearchParams(location.search);
       const g=qs.get('google');
       if(g){
-        if(g==='ok') toast('Google account connected','ok');
+        if(g==='ok'){
+          toast('Google account connected','ok');
+          // Just returned from a successful Google connect. Re-check the connection
+          // and repaint the current screen so the Meetings view flips to "Connected"
+          // right away — otherwise a render that ran before the connection completed
+          // leaves the old "Connect Google" button on screen until a manual refresh.
+          (async function(){
+            try{ await mtgCheckGoogleConnected(); if(window.PAGE==='tasks' && typeof renderPage==='function') renderPage(); }catch(e){}
+          })();
+        }
         else toast('Google connection failed'+(qs.get('msg')?(': '+decodeURIComponent(qs.get('msg'))):''),'err');
         qs.delete('google'); qs.delete('msg');
         const rest=qs.toString();
