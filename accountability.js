@@ -1096,7 +1096,8 @@
     const cols=(pos&&pos.cols)||1, col=(pos&&pos.col)||0;
     const leftCss='calc(4px + (100% - 8px) * '+col+' / '+cols+')';
     const widthCss=cols>1?('calc((100% - 8px) / '+cols+' - 3px)'):'calc(100% - 8px)';
-    const draggable=!m.recur_type||m.recur_type==='none';
+    const rt0=m.recur_type||'none';
+    const draggable=(rt0==='none'||rt0==='weekly'||rt0==='monthly'); // daily time-drag not offered
     const dragAttrs=draggable?(' data-meeting-time="'+m.id+'" data-start="'+startMin+'" data-dur="'+durMin+'" data-date="'+dateStr+'"'):'';
     return '<div class="gcal-mtgblock" style="top:'+topPx+'px;height:'+hPx+'px;left:'+leftCss+';width:'+widthCss+';background:'+gcalEvColor('meeting')+'"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenMeetingPanel('+m.id+')" title="'+esc2(m.title)+'"><b>'+esc2(m.title)+'</b><span>'+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'')+'</span></div>';
   }
@@ -1145,8 +1146,10 @@
     const label=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
     const isToday=dateStr===todayStr;
     const rows=items.length?items.map(function(x){
-      const oneTimeMeeting = x.kind==='meeting' && (!x.t.recur_type||x.t.recur_type==='none');
-      const draggable = x.kind!=='meeting' || oneTimeMeeting;
+      const mtgRt0 = x.kind==='meeting' ? (x.t.recur_type||'none') : '';
+      // One-time, weekly and monthly meetings are draggable to reschedule; daily is not.
+      const mtgDraggable = x.kind==='meeting' && (mtgRt0==='none'||mtgRt0==='weekly'||mtgRt0==='monthly');
+      const draggable = x.kind!=='meeting' || mtgDraggable;
       let dragAttrs='';
       if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"');
       const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='toMe'?'To me':'By me');
@@ -1288,7 +1291,7 @@
               const newDate=curTarget.dataset.date;
               if(newDate && newDate!==fromDate){
                 if(tid!=null) gcalTaskDrop(tid,newDate);
-                else if(mid!=null) gcalMeetingDateDrop(mid,newDate);
+                else if(mid!=null) gcalMeetingDateDrop(mid,newDate,fromDate);
               }
             }
           }
@@ -1329,10 +1332,44 @@
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
   // re-emails attendees with the new date/time, and posts an in-app "meeting_update" notification too —
   // consistent with what a full edit via the meeting form already does on any change.
-  window.gcalMeetingDateDrop=async function(mid,newDate){
+  // Mandatory choice when rescheduling a recurring meeting (drag/drop). change = {newDate?,newStart?,newEnd?}.
+  // Dismissing the popup does NOT reschedule (the calendar re-renders back to how it was).
+  window.mtgReschedAsk=function(mid, occDate, change){
+    MTG_RESCHED={mid:mid, occDate:occDate, change:change||{}};
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-day"></i> Reschedule recurring meeting</h3><span class="x" onclick="mtgReschedCancel()">&times;</span></div>'
+      +'<div class="modal-body"><p style="color:var(--slate);font-size:13.5px;margin:0 0 14px">Apply this change to:</p><div style="display:flex;flex-direction:column;gap:10px">'
+      +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'this\')"><i class="fa-solid fa-calendar-day"></i> &nbsp;This time only <span style="color:var(--slate);font-weight:400;margin-left:4px">— just this one occurrence</span></button>'
+      +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'all\')"><i class="fa-solid fa-repeat"></i> &nbsp;All times <span style="color:var(--slate);font-weight:400;margin-left:4px">— every occurrence</span></button>'
+      +'</div></div><div class="modal-foot"><button class="ac-btn" onclick="mtgReschedCancel()">Cancel</button></div>');
+  };
+  window.mtgReschedCancel=function(){ MTG_RESCHED=null; closeModal(); gcalRefresh(); };
+  window.mtgReschedApply=async function(scope){
+    const R=MTG_RESCHED; MTG_RESCHED=null; closeModal();
+    if(!R) return;
+    const m=(MTG_LIST||[]).find(function(x){return x.id===R.mid;}); if(!m){ gcalRefresh(); return; }
+    const c=R.change||{};
+    try{
+      if(scope==='this'){
+        const newDate=c.newDate||R.occDate;
+        const {data:newId,error}=await ACC().rpc('reschedule_meeting_occurrence',{p_meeting_id:R.mid,p_occ_date:R.occDate,p_new_date:newDate,p_new_start:c.newStart||m.start_time,p_new_end:c.newEnd||m.end_time});
+        if(error)throw error;
+        if(newId && m.mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
+        toast('This occurrence rescheduled','ok');
+      } else {
+        const upd={};
+        if(c.newStart) upd.start_time=c.newStart;
+        if(c.newEnd) upd.end_time=c.newEnd;
+        if(c.newDate){ const d=new Date(c.newDate+'T00:00:00'); if(m.recur_type==='weekly') upd.recur_day=d.getDay(); else if(m.recur_type==='monthly') upd.recur_date=d.getDate(); }
+        if(Object.keys(upd).length){ await ACC().from('meetings').update(upd).eq('id',R.mid); if(m.mode==='online'){ try{ await mtgSyncGoogle(R.mid,'sync'); }catch(_e){} } }
+        toast('All occurrences updated','ok');
+      }
+      await gcalLoadData(); await gcalRefresh();
+    }catch(e){ toast('Reschedule failed: '+((e&&e.message)||e),'err'); try{ await gcalRefresh(); }catch(_e){} }
+  };
+  window.gcalMeetingDateDrop=async function(mid,newDate,origDate){
     const m=(MTG_LIST||[]).find(function(x){return x.id===mid;});
     if(!m) return;
-    if(m.recur_type && m.recur_type!=='none'){ toast('Recurring meetings can\'t be rescheduled by dragging — use Reschedule instead','err'); return; }
+    if(m.recur_type && m.recur_type!=='none'){ mtgReschedAsk(mid, origDate||newDate, {newDate:newDate}); return; }
     if(newDate===m.meeting_date) return;
     try{
       await ACC().from('meetings').update({meeting_date:newDate}).eq('id',mid);
@@ -1405,6 +1442,8 @@
     });
   }
   window.gcalMeetingTimeDrop=async function(mid,newStart,newEnd){
+    const mm=(MTG_LIST||[]).find(function(x){return x.id===mid;});
+    if(mm && mm.recur_type && mm.recur_type!=='none'){ mtgReschedAsk(mid, (typeof GCAL_DATE!=='undefined'?GCAL_DATE:mm.meeting_date), {newStart:newStart, newEnd:newEnd}); return; }
     try{
       await ACC().from('meetings').update({start_time:newStart,end_time:newEnd}).eq('id',mid);
       toast('Meeting time updated','ok');
@@ -1437,7 +1476,7 @@
   }
 
   /* ---------- MEETINGS ---------- */
-  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set();
+  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
   let GOOGLE_CONNECTED=null;
   let MTG_GROUP='all';
   function mtgDurationMinutes(start,end){
@@ -1476,6 +1515,7 @@
     if(rt==='none') return m.meeting_date===dateStr;
     // Recurring meetings only occur from today onward — never paint them on past calendar days.
     if(dateStr < istTodayISO()) return false;
+    if(MTG_SKIP.has(m.id+'|'+dateStr)) return false; // this occurrence was moved out (This-time reschedule)
     if(rt==='daily')return true;
     if(rt==='weekly')return new Date(dateStr+'T00:00:00').getDay()===m.recur_day;
     if(rt==='monthly')return new Date(dateStr+'T00:00:00').getDate()===Number(m.recur_date);
@@ -1590,6 +1630,9 @@
     // logs; one-time meetings are deleted when done so they simply drop off the list. Used to turn the
     // Record button into "Done" and to hide a done occurrence from that day in the calendar.
     try{ const {data:lg}=await ACC().from('meeting_logs').select('meeting_id,occurrence_date').not('meeting_id','is',null); const s=new Set(); (lg||[]).forEach(function(r){ s.add(r.meeting_id+'|'+r.occurrence_date); }); MTG_DONE=s; }catch(e){ MTG_DONE=new Set(); }
+    // Occurrences of a recurring meeting that were moved elsewhere ("this time only" reschedule) —
+    // hidden from their original day.
+    try{ const {data:sk}=await ACC().from('meeting_skips').select('meeting_id,occ_date'); const ss=new Set(); (sk||[]).forEach(function(r){ ss.add(r.meeting_id+'|'+r.occ_date); }); MTG_SKIP=ss; }catch(e){ MTG_SKIP=new Set(); }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -1830,6 +1873,7 @@
       +'<div class="modal-body frm">'
       +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
       +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +((editing && recurVal!=='none')?('<label>Apply changes to <span style="color:#e0121c">*</span></label><select id="mtgScope"><option value="">Choose…</option><option value="all">All occurrences</option><option value="this">This occurrence only (the next one)</option></select>'):'')
       +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
       +'<div class="two"><div><label>Start time <span style="color:var(--slate);font-weight:400">(24h)</span></label><input type="text" id="mtgStart" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.start_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional, 24h)</span></label><input type="text" id="mtgEnd" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.end_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div></div>'
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
@@ -1857,6 +1901,25 @@
     const endRaw=($('mtgEnd').value||'').trim();
     if(endRaw&&(!/^\d{1,2}:[0-5]\d$/.test(endRaw)||parseInt(endRaw,10)>23)){ toast('Enter the end time as HH:MM (24-hour, 00–23)','err'); return; }
     const end=endRaw?mtgTimeVal(endRaw):null;
+    // Editing a recurring meeting requires choosing scope (mandatory). "This occurrence only" moves
+    // just the next occurrence (skip it + create a one-time copy at the form's time); "All" falls
+    // through to the normal series update below.
+    if(editing && recur!=='none'){
+      const scope=$('mtgScope')?$('mtgScope').value:'';
+      if(!scope){ toast('Choose whether changes apply to this occurrence or all occurrences','warn'); return; }
+      if(scope==='this'){
+        const orig=(MTG_LIST||[]).find(function(x){return x.id===id;})||{};
+        let occ=istTodayISO(); for(let i=0;i<400;i++){ if(mtgOccursOn(orig,occ))break; occ=calShiftISO(occ,1); }
+        const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
+        try{
+          const {data:newId,error}=await ACC().rpc('reschedule_meeting_occurrence',{p_meeting_id:id,p_occ_date:occ,p_new_date:occ,p_new_start:start,p_new_end:end});
+          if(error)throw error;
+          if(newId && mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
+          toast('This occurrence updated','ok'); closeModal(); await mtgLoadData(); mtgRenderOnly();
+        }catch(e){ toast('Could not update this occurrence: '+((e&&e.message)||e),'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Save changes';} }
+        return;
+      }
+    }
     // Guard against scheduling a one-time meeting whose START time is already in the past —
     // checked against real Kolkata (IST) wall-clock time specifically (istTodayISO/istNowMinutes
     // above), not the browser's own clock/timezone, since every backend piece (cron functions,
