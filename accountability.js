@@ -1473,10 +1473,13 @@
   // without pre-expanding every occurrence up front.
   function mtgOccursOn(m,dateStr){
     const rt=m.recur_type||'none';
+    if(rt==='none') return m.meeting_date===dateStr;
+    // Recurring meetings only occur from today onward — never paint them on past calendar days.
+    if(dateStr < istTodayISO()) return false;
     if(rt==='daily')return true;
     if(rt==='weekly')return new Date(dateStr+'T00:00:00').getDay()===m.recur_day;
     if(rt==='monthly')return new Date(dateStr+'T00:00:00').getDate()===Number(m.recur_date);
-    return m.meeting_date===dateStr;
+    return false;
   }
   // One-time meetings whose end time has already passed today are hidden from the Today/All
   // view immediately (the backend cron still actually deletes/archives the row within a minute —
