@@ -1379,7 +1379,10 @@
         if(c.newEnd) upd.end_time=c.newEnd;
         if(c.newDate){ const d=new Date(c.newDate+'T00:00:00'); if(m.recur_type==='weekly') upd.recur_day=d.getDay(); else if(m.recur_type==='monthly') upd.recur_date=d.getDate(); }
         if(Object.keys(upd).length){ await ACC().from('meetings').update(upd).eq('id',R.mid); if(m.mode==='online'){ try{ await mtgSyncGoogle(R.mid,'sync'); }catch(_e){} } }
-        try{ await sb.rpc('clear_meeting_exceptions',{p_meeting_id:R.mid}); }catch(_e){} // moving the whole series resets any one-off "this time" copies, so no duplicates linger
+        // Intentionally do NOT clear one-off "this time" exceptions here: occurrences the user moved
+        // individually must stay exactly where they were put — they must not travel with the rest of
+        // the series when it's shifted. Each such move is a standalone one-time copy at a fixed date,
+        // and its original slot stays skipped, so shifting the series leaves those moved ones untouched.
         toast('All occurrences updated','ok');
       }
       await gcalLoadData(); await gcalRefresh();
