@@ -1334,17 +1334,26 @@
   // consistent with what a full edit via the meeting form already does on any change.
   // Mandatory choice when rescheduling a recurring meeting (drag/drop). change = {newDate?,newStart?,newEnd?}.
   // Dismissing the popup does NOT reschedule (the calendar re-renders back to how it was).
+  function mtgReschedClose(){ const ov=document.getElementById('mtgReschedOv'); if(ov)ov.remove(); }
   window.mtgReschedAsk=function(mid, occDate, change){
     MTG_RESCHED={mid:mid, occDate:occDate, change:change||{}};
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-day"></i> Reschedule recurring meeting</h3><span class="x" onclick="mtgReschedCancel()">&times;</span></div>'
-      +'<div class="modal-body"><p style="color:var(--slate);font-size:13.5px;margin:0 0 14px">Apply this change to:</p><div style="display:flex;flex-direction:column;gap:10px">'
-      +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'this\')"><i class="fa-solid fa-calendar-day"></i> &nbsp;This time only <span style="color:var(--slate);font-weight:400;margin-left:4px">— just this one occurrence</span></button>'
+    mtgReschedClose(); // rebuild fresh every time so it always reappears
+    const ov=document.createElement('div'); ov.id='mtgReschedOv';
+    // z-index above the calendar day/meeting panel (200) and everything else, so it's never hidden behind a menu.
+    ov.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:var(--bg-card,#fff);color:var(--ink,#0b1220);border-radius:14px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;font-family:Segoe UI,Arial,sans-serif">'
+      +'<div style="padding:16px 18px;border-bottom:1px solid var(--line,#e2e8f0);font-weight:700;font-size:15px"><i class="fa-solid fa-calendar-day" style="color:#e0121c"></i> Reschedule recurring meeting</div>'
+      +'<div style="padding:18px"><p style="color:var(--slate,#64748b);font-size:13.5px;margin:0 0 14px">Apply this change to:</p><div style="display:flex;flex-direction:column;gap:10px">'
+      +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'this\')"><i class="fa-solid fa-calendar-day"></i> &nbsp;This time only <span style="color:var(--slate);font-weight:400;margin-left:4px">— just this occurrence</span></button>'
       +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'all\')"><i class="fa-solid fa-repeat"></i> &nbsp;All times <span style="color:var(--slate);font-weight:400;margin-left:4px">— every occurrence</span></button>'
-      +'</div></div><div class="modal-foot"><button class="ac-btn" onclick="mtgReschedCancel()">Cancel</button></div>');
+      +'</div></div>'
+      +'<div style="padding:12px 18px;border-top:1px solid var(--line,#e2e8f0);text-align:right"><button class="ac-btn" onclick="mtgReschedCancel()">Cancel</button></div></div>';
+    ov.addEventListener('click',function(e){ if(e.target===ov) mtgReschedCancel(); });
+    document.body.appendChild(ov);
   };
-  window.mtgReschedCancel=function(){ MTG_RESCHED=null; closeModal(); gcalRefresh(); };
+  window.mtgReschedCancel=function(){ MTG_RESCHED=null; mtgReschedClose(); gcalRefresh(); };
   window.mtgReschedApply=async function(scope){
-    const R=MTG_RESCHED; MTG_RESCHED=null; closeModal();
+    const R=MTG_RESCHED; MTG_RESCHED=null; mtgReschedClose();
     if(!R) return;
     const m=(MTG_LIST||[]).find(function(x){return x.id===R.mid;}); if(!m){ gcalRefresh(); return; }
     const c=R.change||{};
