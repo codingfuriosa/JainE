@@ -1720,8 +1720,16 @@
   // Warn before recording/joining a meeting whose scheduled date is still in the future.
   window.mtgTryRecord=function(id){
     const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
-    if(m && (m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
-      if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Record it now anyway?')) return;
+    if(!m) return;
+    // Only the occurrence scheduled for TODAY can be recorded. A recurring meeting whose day falls
+    // later this week, or a one-time meeting dated in the future, must not be recorded "as today" —
+    // show a warning and stop. (Recording writes a log for today's date, so recording a not-today
+    // meeting would wrongly mark the wrong day done.)
+    const today=istTodayISO();
+    const occursToday=(m.recur_type && m.recur_type!=='none') ? mtgOccursOn(m,today) : (m.meeting_date===today);
+    if(!occursToday){
+      toast('This meeting isn\'t scheduled for today — a meeting can only be recorded on the day it\'s scheduled.','warn');
+      return;
     }
     navTo('tasks/meetings/record/'+id);
   };
