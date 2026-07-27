@@ -1377,12 +1377,23 @@
         const upd={};
         if(c.newStart) upd.start_time=c.newStart;
         if(c.newEnd) upd.end_time=c.newEnd;
-        if(c.newDate){ const d=new Date(c.newDate+'T00:00:00'); if(m.recur_type==='weekly') upd.recur_day=d.getDay(); else if(m.recur_type==='monthly') upd.recur_date=d.getDate(); }
+        let wkShift=0, moDate=null;
+        if(c.newDate){ const d=new Date(c.newDate+'T00:00:00'); if(m.recur_type==='weekly'){ upd.recur_day=d.getDay(); wkShift=d.getDay()-Number(m.recur_day); } else if(m.recur_type==='monthly'){ upd.recur_date=d.getDate(); moDate=d.getDate(); } }
         if(Object.keys(upd).length){ await ACC().from('meetings').update(upd).eq('id',R.mid); if(m.mode==='online'){ try{ await mtgSyncGoogle(R.mid,'sync'); }catch(_e){} } }
-        // Intentionally do NOT clear one-off "this time" exceptions here: occurrences the user moved
-        // individually must stay exactly where they were put — they must not travel with the rest of
-        // the series when it's shifted. Each such move is a standalone one-time copy at a fixed date,
-        // and its original slot stays skipped, so shifting the series leaves those moved ones untouched.
+        // Keep individually-moved occurrences exactly where they were put (do NOT clear exceptions),
+        // but also avoid a duplicate: when the series moves to a new weekday/date, re-point each
+        // existing "this time only" skip to the series' NEW slot in that SAME week (weekly) or month
+        // (monthly). That way a week/month already holding a moved copy doesn't ALSO get a fresh
+        // series occurrence dropped into it.
+        try{
+          if(m.recur_type==='weekly' && wkShift!==0){
+            const {data:sk}=await ACC().from('meeting_skips').select('occ_date').eq('meeting_id',R.mid);
+            for(let i=0;i<(sk||[]).length;i++){ const od=sk[i].occ_date, nd=calShiftISO(od,wkShift); if(nd!==od) await ACC().from('meeting_skips').update({occ_date:nd}).eq('meeting_id',R.mid).eq('occ_date',od); }
+          } else if(m.recur_type==='monthly' && moDate!=null){
+            const {data:sk}=await ACC().from('meeting_skips').select('occ_date').eq('meeting_id',R.mid);
+            for(let i=0;i<(sk||[]).length;i++){ const od=sk[i].occ_date, nd=od.slice(0,8)+String(moDate).padStart(2,'0'); if(nd!==od) await ACC().from('meeting_skips').update({occ_date:nd}).eq('meeting_id',R.mid).eq('occ_date',od); }
+          }
+        }catch(_e){}
         toast('All occurrences updated','ok');
       }
       await gcalLoadData(); await gcalRefresh();
