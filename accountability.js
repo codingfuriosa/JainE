@@ -317,6 +317,15 @@
     .mtg-auto-link{font-size:12.5px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:6px}
     .mtg-auto-link.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
     .mtg-auto-link a{color:inherit;font-weight:600;text-decoration:underline}
+    /* Non-blocking "you can still use Offline meetings" banner (shown when Google isn't connected) */
+    .mtg-connect-banner{display:flex;align-items:center;gap:12px;background:#f8fafc;border:1px solid var(--line);border-radius:11px;padding:11px 14px;margin:0 0 14px}
+    .mtg-connect-banner .mcb-ico{font-size:20px;color:#4285f4;flex:0 0 auto}
+    .mtg-connect-banner .mcb-txt{flex:1;min-width:0;font-size:12.5px;color:var(--slate);line-height:1.45}
+    .mtg-connect-banner .mcb-txt b{color:var(--ink);font-weight:600}
+    .mtg-connect-banner .mcb-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #d1d5db;border-radius:20px;padding:0 15px;height:36px;font-weight:600;font-size:13px;color:#374151;cursor:pointer;font-family:inherit}
+    .mtg-connect-banner .mcb-btn:hover{background:#f9fafb}
+    .mtg-connect-banner .mcb-btn i{color:#4285f4}
+    @media(max-width:600px){.mtg-connect-banner{flex-wrap:wrap}.mtg-connect-banner .mcb-btn{width:100%;justify-content:center}}
     /* Non-blocking scheduling-conflict warning shown in the meeting form's attendee picker */
     .mtg-conflict-warn{font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:6px;line-height:1.5}
     .mtg-conflict-mark{margin-left:2px}
@@ -1655,7 +1664,13 @@
   }
   function mtgGoogleStatusHtml(){
     if(GOOGLE_CONNECTED===true) return '<span class="mtg-gstatus connected"><i class="fa-brands fa-google"></i> Connected to Google</span>';
-    if(GOOGLE_CONNECTED===false) return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
+    if(GOOGLE_CONNECTED===false){
+      // A non-thejaingroup.com account can't connect Google Meet at all, so don't offer a
+      // Connect button that would only ever fail — the offline banner explains what they CAN do.
+      const offDomain=!/@thejaingroup\.com$/i.test(me()||'');
+      if(offDomain) return '';
+      return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
+    }
     return '';
   }
   window.googleConnect=function(){
@@ -1875,20 +1890,25 @@
     const selSet = new Set(selAtt.map(function(e){return String(e||'').toLowerCase();}));
     // Only connected accounts are pickable going forward, but anyone already invited stays visible
     // and checked so editing/saving an older meeting never silently drops them.
-    const pickable = list.filter(function(p){ const e=String(p.email||'').toLowerCase(); return !eq(p.email,my) && (connected.has(e) || selSet.has(e)); });
+    // Offline-only users (no Google) can invite anyone; online meetings still limit the picker to
+    // people who've connected Google (they need to land on the Calendar invite / Meet).
+    const pickable = (GOOGLE_CONNECTED===true)
+      ? list.filter(function(p){ const e=String(p.email||'').toLowerCase(); return !eq(p.email,my) && (connected.has(e) || selSet.has(e)); })
+      : list.filter(function(p){ return !eq(p.email,my); });
     const recurVal = m ? (m.recur_type||'none') : 'none';
-    const modeVal = m ? (m.mode||'online') : 'online';
+    // New meetings default to Offline when Google isn't connected (Online needs a real Meet link).
+    const modeVal = m ? (m.mode||'online') : (GOOGLE_CONNECTED===true ? 'online' : 'offline');
     const recurOpts=[['none','One-time'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']];
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-video"></i> '+(editing?'Edit Meeting':'Schedule Meeting')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm">'
       +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
       +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +((editing && recurVal!=='none')?('<label>Apply changes to <span style="color:#e0121c">*</span></label><select id="mtgScope"><option value="">Choose…</option><option value="all">All occurrences</option><option value="this">This occurrence only (the next one)</option></select>'):'')
-      +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
+      +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+(GOOGLE_CONNECTED===true?'':' disabled')+'>Online'+(GOOGLE_CONNECTED===true?'':' — needs Google')+'</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
       +'<div class="two"><div><label>Start time <span style="color:var(--slate);font-weight:400">(24h)</span></label><input type="text" id="mtgStart" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.start_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional, 24h)</span></label><input type="text" id="mtgEnd" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.end_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div></div>'
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
-      +'<label>Attendees <span style="color:var(--slate);font-weight:400">(optional — only people who\'ve connected Google can be added)</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
-      +(pickable.length?'':'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>')
+      +'<label>Attendees <span style="color:var(--slate);font-weight:400">('+(GOOGLE_CONNECTED===true?'optional — only people who\'ve connected Google can be added':'optional')+')</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
+      +((GOOGLE_CONNECTED===true&&!pickable.length)?'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>':'')
       +'<div id="mtgConflictBox"></div>'
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" id="mtgSaveBtn" onclick="mtgFormSave('+(editing?id:'null')+')"><i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule')+'</button></div>');
@@ -1901,6 +1921,7 @@
     const title=($('mtgTitle').value||'').trim(); if(!title){toast('Enter a meeting title','err');return;}
     const recur=$('mtgRecur').value||'none';
     const mode=$('mtgMode').value||'online';
+    if(mode==='online' && GOOGLE_CONNECTED!==true){ toast('Online meetings need a connected Google account — choose Offline, or connect Google first.','warn'); return; }
     let meeting_date=null, recur_day=null, recur_date=null;
     if(recur==='none'){ meeting_date=$('mtgDate')?$('mtgDate').value:''; if(!meeting_date){toast('Pick a date','err');return;} }
     else if(recur==='weekly'){ recur_day=$('mtgRecurDay')?Number($('mtgRecurDay').value):NaN; if(isNaN(recur_day)){toast('Pick a day','err');return;} }
@@ -2403,18 +2424,20 @@
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
+    // Meetings are open to everyone: anyone can create and run OFFLINE meetings without Google.
+    // Online (Google Meet) meetings still need a connected thejaingroup.com Google account — that's
+    // enforced in the Schedule form below, instead of locking the whole section for everyone.
+    let mtgBanner='';
     if(GOOGLE_CONNECTED!==true){
       const myEmail=me();
       const offDomain=!/@thejaingroup\.com$/i.test(myEmail||'');
-      const warnHtml=offDomain?('<div class="mtg-gate-warn"><i class="fa-solid fa-triangle-exclamation"></i> Google Meet only works with a thejaingroup.com account — you\'re signed in as '+esc2(myEmail)+', so this won\'t be able to connect.</div>'):'';
-      b.innerHTML='<div class="mtg-page"><div class="mtg-main"><div class="mtg-gate">'
-        +'<i class="fa-brands fa-google mtg-gate-icon"></i>'
-        +'<h3>Connect Google to use Meetings</h3>'
-        +'<p>Connect your Google account to schedule meetings, get a real Google Meet link, and see who\'s attending.</p>'
-        +warnHtml
-        +'<button onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
-        +'</div></div></div>';
-      return;
+      mtgBanner='<div class="mtg-connect-banner"><i class="fa-brands fa-google mcb-ico"></i><div class="mcb-txt">'
+        +(offDomain
+            ? 'You\'re signed in as <b>'+esc2(myEmail)+'</b>. Online (Google Meet) meetings need a thejaingroup.com Google account — but you can create and run <b>Offline meetings</b> right here.'
+            : 'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.')
+        +'</div>'
+        +(offDomain?'':'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>')
+        +'</div>';
     }
     const groups=mtgGroupedSections(MTG_GROUP);
     groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
@@ -2423,6 +2446,7 @@
     b.innerHTML='<div class="mtg-page">'
       +'<div class="mtg-main">'
       +'<div class="mtg-toolbar"><div class="mtg-toolbar-title">Meetings</div>'+mtgGoogleStatusHtml()+'<button class="mtg-create" onclick="mtgOpenCreate()"><i class="fa-solid fa-plus"></i> Schedule Meeting</button></div>'
+      +mtgBanner
       +mtgGroupTabsHtml()
       +'<div class="mtg-body">'+body+'</div>'
       +'</div></div>';
