@@ -1351,7 +1351,7 @@
     try{
       if(scope==='this'){
         const newDate=c.newDate||R.occDate;
-        const {data:newId,error}=await ACC().rpc('reschedule_meeting_occurrence',{p_meeting_id:R.mid,p_occ_date:R.occDate,p_new_date:newDate,p_new_start:c.newStart||m.start_time,p_new_end:c.newEnd||m.end_time});
+        const {data:newId,error}=await sb.rpc('reschedule_meeting_occurrence',{p_meeting_id:R.mid,p_occ_date:R.occDate,p_new_date:newDate,p_new_start:c.newStart||m.start_time,p_new_end:c.newEnd||m.end_time});
         if(error)throw error;
         if(newId && m.mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
         toast('This occurrence rescheduled','ok');
@@ -1912,7 +1912,7 @@
         let occ=istTodayISO(); for(let i=0;i<400;i++){ if(mtgOccursOn(orig,occ))break; occ=calShiftISO(occ,1); }
         const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
         try{
-          const {data:newId,error}=await ACC().rpc('reschedule_meeting_occurrence',{p_meeting_id:id,p_occ_date:occ,p_new_date:occ,p_new_start:start,p_new_end:end});
+          const {data:newId,error}=await sb.rpc('reschedule_meeting_occurrence',{p_meeting_id:id,p_occ_date:occ,p_new_date:occ,p_new_start:start,p_new_end:end});
           if(error)throw error;
           if(newId && mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
           toast('This occurrence updated','ok'); closeModal(); await mtgLoadData(); mtgRenderOnly();
