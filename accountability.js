@@ -1370,6 +1370,7 @@
         if(c.newEnd) upd.end_time=c.newEnd;
         if(c.newDate){ const d=new Date(c.newDate+'T00:00:00'); if(m.recur_type==='weekly') upd.recur_day=d.getDay(); else if(m.recur_type==='monthly') upd.recur_date=d.getDate(); }
         if(Object.keys(upd).length){ await ACC().from('meetings').update(upd).eq('id',R.mid); if(m.mode==='online'){ try{ await mtgSyncGoogle(R.mid,'sync'); }catch(_e){} } }
+        try{ await sb.rpc('clear_meeting_exceptions',{p_meeting_id:R.mid}); }catch(_e){} // moving the whole series resets any one-off "this time" copies, so no duplicates linger
         toast('All occurrences updated','ok');
       }
       await gcalLoadData(); await gcalRefresh();
@@ -1713,9 +1714,9 @@
     const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
     const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
     let join;
-    if(doneToday) join='<button class="mtg-join" disabled title="Already done today"><i class="fa-solid fa-check"></i> Done</button>';
+    if(doneToday) join='<button class="mtg-join" disabled title="Already done today">Done</button>';
     else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
-    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting"><i class="fa-solid fa-microphone"></i> Record</button>';
+    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
     else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
     const mine = eq(m.created_by,me());
     const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
