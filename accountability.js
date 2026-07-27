@@ -130,7 +130,19 @@
     .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600}
     .wf-dept{font-size:11.5px;color:var(--slate);margin-left:7px}
     .wf-dur{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:5px}
-    @media(max-width:700px){.wf-step-sub{flex-wrap:wrap}.wf-step-sub .wf-s-person{flex:1 1 100%}.wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 44%}}
+    @media(max-width:700px){.wf-step-sub{flex-wrap:wrap}.wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}.wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 44%}}
+    /* Workflow step person picker (avatar + department-grouped) */
+    .wf-step-sub .wf-pp{flex:2;min-width:0}
+    .wf-pp{position:relative}
+    .wf-pp-btn{width:100%;display:flex;align-items:center;gap:9px;text-align:left;cursor:pointer;padding:6px 10px;min-height:40px}
+    .wf-pp-av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;flex:none}
+    .wf-pp-nm{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .wf-pp-ph{font-size:13px;color:var(--slate)}
+    .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px}
+    .wf-pp-panel{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:220px;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;display:none;max-height:280px;overflow:auto}
+    .wf-pp.open .wf-pp-panel{display:block}
+    .wf-pp-panel .ms-search{margin-bottom:6px}
+    .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
     .ac-addrow{display:flex;gap:8px;margin:3px 0}
     .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
     .ac-addrow-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10)}
@@ -568,6 +580,8 @@
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
+    if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
+    if (seg[0]==='meetings' && seg[1]==='wrap' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgWrapPage(v, Number(seg[2])); }
     if (seg[0]==='profile' && typeof taskProfile==='function') { ROUTE={tab:'profile',taskId:null}; return taskProfile(v); }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
     ROUTE={tab:tab,taskId:null};
@@ -596,7 +610,7 @@
     if(completedAt){
       const c=parseD(completedAt); if(!c) return '';
       c.setHours(0,0,0,0);
-      if(c.getTime()>d.getTime()) return '<span class="ac-chip" style="background:#fee2e2;color:#b91c1c;margin-left:6px">Overdue</span>';
+      if(c.getTime()>d.getTime()) return '<span class="ac-chip" title="Overdue" style="background:#fee2e2;color:#b91c1c;margin-left:6px">O</span>';
       return '<span class="ac-chip" style="background:#dcfce7;color:#15803d;margin-left:6px">On time</span>';
     }
     const today=new Date(); today.setHours(0,0,0,0);
@@ -608,9 +622,13 @@
     opt=opt||{};
     const emails=opt.ownerAvatar?[t.delegator].filter(Boolean):((asg&&asg[t.id])||[]);
     const metaParts=[];
-    if(opt.showDoneDate&&t.completed_at) metaParts.push(`<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Marked done ${fmtDate(t.completed_at)}`);
-    if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
-    if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
+    if(opt.showDoneDate){
+      // Completed / Archive rows: show only the marked-done date (date icon) — no tag/due-date.
+      if(t.completed_at) metaParts.push(`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`);
+    } else {
+      if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
+      if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
+    }
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${emails.length?avatars(list,emails):''}</div></div>`;
   }
@@ -629,14 +647,48 @@
      A workflow = a named business process with a triggering event and an ordered
      list of steps. Each step is carried out by one designated person within a set
      duration. Stored in acc.flows (the workflow) + acc.flow_steps (its steps). */
-  let WF_PEOPLE=null;
+  let WF_PEOPLE=null, WF_PID=0;
 
-  function wfPersonOptions(sel){
-    return '<option value="">Assign person…</option>'+(WF_PEOPLE||[]).map(function(p){
-      const dept=(Array.isArray(p.depts)&&p.depts.length)?(' — '+p.depts.join(', ')):'';
-      return '<option value="'+esc2(p.email)+'"'+(sel&&eq(sel,p.email)?' selected':'')+'>'+esc2(p.name)+esc2(dept)+'</option>';
-    }).join('');
+  // Single-select person picker for a workflow step: shows a coloured avatar circle + name,
+  // and the dropdown groups people by department (mirrors the msWidget attendee list). The
+  // chosen email lives in a hidden .wf-s-person input so wfSave reads it exactly as before.
+  function wfPersonPickerHtml(sel){
+    const pid='wfpp'+(++WF_PID);
+    const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,sel);});
+    const trig=p
+      ? '<span class="wf-pp-av" style="background:'+colorFor(p.email)+'">'+esc2(iniOf(p.name).toUpperCase())+'</span><span class="wf-pp-nm">'+esc2(p.name)+'</span>'
+      : '<span class="wf-pp-ph">Assign person…</span>';
+    const groups={}; (WF_PEOPLE||[]).forEach(function(pp){ const ds=(Array.isArray(pp.depts)?pp.depts:[]).map(function(d){return String(d||'').trim();}).filter(Boolean); const key=ds.length?ds.slice().sort().join(', '):'Unassigned'; (groups[key]=groups[key]||[]).push(pp); });
+    const order=Object.keys(groups).sort(function(a,b){ return a==='Unassigned'?1:(b==='Unassigned'?-1:a.localeCompare(b)); });
+    let listHtml='';
+    order.forEach(function(d){ listHtml+='<div class="ms-grp">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ const on=eq(pp.email,sel); listHtml+='<div class="ms-row'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)"><span class="ms-av" style="background:'+colorFor(pp.email)+'">'+esc2(iniOf(pp.name).toUpperCase())+'</span><span class="ms-nm">'+esc2(pp.name)+'</span><i class="fa-solid fa-check ms-ck"></i></div>'; }); });
+    return '<div class="wf-pp" id="'+pid+'">'
+      +'<input type="hidden" class="wf-s-person" value="'+esc2(sel||'')+'">'
+      +'<button type="button" class="ac-in wf-pp-btn" onclick="wfPersonToggle(this)">'+trig+'<i class="fa-solid fa-chevron-down wf-pp-caret"></i></button>'
+      +'<div class="wf-pp-panel"><input class="ac-in ms-search" placeholder="Search people…" oninput="wfPersonFilter(this)"><div class="ms-list">'+listHtml+'</div></div>'
+    +'</div>';
   }
+  window.wfPersonToggle=function(btn){
+    const pp=btn.closest('.wf-pp'); if(!pp)return;
+    const isOpen=pp.classList.contains('open');
+    document.querySelectorAll('.wf-pp.open').forEach(function(x){x.classList.remove('open');});
+    if(!isOpen){ pp.classList.add('open'); const s=pp.querySelector('.ms-search'); if(s){ s.value=''; wfPersonFilter(s); try{s.focus();}catch(_){} } }
+  };
+  window.wfPersonPick=function(row){
+    const pp=row.closest('.wf-pp'); if(!pp)return;
+    const email=row.getAttribute('data-email')||'', name=row.getAttribute('data-name')||email;
+    const hid=pp.querySelector('.wf-s-person'); if(hid)hid.value=email;
+    const btn=pp.querySelector('.wf-pp-btn'); if(btn)btn.innerHTML='<span class="wf-pp-av" style="background:'+colorFor(email)+'">'+esc2(iniOf(name).toUpperCase())+'</span><span class="wf-pp-nm">'+esc2(name)+'</span><i class="fa-solid fa-chevron-down wf-pp-caret"></i>';
+    pp.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
+    row.classList.add('on');
+    pp.classList.remove('open');
+  };
+  window.wfPersonFilter=function(inp){
+    const panel=inp.closest('.wf-pp-panel'); if(!panel)return; const box=panel.querySelector('.ms-list'); if(!box)return;
+    const q=(inp.value||'').toLowerCase();
+    box.querySelectorAll('.ms-row').forEach(function(l){ l.style.display=(!q||(l.dataset.n||'').includes(q))?'':'none'; });
+    box.querySelectorAll('.ms-grp').forEach(function(g){ let n=g.nextElementSibling,vis=false; while(n&&n.classList&&n.classList.contains('ms-row')){ if(n.style.display!=='none')vis=true; n=n.nextElementSibling; } g.style.display=vis?'':'none'; });
+  };
 
   async function workflowTab(){
     const b=$('acBody');
@@ -671,9 +723,10 @@
     return '<div class="wf-step">'
       +'<span class="wf-step-num">'+idx+'</span>'
       +'<div class="wf-step-fields">'
-        +'<input class="ac-in wf-s-title" placeholder="What happens in this step? (e.g. User dept checks &amp; approves the invoice)" value="'+esc2(step.title||'')+'">'
+        +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
+        +'<input class="ac-in wf-s-desc" placeholder="Write the Description" value="'+esc2(step.description||'')+'">'
         +'<div class="wf-step-sub">'
-          +'<select class="ac-in wf-s-person">'+wfPersonOptions(step.owner_email)+'</select>'
+          +wfPersonPickerHtml(step.owner_email)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
           +'<select class="ac-in wf-s-unit">'
             +'<option value="hours"'+(unit==='hours'?' selected':'')+'>Hours</option>'
@@ -689,6 +742,8 @@
   async function wfForm(id){
     const b=$('acBody');
     b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+    if(!window._wfPpWired){ document.addEventListener('click',function(e){ if(!e.target||!e.target.closest||!e.target.closest('.wf-pp')) document.querySelectorAll('.wf-pp.open').forEach(function(x){x.classList.remove('open');}); }); window._wfPpWired=true; }
     let flow={name:'',description:'',trigger_event:''}, steps=[];
     if(id){
       try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); if(data)flow=data; }catch(e){}
@@ -722,7 +777,7 @@
   };
   window.wfRemoveStep=function(btn){
     const wrap=$('wfSteps'); const row=btn.closest('.wf-step'); if(!row||!wrap)return;
-    if(wrap.querySelectorAll('.wf-step').length<=1){ toast('A workflow needs at least one step','warn'); return; }
+    if(wrap.querySelectorAll('.wf-step').length<=2){ toast('A workflow needs at least two steps','warn'); return; }
     row.remove(); wfRenumber();
   };
   function wfRenumber(){
@@ -737,17 +792,23 @@
     if(!name){ toast('Please enter a workflow name','warn'); return; }
     if(!trigger){ toast('Please enter the triggering event','warn'); return; }
     const rows=[].slice.call(document.querySelectorAll('#wfSteps .wf-step'));
-    const steps=[];
-    rows.forEach(function(r){
+    if(rows.length<2){ toast('A workflow needs at least two steps','warn'); return; }
+    const steps=[]; let bad='';
+    rows.forEach(function(r,i){
       const t=((r.querySelector('.wf-s-title')||{}).value||'').trim();
-      if(!t) return; // skip blank rows
+      const desc=((r.querySelector('.wf-s-desc')||{}).value||'').trim();
       const person=(r.querySelector('.wf-s-person')||{}).value||'';
       const durRaw=(r.querySelector('.wf-s-dur')||{}).value;
       const unit=(r.querySelector('.wf-s-unit')||{}).value||'days';
-      const dur=(durRaw!==''&&durRaw!=null)?parseInt(durRaw,10):null;
-      steps.push({seq:steps.length+1,title:t,owner_email:person||null,duration_value:(dur!=null&&!isNaN(dur))?dur:null,duration_unit:unit});
+      const dur=(durRaw!==''&&durRaw!=null)?parseInt(durRaw,10):NaN;
+      if(!bad){
+        if(!t) bad='Step '+(i+1)+': add a title (what happens in this step).';
+        else if(!person) bad='Step '+(i+1)+': assign a person.';
+        else if(!(dur>=1)) bad='Step '+(i+1)+': set a duration.';
+      }
+      steps.push({seq:steps.length+1,title:t,description:desc||null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
     });
-    if(!steps.length){ toast('Please add at least one step with a description','warn'); return; }
+    if(bad){ toast(bad,'warn'); return; }
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
@@ -758,7 +819,7 @@
       }else{
         const {data,error}=await ACC().from('flows').insert({name:name,description:desc||null,trigger_event:trigger}).select().single(); if(error)throw error; flowId=data.id;
       }
-      const stepRows=steps.map(function(s){ return {flow_id:flowId,seq:s.seq,title:s.title,owner_email:s.owner_email,duration_value:s.duration_value,duration_unit:s.duration_unit}; });
+      const stepRows=steps.map(function(s){ return {flow_id:flowId,seq:s.seq,title:s.title,description:s.description,owner_email:s.owner_email,duration_value:s.duration_value,duration_unit:s.duration_unit}; });
       const {error:se}=await ACC().from('flow_steps').insert(stepRows); if(se)throw se;
       toast('Workflow saved','ok');
       await wfRenderList();
@@ -780,7 +841,7 @@
         ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(s.owner_email)+'">'+esc2(iniOf(p?p.name:s.owner_email).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(p?p.name:s.owner_email)+'</span>'+dept+'</span>')
         :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
       const dur=durLabel(s); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
-      return '<div class="wf-tl-item"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
+      return '<div class="wf-tl-item"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
     }).join('');
     b.innerHTML='<div style="display:flex;gap:8px;margin-bottom:12px"><button class="ac-btn" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i> Back</button><div style="flex:1"></div><button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i> Edit</button><button class="ac-btn danger" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete</button></div>'
       +'<div class="ac-card"><div class="hd"><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</div><div class="bd" style="height:auto;max-height:none;overflow:visible">'
@@ -832,7 +893,7 @@
   }
   function gcalVisibleItems(dateStr){
     const items=(GCAL_LAST&&GCAL_LAST.byDate[dateStr])||[];
-    const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
+    const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr) && !MTG_DONE.has(m.id+'|'+dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
     return items.concat(mtgItems).filter(x=>{
       if(!GCAL_FILTERS.has(x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
@@ -1035,7 +1096,8 @@
     const cols=(pos&&pos.cols)||1, col=(pos&&pos.col)||0;
     const leftCss='calc(4px + (100% - 8px) * '+col+' / '+cols+')';
     const widthCss=cols>1?('calc((100% - 8px) / '+cols+' - 3px)'):'calc(100% - 8px)';
-    const draggable=!m.recur_type||m.recur_type==='none';
+    const rt0=m.recur_type||'none';
+    const draggable=(rt0==='none'||rt0==='weekly'||rt0==='monthly'); // daily time-drag not offered
     const dragAttrs=draggable?(' data-meeting-time="'+m.id+'" data-start="'+startMin+'" data-dur="'+durMin+'" data-date="'+dateStr+'"'):'';
     return '<div class="gcal-mtgblock" style="top:'+topPx+'px;height:'+hPx+'px;left:'+leftCss+';width:'+widthCss+';background:'+gcalEvColor('meeting')+'"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenMeetingPanel('+m.id+')" title="'+esc2(m.title)+'"><b>'+esc2(m.title)+'</b><span>'+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'')+'</span></div>';
   }
@@ -1084,8 +1146,10 @@
     const label=d.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
     const isToday=dateStr===todayStr;
     const rows=items.length?items.map(function(x){
-      const oneTimeMeeting = x.kind==='meeting' && (!x.t.recur_type||x.t.recur_type==='none');
-      const draggable = x.kind!=='meeting' || oneTimeMeeting;
+      const mtgRt0 = x.kind==='meeting' ? (x.t.recur_type||'none') : '';
+      // One-time, weekly and monthly meetings are draggable to reschedule; daily is not.
+      const mtgDraggable = x.kind==='meeting' && (mtgRt0==='none'||mtgRt0==='weekly'||mtgRt0==='monthly');
+      const draggable = x.kind!=='meeting' || mtgDraggable;
       let dragAttrs='';
       if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"');
       const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='toMe'?'To me':'By me');
@@ -1227,7 +1291,7 @@
               const newDate=curTarget.dataset.date;
               if(newDate && newDate!==fromDate){
                 if(tid!=null) gcalTaskDrop(tid,newDate);
-                else if(mid!=null) gcalMeetingDateDrop(mid,newDate);
+                else if(mid!=null) gcalMeetingDateDrop(mid,newDate,fromDate);
               }
             }
           }
@@ -1268,10 +1332,54 @@
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
   // re-emails attendees with the new date/time, and posts an in-app "meeting_update" notification too —
   // consistent with what a full edit via the meeting form already does on any change.
-  window.gcalMeetingDateDrop=async function(mid,newDate){
+  // Mandatory choice when rescheduling a recurring meeting (drag/drop). change = {newDate?,newStart?,newEnd?}.
+  // Dismissing the popup does NOT reschedule (the calendar re-renders back to how it was).
+  function mtgReschedClose(){ const ov=document.getElementById('mtgReschedOv'); if(ov)ov.remove(); }
+  window.mtgReschedAsk=function(mid, occDate, change){
+    MTG_RESCHED={mid:mid, occDate:occDate, change:change||{}};
+    mtgReschedClose(); // rebuild fresh every time so it always reappears
+    const ov=document.createElement('div'); ov.id='mtgReschedOv';
+    // z-index above the calendar day/meeting panel (200) and everything else, so it's never hidden behind a menu.
+    ov.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:var(--bg-card,#fff);color:var(--ink,#0b1220);border-radius:14px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;font-family:Segoe UI,Arial,sans-serif">'
+      +'<div style="padding:16px 18px;border-bottom:1px solid var(--line,#e2e8f0);font-weight:700;font-size:15px"><i class="fa-solid fa-calendar-day" style="color:#e0121c"></i> Reschedule recurring meeting</div>'
+      +'<div style="padding:18px"><p style="color:var(--slate,#64748b);font-size:13.5px;margin:0 0 14px">Apply this change to:</p><div style="display:flex;flex-direction:column;gap:10px">'
+      +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'this\')"><i class="fa-solid fa-calendar-day"></i> &nbsp;This time only <span style="color:var(--slate);font-weight:400;margin-left:4px">— just this occurrence</span></button>'
+      +'<button class="ac-btn" style="justify-content:flex-start;text-align:left" onclick="mtgReschedApply(\'all\')"><i class="fa-solid fa-repeat"></i> &nbsp;All times <span style="color:var(--slate);font-weight:400;margin-left:4px">— every occurrence</span></button>'
+      +'</div></div>'
+      +'<div style="padding:12px 18px;border-top:1px solid var(--line,#e2e8f0);text-align:right"><button class="ac-btn" onclick="mtgReschedCancel()">Cancel</button></div></div>';
+    ov.addEventListener('click',function(e){ if(e.target===ov) mtgReschedCancel(); });
+    document.body.appendChild(ov);
+  };
+  window.mtgReschedCancel=function(){ MTG_RESCHED=null; mtgReschedClose(); gcalRefresh(); };
+  window.mtgReschedApply=async function(scope){
+    const R=MTG_RESCHED; MTG_RESCHED=null; mtgReschedClose();
+    if(!R) return;
+    const m=(MTG_LIST||[]).find(function(x){return x.id===R.mid;}); if(!m){ gcalRefresh(); return; }
+    const c=R.change||{};
+    try{
+      if(scope==='this'){
+        const newDate=c.newDate||R.occDate;
+        const {data:newId,error}=await sb.rpc('reschedule_meeting_occurrence',{p_meeting_id:R.mid,p_occ_date:R.occDate,p_new_date:newDate,p_new_start:c.newStart||m.start_time,p_new_end:c.newEnd||m.end_time});
+        if(error)throw error;
+        if(newId && m.mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
+        toast('This occurrence rescheduled','ok');
+      } else {
+        const upd={};
+        if(c.newStart) upd.start_time=c.newStart;
+        if(c.newEnd) upd.end_time=c.newEnd;
+        if(c.newDate){ const d=new Date(c.newDate+'T00:00:00'); if(m.recur_type==='weekly') upd.recur_day=d.getDay(); else if(m.recur_type==='monthly') upd.recur_date=d.getDate(); }
+        if(Object.keys(upd).length){ await ACC().from('meetings').update(upd).eq('id',R.mid); if(m.mode==='online'){ try{ await mtgSyncGoogle(R.mid,'sync'); }catch(_e){} } }
+        try{ await sb.rpc('clear_meeting_exceptions',{p_meeting_id:R.mid}); }catch(_e){} // moving the whole series resets any one-off "this time" copies, so no duplicates linger
+        toast('All occurrences updated','ok');
+      }
+      await gcalLoadData(); await gcalRefresh();
+    }catch(e){ toast('Reschedule failed: '+((e&&e.message)||e),'err'); try{ await gcalRefresh(); }catch(_e){} }
+  };
+  window.gcalMeetingDateDrop=async function(mid,newDate,origDate){
     const m=(MTG_LIST||[]).find(function(x){return x.id===mid;});
     if(!m) return;
-    if(m.recur_type && m.recur_type!=='none'){ toast('Recurring meetings can\'t be rescheduled by dragging — use Reschedule instead','err'); return; }
+    if(m.recur_type && m.recur_type!=='none'){ mtgReschedAsk(mid, origDate||newDate, {newDate:newDate}); return; }
     if(newDate===m.meeting_date) return;
     try{
       await ACC().from('meetings').update({meeting_date:newDate}).eq('id',mid);
@@ -1344,6 +1452,8 @@
     });
   }
   window.gcalMeetingTimeDrop=async function(mid,newStart,newEnd){
+    const mm=(MTG_LIST||[]).find(function(x){return x.id===mid;});
+    if(mm && mm.recur_type && mm.recur_type!=='none'){ mtgReschedAsk(mid, (typeof GCAL_DATE!=='undefined'?GCAL_DATE:mm.meeting_date), {newStart:newStart, newEnd:newEnd}); return; }
     try{
       await ACC().from('meetings').update({start_time:newStart,end_time:newEnd}).eq('id',mid);
       toast('Meeting time updated','ok');
@@ -1376,7 +1486,7 @@
   }
 
   /* ---------- MEETINGS ---------- */
-  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[];
+  let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
   let GOOGLE_CONNECTED=null;
   let MTG_GROUP='all';
   function mtgDurationMinutes(start,end){
@@ -1412,27 +1522,26 @@
   // without pre-expanding every occurrence up front.
   function mtgOccursOn(m,dateStr){
     const rt=m.recur_type||'none';
+    if(rt==='none') return m.meeting_date===dateStr;
+    // Recurring meetings only occur from today onward — never paint them on past calendar days.
+    if(dateStr < istTodayISO()) return false;
+    if(MTG_SKIP.has(m.id+'|'+dateStr)) return false; // this occurrence was moved out (This-time reschedule)
     if(rt==='daily')return true;
     if(rt==='weekly')return new Date(dateStr+'T00:00:00').getDay()===m.recur_day;
     if(rt==='monthly')return new Date(dateStr+'T00:00:00').getDate()===Number(m.recur_date);
-    return m.meeting_date===dateStr;
+    return false;
   }
   // One-time meetings whose end time has already passed today are hidden from the Today/All
   // view immediately (the backend cron still actually deletes/archives the row within a minute —
   // this just avoids the meeting sitting there looking "stuck" in the gap before that runs).
   // Recurring meetings are never hidden this way — they're always meant to stay visible.
   function mtgEndedToday(m){
-    if((m.recur_type||'none')!=='none') return false;
-    if(!m.end_time) return false;
-    if(m.meeting_date!==istTodayISO()) return false; // BUG FIX: this was always comparing against
-    // today's date regardless of the meeting's actual date, so a one-time meeting scheduled for
-    // tomorrow (or any future day) whose end_time clock value happened to be earlier than the
-    // current clock time got wrongly treated as "already ended today" and hidden from every tab.
-    // Compared against Kolkata (IST) time specifically, not the browser's local clock/timezone —
-    // see istNow() above for why.
-    const parts=String(m.end_time).split(':');
-    const endMin=(Number(parts[0])||0)*60+(Number(parts[1])||0);
-    return istNowMinutes()>endMin;
+    // A meeting is never hidden from the active list on the basis of the clock. It stays visible
+    // until it's actually closed out — online on real Google Meet activity, offline when the
+    // organizer records it in-app — and once its scheduled day has fully passed with nothing
+    // logged, the daily archive job moves it out as 'not_held' / 'not_marked_done'. So a meeting
+    // whose scheduled time slipped by (e.g. rescheduled but not updated) never silently vanishes.
+    return false;
   }
   function mtgAllAttendees(m){
     const set=[m.created_by].concat(MTG_ATT[m.id]||[]);
@@ -1527,6 +1636,13 @@
       try{ const {data:allAtt}=await ACC().from('meeting_attendees').select('*').in('meeting_id',ids); (allAtt||[]).forEach(function(a){ (attMap[a.meeting_id]=attMap[a.meeting_id]||[]).push(a.email); }); }catch(e){}
     }
     MTG_LIST=list; MTG_ATT=attMap;
+    // Which occurrences are already done (a log exists). Recurring meetings keep meeting_id on their
+    // logs; one-time meetings are deleted when done so they simply drop off the list. Used to turn the
+    // Record button into "Done" and to hide a done occurrence from that day in the calendar.
+    try{ const {data:lg}=await ACC().from('meeting_logs').select('meeting_id,occurrence_date').not('meeting_id','is',null); const s=new Set(); (lg||[]).forEach(function(r){ s.add(r.meeting_id+'|'+r.occurrence_date); }); MTG_DONE=s; }catch(e){ MTG_DONE=new Set(); }
+    // Occurrences of a recurring meeting that were moved elsewhere ("this time only" reschedule) —
+    // hidden from their original day.
+    try{ const {data:sk}=await ACC().from('meeting_skips').select('meeting_id,occ_date'); const ss=new Set(); (sk||[]).forEach(function(r){ ss.add(r.meeting_id+'|'+r.occ_date); }); MTG_SKIP=ss; }catch(e){ MTG_SKIP=new Set(); }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -1572,6 +1688,22 @@
       return '<span class="mtg-avatar" style="background:'+colorFor(e)+'" title="'+esc2(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>';
     }).join('')+(emails.length>4?'<span class="mtg-avatar" style="background:#94a3b8">+'+(emails.length-4)+'</span>':'')+'</span>';
   }
+  // Warn before recording/joining a meeting whose scheduled date is still in the future.
+  window.mtgTryRecord=function(id){
+    const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
+    if(m && (m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
+      if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Record it now anyway?')) return;
+    }
+    navTo('tasks/meetings/record/'+id);
+  };
+  window.mtgTryJoin=function(id){
+    const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
+    if(!m||!m.meet_link) return;
+    if((m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
+      if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Join it now anyway?')) return;
+    }
+    window.open(m.meet_link,'_blank','noopener');
+  };
   function mtgCard(m,weekCount){
     const modeColor = m.mode==='offline' ? '#64748b' : '#2563eb';
     const people2=mtgAllAttendees(m);
@@ -1580,9 +1712,11 @@
     const timeLabel=dateLbl+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     const recurLbl=mtgRecurLabel(m);
     const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
+    const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
     let join;
-    if(m.mode==='online' && m.meet_link) join='<a class="mtg-join" href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Join</a>';
-    else if(m.mode==='offline') join='<span class="mtg-join ghost">Offline</span>';
+    if(doneToday) join='<button class="mtg-join" disabled title="Already done today">Done</button>';
+    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
+    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
     else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
     const mine = eq(m.created_by,me());
     const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
@@ -1726,6 +1860,11 @@
     host.addEventListener('input',mtgConflictFieldHandler);
     window._mtgConflictWired=true;
   }
+  // Start/End time are a single text field masked to 24-hour HH:MM (00–23 : 00–59) — one field,
+  // no native AM/PM segment, consistent across every browser. Stored/read value stays "HH:MM".
+  function mtgTimeVal(t){ if(!t)return''; const p=String(t).split(':'); if(p.length<2)return''; return String(parseInt(p[0],10)||0).padStart(2,'0')+':'+String(parseInt(p[1],10)||0).padStart(2,'0'); }
+  window.mtgTimeMask=function(el){ const v=(el.value||'').replace(/[^0-9]/g,'').slice(0,4); el.value=(v.length>2)?(v.slice(0,2)+':'+v.slice(2)):v; };
+  window.mtgTimeNorm=function(el){ const raw=(el.value||'').replace(/[^0-9]/g,''); if(!raw){ el.value=''; return; } let h,m; if(raw.length<=2){ h=raw; m='0'; } else { h=raw.slice(0,raw.length-2); m=raw.slice(-2); } h=Math.max(0,Math.min(23,parseInt(h,10)||0)); m=Math.max(0,Math.min(59,parseInt(m,10)||0)); el.value=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_){} };
   window.mtgOpenCreate=async function(id){
     const editing = id!=null;
     let m=null;
@@ -1744,8 +1883,9 @@
       +'<div class="modal-body frm">'
       +'<label>Title</label><input id="mtgTitle" placeholder="e.g. Weekly Marketing Sync" value="'+(m?esc2(m.title):'')+'">'
       +'<label>Recurring</label><select id="mtgRecur" onchange="mtgRecurChange()">'+recurOpts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===recurVal?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +((editing && recurVal!=='none')?('<label>Apply changes to <span style="color:#e0121c">*</span></label><select id="mtgScope"><option value="">Choose…</option><option value="all">All occurrences</option><option value="this">This occurrence only (the next one)</option></select>'):'')
       +'<div class="two"><div><label>Mode</label><select id="mtgMode" onchange="mtgModeChange()"><option value="online"'+(modeVal==='online'?' selected':'')+'>Online</option><option value="offline"'+(modeVal==='offline'?' selected':'')+'>Offline</option></select></div><div id="mtgDateWrap">'+mtgDateFieldHtml(recurVal,m)+'</div></div>'
-      +'<div class="two"><div><label>Start time</label><input type="time" id="mtgStart" value="'+(m?esc2(m.start_time||''):'')+'"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional)</span></label><input type="time" id="mtgEnd" value="'+(m?esc2(m.end_time||''):'')+'"></div></div>'
+      +'<div class="two"><div><label>Start time <span style="color:var(--slate);font-weight:400">(24h)</span></label><input type="text" id="mtgStart" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.start_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div><div><label>End time <span style="color:var(--slate);font-weight:400">(optional, 24h)</span></label><input type="text" id="mtgEnd" inputmode="numeric" maxlength="5" placeholder="HH:MM" value="'+(m?esc2(mtgTimeVal(m.end_time)):'')+'" oninput="mtgTimeMask(this)" onblur="mtgTimeNorm(this)"></div></div>'
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">(optional — only people who\'ve connected Google can be added)</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +(pickable.length?'':'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>')
@@ -1765,8 +1905,31 @@
     if(recur==='none'){ meeting_date=$('mtgDate')?$('mtgDate').value:''; if(!meeting_date){toast('Pick a date','err');return;} }
     else if(recur==='weekly'){ recur_day=$('mtgRecurDay')?Number($('mtgRecurDay').value):NaN; if(isNaN(recur_day)){toast('Pick a day','err');return;} }
     else if(recur==='monthly'){ recur_date=$('mtgRecurDate')?Number($('mtgRecurDate').value):0; if(!recur_date||recur_date<1||recur_date>31){toast('Enter a valid date of month (1–31)','err');return;} }
-    const start=$('mtgStart').value; if(!start){toast('Pick a start time','err');return;}
-    const end=$('mtgEnd').value||null;
+    let start=($('mtgStart').value||'').trim();
+    if(!/^\d{1,2}:[0-5]\d$/.test(start)||parseInt(start,10)>23){ toast('Enter a start time as HH:MM (24-hour, 00–23)','err'); return; }
+    start=mtgTimeVal(start); // always store zero-padded HH:MM — google-calendar-sync builds an RFC3339 string from this
+    const endRaw=($('mtgEnd').value||'').trim();
+    if(endRaw&&(!/^\d{1,2}:[0-5]\d$/.test(endRaw)||parseInt(endRaw,10)>23)){ toast('Enter the end time as HH:MM (24-hour, 00–23)','err'); return; }
+    const end=endRaw?mtgTimeVal(endRaw):null;
+    // Editing a recurring meeting requires choosing scope (mandatory). "This occurrence only" moves
+    // just the next occurrence (skip it + create a one-time copy at the form's time); "All" falls
+    // through to the normal series update below.
+    if(editing && recur!=='none'){
+      const scope=$('mtgScope')?$('mtgScope').value:'';
+      if(!scope){ toast('Choose whether changes apply to this occurrence or all occurrences','warn'); return; }
+      if(scope==='this'){
+        const orig=(MTG_LIST||[]).find(function(x){return x.id===id;})||{};
+        let occ=istTodayISO(); for(let i=0;i<400;i++){ if(mtgOccursOn(orig,occ))break; occ=calShiftISO(occ,1); }
+        const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
+        try{
+          const {data:newId,error}=await sb.rpc('reschedule_meeting_occurrence',{p_meeting_id:id,p_occ_date:occ,p_new_date:occ,p_new_start:start,p_new_end:end});
+          if(error)throw error;
+          if(newId && mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
+          toast('This occurrence updated','ok'); closeModal(); await mtgLoadData(); mtgRenderOnly();
+        }catch(e){ toast('Could not update this occurrence: '+((e&&e.message)||e),'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Save changes';} }
+        return;
+      }
+    }
     // Guard against scheduling a one-time meeting whose START time is already in the past —
     // checked against real Kolkata (IST) wall-clock time specifically (istTodayISO/istNowMinutes
     // above), not the browser's own clock/timezone, since every backend piece (cron functions,
@@ -1875,10 +2038,16 @@
   // Small "N of M joined" badge for list rows — shown instead of a generic Online/Offline tag once
   // real attendance data exists, falls back gracefully while it's still pending or unavailable.
   function mtgAttendanceBadgeHtml(l){
-    if(l.mode==='offline') return '<span class="mtg-log-badge none">Offline</span>';
+    if(l.mode==='offline'){
+      if(l.attendance_status==='not_marked_done') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not marked done</span>';
+      if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Members pending</span>';
+      if(l.attendance_status==='recorded') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+((l.present_emails||[]).length)+' present</span>';
+      return '<span class="mtg-log-badge none">Offline</span>';
+    }
     const invited=(l.attendee_emails||[]).length;
     if(l.attendance_status==='fetched') return '<span class="mtg-log-badge ready"><i class="fa-solid fa-user-check"></i> '+(l.participants||[]).length+' of '+invited+' joined</span>';
     if(l.attendance_status==='pending') return '<span class="mtg-log-badge pending">Fetching attendance…</span>';
+    if(l.attendance_status==='not_held') return '<span class="mtg-log-badge none"><i class="fa-solid fa-calendar-xmark"></i> Not held</span>';
     return '<span class="mtg-log-badge none">No attendance data</span>';
   }
   // A meeting occurrence's detail — real routed page (not a modal), reached via
@@ -1894,12 +2063,31 @@
     const plist=await people();
     const invitedNames=(l.attendee_emails||[]).map(function(e){ return nameOf(plist,e)||e; });
     const actualDur=mtgActualDurationText(l);
+    let audioSrc=null;
+    if(l.mode==='offline' && l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
     const durationHtml = '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgLogTimeLabel(l))
       +(actualDur?(' <span style="color:#166534;font-weight:600;margin-left:6px">'+esc2(actualDur)+' actual</span>'):' <span style="color:var(--slate);font-weight:400;margin-left:6px">(scheduled)</span>')
-      +'</div>';
+      +'</div>'
+      +((l.actual_start&&l.actual_end)?('<div class="gcal-panel-row"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Recorded <b>'+esc2(mtgClockIST(l.actual_start)+' – '+mtgClockIST(l.actual_end))+'</b> <span style="color:var(--slate);font-size:12px">IST</span></div>'):'');
     let attendeesHtml;
     if(l.mode==='offline'){
-      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> '+esc2(invitedNames.join(', ')||'—')+'</div>';
+      if(l.attendance_status==='not_marked_done'){
+        attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+          +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">This meeting was <b>not marked done</b> — it wasn\'t recorded on the scheduled day, so it moved to Archive the following day.</p>';
+      } else {
+        const present=(l.present_emails||[]);
+        const presentL=present.map(function(e){return String(e).toLowerCase();});
+        const missingEmails=(l.attendee_emails||[]).filter(function(e){return presentL.indexOf(String(e).toLowerCase())===-1;});
+        if(!present.length){
+          attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+            +'<p style="color:#b45309;font-size:13px;margin:6px 0 0"><b>Members pending</b> — nobody has been recorded as present yet.</p>'
+            +'<div style="margin-top:10px"><button class="ac-btn primary" onclick="navTo(\'tasks/meetings/wrap/'+l.id+'\')"><i class="fa-solid fa-user-plus"></i> Add members</button></div>';
+        } else {
+          attendeesHtml='<div style="margin-bottom:6px"><b style="font-size:12.5px;color:var(--slate)">Present ('+present.length+')</b></div>'
+            +present.map(function(e){ return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(nameOf(plist,e)||e)+'</div>'; }).join('')
+            +(missingEmails.length?('<div style="margin-top:10px"><b style="font-size:12.5px;color:#b45309">Invited but absent ('+missingEmails.length+')</b></div>'+missingEmails.map(function(e){ return '<div class="mtg-log-attendee"><i class="fa-solid fa-user-xmark" style="color:#b45309"></i> '+esc2(nameOf(plist,e)||e)+'</div>'; }).join('')):'');
+        }
+      }
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
@@ -1912,16 +2100,16 @@
     } else if(l.attendance_status==='pending'){
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Fetching who actually joined from Google Meet — check back shortly.</p>';
+    } else if(l.attendance_status==='not_held'){
+      attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
+        +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">This meeting was <b>not held</b> — no Google Meet call took place on the scheduled day. It stayed active that day and moved to Archive the following day.</p>';
     } else {
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No attendance data for this meeting — either it wasn\'t actually held, or the organizer wasn\'t connected to Google at the time.</p>';
     }
-    let transcriptHtml;
-    if(l.transcript_status==='ready') transcriptHtml='<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
-    else if(l.transcript_status==='pending') transcriptHtml='<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript is being fetched from Google Meet…</p>';
-    else transcriptHtml='<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript — needs a Workspace plan with Meet transcription (Business Standard or higher) and someone starting it live in the call.</p>';
+    const transcriptHtml=mtgTranscriptHtml(l);
     const recordingHtml = l.mode==='offline'
-      ? '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Offline meetings aren\'t recorded through Google Meet.</p>'
+      ? (audioSrc?('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>'):'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.</p>')
       : '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Recording isn\'t available on your current Google Workspace plan (requires Business Standard or higher).</p>';
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
@@ -1963,7 +2151,257 @@
       +'</div>'
       +'<div class="tp-card">'+rows+'</div>';
   }
+
+  /* ---------- OFFLINE MEETING RECORDING + WRAP-UP (record -> transcribe -> members -> log) ---------- */
+  let MTG_REC=null, MTG_WRAP=null;
+  function mtgSecFmt(s){ s=Math.max(0,s|0); const m=Math.floor(s/60), ss=s%60; return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
+  function mtgClockIST(iso){ try{ return new Date(iso).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}); }catch(e){ return ''; } }
+  function mtgTranscriptHtml(l){
+    if(l.transcript_status==='ready') return '<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+    if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
+    if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
+    if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
+    return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript for this meeting.</p>';
+  }
+  function mtgInjectRecCss(){
+    if(document.getElementById('mtgRecCss'))return;
+    const s=document.createElement('style'); s.id='mtgRecCss';
+    s.textContent='.mtg-rec-card{text-align:center;padding:28px 20px}.mtg-rec-dot{width:16px;height:16px;border-radius:50%;background:#cbd5e1;margin:0 auto 14px}.mtg-rec-dot.on{background:#e0121c;animation:mtgpulse 1.2s infinite}@keyframes mtgpulse{0%{box-shadow:0 0 0 0 rgba(224,18,28,.5)}70%{box-shadow:0 0 0 13px rgba(224,18,28,0)}100%{box-shadow:0 0 0 0 rgba(224,18,28,0)}}.mtg-rec-timer{font-size:42px;font-weight:800;letter-spacing:1px;color:var(--ink)}.mtg-rec-hint{color:var(--slate);font-size:13px;max-width:440px;margin:12px auto 22px;line-height:1.55}.mtg-rec-btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}.ac-btn.lg{padding:12px 22px;font-size:15px}.mtg-miss{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:8px 11px;font-size:12.5px}.mtg-log-transcript{white-space:pre-wrap;font-size:13.5px;line-height:1.6;color:var(--ink);max-height:420px;overflow:auto}';
+    document.head.appendChild(s);
+  }
+  async function mtgRecCall(payload){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token;
+      const res=await fetch(SUPABASE_URL+'/functions/v1/meeting-record',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},body:JSON.stringify(payload)});
+      return await res.json().catch(function(){return {error:'bad response'};});
+    }catch(e){ return {error:String(e)}; }
+  }
+  // Upload recording audio THROUGH Supabase (meeting-audio-upload) rather than browser->S3 directly,
+  // so it works from any site origin (the S3 bucket's CORS only trusts the production domain).
+  // Returns the same shape as uploadFileToS3: {data:{path}} | {error}.
+  async function mtgUploadAudio(key, blob){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token;
+      const res=await fetch(SUPABASE_URL+'/functions/v1/meeting-audio-upload?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':blob.type||'application/octet-stream','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},body:blob});
+      const out=await res.json().catch(function(){return {};});
+      if(!res.ok||out.error) return {error:{message:out.error||('upload HTTP '+res.status)}};
+      return {data:{path:out.path}};
+    }catch(e){ return {error:{message:String(e)}}; }
+  }
+  async function mtgRecordPage(v, meetingId){
+    injectCss(); mtgInjectRecCss(); setCrumb(['Accountability','Record Meeting']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    if(!m){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Meeting not found (it may already be archived).</div><div style="margin-top:12px"><button class="ac-btn" onclick="navTo(\'tasks/meetings\')">Back to Meetings</button></div></div>'; return; }
+    MTG_REC={meeting:m, rec:null, chunks:[], stream:null, startedAt:null, wakeLock:null, secs:0, timer:null, mime:''};
+    const when=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Record — '+esc2(m.title)+'</div><div class="tp-sub">'+esc2(when)+' · Offline</div></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Cancel" onclick="mtgRecCancel()"><i class="fa-solid fa-arrow-left"></i></button></div>'
+      +'</div>'
+      +'<div class="tp-card mtg-rec-card">'
+        +'<div class="mtg-rec-dot" id="mtgRecDot"></div>'
+        +'<div class="mtg-rec-timer" id="mtgRecTimer">00:00</div>'
+        +'<div class="mtg-rec-hint" id="mtgRecHint">Tap Start when the meeting begins. Keep this screen open — recording captures this device\'s microphone.</div>'
+        +'<div class="mtg-rec-btns">'
+          +'<button class="ac-btn primary lg" id="mtgRecStart" onclick="mtgRecStart()"><i class="fa-solid fa-microphone"></i> Start recording</button>'
+          +'<button class="ac-btn danger lg" id="mtgRecStop" style="display:none" onclick="mtgRecStop()"><i class="fa-solid fa-stop"></i> Stop &amp; finish</button>'
+        +'</div>'
+      +'</div>';
+  }
+  window.mtgRecStart=async function(){
+    const R=MTG_REC; if(!R||!R.meeting)return;
+    if(typeof MediaRecorder==='undefined'||!navigator.mediaDevices){ toast('Recording isn\'t supported on this browser.','err'); return; }
+    let stream;
+    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ toast('Microphone permission is needed to record.','err'); return; }
+    let mime='audio/webm';
+    if(!MediaRecorder.isTypeSupported(mime)) mime=MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'';
+    let rec; try{ rec=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream); }catch(e){ rec=new MediaRecorder(stream); }
+    R.stream=stream; R.rec=rec; R.chunks=[]; R.mime=rec.mimeType||mime||'audio/webm';
+    rec.ondataavailable=function(e){ if(e.data&&e.data.size)R.chunks.push(e.data); };
+    rec.start(1000);
+    R.startedAt=new Date().toISOString(); R.secs=0;
+    R.timer=setInterval(function(){ R.secs++; const el=$('mtgRecTimer'); if(el)el.textContent=mtgSecFmt(R.secs); },1000);
+    const dot=$('mtgRecDot'); if(dot)dot.classList.add('on');
+    const st=$('mtgRecStart'), sp=$('mtgRecStop'), h=$('mtgRecHint');
+    if(st)st.style.display='none'; if(sp)sp.style.display='';
+    if(h)h.textContent='Recording… keep this screen on and the app open. Tap Stop when the meeting ends.';
+    try{ if(navigator.wakeLock&&navigator.wakeLock.request) R.wakeLock=await navigator.wakeLock.request('screen'); }catch(_e){}
+  };
+  window.mtgRecStop=async function(){
+    const R=MTG_REC; if(!R||!R.rec)return;
+    if(R.stopping) return; R.stopping=true;  // guard against a double Stop firing save-recording twice
+    const sp=$('mtgRecStop'); if(sp){sp.disabled=true;sp.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Finishing…';}
+    if(R.timer){clearInterval(R.timer);R.timer=null;}
+    const endedAt=new Date().toISOString();
+    await new Promise(function(resolve){ try{ R.rec.onstop=resolve; R.rec.stop(); }catch(_e){ resolve(); } });
+    try{ (R.stream.getTracks()||[]).forEach(function(t){t.stop();}); }catch(_e){}
+    try{ if(R.wakeLock){R.wakeLock.release();R.wakeLock=null;} }catch(_e){}
+    const blob=new Blob(R.chunks,{type:R.mime||'audio/webm'});
+    const occ=istTodayISO();
+    const ext=(R.mime&&R.mime.indexOf('mp4')>=0)?'mp4':'webm';
+    let audioPath=null;
+    if(blob.size){
+      const key='accountability/meeting-audio/'+R.meeting.id+'-'+occ+'-'+Date.now()+'.'+ext;
+      const up=await mtgUploadAudio(key,blob);
+      if(up&&up.data)audioPath=up.data.path; else toast('Audio upload failed — you can still log attendees, but there will be no transcript.','warn');
+    }
+    const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
+    if(!resp||!resp.log_id){ toast('Could not save the recording: '+((resp&&resp.error)||'unknown error'),'err'); if(sp){sp.disabled=false;sp.innerHTML='<i class="fa-solid fa-stop"></i> Stop &amp; finish';} return; }
+    MTG_REC=null;
+    navTo('tasks/meetings/wrap/'+resp.log_id);
+  };
+  window.mtgRecCancel=function(){
+    const R=MTG_REC;
+    if(R&&R.rec&&R.rec.state&&R.rec.state!=='inactive'){
+      if(!window.confirm('Discard this recording? Nothing will be saved.'))return;
+      if(R.timer)clearInterval(R.timer);
+      try{R.rec.stop();}catch(_e){}
+      try{(R.stream.getTracks()||[]).forEach(function(t){t.stop();});}catch(_e){}
+      try{ if(R.wakeLock)R.wakeLock.release(); }catch(_e){}
+    }
+    MTG_REC=null; navTo('tasks/meetings');
+  };
+  async function mtgWrapPage(v, logId){
+    injectCss(); mtgInjectRecCss(); setCrumb(['Accountability','Meeting Wrap-up']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let l=null; try{ const {data}=await ACC().from('meeting_logs').select('*').eq('id',logId).maybeSingle(); l=data; }catch(e){}
+    if(!l){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Log not found.</div></div>'; return; }
+    const dir=await people();
+    const invited=(l.attendee_emails||[]);
+    // Members list = ONLY the people invited when the meeting was created (this already includes the
+    // organiser). Tick who actually attended; the rest are marked absent.
+    const memberList=invited.map(function(e){ const p=dir.find(function(x){return eq(x.email,e);}); return {email:e, name:(p?p.name:e), depts:(p&&p.depts)?p.depts:[]}; });
+    const presel=(l.present_emails&&l.present_emails.length)?l.present_emails:invited.slice();
+    MTG_WRAP={logId:logId, invited:invited, people:memberList, l:l};
+    const dateIST=fmtDateY(l.occurrence_date);
+    const recRange=(l.actual_start&&l.actual_end)?(mtgClockIST(l.actual_start)+' – '+mtgClockIST(l.actual_end)):'';
+    const durTxt=(l.actual_start&&l.actual_end)?mtgSecFmt(Math.round((new Date(l.actual_end)-new Date(l.actual_start))/1000)):'';
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#16a34a"></i> Wrap up — '+esc2(l.title)+'</div><div class="tp-sub">'+esc2(dateIST)+' · Offline</div></div>'
+      +'</div>'
+      +'<div class="tp-card">'
+        +'<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Date (IST): <b>'+esc2(dateIST)+'</b></div>'
+        +(recRange?('<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> Recording: <b>'+esc2(recRange)+'</b>'+(durTxt?(' <span style="color:var(--slate)">('+esc2(durTxt)+')</span>'):'')+' <span style="color:var(--slate);font-size:12px">IST</span></div>'):'')
+      +'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3><div id="mtgWrapTranscript">'+mtgTranscriptHtml(l)+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-users" style="color:#e0121c"></i> Members present <span style="color:#e0121c">*</span></h3>'
+        +'<p style="color:var(--slate);font-size:12.5px;margin:0 0 8px">Tick everyone who actually attended — this is required before saving.</p>'
+        +msWidget('mtgWrapMembers',memberList,presel)
+        +'<div id="mtgWrapMissing" style="margin-top:10px"></div>'
+      +'</div>'
+      +'<div class="wf-actions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button class="ac-btn primary" id="mtgWrapSave" onclick="mtgWrapSave()"><i class="fa-solid fa-floppy-disk"></i> Save to Logs</button></div>'
+      +'<div style="color:var(--slate);font-size:12px;margin-top:8px;text-align:right">Members are required — leaving without saving keeps this occurrence marked <b>Pending</b>.</div>';
+    const mb=document.getElementById('mtgWrapMembers'); if(mb){ mb.addEventListener('click',function(){ setTimeout(mtgWrapUpdateMissing,0); }); }
+    mtgWrapUpdateMissing();
+    mtgWrapPollTranscript(logId);
+  }
+  function mtgWrapUpdateMissing(){
+    const box=document.getElementById('mtgWrapMissing'); if(!box||!MTG_WRAP)return;
+    const present=(typeof msGet==='function'?msGet('mtgWrapMembers'):[]);
+    const presentL=present.map(function(e){return String(e).toLowerCase();});
+    const missing=(MTG_WRAP.invited||[]).filter(function(e){return presentL.indexOf(String(e).toLowerCase())===-1;});
+    if(missing.length){ box.innerHTML='<div class="mtg-miss"><i class="fa-solid fa-user-xmark"></i> Invited but not ticked present: '+missing.map(function(e){return esc2(nameOf(MTG_WRAP.people,e)||e);}).join(', ')+'</div>'; }
+    else box.innerHTML='';
+  }
+  function mtgWrapPollTranscript(logId){
+    let n=0;
+    const iv=setInterval(async function(){
+      n++;
+      const el=document.getElementById('mtgWrapTranscript');
+      if(!el||n>120){ clearInterval(iv); return; }
+      try{ const {data}=await ACC().from('meeting_logs').select('transcript,transcript_status').eq('id',logId).maybeSingle();
+        if(data){ el.innerHTML=mtgTranscriptHtml(data); if(data.transcript_status==='ready'||data.transcript_status==='failed'||data.transcript_status==='none'){ clearInterval(iv); } }
+      }catch(e){}
+    },5000);
+  }
+  window.mtgWrapSave=async function(){
+    if(!MTG_WRAP)return;
+    const present=(typeof msGet==='function'?msGet('mtgWrapMembers'):[]);
+    if(!present.length){ toast('Add at least the members who attended before saving.','warn'); mtgWrapUpdateMissing(); return; }
+    const btn=$('mtgWrapSave'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
+    const resp=await mtgRecCall({action:'save-members',log_id:MTG_WRAP.logId,present_emails:present});
+    if(!resp||!resp.ok){ toast('Could not save: '+((resp&&resp.error)||'unknown error'),'err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save to Logs';} return; }
+    toast('Saved to Logs','ok');
+    const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
+    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
+    else navTo('tasks/meetings/log/'+lid);
+  };
+
+  /* ---------- WAY A: in-browser transcription worker (transformers.js, WASM/WebGPU) ----------
+     Distributed & free: whichever logged-in DESKTOP browser has the portal open picks up pending
+     offline-meeting recordings, transcribes them locally (no install, no dedicated machine), and
+     posts the text back. Jobs are claimed atomically server-side so two open browsers never do the
+     same one. Gated to desktop + visible tab to avoid draining phones / background machines. */
+  const WT_CDN='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3';
+  const WT_MODEL='onnx-community/whisper-base';   // multilingual (hi/en/bn); small enough for browsers
+  let WT_started=false, WT_pipe=null, WT_pipePromise=null, WT_busy=false;
+  function wtIsMobile(){ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent||''); }
+  function wtChip(show,txt){
+    let c=document.getElementById('wtChip');
+    if(!show){ if(c)c.remove(); return; }
+    mtgInjectRecCss();
+    if(!c){ c=document.createElement('div'); c.id='wtChip'; c.style.cssText='position:fixed;bottom:16px;right:16px;z-index:9999;background:#0a0a0c;color:#fff;border:1px solid rgba(224,18,28,.5);border-radius:10px;padding:8px 12px;font:600 12px Segoe UI,Arial,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.28);display:flex;align-items:center;gap:8px'; document.body.appendChild(c); }
+    c.innerHTML='<span style="width:8px;height:8px;border-radius:50%;background:#e0121c;display:inline-block;animation:mtgpulse 1.2s infinite"></span> '+esc2(txt);
+  }
+  async function wtLoadPipe(){
+    if(WT_pipe) return WT_pipe;
+    if(WT_pipePromise) return WT_pipePromise;
+    WT_pipePromise=(async function(){
+      const mod=await import(WT_CDN);
+      const opts={};
+      try{ if(navigator.gpu) opts.device='webgpu'; }catch(_e){}
+      WT_pipe=await mod.pipeline('automatic-speech-recognition', WT_MODEL, opts);
+      return WT_pipe;
+    })();
+    return WT_pipePromise;
+  }
+  async function wtDecode(url){
+    const res=await fetch(url); if(!res.ok) throw new Error('audio fetch '+res.status);
+    const buf=await res.arrayBuffer();
+    const AC=window.AudioContext||window.webkitAudioContext;
+    const ctx=new AC({sampleRate:16000});
+    const audio=await ctx.decodeAudioData(buf);
+    const data=audio.getChannelData(0).slice();
+    try{ ctx.close(); }catch(_e){}
+    return data;
+  }
+  async function wtTick(){
+    if(!WT_started) return;
+    const again=function(ms){ setTimeout(wtTick,ms); };
+    if(document.visibilityState!=='visible' || WT_busy){ return again(15000); }
+    let job=null;
+    try{ const r=await mtgRecCall({action:'claim-transcription'}); if(r&&r.log_id)job=r; }catch(_e){}
+    if(!job){ return again(60000); }
+    WT_busy=true; wtChip(true,'Transcribing a meeting…');
+    try{
+      const pipe=await wtLoadPipe();
+      let src=job.audio_url;
+      if(typeof src==='string' && src.indexOf('s3:')===0){ const {data}=await s3Sign('get',src.slice(3)); src=data&&data.url; }
+      if(!src) throw new Error('no audio url');
+      const audio=await wtDecode(src);
+      const out=await pipe(audio,{chunk_length_s:30,stride_length_s:5,task:'transcribe'});
+      const text=(out&&out.text!=null?String(out.text):'').trim();
+      await mtgRecCall({action:'save-transcript',log_id:job.log_id,transcript:text,status:'ready'});
+    }catch(e){
+      // release the job so another browser/attempt can try (claim() gives up after 3 tries)
+      try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
+    }finally{ WT_busy=false; wtChip(false); again(3000); }
+  }
+  function mtgStartBrowserTranscriber(){
+    if(WT_started) return;
+    if(wtIsMobile()) return;                                   // don't drain phones/tablets
+    if(!(window.AudioContext||window.webkitAudioContext)) return;
+    if(typeof me!=='function' || !me()) return;                // only for a signed-in user
+    WT_started=true;
+    setTimeout(wtTick, 8000);                                  // begin shortly after load
+  }
+
   function mtgRenderOnly(){
+    try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
     if(GOOGLE_CONNECTED!==true){
       const myEmail=me();
@@ -2390,10 +2828,17 @@
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
-    const doneDate=(opt.showDoneDate&&t.completed_at)?`<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Marked done ${fmtDate(t.completed_at)}`:'';
-    const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:'',doneDate].filter(Boolean);
-    const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${emails.length?avatars(list,emails):''}</div>${approve}</div>`;
+    let meta='', doneBadge2='';
+    if(opt.showDoneDate){
+      // Awaiting Approval rows: only the marked-done date (date icon) + on-time/overdue badge + members.
+      const dd=t.completed_at?`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`:'';
+      meta=dd?`<div class="rtd">${dd}</div>`:'';
+      doneBadge2=dueBadge(t.due_date,t.completed_at);
+    } else {
+      const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:''].filter(Boolean);
+      meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
+    }
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${emails.length?avatars(list,emails):''}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
@@ -2838,6 +3283,7 @@
 
   function init(){
     injectCss(); wireBell(); notifLoad(); setInterval(notifLoad,45000); window.addEventListener('focus',notifLoad);
+    try{ mtgStartBrowserTranscriber(); }catch(e){}
     try{
       const qs=new URLSearchParams(location.search);
       const g=qs.get('google');
