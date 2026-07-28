@@ -6795,7 +6795,7 @@ VIEWS.compliance=function(v,seg){
 let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta';
 const CMP_PRESETS=[['today','Today'],['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_14d','Last 14 days'],['last_month','Last month'],['last_year','Last year'],['custom','Custom']];
 window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
-function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button></div></div>';}
+function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button><button class="seg-btn'+(CMP_SOURCE==='both'?' on':'')+'" onclick="cmpSetSource(\'both\')"><i class="fa-solid fa-layer-group"></i> &nbsp;Both</button></div></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
 window.cmpSetCustom=function(){const s=$('cmpSince')&&$('cmpSince').value,u=$('cmpUntil')&&$('cmpUntil').value;if(!s||!u){toast('Pick both dates','err');return;}if(s>u){toast('Start date must be before end date','err');return;}CMP_SINCE=s;CMP_UNTIL=u;CMP_PERIOD='custom';renderPage();};
 window.cmpSetAdProject=function(v){CMP_AD_PROJECT=v;CMP_AD_PAGE=0;renderPage();};
@@ -6881,6 +6881,81 @@ window.cmpShowProjectAds=function(accId){
     'lg'
   );
 };
+async function cmpBothView(v,seg){
+  const tabs=['Overview','By source'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
+  const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
+  const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
+    try{
+      const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+      const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+      const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
+      const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      await Promise.all([
+        fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
+        fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
+      ]);
+    }catch(e){}
+  }
+  const C=function(){return sb.schema('camp');};
+  let mIns=[],gIns=[];
+  try{ const r=await Promise.all([C().from('campaign_insights').select('spend,impressions,clicks,leads').eq('period',periodKey),C().from('g_campaign_insights').select('spend,impressions,clicks,conversions').eq('period',periodKey)]); mIns=r[0].data||[];gIns=r[1].data||[]; }catch(e){}
+  const sum=function(arr,k){return arr.reduce(function(s,x){return s+(Number(x[k])||0);},0);};
+  const M={spend:sum(mIns,'spend'),res:sum(mIns,'leads'),impr:sum(mIns,'impressions'),clk:sum(mIns,'clicks')};
+  const Gg={spend:sum(gIns,'spend'),res:sum(gIns,'conversions'),impr:sum(gIns,'impressions'),clk:sum(gIns,'clicks')};
+  const T={spend:M.spend+Gg.spend,res:M.res+Gg.res,impr:M.impr+Gg.impr,clk:M.clk+Gg.clk};
+  const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
+  const num=function(n){return Number(n||0).toLocaleString('en-IN');};
+  const cmpCss='<style>'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
+    +'@media(max-width:1100px){.cmp-kpis{grid-template-columns:repeat(3,1fr)}}'
+    +'@media(max-width:640px){.cmp-kpis{grid-template-columns:repeat(2,1fr);gap:10px}.cmp-kpi{padding:12px 13px}.cmp-kpi .kv{font-size:20px}.cmp-kpi .ki{width:30px;height:30px;font-size:13px}}'
+    +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
+    +'.cmp-kpi::before{content:\"\";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#334155)}'
+    +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
+    +'.cmp-kpi .ki{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--kbg,#f1f5f9);color:var(--kc,#334155)}'
+    +'.cmp-kpi .kl{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--slate)}'
+    +'.cmp-kpi .kv{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--ink,#0f172a);margin-top:12px;line-height:1}'
+    +'.cmp-kpi .ks{font-size:11.5px;color:var(--slate);margin-top:5px;min-height:14px}'
+    +'.cmp-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+    +'@media(max-width:900px){.cmp-charts{grid-template-columns:1fr}}'
+    +'.cmp-chcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}'
+    +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
+    +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+    +'</style>';
+  const cmpKpi=function(iconCls,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="'+iconCls+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const cpr=T.res?T.spend/T.res:null;
+  const kpiStrip='<div class="cmp-kpis">'
+    +cmpKpi('fa-solid fa-indian-rupee-sign','Total Spend',inr(T.spend),'Meta + Google','#334155','#f1f5f9')
+    +cmpKpi('fa-solid fa-bullseye','Total Results',num(Math.round(T.res)),'leads + conversions','#0d9488','#f0fdfa')
+    +cmpKpi('fa-solid fa-tags','Cost / Result',cpr!=null?inr(cpr):'—','blended','#0ea5e9','#f0f9ff')
+    +cmpKpi('fa-solid fa-eye','Impressions',num(T.impr),'','#7c3aed','#f5f3ff')
+    +cmpKpi('fa-solid fa-hand-pointer','Clicks',num(T.clk),'','#2563eb','#eff6ff')
+    +cmpKpi('fa-brands fa-facebook','Meta Spend',inr(M.spend),T.spend?Math.round(M.spend/T.spend*100)+'% of spend':'','#1877f2','#eff6ff')
+    +cmpKpi('fa-brands fa-google','Google Spend',inr(Gg.spend),T.spend?Math.round(Gg.spend/T.spend*100)+'% of spend':'','#ea4335','#fef2f2')
+    +'</div>';
+  let body;
+  if(ti===0){
+    body='<div class="cmp-charts">'
+      +'<div class="cmp-chcard"><h4>Spend: Meta vs Google</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="bCh1"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Results: Meta vs Google</h4><div class="sub">leads + conversions</div><div style="height:260px"><canvas id="bCh2"></canvas></div></div>'
+      +'</div>';
+  } else {
+    const rowT=function(label,d,trStyle){const c=d.res?d.spend/d.res:null;const ctr=d.impr?d.clk/d.impr*100:0;return '<tr'+(trStyle?(' style="'+trStyle+'"'):'')+'><td style="font-weight:600">'+label+'</td><td style="text-align:right">'+inr(d.spend)+'</td><td style="text-align:right">'+num(Math.round(d.res))+'</td><td style="text-align:right">'+(c!=null?inr(c):'—')+'</td><td style="text-align:right">'+num(d.impr)+'</td><td style="text-align:right">'+num(d.clk)+'</td><td style="text-align:right">'+ctr.toFixed(2)+'%</td></tr>';};
+    body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Source','Spend','Results','Cost / Result','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'
+      +rowT('<i class="fa-brands fa-facebook" style="color:#1877f2"></i> &nbsp;Meta',M,'')
+      +rowT('<i class="fa-brands fa-google" style="color:#ea4335"></i> &nbsp;Google',Gg,'')
+      +rowT('Total',T,'background:#f8fafc;font-weight:700')
+      +'</tbody></table></div></div>';
+  }
+  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  if(ti===0&&window.Chart){setTimeout(function(){
+    const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
+    try{new Chart(document.getElementById('bCh1'),{type:'doughnut',data:{labels:['Meta','Google'],datasets:[{data:[M.spend,Gg.spend],backgroundColor:['#1877f2','#ea4335'],borderWidth:2,borderColor:'#fff'}]},options:opt});}catch(e){}
+    try{new Chart(document.getElementById('bCh2'),{type:'doughnut',data:{labels:['Meta','Google'],datasets:[{data:[M.res,Gg.res],backgroundColor:['#1877f2','#ea4335'],borderWidth:2,borderColor:'#fff'}]},options:opt});}catch(e){}
+  },60);}
+}
 async function cmpGoogleView(v,seg){
   const tabs=['Overview','By account','Campaigns'];const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
@@ -6912,7 +6987,9 @@ async function cmpGoogleView(v,seg){
   const tSpend=rows.reduce(function(s,r){return s+r.spend;},0),tImpr=rows.reduce(function(s,r){return s+r.impr;},0),tClk=rows.reduce(function(s,r){return s+r.clk;},0),tConv=rows.reduce(function(s,r){return s+r.conv;},0);
   const avgCtr=tImpr?tClk/tImpr*100:0,avgCpc=tClk?tSpend/tClk:null,cpl=tConv?tSpend/tConv:null;
   const cmpCss='<style>'
-    +'.cmp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:14px;margin:0 0 18px}'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
+    +'@media(max-width:1100px){.cmp-kpis{grid-template-columns:repeat(3,1fr)}}'
+    +'@media(max-width:640px){.cmp-kpis{grid-template-columns:repeat(2,1fr);gap:10px}.cmp-kpi{padding:12px 13px}.cmp-kpi .kv{font-size:20px}.cmp-kpi .ki{width:30px;height:30px;font-size:13px}}'
     +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
     +'.cmp-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#4285f4)}'
     +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
@@ -6966,6 +7043,7 @@ async function cmpGoogleView(v,seg){
 VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
+  if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
   const tabs=['Overview','By Project','Ads'];const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const needAd=ti===2;
@@ -7084,7 +7162,9 @@ VIEWS.campaigns=async function(v,seg){
   const avgCpc=totalClicks?(totalSpend/totalClicks):null;
   // Scoped premium styling for the dashboard (re-injected with the view; harmless to repeat).
   const cmpCss='<style>'
-    +'.cmp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:14px;margin:0 0 18px}'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
+    +'@media(max-width:1100px){.cmp-kpis{grid-template-columns:repeat(3,1fr)}}'
+    +'@media(max-width:640px){.cmp-kpis{grid-template-columns:repeat(2,1fr);gap:10px}.cmp-kpi{padding:12px 13px}.cmp-kpi .kv{font-size:20px}.cmp-kpi .ki{width:30px;height:30px;font-size:13px}}'
     +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
     +'.cmp-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#db2777)}'
     +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
