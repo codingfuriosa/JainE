@@ -6935,7 +6935,12 @@ VIEWS.campaigns=async function(v,seg){
   const totalCpl=totalLeads?(totalSpend/totalLeads):null;
   const kpis=[['Spend ('+periodLabel+')',inr(totalSpend),accounts.length+' projects'],['Results (Leads)',num(totalLeads),''],['Cost / Lead',totalCpl!=null?inr(totalCpl):'—','',totalCpl!=null?'#16855a':'var(--slate)'],['Impressions',num(totalImpr),''],['Avg CTR',avgCtr.toFixed(2)+'%','',avgCtr>=1?'#16855a':'#c2410c']];
   let body;
-  if(ti===0){ body='<div class="m2grid">'+mCard('Spend by project ('+periodLabel+')','<div style="height:260px"><canvas id="cmpCh1"></canvas></div><div style="text-align:center;color:var(--slate);font-size:11.5px;margin-top:8px">Click a bar for campaign-level detail</div>')+mCard('Results (Leads) by project ('+periodLabel+')','<div style="height:260px"><canvas id="cmpCh2"></canvas></div><div style="text-align:center;color:var(--slate);font-size:11.5px;margin-top:8px">Click a bar for campaign-level detail</div>')+'</div>'; }
+  if(ti===0){ body='<div class="cmp-charts">'
+      +'<div class="cmp-chcard"><h4>Spend by project</h4><div class="sub">'+esc(periodLabel)+' · click a bar for campaign detail</div><div style="height:260px"><canvas id="cmpCh1"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Results (Leads) by project</h4><div class="sub">'+esc(periodLabel)+' · click a bar for campaign detail</div><div style="height:260px"><canvas id="cmpCh2"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Spend share</h4><div class="sub">where the budget is going</div><div style="height:260px"><canvas id="cmpCh3"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Cost per lead by project</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="cmpCh4"></canvas></div></div>'
+    +'</div>'; }
   else if(ti===1){
     const sorted=projRows.slice().sort((a,b)=>b.spend-a.spend);
     body=sorted.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
@@ -6990,14 +6995,49 @@ VIEWS.campaigns=async function(v,seg){
     '</div>'):'';
     body=projFilterBar+tbl+pager;
   }
-  v.innerHTML=cmpPeriodBar()+mHead('fa-bullhorn','#db2777','Campaign Analytics')+mKpis(kpis)+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
+  const totalReach=projRows.reduce((s,r)=>s+r.reach,0);
+  const avgCpc=totalClicks?(totalSpend/totalClicks):null;
+  // Scoped premium styling for the dashboard (re-injected with the view; harmless to repeat).
+  const cmpCss='<style>'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:14px;margin:0 0 18px}'
+    +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
+    +'.cmp-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#db2777)}'
+    +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
+    +'.cmp-kpi .ki{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--kbg,#fdf2f8);color:var(--kc,#db2777)}'
+    +'.cmp-kpi .kl{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--slate)}'
+    +'.cmp-kpi .kv{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--ink,#0f172a);margin-top:12px;line-height:1}'
+    +'.cmp-kpi .ks{font-size:11.5px;color:var(--slate);margin-top:5px;min-height:14px}'
+    +'.cmp-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+    +'@media(max-width:900px){.cmp-charts{grid-template-columns:1fr}}'
+    +'.cmp-chcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}'
+    +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
+    +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+    +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
+    +'</style>';
+  const cmpKpi=function(icon,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const kpiStrip='<div class="cmp-kpis">'
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(totalSpend),accounts.length+' project'+(accounts.length===1?'':'s'),'#db2777','#fdf2f8')
+    +cmpKpi('fa-user-plus','Results (Leads)',num(totalLeads),totalLeads?'generated':'no leads yet','#7c3aed','#f5f3ff')
+    +cmpKpi('fa-tags','Cost / Lead',totalCpl!=null?inr(totalCpl):'—','lower is better','#0ea5e9','#f0f9ff')
+    +cmpKpi('fa-eye','Impressions',num(totalImpr),'','#0891b2','#ecfeff')
+    +cmpKpi('fa-users','Reach',num(totalReach),(totalReach&&totalImpr)?((totalImpr/totalReach).toFixed(1)+'x seen on avg'):'','#0d9488','#f0fdfa')
+    +cmpKpi('fa-hand-pointer','Clicks',num(totalClicks),'','#2563eb','#eff6ff')
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'below 1%','#16a34a','#f0fdf4')
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
+    +'</div>';
+  const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
+  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+syncCap+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
     const accIds=projRows.map(r=>r.acc.ad_account_id);
     const clickPt=function(evt,elements){if(elements&&elements.length){cmpShowProject(accIds[elements[0].index]);}};
     const hoverPt=function(evt,elements){if(evt&&evt.native&&evt.native.target)evt.native.target.style.cursor=elements.length?'pointer':'default';};
-    try{new Chart(document.getElementById('cmpCh1'),{type:'bar',data:{labels,datasets:[{label:'Spend (₹)',data:projRows.map(r=>r.spend),backgroundColor:'#db2777',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}}}});}catch(e){}
-    try{new Chart(document.getElementById('cmpCh2'),{type:'bar',data:{labels,datasets:[{label:'Results (Leads)',data:projRows.map(r=>r.leads),backgroundColor:'#0A2640',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}}}});}catch(e){}
+    const palette=['#db2777','#7c3aed','#2563eb','#0891b2','#0d9488','#16a34a','#c2410c','#eab308','#e11d48','#4f46e5'];
+    const gy={grid:{color:'#f1f5f9'},ticks:{font:{size:11}}},gx={grid:{display:false},ticks:{font:{size:11}}};
+    try{new Chart(document.getElementById('cmpCh1'),{type:'bar',data:{labels,datasets:[{label:'Spend (₹)',data:projRows.map(r=>r.spend),backgroundColor:'#db2777',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('cmpCh2'),{type:'bar',data:{labels,datasets:[{label:'Leads',data:projRows.map(r=>r.leads),backgroundColor:'#0A2640',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('cmpCh3'),{type:'doughnut',data:{labels,datasets:[{data:projRows.map(r=>r.spend),backgroundColor:labels.map(function(_,i){return palette[i%palette.length];}),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',onClick:clickPt,onHover:hoverPt,plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}});}catch(e){}
+    try{new Chart(document.getElementById('cmpCh4'),{type:'bar',data:{labels,datasets:[{label:'Cost / Lead (₹)',data:projRows.map(r=>r.cpl!=null?Math.round(r.cpl):0),backgroundColor:'#0ea5e9',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
   },60);}
 };
 VIEWS.scaling=function(v,seg){
