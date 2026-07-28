@@ -6792,8 +6792,10 @@ VIEWS.compliance=function(v,seg){
   else { body=mTable(['Item','Asset','Provider','Expiry','Status'],[['Lift AMC','Passenger lift','OTIS','Mar-27','Active'],['DG warranty','DG Set 250 kVA','Cummins','Dec-26','Active']]); }
   v.innerHTML=mHead('fa-calendar-check','#b45309','Renewals & Compliance')+mKpis(kpis)+mTabs('compliance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
-let CMP_PERIOD='last_7d',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0;
+let CMP_PERIOD='last_7d',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta';
 const CMP_PRESETS=[['today','Today'],['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_14d','Last 14 days'],['last_month','Last month'],['last_year','Last year'],['custom','Custom']];
+window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
+function cmpSourceBar(){return '<div class="seg" style="margin-bottom:12px"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
 window.cmpSetCustom=function(){const s=$('cmpSince')&&$('cmpSince').value,u=$('cmpUntil')&&$('cmpUntil').value;if(!s||!u){toast('Pick both dates','err');return;}if(s>u){toast('Start date must be before end date','err');return;}CMP_SINCE=s;CMP_UNTIL=u;CMP_PERIOD='custom';renderPage();};
 window.cmpSetAdProject=function(v){CMP_AD_PROJECT=v;CMP_AD_PAGE=0;renderPage();};
@@ -6879,10 +6881,93 @@ window.cmpShowProjectAds=function(accId){
     'lg'
   );
 };
+async function cmpGoogleView(v,seg){
+  const tabs=['Overview','By account','Campaigns'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
+  const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
+  const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  // Ask the Google Ads live function to refresh this period (it pulls fresh from Google, then we read the tables).
+  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
+    try{
+      const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+      const body=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(body)});
+    }catch(e){}
+  }
+  const G=function(){return sb.schema('camp');};
+  let accts=[],camps=[],ins=[];
+  try{
+    const r=await Promise.all([G().from('g_accounts').select('*').order('name'),G().from('g_campaigns').select('*'),G().from('g_campaign_insights').select('*').eq('period',periodKey)]);
+    accts=r[0].data||[];camps=r[1].data||[];ins=r[2].data||[];
+  }catch(e){}
+  const insMap={};ins.forEach(function(x){insMap[x.campaign_id]=x;});
+  const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
+  const num=function(n){return Number(n||0).toLocaleString('en-IN');};
+  const rows=accts.map(function(a){
+    const acs=camps.filter(function(c){return c.customer_id===a.customer_id;});
+    let spend=0,impr=0,clk=0,conv=0;
+    acs.forEach(function(c){const i=insMap[c.id];if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clk+=Number(i.clicks)||0;conv+=Number(i.conversions)||0;}});
+    return {a:a,campaigns:acs.length,spend:spend,impr:impr,clk:clk,conv:conv,ctr:impr?clk/impr*100:0,cpl:conv?spend/conv:null};
+  }).sort(function(x,y){return y.spend-x.spend;});
+  const tSpend=rows.reduce(function(s,r){return s+r.spend;},0),tImpr=rows.reduce(function(s,r){return s+r.impr;},0),tClk=rows.reduce(function(s,r){return s+r.clk;},0),tConv=rows.reduce(function(s,r){return s+r.conv;},0);
+  const avgCtr=tImpr?tClk/tImpr*100:0,avgCpc=tClk?tSpend/tClk:null,cpl=tConv?tSpend/tConv:null;
+  const cmpCss='<style>'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:14px;margin:0 0 18px}'
+    +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
+    +'.cmp-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#4285f4)}'
+    +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
+    +'.cmp-kpi .ki{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--kbg,#eff6ff);color:var(--kc,#4285f4)}'
+    +'.cmp-kpi .kl{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--slate)}'
+    +'.cmp-kpi .kv{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--ink,#0f172a);margin-top:12px;line-height:1}'
+    +'.cmp-kpi .ks{font-size:11.5px;color:var(--slate);margin-top:5px;min-height:14px}'
+    +'.cmp-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+    +'@media(max-width:900px){.cmp-charts{grid-template-columns:1fr}}'
+    +'.cmp-chcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}'
+    +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
+    +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+    +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
+    +'</style>';
+  const cmpKpi=function(icon,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const kpiStrip='<div class="cmp-kpis">'
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(tSpend),accts.length+' account'+(accts.length===1?'':'s'),'#4285f4','#eff6ff')
+    +cmpKpi('fa-bullseye','Conversions',num(Math.round(tConv)),tConv?'':'none yet','#0d9488','#f0fdfa')
+    +cmpKpi('fa-tags','Cost / Conv.',cpl!=null?inr(cpl):'—','lower is better','#0ea5e9','#f0f9ff')
+    +cmpKpi('fa-eye','Impressions',num(tImpr),'','#7c3aed','#f5f3ff')
+    +cmpKpi('fa-hand-pointer','Clicks',num(tClk),'','#2563eb','#eff6ff')
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'','#16a34a','#f0fdf4')
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
+    +'</div>';
+  const cap='<div class="cmp-cap"><i class="fa-brands fa-google" style="color:#ea4335"></i> Live Google Ads · '+esc(periodLabel)+' · '+accts.length+' account'+(accts.length===1?'':'s')+'</div>';
+  let body;
+  if(ti===0){
+    body='<div class="cmp-charts">'
+      +'<div class="cmp-chcard"><h4>Spend by account</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="gCh1"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Conversions by account</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="gCh2"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Spend share</h4><div class="sub">where the budget goes</div><div style="height:260px"><canvas id="gCh3"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Cost per conversion by account</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="gCh4"></canvas></div></div>'
+      +'</div>';
+  } else if(ti===1){
+    body=rows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Account','Campaigns','Spend','Conversions','Cost / Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.a.name)+'</td><td style="text-align:right">'+r.campaigns+'</td><td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(r.conv))+'</td><td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td><td style="text-align:right">'+num(r.impr)+'</td><td style="text-align:right">'+num(r.clk)+'</td><td style="text-align:right">'+r.ctr.toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No Google Ads data for this period</div></div>';
+  } else {
+    const crow=camps.map(function(c){const i=insMap[c.id]||{};const acc=accts.find(function(a){return a.customer_id===c.customer_id;});return {c:c,i:i,acc:acc,spend:Number(i.spend)||0};}).filter(function(r){return r.acc&&insMap[r.c.id];}).sort(function(x,y){return y.spend-x.spend;}).slice(0,200);
+    body=crow.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Campaign','Account','Status','Spend','Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+crow.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.c.name)+'</td><td>'+esc(r.acc.name)+'</td><td>'+esc(String(r.c.status||'').replace('ENABLED','Active').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</td><td style="text-align:right">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(Number(r.i.conversions)||0))+'</td><td style="text-align:right">'+num(r.i.impressions)+'</td><td style="text-align:right">'+num(r.i.clicks)+'</td><td style="text-align:right">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No campaigns with data for this period</div></div>';
+  }
+  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cap+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  if(ti===0&&window.Chart){setTimeout(function(){
+    const labels=rows.map(function(r){return r.a.name;});
+    const palette=['#4285f4','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#2563eb','#0891b2'];
+    const gy={grid:{color:'#f1f5f9'},ticks:{font:{size:11}}},gx={grid:{display:false},ticks:{font:{size:11}}};
+    try{new Chart(document.getElementById('gCh1'),{type:'bar',data:{labels:labels,datasets:[{label:'Spend (₹)',data:rows.map(function(r){return r.spend;}),backgroundColor:'#4285f4',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('gCh2'),{type:'bar',data:{labels:labels,datasets:[{label:'Conversions',data:rows.map(function(r){return r.conv;}),backgroundColor:'#0d9488',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('gCh3'),{type:'doughnut',data:{labels:labels,datasets:[{data:rows.map(function(r){return r.spend;}),backgroundColor:labels.map(function(_,i){return palette[i%palette.length];}),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}});}catch(e){}
+    try{new Chart(document.getElementById('gCh4'),{type:'bar',data:{labels:labels,datasets:[{label:'Cost / Conv (₹)',data:rows.map(function(r){return r.cpl!=null?Math.round(r.cpl):0;}),backgroundColor:'#0ea5e9',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+  },60);}
+}
 VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
+  if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   const tabs=['Overview','By Project','Ads'];const ti=mTab(seg,tabs.length);
-  v.innerHTML=cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
+  v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const needAd=ti===2;
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
@@ -7026,7 +7111,7 @@ VIEWS.campaigns=async function(v,seg){
     +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
     +'</div>';
   const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+syncCap+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+syncCap+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
     const accIds=projRows.map(r=>r.acc.ad_account_id);
