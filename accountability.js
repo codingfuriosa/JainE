@@ -147,7 +147,7 @@
     .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
     .ac-addrow-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10)}
     .ac-addrow input{flex:1;border:1px solid var(--brand);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;box-shadow:0 0 0 3px var(--brand-a10)}
-    @media(hover:none){ .ac-in,.ac-addrow input{font-size:16px} }
+    @media(hover:none){ .ac-in,.ac-addrow input,input,select,textarea{font-size:16px} }
     .ac-chip{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
     .ac-c-Pending{background:#fef3c7;color:#92400e}.ac-c-Awaiting{background:#dbeafe;color:#1e40af}.ac-c-Completed{background:#dcfce7;color:#166534}
     /* calendar (Google-Calendar-inspired shell) */
@@ -620,7 +620,7 @@
       const c=parseD(completedAt); if(!c) return '';
       c.setHours(0,0,0,0);
       if(c.getTime()>d.getTime()) return '<span class="ac-chip" title="Overdue" style="background:#fee2e2;color:#b91c1c;margin-left:6px">O</span>';
-      return '<span class="ac-chip" style="background:#dcfce7;color:#15803d;margin-left:6px">On time</span>';
+      return ''; // completed on time (or early) — no badge, the row just shows normally
     }
     const today=new Date(); today.setHours(0,0,0,0);
     if(d.getTime()<today.getTime()) return '<span class="ac-chip" style="background:#fee2e2;color:#b91c1c;margin-left:6px">Overdue</span>';
@@ -632,8 +632,9 @@
     const emails=opt.ownerAvatar?[t.delegator].filter(Boolean):((asg&&asg[t.id])||[]);
     const metaParts=[];
     if(opt.showDoneDate){
-      // Completed / Archive rows: show only the marked-done date (date icon) — no tag/due-date.
+      // Completed / Archive rows: marked-done date + project tag (if any). Badge only when overdue.
       if(t.completed_at) metaParts.push(`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`);
+      if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
     } else {
       if(t._projName) metaParts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
       if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
@@ -2882,8 +2883,10 @@
     let meta='', doneBadge2='';
     if(opt.showDoneDate){
       // Awaiting Approval rows: only the marked-done date (date icon) + on-time/overdue badge + members.
-      const dd=t.completed_at?`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`:'';
-      meta=dd?`<div class="rtd">${dd}</div>`:'';
+      const parts=[];
+      if(t.completed_at) parts.push(`<span title="Marked done"><i class="fa-regular fa-calendar"></i> ${fmtDate(t.completed_at)}</span>`);
+      if(t._projName) parts.push(`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`);
+      meta=parts.length?`<div class="rtd">${parts.join(' · ')}</div>`:'';
       doneBadge2=dueBadge(t.due_date,t.completed_at);
     } else {
       const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:''].filter(Boolean);
