@@ -6792,10 +6792,10 @@ VIEWS.compliance=function(v,seg){
   else { body=mTable(['Item','Asset','Provider','Expiry','Status'],[['Lift AMC','Passenger lift','OTIS','Mar-27','Active'],['DG warranty','DG Set 250 kVA','Cummins','Dec-26','Active']]); }
   v.innerHTML=mHead('fa-calendar-check','#b45309','Renewals & Compliance')+mKpis(kpis)+mTabs('compliance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
-let CMP_PERIOD='last_7d',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta';
+let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta';
 const CMP_PRESETS=[['today','Today'],['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_14d','Last 14 days'],['last_month','Last month'],['last_year','Last year'],['custom','Custom']];
 window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
-function cmpSourceBar(){return '<div class="seg" style="margin-bottom:12px"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button></div>';}
+function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button></div></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
 window.cmpSetCustom=function(){const s=$('cmpSince')&&$('cmpSince').value,u=$('cmpUntil')&&$('cmpUntil').value;if(!s||!u){toast('Pick both dates','err');return;}if(s>u){toast('Start date must be before end date','err');return;}CMP_SINCE=s;CMP_UNTIL=u;CMP_PERIOD='custom';renderPage();};
 window.cmpSetAdProject=function(v){CMP_AD_PROJECT=v;CMP_AD_PAGE=0;renderPage();};
@@ -6952,7 +6952,7 @@ async function cmpGoogleView(v,seg){
     const crow=camps.map(function(c){const i=insMap[c.id]||{};const acc=accts.find(function(a){return a.customer_id===c.customer_id;});return {c:c,i:i,acc:acc,spend:Number(i.spend)||0};}).filter(function(r){return r.acc&&insMap[r.c.id];}).sort(function(x,y){return y.spend-x.spend;}).slice(0,200);
     body=crow.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Campaign','Account','Status','Spend','Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+crow.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.c.name)+'</td><td>'+esc(r.acc.name)+'</td><td>'+esc(String(r.c.status||'').replace('ENABLED','Active').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</td><td style="text-align:right">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(Number(r.i.conversions)||0))+'</td><td style="text-align:right">'+num(r.i.impressions)+'</td><td style="text-align:right">'+num(r.i.clicks)+'</td><td style="text-align:right">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No campaigns with data for this period</div></div>';
   }
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cap+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
     const palette=['#4285f4','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#2563eb','#0891b2'];
@@ -7111,7 +7111,7 @@ VIEWS.campaigns=async function(v,seg){
     +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
     +'</div>';
   const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+syncCap+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
     const accIds=projRows.map(r=>r.acc.ad_account_id);
