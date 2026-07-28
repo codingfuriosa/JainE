@@ -283,6 +283,14 @@ tbody tr.clk:hover{background:#f1f5fb}
 .frm input:focus,.frm select:focus,.frm textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.1)}
 .frm textarea{min-height:80px;resize:vertical}
 .frm .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* Mobile: iOS auto-zooms the page whenever you focus an input whose font is under 16px. Several
+   fields (search boxes, toolbars, the meeting/modal forms) use 13–13.5px, which triggered that
+   zoom on phones. On touch devices, force every text-entry control to 16px so focusing/typing no
+   longer zooms the screen. Text size only — layout is unchanged, and manual pinch-zoom still works. */
+@media(hover:none){
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),
+  select, textarea { font-size:16px !important; }
+}
 .dropzone{border:2px dashed #cbd5e1;border-radius:11px;padding:28px;text-align:center;color:var(--slate);cursor:pointer;transition:.13s}
 .dropzone:hover{border-color:var(--brand);background:var(--brand-50)}
 .dropzone i{font-size:26px;color:#94a3b8;margin-bottom:8px}
