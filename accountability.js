@@ -720,7 +720,7 @@
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
   function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
-  function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>52)s=s.slice(0,51)+'…'; return s; }
+  function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
 
   // Workflow-tab badge: number of workflow instances currently active for (awaiting an action from) the user.
@@ -951,14 +951,14 @@
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
-          if(cs&&(cs.status==='done'||cs.forwarded_at)) return '<td><span class="wf-cell ok"><i class="fa-solid fa-check"></i> Done</span></td>';
-          if(c.status!=='Done' && c.current_step===s.seq) return '<td><span class="wf-cell cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
-          return '<td><span class="wf-cell wait">—</span></td>';
+          if(cs&&(cs.status==='done'||cs.forwarded_at)) return '<td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>';
+          if(c.status!=='Done' && c.current_step===s.seq) return '<td><span class="wf-pill cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
+          return '<td><span class="wf-pill wait">·</span></td>';
         }).join('');
         const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':'<span class="ac-chip ac-c-Pending">Pending</span>';
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
           +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
-          +'<td><b>#'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
+          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span><span class="wf-card-hint">— tick one to edit, one or more to delete; click a row to see its progress</span>'
         +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
@@ -1025,7 +1025,7 @@
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Instance not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
-    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance #'+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':'<span class="ac-chip ac-c-Pending">In progress</span>')+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':'<span class="ac-chip ac-c-Pending">In progress</span>')+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true})||'')+'</div>'
       +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
@@ -1058,7 +1058,7 @@
     const editing=!!caseId;
     const src = editing ? (Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]) : (Array.isArray(flow.trigger_template)?flow.trigger_template:[]);
     const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t.label||'', editing?(t.value||''):'');}):[wfEvtRowHtml('','')]).join('');
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+(editing?('Edit instance #'+(caseRow.case_no||caseId)):'New instance')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+(editing?('Edit instance '+(caseRow.case_no||caseId)):'New instance')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
@@ -1089,7 +1089,11 @@
   };
 
 
-  function wfUpdateHtml(u){ const mine=eq(u.author,me()); return '<div class="wf-upd'+(mine?' me':'')+'"><span class="wf-upd-av" style="background:'+colorFor(u.author)+'">'+esc2(iniOf(wfNm(u.author)).toUpperCase())+'</span><div class="wf-upd-b"><div class="wf-upd-meta"><b>'+esc2(wfNm(u.author))+'</b> · '+wfDT(u.created_at)+'</div><div class="wf-upd-body">'+esc2(u.body)+'</div></div></div>'; }
+  function wfUpdateHtml(u){
+    if(u.system){ return '<div class="wf-upd-sys"><i class="fa-solid fa-circle-info"></i> '+esc2(wfNm(u.author))+' '+esc2(u.body)+' · '+wfDT(u.created_at)+'</div>'; }
+    const mine=eq(u.author,me());
+    return '<div class="wf-upd'+(mine?' me':'')+'"><span class="wf-upd-av" style="background:'+colorFor(u.author)+'">'+esc2(iniOf(wfNm(u.author)).toUpperCase())+'</span><div class="wf-upd-b"><div class="wf-upd-meta"><b>'+esc2(wfNm(u.author))+'</b> · '+wfDT(u.created_at)+'</div><div class="wf-upd-body">'+esc2(u.body)+'</div></div></div>';
+  }
 
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
   async function wfTaskPage(v, t, members, list, ro){
@@ -1124,7 +1128,7 @@
         A='<button class="ac-btn primary" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> Forward</button>';
       } else if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
-         +'<button class="ac-btn danger" onclick="wfReject('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
+         +'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
@@ -1149,10 +1153,12 @@
         +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback <span class="wf-hint" style="font-weight:600">— visible to everyone in this instance</span></h3>'
+      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback <span class="wf-hint" style="font-weight:600">— visible to everyone in this instance</span></h3>'
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
+        +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
       +'</div>';
+    if(window._wfAutoReject && window._wfAutoReject===fcs.id){ window._wfAutoReject=null; setTimeout(function(){ wfRejectStart(fcs.id, fcs.case_id); },60); }
   }
 
   // In-app confirm (no browser dialog, no keyboard shortcuts). opts:{title,body,okLabel,okClass,withNote,notePlaceholder,onOk(note)}
@@ -1204,14 +1210,23 @@
   };
 
   // Reject: an in-app note (Updates & Feedback) then bounce to the previous person
-  window.wfReject=function(fcsId, caseId){
-    wfConfirm({ title:'Reject this step?', body:'It will go back to the previous person. You can add a note for the team — it will be posted to Updates & Feedback.', okLabel:'Reject', okClass:'danger', withNote:true, notePlaceholder:'Reason for rejecting (optional)…', onOk:async function(note){
-      try{
-        if(note){ try{ await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:note}); }catch(e){} }
-        const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error;
-      }catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
-      toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
-    }});
+  // Reject flows through the Updates & Feedback section (no popup): scroll there, reveal the confirm bar.
+  window.wfRejectStart=function(fcsId, caseId){
+    const card=$('wfUpdCard'), bar=$('wfRejectBar'), inp=$('wfUpdIn');
+    if(bar) bar.style.display='';
+    if(card){ try{ card.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){ card.scrollIntoView(); } }
+    if(inp){ inp.placeholder='Reason for rejecting (optional)…'; try{ inp.focus(); }catch(_){} }
+  };
+  window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; const inp=$('wfUpdIn'); if(inp) inp.placeholder='Write an update…'; };
+  // Called from a task-list row: open the task, then auto-start the reject flow there.
+  window.wfRowReject=function(fcsId, caseId, taskId){ window._wfAutoReject=fcsId; navTo('tasks/task/'+taskId); };
+  window.wfDoReject=async function(fcsId, caseId){
+    const inp=$('wfUpdIn'); const note=(inp&&inp.value||'').trim();
+    try{
+      if(note){ try{ await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:note}); }catch(e){} }
+      const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error;
+    }catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
@@ -1327,7 +1342,13 @@
     .wf-itable tbody tr.sel{background:var(--brand-a10,#eef2ff)}
     .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
     .wf-itable tbody tr:last-child td{border-bottom:0}
-    .wf-trigcell{white-space:normal;max-width:240px}
+    .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+    .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+    .wf-pill.ok{background:#dcfce7;color:#166534}
+    .wf-pill.cur{background:#dbeafe;color:#1e40af}
+    .wf-pill.wait{background:#f1f5f9;color:#cbd5e1;padding:3px 12px}
+    .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
+    .wf-upd-sys i{opacity:.6;margin-right:4px}
     .wf-inst-tools{margin-left:auto;display:flex;gap:6px}
     .wf-chk-col{width:36px;text-align:center;white-space:nowrap}
     .wf-inst-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
@@ -1352,6 +1373,8 @@
     .wf-upd-body{font-size:13.5px;color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word}
     .wf-updbar{display:flex;gap:8px}
     .wf-updbar .ac-in{flex:1}
+    .wf-reject-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:600;margin-bottom:10px}
+    .wf-reject-acts{display:flex;gap:7px;flex:none}
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
     @media(max-width:640px){
@@ -3013,6 +3036,18 @@
     const b=$('acBody');
     const [list,{tasks,asg,pm},myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
     const delegatedByMeIds=new Set(tasks.filter(t=>t.parent_task_id&&isOwner(t)).map(t=>t.parent_task_id));
+    // Workflow step state (per-task) so rows can show Forward vs Receive/Reject correctly
+    window._wfStepInfo={};
+    try{
+      const wfIds=tasks.filter(function(t){return t.flow_case_step_id!=null;}).map(function(t){return t.flow_case_step_id;});
+      if(wfIds.length){
+        const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at').in('id',wfIds);
+        const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
+        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        const bounds={}; allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; });
+        (steps||[]).forEach(function(s){ const bb=bounds[s.case_id]||{min:s.seq,max:s.seq}; window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,minSeq:bb.min,maxSeq:bb.max}; });
+      }
+    }catch(e){ window._wfStepInfo={}; }
 
     /* Combined per-card order: tasks you've already ranked (drag-and-dropped) come after
        tasks you haven't touched yet — untouched ones default to top priority ("A"),
@@ -3374,9 +3409,15 @@
     opt=opt||{};
     const emails=(opt.ownerAvatar&&!opt.owner)?[t.delegator].filter(Boolean):(asg[t.id]||[]);
     const approve=opt.approve?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`:'';
+    const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
+    const wfFirst=wfInfo&&wfInfo.seq===wfInfo.minSeq;
+    const wfReceived=wfInfo&&!!wfInfo.received_at;
+    const wfNeedsReceive=wfInfo&&!wfFirst&&!wfReceived;
     const chk=opt.checkable?(t.flow_case_step_id!=null
-      ? `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`
+      ? (wfNeedsReceive ? ''
+         : `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`)
       : `<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`):'';
+    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button></div>`:'';
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
@@ -3396,7 +3437,7 @@
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}${wfRR}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
