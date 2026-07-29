@@ -1140,7 +1140,7 @@
     let takenTxt='—'; if(fcs.received_at&&fcs.forwarded_at) takenTxt=wfHms(new Date(fcs.forwarded_at)-new Date(fcs.received_at)); else if(fcs.received_at) takenTxt='running · '+wfHms(Date.now()-new Date(fcs.received_at));
     const person=fcs.person;
     v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(t.title)+'</div>'
-      +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2((flow&&flow.name)||'Workflow')+'</div></div>'
+      +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
