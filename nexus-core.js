@@ -7388,47 +7388,63 @@ window.trDelete=async function(id){
 };
 
 window.trUploadModal=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload recordings</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body frm">'
-    +'<label>Title <span style="color:var(--slate);font-weight:400">(optional)</span></label>'
+    +'<label>Title <span style="color:var(--slate);font-weight:400">(optional — used when you upload a single file)</span></label>'
     +'<input type="text" id="trTitle" class="sel" placeholder="e.g. Sales sync — 28 Jul">'
-    +'<label style="margin-top:12px">Recording</label>'
-    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select an audio / video recording</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
-    +'<input type="file" id="trFile" class="hidden" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
+    +'<label style="margin-top:12px">Recordings</label>'
+    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — you can pick many at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
+    +'<input type="file" id="trFile" class="hidden" multiple accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
     +'<div id="trUpMsg" style="margin-top:10px"></div>'
     +'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trUpBtn" onclick="trUploadStart()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe</button></div>','md');
 };
-window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();buf.items.add(dt.files[0]);inp.files=buf.files;trUpPick();};
-window.trUpPick=function(){const f=($('trFile').files||[])[0];$('trUpName').textContent=f?f.name:'Drag & drop or click to select an audio / video recording';const btn=$('trUpBtn');if(btn)btn.disabled=!f;};
-window.trUploadStart=async function(){
-  const f=($('trFile').files||[])[0];
-  if(!f){toast('Select a recording first','err');return;}
-  const title=($('trTitle').value||'').trim();
-  const btn=$('trUpBtn');btn.disabled=true;
-  const msg=$('trUpMsg');
-  const setMsg=function(html){if(msg)msg.innerHTML=html;};
-  setMsg('<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" id="trUpFill" style="width:0%"></div></div><div class="psa-progress-label" id="trUpLbl">Uploading…</div></div>');
-  try{
-    const key=s3KeyForTranscription(f.name);
-    const up=await uploadFileToS3(key,f,function(p){const fill=$('trUpFill');if(fill)fill.style.width=p+'%';const l=$('trUpLbl');if(l)l.textContent='Uploading… '+p+'%';});
-    if(!up||!up.data||!up.data.path){throw new Error((up&&up.error&&up.error.message)||'Upload failed');}
-    const l=$('trUpLbl');if(l)l.textContent='Submitting to transcription engine…';
-    const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:up.data.path,title:title||null,name:f.name,size:f.size})});
-    const out=await res.json().catch(function(){return {};});
-    if(!res.ok||!out.row){throw new Error(out.error||'Could not start transcription');}
-    if(!TR_ROWS)TR_ROWS=[];
-    TR_ROWS.unshift(out.row);
-    closeModal();
-    toast('Uploaded — transcription in progress','ok');
-    if(PAGE==='transcription')renderPage();
-    trStartPolling(out.row.id);
-  }catch(e){
-    setMsg('<div class="tag t-red"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(String(e&&e.message||e))+'</div>');
-    if(btn)btn.disabled=false;
+window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();for(let i=0;i<dt.files.length;i++)buf.items.add(dt.files[i]);inp.files=buf.files;trUpPick();};
+window.trUpPick=function(){const files=($('trFile').files||[]);const n=files.length;$('trUpName').textContent=n?(n===1?files[0].name:(n+' files selected')):'Drag & drop or click to select recordings — you can pick many at once';const btn=$('trUpBtn');if(btn){btn.disabled=!n;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe'+(n>1?(' '+n+' files'):'');}};
+// Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
+// domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
+// fall back to the server-side proxy so it still uploads from anywhere.
+async function trUploadOne(f,token){
+  const key=s3KeyForTranscription(f.name);
+  let path=null;
+  try{ const up=await uploadFileToS3(key,f); if(up&&up.data&&up.data.path) path=up.data.path; }catch(_e){}
+  if(!path){
+    const up=await fetch(SUPABASE_URL+'/functions/v1/transcription-upload?key='+encodeURIComponent(key),{method:'POST',headers:{'Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY,'Content-Type':f.type||'application/octet-stream'},body:f});
+    const uj=await up.json().catch(function(){return {};});
+    if(!up.ok||!uj.path) throw new Error(uj.error||'upload failed');
+    path=uj.path;
   }
+  return path;
+}
+window.trUploadStart=async function(){
+  const files=Array.prototype.slice.call(($('trFile').files)||[]);
+  if(!files.length){toast('Select at least one recording','err');return;}
+  const title=($('trTitle').value||'').trim();
+  const btn=$('trUpBtn');if(btn)btn.disabled=true;
+  const msg=$('trUpMsg');
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  let done=0,failed=0;
+  const paint=function(cur){const pct=Math.round((done+failed)/files.length*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">'+esc(cur||('Processed '+(done+failed)+' of '+files.length))+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
+  paint('Starting…');
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    paint('Uploading '+(i+1)+' of '+files.length+': '+f.name);
+    try{
+      const path=await trUploadOne(f,token);
+      const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,title:(files.length===1?(title||null):null),name:f.name,size:f.size})});
+      const out=await res.json().catch(function(){return {};});
+      if(!res.ok||!out.row) throw new Error(out.error||'could not start');
+      if(!TR_ROWS)TR_ROWS=[];
+      TR_ROWS.unshift(out.row);
+      trStartPolling(out.row.id);
+      done++;
+    }catch(e){ failed++; }
+    paint();
+  }
+  toast(done+' recording'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
+  closeModal();
+  if(PAGE==='transcription')renderPage();
 };
 
 async function trDetail(v,id){
