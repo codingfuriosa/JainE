@@ -952,10 +952,10 @@
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
           if(cs&&(cs.status==='done'||cs.forwarded_at)) return '<td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>';
-          if(c.status!=='Done' && c.current_step===s.seq) return '<td><span class="wf-pill cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
+          if(c.status==='Pending' && c.current_step===s.seq) return '<td><span class="wf-pill cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
           return '<td><span class="wf-pill wait">·</span></td>';
         }).join('');
-        const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':'<span class="ac-chip ac-c-Pending">Pending</span>';
+        const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">Pending</span>');
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
           +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
@@ -1025,7 +1025,7 @@
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Instance not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
-    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':'<span class="ac-chip ac-c-Pending">In progress</span>')+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true})||'')+'</div>'
       +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
@@ -1124,9 +1124,7 @@
         A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
       }
     } else if(amAssignee && caseActive){
-      if(isFirst){
-        A='<button class="ac-btn primary" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> Forward</button>';
-      } else if(!received){
+      if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
          +'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
       } else {
@@ -3410,9 +3408,8 @@
     const emails=(opt.ownerAvatar&&!opt.owner)?[t.delegator].filter(Boolean):(asg[t.id]||[]);
     const approve=opt.approve?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`:'';
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
-    const wfFirst=wfInfo&&wfInfo.seq===wfInfo.minSeq;
     const wfReceived=wfInfo&&!!wfInfo.received_at;
-    const wfNeedsReceive=wfInfo&&!wfFirst&&!wfReceived;
+    const wfNeedsReceive=wfInfo&&!wfReceived;
     const chk=opt.checkable?(t.flow_case_step_id!=null
       ? (wfNeedsReceive ? ''
          : `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`)
