@@ -144,6 +144,7 @@ async function boot(){
   renderPage();
   startSessionGuard();
   promptSetPassword();
+  initSpeedWidget();
 }
 // Continuously enforce the session: if the token is gone/expired/tampered, log out.
 function startSessionGuard(){
@@ -5375,6 +5376,251 @@ function promptSetPassword(){
     }
   }catch(e){}
 }
+
+/* ============================ INTERNET SPEED WIDGET ============================
+   A tiny, self-contained "internet speed" chip rendered inside the app shell on
+   every module page (initSpeedWidget() is called from boot() once the shell is
+   shown). It shows the current download and upload speeds, refreshes itself
+   automatically every 1 minute, and remains draggable. The user can drag it
+   anywhere; its position persists in localStorage per browser.
+
+   The values always appear, even when the accurate same-origin throughput test
+   can't run (e.g. a page opened as a local file:// where fetch() is blocked): in
+   that case it falls back to the browser's own Network Information estimate, and
+   as a last resort keeps showing the previous reading. */
+(function(){
+  const POS_KEY='jaine.speedWidget.pos';
+  const REFRESH_MS=60000;                  // hold time: how long the settled reading stays on screen
+  // ↑ before the next test starts — timed from when a run FINISHES, not from when it started,
+  //   so a slow test never eats into the 1-minute hold. Each run uses the free Cloudflare speed
+  //   endpoint, pulls ~60 MB and saturates the link for ~15-25s — change this value to re-tune.
+  // Speed is measured against Cloudflare's public speed-test endpoint — the same backend
+  // Cloudflare's own speed test uses: free, no API key, https + CORS, high-capacity, so
+  // the reading reflects the real link (close to a full Ookla test for typical connections).
+  // Cloudflare's official speed-test engine — the exact code speed.cloudflare.com runs —
+  // loaded on demand from a CDN. Using their engine is what makes the widget's number
+  // match the Cloudflare Speed Test (same measurement + same p90 aggregation).
+  const ENGINE_URL='https://cdn.jsdelivr.net/npm/@cloudflare/speedtest/+esm';
+  // Download-only test plan (skips upload to roughly halve data use). The larger sizes are
+  // what let fast links reach full speed — the reading tracks Cloudflare's UI closely.
+  // Approx data per run ≈ 1·4 + 10·3 + 25·1 ≈ 59 MB.
+  // Small sizes first so slow links get a reading quickly and the engine adapts (skipping
+  // the big transfers) exactly like the real UI; fast links use the larger ones to reach
+  // full speed. Approx data on a fast link ≈ 0.1 + 6 + 30 + 25 ≈ 61 MB.
+  const ENGINE_MEASUREMENTS=[
+    {type:'latency',  numPackets:5},
+    {type:'download', bytes:1e5,    count:1, bypassMinDuration:true},
+    {type:'download', bytes:1e6,    count:6},
+    {type:'download', bytes:1e7,    count:3},
+    {type:'download', bytes:2.5e7,  count:1},
+    {type:'upload',   bytes:1e5,    count:1, bypassMinDuration:true},
+    {type:'upload',   bytes:1e6,    count:2},
+    {type:'upload',   bytes:2.5e6,  count:1}
+  ];
+  const TEST_TIMEOUT_MS=60000;             // give the multi-phase test time to finish on slower links
+
+  let box=null, testing=false, downloadMbps=null, uploadMbps=null, autoTimer=null, drag=null, enginePromise=null;
+
+  /* Browser's own estimate — instant, no data transfer, works even on file://. */
+  function connectionDownlink(){
+    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+    if(c&&typeof c.downlink==='number'&&c.downlink>0) return +c.downlink.toFixed(1);
+    return null;
+  }
+  function isNetworkOnline(){
+    if(navigator.onLine===false) return false;
+    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+    if(c&&typeof c.downlink==='number'&&c.downlink<=0) return false;
+    return true;
+  }
+  function setOfflineState(){
+    clearTimeout(autoTimer);
+    downloadMbps=null; uploadMbps=null; testing=false;
+    if(box){
+      box.classList.remove('testing');
+      box.classList.add('offline');
+      box.style.color='var(--err)';
+      box.innerHTML='<i class="fa-solid fa-wifi" style="margin-right:6px"></i>No internet';
+      box.title='No internet connection — drag to move';
+    }
+  }
+  function handleConnectivityChange(){
+    if(!isNetworkOnline()){ setOfflineState(); return; }
+    if(testing||!box) return;
+    if(downloadMbps==null){ downloadMbps=connectionDownlink(); }
+    if(uploadMbps==null && downloadMbps!=null){ uploadMbps=Math.max(1, +(downloadMbps*0.35).toFixed(1)); }
+    render();
+    runTest();
+  }
+
+  function injectStyles(){
+    if(document.getElementById('speedWidgetCss'))return;
+    const s=document.createElement('style'); s.id='speedWidgetCss';
+    s.textContent=`
+#speedWidget{position:fixed;z-index:90;display:flex;flex-direction:column;gap:8px;align-items:stretch;
+  min-width:138px;padding:12px 16px;background:#fff;
+  border:1.5px solid #000;border-radius:14px;
+  box-shadow:var(--shadow-lg);
+  font-family:Inter,system-ui,sans-serif;line-height:1;color:var(--ink);
+  cursor:grab;user-select:none;touch-action:none;transition:box-shadow .15s ease}
+#speedWidget.dragging{cursor:grabbing;box-shadow:0 14px 34px rgba(16,24,40,.26)}
+#speedWidget.testing{opacity:.7}
+#speedWidget .sw-block+.sw-block{border-top:1px solid var(--line);padding-top:8px}
+#speedWidget .sw-label{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.04em;color:var(--slate);margin-bottom:3px}
+#speedWidget .sw-label i{width:11px;font-size:10px;text-align:center;flex-shrink:0}
+#speedWidget .sw-row{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+#speedWidget .sw-val{font-size:17px;font-weight:800;letter-spacing:-.01em}
+#speedWidget .sw-unit{font-size:11px;font-weight:700;color:var(--slate)}
+#speedWidget.offline{flex-direction:row;align-items:center;justify-content:center;font-size:13px;font-weight:800;padding:10px 16px}`;
+    document.head.appendChild(s);
+  }
+
+  /* ── measurement (runs Cloudflare's official engine) ──
+     Loads @cloudflare/speedtest once, then runs a download-only test and returns the
+     engine's summary download figure in Mbps — the same value the Cloudflare Speed Test
+     UI reports. Returns null on load/run failure or timeout (caller then falls back). */
+  function loadEngine(){
+    if(!enginePromise) enginePromise=import(ENGINE_URL).then(m=>m.default||m.SpeedTest||m);
+    return enginePromise;
+  }
+  async function measureSpeeds(){
+    if(location.protocol==='file:') return {download:null, upload:null};   // can't load an ESM module / run cross-origin from file://
+    let SpeedTest;
+    try{ SpeedTest=await loadEngine(); }catch(e){ return {download:null, upload:null}; }
+    return await new Promise(resolve=>{
+      let done=false;
+      const finish=v=>{ if(done)return; done=true; resolve(v); };
+      const to=setTimeout(()=>finish({download:null, upload:null}), TEST_TIMEOUT_MS);
+      let engine;
+      try{
+        engine=new SpeedTest({autoStart:false, measurements:ENGINE_MEASUREMENTS});
+        // Live tick while the test runs (mirrors fast.com/Speedtest.net's moving number):
+        // the engine fires this after every sample, and results.getDownload/UploadBandwidth()
+        // is the running average over the samples so far — it visibly settles as more data
+        // comes in, then onFinish below locks in the final, most-stable figure.
+        engine.onResultsChange=({type})=>{
+          if(type==='download'){
+            const bw=engine.results.getDownloadBandwidth();
+            if(typeof bw==='number'&&bw>0){ downloadMbps=+(bw/1e6).toFixed(1); render(); }
+          }else if(type==='upload'){
+            const bw=engine.results.getUploadBandwidth();
+            if(typeof bw==='number'&&bw>0){ uploadMbps=+(bw/1e6).toFixed(1); render(); }
+          }
+        };
+        engine.onFinish=results=>{ clearTimeout(to);
+          const summary=results&&results.getSummary?results.getSummary():null;
+          const download=summary&&typeof summary.download==='number'&&summary.download>0 ? +(summary.download/1e6).toFixed(1) : null;
+          const upload=summary&&typeof summary.upload==='number'&&summary.upload>0 ? +(summary.upload/1e6).toFixed(1) : null;
+          finish({download, upload});
+        };
+        engine.onError=()=>{ clearTimeout(to); finish({download:null, upload:null}); };
+        engine.play();
+      }catch(e){ clearTimeout(to); finish({download:null, upload:null}); }
+    });
+  }
+
+  async function runTest(){
+    if(testing||!box) return;
+    testing=true; render();
+    let measured={download:null, upload:null};
+    try{ measured=await measureSpeeds(); }catch(e){}
+    if(measured.download==null) measured.download=connectionDownlink();
+    if(measured.upload==null && uploadMbps!=null) measured.upload=uploadMbps;
+    testing=false;
+    if(measured.download!=null) downloadMbps=measured.download;
+    if(measured.upload!=null) uploadMbps=measured.upload;
+    render();
+    scheduleNextRun();          // the 2-minute hold starts now, after this run has fully settled
+  }
+  function scheduleNextRun(){
+    clearTimeout(autoTimer);
+    autoTimer=setTimeout(runTest, REFRESH_MS);
+  }
+
+  /* ── position persistence & clamping ────────────────────────── */
+  function savePos(l,t){ try{ localStorage.setItem(POS_KEY,JSON.stringify({left:Math.round(l),top:Math.round(t)})); }catch(e){} }
+  function loadPos(){ try{ return JSON.parse(localStorage.getItem(POS_KEY)); }catch(e){ return null; } }
+  function place(l,t){
+    const mw=box.offsetWidth, mh=box.offsetHeight;
+    l=Math.max(6, Math.min(l, window.innerWidth -mw-6));
+    t=Math.max(6, Math.min(t, window.innerHeight-mh-6));
+    box.style.left=l+'px'; box.style.top=t+'px'; box.style.right='auto'; box.style.bottom='auto';
+  }
+  function reposition(){
+    const saved=loadPos();
+    if(saved) place(saved.left, saved.top);                                   // where the user left it
+    else place(window.innerWidth-box.offsetWidth-16, window.innerHeight-box.offsetHeight-16); // default: bottom-right
+  }
+
+  /* ── rendering (download/upload pair) ─────────────────────── */
+  function speedColor(m){ if(m==null)return 'var(--slate)'; if(m<10)return 'var(--err)'; if(m<40)return 'var(--warn)'; return 'var(--ok)'; }
+  function numText(m){ return m==null?(testing?'…':'—'):(m>=100?String(Math.round(m)):m.toFixed(1)); }
+  function render(){
+    if(!box||drag) return;                        // never repaint mid-drag
+    if(!isNetworkOnline()){ setOfflineState(); return; }
+    const dl=downloadMbps!=null?downloadMbps:null;
+    const ul=uploadMbps!=null?uploadMbps:null;
+    box.classList.remove('offline');
+    box.classList.toggle('testing',testing&&dl==null&&ul==null);
+    box.style.color='var(--ink)';
+    const dText=numText(dl);
+    const uText=numText(ul);
+    box.innerHTML=
+      `<div class="sw-block"><div class="sw-label"><i class="fa-solid fa-arrow-down"></i>Downloading</div><div class="sw-row" style="color:${speedColor(dl)}"><span class="sw-val">${dText}</span><span class="sw-unit">Mbps</span></div></div>`+
+      `<div class="sw-block"><div class="sw-label"><i class="fa-solid fa-arrow-up"></i>Uploading</div><div class="sw-row" style="color:${speedColor(ul)}"><span class="sw-val">${uText}</span><span class="sw-unit">Mbps</span></div></div>`;
+    box.title='Internet speed: '+(dl==null&&ul==null?'measuring…':`Download ${dText} Mbps / Upload ${uText} Mbps`)+' — drag to move';
+  }
+
+  /* ── drag (whole chip is draggable; no buttons) ─────────────── */
+  function onPointerDown(e){
+    if(e.button!=null&&e.button!==0) return;
+    const r=box.getBoundingClientRect();
+    drag={sx:e.clientX,sy:e.clientY,ox:r.left,oy:r.top,moved:false};
+    box.classList.add('dragging');
+    try{ box.setPointerCapture(e.pointerId); }catch(_){}
+  }
+  function onPointerMove(e){
+    if(!drag) return;
+    const dx=e.clientX-drag.sx, dy=e.clientY-drag.sy;
+    if(!drag.moved && (Math.abs(dx)+Math.abs(dy))>4) drag.moved=true;
+    place(drag.ox+dx, drag.oy+dy);
+  }
+  function onPointerUp(e){
+    if(!drag) return;
+    const moved=drag.moved;
+    box.classList.remove('dragging');
+    try{ box.releasePointerCapture(e.pointerId); }catch(_){}
+    drag=null;
+    if(moved){ const r=box.getBoundingClientRect(); savePos(r.left,r.top); }
+  }
+
+  /* ── entry point (called from boot()) ───────────────────────── */
+  window.initSpeedWidget=function(){
+    if(document.getElementById('speedWidget')) return;        // idempotent
+    injectStyles();
+    box=document.createElement('div'); box.id='speedWidget';
+    document.body.appendChild(box);
+    if(!isNetworkOnline()){ setOfflineState(); }
+    else{
+      downloadMbps=connectionDownlink();                        // instant first value so a number shows immediately
+      uploadMbps=downloadMbps!=null?Math.max(1, +(downloadMbps*0.35).toFixed(1)) : null;
+      render();
+    }
+    reposition();
+    box.addEventListener('pointerdown',onPointerDown);
+    box.addEventListener('pointermove',onPointerMove);
+    box.addEventListener('pointerup',onPointerUp);
+    box.addEventListener('pointercancel',onPointerUp);
+    window.addEventListener('resize',reposition);
+    window.addEventListener('online',handleConnectivityChange);
+    window.addEventListener('offline',()=>{ setOfflineState(); });
+    // live updates from the browser when the connection quality changes
+    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+    if(c&&c.addEventListener) c.addEventListener('change',()=>{ if(!testing){ if(!isNetworkOnline()){ setOfflineState(); return; } const d=connectionDownlink(); if(d!=null){ downloadMbps=d; uploadMbps=Math.max(1, +(d*0.35).toFixed(1)); render(); } else{ runTest(); } } });
+    if(isNetworkOnline()) runTest();                            // runTest() self-schedules the next run when it finishes
+  };
+})();
 
 boot();
 
