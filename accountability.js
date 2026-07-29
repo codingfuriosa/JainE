@@ -719,7 +719,7 @@
   function wfDT(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
-  function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || o.some(function(e){return eq(e,me());}); }
+  function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
   function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>52)s=s.slice(0,51)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
 
@@ -750,7 +750,9 @@
     // Member-only visibility: you see a workflow only if you created it or you own a step in it.
     flows=flows.filter(function(f){ return wfCanSee(f,ownersByFlow); });
     const rows=flows.map(function(f){
-      const n=stepCounts[f.id]||0; const owners=ownersByFlow[f.id]||[];
+      const n=stepCounts[f.id]||0;
+      const owners=(ownersByFlow[f.id]||[]).slice();
+      if(f.trigger_owner && !owners.some(function(e){return eq(e,f.trigger_owner);})) owners.unshift(f.trigger_owner);
       return '<div class="wf-lrow" onclick="wfOpen('+f.id+')">'
         +'<div class="wf-lrow-main">'
           +'<div class="wf-lrow-name">'+esc2(f.name||'Untitled workflow')+'</div>'
@@ -812,8 +814,8 @@
         +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
         +'<label class="wf-lbl">Triggering event <span class="wf-hint">— what starts this workflow</span></label>'
         +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-        +'<label class="wf-lbl">Event owner <span class="wf-hint">— optional; only this person can start instances. Leave empty and any member can start the first one.</span></label>'
-        +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'<button type="button" class="ac-btn ic" title="Clear (anyone can start)" onclick="wfClearTrigOwner()"><i class="fa-solid fa-xmark"></i></button></div>'
+        +'<label class="wf-lbl">Event owner <span class="wf-hint">— required; only this person can start instances of this workflow</span></label>'
+        +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
         +'<label class="wf-lbl">Description <span class="wf-hint">— optional</span></label>'
         +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
         +'<div class="wf-steps-head"><label class="wf-lbl" style="margin:0">Steps <span class="wf-hint">— in order; each done by one person within a set time</span></label></div>'
@@ -882,6 +884,7 @@
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
+    if(!owner){ toast('Please select the Event owner (Triggering Event member)','warn'); return; }
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
