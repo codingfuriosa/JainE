@@ -221,6 +221,7 @@ const NAV=[
   ]},
   {group:'Growth & Strategy',items:[
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
+    {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
   ]},
@@ -776,6 +777,7 @@ function s3KeyForResume(filename){return `hr/resumes/${s3Stamp()}_${s3SafeName(f
 function s3KeyForJD(filename){return `recruitment/descriptions/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForDefectImg(filename){return `defect-img/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForPostSalesAdhoc(filename){return `postsales/adhoc/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForTranscription(filename){return `transcription/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -7288,4 +7290,212 @@ VIEWS.mail=function(v,seg){
   v.innerHTML=mHead('fa-envelope','#475569',"Naren's Mail")+
     '<div class="card card-pad" style="background:#eff4ff;border-color:#cfe0ef;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-envelope"></i> Connected mailbox: <b>naren@thejaingroup.com</b> (demo). AI triage labels each mail and proposes the next action; converting a mail writes back into Accountability / CRM / Procurement via RPC.</div>'+
     mKpis(kpis)+'<div class="grid" style="grid-template-columns:210px 1fr;gap:16px;margin-top:16px">'+fol+list+'</div>';
+};
+
+/* ============================ TRANSCRIPTION ============================ */
+/* Upload a recording -> stored in S3 (portal/transcription/) -> transcribed
+   & analysed by Gladia (Hindi / English / Bengali, code-switching aware) via
+   the `transcription-analyze` edge function. Results land in acc.transcriptions. */
+const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',pa:'Punjabi'};
+const TR_TIMERS={};
+let TR_ROWS=null;
+function trLangName(c){return TR_LANG_NAMES[c]||(c?String(c).toUpperCase():'—');}
+function trLangTags(langs){if(!langs||!langs.length)return '<span style="color:var(--slate)">—</span>';return langs.map(function(c){return '<span class="tag t-blue" style="margin-right:4px">'+esc(trLangName(c))+'</span>';}).join('');}
+function trFmtDur(s){s=Number(s||0);if(!s)return '—';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.floor(s%60);const p=function(n){return (n<10?'0':'')+n;};return (h?h+':':'')+p(m)+':'+p(ss);}
+function trStatusTag(st){
+  if(st==='done')return '<span class="tag t-green"><i class="fa-solid fa-circle-check"></i> Ready</span>';
+  if(st==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
+  return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Processing</span>';
+}
+
+async function trFetch(force){
+  if(TR_ROWS&&!force)return TR_ROWS;
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').order('created_at',{ascending:false}).limit(200);TR_ROWS=data||[];}catch(e){TR_ROWS=[];}
+  return TR_ROWS;
+}
+
+VIEWS.transcription=async function(v,seg){
+  setCrumb(['Growth & Strategy','Transcription']);
+  if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
+    +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a meeting or call recording — it is transcribed and analysed in <b>Hindi, English &amp; Bengali</b> (code-switching aware), then summarised automatically. Recordings are stored securely in S3.</div>'
+    +'<div id="trKpis"></div>'
+    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Languages</th><th>Duration</th><th>Status</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="6"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+  const rows=await trFetch(true);
+  trRenderList();
+  rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
+};
+
+function trRenderList(){
+  const rows=TR_ROWS||[];
+  const kh=$('trKpis');
+  if(kh){
+    const done=rows.filter(function(r){return r.status==='done';});
+    const proc=rows.filter(function(r){return r.status==='processing';}).length;
+    const mins=done.reduce(function(s,r){return s+(Number(r.duration_seconds)||0);},0)/60;
+    kh.innerHTML=mKpis([
+      ['Recordings',String(rows.length),'all time'],
+      ['Transcribed',String(done.length),'ready to read'],
+      ['Processing',String(proc),proc?'in progress':'all clear',proc?'#d97706':'#16a34a'],
+      ['Audio analysed',(mins>=60?(mins/60).toFixed(1)+' h':Math.round(mins)+' min'),'total duration'],
+    ]);
+  }
+  const host=$('trRows');if(!host)return;
+  if(!rows.length){host.innerHTML='<tr><td colspan="6"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No recordings yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  host.innerHTML=rows.map(function(r){
+    const name=r.title||r.file_name||'Recording';
+    return '<tr>'
+      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:17px"></i><div><div style="font-weight:600">'+esc(name)+'</div>'+(r.title&&r.file_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.file_name)+'</div>':'')+'</div></div></td>'
+      +'<td>'+trLangTags(r.languages)+'</td>'
+      +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
+      +'<td>'+trStatusTag(r.status)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+      +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
+      +'<td style="white-space:nowrap">'
+        +(r.status==='done'?'<button class="btn btn-sm" onclick="navTo(\'transcription/view/'+r.id+'\')"><i class="fa-solid fa-eye"></i> Open</button> ':'')
+        +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
+      +'</td></tr>';
+  }).join('');
+}
+
+async function trPollOnce(id){
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'poll',id:id})});
+  return res.json().catch(function(){return null;});
+}
+function trStartPolling(id){
+  if(TR_TIMERS[id])return;
+  const tick=async function(){
+    let out=null;try{out=await trPollOnce(id);}catch(e){}
+    if(out&&out.row){const i=(TR_ROWS||[]).findIndex(function(x){return x.id===out.row.id;});if(i>=0)TR_ROWS[i]=out.row;}
+    const st=out&&(out.status||(out.row&&out.row.status));
+    if(st==='done'||st==='error'){delete TR_TIMERS[id];if(PAGE==='transcription')renderPage();return;}
+    TR_TIMERS[id]=setTimeout(tick,6000);
+  };
+  TR_TIMERS[id]=setTimeout(tick,3000);
+}
+
+window.trDelete=async function(id){
+  const ok=await confirmDialog('Delete this recording and its transcript? This cannot be undone.');
+  if(!ok)return;
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  TR_ROWS=(TR_ROWS||[]).filter(function(x){return x.id!==id;});
+  trRenderList();
+  try{await sb.schema('acc').from('transcriptions').delete().eq('id',id);}catch(e){}
+  if(r&&r.s3_path)try{s3Delete(r.s3_path);}catch(e){}
+  toast('Recording deleted','ok');
+};
+
+window.trUploadModal=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+    +'<label>Title <span style="color:var(--slate);font-weight:400">(optional)</span></label>'
+    +'<input type="text" id="trTitle" class="sel" placeholder="e.g. Sales sync — 28 Jul">'
+    +'<label style="margin-top:12px">Recording</label>'
+    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select an audio / video recording</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
+    +'<input type="file" id="trFile" class="hidden" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
+    +'<div id="trUpMsg" style="margin-top:10px"></div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trUpBtn" onclick="trUploadStart()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe</button></div>','md');
+};
+window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();buf.items.add(dt.files[0]);inp.files=buf.files;trUpPick();};
+window.trUpPick=function(){const f=($('trFile').files||[])[0];$('trUpName').textContent=f?f.name:'Drag & drop or click to select an audio / video recording';const btn=$('trUpBtn');if(btn)btn.disabled=!f;};
+window.trUploadStart=async function(){
+  const f=($('trFile').files||[])[0];
+  if(!f){toast('Select a recording first','err');return;}
+  const title=($('trTitle').value||'').trim();
+  const btn=$('trUpBtn');btn.disabled=true;
+  const msg=$('trUpMsg');
+  const setMsg=function(html){if(msg)msg.innerHTML=html;};
+  setMsg('<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" id="trUpFill" style="width:0%"></div></div><div class="psa-progress-label" id="trUpLbl">Uploading…</div></div>');
+  try{
+    const key=s3KeyForTranscription(f.name);
+    const up=await uploadFileToS3(key,f,function(p){const fill=$('trUpFill');if(fill)fill.style.width=p+'%';const l=$('trUpLbl');if(l)l.textContent='Uploading… '+p+'%';});
+    if(!up||!up.data||!up.data.path){throw new Error((up&&up.error&&up.error.message)||'Upload failed');}
+    const l=$('trUpLbl');if(l)l.textContent='Submitting to transcription engine…';
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:up.data.path,title:title||null,name:f.name,size:f.size})});
+    const out=await res.json().catch(function(){return {};});
+    if(!res.ok||!out.row){throw new Error(out.error||'Could not start transcription');}
+    if(!TR_ROWS)TR_ROWS=[];
+    TR_ROWS.unshift(out.row);
+    closeModal();
+    toast('Uploaded — transcription in progress','ok');
+    if(PAGE==='transcription')renderPage();
+    trStartPolling(out.row.id);
+  }catch(e){
+    setMsg('<div class="tag t-red"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(String(e&&e.message||e))+'</div>');
+    if(btn)btn.disabled=false;
+  }
+};
+
+async function trDetail(v,id){
+  setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Recording']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  let r=null;
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').eq('id',id).single();r=data;}catch(e){}
+  if(!r){v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Recording not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription\')">Back</button></div>';return;}
+  const name=r.title||r.file_name||'Recording';
+  const a=r.analysis||{};
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All recordings</button>';
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-microphone-lines" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+esc(r.file_name||'')+' · '+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0])+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+    +'<div id="trAudio" style="margin:6px 0 16px"></div>'
+    +mKpis([
+      ['Duration',trFmtDur(r.duration_seconds),''],
+      ['Languages',(r.languages&&r.languages.length?r.languages.map(trLangName).join(', '):'—'),'detected'],
+      ['Speakers',String(a.num_speakers||0),'diarised'],
+      ['Words',String(a.word_count||0),'transcribed'],
+    ])
+    +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trGrid">'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-chart-simple" style="color:#0d9488"></i> Analysis</div>'+trAnalysisHtml(r)+'</div>'
+    +'</div>'
+    +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div>'+trTranscriptHtml(r)+'</div>';
+  const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
+  if(r.s3_path){
+    try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
+  }
+}
+
+function trAnalysisHtml(r){
+  const a=r.analysis||{};
+  const lb=a.language_breakdown||{};
+  const rows=[];
+  const langKeys=Object.keys(lb);
+  if(langKeys.length){
+    const total=langKeys.reduce(function(s,k){return s+lb[k];},0)||1;
+    rows.push('<div style="font-size:12px;color:var(--slate);margin-bottom:6px">Language mix (by utterances)</div>');
+    langKeys.sort(function(x,y){return lb[y]-lb[x];}).forEach(function(k){
+      const pct=Math.round(lb[k]/total*100);
+      rows.push('<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>'+esc(trLangName(k))+'</span><span style="color:var(--slate)">'+pct+'%</span></div><div style="height:7px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#0d9488"></div></div></div>');
+    });
+  }
+  if(Array.isArray(a.entities)&&a.entities.length){
+    const ents=a.entities.slice(0,24).map(function(e){return '<span class="tag t-gray" style="margin:0 4px 4px 0">'+esc(e.text||e.value||e.entity||'')+'</span>';}).join('');
+    if(ents.trim())rows.push('<div style="font-size:12px;color:var(--slate);margin:12px 0 6px">Key entities mentioned</div><div>'+ents+'</div>');
+  }
+  if(!rows.length)return '<div style="color:var(--slate);font-size:13px">No additional analysis available.</div>';
+  return rows.join('');
+}
+
+function trTranscriptHtml(r){
+  const u=r.utterances;
+  if(Array.isArray(u)&&u.length){
+    return '<div style="display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow:auto">'+u.map(function(x){
+      const spk=(x.speaker!==null&&x.speaker!==undefined)?('Speaker '+(typeof x.speaker==='number'?x.speaker+1:x.speaker)):'Speaker';
+      return '<div style="display:flex;gap:10px"><div style="flex-shrink:0;width:96px"><div style="font-weight:600;font-size:12.5px">'+esc(spk)+'</div><div style="font-size:11px;color:var(--slate)">'+trFmtDur(x.start)+(x.language?' · '+esc(trLangName(x.language)):'')+'</div></div><div style="font-size:13.5px;line-height:1.55;flex:1">'+esc(x.text||'')+'</div></div>';
+    }).join('')+'</div>';
+  }
+  if(r.transcript)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(r.transcript)+'</div>';
+  return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
+}
+
+window.trDownload=async function(id){
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  let path=r&&r.s3_path;
+  if(!path){try{const {data}=await sb.schema('acc').from('transcriptions').select('s3_path,file_name').eq('id',id).single();if(data){path=data.s3_path;}}catch(e){}}
+  if(!path){toast('Recording file not available','err');return;}
+  s3OpenSigned(path,(r&&r.file_name)||undefined);
 };
