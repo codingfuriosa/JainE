@@ -7564,6 +7564,18 @@ function trStatusTag(st){
   if(st==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
   return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Processing</span>';
 }
+// Phone helpers (Indian mobile). Normalise to 10 digits, validate 6-9 start, pretty-print.
+function trPhoneNorm(s){s=String(s||'').replace(/[^\d]/g,'');if(s.length===12&&s.slice(0,2)==='91')s=s.slice(2);if(s.length===11&&s.charAt(0)==='0')s=s.slice(1);return s;}
+function trPhoneValid(s){return /^[6-9]\d{9}$/.test(trPhoneNorm(s));}
+function trPhoneFmt(s){const d=trPhoneNorm(s);if(/^[6-9]\d{9}$/.test(d))return '+91 '+d.slice(0,5)+' '+d.slice(5);return s?esc(String(s)):'—';}
+// Qualification / status badge shown in the list + detail.
+function trQualTag(r){
+  if(r.status==='processing')return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Analysing</span>';
+  if(r.status==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
+  if(r.qualification==='Qualified')return '<span class="tag t-green"><i class="fa-solid fa-circle-check"></i> Qualified</span>';
+  if(r.qualification==='Not Qualified')return '<span class="tag t-red"><i class="fa-solid fa-circle-xmark"></i> Not Qualified</span>';
+  return '<span class="tag t-gray">—</span>';
+}
 
 async function trFetch(force){
   if(TR_ROWS&&!force)return TR_ROWS;
@@ -7575,10 +7587,10 @@ VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
-    +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a meeting or call recording — it is transcribed and analysed in <b>Hindi, English &amp; Bengali</b> (code-switching aware), then summarised automatically. Recordings are stored securely in S3.</div>'
+    +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>'
     +'<div id="trKpis"></div>'
     +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Languages</th><th>Duration</th><th>Status</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="6"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Phone Number</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
@@ -7588,28 +7600,30 @@ function trRenderList(){
   const rows=TR_ROWS||[];
   const kh=$('trKpis');
   if(kh){
-    const done=rows.filter(function(r){return r.status==='done';});
+    const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
+    const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
     const proc=rows.filter(function(r){return r.status==='processing';}).length;
-    const mins=done.reduce(function(s,r){return s+(Number(r.duration_seconds)||0);},0)/60;
     kh.innerHTML=mKpis([
-      ['Recordings',String(rows.length),'all time'],
-      ['Transcribed',String(done.length),'ready to read'],
+      ['Calls',String(rows.length),'all time'],
+      ['Qualified',String(qual),'leads matched','#16a34a'],
+      ['Not Qualified',String(notq),'did not match','#dc2626'],
       ['Processing',String(proc),proc?'in progress':'all clear',proc?'#d97706':'#16a34a'],
-      ['Audio analysed',(mins>=60?(mins/60).toFixed(1)+' h':Math.round(mins)+' min'),'total duration'],
     ]);
   }
   const host=$('trRows');if(!host)return;
-  if(!rows.length){host.innerHTML='<tr><td colspan="6"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No recordings yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
   host.innerHTML=rows.map(function(r){
-    const name=r.title||r.file_name||'Recording';
-    return '<tr>'
-      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:17px"></i><div><div style="font-weight:600">'+esc(name)+'</div>'+(r.title&&r.file_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.file_name)+'</div>':'')+'</div></div></td>'
+    const phone=r.phone||r.title||r.customer_name||'';
+    const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+    const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+    return '<tr'+clickable+'>'
+      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-phone" style="color:#0d9488;font-size:15px"></i><div><div style="font-weight:600">'+trPhoneFmt(phone)+'</div>'+nameLine+'</div></div></td>'
+      +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+      +'<td style="max-width:280px"><div style="font-size:12.5px;color:var(--slate);line-height:1.45">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
       +'<td>'+trLangTags(r.languages)+'</td>'
       +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
-      +'<td>'+trStatusTag(r.status)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
       +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
-      +'<td style="white-space:nowrap">'
-        +(r.status==='done'?'<button class="btn btn-sm" onclick="navTo(\'transcription/view/'+r.id+'\')"><i class="fa-solid fa-eye"></i> Open</button> ':'')
+      +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
         +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
       +'</td></tr>';
   }).join('');
@@ -7645,19 +7659,37 @@ window.trDelete=async function(id){
 };
 
 window.trUploadModal=function(){
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload recordings</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload call recordings</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body frm">'
-    +'<label>Title <span style="color:var(--slate);font-weight:400">(optional — used when you upload a single file)</span></label>'
-    +'<input type="text" id="trTitle" class="sel" placeholder="e.g. Sales sync — 28 Jul">'
-    +'<label style="margin-top:12px">Recordings</label>'
     +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — you can pick many at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
     +'<input type="file" id="trFile" class="hidden" multiple accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
+    +'<div id="trFileList" style="margin-top:12px"></div>'
     +'<div id="trUpMsg" style="margin-top:10px"></div>'
     +'</div>'
-    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trUpBtn" onclick="trUploadStart()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe</button></div>','md');
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trUpBtn" onclick="trUploadStart()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify</button></div>','md');
 };
 window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();for(let i=0;i<dt.files.length;i++)buf.items.add(dt.files[i]);inp.files=buf.files;trUpPick();};
-window.trUpPick=function(){const files=($('trFile').files||[]);const n=files.length;$('trUpName').textContent=n?(n===1?files[0].name:(n+' files selected')):'Drag & drop or click to select recordings — you can pick many at once';const btn=$('trUpBtn');if(btn){btn.disabled=!n;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe'+(n>1?(' '+n+' files'):'');}};
+window.trUpPick=function(){
+  const files=($('trFile').files||[]);const n=files.length;
+  $('trUpName').textContent=n?(n===1?files[0].name:(n+' files selected')):'Drag & drop or click to select recordings — you can pick many at once';
+  const list=$('trFileList');
+  if(list){
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number for each recording <span style="color:#dc2626">*</span></label>'
+      +Array.prototype.map.call(files,function(f,i){
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+          +'<i class="fa-solid fa-file-audio" style="color:#0d9488"></i>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(f.name)+'">'+esc(f.name)+'</div></div>'
+          +'<input type="tel" id="trPhone_'+i+'" class="sel" style="width:170px;flex-shrink:0" maxlength="15" placeholder="10-digit mobile" oninput="trUpValidate()">'
+          +'</div>';
+      }).join('')):'';
+  }
+  trUpValidate();
+};
+window.trUpValidate=function(){
+  const files=($('trFile').files||[]);const n=files.length;let allValid=n>0;
+  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp){allValid=false;continue;}const ok=trPhoneValid(inp.value);inp.style.borderColor=inp.value?(ok?'#16a34a':'#dc2626'):'';if(!ok)allValid=false;}
+  const btn=$('trUpBtn');if(btn){btn.disabled=!allValid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
+};
 // Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
 // domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
 // fall back to the server-side proxy so it still uploads from anywhere.
@@ -7676,7 +7708,8 @@ async function trUploadOne(f,token){
 window.trUploadStart=async function(){
   const files=Array.prototype.slice.call(($('trFile').files)||[]);
   if(!files.length){toast('Select at least one recording','err');return;}
-  const title=($('trTitle').value||'').trim();
+  const phones=[];
+  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?inp.value:'';if(!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number for every recording','err');if(inp)inp.focus();return;}phones.push(trPhoneNorm(v));}
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
@@ -7689,7 +7722,7 @@ window.trUploadStart=async function(){
     paint('Uploading '+(i+1)+' of '+files.length+': '+f.name);
     try{
       const path=await trUploadOne(f,token);
-      const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,title:(files.length===1?(title||null):null),name:f.name,size:f.size})});
+      const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size})});
       const out=await res.json().catch(function(){return {};});
       if(!res.ok||!out.row) throw new Error(out.error||'could not start');
       if(!TR_ROWS)TR_ROWS=[];
@@ -7699,7 +7732,7 @@ window.trUploadStart=async function(){
     }catch(e){ failed++; }
     paint();
   }
-  toast(done+' recording'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
+  toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
   closeModal();
   if(PAGE==='transcription')renderPage();
 };
@@ -7710,20 +7743,25 @@ async function trDetail(v,id){
   let r=null;
   try{const {data}=await sb.schema('acc').from('transcriptions').select('*').eq('id',id).single();r=data;}catch(e){}
   if(!r){v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Recording not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription\')">Back</button></div>';return;}
-  const name=r.title||r.file_name||'Recording';
+  const phone=r.phone||r.title||'';
+  const name=phone?trPhoneFmt(phone):(r.file_name||'Recording');
   const a=r.analysis||{};
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All recordings</button>';
-  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-microphone-lines" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+esc(r.file_name||'')+' · '+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0])+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+  const sub=(r.customer_name?esc(r.customer_name)+' · ':'')+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0]);
+  const qb=r.qualification==='Qualified';
+  const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
+    +banner
     +mKpis([
       ['Duration',trFmtDur(r.duration_seconds),''],
       ['Languages',(r.languages&&r.languages.length?r.languages.map(trLangName).join(', '):'—'),'detected'],
+      ['Project',(r.project&&r.project!=='Unclear'?r.project:'—'),'discussed'],
       ['Speakers',String(a.num_speakers||0),'diarised'],
-      ['Words',String(a.word_count||0),'transcribed'],
     ])
     +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trGrid">'
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
-      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-chart-simple" style="color:#0d9488"></i> Analysis</div>'+trAnalysisHtml(r)+'</div>'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Qualification checklist</div>'+trCriteriaHtml(r)+'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+trAnalysisHtml(r)+'</div></div>'
     +'</div>'
     +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div>'+trTranscriptHtml(r)+'</div>';
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
@@ -7732,6 +7770,14 @@ async function trDetail(v,id){
   }
 }
 
+function trCriteriaHtml(r){
+  const c=r.criteria||{};
+  const items=[['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction'],['customer_agrees','Customer agrees'],['site_visit_interested','Wants site visit']];
+  return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it){
+    const ok=c[it[0]]===true;
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+'</div>';
+  }).join('')+'</div>';
+}
 function trAnalysisHtml(r){
   const a=r.analysis||{};
   const lb=a.language_breakdown||{};

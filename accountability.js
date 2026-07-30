@@ -41,6 +41,7 @@
     .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
     .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
     .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+    .wf-tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:7px;border-radius:9px;background:#dc2626;color:#fff;font-size:11px;font-weight:700;line-height:1;box-shadow:0 0 0 2px var(--bg-card)}
     @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:7px;border-bottom:0;padding:2px 2px 6px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:12.5px;gap:5px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}}
     .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
     .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
@@ -592,6 +593,10 @@
     if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='wrap' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgWrapPage(v, Number(seg[2])); }
     if (seg[0]==='profile' && typeof taskProfile==='function') { ROUTE={tab:'profile',taskId:null}; return taskProfile(v); }
+    if (seg[0]==='workflow' && seg[1]==='new') { ROUTE={tab:'workflow',taskId:null}; return wfFormPage(v, null); }
+    if (seg[0]==='workflow' && seg[1]==='edit' && seg[2]) { ROUTE={tab:'workflow',taskId:null}; return wfFormPage(v, Number(seg[2])); }
+    if (seg[0]==='workflow' && seg[1]==='case' && seg[2]) { ROUTE={tab:'workflow',taskId:null}; return wfCaseRoute(v, Number(seg[2])); }
+    if (seg[0]==='workflow' && seg[1]) { ROUTE={tab:'workflow',taskId:null}; return wfDetailPage(v, Number(seg[1]), null); }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
     ROUTE={tab:tab,taskId:null};
     setCrumb(['Accountability', tab==='work'?'Tasks':(tab.charAt(0).toUpperCase()+tab.slice(1))]);
@@ -600,10 +605,11 @@
       <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
+      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow<span class="wf-tab-badge" id="wfTabBadge" style="display:none"></span></div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
-      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
       <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
+    wfUpdateTabBadge();
     if (tab==='scoreboard') return scoreboardTab();
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
@@ -640,7 +646,11 @@
       if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
     }
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
-    return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${emails.length?avatars(list,emails):''}</div></div>`;
+    const wfIcon=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
+    const ownerVis=(t.flow_case_step_id!=null)
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
+      : (emails.length?avatars(list,emails):'');
+    return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${wfIcon}${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
@@ -700,32 +710,66 @@
     box.querySelectorAll('.ms-grp').forEach(function(g){ let n=g.nextElementSibling,vis=false; while(n&&n.classList&&n.classList.contains('ms-row')){ if(n.style.display!=='none')vis=true; n=n.nextElementSibling; } g.style.display=vis?'':'none'; });
   };
 
+  /* small workflow helpers */
+  function wfNm(email){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,email);}); return (p&&p.name)||email||''; }
+  function wfDeptOf(email){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,email);}); return (p&&Array.isArray(p.depts)&&p.depts.length)?p.depts.join(', '):''; }
+  function wfDurText(v,u){ if(v==null||v==='')return ''; u=u||'days'; return v+' '+(Number(v)===1?String(u).replace(/s$/,''):u); }
+  function wfAddDuration(base,value,unit){ const d=new Date(base.getTime()); value=Number(value)||0; if(unit==='hours')d.setHours(d.getHours()+value); else if(unit==='weeks')d.setDate(d.getDate()+value*7); else d.setDate(d.getDate()+value); return d; }
+  function wfDateOnly(d){ const z=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+  function wfDT(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
+  function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
+  function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
+  function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
+  function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
+  function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
+
+  // Workflow-tab badge: number of workflow instances currently active for (awaiting an action from) the user.
+  async function wfMarkSeen(){ /* retained no-op: badge now reflects live active-instance count */ }
+  async function wfUpdateTabBadge(){
+    const el=$('wfTabBadge'); if(!el) return;
+    if(!window._wfBadgeTimer){ window._wfBadgeTimer=setInterval(function(){ if(document.getElementById('wfTabBadge')) wfUpdateTabBadge(); }, 30000); }
+    let n=0; try{ const {data}=await ACC().rpc('wf_active_count'); n=Number(data)||0; }catch(e){ n=0; }
+    if(n>0){ el.textContent=(n>99?'99+':String(n)); el.style.display=''; el.title=n+' workflow'+(n===1?'':'s')+' waiting on you'; }
+    else { el.textContent=''; el.style.display='none'; }
+  }
+
   async function workflowTab(){
     const b=$('acBody');
     b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    window._wfDelId=null; wfInjectCss();
     try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; }
     await wfRenderList();
   }
 
   async function wfRenderList(){
-    const b=$('acBody');
-    let flows=[], stepCounts={};
+    const b=$('acBody'); if(!b)return;
+    let flows=[], stepCounts={}, ownersByFlow={};
     try{ const {data}=await ACC().from('flows').select('*').order('id',{ascending:false}); flows=data||[]; }
     catch(e){ toast('Could not load workflows: '+((e&&e.message)||e),'err'); }
-    try{ const {data}=await ACC().from('flow_steps').select('flow_id'); (data||[]).forEach(function(s){ stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1; }); }catch(e){}
-    const cards=flows.map(function(f){
+    try{ const {data}=await ACC().from('flow_steps').select('flow_id,owner_email'); (data||[]).forEach(function(s){ stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1; if(s.owner_email){ (ownersByFlow[s.flow_id]=ownersByFlow[s.flow_id]||[]); if(!ownersByFlow[s.flow_id].some(function(e){return eq(e,s.owner_email);}))ownersByFlow[s.flow_id].push(s.owner_email); } }); }catch(e){}
+    // Member-only visibility: you see a workflow only if you created it or you own a step in it.
+    flows=flows.filter(function(f){ return wfCanSee(f,ownersByFlow); });
+    const rows=flows.map(function(f){
       const n=stepCounts[f.id]||0;
-      const trig=f.trigger_event?('<div class="wf-trig"><i class="fa-solid fa-bolt"></i> When: '+esc2(f.trigger_event)+'</div>'):'';
-      return '<div class="ac-row" onclick="wfOpen('+f.id+')"><div class="ti"><div class="t">'+esc2(f.name||'Untitled workflow')+'</div>'+(f.description?'<div class="m">'+esc2(f.description)+'</div>':'')+trig+'</div><div class="rt"><span class="ac-chip">'+n+' step'+(n===1?'':'s')+'</span></div></div>';
+      const owners=(ownersByFlow[f.id]||[]).slice();
+      if(f.trigger_owner && !owners.some(function(e){return eq(e,f.trigger_owner);})) owners.unshift(f.trigger_owner);
+      return '<div class="wf-lrow" onclick="wfOpen('+f.id+')">'
+        +'<div class="wf-lrow-main">'
+          +'<div class="wf-lrow-name">'+esc2(f.name||'Untitled workflow')+'</div>'
+          +(f.trigger_event?'<div class="wf-lrow-trig"><i class="fa-solid fa-bolt"></i> '+esc2(f.trigger_event)+'</div>':'')
+        +'</div>'
+        +'<div class="wf-lrow-right">'+wfCircles(owners)+'<span class="wf-lrow-steps">'+n+' step'+(n===1?'':'s')+'</span><i class="fa-solid fa-chevron-right wf-go"></i></div>'
+      +'</div>';
     }).join('');
-    const inner=flows.length?('<div class="ac-arch-list">'+cards+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet — create your first one with the button above.</div>';
-    b.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button></div>'
-      +'<div class="ac-card"><div class="hd"><i class="fa-solid fa-diagram-project"></i> Workflows<span class="cnt">'+flows.length+'</span></div><div class="bd" style="height:auto;max-height:none;overflow:visible">'+inner+'</div></div>';
+    const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet — create your first one with the button above.</div>';
+    b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div><button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button></div>'
+      +inner;
   }
 
-  window.wfNew=function(){ wfForm(null); };
-  window.wfEdit=function(id){ wfForm(id); };
-  window.wfCancel=function(){ wfRenderList(); };
+  window.wfNew=function(){ navTo('tasks/workflow/new'); };
+  window.wfEdit=function(id){ navTo('tasks/workflow/edit/'+id); };
+  window.wfOpen=function(id){ navTo('tasks/workflow/'+id); };
+  window.wfCancel=function(){ navTo('tasks/workflow'); };
 
   function wfStepRowHtml(idx,step){
     step=step||{};
@@ -749,9 +793,10 @@
     +'</div>';
   }
 
-  async function wfForm(id){
-    const b=$('acBody');
-    b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  async function wfFormPage(v,id){
+    wfInjectCss(); window._wfDelId=null;
+    setCrumb(['Accountability','Workflow', id?'Edit':'New']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
     if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
     if(!window._wfPpWired){ document.addEventListener('click',function(e){ if(!e.target||!e.target.closest||!e.target.closest('.wf-pp')) document.querySelectorAll('.wf-pp.open').forEach(function(x){x.classList.remove('open');}); }); window._wfPpWired=true; }
     let flow={name:'',description:'',trigger_event:''}, steps=[];
@@ -759,25 +804,38 @@
       try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); if(data)flow=data; }catch(e){}
       try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
     }
-    if(!steps.length) steps=[{},{}]; // start with two blank step rows
+    if(!steps.length) steps=[{},{}]; // start with two blank step rows (both mandatory)
     const stepsHtml=steps.map(function(s,i){ return wfStepRowHtml(i+1,s); }).join('');
-    b.innerHTML='<div class="ac-card"><div class="hd"><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'Create a workflow')+'</div>'
-      +'<div class="bd" style="height:auto;max-height:none;overflow:visible">'
+    v.innerHTML='<div class="wf-page">'
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
+      +'<div class="wf-card">'
       +'<div class="wf-form" data-id="'+(id||'')+'">'
         +'<label class="wf-lbl">Workflow name</label>'
         +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
         +'<label class="wf-lbl">Triggering event <span class="wf-hint">— what starts this workflow</span></label>'
         +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
+        +'<label class="wf-lbl">Event owner <span class="wf-hint">— required; only this person can start instances of this workflow</span></label>'
+        +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
         +'<label class="wf-lbl">Description <span class="wf-hint">— optional</span></label>'
         +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
         +'<div class="wf-steps-head"><label class="wf-lbl" style="margin:0">Steps <span class="wf-hint">— in order; each done by one person within a set time</span></label></div>'
         +'<div id="wfSteps">'+stepsHtml+'</div>'
-        +'<button class="ac-btn" style="margin-top:4px" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</button>'
+        +'<div class="wf-addstep-ghost" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</div>'
         +'<div class="wf-actions">'
           +'<button class="ac-btn" onclick="wfCancel()">Cancel</button>'
           +'<button class="ac-btn primary" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
         +'</div>'
+        +'<div class="wf-keyhint">Press <b>Enter</b> to save · <b>Esc</b> to close</div>'
       +'</div></div></div>';
+    // Enter = save, Esc = close (ignore while typing in the person-search box)
+    const page=v.querySelector('.wf-form');
+    if(page){ page.addEventListener('keydown',function(e){
+      const inSearch=e.target&&e.target.classList&&e.target.classList.contains('ms-search');
+      const inPanel=e.target&&e.target.closest&&e.target.closest('.wf-pp-panel');
+      if(e.key==='Escape'){ e.preventDefault(); wfCancel(); }
+      else if(e.key==='Enter'&&!inSearch&&!inPanel&&e.target.tagName!=='SELECT'){ e.preventDefault(); wfSave(); }
+    }); }
+    const nm=$('wfName'); if(nm){ try{nm.focus();}catch(_){} }
   }
 
   window.wfAddStep=function(){
@@ -794,6 +852,12 @@
     const wrap=$('wfSteps'); if(!wrap)return;
     [].slice.call(wrap.querySelectorAll('.wf-step')).forEach(function(r,i){ const n=r.querySelector('.wf-step-num'); if(n)n.textContent=(i+1); });
   }
+  window.wfClearTrigOwner=function(){
+    const box=$('wfTrigOwner'); if(!box)return;
+    const hid=box.querySelector('.wf-s-person'); if(hid)hid.value='';
+    const btn=box.querySelector('.wf-pp-btn'); if(btn)btn.innerHTML='<span class="wf-pp-ph">Anyone (no specific owner)</span><i class="fa-solid fa-chevron-down wf-pp-caret"></i>';
+    box.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
+  };
 
   window.wfSave=async function(){
     const name=($('wfName')?$('wfName').value:'').trim();
@@ -819,58 +883,513 @@
       steps.push({seq:steps.length+1,title:t,description:desc||null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
     });
     if(bad){ toast(bad,'warn'); return; }
+    const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
+    if(!owner){ toast('Please select the Event owner (Triggering Event member)','warn'); return; }
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
-      let flowId=editId;
-      if(editId){
-        const {error}=await ACC().from('flows').update({name:name,description:desc||null,trigger_event:trigger,updated_at:new Date().toISOString()}).eq('id',editId); if(error)throw error;
-        await ACC().from('flow_steps').delete().eq('flow_id',editId);
-      }else{
-        const {data,error}=await ACC().from('flows').insert({name:name,description:desc||null,trigger_event:trigger}).select().single(); if(error)throw error; flowId=data.id;
-      }
-      const stepRows=steps.map(function(s){ return {flow_id:flowId,seq:s.seq,title:s.title,description:s.description,owner_email:s.owner_email,duration_value:s.duration_value,duration_unit:s.duration_unit}; });
-      const {error:se}=await ACC().from('flow_steps').insert(stepRows); if(se)throw se;
+      const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null});
+      if(error)throw error;
       toast('Workflow saved','ok');
-      await wfRenderList();
+      navTo('tasks/workflow/'+flowId);
     }catch(e){ toast('Could not save workflow: '+((e&&e.message)||e),'err'); }
   };
 
-  window.wfOpen=async function(id){
-    const b=$('acBody'); b.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  function wfTimelineHtml(steps,opt){
+    opt=opt||{};
+    return steps.map(function(s,i){
+      const person=s.owner_email||s.person;
+      const dept=wfDeptOf(person);
+      const who=person
+        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span>'+(dept?'<span class="wf-dept">'+esc2(dept)+'</span>':'')+'</span>')
+        :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
+      const dur=wfDurText(s.duration_value,s.duration_unit); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
+      let extra='', badge='', cls='';
+      if(opt.live){
+        const done=s.status==='done'||!!s.forwarded_at;
+        const cur=!done && (s.status==='received'||s.received_at||s.appeared_at);
+        cls=done?'wf-tl-done':(cur?'wf-tl-cur':'wf-tl-wait');
+        badge=done?'<span class="wf-badge ok">Done</span>':(cur?'<span class="wf-badge cur">In progress</span>':'<span class="wf-badge wait">Waiting</span>');
+        const bits=[];
+        if(s.received_at) bits.push('Received '+wfDT(s.received_at));
+        if(s.forwarded_at) bits.push('Completed '+wfDT(s.forwarded_at));
+        if(s.received_at&&s.forwarded_at) bits.push('<b>Took '+wfHms(new Date(s.forwarded_at)-new Date(s.received_at))+'</b>');
+        else if(s.received_at&&!s.forwarded_at) bits.push('running for '+wfHms(Date.now()-new Date(s.received_at)));
+        if(bits.length) extra='<div class="wf-tl-track">'+bits.join(' · ')+'</div>';
+      }
+      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div>'+extra+'</div></div>';
+    }).join('');
+  }
+
+  async function wfDetailPage(v, id, selCaseId){
+    wfInjectCss(); setCrumb(['Accountability','Workflow']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
     if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
-    let flow=null, steps=[];
+    let flow=null, steps=[], cases=[], fcs=[];
     try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); flow=data; }catch(e){}
     try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
-    if(!flow){ toast('Workflow not found','err'); return wfRenderList(); }
-    const durLabel=function(s){ if(s.duration_value==null||s.duration_value==='')return ''; const u=s.duration_unit||'days'; return s.duration_value+' '+(Number(s.duration_value)===1?u.replace(/s$/,''):u); };
-    const stepItems=steps.map(function(s,i){
-      const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,s.owner_email);});
-      const dept=(p&&Array.isArray(p.depts)&&p.depts.length)?('<span class="wf-dept">'+esc2(p.depts.join(', '))+'</span>'):'';
-      const who=s.owner_email
-        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(s.owner_email)+'">'+esc2(iniOf(p?p.name:s.owner_email).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(p?p.name:s.owner_email)+'</span>'+dept+'</span>')
-        :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
-      const dur=durLabel(s); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
-      return '<div class="wf-tl-item"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
-    }).join('');
-    b.innerHTML='<div style="display:flex;gap:8px;margin-bottom:12px"><button class="ac-btn" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i> Back</button><div style="flex:1"></div><button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i> Edit</button><button class="ac-btn danger" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i> Delete</button></div>'
-      +'<div class="ac-card"><div class="hd"><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</div><div class="bd" style="height:auto;max-height:none;overflow:visible">'
-      +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
-      +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Trigger:</b> '+esc2(flow.trigger_event||'—')+'</div>'
-      +'<div class="wf-timeline">'+(stepItems||'<div class="ac-empty" style="cursor:default">No steps yet</div>')+'</div>'
-      +'</div></div>';
+    if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
+    try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
+    if(cases.length){ try{ const {data}=await ACC().from('flow_case_steps').select('*').in('case_id',cases.map(function(c){return c.id;})); fcs=data||[]; }catch(e){} }
+    const mySelf=me();
+    const isCreator=eq(flow.created_by||'',mySelf);
+    const canEvent = !flow.trigger_owner || eq(flow.trigger_owner, mySelf);
+    window._wfFlowId=id; window._wfDelId = isCreator ? id : null; wfWireDeleteKey();
+    const members=[];
+    if(flow.trigger_owner && !members.some(function(e){return eq(e,flow.trigger_owner);})) members.push(flow.trigger_owner);
+    steps.forEach(function(s){ if(s.owner_email&&!members.some(function(e){return eq(e,s.owner_email);}))members.push(s.owner_email); });
+
+    // Default timeline panel = the workflow's step definition
+    const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
+    window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps</div></div>'+defTL;
+
+    // Instances table
+    let tableHtml='';
+    if(cases.length){
+      const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+      const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('')+'<th>Status</th>';
+      const rows=cases.map(function(c){
+        const cells=steps.map(function(s){
+          const cs=(byCase[c.id]||{})[s.seq];
+          if(cs&&(cs.status==='done'||cs.forwarded_at)) return '<td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>';
+          if(c.status==='Pending' && c.current_step===s.seq) return '<td><span class="wf-pill cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
+          return '<td><span class="wf-pill wait">·</span></td>';
+        }).join('');
+        const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">Pending</span>');
+        return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
+          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
+          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
+      }).join('');
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span><span class="wf-card-hint">— tick one to edit, one or more to delete; click a row to see its progress</span>'
+        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
+        +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    }
+
+    const headActs='<div class="wf-head-acts">'
+      +(isCreator?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
+                  +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
+      +(canEvent?'<button class="ac-btn primary" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New Event</span></button>':'')
+      +'</div>';
+
+    v.innerHTML='<div class="wf-page">'
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'+headActs+'</div>'
+      +'<div class="wf-card wf-meta">'
+        +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
+        +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
+        +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
+      +'</div>'
+      +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
+      +tableHtml
+    +'</div>';
+    if(selCaseId){ wfShowCase(selCaseId, null); }
+  }
+
+  window.wfInstSelChange=function(){
+    const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
+    const eb=$('wfInstEdit'), db=$('wfInstDel');
+    if(eb) eb.disabled = checks.length!==1;
+    if(db) db.disabled = checks.length<1;
+  };
+  window.wfInstEditSel=function(){
+    const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
+    if(checks.length!==1) return;
+    wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
+  };
+  window.wfInstDelSel=function(){
+    const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
+    if(!checks.length) return;
+    const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
+    wfConfirm({ title:'Delete '+ids.length+' instance'+(ids.length===1?'':'s')+'?', body:'This permanently removes the selected instance'+(ids.length===1?'':'s')+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+      toast('Deleted','ok'); renderPage();
+    }});
   };
 
-  window.wfDelete=async function(id){
-    if(!window.confirm('Delete this workflow and all its steps? This cannot be undone.'))return;
-    try{
-      try{ await ACC().from('flow_cases').delete().eq('flow_id',id); }catch(e){}
-      await ACC().from('flow_steps').delete().eq('flow_id',id);
-      const {error}=await ACC().from('flows').delete().eq('id',id); if(error)throw error;
-      toast('Workflow deleted','ok');
-      await wfRenderList();
-    }catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); }
+  async function wfCaseRoute(v, caseId){
+    let c=null; try{ const {data}=await ACC().from('flow_cases').select('flow_id').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
+    if(!c){ toast('Instance not found','err'); return navTo('tasks/workflow'); }
+    return wfDetailPage(v, c.flow_id, caseId);
+  }
+
+  window.wfShowDef=function(){ const box=$('wfTL'); if(box&&window._wfDefTL!=null) box.innerHTML=window._wfDefTL; document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');}); };
+
+  window.wfShowCase=async function(caseId, rowEl){
+    const box=$('wfTL'); if(box) box.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');});
+    const tr=rowEl||document.querySelector('.wf-itable tbody tr[data-case="'+caseId+'"]'); if(tr)tr.classList.add('sel');
+    let c=null,fcs=[],updates=[];
+    try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
+    try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
+    try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
+    if(!box)return;
+    if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Instance not found</div>'; return; }
+    const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
+    const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+      +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true})||'')+'</div>'
+      +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
   };
+
+  function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
+
+  window.wfDelete=function(id){
+    wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its instances and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      try{ const {error}=await ACC().rpc('wf_delete_flow',{p_id:id}); if(error)throw error; }
+      catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); return; }
+      window._wfDelId=null; toast('Workflow deleted','ok'); navTo('tasks/workflow');
+    }});
+  };
+
+  /* ----- Instance (New Event) form ----- */
+  function wfEvtRowHtml(label,value){ return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>'; }
+  window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
+  window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
+
+  window.wfEventOpen=async function(flowId, caseId){
+    wfInjectCss();
+    if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+    let flow=null, steps=[], caseRow=null;
+    try{ const {data}=await ACC().from('flows').select('*').eq('id',flowId).maybeSingle(); flow=data; }catch(e){}
+    try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
+    if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
+    if(!flow){ toast('Workflow not found','err'); return; }
+    if(!caseId && !steps.length){ toast('Add steps to this workflow before starting an instance','warn'); return; }
+    const editing=!!caseId;
+    const src = editing ? (Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]) : (Array.isArray(flow.trigger_template)?flow.trigger_template:[]);
+    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t.label||'', editing?(t.value||''):'');}):[wfEvtRowHtml('','')]).join('');
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+(editing?('Edit instance '+(caseRow.case_no||caseId)):'New instance')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
+        +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
+        +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
+        +'<label class="wf-lbl">Details <span class="wf-hint">— specifics for this instance</span></label>'
+        +'<div id="wfEvtDetails">'+rowsHtml+'</div>'
+        +'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+(editing?'Save changes':'Create instance')+'</button></div>','md');
+    setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
+  };
+
+  window.wfEventSave=async function(flowId, caseId){
+    const wrap=$('wfEvtDetails'); const details=[];
+    if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){ const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim(); const value=((r.querySelector('.wf-evt-value')||{}).value||'').trim(); if(label||value) details.push({label:label,value:value}); }); }
+    try{
+      if(caseId){
+        const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
+        try{ closeModal(); }catch(e){}
+        toast('Instance updated','ok');
+        if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
+      } else {
+        const {error}=await ACC().rpc('wf_create_instance',{p_flow_id:flowId, p_details:details}); if(error)throw error;
+        try{ closeModal(); }catch(e){}
+        toast('Instance created — first step assigned','ok');
+        if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
+      }
+    }catch(e){ toast('Could not save instance: '+((e&&e.message)||e),'err'); }
+  };
+
+
+  function wfUpdateHtml(u){
+    if(u.system){ return '<div class="wf-upd-sys"><i class="fa-solid fa-circle-info"></i> '+esc2(wfNm(u.author))+' '+esc2(u.body)+' · '+wfDT(u.created_at)+'</div>'; }
+    const mine=eq(u.author,me());
+    return '<div class="wf-upd'+(mine?' me':'')+'"><span class="wf-upd-av" style="background:'+colorFor(u.author)+'">'+esc2(iniOf(wfNm(u.author)).toUpperCase())+'</span><div class="wf-upd-b"><div class="wf-upd-meta"><b>'+esc2(wfNm(u.author))+'</b> · '+wfDT(u.created_at)+'</div><div class="wf-upd-body">'+esc2(u.body)+'</div></div></div>';
+  }
+
+  /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
+  async function wfTaskPage(v, t, members, list, ro){
+    wfInjectCss(); window._wfDelId=null; setCrumb(['Accountability','Workflow','Task']);
+    if(!WF_PEOPLE){ try{ WF_PEOPLE=list||await people(); }catch(e){ WF_PEOPLE=list||[]; } }
+    let fcs=null;
+    try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('id',t.flow_case_step_id).maybeSingle(); fcs=data; }catch(e){}
+    if(!fcs){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">This workflow step no longer exists.</div></div>'; return; }
+    let caseRow=null, flow=null, allSteps=[], updates=[];
+    try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',fcs.case_id).maybeSingle(); caseRow=data; }catch(e){}
+    if(caseRow){ try{ const {data}=await ACC().from('flows').select('*').eq('id',caseRow.flow_id).maybeSingle(); flow=data; }catch(e){} }
+    try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',fcs.case_id).order('seq',{ascending:true}); allSteps=data||[]; }catch(e){}
+    try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',fcs.case_id).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
+    const idx=allSteps.findIndex(function(s){return s.id===fcs.id;});
+    const isFirst=idx<=0, isLast=idx===(allSteps.length-1);
+    const amAssignee=(members||[]).some(function(e){return eq(e,me());});
+    const received=!!fcs.received_at, forwarded=!!fcs.forwarded_at;
+    const caseActive=caseRow && caseRow.status!=='Done';
+    let A='';
+    if(forwarded){
+      // This step is completed and sits in Completed This Week / Archive.
+      if(caseRow && caseRow.status==='Done'){
+        if(isLast && amAssignee) A='<button class="ac-btn" onclick="wfReopen('+fcs.id+')"><i class="fa-solid fa-rotate-left"></i> Reopen</button>';
+        else A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
+      } else if(amAssignee){
+        A='<button class="ac-btn danger" onclick="wfRevert('+fcs.id+')"><i class="fa-solid fa-rotate-left"></i> Revert</button>';
+      } else {
+        A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
+      }
+    } else if(amAssignee && caseActive){
+      if(!received){
+        A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
+         +'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
+      } else {
+        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
+        if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
+        else A+='<button class="ac-btn primary" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> Forward</button>';
+      }
+    }
+    const dueTxt=fcs.due_at?wfDT(fcs.due_at):(t.due_date?fmtDateY(t.due_date):'—');
+    const statusChip=forwarded?'<span class="ac-chip ac-c-Completed">Completed</span>':'<span class="ac-chip ac-c-Pending">Pending</span>';
+    let takenTxt='—'; if(fcs.received_at&&fcs.forwarded_at) takenTxt=wfHms(new Date(fcs.forwarded_at)-new Date(fcs.received_at)); else if(fcs.received_at) takenTxt='running · '+wfHms(Date.now()-new Date(fcs.received_at));
+    const person=fcs.person;
+    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(t.title)+'</div>'
+      +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
+      +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
+      +A+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTitleCase((flow&&flow.name)||'Workflow')+': '+wfTitleCase(fcs.title||''))+'</b>'+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details</h3><div class="tp-grid">'
+        +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
+        +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
+        +'<div class="tp-f"><div class="k">Status</div><div class="v">'+statusChip+'</div></div>'
+        +'<div class="tp-f"><div class="k">Assigned to</div><div class="v">'+(person?('<span class="wf-inline-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span>'+esc2(wfNm(person))+'</span>'):'—')+'</div></div>'
+        +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
+        +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
+      +'</div></div>'
+      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback <span class="wf-hint" style="font-weight:600">— visible to everyone in this instance</span></h3>'
+        +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
+        +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
+        +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+      +'</div>';
+    if(window._wfAutoReject && window._wfAutoReject===fcs.id){ window._wfAutoReject=null; setTimeout(function(){ wfRejectStart(fcs.id, fcs.case_id); },60); }
+  }
+
+  // In-app confirm (no browser dialog, no keyboard shortcuts). opts:{title,body,okLabel,okClass,withNote,notePlaceholder,onOk(note)}
+  function wfConfirm(opts){
+    opts=opts||{};
+    openModal('<div class="modal-head"><h3>'+esc2(opts.title||'Please confirm')+'</h3><span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="min-width:min(92vw,430px)">'
+        +(opts.body?('<p style="margin:0 0 12px;color:var(--slate);font-size:13.5px;line-height:1.55">'+esc2(opts.body)+'</p>'):'')
+        +(opts.withNote?('<label class="wf-lbl" style="margin-top:0"><i class="fa-solid fa-comments"></i> Updates &amp; Feedback</label><textarea id="wfConfirmNote" class="ac-in" rows="3" placeholder="'+esc2(opts.notePlaceholder||'Add a note (optional)')+'" style="resize:vertical;width:100%;box-sizing:border-box"></textarea>'):'')
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" data-wfx>Cancel</button><button class="ac-btn '+(opts.okClass||'primary')+'" id="wfConfirmOk">'+esc2(opts.okLabel||'Confirm')+'</button></div>','md');
+    setTimeout(function(){
+      var ok=document.getElementById('wfConfirmOk');
+      if(ok){ ok.onclick=function(){ var note=((document.getElementById('wfConfirmNote')||{}).value||'').trim(); closeModal(); if(opts.onOk) opts.onOk(note); }; }
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); if(opts.onCancel) opts.onCancel(); }; });
+      if(opts.withNote){ var n=document.getElementById('wfConfirmNote'); if(n){ try{n.focus();}catch(_){} } }
+    },30);
+  }
+
+  // Ticking the left checkbox of a Workflow task = Forward (not the normal Done/approval flow)
+  window.wfRowForward=function(fcsId, cb){
+    if(cb) cb.disabled=true;
+    wfConfirm({ title:'Forward this step?', body:'This completes your step and passes the workflow to the next person.', okLabel:'Forward', okClass:'primary',
+      onOk:async function(){
+        try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
+        catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); if(cb){cb.disabled=false;cb.checked=false;} return; }
+        toast('Forwarded to the next person','ok'); renderPage();
+      },
+      onCancel:function(){ if(cb){cb.disabled=false;cb.checked=false;} }
+    });
+  };
+
+  window.wfReceive=async function(fcsId){
+    try{ const {error}=await ACC().rpc('wf_receive',{p_fcs_id:fcsId}); if(error)throw error; }
+    catch(e){ toast('Could not receive: '+((e&&e.message)||e),'err'); return; }
+    toast('Received — timer started','ok'); renderPage();
+  };
+
+  window.wfForward=async function(fcsId){
+    try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
+    catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    toast('Forwarded to the next person','ok'); navTo('tasks/work');
+  };
+
+  window.wfDone=async function(fcsId){
+    try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
+    catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
+    toast('Workflow completed','ok'); navTo('tasks/work');
+  };
+
+  // Reject: an in-app note (Updates & Feedback) then bounce to the previous person
+  // Reject flows through the Updates & Feedback section (no popup): scroll there, reveal the confirm bar.
+  window.wfRejectStart=function(fcsId, caseId){
+    const card=$('wfUpdCard'), bar=$('wfRejectBar'), inp=$('wfUpdIn');
+    if(bar) bar.style.display='';
+    if(card){ try{ card.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){ card.scrollIntoView(); } }
+    if(inp){ inp.placeholder='Reason for rejecting (optional)…'; try{ inp.focus(); }catch(_){} }
+  };
+  window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; const inp=$('wfUpdIn'); if(inp) inp.placeholder='Write an update…'; };
+  // Called from a task-list row: open the task, then auto-start the reject flow there.
+  window.wfRowReject=function(fcsId, caseId, taskId){ window._wfAutoReject=fcsId; navTo('tasks/task/'+taskId); };
+  window.wfDoReject=async function(fcsId, caseId){
+    const inp=$('wfUpdIn'); const note=(inp&&inp.value||'').trim();
+    try{
+      if(note){ try{ await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:note}); }catch(e){} }
+      const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error;
+    }catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
+  };
+
+  // Revert: pull the flow back to me from whoever currently holds it
+  window.wfRevert=function(fcsId){
+    wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
+      try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
+      catch(e){ toast('Could not revert: '+((e&&e.message)||e),'err'); return; }
+      toast('Reverted — the task is back with you','ok'); navTo('tasks/work');
+    }});
+  };
+
+  // Reopen: bring the completed final step back (instance Done -> In progress)
+  window.wfReopen=function(fcsId){
+    wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and the instance moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
+      try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
+      catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
+      toast('Reopened','ok'); navTo('tasks/work');
+    }});
+  };
+
+  window.wfPostUpdate=async function(caseId){
+    const inp=$('wfUpdIn'); const body=(inp&&inp.value||'').trim(); if(!body) return;
+    try{ const {error}=await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:body}); if(error)throw error; }
+    catch(e){ toast('Could not post update: '+((e&&e.message)||e),'err'); return; }
+    if(inp)inp.value=''; renderPage();
+  };
+
+  function wfInjectCss(){
+    if(document.getElementById('wfCss')) return;
+    const s=document.createElement('style'); s.id='wfCss';
+    s.textContent=`
+    .wf-page{width:100%}
+    .wf-page-head{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap}
+    .wf-page-head h1{font-size:18px;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:9px;flex:1;min-width:0;letter-spacing:-.01em}
+    .wf-page-head h1 i{color:var(--brand);font-size:16px}
+    .wf-head-acts{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+    .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+    .wf-card.wf-meta{padding:14px 18px}
+    .wf-card.wf-tlcard{padding:16px 18px}
+    .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-card-hd i{color:var(--slate);font-size:13px}
+    .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
+    .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
+    /* list header + full-width rows */
+    .wf-listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+    .wf-listhead-t{font-size:15px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px}
+    .wf-listhead-t i{color:var(--brand)}
+    .wf-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg-card)}
+    .wf-lrow{display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer;border-left:3px solid transparent;border-bottom:1px solid var(--line);transition:background .13s,border-color .13s}
+    .wf-lrow:last-child{border-bottom:0}
+    .wf-lrow:hover{background:var(--brand-a10,#eef2ff);border-left-color:var(--brand)}
+    .wf-lrow-main{flex:1;min-width:0}
+    .wf-lrow-name{font-weight:650;font-size:14.5px;color:var(--ink);line-height:1.35;overflow:hidden;text-overflow:ellipsis}
+    .wf-lrow-trig{font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:6px;margin-top:3px}
+    .wf-lrow-trig i{color:var(--brand);font-size:11px}
+    .wf-lrow-right{display:flex;align-items:center;gap:14px;flex:none}
+    .wf-lrow-steps{font-size:12px;font-weight:600;color:var(--slate);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:20px;padding:3px 11px;white-space:nowrap}
+    .wf-go{color:#cbd5e1;font-size:13px}
+    .wf-circles{display:inline-flex;align-items:center}
+    .wf-circle{width:28px;height:28px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid var(--bg-card);margin-left:-7px}
+    .wf-circle:first-child{margin-left:0}
+    .wf-circle.wf-more{background:#94a3b8}
+    .wf-circle.wf-none{background:#eef2f6;color:#94a3b8;border-style:dashed}
+    /* meta card */
+    .wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
+    .wf-trig-box{background:linear-gradient(0deg,var(--brand-a10,#eef2ff),var(--brand-a10,#eef2ff));border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--ink)}
+    .wf-trig-box i{color:var(--brand)}
+    .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
+    .wf-mini-lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
+    /* timeline panel */
+    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
+    .wf-tlhead-t i{color:var(--slate)}
+    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px}
+    .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
+    .wf-timeline{display:flex;flex-direction:column}
+    .wf-tl-item{display:flex;gap:14px;padding-bottom:20px;position:relative}
+    .wf-tl-item:last-child{padding-bottom:0}
+    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:14px;top:30px;bottom:0;width:2px;background:var(--line)}
+    .wf-tl-done:not(:last-child)::before{background:#bbf7d0}
+    .wf-tl-num{flex:0 0 30px;height:30px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;z-index:1}
+    .wf-tl-cur .wf-tl-num{background:var(--brand);box-shadow:0 0 0 4px var(--brand-a10,#eef2ff)}
+    .wf-tl-done .wf-tl-num{background:#16a34a}
+    .wf-tl-wait .wf-tl-num{background:#cbd5e1}
+    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
+    .wf-tl-cur .wf-tl-body{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}
+    .wf-tl-title{font-weight:650;font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+    .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
+    .wf-tl-meta{display:flex;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap}
+    .wf-who{display:inline-flex;align-items:center}
+    .wf-av{width:24px;height:24px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-right:8px}
+    .wf-who-nm{font-size:13px;color:var(--ink);font-weight:600}
+    .wf-dept{font-size:11.5px;color:var(--slate);margin-left:8px}
+    .wf-dur{font-size:12.5px;color:var(--slate);display:inline-flex;align-items:center;gap:6px}
+    .wf-badge{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:none;letter-spacing:0}
+    .wf-badge.ok{background:#dcfce7;color:#166534}.wf-badge.cur{background:#dbeafe;color:#1e40af}.wf-badge.wait{background:#eef2f6;color:#94a3b8}
+    .wf-tl-track{font-size:11.5px;color:var(--slate);margin-top:7px;padding-top:7px;border-top:1px dashed var(--line)}
+    /* form */
+    .wf-ro{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:14px;color:var(--ink)}
+    .wf-addstep-ghost{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 12px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;transition:.15s}
+    .wf-addstep-ghost:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,#eef2ff)}
+    .wf-keyhint{font-size:11.5px;color:var(--slate);text-align:right;margin-top:12px}
+    .wf-evt-row{display:flex;gap:8px;margin-bottom:8px}
+    .wf-evt-row .wf-evt-label{flex:0 0 40%;min-width:0}
+    .wf-evt-row .wf-evt-value{flex:1;min-width:0}
+    /* instances table */
+    .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
+    .wf-itable{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+    .wf-itable th{text-align:left;padding:11px 14px;background:var(--bg,#f8fafc);color:var(--slate);font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
+    .wf-itable td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;color:var(--ink)}
+    .wf-itable tbody tr{cursor:pointer;transition:background .12s;border-left:3px solid transparent}
+    .wf-itable tbody tr:hover{background:var(--bg,#f8fafc)}
+    .wf-itable tbody tr.sel{background:var(--brand-a10,#eef2ff)}
+    .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+    .wf-itable tbody tr:last-child td{border-bottom:0}
+    .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+    .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+    .wf-pill.ok{background:#dcfce7;color:#166534}
+    .wf-pill.cur{background:#dbeafe;color:#1e40af}
+    .wf-pill.wait{background:#f1f5f9;color:#cbd5e1;padding:3px 12px}
+    .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
+    .wf-upd-sys i{opacity:.6;margin-right:4px}
+    .wf-inst-tools{margin-left:auto;display:flex;gap:6px}
+    .wf-chk-col{width:36px;text-align:center;white-space:nowrap}
+    .wf-inst-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
+    .wf-owner-pick{display:flex;gap:8px;align-items:center}
+    .wf-owner-pick .wf-pp{flex:1;min-width:0}
+    .wf-cell{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600}
+    .wf-cell.ok{color:#16a34a}.wf-cell.cur{color:var(--brand)}.wf-cell.wait{color:#cbd5e1}
+    /* trigger details list */
+    .wf-detlist{margin:12px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+    .wf-detlist li{font-size:13px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:8px 11px;line-height:1.45}
+    .wf-detk{font-weight:700;color:var(--slate);display:block;font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:1px}
+    /* task page bits */
+    .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
+    .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:340px;overflow:auto;margin-bottom:12px}
+    .wf-upd{display:flex;gap:10px;align-items:flex-start}
+    .wf-upd.me{flex-direction:row-reverse}
+    .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
+    .wf-upd-b{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:12px;padding:8px 12px;max-width:78%}
+    .wf-upd.me .wf-upd-b{background:var(--brand-a10,#eef2ff)}
+    .wf-upd-meta{font-size:11px;color:var(--slate);margin-bottom:2px}
+    .wf-upd-body{font-size:13.5px;color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+    .wf-updbar{display:flex;gap:8px}
+    .wf-updbar .ac-in{flex:1}
+    .wf-reject-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:600;margin-bottom:10px}
+    .wf-reject-acts{display:flex;gap:7px;flex:none}
+    .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+    .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+    @media(max-width:640px){
+      .wf-page-head h1{font-size:16px;flex:1 1 100%;order:2}
+      .wf-page-head .ac-btn.ic:first-child{order:1}
+      .wf-head-acts{order:3;flex:1 1 100%}
+      .wf-head-acts .ac-btn{flex:1;justify-content:center}
+      .wf-btxt{display:inline}
+      .wf-card{padding:14px}
+      .wf-lrow{padding:12px 13px;gap:10px}
+      .wf-lrow-right{gap:9px}
+      .wf-upd-b{max-width:82%}
+      .wf-detlist{grid-template-columns:1fr}
+    }
+    `;
+    document.head.appendChild(s);
+  }
 
   /* ---------- SCOREBOARD ---------- */
   async function scoreboardTab(){ const b=$('acBody'); let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){} const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
@@ -2490,7 +3009,7 @@
       try{ const {data:fa}=await ACC().rpc('fully_approved_batch',{p_ids:candidates.map(t=>t.id)}); (fa||[]).forEach(r=>{ if(r.fully_approved)fullyApprovedIds.add(r.task_id); }); }catch(e){}
     }
     const done=candidates.filter(t=>fullyApprovedIds.has(t.id)).sort((a,b)=>new Date(b.completed_at||b.approved_at||0)-new Date(a.completed_at||a.approved_at||0));
-    const byMe=done.filter(t=>isOwner(t)&&!isSelf(t,asg)&&!t.parent_task_id);
+    const byMe=done.filter(t=>isOwner(t)&&!isSelf(t,asg)&&!t.parent_task_id&&t.flow_case_step_id==null);
     const toMe=done.filter(t=>isMemb(t,asg)&&!isSelf(t,asg));
     const self=done.filter(t=>isSelf(t,asg));
     const grp=(label,arr,opt)=> arr.length?(`<div class="ac-seclbl">${label}</div><div class="ac-arch-list">`+arr.map(t=>miniRow(t,list,asg,opt)).join('')+`</div>`):'';
@@ -2515,6 +3034,18 @@
     const b=$('acBody');
     const [list,{tasks,asg,pm},myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
     const delegatedByMeIds=new Set(tasks.filter(t=>t.parent_task_id&&isOwner(t)).map(t=>t.parent_task_id));
+    // Workflow step state (per-task) so rows can show Forward vs Receive/Reject correctly
+    window._wfStepInfo={};
+    try{
+      const wfIds=tasks.filter(function(t){return t.flow_case_step_id!=null;}).map(function(t){return t.flow_case_step_id;});
+      if(wfIds.length){
+        const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at').in('id',wfIds);
+        const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
+        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        const bounds={}; allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; });
+        (steps||[]).forEach(function(s){ const bb=bounds[s.case_id]||{min:s.seq,max:s.seq}; window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,minSeq:bb.min,maxSeq:bb.max}; });
+      }
+    }catch(e){ window._wfStepInfo={}; }
 
     /* Combined per-card order: tasks you've already ranked (drag-and-dropped) come after
        tasks you haven't touched yet — untouched ones default to top priority ("A"),
@@ -2562,9 +3093,9 @@
     }
 
     const toMeArr=tasks.filter(t=>isMemb(t,asg)&&stOf(t)==='open');
-    const byMeArr=tasks.filter(t=>isOwner(t)&&stOf(t)==='open'&&!isSelf(t,asg));
+    const byMeArr=tasks.filter(t=>isOwner(t)&&stOf(t)==='open'&&!isSelf(t,asg)&&t.flow_case_step_id==null);
     const awaArr=tasks.filter(t=>isMemb(t,asg)&&stOf(t)==='await');
-    const pend=tasks.filter(t=>isOwner(t)&&stOf(t)==='await');
+    const pend=tasks.filter(t=>isOwner(t)&&stOf(t)==='await'&&t.flow_case_step_id==null);
 
     /* Workload — due-dated active tasks assigned to me, due today/yesterday/overdue only (no future dates, no priority view) */
     const activeAll=tasks.filter(t=>stOf(t)!=='approved');
@@ -2583,7 +3114,7 @@
       try{ const {data:fa}=await ACC().rpc('fully_approved_batch',{p_ids:doneWkCandidates.map(t=>t.id)}); (fa||[]).forEach(r=>{ if(r.fully_approved)fullyApprovedIds.add(r.task_id); }); }catch(e){}
     }
     const doneWk=doneWkCandidates.filter(t=>fullyApprovedIds.has(t.id));
-    const byMeC=doneWk.filter(t=>isOwner(t)&&!isSelf(t,asg)&&!t.parent_task_id);
+    const byMeC=doneWk.filter(t=>isOwner(t)&&!isSelf(t,asg)&&!t.parent_task_id&&t.flow_case_step_id==null);
     const toMeC=doneWk.filter(t=>isMemb(t,asg)&&!isSelf(t,asg));
     const selfC=doneWk.filter(t=>isSelf(t,asg));
     const grp=(label,arr,opt)=> arr.length?(`<div class="ac-seclbl">${label}</div>`+arr.map(t=>miniRow(t,list,asg,opt)).join('')):'';
@@ -2876,7 +3407,14 @@
     opt=opt||{};
     const emails=(opt.ownerAvatar&&!opt.owner)?[t.delegator].filter(Boolean):(asg[t.id]||[]);
     const approve=opt.approve?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`:'';
-    const chk=opt.checkable?`<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`:'';
+    const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
+    const wfReceived=wfInfo&&!!wfInfo.received_at;
+    const wfNeedsReceive=wfInfo&&!wfReceived;
+    const chk=opt.checkable?(t.flow_case_step_id!=null
+      ? (wfNeedsReceive ? ''
+         : `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`)
+      : `<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`):'';
+    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button></div>`:'';
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
@@ -2892,7 +3430,11 @@
       const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:''].filter(Boolean);
       meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     }
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${emails.length?avatars(list,emails):''}</div>${approve}</div>`;
+    const wfIcon2=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
+    const ownerVis=(t.flow_case_step_id!=null)
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
+      : (emails.length?avatars(list,emails):'');
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}${wfRR}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
@@ -3004,6 +3546,7 @@
       ACC().from('ptask_files').select('*').eq('task_id',tid).order('created_at',{ascending:true})
     ]);
     const t=tR.data; if(!t){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Task not found.</div></div>'; return; }
+    if(t.flow_case_step_id!=null){ return wfTaskPage(v, t, (aR.data||[]).map(function(r){return r.email;}), list, ro); }
     const members=(aR.data||[]).map(r=>r.email), subL=sR.data||[], comments=cR.data||[], acts=actR.data||[], files=fR.data||[];
     let projName=''; if(t.project_id){ const pm=await loadProjectsMap(); projName=pm[t.project_id]||''; }
     const amOwner=eq(t.delegator,me()), amMember=members.some(e=>eq(e,me())), st=stOf(t); const iHaveDelegated=(dR.data||[]).length>0;
