@@ -7661,7 +7661,7 @@ window.trDelete=async function(id){
 window.trUploadModal=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload call recordings</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body frm">'
-    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — you can pick many at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
+    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — pick up to 50 at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
     +'<input type="file" id="trFile" class="hidden" multiple accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
     +'<div id="trFileList" style="margin-top:12px"></div>'
     +'<div id="trUpMsg" style="margin-top:10px"></div>'
@@ -7670,25 +7670,28 @@ window.trUploadModal=function(){
 };
 window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();for(let i=0;i<dt.files.length;i++)buf.items.add(dt.files[i]);inp.files=buf.files;trUpPick();};
 window.trUpPick=function(){
-  const files=($('trFile').files||[]);const n=files.length;
-  $('trUpName').textContent=n?(n===1?files[0].name:(n+' files selected')):'Drag & drop or click to select recordings — you can pick many at once';
+  const files=Array.prototype.slice.call(($('trFile').files)||[]);
+  const over=files.length>50;const n=Math.min(files.length,50);
+  $('trUpName').textContent=files.length?(files.length===1?files[0].name:(files.length+' files selected'+(over?' — first 50 will be used':''))):'Drag & drop or click to select recordings — pick up to 50 at once';
   const list=$('trFileList');
   if(list){
-    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number for each recording <span style="color:#dc2626">*</span></label>'
-      +Array.prototype.map.call(files,function(f,i){
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number <span style="color:var(--slate);font-weight:400">(optional — validated if you enter one)</span></label>'
+      +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
+      +files.slice(0,50).map(function(f,i){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
           +'<i class="fa-solid fa-file-audio" style="color:#0d9488"></i>'
           +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(f.name)+'">'+esc(f.name)+'</div></div>'
-          +'<input type="tel" id="trPhone_'+i+'" class="sel" style="width:170px;flex-shrink:0" maxlength="15" placeholder="10-digit mobile" oninput="trUpValidate()">'
+          +'<input type="tel" id="trPhone_'+i+'" class="sel" style="width:160px;flex-shrink:0" maxlength="15" placeholder="10-digit mobile" oninput="trUpValidate()">'
           +'</div>';
-      }).join('')):'';
+      }).join('')+'</div>'
+      +(over?'<div style="font-size:12px;color:#d97706;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> You picked '+files.length+' files — only the first 50 upload at a time.</div>':'')):'';
   }
   trUpValidate();
 };
 window.trUpValidate=function(){
-  const files=($('trFile').files||[]);const n=files.length;let allValid=n>0;
-  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp){allValid=false;continue;}const ok=trPhoneValid(inp.value);inp.style.borderColor=inp.value?(ok?'#16a34a':'#dc2626'):'';if(!ok)allValid=false;}
-  const btn=$('trUpBtn');if(btn){btn.disabled=!allValid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
+  const n=Math.min((($('trFile').files||[]).length),50);let anyInvalid=false;
+  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp)continue;const v=(inp.value||'').trim();const ok=!v||trPhoneValid(v);inp.style.borderColor=v?(ok?'#16a34a':'#dc2626'):'';if(!ok)anyInvalid=true;}
+  const btn=$('trUpBtn');if(btn){btn.disabled=(n<1)||anyInvalid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
 };
 // Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
 // domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
@@ -7706,32 +7709,36 @@ async function trUploadOne(f,token){
   return path;
 }
 window.trUploadStart=async function(){
-  const files=Array.prototype.slice.call(($('trFile').files)||[]);
+  let files=Array.prototype.slice.call(($('trFile').files)||[]);
   if(!files.length){toast('Select at least one recording','err');return;}
+  if(files.length>50)files=files.slice(0,50);
   const phones=[];
-  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?inp.value:'';if(!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number for every recording','err');if(inp)inp.focus();return;}phones.push(trPhoneNorm(v));}
+  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?(inp.value||'').trim():'';if(v&&!trPhoneValid(v)){toast('One phone number is not a valid 10-digit mobile — fix it or clear it','err');if(inp)inp.focus();return;}phones.push(v?trPhoneNorm(v):null);}
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
-  let done=0,failed=0;
-  const paint=function(cur){const pct=Math.round((done+failed)/files.length*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">'+esc(cur||('Processed '+(done+failed)+' of '+files.length))+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
-  paint('Starting…');
-  for(let i=0;i<files.length;i++){
-    const f=files[i];
-    paint('Uploading '+(i+1)+' of '+files.length+': '+f.name);
-    try{
-      const path=await trUploadOne(f,token);
-      const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size})});
-      const out=await res.json().catch(function(){return {};});
-      if(!res.ok||!out.row) throw new Error(out.error||'could not start');
-      if(!TR_ROWS)TR_ROWS=[];
-      TR_ROWS.unshift(out.row);
-      trStartPolling(out.row.id);
-      done++;
-    }catch(e){ failed++; }
-    paint();
-  }
+  const total=files.length;let done=0,failed=0,idx=0;
+  const paint=function(){const pct=Math.round((done+failed)/total*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">Processed '+(done+failed)+' of '+total+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
+  paint();
+  const worker=async function(){
+    while(idx<files.length){
+      const i=idx++;const f=files[i];
+      try{
+        const path=await trUploadOne(f,token);
+        const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size})});
+        const out=await res.json().catch(function(){return {};});
+        if(!res.ok||!out.row) throw new Error(out.error||'could not start');
+        if(!TR_ROWS)TR_ROWS=[];
+        TR_ROWS.unshift(out.row);
+        trStartPolling(out.row.id);
+        done++;
+      }catch(e){ failed++; }
+      paint();
+    }
+  };
+  const K=Math.min(4,files.length);
+  await Promise.all(Array.from({length:K},function(){return worker();}));
   toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
   closeModal();
   if(PAGE==='transcription')renderPage();
