@@ -7783,11 +7783,12 @@ async function trDetail(v,id){
 
 function trCriteriaHtml(r){
   const c=r.criteria||{};
-  const items=[['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction'],['customer_agrees','Customer agrees'],['site_visit_interested','Wants site visit']];
-  return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it){
+  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+  return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it,idx){
     const ok=c[it[0]]===true;
-    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+'</div>';
-  }).join('')+'</div>';
+    const badge=(idx===0)?'<span style="font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 5px;margin-left:6px">PRIORITY</span>':'';
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+badge+'</div>';
+  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match.</div></div>';
 }
 function trAnalysisHtml(r){
   const a=r.analysis||{};
