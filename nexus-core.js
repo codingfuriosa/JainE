@@ -7619,7 +7619,7 @@ function trRenderList(){
     return '<tr'+clickable+'>'
       +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-phone" style="color:#0d9488;font-size:15px"></i><div><div style="font-weight:600">'+trPhoneFmt(phone)+'</div>'+nameLine+'</div></div></td>'
       +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
-      +'<td style="max-width:280px"><div style="font-size:12.5px;color:var(--slate);line-height:1.45">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
+      +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
       +'<td>'+trLangTags(r.languages)+'</td>'
       +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
       +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
@@ -7675,7 +7675,7 @@ window.trUpPick=function(){
   $('trUpName').textContent=files.length?(files.length===1?files[0].name:(files.length+' files selected'+(over?' — first 50 will be used':''))):'Drag & drop or click to select recordings — pick up to 50 at once';
   const list=$('trFileList');
   if(list){
-    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number <span style="color:var(--slate);font-weight:400">(optional — validated if you enter one)</span></label>'
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number <span style="color:#dc2626">* required</span></label>'
       +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
       +files.slice(0,50).map(function(f,i){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
@@ -7689,13 +7689,15 @@ window.trUpPick=function(){
   trUpValidate();
 };
 window.trUpValidate=function(){
-  const n=Math.min((($('trFile').files||[]).length),50);let anyInvalid=false;
-  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp)continue;const v=(inp.value||'').trim();const ok=!v||trPhoneValid(v);inp.style.borderColor=v?(ok?'#16a34a':'#dc2626'):'';if(!ok)anyInvalid=true;}
-  const btn=$('trUpBtn');if(btn){btn.disabled=(n<1)||anyInvalid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
+  const n=Math.min((($('trFile').files||[]).length),50);let allValid=n>0;
+  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp){allValid=false;continue;}const v=(inp.value||'').trim();const ok=trPhoneValid(v);inp.style.borderColor=v?(ok?'#16a34a':'#dc2626'):'';if(!ok)allValid=false;}
+  const btn=$('trUpBtn');if(btn){btn.disabled=!allValid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
 };
 // Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
 // domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
 // fall back to the server-side proxy so it still uploads from anywhere.
+// Read an audio/video file's duration (seconds) in the browser, so the list shows real length.
+function trAudioDuration(file){return new Promise(function(resolve){try{const el=document.createElement('audio');el.preload='metadata';const url=URL.createObjectURL(file);let done=false;const fin=function(d){if(done)return;done=true;try{URL.revokeObjectURL(url);}catch(_){}resolve(d);};el.onloadedmetadata=function(){const d=el.duration;fin(isFinite(d)&&d>0?Math.round(d):null);};el.onerror=function(){fin(null);};setTimeout(function(){fin(null);},8000);el.src=url;}catch(e){resolve(null);}});}
 async function trUploadOne(f,token){
   const key=s3KeyForTranscription(f.name);
   let path=null;
@@ -7713,7 +7715,7 @@ window.trUploadStart=async function(){
   if(!files.length){toast('Select at least one recording','err');return;}
   if(files.length>50)files=files.slice(0,50);
   const phones=[];
-  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?(inp.value||'').trim():'';if(v&&!trPhoneValid(v)){toast('One phone number is not a valid 10-digit mobile — fix it or clear it','err');if(inp)inp.focus();return;}phones.push(v?trPhoneNorm(v):null);}
+  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?(inp.value||'').trim():'';if(!v){toast('Mobile number is required for every recording','err');if(inp)inp.focus();return;}if(!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number','err');if(inp)inp.focus();return;}phones.push(trPhoneNorm(v));}
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
@@ -7725,8 +7727,9 @@ window.trUploadStart=async function(){
     while(idx<files.length){
       const i=idx++;const f=files[i];
       try{
+        const dur=await trAudioDuration(f);
         const path=await trUploadOne(f,token);
-        const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size})});
+        const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size,duration:dur})});
         const out=await res.json().catch(function(){return {};});
         if(!res.ok||!out.row) throw new Error(out.error||'could not start');
         if(!TR_ROWS)TR_ROWS=[];
@@ -7770,7 +7773,8 @@ async function trDetail(v,id){
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Qualification checklist</div>'+trCriteriaHtml(r)+'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+trAnalysisHtml(r)+'</div></div>'
     +'</div>'
-    +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div>'+trTranscriptHtml(r)+'</div>';
+    +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>';
+  TR_DETAIL_ROW=r;
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
   if(r.s3_path){
     try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
@@ -7806,17 +7810,19 @@ function trAnalysisHtml(r){
   return rows.join('');
 }
 
-function trTranscriptHtml(r){
-  const u=r.utterances;
-  if(Array.isArray(u)&&u.length){
-    return '<div style="display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow:auto">'+u.map(function(x){
-      const spk=(x.speaker!==null&&x.speaker!==undefined)?('Speaker '+(typeof x.speaker==='number'?x.speaker+1:x.speaker)):'Speaker';
-      return '<div style="display:flex;gap:10px"><div style="flex-shrink:0;width:96px"><div style="font-weight:600;font-size:12.5px">'+esc(spk)+'</div><div style="font-size:11px;color:var(--slate)">'+trFmtDur(x.start)+(x.language?' · '+esc(trLangName(x.language)):'')+'</div></div><div style="font-size:13.5px;line-height:1.55;flex:1">'+esc(x.text||'')+'</div></div>';
-    }).join('')+'</div>';
-  }
-  if(r.transcript)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(r.transcript)+'</div>';
+let TR_DETAIL_ROW=null;
+function trTranscriptHtml(r,lang){
+  const txt=(lang==='bn')?(r.transcript_bn||r.transcript||''):(r.transcript_en||r.transcript||'');
+  if(txt)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(txt)+'</div>';
   return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
 }
+window.trSetLang=function(lang){
+  if(!TR_DETAIL_ROW)return;
+  const b=$('trTranscriptBody');if(b)b.innerHTML=trTranscriptHtml(TR_DETAIL_ROW,lang);
+  const en=$('trLangEn'),bn=$('trLangBn');
+  if(en)en.className='btn btn-sm'+(lang==='en'?' btn-primary':'');
+  if(bn)bn.className='btn btn-sm'+(lang==='bn'?' btn-primary':'');
+};
 
 window.trDownload=async function(id){
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
