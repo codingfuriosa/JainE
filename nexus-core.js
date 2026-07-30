@@ -5457,22 +5457,33 @@ function promptSetPassword(){
     if(document.getElementById('speedWidgetCss'))return;
     const s=document.createElement('style'); s.id='speedWidgetCss';
     s.textContent=`
-#speedWidget{position:fixed;z-index:90;display:flex;flex-direction:column;gap:8px;align-items:stretch;
-  min-width:138px;padding:12px 16px;background:#fff;
+#speedWidget{position:fixed;z-index:90;display:flex;flex-direction:column;gap:3px;align-items:center;
+  padding:8px 8px;background:#fff;
   border:1.5px solid #000;border-radius:14px;
-  box-shadow:var(--shadow-lg);
-  font-family:Inter,system-ui,sans-serif;line-height:1;color:var(--ink);
+  box-shadow:var(--shadow-lg);width:max-content;
+  font-family:Inter,system-ui,sans-serif;line-height:1;color:var(--ink);white-space:nowrap;
   cursor:grab;user-select:none;touch-action:none;transition:box-shadow .15s ease}
 #speedWidget.dragging{cursor:grabbing;box-shadow:0 14px 34px rgba(16,24,40,.26)}
 #speedWidget.testing{opacity:.7}
-#speedWidget .sw-block+.sw-block{border-top:1px solid var(--line);padding-top:8px}
-#speedWidget .sw-label{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;
-  text-transform:uppercase;letter-spacing:.04em;color:var(--slate);margin-bottom:3px}
-#speedWidget .sw-label i{width:11px;font-size:10px;text-align:center;flex-shrink:0}
-#speedWidget .sw-row{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
-#speedWidget .sw-val{font-size:17px;font-weight:800;letter-spacing:-.01em}
-#speedWidget .sw-unit{font-size:11px;font-weight:700;color:var(--slate)}
-#speedWidget.offline{flex-direction:row;align-items:center;justify-content:center;font-size:13px;font-weight:800;padding:10px 16px}`;
+#speedWidget .sw-block{display:flex;align-items:baseline;gap:3px}
+#speedWidget .sw-block+.sw-block{border-top:1px solid var(--line);padding-top:5px}
+#speedWidget .sw-block i{font-size:10px;flex-shrink:0}
+#speedWidget .sw-val{font-size:12px;font-weight:800;letter-spacing:-.01em}
+#speedWidget .sw-unit{font-size:9px;font-weight:700;color:var(--slate)}
+#speedWidget.offline{flex-direction:row;font-size:11px;font-weight:800;justify-content:center}
+@media (max-width:1024px){
+  #speedWidget{gap:3px;padding:7px 7px}
+  #speedWidget .sw-block+.sw-block{padding-top:4px}
+  #speedWidget .sw-val{font-size:11.5px}
+}
+@media (max-width:480px){
+  #speedWidget{gap:2px;padding:6px 6px}
+  #speedWidget .sw-block{gap:2px}
+  #speedWidget .sw-block+.sw-block{padding-top:3px}
+  #speedWidget i{font-size:9px}
+  #speedWidget .sw-val{font-size:10.5px}
+  #speedWidget .sw-unit{font-size:8px}
+}`;
     document.head.appendChild(s);
   }
 
@@ -5567,8 +5578,8 @@ function promptSetPassword(){
     const dText=numText(dl);
     const uText=numText(ul);
     box.innerHTML=
-      `<div class="sw-block"><div class="sw-label"><i class="fa-solid fa-arrow-down"></i>Downloading</div><div class="sw-row" style="color:${speedColor(dl)}"><span class="sw-val">${dText}</span><span class="sw-unit">Mbps</span></div></div>`+
-      `<div class="sw-block"><div class="sw-label"><i class="fa-solid fa-arrow-up"></i>Uploading</div><div class="sw-row" style="color:${speedColor(ul)}"><span class="sw-val">${uText}</span><span class="sw-unit">Mbps</span></div></div>`;
+      `<div class="sw-block" style="color:${speedColor(dl)}"><i class="fa-solid fa-arrow-down"></i><span class="sw-val">${dText}</span><span class="sw-unit">Mbps</span></div>`+
+      `<div class="sw-block" style="color:${speedColor(ul)}"><i class="fa-solid fa-arrow-up"></i><span class="sw-val">${uText}</span><span class="sw-unit">Mbps</span></div>`;
     box.title='Internet speed: '+(dl==null&&ul==null?'measuring…':`Download ${dText} Mbps / Upload ${uText} Mbps`)+' — drag to move';
   }
 
