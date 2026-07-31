@@ -106,10 +106,10 @@
     .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
-    .hint-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;color:var(--slate);opacity:.6;cursor:pointer;font-size:12px;margin-left:5px;vertical-align:middle;top:-1px;transition:color .12s,opacity .12s}
-    .hint-tip:hover,.hint-tip:focus,.hint-tip.show{opacity:1;color:var(--brand);outline:none}
-    .hint-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);left:50%;background:#0f172a;color:#fff;font-size:11.5px;font-weight:500;line-height:1.45;padding:8px 11px;border-radius:9px;width:max-content;max-width:min(260px,72vw);white-space:normal;text-align:left;box-shadow:0 8px 24px rgba(15,23,42,.22);opacity:0;visibility:hidden;transform:translateX(-50%) translateY(4px);transition:opacity .13s,transform .13s;z-index:99999;pointer-events:none}
-    .hint-tip:hover::after,.hint-tip:focus::after,.hint-tip.show::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+    .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font-size:9px;font-weight:700;cursor:pointer;position:relative;flex:none;margin-left:4px;vertical-align:middle}
+    .wf-tip>.wf-tip-txt{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.4;width:max-content;max-width:min(240px,72vw);text-align:center;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s;z-index:99999;box-shadow:0 6px 18px rgba(0,0,0,.22)}
+    .wf-tip>.wf-tip-txt::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
+    .wf-tip:hover>.wf-tip-txt,.wf-tip:focus>.wf-tip-txt{opacity:1;visibility:visible}
     .wf-steps-head{margin-top:20px}
     .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
@@ -776,12 +776,10 @@
   window.wfCancel=function(){ navTo('tasks/workflow'); };
   // Reusable tooltip for secondary hint text: a small (i) icon. Desktop = hover (native title);
   // mobile = tap shows the text as a toast. Keeps forms/lists compact (esp. on phones).
-  function tip(text){ var s=esc2(String(text||'')); return '<i class="fa-solid fa-circle-info hint-tip" tabindex="0" role="button" data-tip="'+s+'" aria-label="'+s+'"></i>'; }
+  function tip(text){ var s=esc2(String(text||'')); return '<span class="wf-tip" tabindex="0"><i class="fa-solid fa-info"></i><span class="wf-tip-txt">'+s+'</span></span>'; }
   if(!window._acTipInit){ window._acTipInit=1; document.addEventListener('click',function(e){
-    var el=e.target&&e.target.closest&&e.target.closest('.hint-tip');
-    var open=document.querySelectorAll('.hint-tip.show');
-    for(var i=0;i<open.length;i++){ if(open[i]!==el) open[i].classList.remove('show'); }
-    if(el){ e.preventDefault(); e.stopPropagation(); el.classList.toggle('show'); }
+    var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+    if(el){ e.stopPropagation(); try{ el.focus(); }catch(_){} }
   },true); }
   // Workflow instance detail formatters (used for task Title / Description).
   function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
@@ -963,6 +961,7 @@
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+      const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
       const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
@@ -974,8 +973,11 @@
           }
           return '<td><span class="wf-pill wait">·</span></td>';
         }).join('');
+        const fst=firstSeq!=null?(byCase[c.id]||{})[firstSeq]:null;
+        const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
+        const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
-          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
+          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-first-done="'+(firstDone?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'+tip('Tick one to edit, or one or more to delete. Click a row to see its progress.')
@@ -1005,17 +1007,22 @@
   window.wfInstSelChange=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     const eb=$('wfInstEdit'), db=$('wfInstDel');
-    if(eb) eb.disabled = checks.length!==1;
-    if(db) db.disabled = checks.length<1;
+    const oneSel = checks.length===1;
+    const editBlocked = oneSel && checks[0].getAttribute('data-first-done')==='1';
+    const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
+    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? 'Can’t edit — this instance’s first step is already done' : 'Edit selected instance'; }
+    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? 'Can’t delete — a selected instance has already started (first step received)' : 'Delete selected'; }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
+    if(checks[0].getAttribute('data-first-done')==='1'){ toast('Can’t edit — this instance’s first step is already done','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
   window.wfInstDelSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(!checks.length) return;
+    if(checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; })){ toast('Can’t delete — a selected instance has already started (first step received)','err'); return; }
     const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
     wfConfirm({ title:'Delete '+ids.length+' instance'+(ids.length===1?'':'s')+'?', body:'This permanently removes the selected instance'+(ids.length===1?'':'s')+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
