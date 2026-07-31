@@ -106,8 +106,8 @@
     .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
-    .hint-tip{color:var(--slate);opacity:.55;cursor:help;font-size:11px;margin-left:5px;vertical-align:middle}
-    .hint-tip:hover,.hint-tip:focus{opacity:1;color:var(--brand);outline:none}
+    .hint-tip{display:inline-flex;align-items:center;justify-content:center;color:var(--slate);opacity:.55;cursor:pointer;font-size:12px;margin-left:5px;vertical-align:middle;position:relative;top:-1px;transition:opacity .12s,color .12s}
+    .hint-tip:hover,.hint-tip:focus{opacity:.95;color:var(--brand);outline:none}
     .wf-steps-head{margin-top:20px}
     .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
