@@ -352,8 +352,16 @@
     .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
     .mtg-log-badge.none{background:#f1f5f9;color:#94a3b8}
     .mtg-log-transcript{margin-top:6px;font-size:13px;color:#334155;line-height:1.6;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:12px}
-    .mtg-log-summary{margin:6px 0 10px;font-size:13px;color:#334155;line-height:1.65;background:#fff;border:1px solid var(--line);border-left:3px solid #0d9488;border-radius:8px;padding:11px 13px}
+    .mtg-log-summary{margin:6px 0 12px;font-size:13px;color:#334155;line-height:1.65;background:#fff;border:1px solid var(--line);border-left:3px solid #0d9488;border-radius:8px;padding:11px 13px}
     .mtg-log-sumh{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .mtg-tr-facts{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px}
+    .mtg-tr-fact{flex:1 1 110px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+    .mtg-tr-fact .k{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#a3adbe}
+    .mtg-tr-fact .v{font-size:17px;font-weight:650;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
+    .mtg-tr-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+    .mtg-tr-h{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#8a94a6;display:flex;align-items:center;gap:7px}
+    .mtg-tr-btns{display:flex;gap:6px}
+    .mtg-tr-btns .ac-btn{padding:5px 12px;font-size:12.5px}
     .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
     .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-bar{width:4px;border-radius:3px;flex:none}
@@ -2769,12 +2777,40 @@
   let MTG_REC=null, MTG_WRAP=null;
   function mtgSecFmt(s){ s=Math.max(0,s|0); const m=Math.floor(s/60), ss=s%60; return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
   function mtgClockIST(iso){ try{ return new Date(iso).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}); }catch(e){ return ''; } }
+  let MTG_LOG_LANG='en';   // which transcript version the user is viewing
+  const MTG_LANG_NAMES={en:'English',hi:'Hindi',bn:'Bengali',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',ur:'Urdu',pa:'Punjabi'};
+  function mtgLangName(c){return MTG_LANG_NAMES[String(c||'').toLowerCase()]||String(c||'').toUpperCase();}
+  function mtgTrText(l,lang){ return (lang==='bn')?(l.transcript_bn||l.transcript||''):(l.transcript_en||l.transcript||''); }
+  function mtgTrBody(l,lang){
+    const txt=mtgTrText(l,lang);
+    if(!txt) return '<p style="color:var(--slate);font-size:13px;margin:8px 0 0">'+(lang==='bn'?'The original-language version isn\'t stored for this recording — record it again to get both versions.':'No transcript text available.')+'</p>';
+    return '<div class="mtg-log-transcript">'+esc2(txt).replace(/\n/g,'<br>')+'</div>';
+  }
+  window.mtgSetLang=function(lang){
+    MTG_LOG_LANG=lang;
+    const l=window._mtgLogRow; if(!l)return;
+    const b=document.getElementById('mtgTrBody'); if(b)b.innerHTML=mtgTrBody(l,lang);
+    ['en','bn'].forEach(function(k){ const btn=document.getElementById('mtgLang_'+k); if(btn){ if(k===lang)btn.classList.add('primary'); else btn.classList.remove('primary'); } });
+  };
   function mtgTranscriptHtml(l){
     if(l.transcript_status==='ready'){
-      // Gemini also writes a short summary — show it above the verbatim transcript.
+      window._mtgLogRow=l;
       const sum=(l.summary||'').trim();
-      const sumHtml=sum?('<div class="mtg-log-summary"><div class="mtg-log-sumh"><i class="fa-solid fa-wand-magic-sparkles"></i> Summary</div><div>'+esc2(sum).replace(/\n/g,'<br>')+'</div></div>'):'';
-      return sumHtml+'<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+      const sumHtml=sum?('<div class="mtg-log-summary"><div class="mtg-log-sumh"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Summary</div><div>'+esc2(sum).replace(/\n/g,'<br>')+'</div></div>'):'';
+      // quick facts about the recording
+      const enTxt=mtgTrText(l,'en'), words=enTxt?enTxt.trim().split(/\s+/).length:0;
+      const langs=Array.isArray(l.languages)?l.languages.filter(Boolean):[];
+      const facts=[];
+      if(l.num_speakers)facts.push(['Speakers',String(l.num_speakers)]);
+      if(langs.length)facts.push(['Languages',langs.map(mtgLangName).join(', ')]);
+      if(words)facts.push(['Words',words.toLocaleString('en-IN')]);
+      const factsHtml=facts.length?('<div class="mtg-tr-facts">'+facts.map(function(f){return '<div class="mtg-tr-fact"><div class="k">'+esc2(f[0])+'</div><div class="v">'+esc2(f[1])+'</div></div>';}).join('')+'</div>'):'';
+      const hasBn=!!(l.transcript_bn&&String(l.transcript_bn).trim());
+      const lang=(MTG_LOG_LANG==='bn'&&hasBn)?'bn':'en';
+      const toggle='<div class="mtg-tr-bar"><div class="mtg-tr-h"><i class="fa-solid fa-quote-left"></i> Transcript</div>'
+        +'<div class="mtg-tr-btns"><button class="ac-btn'+(lang==='en'?' primary':'')+'" id="mtgLang_en" onclick="mtgSetLang(\'en\')">English</button>'
+        +'<button class="ac-btn'+(lang==='bn'?' primary':'')+'" id="mtgLang_bn" onclick="mtgSetLang(\'bn\')">বাংলা / Original</button></div></div>';
+      return factsHtml+sumHtml+toggle+'<div id="mtgTrBody">'+mtgTrBody(l,lang)+'</div>';
     }
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
     if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
@@ -2931,7 +2967,7 @@
       n++;
       const el=document.getElementById('mtgWrapTranscript');
       if(!el||n>120){ clearInterval(iv); return; }
-      try{ const {data}=await ACC().from('meeting_logs').select('transcript,summary,transcript_status').eq('id',logId).maybeSingle();
+      try{ const {data}=await ACC().from('meeting_logs').select('transcript,transcript_en,transcript_bn,summary,languages,num_speakers,transcript_status').eq('id',logId).maybeSingle();
         if(data){ el.innerHTML=mtgTranscriptHtml(data); if(data.transcript_status==='ready'||data.transcript_status==='failed'||data.transcript_status==='none'){ clearInterval(iv); } }
       }catch(e){}
     },5000);
