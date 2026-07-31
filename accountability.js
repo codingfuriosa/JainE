@@ -106,8 +106,10 @@
     .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
-    .hint-tip{display:inline-flex;align-items:center;justify-content:center;color:var(--slate);opacity:.55;cursor:pointer;font-size:12px;margin-left:5px;vertical-align:middle;position:relative;top:-1px;transition:opacity .12s,color .12s}
-    .hint-tip:hover,.hint-tip:focus{opacity:.95;color:var(--brand);outline:none}
+    .hint-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;color:var(--slate);opacity:.6;cursor:pointer;font-size:12px;margin-left:5px;vertical-align:middle;top:-1px;transition:color .12s,opacity .12s}
+    .hint-tip:hover,.hint-tip:focus,.hint-tip.show{opacity:1;color:var(--brand);outline:none}
+    .hint-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);left:50%;background:#0f172a;color:#fff;font-size:11.5px;font-weight:500;line-height:1.45;padding:8px 11px;border-radius:9px;width:max-content;max-width:min(260px,72vw);white-space:normal;text-align:left;box-shadow:0 8px 24px rgba(15,23,42,.22);opacity:0;visibility:hidden;transform:translateX(-50%) translateY(4px);transition:opacity .13s,transform .13s;z-index:99999;pointer-events:none}
+    .hint-tip:hover::after,.hint-tip:focus::after,.hint-tip.show::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
     .wf-steps-head{margin-top:20px}
     .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
@@ -774,8 +776,13 @@
   window.wfCancel=function(){ navTo('tasks/workflow'); };
   // Reusable tooltip for secondary hint text: a small (i) icon. Desktop = hover (native title);
   // mobile = tap shows the text as a toast. Keeps forms/lists compact (esp. on phones).
-  function tip(text){ var s=esc2(String(text||'')); return '<i class="fa-solid fa-circle-info hint-tip" tabindex="0" role="button" title="'+s+'" data-tip="'+s+'" aria-label="'+s+'"></i>'; }
-  if(!window._acTipInit){ window._acTipInit=1; document.addEventListener('click',function(e){ var el=e.target&&e.target.closest&&e.target.closest('.hint-tip'); if(el){ e.preventDefault(); e.stopPropagation(); var tx=el.getAttribute('data-tip'); if(tx&&typeof toast==='function') toast(tx); } },true); }
+  function tip(text){ var s=esc2(String(text||'')); return '<i class="fa-solid fa-circle-info hint-tip" tabindex="0" role="button" data-tip="'+s+'" aria-label="'+s+'"></i>'; }
+  if(!window._acTipInit){ window._acTipInit=1; document.addEventListener('click',function(e){
+    var el=e.target&&e.target.closest&&e.target.closest('.hint-tip');
+    var open=document.querySelectorAll('.hint-tip.show');
+    for(var i=0;i<open.length;i++){ if(open[i]!==el) open[i].classList.remove('show'); }
+    if(el){ e.preventDefault(); e.stopPropagation(); el.classList.toggle('show'); }
+  },true); }
 
   function wfStepRowHtml(idx,step){
     step=step||{};
