@@ -1150,7 +1150,7 @@
     } else if(amAssignee && caseActive){
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
-         +'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
+         +(isFirst?'':'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>');
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
@@ -3439,7 +3439,8 @@
       ? (wfNeedsReceive ? ''
          : `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`)
       : `<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`):'';
-    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button></div>`:'';
+    const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
+    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`}</div>`:'';
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
