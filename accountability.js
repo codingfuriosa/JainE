@@ -783,6 +783,10 @@
     for(var i=0;i<open.length;i++){ if(open[i]!==el) open[i].classList.remove('show'); }
     if(el){ e.preventDefault(); e.stopPropagation(); el.classList.toggle('show'); }
   },true); }
+  // Workflow instance detail formatters (used for task Title / Description).
+  function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
+  function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(l).trim()&&!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(v); }).filter(Boolean).join('<br>'); }
+  function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
 
   function wfStepRowHtml(idx,step){
     step=step||{};
@@ -1161,12 +1165,17 @@
     const statusChip=forwarded?'<span class="ac-chip ac-c-Completed">Completed</span>':'<span class="ac-chip ac-c-Pending">Pending</span>';
     let takenTxt='—'; if(fcs.received_at&&fcs.forwarded_at) takenTxt=wfHms(new Date(fcs.forwarded_at)-new Date(fcs.received_at)); else if(fcs.received_at) takenTxt='running · '+wfHms(Date.now()-new Date(fcs.received_at));
     const person=fcs.person;
-    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(t.title)+'</div>'
+    const wfDetailsArr=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
+    const wfInline=wfDetailsInline(wfDetailsArr);
+    const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow&&caseRow.case_no?(' #'+caseRow.case_no):'');
+    const wfStepName=wfTitleCase(fcs.title||'');
+    const wfDescFmt=wfDetailsFmt(wfDetailsArr);
+    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfInline||t.title)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTitleCase((flow&&flow.name)||'Workflow')+': '+wfTitleCase(fcs.title||''))+'</b>'+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':'')+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details</h3><div class="tp-grid">'
         +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
         +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
@@ -3064,11 +3073,22 @@
     try{
       const wfIds=tasks.filter(function(t){return t.flow_case_step_id!=null;}).map(function(t){return t.flow_case_step_id;});
       if(wfIds.length){
-        const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at').in('id',wfIds);
+        const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at,forwarded_at,title').in('id',wfIds);
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
-        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq').in('case_id',caseIds); allc=(r&&r.data)||[]; }
-        const bounds={}; allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; });
-        (steps||[]).forEach(function(s){ const bb=bounds[s.case_id]||{min:s.seq,max:s.seq}; window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,minSeq:bb.min,maxSeq:bb.max}; });
+        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
+        const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
+        const bounds={}, bySeq={};
+        allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (bySeq[s.case_id]=bySeq[s.case_id]||{})[s.seq]=s; });
+        (steps||[]).forEach(function(s){
+          const bb=bounds[s.case_id]||{min:s.seq,max:s.seq};
+          const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
+          const nextStep=(bySeq[s.case_id]||{})[s.seq+1]||null;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:!!nextStep};
+        });
       }
     }catch(e){ window._wfStepInfo={}; }
 
@@ -3460,7 +3480,9 @@
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${wfRR}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
+    const wfTitle=wfDet?esc2(wfDet):esc2(t.title);
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
