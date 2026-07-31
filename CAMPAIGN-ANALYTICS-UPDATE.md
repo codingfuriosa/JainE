@@ -221,6 +221,80 @@ backgrounds transparent, card shadows `none`, and **no horizontal page overflow*
 
 ---
 
+## 8. Revision 3 — the empty-columns bugs, fixed at the root
+
+You reported: Google's Trend column empty everywhere, no ads visible at all, the Previous column
+blank, no spend/conversions in the movement table, and lots of blanks on Ad Fatigue.
+
+**These were not five bugs — they were two.**
+
+### 8.1 Google's previous-period data was never being saved
+
+The trend needs the earlier period. Meta's was being saved correctly; **Google's never was**, so
+every Google "Previous", "Trend" and "CTR before" cell had nothing to show — correctly displaying
+"—", but useless.
+
+*Cause:* fetching the previous window needed a **second** call to Google, which was unreliable and
+often never completed.
+
+*Fix:* `google-ads-live` now fills **both periods in a single pass**. It queries the whole span
+(previous start → current end) **segmented by date**, then splits the daily rows into the current
+bucket and the previous bucket. One call, both answers — and half the API traffic.
+
+**Verified:** Google now stores both, e.g. **₹1,55,034 this week vs ₹1,50,546 the week before.**
+
+### 8.2 The Ads page was empty because the ad table had zero rows
+
+*Cause:* a `pageSize` value was being sent alongside queries that also use `LIMIT`, which the Google
+Ads API rejects with **400 INVALID_ARGUMENT** — so *every* account failed silently and nothing was
+saved. (A failed run also wrote its "already synced" marker, which then hid the failure for five
+minutes.)
+
+*Fix:* removed `pageSize` (paging by token alone is correct) and error messages are now recorded in
+full instead of being cut off.
+
+**Verified:** **47 ads** now stored with **47 current + 47 previous** performance rows.
+
+### 8.3 Ad Fatigue: no more pointless empty column
+
+Google genuinely does not publish per-person frequency, so that column could only ever show dashes.
+On the Google tab the **"Seen / person" column is now removed entirely** (7 columns instead of 8),
+and the chip at the top says why. Meta keeps it, because Meta really does provide it.
+
+**Verified:** Meta = 8 columns with "Seen / person"; Google = 7 columns without it, header and body
+cell counts matching (no misalignment).
+
+---
+
+## 9. Offline meeting recordings now use Gemini
+
+Offline meeting recordings were being transcribed by **Groq Whisper plus a second Groq clean-up
+pass** — and the clean-up step was misbehaving badly. One real meeting's stored "transcript" was
+literally:
+
+> *"There is no dialog to clean. Please provide the meeting transcript that needs to be cleaned"*
+
+That is the clean-up model refusing, saved as if it were the meeting.
+
+**Now a single Gemini call** does the whole job: transcribe, transliterate Hindi/Bengali into Roman
+letters (**never** translate), fix in-house terms (FarVision, JAIN-E, Jain Group, CRM, RERA), and
+write a summary. It retries automatically if Gemini is briefly overloaded.
+
+**Verified on that same real meeting:**
+
+| | Result |
+|---|---|
+| **Transcript** | *Speaker 1: Aur main main kuch vakya bolne ka prayas karta hu. Tamil… bhul gaya.*<br>*Speaker 2: Kuch Bengali me bolo na.*<br>*Speaker 1: Ami tomake bhalobashi.* |
+| **Summary** | - Speaker 1 attempts to recall and speak a sentence in Tamil.<br>- He realizes he has forgotten the Tamil phrase.<br>- Speaker 2 suggests speaking in Bengali instead.<br>- Speaker 1 responds by saying "Ami tomake bhalobashi" in Bengali. |
+
+Note the Bengali is **transliterated, not translated** — exactly the rule you wanted.
+
+**New:** each meeting log now also shows an **AI Summary** block above the transcript (teal-marked
+card). A `summary` column was added to store it. Existing meetings keep their old transcript until
+they are recorded again.
+
+---
+
 ## 6. Interface polish
 
 - A **legend line** under the KPIs on every tab explaining what "Trend" and "Fatigue" mean, so

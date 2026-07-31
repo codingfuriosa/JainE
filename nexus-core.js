@@ -7207,16 +7207,15 @@ function cmpPrevRange(){
 }
 function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
 function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
-// Ask the live functions to also sync the previous window so the comparison has real numbers.
+// Sync the previous window for META only — google-ads-live now fills both buckets in one call
+// (see its prev_since/prev_until parameters), so asking it twice is unnecessary.
 async function cmpSyncPrev(which){
+  if(which!=='meta'&&which!=='both')return;
   const p=cmpPrevRange(); if(!p)return;
   try{
     const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
     const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-    const calls=[];
-    if(which==='meta'||which==='both')calls.push(fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){}));
-    if(which==='google'||which==='both')calls.push(fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify({period:'custom',since:p.since,until:p.until})}).catch(function(){}));
-    await Promise.all(calls);
+    await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){});
   }catch(e){}
 }
 // Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
@@ -7290,7 +7289,7 @@ function cmpTrendPage(rows,totals,inr,num,resLabel){
 }
 /* ---------------- AD FATIGUE page ----------------
    rows = [{name, sub, freq, ctr, pctr, spend, impr}] */
-function cmpFatiguePage(rows,inr,num,note){
+function cmpFatiguePage(rows,inr,num,note,hideFreq){
   const grade=function(r){
     const f=Number(r.freq)||0, c=(r.ctr==null?null:Number(r.ctr)), pc=(r.pctr==null?null:Number(r.pctr));
     const drop=(pc&&pc>0&&c!=null)?(1-(c/pc)):null;
@@ -7310,19 +7309,22 @@ function cmpFatiguePage(rows,inr,num,note){
     if(x.g.level==='md')return 'Watch it; plan a new variant';
     return 'Healthy';
   };
+  // Google Ads publishes no per-person frequency, so on that source we drop the column entirely
+  // rather than showing a row of dashes.
+  const cols=hideFreq?7:8;
   const body=scored.length?scored.map(function(x){
     return '<tr><td><div class="cmp-nm">'+esc(x.name)+'</div>'+(x.sub?'<div class="cmp-sub">'+esc(x.sub)+'</div>':'')+'</td>'
-      +'<td class="num">'+(x.freq?(Number(x.freq).toFixed(1)+'×'):'—')+'</td>'
+      +(hideFreq?'':'<td class="num">'+(x.freq?(Number(x.freq).toFixed(1)+'×'):'—')+'</td>')
       +'<td class="num muted">'+(x.pctr!=null?(Number(x.pctr).toFixed(2)+'%'):'—')+'</td>'
       +'<td class="num strong">'+(x.ctr!=null?(Number(x.ctr).toFixed(2)+'%'):'—')+'</td>'
       +'<td class="num">'+(x.g.drop===null?'—':('<span class="'+(x.g.drop>0?'cmp-dn':'cmp-up')+'">'+(x.g.drop>0?'−':'+')+Math.abs(Math.round(x.g.drop*100))+'%</span>'))+'</td>'
       +'<td class="num">'+inr(x.spend||0)+'</td>'
       +'<td>'+cmpFatigue(x.freq,x.ctr,x.pctr)+'</td>'
       +'<td class="cmp-adv">'+esc(advice(x))+'</td></tr>';
-  }).join(''):'<tr><td colspan="8" class="cmp-none">Not enough data to judge fatigue yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+cols+'" class="cmp-none">Not enough data to judge fatigue yet</td></tr>';
   return '<div class="cmp-stats">'+stat(nHi,'Need refresh','hi')+stat(nMd,'Watching','md')+stat(nOk,'Healthy','ok')+'</div>'
     +'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Ad fatigue</span><h3>Worst first</h3></div><span class="cmp-chip">'+esc(note||'')+'</span></div>'
-    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Name</th><th class="num">Seen / person</th><th class="num">CTR before</th><th class="num">CTR now</th><th class="num">Change</th><th class="num">Spend</th><th>Verdict</th><th>What to do</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Name</th>'+(hideFreq?'':'<th class="num">Seen / person</th>')+'<th class="num">CTR before</th><th class="num">CTR now</th><th class="num">Change</th><th class="num">Spend</th><th>Verdict</th><th>What to do</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
 }
 /* Refined, restrained visual language — neutral surfaces, one accent, no candy colours.
    Loaded AFTER each view's older inline styles so these rules win. */
@@ -7500,6 +7502,7 @@ async function cmpBothView(v,seg){
       const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
       const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
       const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      const pr0=cmpPrevRange(); if(pr0){gbody.prev_since=pr0.since;gbody.prev_until=pr0.until;}
       await Promise.all([
         fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
         fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
@@ -7675,14 +7678,15 @@ async function cmpGoogleView(v,seg){
   if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
     try{
       const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+      const pr=cmpPrevRange();
       const base=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      if(pr){base.prev_since=pr.since;base.prev_until=pr.until;}   // one call fills both buckets
       const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-      const jobs=[fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(base)})];
+      const jobs=[fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(base)}).catch(function(){})];
       if(needGAds)jobs.push(fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(Object.assign({},base,{level:'ad'}))}).catch(function(){}));
       await Promise.all(jobs);
     }catch(e){}
   }
-  await cmpSyncPrev('google');
   const G=function(){return sb.schema('camp');};
   const prevKey=cmpPrevKey();
   let accts=[],camps=[],ins=[],pIns=[],gAds=[],gAdIns=[],gAdPrev=[];
@@ -7851,7 +7855,7 @@ async function cmpGoogleView(v,seg){
           spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
       });
     }
-    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (no per-person frequency available)');
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
   }
   const showKpis=(ti!==4&&ti!==5);
   v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';

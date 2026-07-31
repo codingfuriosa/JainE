@@ -352,6 +352,8 @@
     .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
     .mtg-log-badge.none{background:#f1f5f9;color:#94a3b8}
     .mtg-log-transcript{margin-top:6px;font-size:13px;color:#334155;line-height:1.6;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:12px}
+    .mtg-log-summary{margin:6px 0 10px;font-size:13px;color:#334155;line-height:1.65;background:#fff;border:1px solid var(--line);border-left:3px solid #0d9488;border-radius:8px;padding:11px 13px}
+    .mtg-log-sumh{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;margin-bottom:6px;display:flex;align-items:center;gap:6px}
     .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
     .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-bar{width:4px;border-radius:3px;flex:none}
@@ -2768,7 +2770,12 @@
   function mtgSecFmt(s){ s=Math.max(0,s|0); const m=Math.floor(s/60), ss=s%60; return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
   function mtgClockIST(iso){ try{ return new Date(iso).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}); }catch(e){ return ''; } }
   function mtgTranscriptHtml(l){
-    if(l.transcript_status==='ready') return '<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+    if(l.transcript_status==='ready'){
+      // Gemini also writes a short summary — show it above the verbatim transcript.
+      const sum=(l.summary||'').trim();
+      const sumHtml=sum?('<div class="mtg-log-summary"><div class="mtg-log-sumh"><i class="fa-solid fa-wand-magic-sparkles"></i> Summary</div><div>'+esc2(sum).replace(/\n/g,'<br>')+'</div></div>'):'';
+      return sumHtml+'<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+    }
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
     if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
     if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
@@ -2924,7 +2931,7 @@
       n++;
       const el=document.getElementById('mtgWrapTranscript');
       if(!el||n>120){ clearInterval(iv); return; }
-      try{ const {data}=await ACC().from('meeting_logs').select('transcript,transcript_status').eq('id',logId).maybeSingle();
+      try{ const {data}=await ACC().from('meeting_logs').select('transcript,summary,transcript_status').eq('id',logId).maybeSingle();
         if(data){ el.innerHTML=mtgTranscriptHtml(data); if(data.transcript_status==='ready'||data.transcript_status==='failed'||data.transcript_status==='none'){ clearInterval(iv); } }
       }catch(e){}
     },5000);
