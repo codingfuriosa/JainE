@@ -7749,6 +7749,7 @@ function trRenderList(){
       +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
       +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
       +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+        +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
         +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
       +'</td></tr>';
   }).join('');
@@ -7781,6 +7782,24 @@ window.trDelete=async function(id){
   try{await sb.schema('acc').from('transcriptions').delete().eq('id',id);}catch(e){}
   if(r&&r.s3_path)try{s3Delete(r.s3_path);}catch(e){}
   toast('Recording deleted','ok');
+};
+
+// Re-run analysis on a failed row using the recording already in S3 — no re-upload needed.
+window.trRetry=async function(id){
+  const i=(TR_ROWS||[]).findIndex(function(x){return x.id===id;});
+  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList(); }
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  try{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'retry',id:id})});
+    const out=await res.json().catch(function(){return {};});
+    if(!res.ok||!out.row) throw new Error(out.error||'could not retry');
+    trStartPolling(id);
+    toast('Retrying…','ok');
+  }catch(e){
+    toast('Could not retry: '+((e&&e.message)||e),'err');
+    if(i>=0){ TR_ROWS[i].status='error'; trRenderList(); }
+  }
 };
 
 window.trUploadModal=function(){
