@@ -38,6 +38,9 @@
     if (document.getElementById('accCss')) return;
     const s=document.createElement('style'); s.id='accCss';
     s.textContent = `
+    /* Hide scrollbars page-wide on Accountability — scrolling still works, just no visible bar (vertical or horizontal) */
+    *{scrollbar-width:none;-ms-overflow-style:none}
+    *::-webkit-scrollbar{width:0;height:0;display:none}
     .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
     .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
     .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
@@ -48,6 +51,7 @@
     .ac-pbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
     .ac-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
     .ac-btn:hover{border-color:var(--brand);color:var(--brand)}
+    .wf-inst-tools .ac-btn:disabled{opacity:.4;cursor:default;pointer-events:none}
     .ac-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.ac-btn.primary:hover{color:#fff;filter:brightness(.94)}
     .ac-btn.ok{background:#16a34a;border-color:#16a34a;color:#fff}.ac-btn.ok:hover{color:#fff}
     .ac-btn.danger{color:#b91c1c}.ac-btn.danger:hover{border-color:#b91c1c}
@@ -661,7 +665,7 @@
       if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
     }
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
-    const wfIcon=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
+    const wfIcon='';
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
@@ -850,7 +854,7 @@
         +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
         +'<label class="wf-lbl">Triggering event '+tip('What starts this workflow.')+'</label>'
         +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-        +'<label class="wf-lbl">Event owner '+tip('Required. Only this person can start instances of this workflow.')+'</label>'
+        +'<label class="wf-lbl">Triggering event owner '+tip('Required. Only this person can start instances of this workflow.')+'</label>'
         +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
         +'<label class="wf-lbl">Description '+tip('Optional.')+'</label>'
         +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
@@ -919,7 +923,7 @@
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
-    if(!owner){ toast('Please select the Event owner (Triggering Event member)','warn'); return; }
+    if(!owner){ toast('Please select the Triggering event owner','warn'); return; }
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
@@ -1002,8 +1006,9 @@
         const fst=firstSeq!=null?(byCase[c.id]||{})[firstSeq]:null;
         const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
         const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
+        const instOver=(c.status==='Done'||c.status==='Cancelled');
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
-          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-first-done="'+(firstDone?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
+          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'
@@ -1034,15 +1039,15 @@
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     const eb=$('wfInstEdit'), db=$('wfInstDel');
     const oneSel = checks.length===1;
-    const editBlocked = oneSel && checks[0].getAttribute('data-first-done')==='1';
+    const editBlocked = oneSel && checks[0].getAttribute('data-inst-over')==='1';
     const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
-    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? 'Can’t edit — this instance’s first step is already done' : 'Edit selected instance'; }
+    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? 'Can’t edit — this instance is already over (completed)' : 'Edit selected instance'; }
     if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? 'Can’t delete — a selected instance has already started (first step received)' : 'Delete selected'; }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
-    if(checks[0].getAttribute('data-first-done')==='1'){ toast('Can’t edit — this instance’s first step is already done','err'); return; }
+    if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this instance is already over','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
   window.wfInstDelSel=function(){
@@ -3547,7 +3552,7 @@
       const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:''].filter(Boolean);
       meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     }
-    const wfIcon2=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
+    const wfIcon2='';
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
