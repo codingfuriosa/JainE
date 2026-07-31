@@ -933,7 +933,6 @@ async function docLibrary(v){
   setCrumb(['Documents',dept]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid ${m[0]}" style="color:${m[1]}"></i> ${esc(dept)} Library</h1><p>Folder navigation, categories & version-controlled storage</p></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
-    <button class="btn" title="Index all un-indexed files so their contents are searchable" onclick="docReindexAll(null)"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button>
     <button class="btn" onclick="docNewFolder('${esc(dept)}')"><i class="fa-solid fa-folder-plus"></i> New Folder</button>
     <button class="btn btn-primary" onclick="docUploadModal('${esc(dept)}')"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div class="split"><div><div class="subnav" id="catNav"></div></div><div><div id="docTableHost"></div></div></div>`;
@@ -971,7 +970,6 @@ async function docAll(v,title){
   setCrumb(['Documents',title]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-table-list" style="color:#1d4ed8"></i> ${esc(title)}</h1><p>Search and manage documents across every department</p></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
-    <button class="btn" title="Index all un-indexed files in this dept" onclick="docReindexAll(DOC.dept)"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button>
     <button class="btn btn-primary" onclick="docUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div id="docTableHost"></div>`;
   docRenderTable($('docTableHost'),null);
@@ -1525,7 +1523,7 @@ async function legalDocsView(seg){
   }
   setCrumb(['Legal',crumbTail]);
   const hAct=$('legalHeadActions');
-  if(hAct)hAct.innerHTML=`<button class="btn" onclick="docReindexAll('Legal')"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button><button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  if(hAct)hAct.innerHTML=`<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
   const body=$('legalBody');if(!body)return;
   body.innerHTML=`<div class="split"><div><div class="subnav" id="legalNav"></div></div><div><div id="docTableHost"></div></div></div>`;
   legalNav();
@@ -3867,7 +3865,7 @@ const HD_KB=[
  {k:['upload document','upload file','add document','add file','put file','upload a doc'],a:`To upload a document: open <b>Document Library</b> from the sidebar, pick a department tab, then click <b>Upload</b>. Select your file, choose or type a <b>Category/Folder</b>, and save. Large files (up to 5 GB) are supported via resumable upload.`},
  {k:['folder','category','new folder','create folder','add category'],a:`To create a folder/category: inside any Document Library click <b>+ New Folder</b>. In <b>Legal</b>, every folder and category in the tree has a small <b>+</b> icon — click it to add a category inside that exact spot (Litigation, Projects, a project, or a category), or use <b>+ Add main folder</b> at the bottom for a brand-new top-level folder.`},
  {k:['search document','find document','document search','search file','search by name'],a:`Use the <b>Find a Document</b> tab here to search by file name, title or document number. In the Document Library you can filter by status and date. Word-inside-file search has been replaced with name-based search for speed.`},
- {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`To re-index files for OCR: open a Document Library and click <b>Index All Files</b> at the top. This re-scans all PDFs, images, Word, Excel and PowerPoint files using triple-pass OCR (PSM 3, 6, 11) and stores extracted text. Numbers with commas (e.g. 2,90,39) are normalised and searchable.`},
+ {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`Indexing is now <b>automatic</b> — when you upload a scanned PDF or image it is read by AI (Gemini OCR) in the background, so the words inside it become searchable within moments. There's nothing to click: just type in the search box in a Document Library or the Legal module and matching files appear by name and by text inside them.`},
  {k:['download file','download document','get file','open file','preview file'],a:`To download or preview: find the file in <b>Document Library</b>, click the file row to open its detail panel, then click <b>Open</b> or <b>Download</b>. Files open in a new tab.`},
  {k:['delete document','remove file','delete file'],a:`To delete a document: open the file in <b>Document Library</b>, then click <b>Delete</b> in the detail panel. This removes both the database record and the stored file.`},
  {k:['legal','vault','title deed','deed','rera','agreement','noc','sanction','land record','court'],a:`The <b>Legal Vault</b> is organised as a tree: two main folders, <b>Litigation</b> and <b>Projects</b>. Under <b>Projects</b> sit the individual projects (Dream Gurukul, Dream World City, Dream One, Dream Eco City, Dream Valley, Dream Exotica, Dream Ananta), and each project has <b>History of Land / Chain</b>, <b>Title Papers</b>, <b>Permissions & Sanctions</b>, <b>RERA & Compliance</b> and <b>Project Manual</b>. Click the <b>+</b> next to any folder to add a category inside it, and <b>Upload</b> to add files to a category.`},
