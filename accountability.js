@@ -652,7 +652,7 @@
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     const wfIcon=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
     const ownerVis=(t.flow_case_step_id!=null)
-      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
     return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${wfIcon}${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
@@ -959,18 +959,20 @@
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
-      const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('')+'<th>Status</th>';
+      const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
-          if(cs&&(cs.status==='done'||cs.forwarded_at)) return '<td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>';
-          if(c.status==='Pending' && c.current_step===s.seq) return '<td><span class="wf-pill cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
+          if(cs&&(cs.status==='done'||cs.forwarded_at)){ var dd=cs.forwarded_at?wfDT(cs.forwarded_at):''; return '<td><span class="wf-pill ok"'+(dd?(' title="Done · '+esc2(dd)+'"'):'')+'><i class="fa-solid fa-check"></i> Done</span></td>'; }
+          if(c.status==='Pending' && c.current_step===s.seq){
+            if(cs&&cs.received_at) return '<td><span class="wf-pill cur" title="Received · '+esc2(wfDT(cs.received_at))+'"><i class="fa-solid fa-inbox"></i> Received</span></td>';
+            return '<td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>';
+          }
           return '<td><span class="wf-pill wait">·</span></td>';
         }).join('');
-        const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">Pending</span>');
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
           +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
-          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
+          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'+tip('Tick one to edit, or one or more to delete. Click a row to see its progress.')
         +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
@@ -1367,6 +1369,7 @@
     .wf-pill.ok{background:#dcfce7;color:#166534}
     .wf-pill.cur{background:#dbeafe;color:#1e40af}
     .wf-pill.wait{background:#f1f5f9;color:#cbd5e1;padding:3px 12px}
+    .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
     .wf-upd-sys i{opacity:.6;margin-right:4px}
     .wf-inst-tools{margin-left:auto;display:flex;gap:6px}
@@ -3454,9 +3457,9 @@
     }
     const wfIcon2=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
     const ownerVis=(t.flow_case_step_id!=null)
-      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}${wfRR}</div>`;
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${wfRR}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
