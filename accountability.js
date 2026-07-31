@@ -106,6 +106,8 @@
     .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
+    .hint-tip{color:var(--slate);opacity:.55;cursor:help;font-size:11px;margin-left:5px;vertical-align:middle}
+    .hint-tip:hover,.hint-tip:focus{opacity:1;color:var(--brand);outline:none}
     .wf-steps-head{margin-top:20px}
     .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
@@ -770,6 +772,10 @@
   window.wfEdit=function(id){ navTo('tasks/workflow/edit/'+id); };
   window.wfOpen=function(id){ navTo('tasks/workflow/'+id); };
   window.wfCancel=function(){ navTo('tasks/workflow'); };
+  // Reusable tooltip for secondary hint text: a small (i) icon. Desktop = hover (native title);
+  // mobile = tap shows the text as a toast. Keeps forms/lists compact (esp. on phones).
+  function tip(text){ var s=esc2(String(text||'')); return '<i class="fa-solid fa-circle-info hint-tip" tabindex="0" role="button" title="'+s+'" data-tip="'+s+'" aria-label="'+s+'"></i>'; }
+  if(!window._acTipInit){ window._acTipInit=1; document.addEventListener('click',function(e){ var el=e.target&&e.target.closest&&e.target.closest('.hint-tip'); if(el){ e.preventDefault(); e.stopPropagation(); var tx=el.getAttribute('data-tip'); if(tx&&typeof toast==='function') toast(tx); } },true); }
 
   function wfStepRowHtml(idx,step){
     step=step||{};
@@ -812,20 +818,19 @@
       +'<div class="wf-form" data-id="'+(id||'')+'">'
         +'<label class="wf-lbl">Workflow name</label>'
         +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
-        +'<label class="wf-lbl">Triggering event <span class="wf-hint">— what starts this workflow</span></label>'
+        +'<label class="wf-lbl">Triggering event '+tip('What starts this workflow.')+'</label>'
         +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-        +'<label class="wf-lbl">Event owner <span class="wf-hint">— required; only this person can start instances of this workflow</span></label>'
+        +'<label class="wf-lbl">Event owner '+tip('Required. Only this person can start instances of this workflow.')+'</label>'
         +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
-        +'<label class="wf-lbl">Description <span class="wf-hint">— optional</span></label>'
+        +'<label class="wf-lbl">Description '+tip('Optional.')+'</label>'
         +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
-        +'<div class="wf-steps-head"><label class="wf-lbl" style="margin:0">Steps <span class="wf-hint">— in order; each done by one person within a set time</span></label></div>'
+        +'<div class="wf-steps-head"><label class="wf-lbl" style="margin:0">Steps '+tip('In order; each step is done by one person within a set time.')+'</label></div>'
         +'<div id="wfSteps">'+stepsHtml+'</div>'
         +'<div class="wf-addstep-ghost" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</div>'
         +'<div class="wf-actions">'
           +'<button class="ac-btn" onclick="wfCancel()">Cancel</button>'
-          +'<button class="ac-btn primary" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
+          +'<button class="ac-btn primary" title="Press Enter to save · Esc to close" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
         +'</div>'
-        +'<div class="wf-keyhint">Press <b>Enter</b> to save · <b>Esc</b> to close</div>'
       +'</div></div></div>';
     // Enter = save, Esc = close (ignore while typing in the person-search box)
     const page=v.querySelector('.wf-form');
@@ -960,7 +965,7 @@
           +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
       }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span><span class="wf-card-hint">— tick one to edit, one or more to delete; click a row to see its progress</span>'
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'+tip('Tick one to edit, or one or more to delete. Click a row to see its progress.')
         +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
@@ -1072,9 +1077,9 @@
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<label class="wf-lbl">Details '+(locked?'<span class="wf-hint">— fill in the values (fields are fixed)</span>':'<span class="wf-hint">— specifics for this instance</span>')+'</label>'
+        +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':'Specifics for this instance. Add or remove detail fields as needed.')+'</label>'
         +'<div id="wfEvtDetails">'+rowsHtml+'</div>'
-        +(locked?'<div class="wf-hint" style="margin-top:8px;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-lock" style="font-size:10px"></i> These detail fields are fixed for this workflow and cannot be changed.</div>':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>')
+        +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>')
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+(editing?'Save changes':'Create instance')+'</button></div>','md');
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
@@ -1161,7 +1166,7 @@
         +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
-      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback <span class="wf-hint" style="font-weight:600">— visible to everyone in this instance</span></h3>'
+      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback '+tip('Visible to everyone in this instance.')+'</h3>'
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
