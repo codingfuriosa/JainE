@@ -1042,7 +1042,10 @@
   };
 
   /* ----- Instance (New Event) form ----- */
-  function wfEvtRowHtml(label,value){ return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>'; }
+  function wfEvtRowHtml(label,value,locked){
+    if(locked){ return '<div class="wf-evt-row"><div class="ac-in wf-evt-labelro" style="flex:1;min-width:0;background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--slate);flex:none"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc2(label||'')+'</span></div><input type="hidden" class="wf-evt-label" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"></div>'; }
+    return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>';
+  }
   window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
 
@@ -1056,15 +1059,22 @@
     if(!flow){ toast('Workflow not found','err'); return; }
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting an instance','warn'); return; }
     const editing=!!caseId;
-    const src = editing ? (Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]) : (Array.isArray(flow.trigger_template)?flow.trigger_template:[]);
-    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t.label||'', editing?(t.value||''):'');}):[wfEvtRowHtml('','')]).join('');
+    // Once the detail fields have been defined for this workflow (trigger_template is set), the field
+    // LABELS are locked: they can't be edited, added or removed — you only fill in the values.
+    const template=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
+    const locked=template.length>0;
+    let src;
+    if(editing){ src=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]; }
+    else if(locked){ src=template.map(function(t){return {label:(t&&t.label)||'',value:''};}); }
+    else { src=[]; }
+    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml((t&&t.label)||'', (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+(editing?('Edit instance '+(caseRow.case_no||caseId)):'New instance')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<label class="wf-lbl">Details <span class="wf-hint">— specifics for this instance</span></label>'
+        +'<label class="wf-lbl">Details '+(locked?'<span class="wf-hint">— fill in the values (fields are fixed)</span>':'<span class="wf-hint">— specifics for this instance</span>')+'</label>'
         +'<div id="wfEvtDetails">'+rowsHtml+'</div>'
-        +'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'
+        +(locked?'<div class="wf-hint" style="margin-top:8px;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-lock" style="font-size:10px"></i> These detail fields are fixed for this workflow and cannot be changed.</div>':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>')
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+(editing?'Save changes':'Create instance')+'</button></div>','md');
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
