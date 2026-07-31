@@ -7626,7 +7626,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>'
     +'<div id="trKpis"></div>'
     +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Phone Number</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
@@ -7649,15 +7649,13 @@ function trRenderList(){
   const host=$('trRows');if(!host)return;
   if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
   host.innerHTML=rows.map(function(r){
-    const phoneRaw=r.phone||r.title||'';
-    const hasPhone=!!(phoneRaw&&String(phoneRaw).trim());
+    const fname=r.file_name||'Recording';
     const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
-    // Phone is optional now: show it as the main line when present (name below it);
-    // when there's no phone, show the detected caller name as the main line instead.
-    const primary=hasPhone?trPhoneFmt(phoneRaw):(r.customer_name?esc(r.customer_name):'Call');
-    const nameLine=(hasPhone&&r.customer_name)?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+    // Main line = the recording's file name (truncated with … if too long, full name on hover);
+    // below it = the detected customer name, when the call identified one.
+    const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
     return '<tr'+clickable+'>'
-      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-phone" style="color:#0d9488;font-size:15px"></i><div><div style="font-weight:600">'+primary+'</div>'+nameLine+'</div></div></td>'
+      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
       +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
       +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
       +'<td>'+trLangTags(r.languages)+'</td>'
