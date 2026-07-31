@@ -663,7 +663,7 @@
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     const wfIcon=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
     const ownerVis=(t.flow_case_step_id!=null)
-      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px"><i class="fa-solid fa-diagram-project"></i></span>`
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
     return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${wfIcon}${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
@@ -671,10 +671,18 @@
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
   window.accTaskSearch=function(val){
     const q=(val||'').trim().toLowerCase();
-    document.querySelectorAll('#acBody .ac-row').forEach(function(row){
+    const body=document.getElementById('acBody'); if(!body)return;
+    body.querySelectorAll('.ac-row').forEach(function(row){
       const el=row.querySelector('.ti .t');
       const txt=el?el.textContent.toLowerCase():'';
       row.style.display=(!q||txt.includes(q))?'':'none';
+    });
+    // While searching, hide the "Add task" dotted rows unless their group still has a visible task.
+    body.querySelectorAll('.ac-addrow-ghost, .ac-ins, .ac-addrow').forEach(function(g){
+      if(!q){ g.style.display=''; return; }
+      const parent=g.parentElement;
+      const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
+      g.style.display=hasVisible?'':'none';
     });
   };
 
@@ -943,6 +951,11 @@
         if(s.received_at&&s.forwarded_at) bits.push('<b>Took '+wfHms(new Date(s.forwarded_at)-new Date(s.received_at))+'</b>');
         else if(s.received_at&&!s.forwarded_at) bits.push('running for '+wfHms(Date.now()-new Date(s.received_at)));
         if(bits.length) extra='<div class="wf-tl-track">'+bits.join(' · ')+'</div>';
+        // Every person can revert their OWN completed step (pulls the flow back to them) while the instance is active.
+        const active=opt.caseStatus!=='Done' && opt.caseStatus!=='Cancelled';
+        if(done && active && eq(person, me()) && s.id!=null){
+          extra+='<div style="margin-top:8px"><button class="ac-btn danger" style="height:28px;padding:0 11px;font-size:12px" onclick="wfRevert('+s.id+')"><i class="fa-solid fa-rotate-left"></i> Revert to my step</button></div>';
+        }
       }
       return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div>'+extra+'</div></div>';
     }).join('');
@@ -993,7 +1006,7 @@
           +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-first-done="'+(firstDone?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'+tip('Tick one to edit, or one or more to delete. Click a row to see its progress.')
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'
         +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
@@ -1065,7 +1078,7 @@
     const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
-      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true})||'')+'</div>'
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status})||'')+'</div>'
       +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
   };
 
@@ -1190,7 +1203,7 @@
     const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow&&caseRow.case_no?(' #'+caseRow.case_no):'');
     const wfStepName=wfTitleCase(fcs.title||'');
     const wfDescFmt=wfDetailsFmt(wfDetailsArr);
-    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
+    v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
@@ -1204,11 +1217,11 @@
         +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
-      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback '+tip('Visible to everyone in this instance.')+'</h3>'
+      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback</h3>'
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
-      +'</div>';
+      +'</div></div>';
     if(window._wfAutoReject && window._wfAutoReject===fcs.id){ window._wfAutoReject=null; setTimeout(function(){ wfRejectStart(fcs.id, fcs.case_id); },60); }
   }
 
@@ -1284,7 +1297,8 @@
     wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not revert: '+((e&&e.message)||e),'err'); return; }
-      toast('Reverted — the task is back with you','ok'); navTo('tasks/work');
+      toast('Reverted — the task is back with you','ok');
+      if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
     }});
   };
 
@@ -1439,6 +1453,11 @@
       .wf-lrow-right{gap:9px}
       .wf-upd-b{max-width:82%}
       .wf-detlist{grid-template-columns:1fr}
+      .wf-tp .tp-head{flex-wrap:wrap;gap:10px}
+      .wf-tp .tp-acts{flex-wrap:wrap;width:100%}
+      .wf-tp .tp-acts .ac-btn{flex:1 1 auto;justify-content:center}
+      .wf-tp .tp-grid{grid-template-columns:1fr}
+      .wf-tp .wf-updbar .ac-in{min-width:0}
     }
     `;
     document.head.appendChild(s);
@@ -3530,7 +3549,7 @@
     }
     const wfIcon2=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
     const ownerVis=(t.flow_case_step_id!=null)
-      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px"><i class="fa-solid fa-diagram-project"></i></span>`
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
     const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
     const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
