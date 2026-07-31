@@ -6569,6 +6569,7 @@ function rtRender(){
       <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
       <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
       <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
+      ${rtCanShare()?`<button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`:''}
     </div>
   </div>
   <div class="card" style="overflow:hidden">
@@ -6600,6 +6601,8 @@ window.rtSyncToolbar=function(){
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   if(ren){ren.disabled=n!==1;ren.style.cssText=n===1?'':dis;}
   if(del){del.disabled=n===0;del.style.cssText=n>0?'color:var(--err);border-color:var(--err)':dis+';color:var(--err);border-color:var(--err)';}
+  const shr=$('rtShareBtn');
+  if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
 window.rtAdd=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -6656,6 +6659,91 @@ window.rtDelete=async function(){
   if(error){toast(error.message,'err');return;}
   RT_RECORDS=(RT_RECORDS||[]).filter(r=>!sel.includes(r.id));
   toast(sel.length+' test(s) deleted');rtRender();
+};
+
+/* ── Share Test (email a form link to candidates via the Email API backend) ── */
+// Visibility is limited to these people, matched by their JainE profile full name.
+// (Others with recruitment access will NOT see the Share button.)
+// NOTE: 'administrator' & 'abhay mati' added for testing — remove later if the 3 named
+// staff should be the only ones with Share access.
+const RT_SHARE_ALLOWED=['shuchandra das','khushbu singh','uzma ahmed','administrator','abhay mati'];
+function rtShareNorm(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function rtCanShare(){
+  const nm=rtShareNorm((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'');
+  return RT_SHARE_ALLOWED.includes(nm);
+}
+function rtShareFieldRow(val){
+  return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
+    <button type="button" class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none;padding:6px 10px" onclick="rtShareRemoveField(this)" title="Remove this email"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+window.rtShareRemoveField=function(btn){const row=btn.closest('.rt-share-field');if(row)row.remove();};
+window.rtShareAddN=function(){
+  const raw=parseInt(($('rtAddN')||{}).value);
+  const n=Math.max(1,Math.min(50,isNaN(raw)?1:raw));
+  const cont=$('rtEmailFields');if(!cont)return;
+  for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
+};
+window.rtShare=function(){
+  if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
+  if(sel.length!==1){toast('Select exactly one test to share','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const subject=`Check This ${rec.name} provided by JainGroup`;
+  const body=`Dear Candidate,\nFill This Test at the latest.\nTest Attachment`;
+  const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <div style="background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--slate);margin-bottom:4px">Sending as <b style="color:var(--ink)">${esc(senderName)}</b> · ${esc(state.email||'')}</div>
+    <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
+    <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
+    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
+    ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
+    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(each field must be filled)</span></label>
+    <div id="rtEmailFields">${fields}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
+      <button type="button" class="btn btn-sm" onclick="rtShareAddN()"><i class="fa-solid fa-plus"></i> Add Field(s)</button>
+    </div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="rtShareSend(${rec.id})"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.rtShareSend=async function(id){
+  if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
+  const inps=[...document.querySelectorAll('#rtEmailFields .rt-email-inp')];
+  if(!inps.length){toast('Add at least one candidate email','err');return;}
+  const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emails=[];
+  for(const el of inps){
+    const v=(el.value||'').trim();
+    el.style.borderColor='';
+    if(!v){el.style.borderColor='var(--err)';toast('Every email field must be filled (or remove it)','err');el.focus();return;}
+    if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
+    if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
+    emails.push(v.toLowerCase());
+  }
+  const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
+  const body=($('rtShareBody')||{}).value?.trim()||'';
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const btn=$('rtShareSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({test_id:id,test_name:rec.name,link:rec.link||'',subject,body,recipients:emails,sender_name:senderName,sender_email:state.email||''})
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    closeModal();toast('Test shared with '+emails.length+' candidate'+(emails.length>1?'s':''),'ok');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
 };
 window.rtPreview=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
