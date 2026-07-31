@@ -107,9 +107,10 @@
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
     .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font-size:9px;font-weight:700;cursor:pointer;position:relative;flex:none;margin-left:4px;vertical-align:middle}
-    .wf-tip>.wf-tip-txt{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.4;width:max-content;max-width:min(240px,72vw);text-align:center;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s;z-index:99999;box-shadow:0 6px 18px rgba(0,0,0,.22)}
-    .wf-tip>.wf-tip-txt::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
-    .wf-tip:hover>.wf-tip-txt,.wf-tip:focus>.wf-tip-txt{opacity:1;visibility:visible}
+    .wf-poptip{position:relative;cursor:pointer}
+    .wf-tip-txt{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.5;width:max-content;max-width:min(240px,72vw);text-align:center;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s;z-index:99999;box-shadow:0 6px 18px rgba(0,0,0,.22)}
+    .wf-tip-txt::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
+    .wf-tip:hover>.wf-tip-txt,.wf-tip:focus>.wf-tip-txt,.wf-poptip.show>.wf-tip-txt{opacity:1;visibility:visible}
     .wf-steps-head{margin-top:20px}
     .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
@@ -780,7 +781,9 @@
   if(!window._acTipInit){ window._acTipInit=1; document.addEventListener('click',function(e){
     var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
     if(el){ e.stopPropagation(); try{ el.focus(); }catch(_){} }
+    if(!(e.target&&e.target.closest&&e.target.closest('.wf-poptip'))){ document.querySelectorAll('.wf-poptip.show').forEach(function(x){x.classList.remove('show');}); }
   },true); }
+  window.wfPopToggle=function(el){ var was=el.classList.contains('show'); document.querySelectorAll('.wf-poptip.show').forEach(function(x){ if(x!==el) x.classList.remove('show'); }); el.classList.toggle('show', !was); };
   // Workflow instance detail formatters (used for task Title / Description).
   function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(l).trim()&&!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(v); }).filter(Boolean).join('<br>'); }
@@ -966,9 +969,9 @@
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
-          if(cs&&(cs.status==='done'||cs.forwarded_at)){ var dd=cs.forwarded_at?wfDT(cs.forwarded_at):''; return '<td><span class="wf-pill ok"'+(dd?(' title="Done · '+esc2(dd)+'"'):'')+'><i class="fa-solid fa-check"></i> Done</span></td>'; }
+          if(cs&&(cs.status==='done'||cs.forwarded_at)){ var rcv=cs.received_at?wfDT(cs.received_at):'—'; var don=cs.forwarded_at?wfDT(cs.forwarded_at):'—'; return '<td><span class="wf-pill ok wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-check"></i> Done<span class="wf-tip-txt">Received: '+esc2(rcv)+'<br>Done: '+esc2(don)+'</span></span></td>'; }
           if(c.status==='Pending' && c.current_step===s.seq){
-            if(cs&&cs.received_at) return '<td><span class="wf-pill cur" title="Received · '+esc2(wfDT(cs.received_at))+'"><i class="fa-solid fa-inbox"></i> Received</span></td>';
+            if(cs&&cs.received_at) return '<td><span class="wf-pill cur wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-inbox"></i> Received<span class="wf-tip-txt">Received: '+esc2(wfDT(cs.received_at))+'</span></span></td>';
             return '<td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>';
           }
           return '<td><span class="wf-pill wait">·</span></td>';
@@ -1177,7 +1180,7 @@
     const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow&&caseRow.case_no?(' #'+caseRow.case_no):'');
     const wfStepName=wfTitleCase(fcs.title||'');
     const wfDescFmt=wfDetailsFmt(wfDetailsArr);
-    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfInline||t.title)+'</div>'
+    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
@@ -1249,21 +1252,20 @@
 
   // Reject: an in-app note (Updates & Feedback) then bounce to the previous person
   // Reject flows through the Updates & Feedback section (no popup): scroll there, reveal the confirm bar.
+  // Reject now asks for confirmation in a popup (no jumping to Updates & Feedback).
   window.wfRejectStart=function(fcsId, caseId){
-    const card=$('wfUpdCard'), bar=$('wfRejectBar'), inp=$('wfUpdIn');
-    if(bar) bar.style.display='';
-    if(card){ try{ card.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){ card.scrollIntoView(); } }
-    if(inp){ inp.placeholder='Reason for rejecting (optional)…'; try{ inp.focus(); }catch(_){} }
+    wfConfirm({ title:'Reject this step?', body:'This sends the task back to the previous person.', okLabel:'Reject', okClass:'danger', onOk:async function(){
+      try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
+      catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+      toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
+    }});
   };
-  window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; const inp=$('wfUpdIn'); if(inp) inp.placeholder='Write an update…'; };
-  // Called from a task-list row: open the task, then auto-start the reject flow there.
-  window.wfRowReject=function(fcsId, caseId, taskId){ window._wfAutoReject=fcsId; navTo('tasks/task/'+taskId); };
+  window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
+  // From a task-list row: same confirmation popup, no navigation needed.
+  window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
-    const inp=$('wfUpdIn'); const note=(inp&&inp.value||'').trim();
-    try{
-      if(note){ try{ await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:note}); }catch(e){} }
-      const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error;
-    }catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
+    catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
     toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
   };
 
@@ -3488,7 +3490,9 @@
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
     const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
-    const wfTitle=wfDet?esc2(wfDet):esc2(t.title);
+    const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
+    const wfCombined=[wfStepNm,wfDet].filter(Boolean).join(' - ');
+    const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
