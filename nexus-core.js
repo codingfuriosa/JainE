@@ -1488,11 +1488,15 @@ window.docUploadSave=async function(){
     if(upErr){toast('Upload failed: '+upErr.message,'err');continue;}
     const ti=titleIns.find(x=>x.dataset.i==idx);
     const title=(ti&&ti.value.trim())||f.name.replace(/\.[^.]+$/,'');
-    btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading & indexing (OCR if needed)…';
-    const ctext=await extractFileText(f);
+    const fileExt=(f.name.split('.').pop()||'').toLowerCase();
+    const useGemini=DOC_GEMINI_TYPES.includes(fileExt); // scanned PDFs / images -> strong Gemini OCR (server-side)
+    let ctext=null;
+    if(!useGemini){ btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading & indexing…'; ctext=await extractFileText(f); }
     btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
-    const {error}=await sb.schema('doc').from('documents').insert({title,department:dept,category:cat,folder_id:folderId,description:desc,version:ver,tags:'',visibility:vis,status,confidential:conf,file_name:f.name,file_size:f.size,file_type:f.name.split('.').pop(),storage_path:upData.path,content_text:ctext,uploaded_by:state.email});
-    if(error){toast('Saved file but metadata failed: '+error.message,'err');}else ok++;
+    const {data:insData,error}=await sb.schema('doc').from('documents').insert({title,department:dept,category:cat,folder_id:folderId,description:desc,version:ver,tags:'',visibility:vis,status,confidential:conf,file_name:f.name,file_size:f.size,file_type:fileExt,storage_path:upData.path,content_text:ctext,uploaded_by:state.email}).select('id').single();
+    if(error){toast('Saved file but metadata failed: '+error.message,'err');}
+    // Auto-index scanned/image uploads with Gemini in the background — no "Index All" needed, search just works.
+    else { ok++; if(useGemini&&insData&&insData.id){ docOcrGemini(insData.id); } }
   }
   closeModal();if(ok)toast(ok+' document'+(ok>1?'s':'')+' uploaded to S3','ok');route();
 };
@@ -7711,13 +7715,12 @@ window.trUpPick=function(){
   $('trUpName').textContent=files.length?(files.length===1?files[0].name:(files.length+' files selected'+(over?' — first 50 will be used':''))):'Drag & drop or click to select recordings — pick up to 50 at once';
   const list=$('trFileList');
   if(list){
-    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number <span style="color:var(--slate);font-weight:400">(optional)</span></label>'
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Selected recording'+(n>1?'s':'')+'</label>'
       +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
       +files.slice(0,50).map(function(f,i){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
           +'<i class="fa-solid fa-file-audio" style="color:#0d9488"></i>'
           +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(f.name)+'">'+esc(f.name)+'</div></div>'
-          +'<input type="tel" id="trPhone_'+i+'" class="sel" style="width:160px;flex-shrink:0" maxlength="15" placeholder="10-digit mobile" oninput="trUpValidate()">'
           +'</div>';
       }).join('')+'</div>'
       +(over?'<div style="font-size:12px;color:#d97706;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> You picked '+files.length+' files — only the first 50 upload at a time.</div>':'')):'';
@@ -7725,11 +7728,9 @@ window.trUpPick=function(){
   trUpValidate();
 };
 window.trUpValidate=function(){
-  // Phone is OPTIONAL: upload is allowed with the field blank. If a number IS typed,
-  // it must be a valid 10-digit mobile, otherwise the button is disabled.
-  const n=Math.min((($('trFile').files||[]).length),50);let allValid=n>0;
-  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp)continue;const v=(inp.value||'').trim();if(!v){inp.style.borderColor='';continue;}const ok=trPhoneValid(v);inp.style.borderColor=ok?'#16a34a':'#dc2626';if(!ok)allValid=false;}
-  const btn=$('trUpBtn');if(btn){btn.disabled=!allValid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
+  // No phone field anymore — just enable the button once at least one recording is picked.
+  const n=Math.min((($('trFile').files||[]).length),50);
+  const btn=$('trUpBtn');if(btn){btn.disabled=!(n>0);btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
 };
 // Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
 // domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
@@ -7752,8 +7753,8 @@ window.trUploadStart=async function(){
   let files=Array.prototype.slice.call(($('trFile').files)||[]);
   if(!files.length){toast('Select at least one recording','err');return;}
   if(files.length>50)files=files.slice(0,50);
-  const phones=[];
-  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?(inp.value||'').trim():'';if(v&&!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number','err');if(inp)inp.focus();return;}phones.push(v?trPhoneNorm(v):null);}
+  // Phone field removed — the caller's name/number is picked up from the call itself.
+  const phones=files.map(function(){return null;});
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
