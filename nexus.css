@@ -392,7 +392,9 @@ tbody tr.clk:hover{background:#f1f5fb}
 .chk-tile:has(input:checked) .tile-ic{color:#1d4ed8!important}
 .chk-tile input[type=checkbox]{display:none}
 .tile-ic{font-size:13.5px;width:16px;text-align:center;color:#64748b;flex-shrink:0;margin-right:2px}
-@media(min-width:1025px){.hamburger{display:none!important}}
+@media(min-width:1025px){.hamburger{display:flex!important}
+  body.nav-closed .sidebar{transform:translateX(-100%)}
+  body.nav-closed .main{margin-left:0}}
 
 /* fix oversized icon inside empty-state buttons */
 .empty .btn i,.empty .btn-sm i{font-size:inherit;color:inherit;margin-bottom:0;display:inline}

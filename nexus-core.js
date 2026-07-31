@@ -292,7 +292,8 @@ function renderShell(){
   });
   document.addEventListener('click',e=>{if(!_gs.parentElement.contains(e.target))_gsDrop.style.display='none';});
   // hamburger / responsive sidebar
-  var hb=$('hamburger'); if(hb) hb.onclick=function(e){ e.stopPropagation(); var mobile=window.innerWidth<=1024; document.body.classList.toggle(mobile?'nav-open':'nav-closed'); };
+  if(window.innerWidth>1024 && localStorage.getItem('nav_closed')==='1') document.body.classList.add('nav-closed');
+  var hb=$('hamburger'); if(hb) hb.onclick=function(e){ e.stopPropagation(); var mobile=window.innerWidth<=1024; document.body.classList.toggle(mobile?'nav-open':'nav-closed'); if(!mobile){ try{ localStorage.setItem('nav_closed', document.body.classList.contains('nav-closed')?'1':'0'); }catch(_){} } };
   var bd=$('sbBackdrop'); if(bd) bd.onclick=function(){ document.body.classList.remove('nav-open'); };
   document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
 }
