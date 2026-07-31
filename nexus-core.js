@@ -1400,33 +1400,65 @@ async function docSignedUrlFor(d,seconds){
   if(isS3Path(d.storage_path)){const {data,error}=await s3Sign('get',d.storage_path.slice(3));if(error)return {error};return {data:{signedUrl:data.url}};}
   return sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,seconds);
 }
+// File types the Gemini OCR edge function handles (scanned PDFs & images — the Legal case).
+// Everything else (docx/xlsx/pptx/txt) still uses the client-side extractor below.
+const DOC_GEMINI_TYPES=['pdf','png','jpg','jpeg','webp','heic','heif'];
+function docFileExt(d){return (d.file_type||(d.file_name||'').split('.').pop()||'').toLowerCase();}
+// Server-side OCR/text extraction via Gemini. Returns {ok,chars} | {skip} | {error}.
+async function docOcrGemini(id){
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  try{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/document-ocr',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'ocr',id:id})});
+    return await res.json();
+  }catch(e){return {error:String(e)};}
+}
+// Index one document into content_text: Gemini for scans/images, client-side reader otherwise.
+async function docIndexOne(d){
+  const ext=docFileExt(d);
+  if(DOC_GEMINI_TYPES.includes(ext)){
+    const out=await docOcrGemini(d.id);
+    if(out&&out.ok)return out.chars?true:false;      // done (true if any text found)
+    if(!(out&&out.skip))return false;                 // hard error — skip (re-runnable later)
+    // out.skip -> fall through to the client-side reader
+  }
+  const {data,error}=await docSignedUrlFor(d,300);
+  if(error)return false;
+  const txt=await extractUrlText(data.signedUrl,d.file_type);
+  if(txt==null)return false;
+  await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',d.id);
+  return true;
+}
 window.docReindex=async function(id){
   const d=await getDoc(id);if(!d)return;
   if(!d.storage_path){toast(d.link?'Linked intranet files cannot be content-indexed':'No file to index','');return;}
-  toast('Indexing file text…','');
-  const {data,error}=await docSignedUrlFor(d,180);
-  if(error){toast(error.message,'err');return;}
-  const txt=await extractUrlText(data.signedUrl,d.file_type);
-  if(txt==null){toast('Could not read text from this file (maybe a scanned image).','err');return;}
-  await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',id);
-  toast('Indexed — words inside the file are now searchable','ok');
+  toast('Reading the text inside this file…','');
+  const ok=await docIndexOne(d);
+  toast(ok?'Indexed — words inside the file are now searchable':'Could not read text from this file.',ok?'ok':'err');
+  const host=$('docTableHost');if(host)docRenderTable(host,DOC.dept||undefined);
 };
 window.docReindexAll=async function(dept){
   const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept});
   const toIndex=all.filter(d=>d.storage_path&&(!d.content_text||d.content_text.length<200));
   if(!toIndex.length){toast('All files already indexed','ok');return;}
-  toast('Indexing '+toIndex.length+' file(s)… this may take a minute','');
-  let done=0,failed=0;
-  for(const d of toIndex){
-    try{
-      const {data,error}=await docSignedUrlFor(d,300);
-      if(error){failed++;continue;}
-      const txt=await extractUrlText(data.signedUrl,d.file_type);
-      if(txt==null){failed++;continue;}
-      await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',d.id);
-      done++;
-    }catch(e){failed++;}
-  }
+  const total=toIndex.length;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Indexing files for search</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><p style="font-size:13px;color:var(--slate);margin:0 0 12px">Reading the text inside <b>'+total+'</b> file(s) with AI (Gemini) so words <i>inside</i> them become searchable — scanned/unclear legal documents included. This can take a while for large batches; keep this window open.</p>'
+    +'<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" id="docIdxFill" style="width:0%"></div></div><div class="psa-progress-label" id="docIdxLbl">Starting…</div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+  let done=0,failed=0,idx=0;
+  const paint=function(){const p=Math.round((done+failed)/total*100);const f=$('docIdxFill');if(f)f.style.width=p+'%';const l=$('docIdxLbl');if(l)l.textContent='Processed '+(done+failed)+' of '+total+' · '+done+' indexed'+(failed?', '+failed+' skipped':'');};
+  paint();
+  const worker=async function(){
+    while(idx<toIndex.length){
+      const d=toIndex[idx++];
+      try{ if(await docIndexOne(d))done++; else failed++; }catch(e){ failed++; }
+      paint();
+    }
+  };
+  const K=Math.min(4,toIndex.length);
+  await Promise.all(Array.from({length:K},function(){return worker();}));
+  const l=$('docIdxLbl');if(l)l.textContent='Done — '+done+' indexed'+(failed?', '+failed+' skipped (re-run to retry)':'');
   toast(done+' file(s) indexed'+(failed?' · '+failed+' skipped':''),'ok');
   // Refresh the table in place — don't call route() which resets the search
   const host=$('docTableHost');
@@ -7613,11 +7645,15 @@ function trRenderList(){
   const host=$('trRows');if(!host)return;
   if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
   host.innerHTML=rows.map(function(r){
-    const phone=r.phone||r.title||r.customer_name||'';
+    const phoneRaw=r.phone||r.title||'';
+    const hasPhone=!!(phoneRaw&&String(phoneRaw).trim());
     const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
-    const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+    // Phone is optional now: show it as the main line when present (name below it);
+    // when there's no phone, show the detected caller name as the main line instead.
+    const primary=hasPhone?trPhoneFmt(phoneRaw):(r.customer_name?esc(r.customer_name):'Call');
+    const nameLine=(hasPhone&&r.customer_name)?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
     return '<tr'+clickable+'>'
-      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-phone" style="color:#0d9488;font-size:15px"></i><div><div style="font-weight:600">'+trPhoneFmt(phone)+'</div>'+nameLine+'</div></div></td>'
+      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-phone" style="color:#0d9488;font-size:15px"></i><div><div style="font-weight:600">'+primary+'</div>'+nameLine+'</div></div></td>'
       +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
       +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
       +'<td>'+trLangTags(r.languages)+'</td>'
@@ -7675,7 +7711,7 @@ window.trUpPick=function(){
   $('trUpName').textContent=files.length?(files.length===1?files[0].name:(files.length+' files selected'+(over?' — first 50 will be used':''))):'Drag & drop or click to select recordings — pick up to 50 at once';
   const list=$('trFileList');
   if(list){
-    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number <span style="color:#dc2626">* required</span></label>'
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number <span style="color:var(--slate);font-weight:400">(optional)</span></label>'
       +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
       +files.slice(0,50).map(function(f,i){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
@@ -7689,8 +7725,10 @@ window.trUpPick=function(){
   trUpValidate();
 };
 window.trUpValidate=function(){
+  // Phone is OPTIONAL: upload is allowed with the field blank. If a number IS typed,
+  // it must be a valid 10-digit mobile, otherwise the button is disabled.
   const n=Math.min((($('trFile').files||[]).length),50);let allValid=n>0;
-  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp){allValid=false;continue;}const v=(inp.value||'').trim();const ok=trPhoneValid(v);inp.style.borderColor=v?(ok?'#16a34a':'#dc2626'):'';if(!ok)allValid=false;}
+  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp)continue;const v=(inp.value||'').trim();if(!v){inp.style.borderColor='';continue;}const ok=trPhoneValid(v);inp.style.borderColor=ok?'#16a34a':'#dc2626';if(!ok)allValid=false;}
   const btn=$('trUpBtn');if(btn){btn.disabled=!allValid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
 };
 // Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
@@ -7715,7 +7753,7 @@ window.trUploadStart=async function(){
   if(!files.length){toast('Select at least one recording','err');return;}
   if(files.length>50)files=files.slice(0,50);
   const phones=[];
-  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?(inp.value||'').trim():'';if(!v){toast('Mobile number is required for every recording','err');if(inp)inp.focus();return;}if(!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number','err');if(inp)inp.focus();return;}phones.push(trPhoneNorm(v));}
+  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?(inp.value||'').trim():'';if(v&&!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number','err');if(inp)inp.focus();return;}phones.push(v?trPhoneNorm(v):null);}
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
