@@ -951,6 +951,7 @@
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+      const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
       const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('')+'<th>Status</th>';
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
@@ -960,8 +961,11 @@
           return '<td><span class="wf-pill wait">·</span></td>';
         }).join('');
         const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">Pending</span>');
+        const fst=firstSeq!=null?(byCase[c.id]||{})[firstSeq]:null;
+        const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
+        const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
-          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
+          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-first-done="'+(firstDone?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span><span class="wf-card-hint">— tick one to edit, one or more to delete; click a row to see its progress</span>'
@@ -991,17 +995,22 @@
   window.wfInstSelChange=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     const eb=$('wfInstEdit'), db=$('wfInstDel');
-    if(eb) eb.disabled = checks.length!==1;
-    if(db) db.disabled = checks.length<1;
+    const oneSel = checks.length===1;
+    const editBlocked = oneSel && checks[0].getAttribute('data-first-done')==='1';
+    const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
+    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? 'Can’t edit — this instance’s first step is already done' : 'Edit selected instance'; }
+    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? 'Can’t delete — a selected instance has already started (first step received)' : 'Delete selected'; }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
+    if(checks[0].getAttribute('data-first-done')==='1'){ toast('Can’t edit — this instance’s first step is already done','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
   window.wfInstDelSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(!checks.length) return;
+    if(checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; })){ toast('Can’t delete — a selected instance has already started (first step received)','err'); return; }
     const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
     wfConfirm({ title:'Delete '+ids.length+' instance'+(ids.length===1?'':'s')+'?', body:'This permanently removes the selected instance'+(ids.length===1?'':'s')+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
