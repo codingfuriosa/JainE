@@ -1,5 +1,11 @@
 # Campaign Analytics — what was added (31 July 2026)
 
+> **Revision 2 (same day).** Best/Worst performer cards were **removed**. Trend and Ad Fatigue are
+> now **their own full pages (tabs)** instead of cards. **Google Ads gained an Ads (ad-wise) page**,
+> **Meta gained a Campaigns page with Active / Inactive filtering**, and the whole module was
+> **redesigned** to a restrained, neutral look matching the sidebar. Details in section 7 below.
+
+
 Everything below is **live and working**, not a placeholder. Each item says where to find it.
 The page is at **Growth & Strategy → Campaign Analytics**, with the three source buttons at
 the top: **Meta**, **Google Ads**, **Both**.
@@ -65,19 +71,11 @@ If there is genuinely no earlier data to compare with, it shows a plain **"—"*
 
 ---
 
-## 3. Best & Worst performers
+## 3. ~~Best & Worst performers~~ — REMOVED in revision 2
 
-A pair of cards on the **Overview** tab of all three sources.
-
-- **Best performers** (green) — the projects/accounts giving you the **cheapest cost per lead /
-  conversion**, ranked 1-2-3.
-- **Worst performers** (red) — money being wasted. It shows two kinds:
-  1. anything that **spent money and produced zero results** (flagged with a **!**), listed first
-     because that is the most urgent,
-  2. then the **most expensive** cost-per-result ones.
-
-Each line shows the amount spent and how many results it produced, so the comparison is obvious.
-Nothing ever appears in both lists at once.
+These cards were taken out as requested. Their job (spotting what is doing well and what is
+wasting money) is now done better by the **Trend** page, which shows every project/account moving
+up or down side by side. See section 7.
 
 ---
 
@@ -142,6 +140,84 @@ A watchdog now runs **every day at 9:00 AM** and compares **yesterday against th
 
 **Who gets the emails:** by default `digitalmarketing@thejaingroup.com`. To send to more people,
 add a Supabase secret named **`CAMPAIGN_ALERT_EMAILS`** with comma-separated addresses.
+
+---
+
+## 7. Revision 2 — proper pages, ad-wise data, and a grown-up design
+
+### 7.1 New tab layout
+
+| Source | Tabs |
+|---|---|
+| **Meta** | Overview · **Campaigns** · By Project · Ads · **Trend** · **Ad Fatigue** |
+| **Google Ads** | Overview · Accounts · Campaigns · **Ads** · **Trend** · **Ad Fatigue** |
+| **Both** | Overview · Sources · **Trend** · **Ad Fatigue** |
+
+### 7.2 Trend — now a full page
+
+Two stacked panels:
+
+1. **Period comparison** — a clean table of *Metric · Previous · Current · Change*, covering Spend,
+   Leads/Conversions, Cost per result, Clicks and CTR, each with a small proportional bar so the size
+   of the move is visible at a glance.
+2. **Breakdown** — every project (Meta) or account (Google) with **previous → current → change** for
+   both spend and results, plus cost-per-result and its movement. Sorted by spend.
+
+### 7.3 Ad Fatigue — now a full page
+
+- A strip of three counters at the top: **Need refresh · Watching · Healthy**.
+- Then a table sorted **worst first**, with: times seen per person, **CTR before**, **CTR now**, the
+  % change, spend, the verdict, and a plain-English **"What to do"** column
+  (e.g. *"Refresh the creative — swap images/headlines"*).
+- Meta lists **individual ads** (so you know exactly which creative to swap); if ad data isn't loaded
+  it falls back to campaigns. Google lists individual ads too, using CTR decline.
+
+### 7.4 Google Ads — Ad-wise page (NEW)
+
+Google ad-level data is now pulled from the API (`ad_group_ad`) into two new tables. Because Google
+often leaves responsive ads unnamed, the ad is labelled from its **actual headlines**, which reads
+naturally — verified live on your account, e.g.:
+
+- *"Dream World City in Joka / Starts ₹29L in Joka Kolkata"* — Brand KW — ₹14,460, 176 clicks, 9.8 conv
+- *"Flats in Joka Kolkata / EMI From ₹19,565"* — Joka — ₹14,690, 167 clicks, 8.0 conv
+
+Each row shows account · campaign · ad group underneath, plus spend, trend, conversions,
+cost/conversion, clicks, CTR and fatigue. Ad data is only fetched when you actually open the Ads or
+Fatigue tab, so the other tabs stay fast.
+
+### 7.5 Meta — Campaigns page with Active / Inactive (NEW)
+
+A campaign-wise table with an **All / Active / Inactive** filter (each button shows its count).
+Columns: campaign (with project + objective beneath), status, budget with "% used", spend, trend,
+leads, cost per lead with movement, CTR and fatigue. The same filter was added to Google's Campaigns
+and Ads pages.
+
+### 7.6 Redesign — quieter and more grown-up
+
+The old look used eight different bright colours, coloured left bars, coloured icon badges and
+candy-coloured pills. That has been replaced with a restrained system that matches the sidebar:
+
+| Element | Before | Now |
+|---|---|---|
+| KPI cards | 8 bright accent colours + coloured icon circles + drop shadow | white card, hairline border, **no** accent bar, muted grey icon, no shadow |
+| Numbers | 24px heavy | 23px, weight 650, tight letter-spacing, **tabular figures** so columns line up |
+| Trend / fatigue | filled coloured pills | plain text, muted green / muted red only |
+| Tables | generic | 10px uppercase letter-spaced headers, hairline rows, right-aligned numerals, soft hover |
+| Panels | — | titled panels with a small uppercase overline and a date chip |
+| Active filter | — | near-black `#111318`, echoing the sidebar |
+
+Verified by reading the **computed styles** in a real browser: accent bars `display:none`, pill
+backgrounds transparent, card shadows `none`, and **no horizontal page overflow**.
+
+### 7.7 Revision 2 verification
+
+- `nexus-core.js` parsed by a real JavaScript engine → **no syntax errors**.
+- **Trend maths unit-tested** with known inputs: 55,000 → 62,000 = **+13%**, 33 → 30 = **−9%**,
+  cost/lead 1,666 → 2,066 = **+24%**, CTR 1.80% → 1.42% = **−22%** — all correct.
+- **Fatigue page tested**: correctly counted 1 Need-refresh / 1 Watching / 1 Healthy and sorted
+  worst-first, with the right advice on each row.
+- **Google ad-level API call tested live** — real ads, spend and conversions returned.
+- New tables/columns confirmed created in the database.
 
 ---
 
