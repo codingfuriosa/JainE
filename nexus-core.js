@@ -7176,6 +7176,132 @@ VIEWS.compliance=function(v,seg){
 };
 let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta';
 const CMP_PRESETS=[['today','Today'],['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_14d','Last 14 days'],['last_month','Last month'],['last_year','Last year'],['custom','Custom']];
+
+/* ============ Trend / Fatigue / Best-&-Worst (shared by the Meta, Google and Both tabs) ============
+   "Trend" = this period compared with the SAME-LENGTH period immediately before it. We ask the live
+   sync functions for that earlier window too (as a custom range), then compare the two. */
+function cmpDayStr(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}
+function cmpAddDays(d,n){const x=new Date(d.getTime());x.setDate(x.getDate()+n);return x;}
+// The equivalent window immediately before the one being viewed.
+function cmpPrevRange(){
+  const today=new Date();today.setHours(12,0,0,0);
+  const P=CMP_PERIOD;
+  if(P==='today'){const d=cmpAddDays(today,-1);return {since:cmpDayStr(d),until:cmpDayStr(d)};}
+  if(P==='yesterday'){const d=cmpAddDays(today,-2);return {since:cmpDayStr(d),until:cmpDayStr(d)};}
+  if(P==='last_7d')return {since:cmpDayStr(cmpAddDays(today,-14)),until:cmpDayStr(cmpAddDays(today,-8))};
+  if(P==='last_14d')return {since:cmpDayStr(cmpAddDays(today,-28)),until:cmpDayStr(cmpAddDays(today,-15))};
+  if(P==='last_month'){const first=new Date(today.getFullYear(),today.getMonth()-2,1);const last=new Date(today.getFullYear(),today.getMonth()-1,0);return {since:cmpDayStr(first),until:cmpDayStr(last)};}
+  if(P==='last_year')return {since:cmpDayStr(cmpAddDays(today,-729)),until:cmpDayStr(cmpAddDays(today,-365))};
+  if(P==='custom'&&CMP_SINCE&&CMP_UNTIL){
+    const s=new Date(CMP_SINCE+'T12:00:00'),u=new Date(CMP_UNTIL+'T12:00:00');
+    const len=Math.max(1,Math.round((u-s)/86400000)+1);
+    return {since:cmpDayStr(cmpAddDays(s,-len)),until:cmpDayStr(cmpAddDays(s,-1))};
+  }
+  return null;
+}
+function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
+function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
+// Ask the live functions to also sync the previous window so the comparison has real numbers.
+async function cmpSyncPrev(which){
+  const p=cmpPrevRange(); if(!p)return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+    const calls=[];
+    if(which==='meta'||which==='both')calls.push(fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){}));
+    if(which==='google'||which==='both')calls.push(fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify({period:'custom',since:p.since,until:p.until})}).catch(function(){}));
+    await Promise.all(calls);
+  }catch(e){}
+}
+// Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
+function cmpTrend(cur,prev,lowerIsBetter){
+  cur=Number(cur)||0;
+  if(prev===null||prev===undefined||!isFinite(Number(prev))||Number(prev)===0){
+    return '<span class="cmp-tr none" title="No data for '+esc(cmpPrevLabel())+' to compare against">—</span>';
+  }
+  prev=Number(prev);
+  const pct=(cur-prev)/Math.abs(prev)*100;
+  if(Math.abs(pct)<1)return '<span class="cmp-tr flat" title="Barely changed vs '+esc(cmpPrevLabel())+'"><i class="fa-solid fa-minus"></i> 0%</span>';
+  const up=pct>0, good=lowerIsBetter?!up:up;
+  const tip=(up?'Up ':'Down ')+Math.abs(pct).toFixed(0)+'% vs '+cmpPrevLabel()+(good?' — better':' — worse');
+  return '<span class="cmp-tr '+(good?'good':'bad')+'" title="'+esc(tip)+'"><i class="fa-solid '+(up?'fa-arrow-trend-up':'fa-arrow-trend-down')+'"></i> '+(up?'+':'−')+Math.abs(pct).toFixed(0)+'%</span>';
+}
+/* Ad fatigue. Meta gives a real per-person "frequency" (how many times each person saw the ad) —
+   high frequency plus a falling CTR is classic creative burnout. Google Ads has no per-user
+   frequency for Search, so there we score on the CTR fall alone. */
+function cmpFatigue(freq,ctr,prevCtr){
+  const f=Number(freq)||0;
+  const c=(ctr==null)?null:Number(ctr), pc=(prevCtr==null)?null:Number(prevCtr);
+  const drop=(pc&&pc>0&&c!=null)?(1-(c/pc)):null;
+  if(!f&&drop===null)return '<span class="cmp-fg na" title="Not enough data yet">—</span>';
+  let score=0;
+  if(f>=4)score+=2;else if(f>=3)score+=1.5;else if(f>=2.5)score+=1;
+  if(drop!==null&&drop>=0.30)score+=2;else if(drop!==null&&drop>=0.15)score+=1;
+  const bits=[];
+  if(f)bits.push('Seen '+f.toFixed(1)+'x per person');
+  if(drop!==null)bits.push(drop>0?('CTR down '+Math.round(drop*100)+'%'):('CTR up '+Math.round(-drop*100)+'%'));
+  const tip=bits.join(' · ')||'No signal';
+  if(score>=3)return '<span class="cmp-fg hi" title="'+esc(tip+' — refresh the creative')+'"><i class="fa-solid fa-fire"></i> High</span>';
+  if(score>=1.5)return '<span class="cmp-fg md" title="'+esc(tip+' — keep an eye on it')+'"><i class="fa-solid fa-triangle-exclamation"></i> Watch</span>';
+  return '<span class="cmp-fg ok" title="'+esc(tip)+'"><i class="fa-solid fa-circle-check"></i> Fresh</span>';
+}
+/* Best & worst performers. items = [{name, spend, res, cpr}] */
+function cmpBestWorst(items,inr,num,resLabel){
+  const paid=items.filter(function(x){return x.spend>0;});
+  const scored=paid.filter(function(x){return x.res>0&&x.cpr!=null;}).sort(function(a,b){return a.cpr-b.cpr;});
+  const dead=paid.filter(function(x){return !x.res;}).sort(function(a,b){return b.spend-a.spend;});
+  if(!paid.length)return '';
+  const line=function(x,rank,kind){
+    return '<div class="cmp-bwrow"><span class="cmp-bwrank '+kind+'">'+rank+'</span>'
+      +'<span class="cmp-bwnm" title="'+esc(x.name)+'">'+esc(x.name)+'</span>'
+      +'<span class="cmp-bwv">'+(x.cpr!=null?inr(x.cpr):'—')+'</span>'
+      +'<span class="cmp-bwsub">'+inr(x.spend)+' · '+num(Math.round(x.res||0))+' '+esc(resLabel)+'</span></div>';
+  };
+  // Never let the same entry appear in both lists: split the ranked list down the middle.
+  const nBest=Math.min(3,Math.ceil(scored.length/2));
+  const bestList=scored.slice(0,nBest);
+  const worstList=scored.slice(nBest).reverse().slice(0,3);
+  const best=bestList.map(function(x,i){return line(x,i+1,'good');}).join('')||'<div class="cmp-bwempty">Nothing with results yet</div>';
+  let worst=dead.slice(0,3).map(function(x,i){return '<div class="cmp-bwrow"><span class="cmp-bwrank bad">!</span><span class="cmp-bwnm" title="'+esc(x.name)+'">'+esc(x.name)+'</span><span class="cmp-bwv" style="color:#b91c1c">no '+esc(resLabel)+'</span><span class="cmp-bwsub">'+inr(x.spend)+' spent</span></div>';}).join('');
+  worst+=worstList.map(function(x,i){return line(x,dead.length+i+1,'bad');}).join('');
+  if(!worst)worst='<div class="cmp-bwempty">Nothing wasteful — nice</div>';
+  return '<div class="cmp-bw">'
+    +'<div class="cmp-bwcard good"><h4><i class="fa-solid fa-trophy"></i> Best performers</h4><div class="sub">cheapest cost per '+esc(resLabel).replace(/s$/,'')+'</div>'+best+'</div>'
+    +'<div class="cmp-bwcard bad"><h4><i class="fa-solid fa-money-bill-transfer"></i> Worst performers</h4><div class="sub">burning money · fix or pause</div>'+worst+'</div>'
+    +'</div>';
+}
+const CMP_EXTRA_CSS='<style>'
+  +'.cmp-tr{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;vertical-align:middle;cursor:default}'
+  +'.cmp-tr.good{background:#f0fdf4;color:#15803d}.cmp-tr.bad{background:#fef2f2;color:#b91c1c}'
+  +'.cmp-tr.flat{background:#f1f5f9;color:#64748b}.cmp-tr.none{background:transparent;color:#cbd5e1;font-weight:600}'
+  +'.cmp-fg{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;cursor:default}'
+  +'.cmp-fg.hi{background:#fef2f2;color:#b91c1c}.cmp-fg.md{background:#fffbeb;color:#b45309}'
+  +'.cmp-fg.ok{background:#f0fdf4;color:#15803d}.cmp-fg.na{background:transparent;color:#cbd5e1}'
+  +'.cmp-kpi .ktr{margin-top:7px}'
+  +'.cmp-bw{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 18px}'
+  +'@media(max-width:900px){.cmp-bw{grid-template-columns:1fr}}'
+  +'.cmp-bwcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:15px 16px;position:relative;overflow:hidden}'
+  +'.cmp-bwcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}'
+  +'.cmp-bwcard.good::before{background:#16a34a}.cmp-bwcard.bad::before{background:#dc2626}'
+  +'.cmp-bwcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a);display:flex;align-items:center;gap:8px}'
+  +'.cmp-bwcard.good h4 i{color:#16a34a}.cmp-bwcard.bad h4 i{color:#dc2626}'
+  +'.cmp-bwcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+  +'.cmp-bwrow{display:grid;grid-template-columns:22px 1fr auto;grid-template-areas:"r n v" ". s s";gap:2px 9px;align-items:center;padding:8px 0;border-top:1px solid #f1f5f9}'
+  +'.cmp-bwrow:first-of-type{border-top:0}'
+  +'.cmp-bwrank{grid-area:r;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;color:#fff}'
+  +'.cmp-bwrank.good{background:#16a34a}.cmp-bwrank.bad{background:#dc2626}'
+  +'.cmp-bwnm{grid-area:n;font-size:13px;font-weight:600;color:var(--ink,#0f172a);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+  +'.cmp-bwv{grid-area:v;font-size:13px;font-weight:800;color:var(--ink,#0f172a);white-space:nowrap}'
+  +'.cmp-bwsub{grid-area:s;font-size:11px;color:var(--slate)}'
+  +'.cmp-bwempty{font-size:12.5px;color:var(--slate);padding:8px 0}'
+  +'.cmp-legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--slate);margin:-6px 0 14px}'
+  +'</style>';
+// Background watchdog: raise email + bell alerts for spend spikes and other critical problems.
+// Safe to call often — the server only alerts once per issue per day.
+function cmpRunAlerts(){
+  if(window._cmpAlertsRan)return; window._cmpAlertsRan=true;
+  try{ fetch(SUPABASE_URL+'/functions/v1/campaign-alerts',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},body:'{}'}).catch(function(){}); }catch(e){}
+}
 window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
 function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button><button class="seg-btn'+(CMP_SOURCE==='both'?' on':'')+'" onclick="cmpSetSource(\'both\')"><i class="fa-solid fa-layer-group"></i> &nbsp;Both</button></div></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
@@ -7201,28 +7327,33 @@ window.cmpShowProject=function(accId){
   if(!acc)return;
   const inr=CMP_LAST.inr,num=CMP_LAST.num;
   const belongsToProj=function(c,a){ return c.name&&a.name&&String(c.name).trim().toLowerCase().startsWith(String(a.name).trim().toLowerCase()); };
+  const prevMap=CMP_LAST.cPrevMap||{};
   const rows=CMP_LAST.campaigns.filter(c=>c.ad_account_id===accId&&belongsToProj(c,acc)).map(c=>{
     const i=CMP_LAST.cInsMap[c.id]||{};
+    const p=prevMap[c.id]||null;
     const spend=Number(i.spend)||0,leads=Number(i.leads)||0;
     const budget=c.daily_budget!=null?Number(c.daily_budget):(c.lifetime_budget!=null?Number(c.lifetime_budget):null);
-    return {c,i,spend,leads,budget,cpl:leads?spend/leads:null};
+    const pspend=p?(Number(p.spend)||0):null, pleads=p?(Number(p.leads)||0):0;
+    return {c,i,spend,leads,budget,cpl:leads?spend/leads:null,
+      pspend,pcpl:pleads?((Number(p.spend)||0)/pleads):null,pctr:p?(Number(p.ctr)||0):null};
   }).sort((a,b)=>b.spend-a.spend);
   const totalSpend=rows.reduce((s,r)=>s+r.spend,0);
   const totalLeads=rows.reduce((s,r)=>s+r.leads,0);
   const statusTag=function(st){const s=(st||'').toUpperCase();if(s==='ACTIVE')return '<span class="tag t-green">Active</span>';if(s==='PAUSED')return '<span class="tag t-amber">Paused</span>';return s?'<span class="tag" style="background:#f1f5f9;color:#475569">'+esc(s)+'</span>':'—';};
   const tbl=rows.length?('<div class="card qc-table-card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    ['Campaign','Status','Budget','Spend','Results (Leads)','Cost / Lead','Impressions','Reach','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+    ['Campaign','Status','Budget','Spend','Trend','Results (Leads)','Cost / Lead','Reach','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
     '</tr></thead><tbody>'+
     rows.map(function(r){return '<tr>'+
       '<td style="font-weight:600">'+esc(r.c.name||'—')+'</td>'+
       '<td>'+statusTag(r.c.status)+'</td>'+
       '<td style="text-align:right">'+(r.budget?inr(r.budget)+(r.c.daily_budget!=null?'/day':' total'):'—')+'</td>'+
-      '<td style="text-align:right">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'+
       '<td style="text-align:right">'+num(r.leads)+'</td>'+
-      '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'+
-      '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+      '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'+
       '<td style="text-align:right">'+num(r.i.reach)+'</td>'+
       '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+      '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,r.pctr)+'</td>'+
     '</tr>';}).join('')+
     '</tbody></table></div></div>'):'<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-chart-line"></i><div>No campaign data for this period</div></div>';
   openModal(
@@ -7245,16 +7376,19 @@ window.cmpShowProjectAds=function(accId){
   const totalSpend=rows.reduce((s,r)=>s+r.spend,0);
   const statusTag=function(st){const s=(st||'').toUpperCase();if(s==='ACTIVE')return '<span class="tag t-green">Active</span>';if(s==='PAUSED')return '<span class="tag t-amber">Paused</span>';return s?'<span class="tag" style="background:#f1f5f9;color:#475569">'+esc(s)+'</span>':'—';};
   const tbl=rows.length?('<div class="card qc-table-card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    ['Ad','Campaign','Status','Spend','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+    ['Ad','Campaign','Status','Spend','Trend','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
     '</tr></thead><tbody>'+
-    rows.map(function(r){return '<tr>'+
+    rows.map(function(r){
+      const p=(CMP_LAST.aPrevMap||{})[r.a.id]||null;
+      return '<tr>'+
       '<td style="font-weight:600">'+esc(r.a.name||'—')+'</td>'+
       '<td>'+esc(r.camp?r.camp.name:'—')+'</td>'+
       '<td>'+statusTag(r.a.effective_status||r.a.status)+'</td>'+
-      '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-      '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right">'+cmpTrend(r.spend,p?(Number(p.spend)||0):null,false)+'</td>'+
       '<td style="text-align:right">'+num(r.i.clicks)+'</td>'+
       '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+      '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,p?(Number(p.ctr)||0):null)+'</td>'+
     '</tr>';}).join('')+
     '</tbody></table></div></div>'):'<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-rectangle-ad"></i><div>No ad data for this period</div></div>';
   openModal(
@@ -7280,13 +7414,54 @@ async function cmpBothView(v,seg){
       ]);
     }catch(e){}
   }
+  await cmpSyncPrev('both');
   const C=function(){return sb.schema('camp');};
-  let mIns=[],gIns=[];
-  try{ const r=await Promise.all([C().from('campaign_insights').select('spend,impressions,clicks,leads').eq('period',periodKey),C().from('g_campaign_insights').select('spend,impressions,clicks,conversions').eq('period',periodKey)]); mIns=r[0].data||[];gIns=r[1].data||[]; }catch(e){}
+  const prevKey=cmpPrevKey();
+  let mIns=[],gIns=[],mPrev=[],gPrev=[],mAccts=[],mCamps=[],gAccts=[],gCamps=[];
+  try{
+    const calls=[
+      C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',periodKey),
+      C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',periodKey),
+      C().from('ad_accounts').select('ad_account_id,name'),
+      C().from('campaigns').select('id,ad_account_id,name,daily_budget,lifetime_budget'),
+      C().from('g_accounts').select('customer_id,name'),
+      C().from('g_campaigns').select('id,customer_id,name,status,budget_amount')
+    ];
+    if(prevKey){
+      calls.push(C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',prevKey));
+      calls.push(C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',prevKey));
+    }
+    const r=await Promise.all(calls);
+    mIns=r[0].data||[];gIns=r[1].data||[];mAccts=r[2].data||[];mCamps=r[3].data||[];gAccts=r[4].data||[];gCamps=r[5].data||[];
+    if(prevKey){mPrev=(r[6]&&r[6].data)||[];gPrev=(r[7]&&r[7].data)||[];}
+  }catch(e){}
   const sum=function(arr,k){return arr.reduce(function(s,x){return s+(Number(x[k])||0);},0);};
   const M={spend:sum(mIns,'spend'),res:sum(mIns,'leads'),impr:sum(mIns,'impressions'),clk:sum(mIns,'clicks')};
   const Gg={spend:sum(gIns,'spend'),res:sum(gIns,'conversions'),impr:sum(gIns,'impressions'),clk:sum(gIns,'clicks')};
   const T={spend:M.spend+Gg.spend,res:M.res+Gg.res,impr:M.impr+Gg.impr,clk:M.clk+Gg.clk};
+  const Mp={spend:sum(mPrev,'spend'),res:sum(mPrev,'leads'),impr:sum(mPrev,'impressions'),clk:sum(mPrev,'clicks')};
+  const Gp={spend:sum(gPrev,'spend'),res:sum(gPrev,'conversions'),impr:sum(gPrev,'impressions'),clk:sum(gPrev,'clicks')};
+  const Tp={spend:Mp.spend+Gp.spend,res:Mp.res+Gp.res,impr:Mp.impr+Gp.impr,clk:Mp.clk+Gp.clk};
+  const avgFreq=function(arr){const f=arr.map(function(x){return Number(x.frequency)||0;}).filter(function(x){return x>0;});return f.length?(f.reduce(function(a,b){return a+b;},0)/f.length):0;};
+  const mFreq=avgFreq(mIns);
+  // total live daily budget across both platforms
+  const mBudget=mCamps.reduce(function(s,c){return s+(Number(c.daily_budget)||0);},0);
+  const gBudget=gCamps.filter(function(c){return String(c.status||'').toUpperCase()==='ENABLED';}).reduce(function(s,c){return s+(Number(c.budget_amount)||0);},0);
+  const tBudget=mBudget+gBudget;
+  // combined best / worst across Meta projects and Google accounts
+  const mInsMap={};mIns.forEach(function(x){mInsMap[x.campaign_id]=x;});
+  const gInsMap={};gIns.forEach(function(x){gInsMap[x.campaign_id]=x;});
+  const bwItems=[];
+  mAccts.forEach(function(a){
+    let sp=0,rs=0;
+    mCamps.filter(function(c){return c.ad_account_id===a.ad_account_id&&c.name&&a.name&&String(c.name).trim().toLowerCase().indexOf(String(a.name).trim().toLowerCase())===0;}).forEach(function(c){const i=mInsMap[c.id];if(i){sp+=Number(i.spend)||0;rs+=Number(i.leads)||0;}});
+    if(sp>0)bwItems.push({name:'Meta · '+a.name,spend:sp,res:rs,cpr:rs?sp/rs:null});
+  });
+  gAccts.forEach(function(a){
+    let sp=0,rs=0;
+    gCamps.filter(function(c){return c.customer_id===a.customer_id;}).forEach(function(c){const i=gInsMap[c.id];if(i){sp+=Number(i.spend)||0;rs+=Number(i.conversions)||0;}});
+    if(sp>0)bwItems.push({name:'Google · '+a.name,spend:sp,res:rs,cpr:rs?sp/rs:null});
+  });
   const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
   const num=function(n){return Number(n||0).toLocaleString('en-IN');};
   const cmpCss='<style>'
@@ -7306,32 +7481,50 @@ async function cmpBothView(v,seg){
     +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
     +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
     +'</style>';
-  const cmpKpi=function(iconCls,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="'+iconCls+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
-  const cpr=T.res?T.spend/T.res:null;
+  const cmpKpi=function(iconCls,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="'+iconCls+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
+  const cpr=T.res?T.spend/T.res:null, pcpr=Tp.res?Tp.spend/Tp.res:null;
   const kpiStrip='<div class="cmp-kpis">'
-    +cmpKpi('fa-solid fa-indian-rupee-sign','Total Spend',inr(T.spend),'Meta + Google','#334155','#f1f5f9')
-    +cmpKpi('fa-solid fa-bullseye','Total Results',num(Math.round(T.res)),'leads + conversions','#0d9488','#f0fdfa')
-    +cmpKpi('fa-solid fa-tags','Cost / Result',cpr!=null?inr(cpr):'—','blended','#0ea5e9','#f0f9ff')
-    +cmpKpi('fa-solid fa-eye','Impressions',num(T.impr),'','#7c3aed','#f5f3ff')
-    +cmpKpi('fa-solid fa-hand-pointer','Clicks',num(T.clk),'','#2563eb','#eff6ff')
-    +cmpKpi('fa-brands fa-facebook','Meta Spend',inr(M.spend),T.spend?Math.round(M.spend/T.spend*100)+'% of spend':'','#1877f2','#eff6ff')
-    +cmpKpi('fa-brands fa-google','Google Spend',inr(Gg.spend),T.spend?Math.round(Gg.spend/T.spend*100)+'% of spend':'','#ea4335','#fef2f2')
+    +cmpKpi('fa-solid fa-indian-rupee-sign','Total Spend',inr(T.spend),'Meta + Google','#334155','#f1f5f9',cmpTrend(T.spend,Tp.spend,false))
+    +cmpKpi('fa-solid fa-wallet','Daily Budget',tBudget?inr(tBudget):'—','both platforms','#6366f1','#eef2ff',tBudget?('<span class="cmp-tr flat" title="Share of the daily budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(T.spend/tBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-solid fa-bullseye','Total Results',num(Math.round(T.res)),'leads + conversions','#0d9488','#f0fdfa',cmpTrend(T.res,Tp.res,false))
+    +cmpKpi('fa-solid fa-tags','Cost / Result',cpr!=null?inr(cpr):'—','blended','#0ea5e9','#f0f9ff',cmpTrend(cpr,pcpr,true))
+    +cmpKpi('fa-solid fa-eye','Impressions',num(T.impr),'','#7c3aed','#f5f3ff',cmpTrend(T.impr,Tp.impr,false))
+    +cmpKpi('fa-solid fa-hand-pointer','Clicks',num(T.clk),'','#2563eb','#eff6ff',cmpTrend(T.clk,Tp.clk,false))
+    +cmpKpi('fa-brands fa-facebook','Meta Spend',inr(M.spend),T.spend?Math.round(M.spend/T.spend*100)+'% of spend':'','#1877f2','#eff6ff',cmpTrend(M.spend,Mp.spend,false))
+    +cmpKpi('fa-brands fa-google','Google Spend',inr(Gg.spend),T.spend?Math.round(Gg.spend/T.spend*100)+'% of spend':'','#ea4335','#fef2f2',cmpTrend(Gg.spend,Gp.spend,false))
     +'</div>';
+  const legend='<div class="cmp-legend"><span><i class="fa-solid fa-arrow-trend-up"></i> Trend = vs '+esc(cmpPrevLabel())+'</span><span>Fatigue: Meta uses real per-person frequency, Google uses CTR decline</span></div>';
+  const bwHtml=cmpBestWorst(bwItems,inr,num,'results');
   let body;
   if(ti===0){
-    body='<div class="cmp-charts">'
+    body=bwHtml+'<div class="cmp-charts">'
       +'<div class="cmp-chcard"><h4>Spend: Meta vs Google</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="bCh1"></canvas></div></div>'
       +'<div class="cmp-chcard"><h4>Results: Meta vs Google</h4><div class="sub">leads + conversions</div><div style="height:260px"><canvas id="bCh2"></canvas></div></div>'
       +'</div>';
   } else {
-    const rowT=function(label,d,trStyle){const c=d.res?d.spend/d.res:null;const ctr=d.impr?d.clk/d.impr*100:0;return '<tr'+(trStyle?(' style="'+trStyle+'"'):'')+'><td style="font-weight:600">'+label+'</td><td style="text-align:right">'+inr(d.spend)+'</td><td style="text-align:right">'+num(Math.round(d.res))+'</td><td style="text-align:right">'+(c!=null?inr(c):'—')+'</td><td style="text-align:right">'+num(d.impr)+'</td><td style="text-align:right">'+num(d.clk)+'</td><td style="text-align:right">'+ctr.toFixed(2)+'%</td></tr>';};
-    body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Source','Spend','Results','Cost / Result','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'
-      +rowT('<i class="fa-brands fa-facebook" style="color:#1877f2"></i> &nbsp;Meta',M,'')
-      +rowT('<i class="fa-brands fa-google" style="color:#ea4335"></i> &nbsp;Google',Gg,'')
-      +rowT('Total',T,'background:#f8fafc;font-weight:700')
+    const mCtr=M.impr?M.clk/M.impr*100:0, mpCtr=Mp.impr?Mp.clk/Mp.impr*100:0;
+    const gCtr=Gg.impr?Gg.clk/Gg.impr*100:0, gpCtr=Gp.impr?Gp.clk/Gp.impr*100:0;
+    const tCtr=T.impr?T.clk/T.impr*100:0, tpCtr=Tp.impr?Tp.clk/Tp.impr*100:0;
+    const rowT=function(label,d,p,ctr,pCtr,budget,fatigue,trStyle){
+      const c=d.res?d.spend/d.res:null, pc=p&&p.res?p.spend/p.res:null;
+      return '<tr'+(trStyle?(' style="'+trStyle+'"'):'')+'><td style="font-weight:600">'+label+'</td>'
+      +'<td style="text-align:right">'+(budget?inr(budget)+'<span style="color:var(--slate);font-size:11px">/day</span>':'—')+'</td>'
+      +'<td style="text-align:right;font-weight:600">'+inr(d.spend)+'</td>'
+      +'<td style="text-align:right">'+cmpTrend(d.spend,p?p.spend:null,false)+'</td>'
+      +'<td style="text-align:right">'+num(Math.round(d.res))+' '+cmpTrend(d.res,p?p.res:null,false)+'</td>'
+      +'<td style="text-align:right">'+(c!=null?inr(c):'—')+' '+cmpTrend(c,pc,true)+'</td>'
+      +'<td style="text-align:right">'+num(d.clk)+'</td>'
+      +'<td style="text-align:right">'+ctr.toFixed(2)+'% '+cmpTrend(ctr,pCtr,false)+'</td>'
+      +'<td style="text-align:right">'+fatigue+'</td></tr>';
+    };
+    body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Source','Daily Budget','Spend','Trend','Results','Cost / Result','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'
+      +rowT('<i class="fa-brands fa-facebook" style="color:#1877f2"></i> &nbsp;Meta',M,Mp,mCtr,mpCtr,mBudget,cmpFatigue(mFreq,mCtr,mpCtr),'')
+      +rowT('<i class="fa-brands fa-google" style="color:#ea4335"></i> &nbsp;Google',Gg,Gp,gCtr,gpCtr,gBudget,cmpFatigue(0,gCtr,gpCtr),'')
+      +rowT('Total',T,Tp,tCtr,tpCtr,tBudget,cmpFatigue(mFreq,tCtr,tpCtr),'background:#f8fafc;font-weight:700')
       +'</tbody></table></div></div>';
   }
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+legend+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
     try{new Chart(document.getElementById('bCh1'),{type:'doughnut',data:{labels:['Meta','Google'],datasets:[{data:[M.spend,Gg.spend],backgroundColor:['#1877f2','#ea4335'],borderWidth:2,borderColor:'#fff'}]},options:opt});}catch(e){}
@@ -7351,22 +7544,39 @@ async function cmpGoogleView(v,seg){
       await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(body)});
     }catch(e){}
   }
+  await cmpSyncPrev('google');
   const G=function(){return sb.schema('camp');};
-  let accts=[],camps=[],ins=[];
+  const prevKey=cmpPrevKey();
+  let accts=[],camps=[],ins=[],pIns=[];
   try{
-    const r=await Promise.all([G().from('g_accounts').select('*').order('name'),G().from('g_campaigns').select('*'),G().from('g_campaign_insights').select('*').eq('period',periodKey)]);
-    accts=r[0].data||[];camps=r[1].data||[];ins=r[2].data||[];
+    const calls=[G().from('g_accounts').select('*').order('name'),G().from('g_campaigns').select('*'),G().from('g_campaign_insights').select('*').eq('period',periodKey)];
+    if(prevKey)calls.push(G().from('g_campaign_insights').select('*').eq('period',prevKey));
+    const r=await Promise.all(calls);
+    accts=r[0].data||[];camps=r[1].data||[];ins=r[2].data||[];pIns=prevKey?((r[3]&&r[3].data)||[]):[];
   }catch(e){}
   const insMap={};ins.forEach(function(x){insMap[x.campaign_id]=x;});
+  const pInsMap={};pIns.forEach(function(x){pInsMap[x.campaign_id]=x;});
   const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
   const num=function(n){return Number(n||0).toLocaleString('en-IN');};
+  const isLive=function(c){return String(c.status||'').toUpperCase()==='ENABLED';};
   const rows=accts.map(function(a){
     const acs=camps.filter(function(c){return c.customer_id===a.customer_id;});
-    let spend=0,impr=0,clk=0,conv=0;
-    acs.forEach(function(c){const i=insMap[c.id];if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clk+=Number(i.clicks)||0;conv+=Number(i.conversions)||0;}});
-    return {a:a,campaigns:acs.length,spend:spend,impr:impr,clk:clk,conv:conv,ctr:impr?clk/impr*100:0,cpl:conv?spend/conv:null};
+    let spend=0,impr=0,clk=0,conv=0,budget=0;
+    let pspend=0,pimpr=0,pclk=0,pconv=0;
+    acs.forEach(function(c){
+      const i=insMap[c.id];if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clk+=Number(i.clicks)||0;conv+=Number(i.conversions)||0;}
+      const p=pInsMap[c.id];if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclk+=Number(p.clicks)||0;pconv+=Number(p.conversions)||0;}
+      if(isLive(c))budget+=Number(c.budget_amount)||0;
+    });
+    return {a:a,campaigns:acs.length,spend:spend,impr:impr,clk:clk,conv:conv,budget:budget,
+      ctr:impr?clk/impr*100:0,cpl:conv?spend/conv:null,
+      pspend:pspend,pconv:pconv,pctr:pimpr?pclk/pimpr*100:0,pcpl:pconv?pspend/pconv:null};
   }).sort(function(x,y){return y.spend-x.spend;});
   const tSpend=rows.reduce(function(s,r){return s+r.spend;},0),tImpr=rows.reduce(function(s,r){return s+r.impr;},0),tClk=rows.reduce(function(s,r){return s+r.clk;},0),tConv=rows.reduce(function(s,r){return s+r.conv;},0);
+  const tBudget=rows.reduce(function(s,r){return s+r.budget;},0);
+  const pSpend=rows.reduce(function(s,r){return s+r.pspend;},0),pConv=rows.reduce(function(s,r){return s+r.pconv;},0);
+  const pImprT=pIns.reduce(function(s,x){return s+(Number(x.impressions)||0);},0),pClkT=pIns.reduce(function(s,x){return s+(Number(x.clicks)||0);},0);
+  const pAvgCtr=pImprT?pClkT/pImprT*100:0, pCpl=pConv?pSpend/pConv:null, pAvgCpc=pClkT?pSpend/pClkT:null;
   const avgCtr=tImpr?tClk/tImpr*100:0,avgCpc=tClk?tSpend/tClk:null,cpl=tConv?tSpend/tConv:null;
   const cmpCss='<style>'
     +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
@@ -7386,17 +7596,20 @@ async function cmpGoogleView(v,seg){
     +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
     +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
     +'</style>';
-  const cmpKpi=function(icon,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const cmpKpi=function(icon,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
   const kpiStrip='<div class="cmp-kpis">'
-    +cmpKpi('fa-indian-rupee-sign','Spend',inr(tSpend),accts.length+' account'+(accts.length===1?'':'s'),'#4285f4','#eff6ff')
-    +cmpKpi('fa-bullseye','Conversions',num(Math.round(tConv)),tConv?'':'none yet','#0d9488','#f0fdfa')
-    +cmpKpi('fa-tags','Cost / Conv.',cpl!=null?inr(cpl):'—','lower is better','#0ea5e9','#f0f9ff')
-    +cmpKpi('fa-eye','Impressions',num(tImpr),'','#7c3aed','#f5f3ff')
-    +cmpKpi('fa-hand-pointer','Clicks',num(tClk),'','#2563eb','#eff6ff')
-    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'','#16a34a','#f0fdf4')
-    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(tSpend),accts.length+' account'+(accts.length===1?'':'s'),'#4285f4','#eff6ff',cmpTrend(tSpend,pSpend,false))
+    +cmpKpi('fa-wallet','Daily Budget',tBudget?inr(tBudget):'—','active campaigns','#6366f1','#eef2ff',tBudget?('<span class="cmp-tr flat" title="Share of today\'s budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(tSpend/tBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-bullseye','Conversions',num(Math.round(tConv)),tConv?'':'none yet','#0d9488','#f0fdfa',cmpTrend(tConv,pConv,false))
+    +cmpKpi('fa-tags','Cost / Conv.',cpl!=null?inr(cpl):'—','lower is better','#0ea5e9','#f0f9ff',cmpTrend(cpl,pCpl,true))
+    +cmpKpi('fa-eye','Impressions',num(tImpr),'','#7c3aed','#f5f3ff',cmpTrend(tImpr,pImprT,false))
+    +cmpKpi('fa-hand-pointer','Clicks',num(tClk),'','#2563eb','#eff6ff',cmpTrend(tClk,pClkT,false))
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'','#16a34a','#f0fdf4',cmpTrend(avgCtr,pAvgCtr,false))
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
     +'</div>';
   const cap='<div class="cmp-cap"><i class="fa-brands fa-google" style="color:#ea4335"></i> Live Google Ads · '+esc(periodLabel)+' · '+accts.length+' account'+(accts.length===1?'':'s')+'</div>';
+  const legend='<div class="cmp-legend"><span><i class="fa-solid fa-arrow-trend-up"></i> Trend = vs '+esc(cmpPrevLabel())+'</span><span>'+cmpFatigue(0,1,1.6)+' Fatigue = CTR falling while spend continues</span></div>';
+  const bwHtml=cmpBestWorst(rows.map(function(r){return {name:r.a.name,spend:r.spend,res:r.conv,cpr:r.cpl};}),inr,num,'conversions');
   let body;
   if(ti===0){
     body='<div class="cmp-charts">'
@@ -7406,12 +7619,37 @@ async function cmpGoogleView(v,seg){
       +'<div class="cmp-chcard"><h4>Cost per conversion by account</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="gCh4"></canvas></div></div>'
       +'</div>';
   } else if(ti===1){
-    body=rows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Account','Campaigns','Spend','Conversions','Cost / Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.a.name)+'</td><td style="text-align:right">'+r.campaigns+'</td><td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(r.conv))+'</td><td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td><td style="text-align:right">'+num(r.impr)+'</td><td style="text-align:right">'+num(r.clk)+'</td><td style="text-align:right">'+r.ctr.toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No Google Ads data for this period</div></div>';
+    body=rows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Account','Campaigns','Daily Budget','Spend','Trend','Conversions','Cost / Conv','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){
+      const used=r.budget?Math.round(r.spend/r.budget*100):null;
+      return '<tr><td style="font-weight:600">'+esc(r.a.name)+'</td><td style="text-align:right">'+r.campaigns+'</td>'
+      +'<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'
+      +'<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'
+      +'<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+      +'<td style="text-align:right">'+num(Math.round(r.conv))+'</td>'
+      +'<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'
+      +'<td style="text-align:right">'+num(r.clk)+'</td><td style="text-align:right">'+r.ctr.toFixed(2)+'%</td>'
+      +'<td style="text-align:right">'+cmpFatigue(0,r.ctr,r.pctr)+'</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No Google Ads data for this period</div></div>';
   } else {
-    const crow=camps.map(function(c){const i=insMap[c.id]||{};const acc=accts.find(function(a){return a.customer_id===c.customer_id;});return {c:c,i:i,acc:acc,spend:Number(i.spend)||0};}).filter(function(r){return r.acc&&insMap[r.c.id];}).sort(function(x,y){return y.spend-x.spend;}).slice(0,200);
-    body=crow.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Campaign','Account','Status','Spend','Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+crow.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.c.name)+'</td><td>'+esc(r.acc.name)+'</td><td>'+esc(String(r.c.status||'').replace('ENABLED','Active').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</td><td style="text-align:right">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(Number(r.i.conversions)||0))+'</td><td style="text-align:right">'+num(r.i.impressions)+'</td><td style="text-align:right">'+num(r.i.clicks)+'</td><td style="text-align:right">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No campaigns with data for this period</div></div>';
+    const crow=camps.map(function(c){const i=insMap[c.id]||{};const p=pInsMap[c.id]||null;const acc=accts.find(function(a){return a.customer_id===c.customer_id;});return {c:c,i:i,p:p,acc:acc,spend:Number(i.spend)||0};}).filter(function(r){return r.acc&&insMap[r.c.id];}).sort(function(x,y){return y.spend-x.spend;}).slice(0,200);
+    body=crow.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Campaign','Account','Status','Daily Budget','Spend','Trend','Conv','Cost / Conv','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+crow.map(function(r){
+      const bud=Number(r.c.budget_amount)||0, sp=r.spend;
+      const conv=Number(r.i.conversions)||0, cpc=conv?sp/conv:null;
+      const psp=r.p?(Number(r.p.spend)||0):null;
+      const pconv=r.p?(Number(r.p.conversions)||0):0, pcpc=(r.p&&pconv)?((Number(r.p.spend)||0)/pconv):null;
+      const pctr=r.p?(Number(r.p.ctr)||0):null;
+      const used=bud?Math.round(sp/bud*100):null;
+      return '<tr><td style="font-weight:600">'+esc(r.c.name)+'</td><td>'+esc(r.acc.name)+'</td>'
+      +'<td>'+esc(String(r.c.status||'').replace('ENABLED','Active').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</td>'
+      +'<td style="text-align:right">'+(bud?(inr(bud)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'
+      +'<td style="text-align:right;font-weight:600">'+inr(sp)+'</td>'
+      +'<td style="text-align:right">'+cmpTrend(sp,psp,false)+'</td>'
+      +'<td style="text-align:right">'+num(Math.round(conv))+'</td>'
+      +'<td style="text-align:right">'+(cpc!=null?inr(cpc):'—')+' '+cmpTrend(cpc,pcpc,true)+'</td>'
+      +'<td style="text-align:right">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td>'
+      +'<td style="text-align:right">'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No campaigns with data for this period</div></div>';
   }
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+cap+legend+(ti===0?bwHtml:'')+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
     const palette=['#4285f4','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#2563eb','#0891b2'];
@@ -7442,19 +7680,27 @@ VIEWS.campaigns=async function(v,seg){
       await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(reqBody)});
     }catch(e){}
   }
+  await cmpSyncPrev('meta');
   const CMP=()=>sb.schema('camp');
-  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[];
+  const prevKey=cmpPrevKey();
+  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[];
   try{
     const calls=[
       CMP().from('ad_accounts').select('*').order('name'),
       CMP().from('campaigns').select('*'),
       CMP().from('campaign_insights').select('*').eq('period',periodKey)
     ];
-    if(needAd){calls.push(CMP().from('ads').select('*'));calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey));}
+    const iPrevC=calls.length; if(prevKey)calls.push(CMP().from('campaign_insights').select('*').eq('period',prevKey));
+    let iAds=-1,iAdIns=-1,iPrevA=-1;
+    if(needAd){ iAds=calls.length; calls.push(CMP().from('ads').select('*')); iAdIns=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iPrevA=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',prevKey)); } }
     const results=await Promise.all(calls);
-    accounts=results[0].data||[];campaigns=results[1].data||[];cIns=results[2].data||[];
-    if(needAd){ads=results[3].data||[];aIns=results[4].data||[];}
+    const at=function(i){return (i>=0&&results[i]&&results[i].data)?results[i].data:[];};
+    accounts=at(0);campaigns=at(1);cIns=at(2);
+    if(prevKey)cPrev=at(iPrevC);
+    if(needAd){ads=at(iAds);aIns=at(iAdIns);if(iPrevA>=0)aPrev=at(iPrevA);}
   }catch(e){}
+  const cPrevMap={};cPrev.forEach(function(x){cPrevMap[x.campaign_id]=x;});
+  const aPrevMap={};aPrev.forEach(function(x){aPrevMap[x.ad_id]=x;});
   const cInsMap={};cIns.forEach(x=>cInsMap[x.campaign_id]=x);
   const aInsMap={};aIns.forEach(x=>aInsMap[x.ad_id]=x);
   const campMap={};campaigns.forEach(x=>campMap[x.id]=x);
@@ -7463,21 +7709,38 @@ VIEWS.campaigns=async function(v,seg){
   const belongsToProj=function(c,acc){ return c.name&&acc.name&&String(c.name).trim().toLowerCase().startsWith(String(acc.name).trim().toLowerCase()); };
   const projRows=accounts.map(acc=>{
     const accCamps=campaigns.filter(c=>c.ad_account_id===acc.ad_account_id&&belongsToProj(c,acc));
-    let spend=0,impr=0,clicks=0,leads=0,reach=0,budget=0;
+    let spend=0,impr=0,clicks=0,leads=0,reach=0,budget=0,freqSum=0,freqN=0;
+    let pspend=0,pimpr=0,pclicks=0,pleads=0;
     accCamps.forEach(c=>{
       const i=cInsMap[c.id];
-      if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;}
+      if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;const f=Number(i.frequency)||0;if(f>0){freqSum+=f;freqN++;}}
+      const p=cPrevMap[c.id];
+      if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclicks+=Number(p.clicks)||0;pleads+=Number(p.leads)||0;}
       budget+=Number(c.daily_budget)||Number(c.lifetime_budget)||0;
     });
-    return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,ctr:impr?(clicks/impr*100):0,cpl:leads?(spend/leads):null};
+    return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,
+      freq:freqN?(freqSum/freqN):0,
+      ctr:impr?(clicks/impr*100):0,cpl:leads?(spend/leads):null,
+      pspend,pleads,pctr:pimpr?(pclicks/pimpr*100):0,pcpl:pleads?(pspend/pleads):null};
   });
-  CMP_LAST={accounts,campaigns,cInsMap,periodLabel,inr,num,ads,aInsMap,campMap};
+  CMP_LAST={accounts,campaigns,cInsMap,periodLabel,inr,num,ads,aInsMap,campMap,cPrevMap,aPrevMap};
   const totalSpend=projRows.reduce((s,r)=>s+r.spend,0);
   const totalImpr=projRows.reduce((s,r)=>s+r.impr,0);
   const totalClicks=projRows.reduce((s,r)=>s+r.clicks,0);
   const totalLeads=projRows.reduce((s,r)=>s+r.leads,0);
   const avgCtr=totalImpr?(totalClicks/totalImpr*100):0;
   const totalCpl=totalLeads?(totalSpend/totalLeads):null;
+  // previous-period totals (for the Trend pills)
+  const pTotSpend=cPrev.reduce((s,x)=>s+(Number(x.spend)||0),0);
+  const pTotImpr=cPrev.reduce((s,x)=>s+(Number(x.impressions)||0),0);
+  const pTotClicks=cPrev.reduce((s,x)=>s+(Number(x.clicks)||0),0);
+  const pTotLeads=cPrev.reduce((s,x)=>s+(Number(x.leads)||0),0);
+  const pTotReach=cPrev.reduce((s,x)=>s+(Number(x.reach)||0),0);
+  const pAvgCtr=pTotImpr?(pTotClicks/pTotImpr*100):0;
+  const pTotCpl=pTotLeads?(pTotSpend/pTotLeads):null;
+  const pAvgCpc=pTotClicks?(pTotSpend/pTotClicks):null;
+  const metaFreq=(function(){const f=projRows.map(r=>r.freq).filter(x=>x>0);return f.length?(f.reduce((a,b)=>a+b,0)/f.length):0;})();
+  const metaBudget=projRows.reduce((s,r)=>s+r.budget,0);
   const kpis=[['Spend ('+periodLabel+')',inr(totalSpend),accounts.length+' projects'],['Results (Leads)',num(totalLeads),''],['Cost / Lead',totalCpl!=null?inr(totalCpl):'—','',totalCpl!=null?'#16855a':'var(--slate)'],['Impressions',num(totalImpr),''],['Avg CTR',avgCtr.toFixed(2)+'%','',avgCtr>=1?'#16855a':'#c2410c']];
   let body;
   if(ti===0){ body='<div class="cmp-charts">'
@@ -7489,18 +7752,21 @@ VIEWS.campaigns=async function(v,seg){
   else if(ti===1){
     const sorted=projRows.slice().sort((a,b)=>b.spend-a.spend);
     body=sorted.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      ['Project','Campaigns','Spend','Budget','Results (Leads)','Cost / Lead','Impressions','Reach','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+      ['Project','Campaigns','Daily Budget','Spend','Trend','Results (Leads)','Cost / Lead','Reach','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
       '</tr></thead><tbody>'+
-      sorted.map(function(r){return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
+      sorted.map(function(r){
+        const used=r.budget?Math.round(r.spend/r.budget*100):null;
+        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
         '<td style="font-weight:600">'+esc(r.acc.name)+'</td>'+
         '<td style="text-align:right">'+r.campaigns+'</td>'+
-        '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-        '<td style="text-align:right">'+(r.budget?inr(r.budget)+'/day':'—')+'</td>'+
-        '<td style="text-align:right">'+num(r.leads)+'</td>'+
-        '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'+
-        '<td style="text-align:right">'+num(r.impr)+'</td>'+
+        '<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'+
+        '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+        '<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'+
+        '<td style="text-align:right">'+num(r.leads)+' '+cmpTrend(r.leads,r.pleads,false)+'</td>'+
+        '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'+
         '<td style="text-align:right">'+num(r.reach)+'</td>'+
         '<td style="text-align:right">'+r.ctr.toFixed(2)+'%</td>'+
+        '<td style="text-align:right">'+cmpFatigue(r.freq,r.ctr,r.pctr)+'</td>'+
       '</tr>';}).join('')+
       '</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No project data for this period</div></div>';
   }
@@ -7520,17 +7786,21 @@ VIEWS.campaigns=async function(v,seg){
     const curPage=Math.min(CMP_AD_PAGE,totalPages-1);
     const pageRows=allAdRows.slice(curPage*PAGE_SIZE,(curPage+1)*PAGE_SIZE);
     const tbl=pageRows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      ['Ad','Project','Campaign','Status','Spend','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+      ['Ad','Project','Campaign','Status','Spend','Trend','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
       '</tr></thead><tbody>'+
-      pageRows.map(function(r){return '<tr class="clk" onclick="cmpShowProjectAds(\''+r.acc.ad_account_id+'\')">'+
+      pageRows.map(function(r){
+        const p=aPrevMap[r.a.id]||null;
+        const pSp=p?(Number(p.spend)||0):null, pCt=p?(Number(p.ctr)||0):null;
+        return '<tr class="clk" onclick="cmpShowProjectAds(\''+r.acc.ad_account_id+'\')">'+
         '<td style="font-weight:600">'+esc(r.a.name)+'</td>'+
         '<td>'+esc(r.acc.name)+'</td>'+
         '<td>'+esc(r.camp.name)+'</td>'+
         '<td>'+esc(r.a.effective_status||r.a.status||'—')+'</td>'+
-        '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-        '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+        '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+        '<td style="text-align:right">'+cmpTrend(r.spend,pSp,false)+'</td>'+
         '<td style="text-align:right">'+num(r.i.clicks)+'</td>'+
         '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+        '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,pCt)+'</td>'+
       '</tr>';}).join('')+
       '</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No ad-level data for this project/period</div></div>';
     const pager=allAdRows.length>PAGE_SIZE?('<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px">'+
@@ -7561,19 +7831,24 @@ VIEWS.campaigns=async function(v,seg){
     +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
     +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
     +'</style>';
-  const cmpKpi=function(icon,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const cmpKpi=function(icon,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
   const kpiStrip='<div class="cmp-kpis">'
-    +cmpKpi('fa-indian-rupee-sign','Spend',inr(totalSpend),accounts.length+' project'+(accounts.length===1?'':'s'),'#db2777','#fdf2f8')
-    +cmpKpi('fa-user-plus','Results (Leads)',num(totalLeads),totalLeads?'generated':'no leads yet','#7c3aed','#f5f3ff')
-    +cmpKpi('fa-tags','Cost / Lead',totalCpl!=null?inr(totalCpl):'—','lower is better','#0ea5e9','#f0f9ff')
-    +cmpKpi('fa-eye','Impressions',num(totalImpr),'','#0891b2','#ecfeff')
-    +cmpKpi('fa-users','Reach',num(totalReach),(totalReach&&totalImpr)?((totalImpr/totalReach).toFixed(1)+'x seen on avg'):'','#0d9488','#f0fdfa')
-    +cmpKpi('fa-hand-pointer','Clicks',num(totalClicks),'','#2563eb','#eff6ff')
-    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'below 1%','#16a34a','#f0fdf4')
-    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(totalSpend),accounts.length+' project'+(accounts.length===1?'':'s'),'#db2777','#fdf2f8',cmpTrend(totalSpend,pTotSpend,false))
+    +cmpKpi('fa-wallet','Daily Budget',metaBudget?inr(metaBudget):'—','across campaigns','#6366f1','#eef2ff',metaBudget?('<span class="cmp-tr flat" title="Share of the daily budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(totalSpend/metaBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-user-plus','Results (Leads)',num(totalLeads),totalLeads?'generated':'no leads yet','#7c3aed','#f5f3ff',cmpTrend(totalLeads,pTotLeads,false))
+    +cmpKpi('fa-tags','Cost / Lead',totalCpl!=null?inr(totalCpl):'—','lower is better','#0ea5e9','#f0f9ff',cmpTrend(totalCpl,pTotCpl,true))
+    +cmpKpi('fa-eye','Impressions',num(totalImpr),'','#0891b2','#ecfeff',cmpTrend(totalImpr,pTotImpr,false))
+    +cmpKpi('fa-users','Reach',num(totalReach),(totalReach&&totalImpr)?((totalImpr/totalReach).toFixed(1)+'x seen on avg'):'','#0d9488','#f0fdfa',cmpTrend(totalReach,pTotReach,false))
+    +cmpKpi('fa-hand-pointer','Clicks',num(totalClicks),'','#2563eb','#eff6ff',cmpTrend(totalClicks,pTotClicks,false))
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'below 1%','#16a34a','#f0fdf4',cmpTrend(avgCtr,pAvgCtr,false))
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
+    +cmpKpi('fa-fire','Ad Fatigue',metaFreq?(metaFreq.toFixed(1)+'x'):'—','seen per person','#e11d48','#fff1f2',cmpFatigue(metaFreq,avgCtr,pAvgCtr))
     +'</div>';
   const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  const legend='<div class="cmp-legend"><span><i class="fa-solid fa-arrow-trend-up"></i> Trend = vs '+esc(cmpPrevLabel())+'</span><span><i class="fa-solid fa-fire" style="color:#e11d48"></i> Fatigue = how often each person saw the ads + whether CTR is falling</span></div>';
+  const bwHtml=cmpBestWorst(projRows.map(function(r){return {name:r.acc.name,spend:r.spend,res:r.leads,cpr:r.cpl};}),inr,num,'leads');
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+syncCap+legend+(ti===0?bwHtml:'')+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
     const accIds=projRows.map(r=>r.acc.ad_account_id);
