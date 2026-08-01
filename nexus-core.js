@@ -144,7 +144,6 @@ async function boot(){
   renderPage();
   startSessionGuard();
   promptSetPassword();
-  initSpeedWidget();
 }
 // Continuously enforce the session: if the token is gone/expired/tampered, log out.
 function startSessionGuard(){
@@ -239,6 +238,9 @@ const NAV=[
     {id:'whatsapp',label:'WhatsApp Bot',icon:'fa-comment-dots'},
     {id:'mail',label:"Naren's Mail",icon:'fa-envelope'},
   ]},
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+  ]},
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
@@ -247,11 +249,11 @@ const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
-const DEFAULT_MODULES=['dashboard','tasks','projects','settings'];
+const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
 function navIcon(id){return ICONS[id]||'fa-square';}
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');return ss;}const ss=new Set(['dashboard','settings']);return ss;}
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return ss;}const ss=new Set(['dashboard','settings','network']);return ss;}
 function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>!allow||allow.has(it.id))})).filter(g=>g.items.length);if(state.super)groups=[{group:'Administration',items:[{id:'security',label:'Control Panel',icon:'fa-sliders'}]}].concat(groups);return groups;}
-function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='dashboard'||id==='settings'||id==='placeholder')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -5413,261 +5415,6 @@ function promptSetPassword(){
   }catch(e){}
 }
 
-/* ============================ INTERNET SPEED WIDGET ============================
-   A tiny, self-contained "internet speed" chip rendered inside the app shell on
-   every module page (initSpeedWidget() is called from boot() once the shell is
-   shown). It shows the current download and upload speeds, refreshes itself
-   automatically every 1 minute, and remains draggable. The user can drag it
-   anywhere; its position persists in localStorage per browser.
-
-   The values always appear, even when the accurate same-origin throughput test
-   can't run (e.g. a page opened as a local file:// where fetch() is blocked): in
-   that case it falls back to the browser's own Network Information estimate, and
-   as a last resort keeps showing the previous reading. */
-(function(){
-  const POS_KEY='jaine.speedWidget.pos';
-  const REFRESH_MS=60000;                  // hold time: how long the settled reading stays on screen
-  // ↑ before the next test starts — timed from when a run FINISHES, not from when it started,
-  //   so a slow test never eats into the 1-minute hold. Each run uses the free Cloudflare speed
-  //   endpoint, pulls ~60 MB and saturates the link for ~15-25s — change this value to re-tune.
-  // Speed is measured against Cloudflare's public speed-test endpoint — the same backend
-  // Cloudflare's own speed test uses: free, no API key, https + CORS, high-capacity, so
-  // the reading reflects the real link (close to a full Ookla test for typical connections).
-  // Cloudflare's official speed-test engine — the exact code speed.cloudflare.com runs —
-  // loaded on demand from a CDN. Using their engine is what makes the widget's number
-  // match the Cloudflare Speed Test (same measurement + same p90 aggregation).
-  const ENGINE_URL='https://cdn.jsdelivr.net/npm/@cloudflare/speedtest/+esm';
-  // Download-only test plan (skips upload to roughly halve data use). The larger sizes are
-  // what let fast links reach full speed — the reading tracks Cloudflare's UI closely.
-  // Approx data per run ≈ 1·4 + 10·3 + 25·1 ≈ 59 MB.
-  // Small sizes first so slow links get a reading quickly and the engine adapts (skipping
-  // the big transfers) exactly like the real UI; fast links use the larger ones to reach
-  // full speed. Approx data on a fast link ≈ 0.1 + 6 + 30 + 25 ≈ 61 MB.
-  const ENGINE_MEASUREMENTS=[
-    {type:'latency',  numPackets:5},
-    {type:'download', bytes:1e5,    count:1, bypassMinDuration:true},
-    {type:'download', bytes:1e6,    count:6},
-    {type:'download', bytes:1e7,    count:3},
-    {type:'download', bytes:2.5e7,  count:1},
-    {type:'upload',   bytes:1e5,    count:1, bypassMinDuration:true},
-    {type:'upload',   bytes:1e6,    count:2},
-    {type:'upload',   bytes:2.5e6,  count:1}
-  ];
-  const TEST_TIMEOUT_MS=60000;             // give the multi-phase test time to finish on slower links
-
-  let box=null, testing=false, downloadMbps=null, uploadMbps=null, autoTimer=null, drag=null, enginePromise=null;
-
-  /* Browser's own estimate — instant, no data transfer, works even on file://. */
-  function connectionDownlink(){
-    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
-    if(c&&typeof c.downlink==='number'&&c.downlink>0) return +c.downlink.toFixed(1);
-    return null;
-  }
-  function isNetworkOnline(){
-    if(navigator.onLine===false) return false;
-    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
-    if(c&&typeof c.downlink==='number'&&c.downlink<=0) return false;
-    return true;
-  }
-  function setOfflineState(){
-    clearTimeout(autoTimer);
-    downloadMbps=null; uploadMbps=null; testing=false;
-    if(box){
-      box.classList.remove('testing');
-      box.classList.add('offline');
-      box.style.color='var(--err)';
-      box.innerHTML='<i class="fa-solid fa-wifi" style="margin-right:6px"></i>No internet';
-      box.title='No internet connection — drag to move';
-    }
-  }
-  function handleConnectivityChange(){
-    if(!isNetworkOnline()){ setOfflineState(); return; }
-    if(testing||!box) return;
-    if(downloadMbps==null){ downloadMbps=connectionDownlink(); }
-    if(uploadMbps==null && downloadMbps!=null){ uploadMbps=Math.max(1, +(downloadMbps*0.35).toFixed(1)); }
-    render();
-    runTest();
-  }
-
-  function injectStyles(){
-    if(document.getElementById('speedWidgetCss'))return;
-    const s=document.createElement('style'); s.id='speedWidgetCss';
-    s.textContent=`
-#speedWidget{position:fixed;z-index:90;display:flex;flex-direction:column;gap:3px;align-items:center;
-  padding:8px 8px;background:#fff;
-  border:1.5px solid #000;border-radius:14px;
-  box-shadow:var(--shadow-lg);width:max-content;
-  font-family:Inter,system-ui,sans-serif;line-height:1;color:var(--ink);white-space:nowrap;
-  cursor:grab;user-select:none;touch-action:none;transition:box-shadow .15s ease}
-#speedWidget.dragging{cursor:grabbing;box-shadow:0 14px 34px rgba(16,24,40,.26)}
-#speedWidget.testing{opacity:.7}
-#speedWidget .sw-block{display:flex;align-items:baseline;gap:3px}
-#speedWidget .sw-block+.sw-block{border-top:1px solid var(--line);padding-top:5px}
-#speedWidget .sw-block i{font-size:10px;flex-shrink:0}
-#speedWidget .sw-val{font-size:12px;font-weight:800;letter-spacing:-.01em}
-#speedWidget .sw-unit{font-size:9px;font-weight:700;color:var(--slate)}
-#speedWidget.offline{flex-direction:row;font-size:11px;font-weight:800;justify-content:center}
-@media (max-width:1024px){
-  #speedWidget{gap:3px;padding:7px 7px}
-  #speedWidget .sw-block+.sw-block{padding-top:4px}
-  #speedWidget .sw-val{font-size:11.5px}
-}
-@media (max-width:480px){
-  #speedWidget{gap:2px;padding:6px 6px}
-  #speedWidget .sw-block{gap:2px}
-  #speedWidget .sw-block+.sw-block{padding-top:3px}
-  #speedWidget i{font-size:9px}
-  #speedWidget .sw-val{font-size:10.5px}
-  #speedWidget .sw-unit{font-size:8px}
-}`;
-    document.head.appendChild(s);
-  }
-
-  /* ── measurement (runs Cloudflare's official engine) ──
-     Loads @cloudflare/speedtest once, then runs a download-only test and returns the
-     engine's summary download figure in Mbps — the same value the Cloudflare Speed Test
-     UI reports. Returns null on load/run failure or timeout (caller then falls back). */
-  function loadEngine(){
-    if(!enginePromise) enginePromise=import(ENGINE_URL).then(m=>m.default||m.SpeedTest||m);
-    return enginePromise;
-  }
-  async function measureSpeeds(){
-    if(location.protocol==='file:') return {download:null, upload:null};   // can't load an ESM module / run cross-origin from file://
-    let SpeedTest;
-    try{ SpeedTest=await loadEngine(); }catch(e){ return {download:null, upload:null}; }
-    return await new Promise(resolve=>{
-      let done=false;
-      const finish=v=>{ if(done)return; done=true; resolve(v); };
-      const to=setTimeout(()=>finish({download:null, upload:null}), TEST_TIMEOUT_MS);
-      let engine;
-      try{
-        engine=new SpeedTest({autoStart:false, measurements:ENGINE_MEASUREMENTS});
-        // Live tick while the test runs (mirrors fast.com/Speedtest.net's moving number):
-        // the engine fires this after every sample, and results.getDownload/UploadBandwidth()
-        // is the running average over the samples so far — it visibly settles as more data
-        // comes in, then onFinish below locks in the final, most-stable figure.
-        engine.onResultsChange=({type})=>{
-          if(type==='download'){
-            const bw=engine.results.getDownloadBandwidth();
-            if(typeof bw==='number'&&bw>0){ downloadMbps=+(bw/1e6).toFixed(1); render(); }
-          }else if(type==='upload'){
-            const bw=engine.results.getUploadBandwidth();
-            if(typeof bw==='number'&&bw>0){ uploadMbps=+(bw/1e6).toFixed(1); render(); }
-          }
-        };
-        engine.onFinish=results=>{ clearTimeout(to);
-          const summary=results&&results.getSummary?results.getSummary():null;
-          const download=summary&&typeof summary.download==='number'&&summary.download>0 ? +(summary.download/1e6).toFixed(1) : null;
-          const upload=summary&&typeof summary.upload==='number'&&summary.upload>0 ? +(summary.upload/1e6).toFixed(1) : null;
-          finish({download, upload});
-        };
-        engine.onError=()=>{ clearTimeout(to); finish({download:null, upload:null}); };
-        engine.play();
-      }catch(e){ clearTimeout(to); finish({download:null, upload:null}); }
-    });
-  }
-
-  async function runTest(){
-    if(testing||!box) return;
-    testing=true; render();
-    let measured={download:null, upload:null};
-    try{ measured=await measureSpeeds(); }catch(e){}
-    if(measured.download==null) measured.download=connectionDownlink();
-    if(measured.upload==null && uploadMbps!=null) measured.upload=uploadMbps;
-    testing=false;
-    if(measured.download!=null) downloadMbps=measured.download;
-    if(measured.upload!=null) uploadMbps=measured.upload;
-    render();
-    scheduleNextRun();          // the 2-minute hold starts now, after this run has fully settled
-  }
-  function scheduleNextRun(){
-    clearTimeout(autoTimer);
-    autoTimer=setTimeout(runTest, REFRESH_MS);
-  }
-
-  /* ── position persistence & clamping ────────────────────────── */
-  function savePos(l,t){ try{ localStorage.setItem(POS_KEY,JSON.stringify({left:Math.round(l),top:Math.round(t)})); }catch(e){} }
-  function loadPos(){ try{ return JSON.parse(localStorage.getItem(POS_KEY)); }catch(e){ return null; } }
-  function place(l,t){
-    const mw=box.offsetWidth, mh=box.offsetHeight;
-    l=Math.max(6, Math.min(l, window.innerWidth -mw-6));
-    t=Math.max(6, Math.min(t, window.innerHeight-mh-6));
-    box.style.left=l+'px'; box.style.top=t+'px'; box.style.right='auto'; box.style.bottom='auto';
-  }
-  function reposition(){
-    const saved=loadPos();
-    if(saved) place(saved.left, saved.top);                                   // where the user left it
-    else place(window.innerWidth-box.offsetWidth-16, window.innerHeight-box.offsetHeight-16); // default: bottom-right
-  }
-
-  /* ── rendering (download/upload pair) ─────────────────────── */
-  function speedColor(m){ if(m==null)return 'var(--slate)'; if(m<10)return 'var(--err)'; if(m<40)return 'var(--warn)'; return 'var(--ok)'; }
-  function numText(m){ return m==null?(testing?'…':'—'):(m>=100?String(Math.round(m)):m.toFixed(1)); }
-  function render(){
-    if(!box||drag) return;                        // never repaint mid-drag
-    if(!isNetworkOnline()){ setOfflineState(); return; }
-    const dl=downloadMbps!=null?downloadMbps:null;
-    const ul=uploadMbps!=null?uploadMbps:null;
-    box.classList.remove('offline');
-    box.classList.toggle('testing',testing&&dl==null&&ul==null);
-    box.style.color='var(--ink)';
-    const dText=numText(dl);
-    const uText=numText(ul);
-    box.innerHTML=
-      `<div class="sw-block" style="color:${speedColor(dl)}"><i class="fa-solid fa-arrow-down"></i><span class="sw-val">${dText}</span><span class="sw-unit">Mbps</span></div>`+
-      `<div class="sw-block" style="color:${speedColor(ul)}"><i class="fa-solid fa-arrow-up"></i><span class="sw-val">${uText}</span><span class="sw-unit">Mbps</span></div>`;
-    box.title='Internet speed: '+(dl==null&&ul==null?'measuring…':`Download ${dText} Mbps / Upload ${uText} Mbps`)+' — drag to move';
-  }
-
-  /* ── drag (whole chip is draggable; no buttons) ─────────────── */
-  function onPointerDown(e){
-    if(e.button!=null&&e.button!==0) return;
-    const r=box.getBoundingClientRect();
-    drag={sx:e.clientX,sy:e.clientY,ox:r.left,oy:r.top,moved:false};
-    box.classList.add('dragging');
-    try{ box.setPointerCapture(e.pointerId); }catch(_){}
-  }
-  function onPointerMove(e){
-    if(!drag) return;
-    const dx=e.clientX-drag.sx, dy=e.clientY-drag.sy;
-    if(!drag.moved && (Math.abs(dx)+Math.abs(dy))>4) drag.moved=true;
-    place(drag.ox+dx, drag.oy+dy);
-  }
-  function onPointerUp(e){
-    if(!drag) return;
-    const moved=drag.moved;
-    box.classList.remove('dragging');
-    try{ box.releasePointerCapture(e.pointerId); }catch(_){}
-    drag=null;
-    if(moved){ const r=box.getBoundingClientRect(); savePos(r.left,r.top); }
-  }
-
-  /* ── entry point (called from boot()) ───────────────────────── */
-  window.initSpeedWidget=function(){
-    if(document.getElementById('speedWidget')) return;        // idempotent
-    injectStyles();
-    box=document.createElement('div'); box.id='speedWidget';
-    document.body.appendChild(box);
-    if(!isNetworkOnline()){ setOfflineState(); }
-    else{
-      downloadMbps=connectionDownlink();                        // instant first value so a number shows immediately
-      uploadMbps=downloadMbps!=null?Math.max(1, +(downloadMbps*0.35).toFixed(1)) : null;
-      render();
-    }
-    reposition();
-    box.addEventListener('pointerdown',onPointerDown);
-    box.addEventListener('pointermove',onPointerMove);
-    box.addEventListener('pointerup',onPointerUp);
-    box.addEventListener('pointercancel',onPointerUp);
-    window.addEventListener('resize',reposition);
-    window.addEventListener('online',handleConnectivityChange);
-    window.addEventListener('offline',()=>{ setOfflineState(); });
-    // live updates from the browser when the connection quality changes
-    const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
-    if(c&&c.addEventListener) c.addEventListener('change',()=>{ if(!testing){ if(!isNetworkOnline()){ setOfflineState(); return; } const d=connectionDownlink(); if(d!=null){ downloadMbps=d; uploadMbps=Math.max(1, +(d*0.35).toFixed(1)); render(); } else{ runTest(); } } });
-    if(isNetworkOnline()) runTest();                            // runTest() self-schedules the next run when it finishes
-  };
-})();
 
 boot();
 
@@ -6533,6 +6280,122 @@ VIEWS.maintenance=function(v,seg){
   else if(ti===2){ body=mTable(['Ticket','Asset','Issue','Raised','Status'],[['BD-22','Passenger lift','Door fault','Today','Open']]); }
   else { body=mTable(['Location','Assets','Active','Under repair'],[['Dream Valley','86','80','3'],['Jain Heights','54','50','1']]); }
   v.innerHTML=mHead('fa-screwdriver-wrench','#7c3aed','Assets & Maintenance')+mKpis(kpis)+mTabs('maintenance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
+};
+
+/* ---------- INTERNET SPEED MONITOR ----------
+   Reads the net_* tables (public schema) populated by the office laptops'
+   speed-monitor agent. Read-only: RLS lets any signed-in user SELECT these. */
+const NET_RANGES=[['today','Today'],['3d','Last 3 days'],['5d','Last 5 days'],['30d','Last 1 month']];
+let NET_RANGE='today';
+window.netRangeChange=function(v){ NET_RANGE=v; renderPage(); };
+VIEWS.network=async function(v,seg){
+  setCrumb(['IT & Support','Internet Speed']);
+  const tabs=['Overview','All readings','Alerts'];
+  const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-wifi','#0ea5e9','Internet Speed Monitor')+mTabs('network',tabs,ti)
+    +'<div id="netBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  const host=$('netBody');
+  const nf=(n,d=1)=>(n==null||isNaN(n))?'—':Number(n).toFixed(d);
+  const tag=s=>'<span class="tag '+(s==='ok'?'t-green':s==='low'?'t-red':'t-amber')+'">'+esc(s||'—')+'</span>';
+  try{
+    const dayAgoMs=Date.now()-24*3600*1000;
+    const [tRes,aRes,sRes,dRes]=await Promise.all([
+      sb.from('net_speed_tests').select('id,device_key,tested_at,download_mbps,upload_mbps,ping_ms,jitter_ms,isp,server_location,status').order('tested_at',{ascending:false}).limit(5000),
+      sb.from('net_alerts').select('*').order('occurred_at',{ascending:false}).limit(24),
+      sb.from('net_settings').select('*').eq('device_key','office').maybeSingle(),
+      sb.from('net_devices').select('device_key,display_name'),
+    ]);
+    if(tRes.error)throw tRes.error;
+    const tests=tRes.data||[];
+    const alerts=aRes.data||[];
+    const settings=(sRes&&sRes.data)||{};
+    const devMap={};(dRes.data||[]).forEach(d=>devMap[d.device_key]=d.display_name||d.device_key);
+    const nameOfDev=k=>devMap[k]||k||'—';
+
+    if(!tests.length){
+      host.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-wifi"></i><div style="font-weight:600;color:var(--ink)">No speed readings yet</div><p style="max-width:460px;margin:6px auto 0">Once a monitored laptop runs the speed-monitor agent, its readings appear here automatically.</p></div>';
+      return;
+    }
+
+    /* ---- OVERVIEW ---- */
+    if(ti===0){
+      const latest=tests.find(t=>t.download_mbps!=null);
+      const a24=alerts.filter(a=>new Date(a.occurred_at).getTime()>=dayAgoMs).length;
+      const kpis=[
+        ['Latest download', latest?nf(latest.download_mbps)+' Mbps':'—', latest?relTime(latest.tested_at):''],
+        ['Latest upload', latest?nf(latest.upload_mbps)+' Mbps':'—', ''],
+        ['Latest ping', latest?nf(latest.ping_ms,0)+' ms':'—', latest&&latest.isp?latest.isp:''],
+        ['Alerts (24h)', String(a24), a24?'below threshold':'all healthy', a24?'#c83232':'#16855a'],
+      ];
+      const metaCells=[['Interval',(settings.interval_minutes||'—')+' min'],
+        ['Office hours',settings.office_start_hour!=null?(settings.office_start_hour+':00–'+settings.office_end_hour+':00'):'—'],
+        ['Download threshold',(settings.download_threshold||'—')+' Mbps'],
+        ['Upload threshold',(settings.upload_threshold||'—')+' Mbps'],
+        ['Ping threshold',(settings.ping_threshold||'—')+' ms']];
+      host.innerHTML=mKpis(kpis)
+        +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Speed over time · last 24h</div><div class="sec-sub">Download vs upload over the last 24 hours · red dashed line = alert threshold</div><canvas id="chNet" height="110"></canvas></div>'
+        +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Monitoring settings</div><div class="sec-sub">Shared configuration · change in the net_settings table</div>'
+          +'<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:8px">'
+          +metaCells.map(x=>'<div><div style="color:var(--slate);font-size:12px">'+esc(x[0])+'</div><div style="font-weight:700;font-size:15px;margin-top:2px">'+esc(x[1])+'</div></div>').join('')
+          +'</div></div>';
+      // chart — last 24h if available, else the most recent 100 readings
+      let pts=tests.filter(t=>t.download_mbps!=null&&new Date(t.tested_at).getTime()>=dayAgoMs);
+      if(!pts.length)pts=tests.filter(t=>t.download_mbps!=null).slice(0,100);
+      pts=pts.slice().reverse();
+      const labels=pts.map(p=>new Date(p.tested_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}));
+      const dls=pts.map(p=>Number(p.download_mbps)), uls=pts.map(p=>Number(p.upload_mbps));
+      const thr=Number(settings.download_threshold)||0;
+      const ds=[
+        {label:'Download',data:dls,borderColor:'#0ea5e9',backgroundColor:'rgba(14,165,233,.08)',fill:true,tension:.35,borderWidth:2,pointRadius:2},
+        {label:'Upload',data:uls,borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.05)',fill:true,tension:.35,borderWidth:2,pointRadius:2},
+      ];
+      if(thr>0)ds.push({label:'Threshold',data:dls.map(()=>thr),borderColor:'#dc2626',borderDash:[5,4],borderWidth:1.5,pointRadius:0,fill:false});
+      new Chart($('chNet'),{type:'line',data:{labels,datasets:ds},options:{plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:12}}}},scales:{y:{grid:{color:'#eef1f6'},border:{display:false},title:{display:true,text:'Mbps'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+      return;
+    }
+
+    /* ---- ALL READINGS ---- */
+    if(ti===1){
+      const now=new Date();
+      let sinceMs;
+      if(NET_RANGE==='today') sinceMs=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+      else sinceMs=now.getTime()-({'3d':3,'5d':5,'30d':30}[NET_RANGE]||3)*24*3600*1000;
+      const filtered=tests.filter(t=>new Date(t.tested_at).getTime()>=sinceMs);
+      const rows=filtered.map(t=>[
+        new Date(t.tested_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}),
+        nf(t.download_mbps), nf(t.upload_mbps), t.ping_ms!=null?nf(t.ping_ms,0):'—',
+        t.isp||'—',
+      ]);
+      const rangeSel='<select class="sel" id="netRangeSel" style="margin-left:auto" onchange="netRangeChange(this.value)">'
+        +NET_RANGES.map(r=>'<option value="'+r[0]+'"'+(r[0]===NET_RANGE?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
+      host.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+        +'<div class="sec-sub" style="margin:0">Showing '+rows.length+' reading'+(rows.length===1?'':'s')+'</div>'
+        +rangeSel+'</div>'
+        +(rows.length?mTable(['Time','↓ Mbps','↑ Mbps','Ping','ISP'],rows):'<div class="card card-pad empty">No readings in this range</div>');
+      return;
+    }
+
+    /* ---- ALERTS ---- */
+    if(ti===2){
+      if(!alerts.length){
+        host.innerHTML='<div class="card card-pad empty"><i class="fa-regular fa-circle-check" style="color:#16855a"></i><div style="font-weight:600;color:var(--ink)">No low-speed alerts</div><p style="max-width:440px;margin:6px auto 0">Every test so far has stayed above the threshold. When a reading falls below, a screenshot is captured automatically and shown here.</p></div>';
+        return;
+      }
+      host.innerHTML='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px">'+alerts.map(a=>{
+        const img=a.screenshot_url
+          ?'<a href="'+esc(a.screenshot_url)+'" target="_blank" rel="noopener"><img src="'+esc(a.screenshot_url)+'" alt="Screenshot" style="width:100%;aspect-ratio:16/9;object-fit:cover;background:#000;display:block" loading="lazy"></a>'
+          :'<div style="width:100%;aspect-ratio:16/9;background:var(--line-2);display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px">no screenshot</div>';
+        return '<div class="card" style="overflow:hidden;padding:0">'+img
+          +'<div style="padding:12px"><div style="font-weight:700;font-size:12.5px;color:#c83232"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(a.reason||'Low speed')+'</div>'
+          +'<div style="font-family:monospace;font-size:12px;margin-top:6px">↓'+nf(a.download_mbps)+' ↑'+nf(a.upload_mbps)+' Mbps · '+nf(a.ping_ms,0)+'ms</div>'
+          +'<div style="color:var(--slate);font-size:11.5px;margin-top:6px">'+esc(nameOfDev(a.device_key))+' · '+fmtDate(a.occurred_at)+' '+new Date(a.occurred_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+'</div>'
+          +'</div></div>';
+      }).join('')+'</div>';
+      return;
+    }
+  }catch(e){
+    host.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation" style="color:#c83232"></i><div style="font-weight:600;color:var(--ink)">Couldn\'t load speed data</div><p style="max-width:440px;margin:6px auto 0">'+esc(e.message||String(e))+'</p></div>';
+  }
 };
 
 // ── Recruitment ──────────────────────────────────────────────────────────────
