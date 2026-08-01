@@ -221,6 +221,8 @@ const NAV=[
   ]},
   {group:'Growth & Strategy',items:[
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
+    {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},
+    {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
     {id:'playbook',label:'Playbook',icon:'fa-book-open'},
   ]},
@@ -236,6 +238,9 @@ const NAV=[
     {id:'whatsapp',label:'WhatsApp Bot',icon:'fa-comment-dots'},
     {id:'mail',label:"Naren's Mail",icon:'fa-envelope'},
   ]},
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+  ]},
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
@@ -244,11 +249,11 @@ const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
-const DEFAULT_MODULES=['dashboard','tasks','projects','settings'];
+const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
 function navIcon(id){return ICONS[id]||'fa-square';}
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');return ss;}const ss=new Set(['dashboard','settings']);return ss;}
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return ss;}const ss=new Set(['dashboard','settings','network']);return ss;}
 function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>!allow||allow.has(it.id))})).filter(g=>g.items.length);if(state.super)groups=[{group:'Administration',items:[{id:'security',label:'Control Panel',icon:'fa-sliders'}]}].concat(groups);return groups;}
-function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='dashboard'||id==='settings'||id==='placeholder')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -290,7 +295,8 @@ function renderShell(){
   });
   document.addEventListener('click',e=>{if(!_gs.parentElement.contains(e.target))_gsDrop.style.display='none';});
   // hamburger / responsive sidebar
-  var hb=$('hamburger'); if(hb) hb.onclick=function(e){ e.stopPropagation(); var mobile=window.innerWidth<=1024; document.body.classList.toggle(mobile?'nav-open':'nav-closed'); };
+  if(window.innerWidth>1024 && localStorage.getItem('nav_closed')==='1') document.body.classList.add('nav-closed');
+  var hb=$('hamburger'); if(hb) hb.onclick=function(e){ e.stopPropagation(); var mobile=window.innerWidth<=1024; document.body.classList.toggle(mobile?'nav-open':'nav-closed'); if(!mobile){ try{ localStorage.setItem('nav_closed', document.body.classList.contains('nav-closed')?'1':'0'); }catch(_){} } };
   var bd=$('sbBackdrop'); if(bd) bd.onclick=function(){ document.body.classList.remove('nav-open'); };
   document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
 }
@@ -776,6 +782,7 @@ function s3KeyForResume(filename){return `hr/resumes/${s3Stamp()}_${s3SafeName(f
 function s3KeyForJD(filename){return `recruitment/descriptions/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForDefectImg(filename){return `defect-img/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForPostSalesAdhoc(filename){return `postsales/adhoc/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForTranscription(filename){return `transcription/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -930,7 +937,6 @@ async function docLibrary(v){
   setCrumb(['Documents',dept]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid ${m[0]}" style="color:${m[1]}"></i> ${esc(dept)} Library</h1><p>Folder navigation, categories & version-controlled storage</p></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
-    <button class="btn" title="Index all un-indexed files so their contents are searchable" onclick="docReindexAll(null)"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button>
     <button class="btn" onclick="docNewFolder('${esc(dept)}')"><i class="fa-solid fa-folder-plus"></i> New Folder</button>
     <button class="btn btn-primary" onclick="docUploadModal('${esc(dept)}')"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div class="split"><div><div class="subnav" id="catNav"></div></div><div><div id="docTableHost"></div></div></div>`;
@@ -968,7 +974,6 @@ async function docAll(v,title){
   setCrumb(['Documents',title]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-table-list" style="color:#1d4ed8"></i> ${esc(title)}</h1><p>Search and manage documents across every department</p></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
-    <button class="btn" title="Index all un-indexed files in this dept" onclick="docReindexAll(DOC.dept)"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button>
     <button class="btn btn-primary" onclick="docUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div id="docTableHost"></div>`;
   docRenderTable($('docTableHost'),null);
@@ -1397,33 +1402,65 @@ async function docSignedUrlFor(d,seconds){
   if(isS3Path(d.storage_path)){const {data,error}=await s3Sign('get',d.storage_path.slice(3));if(error)return {error};return {data:{signedUrl:data.url}};}
   return sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,seconds);
 }
+// File types the Gemini OCR edge function handles (scanned PDFs & images — the Legal case).
+// Everything else (docx/xlsx/pptx/txt) still uses the client-side extractor below.
+const DOC_GEMINI_TYPES=['pdf','png','jpg','jpeg','webp','heic','heif'];
+function docFileExt(d){return (d.file_type||(d.file_name||'').split('.').pop()||'').toLowerCase();}
+// Server-side OCR/text extraction via Gemini. Returns {ok,chars} | {skip} | {error}.
+async function docOcrGemini(id){
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  try{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/document-ocr',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'ocr',id:id})});
+    return await res.json();
+  }catch(e){return {error:String(e)};}
+}
+// Index one document into content_text: Gemini for scans/images, client-side reader otherwise.
+async function docIndexOne(d){
+  const ext=docFileExt(d);
+  if(DOC_GEMINI_TYPES.includes(ext)){
+    const out=await docOcrGemini(d.id);
+    if(out&&out.ok)return out.chars?true:false;      // done (true if any text found)
+    if(!(out&&out.skip))return false;                 // hard error — skip (re-runnable later)
+    // out.skip -> fall through to the client-side reader
+  }
+  const {data,error}=await docSignedUrlFor(d,300);
+  if(error)return false;
+  const txt=await extractUrlText(data.signedUrl,d.file_type);
+  if(txt==null)return false;
+  await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',d.id);
+  return true;
+}
 window.docReindex=async function(id){
   const d=await getDoc(id);if(!d)return;
   if(!d.storage_path){toast(d.link?'Linked intranet files cannot be content-indexed':'No file to index','');return;}
-  toast('Indexing file text…','');
-  const {data,error}=await docSignedUrlFor(d,180);
-  if(error){toast(error.message,'err');return;}
-  const txt=await extractUrlText(data.signedUrl,d.file_type);
-  if(txt==null){toast('Could not read text from this file (maybe a scanned image).','err');return;}
-  await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',id);
-  toast('Indexed — words inside the file are now searchable','ok');
+  toast('Reading the text inside this file…','');
+  const ok=await docIndexOne(d);
+  toast(ok?'Indexed — words inside the file are now searchable':'Could not read text from this file.',ok?'ok':'err');
+  const host=$('docTableHost');if(host)docRenderTable(host,DOC.dept||undefined);
 };
 window.docReindexAll=async function(dept){
   const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept});
   const toIndex=all.filter(d=>d.storage_path&&(!d.content_text||d.content_text.length<200));
   if(!toIndex.length){toast('All files already indexed','ok');return;}
-  toast('Indexing '+toIndex.length+' file(s)… this may take a minute','');
-  let done=0,failed=0;
-  for(const d of toIndex){
-    try{
-      const {data,error}=await docSignedUrlFor(d,300);
-      if(error){failed++;continue;}
-      const txt=await extractUrlText(data.signedUrl,d.file_type);
-      if(txt==null){failed++;continue;}
-      await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',d.id);
-      done++;
-    }catch(e){failed++;}
-  }
+  const total=toIndex.length;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Indexing files for search</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><p style="font-size:13px;color:var(--slate);margin:0 0 12px">Reading the text inside <b>'+total+'</b> file(s) with AI (Gemini) so words <i>inside</i> them become searchable — scanned/unclear legal documents included. This can take a while for large batches; keep this window open.</p>'
+    +'<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" id="docIdxFill" style="width:0%"></div></div><div class="psa-progress-label" id="docIdxLbl">Starting…</div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+  let done=0,failed=0,idx=0;
+  const paint=function(){const p=Math.round((done+failed)/total*100);const f=$('docIdxFill');if(f)f.style.width=p+'%';const l=$('docIdxLbl');if(l)l.textContent='Processed '+(done+failed)+' of '+total+' · '+done+' indexed'+(failed?', '+failed+' skipped':'');};
+  paint();
+  const worker=async function(){
+    while(idx<toIndex.length){
+      const d=toIndex[idx++];
+      try{ if(await docIndexOne(d))done++; else failed++; }catch(e){ failed++; }
+      paint();
+    }
+  };
+  const K=Math.min(4,toIndex.length);
+  await Promise.all(Array.from({length:K},function(){return worker();}));
+  const l=$('docIdxLbl');if(l)l.textContent='Done — '+done+' indexed'+(failed?', '+failed+' skipped (re-run to retry)':'');
   toast(done+' file(s) indexed'+(failed?' · '+failed+' skipped':''),'ok');
   // Refresh the table in place — don't call route() which resets the search
   const host=$('docTableHost');
@@ -1453,11 +1490,15 @@ window.docUploadSave=async function(){
     if(upErr){toast('Upload failed: '+upErr.message,'err');continue;}
     const ti=titleIns.find(x=>x.dataset.i==idx);
     const title=(ti&&ti.value.trim())||f.name.replace(/\.[^.]+$/,'');
-    btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading & indexing (OCR if needed)…';
-    const ctext=await extractFileText(f);
+    const fileExt=(f.name.split('.').pop()||'').toLowerCase();
+    const useGemini=DOC_GEMINI_TYPES.includes(fileExt); // scanned PDFs / images -> strong Gemini OCR (server-side)
+    let ctext=null;
+    if(!useGemini){ btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading & indexing…'; ctext=await extractFileText(f); }
     btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
-    const {error}=await sb.schema('doc').from('documents').insert({title,department:dept,category:cat,folder_id:folderId,description:desc,version:ver,tags:'',visibility:vis,status,confidential:conf,file_name:f.name,file_size:f.size,file_type:f.name.split('.').pop(),storage_path:upData.path,content_text:ctext,uploaded_by:state.email});
-    if(error){toast('Saved file but metadata failed: '+error.message,'err');}else ok++;
+    const {data:insData,error}=await sb.schema('doc').from('documents').insert({title,department:dept,category:cat,folder_id:folderId,description:desc,version:ver,tags:'',visibility:vis,status,confidential:conf,file_name:f.name,file_size:f.size,file_type:fileExt,storage_path:upData.path,content_text:ctext,uploaded_by:state.email}).select('id').single();
+    if(error){toast('Saved file but metadata failed: '+error.message,'err');}
+    // Auto-index scanned/image uploads with Gemini in the background — no "Index All" needed, search just works.
+    else { ok++; if(useGemini&&insData&&insData.id){ docOcrGemini(insData.id); } }
   }
   closeModal();if(ok)toast(ok+' document'+(ok>1?'s':'')+' uploaded to S3','ok');route();
 };
@@ -1486,7 +1527,7 @@ async function legalDocsView(seg){
   }
   setCrumb(['Legal',crumbTail]);
   const hAct=$('legalHeadActions');
-  if(hAct)hAct.innerHTML=`<button class="btn" onclick="docReindexAll('Legal')"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button><button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  if(hAct)hAct.innerHTML=`<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
   const body=$('legalBody');if(!body)return;
   body.innerHTML=`<div class="split"><div><div class="subnav" id="legalNav"></div></div><div><div id="docTableHost"></div></div></div>`;
   legalNav();
@@ -3828,7 +3869,7 @@ const HD_KB=[
  {k:['upload document','upload file','add document','add file','put file','upload a doc'],a:`To upload a document: open <b>Document Library</b> from the sidebar, pick a department tab, then click <b>Upload</b>. Select your file, choose or type a <b>Category/Folder</b>, and save. Large files (up to 5 GB) are supported via resumable upload.`},
  {k:['folder','category','new folder','create folder','add category'],a:`To create a folder/category: inside any Document Library click <b>+ New Folder</b>. In <b>Legal</b>, every folder and category in the tree has a small <b>+</b> icon — click it to add a category inside that exact spot (Litigation, Projects, a project, or a category), or use <b>+ Add main folder</b> at the bottom for a brand-new top-level folder.`},
  {k:['search document','find document','document search','search file','search by name'],a:`Use the <b>Find a Document</b> tab here to search by file name, title or document number. In the Document Library you can filter by status and date. Word-inside-file search has been replaced with name-based search for speed.`},
- {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`To re-index files for OCR: open a Document Library and click <b>Index All Files</b> at the top. This re-scans all PDFs, images, Word, Excel and PowerPoint files using triple-pass OCR (PSM 3, 6, 11) and stores extracted text. Numbers with commas (e.g. 2,90,39) are normalised and searchable.`},
+ {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`Indexing is now <b>automatic</b> — when you upload a scanned PDF or image it is read by AI (Gemini OCR) in the background, so the words inside it become searchable within moments. There's nothing to click: just type in the search box in a Document Library or the Legal module and matching files appear by name and by text inside them.`},
  {k:['download file','download document','get file','open file','preview file'],a:`To download or preview: find the file in <b>Document Library</b>, click the file row to open its detail panel, then click <b>Open</b> or <b>Download</b>. Files open in a new tab.`},
  {k:['delete document','remove file','delete file'],a:`To delete a document: open the file in <b>Document Library</b>, then click <b>Delete</b> in the detail panel. This removes both the database record and the stored file.`},
  {k:['legal','vault','title deed','deed','rera','agreement','noc','sanction','land record','court'],a:`The <b>Legal Vault</b> is organised as a tree: two main folders, <b>Litigation</b> and <b>Projects</b>. Under <b>Projects</b> sit the individual projects (Dream Gurukul, Dream World City, Dream One, Dream Eco City, Dream Valley, Dream Exotica, Dream Ananta), and each project has <b>History of Land / Chain</b>, <b>Title Papers</b>, <b>Permissions & Sanctions</b>, <b>RERA & Compliance</b> and <b>Project Manual</b>. Click the <b>+</b> next to any folder to add a category inside it, and <b>Upload</b> to add files to a category.`},
@@ -4047,6 +4088,48 @@ async function hrEmployees(force){
 function hrName(code){const e=(HR_EMP||[]).find(x=>x.emp_code===code);return e?e.full_name:(code||'—');}
 function hrCan(){return state.super||(state.roles&&state.roles.hr);}
 function hrCanWrite(){return state.super||(state.roles&&['ADMIN','MANAGER','EDITOR','HR'].includes(state.roles.hr));}
+
+/* ---- Recruitment write access ------------------------------------------------------------
+   Adding, editing and deleting anything in Recruitment is limited to Administrators, Abhay
+   Mati, and whoever sits in the HR department. Everyone else keeps read-only access: the
+   controls are stripped from the page AND every action re-checks, so a stale page can't be
+   used to slip a change through. */
+const REC_RO_CSS='<style id="recRoCss">.rec-ro{display:flex;align-items:center;gap:9px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 14px;font-size:12.5px;font-weight:600;margin:0 0 14px}.rec-ro i{color:#d97706}</style>';
+function recCanWrite(){
+  if(state.super) return true;
+  const p=state.profile||{}, r=state.roles||{};
+  const em=String(state.email||'').trim().toLowerCase();
+  const nm=String(p.full_name||r.full_name||'').trim().toLowerCase();
+  if(em==='system1@thejaingroup.com'||nm==='abhay mati') return true;
+  const dep=[].concat(p.department||r.department||[]);
+  return dep.some(function(d){ return /^\s*(hr|human\s*resources?)\s*$/i.test(String(d||'')); });
+}
+function recGuard(){
+  if(recCanWrite()) return true;
+  toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
+  return false;
+}
+const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareAddN','rtShareSend',
+  'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
+  'recUploadModal','recDeleteSel','recJdSave','recJdDelete'];
+function recStripWriteControls(root){
+  if(recCanWrite()) return;
+  const re=new RegExp('^\\s*(?:'+REC_WRITE_FNS.join('|')+')\\s*\\(');
+  (root||document).querySelectorAll('[onclick]').forEach(function(el){
+    if(re.test(el.getAttribute('onclick')||'')) el.remove();
+  });
+}
+// Several Recruitment bars are re-rendered on the fly, so watch the view and re-strip.
+function recWatchPerms(){
+  if(recCanWrite()) return;
+  const host=document.getElementById('view'); if(!host) return;
+  recStripWriteControls(host);
+  if(window._recObs) window._recObs.disconnect();
+  window._recObs=new MutationObserver(function(){ recStripWriteControls(host); recStripWriteControls(document.getElementById('modalHost')); });
+  window._recObs.observe(host,{childList:true,subtree:true});
+  const mh=document.getElementById('modalHost');
+  if(mh) window._recObs.observe(mh,{childList:true,subtree:true});
+}
 function hrEmpOptions(sel){return (HR_EMP||[]).map(e=>`<option value="${esc(e.emp_code)}" ${e.emp_code===sel?'selected':''}>${esc(e.full_name)} (${esc(e.emp_code)})</option>`).join('');}
 
 VIEWS.hr=async function(v,seg){
@@ -5374,6 +5457,7 @@ function promptSetPassword(){
   }catch(e){}
 }
 
+
 boot();
 
 
@@ -6240,6 +6324,122 @@ VIEWS.maintenance=function(v,seg){
   v.innerHTML=mHead('fa-screwdriver-wrench','#7c3aed','Assets & Maintenance')+mKpis(kpis)+mTabs('maintenance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
 
+/* ---------- INTERNET SPEED MONITOR ----------
+   Reads the net_* tables (public schema) populated by the office laptops'
+   speed-monitor agent. Read-only: RLS lets any signed-in user SELECT these. */
+const NET_RANGES=[['today','Today'],['3d','Last 3 days'],['5d','Last 5 days'],['30d','Last 1 month']];
+let NET_RANGE='today';
+window.netRangeChange=function(v){ NET_RANGE=v; renderPage(); };
+VIEWS.network=async function(v,seg){
+  setCrumb(['IT & Support','Internet Speed']);
+  const tabs=['Overview','All readings','Alerts'];
+  const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-wifi','#0ea5e9','Internet Speed Monitor')+mTabs('network',tabs,ti)
+    +'<div id="netBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  const host=$('netBody');
+  const nf=(n,d=1)=>(n==null||isNaN(n))?'—':Number(n).toFixed(d);
+  const tag=s=>'<span class="tag '+(s==='ok'?'t-green':s==='low'?'t-red':'t-amber')+'">'+esc(s||'—')+'</span>';
+  try{
+    const dayAgoMs=Date.now()-24*3600*1000;
+    const [tRes,aRes,sRes,dRes]=await Promise.all([
+      sb.from('net_speed_tests').select('id,device_key,tested_at,download_mbps,upload_mbps,ping_ms,jitter_ms,isp,server_location,status').order('tested_at',{ascending:false}).limit(5000),
+      sb.from('net_alerts').select('*').order('occurred_at',{ascending:false}).limit(24),
+      sb.from('net_settings').select('*').eq('device_key','office').maybeSingle(),
+      sb.from('net_devices').select('device_key,display_name'),
+    ]);
+    if(tRes.error)throw tRes.error;
+    const tests=tRes.data||[];
+    const alerts=aRes.data||[];
+    const settings=(sRes&&sRes.data)||{};
+    const devMap={};(dRes.data||[]).forEach(d=>devMap[d.device_key]=d.display_name||d.device_key);
+    const nameOfDev=k=>devMap[k]||k||'—';
+
+    if(!tests.length){
+      host.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-wifi"></i><div style="font-weight:600;color:var(--ink)">No speed readings yet</div><p style="max-width:460px;margin:6px auto 0">Once a monitored laptop runs the speed-monitor agent, its readings appear here automatically.</p></div>';
+      return;
+    }
+
+    /* ---- OVERVIEW ---- */
+    if(ti===0){
+      const latest=tests.find(t=>t.download_mbps!=null);
+      const a24=alerts.filter(a=>new Date(a.occurred_at).getTime()>=dayAgoMs).length;
+      const kpis=[
+        ['Latest download', latest?nf(latest.download_mbps)+' Mbps':'—', latest?relTime(latest.tested_at):''],
+        ['Latest upload', latest?nf(latest.upload_mbps)+' Mbps':'—', ''],
+        ['Latest ping', latest?nf(latest.ping_ms,0)+' ms':'—', latest&&latest.isp?latest.isp:''],
+        ['Alerts (24h)', String(a24), a24?'below threshold':'all healthy', a24?'#c83232':'#16855a'],
+      ];
+      const metaCells=[['Interval',(settings.interval_minutes||'—')+' min'],
+        ['Office hours',settings.office_start_hour!=null?(settings.office_start_hour+':00–'+settings.office_end_hour+':00'):'—'],
+        ['Download threshold',(settings.download_threshold||'—')+' Mbps'],
+        ['Upload threshold',(settings.upload_threshold||'—')+' Mbps'],
+        ['Ping threshold',(settings.ping_threshold||'—')+' ms']];
+      host.innerHTML=mKpis(kpis)
+        +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Speed over time · last 24h</div><div class="sec-sub">Download vs upload over the last 24 hours · red dashed line = alert threshold</div><canvas id="chNet" height="110"></canvas></div>'
+        +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Monitoring settings</div><div class="sec-sub">Shared configuration · change in the net_settings table</div>'
+          +'<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:8px">'
+          +metaCells.map(x=>'<div><div style="color:var(--slate);font-size:12px">'+esc(x[0])+'</div><div style="font-weight:700;font-size:15px;margin-top:2px">'+esc(x[1])+'</div></div>').join('')
+          +'</div></div>';
+      // chart — last 24h if available, else the most recent 100 readings
+      let pts=tests.filter(t=>t.download_mbps!=null&&new Date(t.tested_at).getTime()>=dayAgoMs);
+      if(!pts.length)pts=tests.filter(t=>t.download_mbps!=null).slice(0,100);
+      pts=pts.slice().reverse();
+      const labels=pts.map(p=>new Date(p.tested_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}));
+      const dls=pts.map(p=>Number(p.download_mbps)), uls=pts.map(p=>Number(p.upload_mbps));
+      const thr=Number(settings.download_threshold)||0;
+      const ds=[
+        {label:'Download',data:dls,borderColor:'#0ea5e9',backgroundColor:'rgba(14,165,233,.08)',fill:true,tension:.35,borderWidth:2,pointRadius:2},
+        {label:'Upload',data:uls,borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.05)',fill:true,tension:.35,borderWidth:2,pointRadius:2},
+      ];
+      if(thr>0)ds.push({label:'Threshold',data:dls.map(()=>thr),borderColor:'#dc2626',borderDash:[5,4],borderWidth:1.5,pointRadius:0,fill:false});
+      new Chart($('chNet'),{type:'line',data:{labels,datasets:ds},options:{plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:12}}}},scales:{y:{grid:{color:'#eef1f6'},border:{display:false},title:{display:true,text:'Mbps'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+      return;
+    }
+
+    /* ---- ALL READINGS ---- */
+    if(ti===1){
+      const now=new Date();
+      let sinceMs;
+      if(NET_RANGE==='today') sinceMs=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+      else sinceMs=now.getTime()-({'3d':3,'5d':5,'30d':30}[NET_RANGE]||3)*24*3600*1000;
+      const filtered=tests.filter(t=>new Date(t.tested_at).getTime()>=sinceMs);
+      const rows=filtered.map(t=>[
+        new Date(t.tested_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}),
+        nf(t.download_mbps), nf(t.upload_mbps), t.ping_ms!=null?nf(t.ping_ms,0):'—',
+        t.isp||'—',
+      ]);
+      const rangeSel='<select class="sel" id="netRangeSel" style="margin-left:auto" onchange="netRangeChange(this.value)">'
+        +NET_RANGES.map(r=>'<option value="'+r[0]+'"'+(r[0]===NET_RANGE?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
+      host.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+        +'<div class="sec-sub" style="margin:0">Showing '+rows.length+' reading'+(rows.length===1?'':'s')+'</div>'
+        +rangeSel+'</div>'
+        +(rows.length?mTable(['Time','↓ Mbps','↑ Mbps','Ping','ISP'],rows):'<div class="card card-pad empty">No readings in this range</div>');
+      return;
+    }
+
+    /* ---- ALERTS ---- */
+    if(ti===2){
+      if(!alerts.length){
+        host.innerHTML='<div class="card card-pad empty"><i class="fa-regular fa-circle-check" style="color:#16855a"></i><div style="font-weight:600;color:var(--ink)">No low-speed alerts</div><p style="max-width:440px;margin:6px auto 0">Every test so far has stayed above the threshold. When a reading falls below, a screenshot is captured automatically and shown here.</p></div>';
+        return;
+      }
+      host.innerHTML='<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px">'+alerts.map(a=>{
+        const img=a.screenshot_url
+          ?'<a href="'+esc(a.screenshot_url)+'" target="_blank" rel="noopener"><img src="'+esc(a.screenshot_url)+'" alt="Screenshot" style="width:100%;aspect-ratio:16/9;object-fit:cover;background:#000;display:block" loading="lazy"></a>'
+          :'<div style="width:100%;aspect-ratio:16/9;background:var(--line-2);display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px">no screenshot</div>';
+        return '<div class="card" style="overflow:hidden;padding:0">'+img
+          +'<div style="padding:12px"><div style="font-weight:700;font-size:12.5px;color:#c83232"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(a.reason||'Low speed')+'</div>'
+          +'<div style="font-family:monospace;font-size:12px;margin-top:6px">↓'+nf(a.download_mbps)+' ↑'+nf(a.upload_mbps)+' Mbps · '+nf(a.ping_ms,0)+'ms</div>'
+          +'<div style="color:var(--slate);font-size:11.5px;margin-top:6px">'+esc(nameOfDev(a.device_key))+' · '+fmtDate(a.occurred_at)+' '+new Date(a.occurred_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+'</div>'
+          +'</div></div>';
+      }).join('')+'</div>';
+      return;
+    }
+  }catch(e){
+    host.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation" style="color:#c83232"></i><div style="font-weight:600;color:var(--ink)">Couldn\'t load speed data</div><p style="max-width:440px;margin:6px auto 0">'+esc(e.message||String(e))+'</p></div>';
+  }
+};
+
 // ── Recruitment ──────────────────────────────────────────────────────────────
 let RT_RECORDS=null; // cached tests from DB
 // Default JDs bundled with the app (from ./jd/ folder)
@@ -6248,7 +6448,10 @@ let REC_SEL=new Set();
 VIEWS.recruitment=async function(v,seg){
   setCrumb(['People','Recruitment (ATS)']);
   const tabs=['Tests','Descriptions','ManPower Form'];const ti=mTab(seg,tabs.length);
-  v.innerHTML=mHead('fa-user-plus','#0369a1','Recruitment (ATS)')+mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  v.innerHTML=REC_RO_CSS+mHead('fa-user-plus','#0369a1','Recruitment (ATS)')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Read-only — adding, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
+    +mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  recWatchPerms();
   if(ti===2){recManpower();return;}
   if(ti===0){await recTests();return;}
   await recLoadJDs(v);
@@ -6276,6 +6479,7 @@ function rtRender(){
       <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
       <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
       <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
+      ${rtCanShare()?`<button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`:''}
     </div>
   </div>
   <div class="card" style="overflow:hidden">
@@ -6307,8 +6511,10 @@ window.rtSyncToolbar=function(){
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   if(ren){ren.disabled=n!==1;ren.style.cssText=n===1?'':dis;}
   if(del){del.disabled=n===0;del.style.cssText=n>0?'color:var(--err);border-color:var(--err)':dis+';color:var(--err);border-color:var(--err)';}
+  const shr=$('rtShareBtn');
+  if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
-window.rtAdd=function(){
+window.rtAdd=function(){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
@@ -6330,7 +6536,7 @@ window.rtSave=async function(){
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
 };
-window.rtRename=function(){
+window.rtRename=function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   if(sel.length!==1)return;
   const id=parseInt(sel[0].value);
@@ -6355,7 +6561,7 @@ window.rtUpdate=async function(id){
   if(rec){rec.name=name;rec.link=link;rec.response_sheet_url=sheet||null;}
   closeModal();toast('Test updated');rtRender();
 };
-window.rtDelete=async function(){
+window.rtDelete=async function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
   if(!await confirmDialog('Delete '+sel.length+' test(s)? All associated responses will also be deleted. This cannot be undone.'))return;
@@ -6363,6 +6569,91 @@ window.rtDelete=async function(){
   if(error){toast(error.message,'err');return;}
   RT_RECORDS=(RT_RECORDS||[]).filter(r=>!sel.includes(r.id));
   toast(sel.length+' test(s) deleted');rtRender();
+};
+
+/* ── Share Test (email a form link to candidates via the Email API backend) ── */
+// Visibility is limited to these people, matched by their JainE profile full name.
+// (Others with recruitment access will NOT see the Share button.)
+// NOTE: 'administrator' & 'abhay mati' added for testing — remove later if the 3 named
+// staff should be the only ones with Share access.
+const RT_SHARE_ALLOWED=['shuchandra das','khushbu singh','uzma ahmed','administrator','abhay mati'];
+function rtShareNorm(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function rtCanShare(){
+  const nm=rtShareNorm((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'');
+  return RT_SHARE_ALLOWED.includes(nm);
+}
+function rtShareFieldRow(val){
+  return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
+    <button type="button" class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none;padding:6px 10px" onclick="rtShareRemoveField(this)" title="Remove this email"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+window.rtShareRemoveField=function(btn){const row=btn.closest('.rt-share-field');if(row)row.remove();};
+window.rtShareAddN=function(){
+  const raw=parseInt(($('rtAddN')||{}).value);
+  const n=Math.max(1,Math.min(50,isNaN(raw)?1:raw));
+  const cont=$('rtEmailFields');if(!cont)return;
+  for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
+};
+window.rtShare=function(){
+  if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
+  if(sel.length!==1){toast('Select exactly one test to share','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const subject=`Check This ${rec.name} provided by JainGroup`;
+  const body=`Dear Candidate,\nFill This Test at the latest.\nTest Attachment`;
+  const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <div style="background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--slate);margin-bottom:4px">Sending as <b style="color:var(--ink)">${esc(senderName)}</b> · ${esc(state.email||'')}</div>
+    <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
+    <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
+    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
+    ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
+    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(each field must be filled)</span></label>
+    <div id="rtEmailFields">${fields}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
+      <button type="button" class="btn btn-sm" onclick="rtShareAddN()"><i class="fa-solid fa-plus"></i> Add Field(s)</button>
+    </div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="rtShareSend(${rec.id})"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.rtShareSend=async function(id){
+  if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
+  const inps=[...document.querySelectorAll('#rtEmailFields .rt-email-inp')];
+  if(!inps.length){toast('Add at least one candidate email','err');return;}
+  const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emails=[];
+  for(const el of inps){
+    const v=(el.value||'').trim();
+    el.style.borderColor='';
+    if(!v){el.style.borderColor='var(--err)';toast('Every email field must be filled (or remove it)','err');el.focus();return;}
+    if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
+    if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
+    emails.push(v.toLowerCase());
+  }
+  const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
+  const body=($('rtShareBody')||{}).value?.trim()||'';
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const btn=$('rtShareSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({test_id:id,test_name:rec.name,link:rec.link||'',subject,body,recipients:emails,sender_name:senderName,sender_email:state.email||''})
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    closeModal();toast('Test shared with '+emails.length+' candidate'+(emails.length>1?'s':''),'ok');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
 };
 window.rtPreview=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
@@ -6500,12 +6791,12 @@ window.mpSyncToolbar=function(){
   if(editBtn){editBtn.disabled=n!==1;editBtn.style.cssText=n===1?'':'opacity:.38;cursor:not-allowed;pointer-events:none';}
   if(delBtn){delBtn.disabled=n===0;delBtn.style.cssText=n>0?'color:var(--err);border-color:var(--err)':'opacity:.38;cursor:not-allowed;pointer-events:none;color:var(--err);border-color:var(--err)';}
 };
-window.mpEditSel=function(){
+window.mpEditSel=function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.mp-chk:checked')];
   if(sel.length!==1)return;
   mpEdit(parseInt(sel[0].value));
 };
-window.mpDeleteSel=async function(){
+window.mpDeleteSel=async function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.mp-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
   if(!await confirmDialog('Delete '+sel.length+' requisition(s)? This cannot be undone.'))return;
@@ -6621,7 +6912,7 @@ function mpCollect(){
     submitted_at:new Date().toISOString()
   };
 }
-window.mpFillForm=function(){mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
+window.mpFillForm=function(){if(!recGuard())return;mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
 window.mpSave=async function(){
   const d=mpCollect();
   if(!d.job_title){toast('Job Title is required','err');return;}
@@ -6630,7 +6921,7 @@ window.mpSave=async function(){
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
   MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Requisition submitted');recManpower();
 };
-window.mpEdit=function(id){
+window.mpEdit=function(id){if(!recGuard())return;
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
   mpModal('Edit Requisition',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
 };
@@ -6643,7 +6934,7 @@ window.mpUpdate=async function(id){
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
   closeModal();toast('Updated');recManpower();
 };
-window.mpDeleteOne=async function(id){
+window.mpDeleteOne=async function(id){if(!recGuard())return;
   if(!await confirmDialog('Delete this requisition?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
@@ -6723,7 +7014,7 @@ window.recRefreshBar=function(){
     <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:'color:var(--err)'}" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
     ${n>0?`<span style="font-size:12px;color:var(--slate)">${n} selected</span>`:''}`;
 };
-window.recUploadModal=function(){
+window.recUploadModal=function(){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pdf"></i> Upload Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Position / Title</label><input id="recJdName" placeholder="e.g. General Manager Commercial">
@@ -6758,7 +7049,7 @@ window.recDownloadSel=async function(){
     await new Promise(r=>setTimeout(r,300));
   }
 };
-window.recDeleteSel=async function(){
+window.recDeleteSel=async function(){if(!recGuard())return;
   if(!REC_SEL.size)return;
   if(!await confirmDialog(`Delete ${REC_SEL.size} file(s)?`))return;
   let jds=[];try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jds=data||[];}catch(e){}
@@ -6792,11 +7083,257 @@ VIEWS.compliance=function(v,seg){
   else { body=mTable(['Item','Asset','Provider','Expiry','Status'],[['Lift AMC','Passenger lift','OTIS','Mar-27','Active'],['DG warranty','DG Set 250 kVA','Cummins','Dec-26','Active']]); }
   v.innerHTML=mHead('fa-calendar-check','#b45309','Renewals & Compliance')+mKpis(kpis)+mTabs('compliance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
-let CMP_PERIOD='last_7d',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0;
+let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta',CMP_STATUS='all',CMP_CAMP_PROJECT='all';
+window.cmpSetStatus=function(s){CMP_STATUS=s;CMP_AD_PAGE=0;renderPage();};
+function cmpStatusBar(counts){
+  const b=function(k,label){return '<button class="cmp-fbtn'+(CMP_STATUS===k?' on':'')+'" onclick="cmpSetStatus(\''+k+'\')">'+esc(label)+(counts&&counts[k]!=null?(' <span class="cmp-fcount">'+counts[k]+'</span>'):'')+'</button>';};
+  return '<div class="cmp-fbar">'+b('all','All')+b('active','Active')+b('inactive','Inactive')+'</div>';
+}
+function cmpIsActive(st){const s=String(st||'').toUpperCase();return s==='ACTIVE'||s==='ENABLED';}
 const CMP_PRESETS=[['today','Today'],['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_14d','Last 14 days'],['last_month','Last month'],['last_year','Last year'],['custom','Custom']];
+
+/* ============ Trend / Fatigue / Best-&-Worst (shared by the Meta, Google and Both tabs) ============
+   "Trend" = this period compared with the SAME-LENGTH period immediately before it. We ask the live
+   sync functions for that earlier window too (as a custom range), then compare the two. */
+function cmpDayStr(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}
+function cmpAddDays(d,n){const x=new Date(d.getTime());x.setDate(x.getDate()+n);return x;}
+// The equivalent window immediately before the one being viewed.
+function cmpPrevRange(){
+  const today=new Date();today.setHours(12,0,0,0);
+  const P=CMP_PERIOD;
+  if(P==='today'){const d=cmpAddDays(today,-1);return {since:cmpDayStr(d),until:cmpDayStr(d)};}
+  if(P==='yesterday'){const d=cmpAddDays(today,-2);return {since:cmpDayStr(d),until:cmpDayStr(d)};}
+  if(P==='last_7d')return {since:cmpDayStr(cmpAddDays(today,-14)),until:cmpDayStr(cmpAddDays(today,-8))};
+  if(P==='last_14d')return {since:cmpDayStr(cmpAddDays(today,-28)),until:cmpDayStr(cmpAddDays(today,-15))};
+  if(P==='last_month'){const first=new Date(today.getFullYear(),today.getMonth()-2,1);const last=new Date(today.getFullYear(),today.getMonth()-1,0);return {since:cmpDayStr(first),until:cmpDayStr(last)};}
+  if(P==='last_year')return {since:cmpDayStr(cmpAddDays(today,-729)),until:cmpDayStr(cmpAddDays(today,-365))};
+  if(P==='custom'&&CMP_SINCE&&CMP_UNTIL){
+    const s=new Date(CMP_SINCE+'T12:00:00'),u=new Date(CMP_UNTIL+'T12:00:00');
+    const len=Math.max(1,Math.round((u-s)/86400000)+1);
+    return {since:cmpDayStr(cmpAddDays(s,-len)),until:cmpDayStr(cmpAddDays(s,-1))};
+  }
+  return null;
+}
+function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
+function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
+// Sync the previous window for META only — google-ads-live now fills both buckets in one call
+// (see its prev_since/prev_until parameters), so asking it twice is unnecessary.
+async function cmpSyncPrev(which){
+  if(which!=='meta'&&which!=='both')return;
+  const p=cmpPrevRange(); if(!p)return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+    await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){});
+  }catch(e){}
+}
+// Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
+function cmpTrend(cur,prev,lowerIsBetter){
+  cur=Number(cur)||0;
+  if(prev===null||prev===undefined||!isFinite(Number(prev))||Number(prev)===0){
+    return '<span class="cmp-tr none" title="No data for '+esc(cmpPrevLabel())+' to compare against">—</span>';
+  }
+  prev=Number(prev);
+  const pct=(cur-prev)/Math.abs(prev)*100;
+  if(Math.abs(pct)<1)return '<span class="cmp-tr flat" title="Barely changed vs '+esc(cmpPrevLabel())+'"><i class="fa-solid fa-minus"></i> 0%</span>';
+  const up=pct>0, good=lowerIsBetter?!up:up;
+  const tip=(up?'Up ':'Down ')+Math.abs(pct).toFixed(0)+'% vs '+cmpPrevLabel()+(good?' — better':' — worse');
+  return '<span class="cmp-tr '+(good?'good':'bad')+'" title="'+esc(tip)+'"><i class="fa-solid '+(up?'fa-arrow-trend-up':'fa-arrow-trend-down')+'"></i> '+(up?'+':'−')+Math.abs(pct).toFixed(0)+'%</span>';
+}
+/* Ad fatigue. Meta gives a real per-person "frequency" (how many times each person saw the ad) —
+   high frequency plus a falling CTR is classic creative burnout. Google Ads has no per-user
+   frequency for Search, so there we score on the CTR fall alone. */
+function cmpFatigue(freq,ctr,prevCtr){
+  const f=Number(freq)||0;
+  const c=(ctr==null)?null:Number(ctr), pc=(prevCtr==null)?null:Number(prevCtr);
+  const drop=(pc&&pc>0&&c!=null)?(1-(c/pc)):null;
+  if(!f&&drop===null)return '<span class="cmp-fg na" title="Not enough data yet">—</span>';
+  let score=0;
+  if(f>=4)score+=2;else if(f>=3)score+=1.5;else if(f>=2.5)score+=1;
+  if(drop!==null&&drop>=0.30)score+=2;else if(drop!==null&&drop>=0.15)score+=1;
+  const bits=[];
+  if(f)bits.push('Seen '+f.toFixed(1)+'x per person');
+  if(drop!==null)bits.push(drop>0?('CTR down '+Math.round(drop*100)+'%'):('CTR up '+Math.round(-drop*100)+'%'));
+  const tip=bits.join(' · ')||'No signal';
+  if(score>=3)return '<span class="cmp-fg hi" title="'+esc(tip+' — refresh the creative')+'"><i class="fa-solid fa-fire"></i> High</span>';
+  if(score>=1.5)return '<span class="cmp-fg md" title="'+esc(tip+' — keep an eye on it')+'"><i class="fa-solid fa-triangle-exclamation"></i> Watch</span>';
+  return '<span class="cmp-fg ok" title="'+esc(tip)+'"><i class="fa-solid fa-circle-check"></i> Fresh</span>';
+}
+/* ---------------- TREND page ----------------
+   rows = [{name, sub, spend, pspend, res, pres, cpr, pcpr, ctr, pctr}] */
+function cmpTrendPage(rows,totals,inr,num,resLabel){
+  const chg=function(cur,prev){ if(prev==null||!isFinite(Number(prev))||Number(prev)===0)return null; return (Number(cur||0)-Number(prev))/Math.abs(Number(prev))*100; };
+  const mrow=function(label,cur,prev,fmt,lowerIsBetter){
+    const c=chg(cur,prev);
+    return '<tr><td class="cmp-mlbl">'+esc(label)+'</td>'
+      +'<td class="num muted">'+fmt(prev)+'</td>'
+      +'<td class="num strong">'+fmt(cur)+'</td>'
+      +'<td class="num">'+cmpTrend(cur,prev,lowerIsBetter)+'</td>'
+      +'<td class="cmp-bar">'+(c==null?'':('<span class="cmp-barfill '+(((lowerIsBetter?-c:c)>=0)?'up':'down')+'" style="width:'+Math.min(100,Math.abs(c))+'%"></span>'))+'</td></tr>';
+  };
+  const summary='<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Period comparison</span><h3>This period vs the one before</h3></div><span class="cmp-chip">'+esc(cmpPrevLabel())+'</span></div>'
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Metric</th><th class="num">Previous</th><th class="num">Current</th><th class="num">Change</th><th style="width:120px"></th></tr></thead><tbody>'
+    +mrow('Spend',totals.spend,totals.pspend,inr,false)
+    +mrow(resLabel.charAt(0).toUpperCase()+resLabel.slice(1),totals.res,totals.pres,function(v){return num(Math.round(Number(v)||0));},false)
+    +mrow('Cost per '+resLabel.replace(/s$/,''),totals.cpr,totals.pcpr,function(v){return v==null?'—':inr(v);},true)
+    +mrow('Clicks',totals.clk,totals.pclk,function(v){return num(Math.round(Number(v)||0));},false)
+    +mrow('CTR',totals.ctr,totals.pctr,function(v){return (Number(v)||0).toFixed(2)+'%';},false)
+    +'</tbody></table></div></div>';
+  const sorted=rows.slice().sort(function(a,b){return (b.spend||0)-(a.spend||0);});
+  const body=sorted.length?sorted.map(function(r){
+    const c=chg(r.spend,r.pspend);
+    return '<tr><td><div class="cmp-nm">'+esc(r.name)+'</div>'+(r.sub?'<div class="cmp-sub">'+esc(r.sub)+'</div>':'')+'</td>'
+      +'<td class="num muted">'+inr(r.pspend||0)+'</td>'
+      +'<td class="num strong">'+inr(r.spend||0)+'</td>'
+      +'<td class="num">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+      +'<td class="num muted">'+num(Math.round(r.pres||0))+'</td>'
+      +'<td class="num strong">'+num(Math.round(r.res||0))+'</td>'
+      +'<td class="num">'+cmpTrend(r.res,r.pres,false)+'</td>'
+      +'<td class="num">'+(r.cpr!=null?inr(r.cpr):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(r.cpr,r.pcpr,true)+'</td></tr>';
+  }).join(''):'<tr><td colspan="9" class="cmp-none">No data for this period</td></tr>';
+  const detail='<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Breakdown</span><h3>Movement by '+esc(resLabel==='conversions'?'account':'project')+'</h3></div></div>'
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Name</th><th class="num" colspan="3">Spend — prev / now / change</th><th class="num" colspan="3">'+esc(resLabel)+' — prev / now / change</th><th class="num" colspan="2">Cost / '+esc(resLabel.replace(/s$/,''))+'</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+  return summary+detail;
+}
+/* ---------------- AD FATIGUE page ----------------
+   rows = [{name, sub, freq, ctr, pctr, spend, impr}] */
+function cmpFatiguePage(rows,inr,num,note,hideFreq){
+  const grade=function(r){
+    const f=Number(r.freq)||0, c=(r.ctr==null?null:Number(r.ctr)), pc=(r.pctr==null?null:Number(r.pctr));
+    const drop=(pc&&pc>0&&c!=null)?(1-(c/pc)):null;
+    let s=0;
+    if(f>=4)s+=2;else if(f>=3)s+=1.5;else if(f>=2.5)s+=1;
+    if(drop!==null&&drop>=0.30)s+=2;else if(drop!==null&&drop>=0.15)s+=1;
+    return {score:s,drop:drop,level:(s>=3?'hi':(s>=1.5?'md':'ok'))};
+  };
+  const scored=rows.map(function(r){return Object.assign({},r,{g:grade(r)});})
+    .sort(function(a,b){ if(b.g.score!==a.g.score)return b.g.score-a.g.score; return (b.spend||0)-(a.spend||0); });
+  const nHi=scored.filter(function(x){return x.g.level==='hi';}).length;
+  const nMd=scored.filter(function(x){return x.g.level==='md';}).length;
+  const nOk=scored.length-nHi-nMd;
+  const stat=function(v,l,cls){return '<div class="cmp-stat '+cls+'"><div class="v">'+v+'</div><div class="l">'+esc(l)+'</div></div>';};
+  const advice=function(x){
+    if(x.g.level==='hi')return 'Refresh the creative — swap images/headlines';
+    if(x.g.level==='md')return 'Watch it; plan a new variant';
+    return 'Healthy';
+  };
+  // Google Ads publishes no per-person frequency, so on that source we drop the column entirely
+  // rather than showing a row of dashes.
+  const cols=hideFreq?7:8;
+  const body=scored.length?scored.map(function(x){
+    return '<tr><td><div class="cmp-nm">'+esc(x.name)+'</div>'+(x.sub?'<div class="cmp-sub">'+esc(x.sub)+'</div>':'')+'</td>'
+      +(hideFreq?'':'<td class="num">'+(x.freq?(Number(x.freq).toFixed(1)+'×'):'—')+'</td>')
+      +'<td class="num muted">'+(x.pctr!=null?(Number(x.pctr).toFixed(2)+'%'):'—')+'</td>'
+      +'<td class="num strong">'+(x.ctr!=null?(Number(x.ctr).toFixed(2)+'%'):'—')+'</td>'
+      +'<td class="num">'+(x.g.drop===null?'—':('<span class="'+(x.g.drop>0?'cmp-dn':'cmp-up')+'">'+(x.g.drop>0?'−':'+')+Math.abs(Math.round(x.g.drop*100))+'%</span>'))+'</td>'
+      +'<td class="num">'+inr(x.spend||0)+'</td>'
+      +'<td>'+cmpFatigue(x.freq,x.ctr,x.pctr)+'</td>'
+      +'<td class="cmp-adv">'+esc(advice(x))+'</td></tr>';
+  }).join(''):'<tr><td colspan="'+cols+'" class="cmp-none">Not enough data to judge fatigue yet</td></tr>';
+  return '<div class="cmp-stats">'+stat(nHi,'Need refresh','hi')+stat(nMd,'Watching','md')+stat(nOk,'Healthy','ok')+'</div>'
+    +'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Ad fatigue</span><h3>Worst first</h3></div><span class="cmp-chip">'+esc(note||'')+'</span></div>'
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Name</th>'+(hideFreq?'':'<th class="num">Seen / person</th>')+'<th class="num">CTR before</th><th class="num">CTR now</th><th class="num">Change</th><th class="num">Spend</th><th>Verdict</th><th>What to do</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+/* Refined, restrained visual language — neutral surfaces, one accent, no candy colours.
+   Loaded AFTER each view's older inline styles so these rules win. */
+const CMP_EXTRA_CSS='<style>'
+  /* neutralise the old colourful KPI treatment */
+  +'.cmp-kpi{border-radius:12px!important;box-shadow:none!important;border:1px solid var(--line)!important;padding:14px 15px!important;background:#fff!important}'
+  +'.cmp-kpi::before{display:none!important}'
+  +'.cmp-kpi .ki{background:transparent!important;color:#94a3b8!important;width:auto!important;height:auto!important;font-size:12.5px!important}'
+  +'.cmp-kpi .kl{font-size:10.5px!important;letter-spacing:.07em!important;color:#8a94a6!important;font-weight:600!important}'
+  +'.cmp-kpi .kv{font-size:23px!important;font-weight:650!important;letter-spacing:-.6px!important;margin-top:9px!important;color:var(--ink)!important;font-variant-numeric:tabular-nums}'
+  +'.cmp-kpi .ks{font-size:11px!important;color:#98a2b3!important;margin-top:3px!important}'
+  +'.cmp-kpi:hover{border-color:#d6dced!important}'
+  +'.cmp-kpis{gap:12px!important;margin-bottom:16px!important}'
+  +'.cmp-kpi .ktr{margin-top:8px}'
+  /* trend + fatigue: quiet text, not loud pills */
+  +'.cmp-tr{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle;cursor:default;font-variant-numeric:tabular-nums}'
+  +'.cmp-tr i{font-size:9.5px}'
+  +'.cmp-tr.good{color:#15803d}.cmp-tr.bad{color:#c0392f}.cmp-tr.flat{color:#98a2b3}.cmp-tr.none{color:#cbd5e1}'
+  +'.cmp-fg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:default}'
+  +'.cmp-fg i{font-size:9px}'
+  +'.cmp-fg.hi{color:#c0392f}.cmp-fg.md{color:#a16207}.cmp-fg.ok{color:#5b6674}.cmp-fg.na{color:#cbd5e1}'
+  +'.cmp-up{color:#15803d;font-weight:600}.cmp-dn{color:#c0392f;font-weight:600}'
+  /* panels */
+  +'.cmp-panel{background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 16px;overflow:hidden}'
+  +'.cmp-phead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:15px 18px 13px;border-bottom:1px solid var(--line-2)}'
+  +'.cmp-over{display:block;font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#a3adbe;margin-bottom:3px}'
+  +'.cmp-phead h3{margin:0;font-size:15px;font-weight:650;letter-spacing:-.2px;color:var(--ink)}'
+  +'.cmp-chip{font-size:11px;color:#7d8798;background:#f6f8fc;border:1px solid var(--line-2);border-radius:6px;padding:3px 9px;white-space:nowrap}'
+  /* tables */
+  +'.cmp-tblwrap{overflow-x:auto}'
+  +'.cmp-tbl{width:100%;border-collapse:collapse;font-size:13px}'
+  +'.cmp-tbl th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#a3adbe;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:#fcfdff}'
+  +'.cmp-tbl th.num{text-align:right}'
+  +'.cmp-tbl td{padding:11px 14px;border-bottom:1px solid var(--line-2);vertical-align:middle}'
+  +'.cmp-tbl tbody tr:last-child td{border-bottom:0}'
+  +'.cmp-tbl tbody tr:hover{background:#fbfcfe}'
+  +'.cmp-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
+  +'.cmp-tbl td.muted{color:#98a2b3}.cmp-tbl td.strong{font-weight:650;color:var(--ink)}'
+  +'.cmp-mlbl{font-weight:600;color:#5b6674}'
+  +'.cmp-nm{font-weight:600;color:var(--ink);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  +'.cmp-sub{font-size:11px;color:#98a2b3;margin-top:2px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  +'.cmp-adv{font-size:12px;color:#7d8798}'
+  +'.cmp-none{text-align:center;color:#a3adbe;padding:28px 14px;font-size:12.5px}'
+  +'.cmp-bar{padding-right:18px!important}'
+  +'.cmp-barfill{display:block;height:5px;border-radius:3px;background:#dbe2ee;min-width:2px}'
+  +'.cmp-barfill.up{background:#9fc9ae}.cmp-barfill.down{background:#e0b4ae}'
+  /* stat strip on the fatigue page */
+  +'.cmp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 16px}'
+  +'.cmp-stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;position:relative}'
+  +'.cmp-stat .v{font-size:25px;font-weight:650;letter-spacing:-.7px;color:var(--ink);font-variant-numeric:tabular-nums}'
+  +'.cmp-stat .l{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#8a94a6;margin-top:4px}'
+  +'.cmp-stat.hi .v{color:#c0392f}.cmp-stat.md .v{color:#a16207}'
+  +'@media(max-width:640px){.cmp-stats{grid-template-columns:1fr}}'
+  /* filter row */
+  +'.cmp-fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}'
+  +'.cmp-projbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}'
+  +'.cmp-projsel{height:38px;min-width:210px;border:1px solid var(--line);border-radius:9px;padding:0 32px 0 12px;font-size:13px;font-family:inherit;font-weight:600;color:var(--ink);background-color:var(--bg-card);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%2364748b\' stroke-width=\'1.8\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:11px 8px}'
+  +'.cmp-projsel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,#eef2ff)}'
+  +'.cmp-reload{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 15px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;margin-top:10px}'
+  +'.cmp-reload:hover{border-color:var(--brand);color:var(--brand)}'
+  +'.cmp-fbtn{font-size:12.5px;font-weight:600;color:#5b6674;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 13px;cursor:pointer;transition:.12s;font-family:inherit}'
+  +'.cmp-fbtn:hover{border-color:#c3ccdd;color:var(--ink)}'
+  +'.cmp-fbtn.on{background:#111318;border-color:#111318;color:#fff}'
+  +'.cmp-fcount{font-size:12px;color:#98a2b3;margin-left:2px}'
+  +'.cmp-legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#98a2b3;margin:-4px 0 16px}'
+  +'.cmp-cap{font-size:11.5px!important;color:#98a2b3!important}'
+  +'.cmp-chcard{border-radius:12px!important;box-shadow:none!important;border:1px solid var(--line)!important}'
+  +'.cmp-chcard h4{font-size:14px!important;font-weight:650!important;letter-spacing:-.2px}'
+  +'.cmp-chcard .sub{font-size:11px!important;color:#98a2b3!important}'
+  +'</style>';
+// Background watchdog: raise email + bell alerts for spend spikes and other critical problems.
+// Safe to call often — the server only alerts once per issue per day.
+function cmpRunAlerts(){
+  if(window._cmpAlertsRan)return; window._cmpAlertsRan=true;
+  try{ fetch(SUPABASE_URL+'/functions/v1/campaign-alerts',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},body:'{}'}).catch(function(){}); }catch(e){}
+}
+window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
+function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button><button class="seg-btn'+(CMP_SOURCE==='both'?' on':'')+'" onclick="cmpSetSource(\'both\')"><i class="fa-solid fa-layer-group"></i> &nbsp;Both</button></div></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
 window.cmpSetCustom=function(){const s=$('cmpSince')&&$('cmpSince').value,u=$('cmpUntil')&&$('cmpUntil').value;if(!s||!u){toast('Pick both dates','err');return;}if(s>u){toast('Start date must be before end date','err');return;}CMP_SINCE=s;CMP_UNTIL=u;CMP_PERIOD='custom';renderPage();};
 window.cmpSetAdProject=function(v){CMP_AD_PROJECT=v;CMP_AD_PAGE=0;renderPage();};
+window.cmpSetCampProject=function(v){CMP_CAMP_PROJECT=v;renderPage();};
+// Pull Google ad-level rows for the period on screen. The first fetch for an unseen period can
+// take a while (it walks every account), so this reports honestly instead of failing silently.
+window.cmpLoadGoogleAds=async function(){
+  const btn=document.querySelector('.cmp-reload');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Loading — this can take a minute…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const base=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL,level:'ad'}:{period:CMP_PERIOD,level:'ad'};
+    const res=await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(base)});
+    const jr=await res.json().catch(function(){return {};});
+    if(!res.ok||jr.error) throw new Error(jr.error||('Google returned '+res.status));
+    toast('Loaded '+(jr.ad_insight_rows!=null?jr.ad_insight_rows:0)+' ad rows','ok');
+  }catch(e){ toast('Could not load ad data: '+((e&&e.message)||e),'err'); }
+  renderPage();
+};
 window.cmpSetAdPage=function(p){CMP_AD_PAGE=p;renderPage();};
 function cmpPeriodBar(){
   const segBtns=CMP_PRESETS.map(function(p){return '<button class="seg-btn'+(CMP_PERIOD===p[0]?' on':'')+'" onclick="cmpSetPeriod(\''+p[0]+'\')">'+p[1]+'</button>';}).join('');
@@ -6817,28 +7354,33 @@ window.cmpShowProject=function(accId){
   if(!acc)return;
   const inr=CMP_LAST.inr,num=CMP_LAST.num;
   const belongsToProj=function(c,a){ return c.name&&a.name&&String(c.name).trim().toLowerCase().startsWith(String(a.name).trim().toLowerCase()); };
+  const prevMap=CMP_LAST.cPrevMap||{};
   const rows=CMP_LAST.campaigns.filter(c=>c.ad_account_id===accId&&belongsToProj(c,acc)).map(c=>{
     const i=CMP_LAST.cInsMap[c.id]||{};
+    const p=prevMap[c.id]||null;
     const spend=Number(i.spend)||0,leads=Number(i.leads)||0;
     const budget=c.daily_budget!=null?Number(c.daily_budget):(c.lifetime_budget!=null?Number(c.lifetime_budget):null);
-    return {c,i,spend,leads,budget,cpl:leads?spend/leads:null};
+    const pspend=p?(Number(p.spend)||0):null, pleads=p?(Number(p.leads)||0):0;
+    return {c,i,spend,leads,budget,cpl:leads?spend/leads:null,
+      pspend,pcpl:pleads?((Number(p.spend)||0)/pleads):null,pctr:p?(Number(p.ctr)||0):null};
   }).sort((a,b)=>b.spend-a.spend);
   const totalSpend=rows.reduce((s,r)=>s+r.spend,0);
   const totalLeads=rows.reduce((s,r)=>s+r.leads,0);
   const statusTag=function(st){const s=(st||'').toUpperCase();if(s==='ACTIVE')return '<span class="tag t-green">Active</span>';if(s==='PAUSED')return '<span class="tag t-amber">Paused</span>';return s?'<span class="tag" style="background:#f1f5f9;color:#475569">'+esc(s)+'</span>':'—';};
   const tbl=rows.length?('<div class="card qc-table-card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    ['Campaign','Status','Budget','Spend','Results (Leads)','Cost / Lead','Impressions','Reach','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+    ['Campaign','Status','Budget','Spend','Trend','Results (Leads)','Cost / Lead','Reach','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
     '</tr></thead><tbody>'+
     rows.map(function(r){return '<tr>'+
       '<td style="font-weight:600">'+esc(r.c.name||'—')+'</td>'+
       '<td>'+statusTag(r.c.status)+'</td>'+
       '<td style="text-align:right">'+(r.budget?inr(r.budget)+(r.c.daily_budget!=null?'/day':' total'):'—')+'</td>'+
-      '<td style="text-align:right">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'+
       '<td style="text-align:right">'+num(r.leads)+'</td>'+
-      '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'+
-      '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+      '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'+
       '<td style="text-align:right">'+num(r.i.reach)+'</td>'+
       '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+      '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,r.pctr)+'</td>'+
     '</tr>';}).join('')+
     '</tbody></table></div></div>'):'<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-chart-line"></i><div>No campaign data for this period</div></div>';
   openModal(
@@ -6861,16 +7403,19 @@ window.cmpShowProjectAds=function(accId){
   const totalSpend=rows.reduce((s,r)=>s+r.spend,0);
   const statusTag=function(st){const s=(st||'').toUpperCase();if(s==='ACTIVE')return '<span class="tag t-green">Active</span>';if(s==='PAUSED')return '<span class="tag t-amber">Paused</span>';return s?'<span class="tag" style="background:#f1f5f9;color:#475569">'+esc(s)+'</span>':'—';};
   const tbl=rows.length?('<div class="card qc-table-card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    ['Ad','Campaign','Status','Spend','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+    ['Ad','Campaign','Status','Spend','Trend','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
     '</tr></thead><tbody>'+
-    rows.map(function(r){return '<tr>'+
+    rows.map(function(r){
+      const p=(CMP_LAST.aPrevMap||{})[r.a.id]||null;
+      return '<tr>'+
       '<td style="font-weight:600">'+esc(r.a.name||'—')+'</td>'+
       '<td>'+esc(r.camp?r.camp.name:'—')+'</td>'+
       '<td>'+statusTag(r.a.effective_status||r.a.status)+'</td>'+
-      '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-      '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right">'+cmpTrend(r.spend,p?(Number(p.spend)||0):null,false)+'</td>'+
       '<td style="text-align:right">'+num(r.i.clicks)+'</td>'+
       '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+      '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,p?(Number(p.ctr)||0):null)+'</td>'+
     '</tr>';}).join('')+
     '</tbody></table></div></div>'):'<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-rectangle-ad"></i><div>No ad data for this period</div></div>';
   openModal(
@@ -6879,11 +7424,397 @@ window.cmpShowProjectAds=function(accId){
     'lg'
   );
 };
+async function cmpBothView(v,seg){
+  const tabs=['Overview','Sources','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
+  const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
+  const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
+    try{
+      const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+      const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+      const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
+      const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      const pr0=cmpPrevRange(); if(pr0){gbody.prev_since=pr0.since;gbody.prev_until=pr0.until;}
+      await Promise.all([
+        fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
+        fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
+      ]);
+    }catch(e){}
+  }
+  await cmpSyncPrev('both');
+  const C=function(){return sb.schema('camp');};
+  const prevKey=cmpPrevKey();
+  let mIns=[],gIns=[],mPrev=[],gPrev=[],mAccts=[],mCamps=[],gAccts=[],gCamps=[];
+  try{
+    const calls=[
+      C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',periodKey),
+      C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',periodKey),
+      C().from('ad_accounts').select('ad_account_id,name'),
+      C().from('campaigns').select('id,ad_account_id,name,daily_budget,lifetime_budget,status'),
+      C().from('g_accounts').select('customer_id,name'),
+      C().from('g_campaigns').select('id,customer_id,name,status,budget_amount')
+    ];
+    if(prevKey){
+      calls.push(C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',prevKey));
+      calls.push(C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',prevKey));
+    }
+    const r=await Promise.all(calls);
+    mIns=r[0].data||[];gIns=r[1].data||[];mAccts=r[2].data||[];mCamps=r[3].data||[];gAccts=r[4].data||[];gCamps=r[5].data||[];
+    if(prevKey){mPrev=(r[6]&&r[6].data)||[];gPrev=(r[7]&&r[7].data)||[];}
+  }catch(e){}
+  const sum=function(arr,k){return arr.reduce(function(s,x){return s+(Number(x[k])||0);},0);};
+  const M={spend:sum(mIns,'spend'),res:sum(mIns,'leads'),impr:sum(mIns,'impressions'),clk:sum(mIns,'clicks')};
+  const Gg={spend:sum(gIns,'spend'),res:sum(gIns,'conversions'),impr:sum(gIns,'impressions'),clk:sum(gIns,'clicks')};
+  const T={spend:M.spend+Gg.spend,res:M.res+Gg.res,impr:M.impr+Gg.impr,clk:M.clk+Gg.clk};
+  const Mp={spend:sum(mPrev,'spend'),res:sum(mPrev,'leads'),impr:sum(mPrev,'impressions'),clk:sum(mPrev,'clicks')};
+  const Gp={spend:sum(gPrev,'spend'),res:sum(gPrev,'conversions'),impr:sum(gPrev,'impressions'),clk:sum(gPrev,'clicks')};
+  const Tp={spend:Mp.spend+Gp.spend,res:Mp.res+Gp.res,impr:Mp.impr+Gp.impr,clk:Mp.clk+Gp.clk};
+  const avgFreq=function(arr){const f=arr.map(function(x){return Number(x.frequency)||0;}).filter(function(x){return x>0;});return f.length?(f.reduce(function(a,b){return a+b;},0)/f.length):0;};
+  const mFreq=avgFreq(mIns);
+  // total live daily budget across both platforms — ACTIVE campaigns only, since a paused
+  // campaign isn't spending its budget and shouldn't inflate the figure
+  const mBudget=mCamps.filter(function(c){return cmpIsActive(c.status);}).reduce(function(s,c){return s+(Number(c.daily_budget)||0);},0);
+  const gBudget=gCamps.filter(function(c){return String(c.status||'').toUpperCase()==='ENABLED';}).reduce(function(s,c){return s+(Number(c.budget_amount)||0);},0);
+  const tBudget=mBudget+gBudget;
+  // combined best / worst across Meta projects and Google accounts
+  const mInsMap={};mIns.forEach(function(x){mInsMap[x.campaign_id]=x;});
+  const gInsMap={};gIns.forEach(function(x){gInsMap[x.campaign_id]=x;});
+  const bwItems=[];
+  mAccts.forEach(function(a){
+    let sp=0,rs=0;
+    mCamps.filter(function(c){return c.ad_account_id===a.ad_account_id&&c.name&&a.name&&String(c.name).trim().toLowerCase().indexOf(String(a.name).trim().toLowerCase())===0;}).forEach(function(c){const i=mInsMap[c.id];if(i){sp+=Number(i.spend)||0;rs+=Number(i.leads)||0;}});
+    if(sp>0)bwItems.push({name:'Meta · '+a.name,spend:sp,res:rs,cpr:rs?sp/rs:null});
+  });
+  gAccts.forEach(function(a){
+    let sp=0,rs=0;
+    gCamps.filter(function(c){return c.customer_id===a.customer_id;}).forEach(function(c){const i=gInsMap[c.id];if(i){sp+=Number(i.spend)||0;rs+=Number(i.conversions)||0;}});
+    if(sp>0)bwItems.push({name:'Google · '+a.name,spend:sp,res:rs,cpr:rs?sp/rs:null});
+  });
+  const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
+  const num=function(n){return Number(n||0).toLocaleString('en-IN');};
+  const cmpCss='<style>'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
+    +'@media(max-width:1100px){.cmp-kpis{grid-template-columns:repeat(3,1fr)}}'
+    +'@media(max-width:640px){.cmp-kpis{grid-template-columns:repeat(2,1fr);gap:10px}.cmp-kpi{padding:12px 13px}.cmp-kpi .kv{font-size:20px}.cmp-kpi .ki{width:30px;height:30px;font-size:13px}}'
+    +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
+    +'.cmp-kpi::before{content:\"\";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#334155)}'
+    +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
+    +'.cmp-kpi .ki{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--kbg,#f1f5f9);color:var(--kc,#334155)}'
+    +'.cmp-kpi .kl{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--slate)}'
+    +'.cmp-kpi .kv{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--ink,#0f172a);margin-top:12px;line-height:1}'
+    +'.cmp-kpi .ks{font-size:11.5px;color:var(--slate);margin-top:5px;min-height:14px}'
+    +'.cmp-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+    +'@media(max-width:900px){.cmp-charts{grid-template-columns:1fr}}'
+    +'.cmp-chcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}'
+    +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
+    +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+    +'</style>';
+  const cmpKpi=function(iconCls,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="'+iconCls+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
+  const cpr=T.res?T.spend/T.res:null, pcpr=Tp.res?Tp.spend/Tp.res:null;
+  const kpiStrip='<div class="cmp-kpis">'
+    +cmpKpi('fa-solid fa-indian-rupee-sign','Total Spend',inr(T.spend),'Meta + Google','#334155','#f1f5f9',cmpTrend(T.spend,Tp.spend,false))
+    +cmpKpi('fa-solid fa-wallet','Daily Budget',tBudget?inr(tBudget):'—','both platforms','#6366f1','#eef2ff',tBudget?('<span class="cmp-tr flat" title="Share of the daily budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(T.spend/tBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-solid fa-bullseye','Total Results',num(Math.round(T.res)),'leads + conversions','#0d9488','#f0fdfa',cmpTrend(T.res,Tp.res,false))
+    +cmpKpi('fa-solid fa-tags','Cost / Result',cpr!=null?inr(cpr):'—','blended','#0ea5e9','#f0f9ff',cmpTrend(cpr,pcpr,true))
+    +cmpKpi('fa-solid fa-eye','Impressions',num(T.impr),'','#7c3aed','#f5f3ff',cmpTrend(T.impr,Tp.impr,false))
+    +cmpKpi('fa-solid fa-hand-pointer','Clicks',num(T.clk),'','#2563eb','#eff6ff',cmpTrend(T.clk,Tp.clk,false))
+    +cmpKpi('fa-brands fa-facebook','Meta Spend',inr(M.spend),T.spend?Math.round(M.spend/T.spend*100)+'% of spend':'','#1877f2','#eff6ff',cmpTrend(M.spend,Mp.spend,false))
+    +cmpKpi('fa-brands fa-google','Google Spend',inr(Gg.spend),T.spend?Math.round(Gg.spend/T.spend*100)+'% of spend':'','#ea4335','#fef2f2',cmpTrend(Gg.spend,Gp.spend,false))
+    +'</div>';
+  const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue: Meta uses real per-person frequency, Google uses CTR decline</span></div>';
+  let body;
+  if(ti===0){
+    body='<div class="cmp-charts">'
+      +'<div class="cmp-chcard"><h4>Spend: Meta vs Google</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="bCh1"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Results: Meta vs Google</h4><div class="sub">leads + conversions</div><div style="height:260px"><canvas id="bCh2"></canvas></div></div>'
+      +'</div>';
+  } else if(ti===1){
+    const mCtr=M.impr?M.clk/M.impr*100:0, mpCtr=Mp.impr?Mp.clk/Mp.impr*100:0;
+    const gCtr=Gg.impr?Gg.clk/Gg.impr*100:0, gpCtr=Gp.impr?Gp.clk/Gp.impr*100:0;
+    const tCtr=T.impr?T.clk/T.impr*100:0, tpCtr=Tp.impr?Tp.clk/Tp.impr*100:0;
+    const rowT=function(label,d,p,ctr,pCtr,budget,fatigue,isTotal){
+      const c=d.res?d.spend/d.res:null, pc=p&&p.res?p.spend/p.res:null;
+      return '<tr'+(isTotal?' style="background:#fbfcfe"':'')+'><td'+(isTotal?' class="strong"':'')+'>'+label+'</td>'
+      +'<td class="num">'+(budget?inr(budget):'—')+'</td>'
+      +'<td class="num strong">'+inr(d.spend)+'</td>'
+      +'<td class="num">'+cmpTrend(d.spend,p?p.spend:null,false)+'</td>'
+      +'<td class="num">'+num(Math.round(d.res))+'</td>'
+      +'<td class="num">'+cmpTrend(d.res,p?p.res:null,false)+'</td>'
+      +'<td class="num">'+(c!=null?inr(c):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(c,pc,true)+'</td>'
+      +'<td class="num">'+ctr.toFixed(2)+'%</td>'
+      +'<td>'+fatigue+'</td></tr>';
+    };
+    body='<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Sources</span><h3>Meta vs Google</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Source</th><th class="num">Budget / day</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Results</th><th class="num">vs prev</th><th class="num">Cost / Result</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'
+      +rowT('<i class="fa-brands fa-facebook" style="color:#8a94a6"></i> &nbsp;Meta',M,Mp,mCtr,mpCtr,mBudget,cmpFatigue(mFreq,mCtr,mpCtr),false)
+      +rowT('<i class="fa-brands fa-google" style="color:#8a94a6"></i> &nbsp;Google',Gg,Gp,gCtr,gpCtr,gBudget,cmpFatigue(0,gCtr,gpCtr),false)
+      +rowT('Total',T,Tp,tCtr,tpCtr,tBudget,cmpFatigue(mFreq,tCtr,tpCtr),true)
+      +'</tbody></table></div></div>';
+  } else if(ti===2){
+    const tCtr=T.impr?T.clk/T.impr*100:0, tpCtr=Tp.impr?Tp.clk/Tp.impr*100:0;
+    const prevByName={};
+    const pmMap={};mPrev.forEach(function(x){pmMap[x.campaign_id]=x;});
+    const pgMap={};gPrev.forEach(function(x){pgMap[x.campaign_id]=x;});
+    mAccts.forEach(function(a){
+      let sp=0,rs=0;
+      mCamps.filter(function(c){return c.ad_account_id===a.ad_account_id&&c.name&&a.name&&String(c.name).trim().toLowerCase().indexOf(String(a.name).trim().toLowerCase())===0;}).forEach(function(c){const p=pmMap[c.id];if(p){sp+=Number(p.spend)||0;rs+=Number(p.leads)||0;}});
+      prevByName['Meta · '+a.name]={spend:sp,res:rs};
+    });
+    gAccts.forEach(function(a){
+      let sp=0,rs=0;
+      gCamps.filter(function(c){return c.customer_id===a.customer_id;}).forEach(function(c){const p=pgMap[c.id];if(p){sp+=Number(p.spend)||0;rs+=Number(p.conversions)||0;}});
+      prevByName['Google · '+a.name]={spend:sp,res:rs};
+    });
+    body=cmpTrendPage(bwItems.map(function(x){
+      const p=prevByName[x.name]||{spend:null,res:0};
+      return {name:x.name,sub:'',spend:x.spend,pspend:p.spend,res:x.res,pres:p.res,cpr:x.cpr,pcpr:p.res?(p.spend/p.res):null};
+    }),{spend:T.spend,pspend:Tp.spend,res:T.res,pres:Tp.res,cpr:cpr,pcpr:pcpr,clk:T.clk,pclk:Tp.clk,ctr:tCtr,pctr:tpCtr},inr,num,'results');
+  } else {
+    const fr=[];
+    const mAccName={};mAccts.forEach(function(a){mAccName[a.ad_account_id]=a.name;});
+    const gAccName={};gAccts.forEach(function(a){gAccName[a.customer_id]=a.name;});
+    const pmMap={};mPrev.forEach(function(x){pmMap[x.campaign_id]=x;});
+    const pgMap={};gPrev.forEach(function(x){pgMap[x.campaign_id]=x;});
+    mCamps.forEach(function(c){
+      const i=mInsMap[c.id]; if(!i)return; const p=pmMap[c.id]||null;
+      const imp=Number(i.impressions)||0, pimp=p?(Number(p.impressions)||0):0;
+      fr.push({name:c.name||'Campaign',sub:'Meta · '+(mAccName[c.ad_account_id]||''),freq:Number(i.frequency)||0,
+        ctr:imp?((Number(i.clicks)||0)/imp*100):null,
+        pctr:pimp?((Number(p.clicks)||0)/pimp*100):null,
+        spend:Number(i.spend)||0,impr:imp});
+    });
+    gCamps.forEach(function(c){
+      const i=gInsMap[c.id]; if(!i)return; const p=pgMap[c.id]||null;
+      fr.push({name:c.name||'Campaign',sub:'Google · '+(gAccName[c.customer_id]||''),freq:0,
+        ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+    });
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta + Google · campaign level');
+  }
+  const showKpis=(ti!==2&&ti!==3);
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
+  cmpRunAlerts();
+  if(ti===0&&window.Chart){setTimeout(function(){
+    const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
+    try{new Chart(document.getElementById('bCh1'),{type:'doughnut',data:{labels:['Meta','Google'],datasets:[{data:[M.spend,Gg.spend],backgroundColor:['#1877f2','#ea4335'],borderWidth:2,borderColor:'#fff'}]},options:opt});}catch(e){}
+    try{new Chart(document.getElementById('bCh2'),{type:'doughnut',data:{labels:['Meta','Google'],datasets:[{data:[M.res,Gg.res],backgroundColor:['#1877f2','#ea4335'],borderWidth:2,borderColor:'#fff'}]},options:opt});}catch(e){}
+  },60);}
+}
+async function cmpGoogleView(v,seg){
+  const tabs=['Overview','Accounts','Campaigns','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const needGAds=(ti===3||ti===5);
+  v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
+  const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
+  const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  // Ask the Google Ads live function to refresh this period (it pulls fresh from Google, then we read the tables).
+  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
+    try{
+      const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+      const pr=cmpPrevRange();
+      const base=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      if(pr){base.prev_since=pr.since;base.prev_until=pr.until;}   // one call fills both buckets
+      const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+      const jobs=[fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(base)}).catch(function(){})];
+      if(needGAds)jobs.push(fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(Object.assign({},base,{level:'ad'}))}).catch(function(){}));
+      await Promise.all(jobs);
+    }catch(e){}
+  }
+  const G=function(){return sb.schema('camp');};
+  const prevKey=cmpPrevKey();
+  let accts=[],camps=[],ins=[],pIns=[],gAds=[],gAdIns=[],gAdPrev=[];
+  try{
+    const calls=[G().from('g_accounts').select('*').order('name'),G().from('g_campaigns').select('*'),G().from('g_campaign_insights').select('*').eq('period',periodKey)];
+    const iPrev=calls.length; if(prevKey)calls.push(G().from('g_campaign_insights').select('*').eq('period',prevKey));
+    let iAds=-1,iAdIns=-1,iAdPrev=-1;
+    if(needGAds){ iAds=calls.length; calls.push(G().from('g_ads').select('*')); iAdIns=calls.length; calls.push(G().from('g_ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iAdPrev=calls.length; calls.push(G().from('g_ad_insights').select('*').eq('period',prevKey)); } }
+    const r=await Promise.all(calls);
+    const at=function(i){return (i>=0&&r[i]&&r[i].data)?r[i].data:[];};
+    accts=at(0);camps=at(1);ins=at(2);
+    if(prevKey)pIns=at(iPrev);
+    if(needGAds){gAds=at(iAds);gAdIns=at(iAdIns);if(iAdPrev>=0)gAdPrev=at(iAdPrev);}
+  }catch(e){}
+  const insMap={};ins.forEach(function(x){insMap[x.campaign_id]=x;});
+  const pInsMap={};pIns.forEach(function(x){pInsMap[x.campaign_id]=x;});
+  const gAdInsMap={};gAdIns.forEach(function(x){gAdInsMap[x.ad_id]=x;});
+  const gAdPrevMap={};gAdPrev.forEach(function(x){gAdPrevMap[x.ad_id]=x;});
+  const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
+  const num=function(n){return Number(n||0).toLocaleString('en-IN');};
+  const isLive=function(c){return String(c.status||'').toUpperCase()==='ENABLED';};
+  const rows=accts.map(function(a){
+    const acs=camps.filter(function(c){return c.customer_id===a.customer_id;});
+    let spend=0,impr=0,clk=0,conv=0,budget=0;
+    let pspend=0,pimpr=0,pclk=0,pconv=0;
+    acs.forEach(function(c){
+      const i=insMap[c.id];if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clk+=Number(i.clicks)||0;conv+=Number(i.conversions)||0;}
+      const p=pInsMap[c.id];if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclk+=Number(p.clicks)||0;pconv+=Number(p.conversions)||0;}
+      if(isLive(c))budget+=Number(c.budget_amount)||0;
+    });
+    return {a:a,campaigns:acs.length,spend:spend,impr:impr,clk:clk,conv:conv,budget:budget,
+      ctr:impr?clk/impr*100:0,cpl:conv?spend/conv:null,
+      pspend:pspend,pconv:pconv,pctr:pimpr?pclk/pimpr*100:0,pcpl:pconv?pspend/pconv:null};
+  }).sort(function(x,y){return y.spend-x.spend;});
+  const tSpend=rows.reduce(function(s,r){return s+r.spend;},0),tImpr=rows.reduce(function(s,r){return s+r.impr;},0),tClk=rows.reduce(function(s,r){return s+r.clk;},0),tConv=rows.reduce(function(s,r){return s+r.conv;},0);
+  const tBudget=rows.reduce(function(s,r){return s+r.budget;},0);
+  const pSpend=rows.reduce(function(s,r){return s+r.pspend;},0),pConv=rows.reduce(function(s,r){return s+r.pconv;},0);
+  const pImprT=pIns.reduce(function(s,x){return s+(Number(x.impressions)||0);},0),pClkT=pIns.reduce(function(s,x){return s+(Number(x.clicks)||0);},0);
+  const pAvgCtr=pImprT?pClkT/pImprT*100:0, pCpl=pConv?pSpend/pConv:null, pAvgCpc=pClkT?pSpend/pClkT:null;
+  const avgCtr=tImpr?tClk/tImpr*100:0,avgCpc=tClk?tSpend/tClk:null,cpl=tConv?tSpend/tConv:null;
+  const cmpCss='<style>'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
+    +'@media(max-width:1100px){.cmp-kpis{grid-template-columns:repeat(3,1fr)}}'
+    +'@media(max-width:640px){.cmp-kpis{grid-template-columns:repeat(2,1fr);gap:10px}.cmp-kpi{padding:12px 13px}.cmp-kpi .kv{font-size:20px}.cmp-kpi .ki{width:30px;height:30px;font-size:13px}}'
+    +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
+    +'.cmp-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#4285f4)}'
+    +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
+    +'.cmp-kpi .ki{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--kbg,#eff6ff);color:var(--kc,#4285f4)}'
+    +'.cmp-kpi .kl{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--slate)}'
+    +'.cmp-kpi .kv{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--ink,#0f172a);margin-top:12px;line-height:1}'
+    +'.cmp-kpi .ks{font-size:11.5px;color:var(--slate);margin-top:5px;min-height:14px}'
+    +'.cmp-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+    +'@media(max-width:900px){.cmp-charts{grid-template-columns:1fr}}'
+    +'.cmp-chcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}'
+    +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
+    +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+    +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
+    +'</style>';
+  const cmpKpi=function(icon,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
+  const kpiStrip='<div class="cmp-kpis">'
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(tSpend),accts.length+' account'+(accts.length===1?'':'s'),'#4285f4','#eff6ff',cmpTrend(tSpend,pSpend,false))
+    +cmpKpi('fa-wallet','Daily Budget',tBudget?inr(tBudget):'—','active campaigns','#6366f1','#eef2ff',tBudget?('<span class="cmp-tr flat" title="Share of today\'s budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(tSpend/tBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-bullseye','Conversions',num(Math.round(tConv)),tConv?'':'none yet','#0d9488','#f0fdfa',cmpTrend(tConv,pConv,false))
+    +cmpKpi('fa-tags','Cost / Conv.',cpl!=null?inr(cpl):'—','lower is better','#0ea5e9','#f0f9ff',cmpTrend(cpl,pCpl,true))
+    +cmpKpi('fa-eye','Impressions',num(tImpr),'','#7c3aed','#f5f3ff',cmpTrend(tImpr,pImprT,false))
+    +cmpKpi('fa-hand-pointer','Clicks',num(tClk),'','#2563eb','#eff6ff',cmpTrend(tClk,pClkT,false))
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'','#16a34a','#f0fdf4',cmpTrend(avgCtr,pAvgCtr,false))
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
+    +'</div>';
+  const cap='<div class="cmp-cap"><i class="fa-brands fa-google" style="color:#ea4335"></i> Live Google Ads · '+esc(periodLabel)+' · '+accts.length+' account'+(accts.length===1?'':'s')+'</div>';
+  const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Google has no per-person frequency, so fatigue = CTR falling while spend continues</span></div>';
+  let body;
+  if(ti===0){
+    body='<div class="cmp-charts">'
+      +'<div class="cmp-chcard"><h4>Spend by account</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="gCh1"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Conversions by account</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="gCh2"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Spend share</h4><div class="sub">where the budget goes</div><div style="height:260px"><canvas id="gCh3"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Cost per conversion by account</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="gCh4"></canvas></div></div>'
+      +'</div>';
+  } else if(ti===1){
+    body=rows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Account','Campaigns','Daily Budget','Spend','Trend','Conversions','Cost / Conv','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){
+      const used=r.budget?Math.round(r.spend/r.budget*100):null;
+      return '<tr><td style="font-weight:600">'+esc(r.a.name)+'</td><td style="text-align:right">'+r.campaigns+'</td>'
+      +'<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'
+      +'<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'
+      +'<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+      +'<td style="text-align:right">'+num(Math.round(r.conv))+'</td>'
+      +'<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'
+      +'<td style="text-align:right">'+num(r.clk)+'</td><td style="text-align:right">'+r.ctr.toFixed(2)+'%</td>'
+      +'<td style="text-align:right">'+cmpFatigue(0,r.ctr,r.pctr)+'</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No Google Ads data for this period</div></div>';
+  } else if(ti===2){
+    const all=camps.map(function(c){const i=insMap[c.id]||null;const p=pInsMap[c.id]||null;const acc=accts.find(function(a){return a.customer_id===c.customer_id;});
+      return {c:c,i:i||{},p:p,acc:acc,spend:i?(Number(i.spend)||0):0,active:cmpIsActive(c.status),hasData:!!i};}).filter(function(r){return r.acc;});
+    const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
+    const crow=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(x,y){return y.spend-x.spend;}).slice(0,300);
+    const rowsHtml=crow.length?crow.map(function(r){
+      const bud=Number(r.c.budget_amount)||0, sp=r.spend;
+      const conv=Number(r.i.conversions)||0, cpc=conv?sp/conv:null;
+      const psp=r.p?(Number(r.p.spend)||0):null;
+      const pconv=r.p?(Number(r.p.conversions)||0):0, pcpc=(r.p&&pconv)?((Number(r.p.spend)||0)/pconv):null;
+      const pctr=r.p?(Number(r.p.ctr)||0):null;
+      const used=bud?Math.round(sp/bud*100):null;
+      const chan=String(r.c.channel_type||'').replace(/_/g,' ').toLowerCase();
+      return '<tr><td><div class="cmp-nm">'+esc(r.c.name)+'</div><div class="cmp-sub">'+esc(r.acc.name)+(chan?(' · '+esc(chan)):'')+'</div></td>'
+      +'<td>'+(r.active?'<span class="cmp-fg ok"><i class="fa-solid fa-circle"></i> Active</span>':'<span class="cmp-fg na" style="color:#98a2b3"><i class="fa-solid fa-circle"></i> '+esc(String(r.c.status||'Inactive').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</span>')+'</td>'
+      +'<td class="num">'+(bud?(inr(bud)+(used!=null?'<div class="cmp-sub" style="text-align:right'+(used>100?';color:#c0392f':'')+'">'+used+'% used</div>':'')):'—')+'</td>'
+      +'<td class="num strong">'+inr(sp)+'</td>'
+      +'<td class="num">'+cmpTrend(sp,psp,false)+'</td>'
+      +'<td class="num">'+num(Math.round(conv))+'</td>'
+      +'<td class="num">'+(cpc!=null?inr(cpc):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(cpc,pcpc,true)+'</td>'
+      +'<td class="num">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td>'
+      +'<td>'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join(''):'<tr><td colspan="10" class="cmp-none">No campaigns match this filter</td></tr>';
+    body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Campaigns</span><h3>'+crow.length+' campaign'+(crow.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Campaign</th><th>Status</th><th class="num">Budget</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Conv</th><th class="num">Cost / Conv</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
+  } else if(ti===3){
+    // ---- Ad-wise (Google) ----
+    const campNameMap={};camps.forEach(function(c){campNameMap[c.id]=c.name;});
+    const all=gAds.map(function(a){
+      const i=gAdInsMap[a.id]||null, p=gAdPrevMap[a.id]||null;
+      const acc=accts.find(function(x){return x.customer_id===a.customer_id;});
+      return {a:a,i:i||{},p:p,acc:acc,spend:i?(Number(i.spend)||0):0,active:cmpIsActive(a.status),hasData:!!i};
+    }).filter(function(r){return r.hasData;});
+    const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
+    const shown=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(x,y){return y.spend-x.spend;}).slice(0,300);
+    const rowsHtml=shown.length?shown.map(function(r){
+      const conv=Number(r.i.conversions)||0, sp=r.spend, cpc=conv?sp/conv:null;
+      const psp=r.p?(Number(r.p.spend)||0):null;
+      const pconv=r.p?(Number(r.p.conversions)||0):0, pcpc=(r.p&&pconv)?((Number(r.p.spend)||0)/pconv):null;
+      const pctr=r.p?(Number(r.p.ctr)||0):null;
+      const sub=[(r.acc&&r.acc.name)||'',campNameMap[r.a.campaign_id]||'',r.a.ad_group_name||''].filter(Boolean).join(' · ');
+      return '<tr><td><div class="cmp-nm">'+esc(r.a.name||'Ad')+'</div><div class="cmp-sub">'+esc(sub)+'</div></td>'
+      +'<td>'+(r.active?'<span class="cmp-fg ok"><i class="fa-solid fa-circle"></i> Active</span>':'<span class="cmp-fg na" style="color:#98a2b3"><i class="fa-solid fa-circle"></i> '+esc(String(r.a.status||'Inactive').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</span>')+'</td>'
+      +'<td class="num strong">'+inr(sp)+'</td>'
+      +'<td class="num">'+cmpTrend(sp,psp,false)+'</td>'
+      +'<td class="num">'+num(Math.round(conv))+'</td>'
+      +'<td class="num">'+(cpc!=null?inr(cpc):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(cpc,pcpc,true)+'</td>'
+      +'<td class="num">'+num(r.i.clicks)+'</td>'
+      +'<td class="num">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td>'
+      +'<td>'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join('')
+      // Ad-level data is pulled per period on demand and the first pull for a new period is slow,
+      // so an empty table usually just means "not fetched yet" — offer the retry rather than a dead end.
+      :'<tr><td colspan="10" class="cmp-none">No ad data loaded for '+esc(periodLabel)+' yet.'
+        +'<div><button class="cmp-reload" onclick="cmpLoadGoogleAds()"><i class="fa-solid fa-rotate"></i> Load ad data for this period</button></div></td></tr>';
+    body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Ads</span><h3>'+shown.length+' ad'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Ad</th><th>Status</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Conv</th><th class="num">Cost / Conv</th><th class="num">vs prev</th><th class="num">Clicks</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
+  } else if(ti===4){
+    body=cmpTrendPage(rows.map(function(r){return {name:r.a.name,sub:r.campaigns+' campaign'+(r.campaigns===1?'':'s'),spend:r.spend,pspend:r.pspend,res:r.conv,pres:r.pconv,cpr:r.cpl,pcpr:r.pcpl};}),
+      {spend:tSpend,pspend:pSpend,res:tConv,pres:pConv,cpr:cpl,pcpr:pCpl,clk:tClk,pclk:pClkT,ctr:avgCtr,pctr:pAvgCtr},inr,num,'conversions');
+  } else {
+    // ---- Ad Fatigue (Google): per ad when loaded, else per campaign ----
+    const campNameMap={};camps.forEach(function(c){campNameMap[c.id]=c.name;});
+    const fr=[];
+    gAds.forEach(function(a){
+      const i=gAdInsMap[a.id]; if(!i)return;
+      const p=gAdPrevMap[a.id]||null;
+      const acc=accts.find(function(x){return x.customer_id===a.customer_id;});
+      fr.push({name:a.name||'Ad',sub:[(acc&&acc.name)||'',campNameMap[a.campaign_id]||''].filter(Boolean).join(' · '),
+        freq:0,ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+    });
+    if(!fr.length){
+      camps.forEach(function(c){
+        const i=insMap[c.id]; if(!i)return;
+        const p=pInsMap[c.id]||null;
+        const acc=accts.find(function(x){return x.customer_id===c.customer_id;});
+        fr.push({name:c.name||'Campaign',sub:(acc&&acc.name)||'',freq:0,
+          ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+          spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+      });
+    }
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
+  }
+  const showKpis=(ti!==4&&ti!==5);
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
+  cmpRunAlerts();
+  if(ti===0&&window.Chart){setTimeout(function(){
+    const labels=rows.map(function(r){return r.a.name;});
+    const palette=['#4285f4','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#2563eb','#0891b2'];
+    const gy={grid:{color:'#f1f5f9'},ticks:{font:{size:11}}},gx={grid:{display:false},ticks:{font:{size:11}}};
+    try{new Chart(document.getElementById('gCh1'),{type:'bar',data:{labels:labels,datasets:[{label:'Spend (₹)',data:rows.map(function(r){return r.spend;}),backgroundColor:'#4285f4',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('gCh2'),{type:'bar',data:{labels:labels,datasets:[{label:'Conversions',data:rows.map(function(r){return r.conv;}),backgroundColor:'#0d9488',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('gCh3'),{type:'doughnut',data:{labels:labels,datasets:[{data:rows.map(function(r){return r.spend;}),backgroundColor:labels.map(function(_,i){return palette[i%palette.length];}),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}});}catch(e){}
+    try{new Chart(document.getElementById('gCh4'),{type:'bar',data:{labels:labels,datasets:[{label:'Cost / Conv (₹)',data:rows.map(function(r){return r.cpl!=null?Math.round(r.cpl):0;}),backgroundColor:'#0ea5e9',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+  },60);}
+}
 VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
-  const tabs=['Overview','By Project','Ads'];const ti=mTab(seg,tabs.length);
-  v.innerHTML=cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
-  const needAd=ti===2;
+  if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
+  if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
+  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
+  const needAd=(ti===3||ti===5);
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
   // Ask the live Edge Function to make sure this exact period+level is fresh (it caches
@@ -6897,19 +7828,27 @@ VIEWS.campaigns=async function(v,seg){
       await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(reqBody)});
     }catch(e){}
   }
+  await cmpSyncPrev('meta');
   const CMP=()=>sb.schema('camp');
-  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[];
+  const prevKey=cmpPrevKey();
+  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[];
   try{
     const calls=[
       CMP().from('ad_accounts').select('*').order('name'),
       CMP().from('campaigns').select('*'),
       CMP().from('campaign_insights').select('*').eq('period',periodKey)
     ];
-    if(needAd){calls.push(CMP().from('ads').select('*'));calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey));}
+    const iPrevC=calls.length; if(prevKey)calls.push(CMP().from('campaign_insights').select('*').eq('period',prevKey));
+    let iAds=-1,iAdIns=-1,iPrevA=-1;
+    if(needAd){ iAds=calls.length; calls.push(CMP().from('ads').select('*')); iAdIns=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iPrevA=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',prevKey)); } }
     const results=await Promise.all(calls);
-    accounts=results[0].data||[];campaigns=results[1].data||[];cIns=results[2].data||[];
-    if(needAd){ads=results[3].data||[];aIns=results[4].data||[];}
+    const at=function(i){return (i>=0&&results[i]&&results[i].data)?results[i].data:[];};
+    accounts=at(0);campaigns=at(1);cIns=at(2);
+    if(prevKey)cPrev=at(iPrevC);
+    if(needAd){ads=at(iAds);aIns=at(iAdIns);if(iPrevA>=0)aPrev=at(iPrevA);}
   }catch(e){}
+  const cPrevMap={};cPrev.forEach(function(x){cPrevMap[x.campaign_id]=x;});
+  const aPrevMap={};aPrev.forEach(function(x){aPrevMap[x.ad_id]=x;});
   const cInsMap={};cIns.forEach(x=>cInsMap[x.campaign_id]=x);
   const aInsMap={};aIns.forEach(x=>aInsMap[x.ad_id]=x);
   const campMap={};campaigns.forEach(x=>campMap[x.id]=x);
@@ -6918,41 +7857,133 @@ VIEWS.campaigns=async function(v,seg){
   const belongsToProj=function(c,acc){ return c.name&&acc.name&&String(c.name).trim().toLowerCase().startsWith(String(acc.name).trim().toLowerCase()); };
   const projRows=accounts.map(acc=>{
     const accCamps=campaigns.filter(c=>c.ad_account_id===acc.ad_account_id&&belongsToProj(c,acc));
-    let spend=0,impr=0,clicks=0,leads=0,reach=0,budget=0;
+    let spend=0,impr=0,clicks=0,leads=0,reach=0,budget=0,freqSum=0,freqN=0;
+    let pspend=0,pimpr=0,pclicks=0,pleads=0;
     accCamps.forEach(c=>{
       const i=cInsMap[c.id];
-      if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;}
-      budget+=Number(c.daily_budget)||Number(c.lifetime_budget)||0;
+      if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;const f=Number(i.frequency)||0;if(f>0){freqSum+=f;freqN++;}}
+      const p=cPrevMap[c.id];
+      if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclicks+=Number(p.clicks)||0;pleads+=Number(p.leads)||0;}
+      // budget counts ACTIVE campaigns only — paused ones aren't spending
+      if(cmpIsActive(c.status)) budget+=Number(c.daily_budget)||Number(c.lifetime_budget)||0;
     });
-    return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,ctr:impr?(clicks/impr*100):0,cpl:leads?(spend/leads):null};
+    return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,
+      freq:freqN?(freqSum/freqN):0,
+      ctr:impr?(clicks/impr*100):0,cpl:leads?(spend/leads):null,
+      pspend,pleads,pctr:pimpr?(pclicks/pimpr*100):0,pcpl:pleads?(pspend/pleads):null};
   });
-  CMP_LAST={accounts,campaigns,cInsMap,periodLabel,inr,num,ads,aInsMap,campMap};
+  CMP_LAST={accounts,campaigns,cInsMap,periodLabel,inr,num,ads,aInsMap,campMap,cPrevMap,aPrevMap};
   const totalSpend=projRows.reduce((s,r)=>s+r.spend,0);
   const totalImpr=projRows.reduce((s,r)=>s+r.impr,0);
   const totalClicks=projRows.reduce((s,r)=>s+r.clicks,0);
   const totalLeads=projRows.reduce((s,r)=>s+r.leads,0);
   const avgCtr=totalImpr?(totalClicks/totalImpr*100):0;
   const totalCpl=totalLeads?(totalSpend/totalLeads):null;
+  // previous-period totals (for the Trend pills)
+  const pTotSpend=cPrev.reduce((s,x)=>s+(Number(x.spend)||0),0);
+  const pTotImpr=cPrev.reduce((s,x)=>s+(Number(x.impressions)||0),0);
+  const pTotClicks=cPrev.reduce((s,x)=>s+(Number(x.clicks)||0),0);
+  const pTotLeads=cPrev.reduce((s,x)=>s+(Number(x.leads)||0),0);
+  const pTotReach=cPrev.reduce((s,x)=>s+(Number(x.reach)||0),0);
+  const pAvgCtr=pTotImpr?(pTotClicks/pTotImpr*100):0;
+  const pTotCpl=pTotLeads?(pTotSpend/pTotLeads):null;
+  const pAvgCpc=pTotClicks?(pTotSpend/pTotClicks):null;
+  const metaFreq=(function(){const f=projRows.map(r=>r.freq).filter(x=>x>0);return f.length?(f.reduce((a,b)=>a+b,0)/f.length):0;})();
+  const metaBudget=projRows.reduce((s,r)=>s+r.budget,0);
   const kpis=[['Spend ('+periodLabel+')',inr(totalSpend),accounts.length+' projects'],['Results (Leads)',num(totalLeads),''],['Cost / Lead',totalCpl!=null?inr(totalCpl):'—','',totalCpl!=null?'#16855a':'var(--slate)'],['Impressions',num(totalImpr),''],['Avg CTR',avgCtr.toFixed(2)+'%','',avgCtr>=1?'#16855a':'#c2410c']];
   let body;
-  if(ti===0){ body='<div class="m2grid">'+mCard('Spend by project ('+periodLabel+')','<div style="height:260px"><canvas id="cmpCh1"></canvas></div><div style="text-align:center;color:var(--slate);font-size:11.5px;margin-top:8px">Click a bar for campaign-level detail</div>')+mCard('Results (Leads) by project ('+periodLabel+')','<div style="height:260px"><canvas id="cmpCh2"></canvas></div><div style="text-align:center;color:var(--slate);font-size:11.5px;margin-top:8px">Click a bar for campaign-level detail</div>')+'</div>'; }
+  if(ti===0){ body='<div class="cmp-charts">'
+      +'<div class="cmp-chcard"><h4>Spend by project</h4><div class="sub">'+esc(periodLabel)+' · click a bar for campaign detail</div><div style="height:260px"><canvas id="cmpCh1"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Results (Leads) by project</h4><div class="sub">'+esc(periodLabel)+' · click a bar for campaign detail</div><div style="height:260px"><canvas id="cmpCh2"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Spend share</h4><div class="sub">where the budget is going</div><div style="height:260px"><canvas id="cmpCh3"></canvas></div></div>'
+      +'<div class="cmp-chcard"><h4>Cost per lead by project</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="cmpCh4"></canvas></div></div>'
+    +'</div>'; }
   else if(ti===1){
+    // Campaign-wise, with Active / Inactive filtering
+    const all=campaigns.map(function(c){
+      const acc=accounts.find(function(a){return a.ad_account_id===c.ad_account_id;});
+      const i=cInsMap[c.id]||null, p=cPrevMap[c.id]||null;
+      const spend=i?(Number(i.spend)||0):0, leads=i?(Number(i.leads)||0):0;
+      const budget=c.daily_budget!=null?Number(c.daily_budget):(c.lifetime_budget!=null?Number(c.lifetime_budget):null);
+      return {c:c,acc:acc,i:i,p:p,spend:spend,leads:leads,budget:budget,
+        cpl:leads?spend/leads:null,ctr:i&&i.ctr!=null?Number(i.ctr):null,
+        pspend:p?(Number(p.spend)||0):null,
+        pcpl:(p&&(Number(p.leads)||0))?((Number(p.spend)||0)/(Number(p.leads)||0)):null,
+        pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        active:cmpIsActive(c.status)};
+    }).filter(function(r){return r.acc;})
+      .filter(function(r){return CMP_CAMP_PROJECT==='all'||r.acc.ad_account_id===CMP_CAMP_PROJECT;});
+    const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
+    const shown=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(a,b){return b.spend-a.spend;});
+    const projBar='<div class="cmp-projbar"><select class="cmp-projsel" onchange="cmpSetCampProject(this.value)">'
+      +'<option value="all"'+(CMP_CAMP_PROJECT==='all'?' selected':'')+'>All Projects</option>'
+      +accounts.map(function(a){return '<option value="'+esc(a.ad_account_id)+'"'+(CMP_CAMP_PROJECT===a.ad_account_id?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')
+      +'</select></div>';
+    const rowsHtml=shown.length?shown.map(function(r){
+      const used=r.budget?Math.round(r.spend/r.budget*100):null;
+      return '<tr><td><div class="cmp-nm">'+esc(r.c.name||'—')+'</div><div class="cmp-sub">'+esc(r.acc.name)+(r.c.objective?(' · '+esc(String(r.c.objective).replace(/_/g,' ').toLowerCase())):'')+'</div></td>'
+        +'<td>'+(r.active?'<span class="cmp-fg ok"><i class="fa-solid fa-circle"></i> Active</span>':'<span class="cmp-fg na" style="color:#98a2b3"><i class="fa-solid fa-circle"></i> '+esc(r.c.status?String(r.c.status).charAt(0)+String(r.c.status).slice(1).toLowerCase():'Inactive')+'</span>')+'</td>'
+        +'<td class="num">'+(r.budget?(inr(r.budget)+(used!=null?'<div class="cmp-sub" style="text-align:right'+(used>100?';color:#c0392f':'')+'">'+used+'% used</div>':'')):'—')+'</td>'
+        +'<td class="num strong">'+inr(r.spend)+'</td>'
+        +'<td class="num">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+        +'<td class="num">'+num(r.leads)+'</td>'
+        +'<td class="num">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'
+        +'<td class="num">'+cmpTrend(r.cpl,r.pcpl,true)+'</td>'
+        +'<td class="num">'+(r.ctr!=null?r.ctr.toFixed(2)+'%':'—')+'</td>'
+        +'<td>'+cmpFatigue(r.i?(Number(r.i.frequency)||0):0,r.ctr,r.pctr)+'</td></tr>';
+    }).join(''):'<tr><td colspan="10" class="cmp-none">No campaigns match this filter</td></tr>';
+    body=projBar+cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Campaigns</span><h3>'+shown.length+' campaign'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Campaign</th><th>Status</th><th class="num">Budget</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Leads</th><th class="num">Cost / Lead</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
+  }
+  else if(ti===2){
     const sorted=projRows.slice().sort((a,b)=>b.spend-a.spend);
     body=sorted.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      ['Project','Campaigns','Spend','Budget','Results (Leads)','Cost / Lead','Impressions','Reach','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+      ['Project','Campaigns','Daily Budget','Spend','Trend','Results (Leads)','Cost / Lead','Reach','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
       '</tr></thead><tbody>'+
-      sorted.map(function(r){return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
+      sorted.map(function(r){
+        const used=r.budget?Math.round(r.spend/r.budget*100):null;
+        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
         '<td style="font-weight:600">'+esc(r.acc.name)+'</td>'+
         '<td style="text-align:right">'+r.campaigns+'</td>'+
-        '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-        '<td style="text-align:right">'+(r.budget?inr(r.budget)+'/day':'—')+'</td>'+
-        '<td style="text-align:right">'+num(r.leads)+'</td>'+
-        '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'+
-        '<td style="text-align:right">'+num(r.impr)+'</td>'+
+        '<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'+
+        '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+        '<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'+
+        '<td style="text-align:right">'+num(r.leads)+' '+cmpTrend(r.leads,r.pleads,false)+'</td>'+
+        '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'+
         '<td style="text-align:right">'+num(r.reach)+'</td>'+
         '<td style="text-align:right">'+r.ctr.toFixed(2)+'%</td>'+
+        '<td style="text-align:right">'+cmpFatigue(r.freq,r.ctr,r.pctr)+'</td>'+
       '</tr>';}).join('')+
       '</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No project data for this period</div></div>';
+  }
+  else if(ti===4){
+    // ---- Trend page ----
+    body=cmpTrendPage(projRows.map(function(r){return {name:r.acc.name,sub:r.campaigns+' campaign'+(r.campaigns===1?'':'s'),spend:r.spend,pspend:r.pspend,res:r.leads,pres:r.pleads,cpr:r.cpl,pcpr:r.pcpl};}),
+      {spend:totalSpend,pspend:pTotSpend,res:totalLeads,pres:pTotLeads,cpr:totalCpl,pcpr:pTotCpl,clk:totalClicks,pclk:pTotClicks,ctr:avgCtr,pctr:pAvgCtr},inr,num,'leads');
+  }
+  else if(ti===5){
+    // ---- Ad Fatigue page (per ad when available, else per campaign) ----
+    const fr=[];
+    ads.forEach(function(a){
+      const i=aInsMap[a.id]; if(!i)return;
+      const p=aPrevMap[a.id]||null;
+      const acc=accounts.find(function(x){return x.ad_account_id===a.ad_account_id;});
+      const camp=campMap[a.campaign_id];
+      fr.push({name:a.name||'Ad',sub:[(acc&&acc.name)||'',(camp&&camp.name)||''].filter(Boolean).join(' · '),
+        freq:Number(i.frequency)||0,ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+    });
+    if(!fr.length){
+      campaigns.forEach(function(c){
+        const i=cInsMap[c.id]; if(!i)return;
+        const p=cPrevMap[c.id]||null;
+        const acc=accounts.find(function(x){return x.ad_account_id===c.ad_account_id;});
+        fr.push({name:c.name||'Campaign',sub:(acc&&acc.name)||'',freq:Number(i.frequency)||0,
+          ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+          spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+      });
+    }
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta · per-person frequency + CTR trend');
   }
   else {
     const filteredAccIds=new Set((CMP_AD_PROJECT==='all'?accounts:accounts.filter(a=>a.ad_account_id===CMP_AD_PROJECT)).map(a=>a.ad_account_id));
@@ -6970,17 +8001,21 @@ VIEWS.campaigns=async function(v,seg){
     const curPage=Math.min(CMP_AD_PAGE,totalPages-1);
     const pageRows=allAdRows.slice(curPage*PAGE_SIZE,(curPage+1)*PAGE_SIZE);
     const tbl=pageRows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      ['Ad','Project','Campaign','Status','Spend','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+      ['Ad','Project','Campaign','Status','Spend','Trend','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
       '</tr></thead><tbody>'+
-      pageRows.map(function(r){return '<tr class="clk" onclick="cmpShowProjectAds(\''+r.acc.ad_account_id+'\')">'+
+      pageRows.map(function(r){
+        const p=aPrevMap[r.a.id]||null;
+        const pSp=p?(Number(p.spend)||0):null, pCt=p?(Number(p.ctr)||0):null;
+        return '<tr class="clk" onclick="cmpShowProjectAds(\''+r.acc.ad_account_id+'\')">'+
         '<td style="font-weight:600">'+esc(r.a.name)+'</td>'+
         '<td>'+esc(r.acc.name)+'</td>'+
         '<td>'+esc(r.camp.name)+'</td>'+
         '<td>'+esc(r.a.effective_status||r.a.status||'—')+'</td>'+
-        '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-        '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+        '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+        '<td style="text-align:right">'+cmpTrend(r.spend,pSp,false)+'</td>'+
         '<td style="text-align:right">'+num(r.i.clicks)+'</td>'+
         '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+        '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,pCt)+'</td>'+
       '</tr>';}).join('')+
       '</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No ad-level data for this project/period</div></div>';
     const pager=allAdRows.length>PAGE_SIZE?('<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px">'+
@@ -6990,14 +8025,56 @@ VIEWS.campaigns=async function(v,seg){
     '</div>'):'';
     body=projFilterBar+tbl+pager;
   }
-  v.innerHTML=cmpPeriodBar()+mHead('fa-bullhorn','#db2777','Campaign Analytics')+mKpis(kpis)+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
+  const totalReach=projRows.reduce((s,r)=>s+r.reach,0);
+  const avgCpc=totalClicks?(totalSpend/totalClicks):null;
+  // Scoped premium styling for the dashboard (re-injected with the view; harmless to repeat).
+  const cmpCss='<style>'
+    +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
+    +'@media(max-width:1100px){.cmp-kpis{grid-template-columns:repeat(3,1fr)}}'
+    +'@media(max-width:640px){.cmp-kpis{grid-template-columns:repeat(2,1fr);gap:10px}.cmp-kpi{padding:12px 13px}.cmp-kpi .kv{font-size:20px}.cmp-kpi .ki{width:30px;height:30px;font-size:13px}}'
+    +'.cmp-kpi{position:relative;background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:var(--shadow);overflow:hidden}'
+    +'.cmp-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,#db2777)}'
+    +'.cmp-kpi .kh{display:flex;align-items:center;justify-content:space-between;gap:8px}'
+    +'.cmp-kpi .ki{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--kbg,#fdf2f8);color:var(--kc,#db2777)}'
+    +'.cmp-kpi .kl{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--slate)}'
+    +'.cmp-kpi .kv{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--ink,#0f172a);margin-top:12px;line-height:1}'
+    +'.cmp-kpi .ks{font-size:11.5px;color:var(--slate);margin-top:5px;min-height:14px}'
+    +'.cmp-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}'
+    +'@media(max-width:900px){.cmp-charts{grid-template-columns:1fr}}'
+    +'.cmp-chcard{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:16px}'
+    +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
+    +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
+    +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
+    +'</style>';
+  const cmpKpi=function(icon,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
+  const kpiStrip='<div class="cmp-kpis">'
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(totalSpend),accounts.length+' project'+(accounts.length===1?'':'s'),'#db2777','#fdf2f8',cmpTrend(totalSpend,pTotSpend,false))
+    +cmpKpi('fa-wallet','Daily Budget',metaBudget?inr(metaBudget):'—','across campaigns','#6366f1','#eef2ff',metaBudget?('<span class="cmp-tr flat" title="Share of the daily budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(totalSpend/metaBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-user-plus','Results (Leads)',num(totalLeads),totalLeads?'generated':'no leads yet','#7c3aed','#f5f3ff',cmpTrend(totalLeads,pTotLeads,false))
+    +cmpKpi('fa-tags','Cost / Lead',totalCpl!=null?inr(totalCpl):'—','lower is better','#0ea5e9','#f0f9ff',cmpTrend(totalCpl,pTotCpl,true))
+    +cmpKpi('fa-eye','Impressions',num(totalImpr),'','#0891b2','#ecfeff',cmpTrend(totalImpr,pTotImpr,false))
+    +cmpKpi('fa-users','Reach',num(totalReach),(totalReach&&totalImpr)?((totalImpr/totalReach).toFixed(1)+'x seen on avg'):'','#0d9488','#f0fdfa',cmpTrend(totalReach,pTotReach,false))
+    +cmpKpi('fa-hand-pointer','Clicks',num(totalClicks),'','#2563eb','#eff6ff',cmpTrend(totalClicks,pTotClicks,false))
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'below 1%','#16a34a','#f0fdf4',cmpTrend(avgCtr,pAvgCtr,false))
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
+    +cmpKpi('fa-fire','Ad Fatigue',metaFreq?(metaFreq.toFixed(1)+'x'):'—','seen per person','#e11d48','#fff1f2',cmpFatigue(metaFreq,avgCtr,pAvgCtr))
+    +'</div>';
+  const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
+  const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
+  const showKpis=(ti!==4&&ti!==5);
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
     const accIds=projRows.map(r=>r.acc.ad_account_id);
     const clickPt=function(evt,elements){if(elements&&elements.length){cmpShowProject(accIds[elements[0].index]);}};
     const hoverPt=function(evt,elements){if(evt&&evt.native&&evt.native.target)evt.native.target.style.cursor=elements.length?'pointer':'default';};
-    try{new Chart(document.getElementById('cmpCh1'),{type:'bar',data:{labels,datasets:[{label:'Spend (₹)',data:projRows.map(r=>r.spend),backgroundColor:'#db2777',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}}}});}catch(e){}
-    try{new Chart(document.getElementById('cmpCh2'),{type:'bar',data:{labels,datasets:[{label:'Results (Leads)',data:projRows.map(r=>r.leads),backgroundColor:'#0A2640',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}}}});}catch(e){}
+    const palette=['#db2777','#7c3aed','#2563eb','#0891b2','#0d9488','#16a34a','#c2410c','#eab308','#e11d48','#4f46e5'];
+    const gy={grid:{color:'#f1f5f9'},ticks:{font:{size:11}}},gx={grid:{display:false},ticks:{font:{size:11}}};
+    try{new Chart(document.getElementById('cmpCh1'),{type:'bar',data:{labels,datasets:[{label:'Spend (₹)',data:projRows.map(r=>r.spend),backgroundColor:'#db2777',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('cmpCh2'),{type:'bar',data:{labels,datasets:[{label:'Leads',data:projRows.map(r=>r.leads),backgroundColor:'#0A2640',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+    try{new Chart(document.getElementById('cmpCh3'),{type:'doughnut',data:{labels,datasets:[{data:projRows.map(r=>r.spend),backgroundColor:labels.map(function(_,i){return palette[i%palette.length];}),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',onClick:clickPt,onHover:hoverPt,plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}}});}catch(e){}
+    try{new Chart(document.getElementById('cmpCh4'),{type:'bar',data:{labels,datasets:[{label:'Cost / Lead (₹)',data:projRows.map(r=>r.cpl!=null?Math.round(r.cpl):0),backgroundColor:'#0ea5e9',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,onClick:clickPt,onHover:hoverPt,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
   },60);}
 };
 VIEWS.scaling=function(v,seg){
@@ -7083,4 +8160,629 @@ VIEWS.mail=function(v,seg){
   v.innerHTML=mHead('fa-envelope','#475569',"Naren's Mail")+
     '<div class="card card-pad" style="background:#eff4ff;border-color:#cfe0ef;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-envelope"></i> Connected mailbox: <b>naren@thejaingroup.com</b> (demo). AI triage labels each mail and proposes the next action; converting a mail writes back into Accountability / CRM / Procurement via RPC.</div>'+
     mKpis(kpis)+'<div class="grid" style="grid-template-columns:210px 1fr;gap:16px;margin-top:16px">'+fol+list+'</div>';
+};
+
+/* ============================ TRANSCRIPTION ============================ */
+/* Upload a recording -> stored in S3 (portal/transcription/) -> transcribed
+   & analysed by Gladia (Hindi / English / Bengali, code-switching aware) via
+   the `transcription-analyze` edge function. Results land in acc.transcriptions. */
+const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',pa:'Punjabi'};
+const TR_TIMERS={};
+let TR_ROWS=null;
+function trLangName(c){return TR_LANG_NAMES[c]||(c?String(c).toUpperCase():'—');}
+function trLangTags(langs){if(!langs||!langs.length)return '<span style="color:var(--slate)">—</span>';return langs.map(function(c){return '<span class="tag t-blue" style="margin-right:4px">'+esc(trLangName(c))+'</span>';}).join('');}
+function trFmtDur(s){s=Number(s||0);if(!s)return '—';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.floor(s%60);const p=function(n){return (n<10?'0':'')+n;};return (h?h+':':'')+p(m)+':'+p(ss);}
+function trStatusTag(st){
+  if(st==='done')return '<span class="tag t-green"><i class="fa-solid fa-circle-check"></i> Ready</span>';
+  if(st==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
+  return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Processing</span>';
+}
+// Phone helpers (Indian mobile). Normalise to 10 digits, validate 6-9 start, pretty-print.
+function trPhoneNorm(s){s=String(s||'').replace(/[^\d]/g,'');if(s.length===12&&s.slice(0,2)==='91')s=s.slice(2);if(s.length===11&&s.charAt(0)==='0')s=s.slice(1);return s;}
+function trPhoneValid(s){return /^[6-9]\d{9}$/.test(trPhoneNorm(s));}
+function trPhoneFmt(s){const d=trPhoneNorm(s);if(/^[6-9]\d{9}$/.test(d))return '+91 '+d.slice(0,5)+' '+d.slice(5);return s?esc(String(s)):'—';}
+// Qualification / status badge shown in the list + detail.
+function trQualTag(r){
+  if(r.status==='processing')return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Analysing</span>';
+  if(r.status==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
+  if(r.qualification==='Qualified')return '<span class="tag t-green"><i class="fa-solid fa-circle-check"></i> Qualified</span>';
+  if(r.qualification==='Not Qualified')return '<span class="tag t-red"><i class="fa-solid fa-circle-xmark"></i> Not Qualified</span>';
+  return '<span class="tag t-gray">—</span>';
+}
+
+async function trFetch(force){
+  if(TR_ROWS&&!force)return TR_ROWS;
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').order('created_at',{ascending:false}).limit(200);TR_ROWS=data||[];}catch(e){TR_ROWS=[];}
+  return TR_ROWS;
+}
+
+/* ==========================================================================================
+   ORGANIC — Posts & Reels  (mirrors Business Suite > Content, for our own Pages + Instagram)
+   ========================================================================================== */
+let ORG_PERIOD='last_28d', ORG_SINCE='', ORG_UNTIL='', ORG_NET='all', ORG_KIND='all',
+    ORG_PAGE='all', ORG_SORT='date', ORG_Q='', ORG_PG=0, ORG_ROWS=null, ORG_PAGES=null, ORG_OPEN=false;
+const ORG_PER=25;
+const ORG_PRESETS=[
+  ['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_28d','Last 28 days'],['last_90d','Last 90 days'],
+  ['this_week','This week'],['this_month','This month'],['this_year','This year'],
+  ['last_week','Last week'],['last_month','Last month'],['lifetime','Lifetime'],['custom','Custom']
+];
+function orgDay(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function orgAdd(d,n){const x=new Date(d.getTime());x.setDate(x.getDate()+n);return x;}
+// Monday-start weeks, to match how Business Suite reports.
+function orgMonday(d){const x=new Date(d.getTime());const off=(x.getDay()+6)%7;x.setDate(x.getDate()-off);return x;}
+function orgRange(){
+  const today=new Date(); today.setHours(12,0,0,0);
+  const P=ORG_PERIOD;
+  if(P==='lifetime')   return {since:'',until:''};
+  if(P==='custom')     return {since:ORG_SINCE,until:ORG_UNTIL};
+  if(P==='yesterday'){ const d=orgAdd(today,-1); return {since:orgDay(d),until:orgDay(d)}; }
+  if(P==='last_7d')    return {since:orgDay(orgAdd(today,-7)),  until:orgDay(orgAdd(today,-1))};
+  if(P==='last_28d')   return {since:orgDay(orgAdd(today,-28)), until:orgDay(orgAdd(today,-1))};
+  if(P==='last_90d')   return {since:orgDay(orgAdd(today,-90)), until:orgDay(orgAdd(today,-1))};
+  if(P==='this_week')  return {since:orgDay(orgMonday(today)), until:orgDay(today)};
+  if(P==='this_month') return {since:orgDay(new Date(today.getFullYear(),today.getMonth(),1)), until:orgDay(today)};
+  if(P==='this_year')  return {since:orgDay(new Date(today.getFullYear(),0,1)), until:orgDay(today)};
+  if(P==='last_week'){ const m=orgMonday(today); return {since:orgDay(orgAdd(m,-7)), until:orgDay(orgAdd(m,-1))}; }
+  if(P==='last_month'){ const f=new Date(today.getFullYear(),today.getMonth()-1,1), l=new Date(today.getFullYear(),today.getMonth(),0);
+                        return {since:orgDay(f),until:orgDay(l)}; }
+  return {since:'',until:''};
+}
+function orgRangeLabel(){
+  if(ORG_PERIOD==='lifetime') return 'All time';
+  const r=orgRange(); if(!r.since||!r.until) return 'Pick two dates';
+  const f=function(s){const d=new Date(s+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});};
+  return r.since===r.until ? f(r.since) : (f(r.since)+' – '+f(r.until));
+}
+function orgPresetLabel(){ return ((ORG_PRESETS.find(function(p){return p[0]===ORG_PERIOD;})||[])[1])||'Custom'; }
+
+const ORG_CSS='<style id="orgCss">'
++'.org-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
++'.org-dp{position:relative}'
++'.org-dp-btn{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg-card);cursor:pointer;transition:.15s;min-width:0}'
++'.org-dp-btn:hover{border-color:var(--brand)}'
++'.org-dp.open .org-dp-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,#eef2ff)}'
++'.org-dp-btn i.cal{color:var(--brand);font-size:14px}'
++'.org-dp-lab{display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;min-width:0}'
++'.org-dp-lab b{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap}'
++'.org-dp-lab span{font-size:11px;color:var(--slate);white-space:nowrap}'
++'.org-dp-btn i.cv{margin-left:6px;color:var(--slate);font-size:11px;transition:transform .15s}'
++'.org-dp.open .org-dp-btn i.cv{transform:rotate(180deg)}'
++'.org-dp-pan{position:absolute;top:calc(100% + 6px);left:0;z-index:80;background:var(--bg-card);border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 38px rgba(15,23,42,.18);padding:9px;display:none;width:352px;max-width:92vw;box-sizing:border-box}'
++'.org-dp.open .org-dp-pan{display:block}'
++'.org-dp-list{display:grid;grid-template-columns:1fr 1fr;gap:3px}'
++'.org-dp-opt{padding:8px 11px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;white-space:nowrap;border:1px solid transparent}'
++'.org-dp-opt:hover{background:var(--bg,#f8fafc)}'
++'.org-dp-opt.on{background:var(--brand-a10,#eef2ff);color:var(--brand);border-color:var(--brand)}'
++'.org-dp-cus{border-top:1px solid var(--line);margin-top:8px;padding-top:10px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}'
++'.org-dp-cus label{display:flex;flex-direction:column;gap:4px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);flex:1 1 130px;min-width:0}'
++'.org-dp-cus input{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;font-family:inherit;color:var(--ink);background:var(--bg-card);width:100%;box-sizing:border-box}'
++'.org-dp-cus button{height:36px;padding:0 16px;border-radius:8px;border:0;background:var(--brand);color:#fff;font-size:13px;font-weight:700;cursor:pointer}'
++'.org-fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}'
++'.org-fbtn{height:34px;padding:0 13px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);font-size:12.5px;font-weight:600;color:var(--slate);cursor:pointer;transition:.14s;display:inline-flex;align-items:center;gap:6px}'
++'.org-fbtn:hover{border-color:var(--brand);color:var(--brand)}'
++'.org-fbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}'
++'.org-fbtn .n{font-size:11px;opacity:.75;font-weight:700}'
++'.org-search{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 12px;font-size:13px;font-family:inherit;min-width:190px;flex:1 1 190px;max-width:300px;background:var(--bg-card);color:var(--ink);box-sizing:border-box}'
++'.org-sel{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 30px 0 11px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%2364748b\' stroke-width=\'1.8\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}'
++'.org-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px;margin-bottom:16px}'
++'.org-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}'
++'.org-kpi .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:6px}'
++'.org-kpi .v{font-size:22px;font-weight:800;color:var(--ink);margin-top:5px;letter-spacing:-.02em}'
++'.org-kpi .s{font-size:11.5px;color:var(--slate);margin-top:2px}'
++'.org-tblwrap{border:1px solid var(--line);border-radius:12px;overflow-x:auto;background:var(--bg-card)}'
++'.org-tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}'
++'.org-tbl th{text-align:left;padding:11px 13px;background:var(--bg,#f8fafc);color:var(--slate);font-weight:700;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line);position:sticky;top:0}'
++'.org-tbl th.n,.org-tbl td.n{text-align:right}'
++'.org-tbl td{padding:11px 13px;border-bottom:1px solid var(--line);color:var(--ink);vertical-align:middle}'
++'.org-tbl tbody tr{cursor:pointer;transition:background .12s}'
++'.org-tbl tbody tr:hover{background:var(--bg,#f8fafc)}'
++'.org-tbl tbody tr:last-child td{border-bottom:0}'
++'.org-post{display:flex;align-items:center;gap:11px;min-width:0;max-width:390px}'
++'.org-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:var(--bg,#f1f5f9);border:1px solid var(--line)}'
++'.org-thumb-ph{width:44px;height:44px;border-radius:8px;flex:none;background:var(--bg,#f1f5f9);border:1px solid var(--line);display:grid;place-items:center;color:#cbd5e1;font-size:15px}'
++'.org-ptxt{min-width:0}'
++'.org-ptxt b{display:block;font-size:13px;font-weight:600;color:var(--ink);line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}'
++'.org-ptxt span{font-size:11.5px;color:var(--slate)}'
++'.org-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:capitalize;white-space:nowrap}'
++'.org-tag.reel{background:#fae8ff;color:#a21caf}.org-tag.video{background:#e0e7ff;color:#3730a3}.org-tag.photo{background:#dcfce7;color:#166534}'
++'.org-tag.carousel{background:#fef3c7;color:#92400e}.org-tag.link{background:#e0f2fe;color:#075985}.org-tag.post,.org-tag.status{background:#f1f5f9;color:#475569}'
++'.org-net{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--slate);white-space:nowrap}'
++'.org-net i.fa-facebook{color:#1877f2}.org-net i.fa-instagram{color:#e1306c}'
++'.org-er{font-weight:700}'
++'.org-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}'
++'.org-pager .info{font-size:12.5px;color:var(--slate)}'
++'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
++'.org-pager button:disabled{opacity:.45;cursor:not-allowed}'
++'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
++'.org-empty i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
++'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
++'.org-dtl-f .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
++'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px}'
++'@media(max-width:760px){.org-dp-list{grid-template-columns:1fr}.org-kpi .v{font-size:19px}.org-post{max-width:220px}}'
++'</style>';
+
+function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).replace(/\.00$/,'')+' Cr'; if(n>=1e5)return (n/1e5).toFixed(2).replace(/\.00$/,'')+' L'; if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k'; return String(n);}
+function orgDT(s){ if(!s)return '—'; try{return new Date(s).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(s);} }
+function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(r.shares)||0)+(Number(r.saves)||0); }
+function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : 0; }
+
+window.orgToggleDp=function(e){ if(e)e.stopPropagation(); ORG_OPEN=!ORG_OPEN; renderPage(); };
+window.orgSetPeriod=function(p){
+  ORG_PERIOD=p; ORG_PG=0;
+  if(p==='custom'){ if(!ORG_SINCE||!ORG_UNTIL){ const r=orgRange(); const t=new Date(); ORG_UNTIL=orgDay(t); ORG_SINCE=orgDay(orgAdd(t,-27)); } renderPage(); return; }
+  ORG_OPEN=false; renderPage();
+};
+window.orgApplyCustom=function(){
+  const a=document.getElementById('orgFrom'), b=document.getElementById('orgTo');
+  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); return; }
+  if(a.value>b.value){ toast('The From date must come before the To date','warn'); return; }
+  ORG_SINCE=a.value; ORG_UNTIL=b.value; ORG_PERIOD='custom'; ORG_OPEN=false; ORG_PG=0; renderPage();
+};
+window.orgSetNet=function(n){ORG_NET=n;ORG_PG=0;renderPage();};
+window.orgSetKind=function(k){ORG_KIND=k;ORG_PG=0;renderPage();};
+window.orgSetPageId=function(v){ORG_PAGE=v;ORG_PG=0;renderPage();};
+window.orgSetSort=function(v){ORG_SORT=v;ORG_PG=0;renderPage();};
+window.orgSearch=function(v){ORG_Q=v;ORG_PG=0;
+  clearTimeout(window._orgQT); window._orgQT=setTimeout(function(){renderPage(); const el=document.getElementById('orgQ'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} },320);
+};
+window.orgGo=function(d){ORG_PG=Math.max(0,ORG_PG+d);renderPage();};
+
+window.orgSync=async function(){
+  const btn=document.getElementById('orgSyncBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Syncing…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const r=orgRange();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(ORG_PERIOD==='lifetime'?{full:true}:{since:r.since,until:r.until})});
+    const jr=await res.json().catch(function(){return{};});
+    if(jr.error){ toast(jr.error,'err'); }
+    else { toast('Synced '+(jr.posts||0)+' posts, '+(jr.reels||0)+' reels'+(jr.ig?', '+jr.ig+' Instagram':''),'ok');
+           if((jr.errors||[]).length) console.warn('organic sync notes:',jr.errors); }
+  }catch(e){ toast('Sync failed: '+((e&&e.message)||e),'err'); }
+  ORG_ROWS=null; renderPage();
+};
+
+window.orgOpen=function(id){
+  const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);}); if(!r)return;
+  const rx=r.reactions||{};
+  const f=function(k,v){return '<div class="org-dtl-f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(r.kind||'Post')+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="min-width:min(94vw,640px)">'
+      +(r.thumbnail?'<img src="'+esc(r.thumbnail)+'" style="width:100%;max-height:230px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:12px">':'')
+      +'<div style="font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;max-height:170px;overflow:auto">'+esc(r.message||'(no caption)')+'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
+      +'<div class="org-dtl-grid">'
+        +f('Reach',orgN(r.reach))+f('Impressions',orgN(r.impressions))
+        +f('Engaged users',orgN(r.engaged_users))+f('Engagement rate',orgER(r).toFixed(2)+'%')
+        +f('Likes',orgN(r.likes))+f('Comments',orgN(r.comments))
+        +f('Shares',orgN(r.shares))+f('Saves',orgN(r.saves))
+        +f('Link clicks',orgN(r.clicks))+f('Negative feedback',orgN(r.negative_feedback))
+        +(r.impressions_organic||r.impressions_paid?f('Organic reach',orgN(r.impressions_organic))+f('Paid reach',orgN(r.impressions_paid)):'')
+        +(r.video_views?f('Video views',orgN(r.video_views))+f('Avg watch time',((Number(r.video_avg_watch_ms)||0)/1000).toFixed(1)+'s'):'')
+        +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
+           ?f('Reactions','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
+      +'</div>'
+    +'</div>'
+    +'<div class="modal-foot">'+(r.permalink?'<a class="btn" target="_blank" rel="noopener" href="'+esc(r.permalink)+'"><i class="fa-solid fa-arrow-up-right-from-square"></i> View on '+(r.network==='instagram'?'Instagram':'Facebook')+'</a>':'')
+      +'<button class="btn primary" onclick="closeModal()">Close</button></div>','md');
+};
+
+function orgDatePicker(){
+  const opts=ORG_PRESETS.map(function(p){
+    return '<div class="org-dp-opt'+(ORG_PERIOD===p[0]?' on':'')+'" onclick="event.stopPropagation();orgSetPeriod(\''+p[0]+'\')">'+esc(p[1])+'</div>';
+  }).join('');
+  const cus=ORG_PERIOD==='custom'
+    ? '<div class="org-dp-cus" onclick="event.stopPropagation()">'
+      +'<label>From<input type="date" id="orgFrom" value="'+esc(ORG_SINCE||'')+'"></label>'
+      +'<label>To<input type="date" id="orgTo" value="'+esc(ORG_UNTIL||'')+'"></label>'
+      +'<button onclick="orgApplyCustom()">Apply</button></div>'
+    : '';
+  return '<div class="org-dp'+(ORG_OPEN?' open':'')+'" id="orgDp">'
+    +'<div class="org-dp-btn" onclick="orgToggleDp(event)">'
+      +'<i class="fa-regular fa-calendar cal"></i>'
+      +'<span class="org-dp-lab"><b>'+esc(orgPresetLabel())+'</b><span>'+esc(orgRangeLabel())+'</span></span>'
+      +'<i class="fa-solid fa-chevron-down cv"></i></div>'
+    +'<div class="org-dp-pan"><div class="org-dp-list">'+opts+'</div>'+cus+'</div></div>';
+}
+
+VIEWS.organic=async function(v,seg){
+  setCrumb(['Growth & Strategy','Posts & Reels']);
+  const tabs=['Overview','All content','Top performers'];
+  const ti=mTab(seg,tabs.length);
+  if(!window._orgDocWired){ window._orgDocWired=true;
+    document.addEventListener('click',function(e){ if(ORG_OPEN && !(e.target&&e.target.closest&&e.target.closest('.org-dp'))){ ORG_OPEN=false; renderPage(); } });
+  }
+  v.innerHTML=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels')+'<div class="loader"><div class="spin"></div></div>';
+
+  if(!ORG_PAGES){ try{ const {data}=await sb.schema('camp').from('social_pages').select('*').order('name'); ORG_PAGES=data||[]; }catch(e){ ORG_PAGES=[]; } }
+  if(!ORG_ROWS){ try{ const {data}=await sb.schema('camp').from('social_posts').select('*').order('created_time',{ascending:false}).limit(3000); ORG_ROWS=data||[]; }catch(e){ ORG_ROWS=[]; } }
+
+  const R=orgRange();
+  let rows=(ORG_ROWS||[]).filter(function(r){
+    if(R.since && r.created_time && String(r.created_time).slice(0,10) < R.since) return false;
+    if(R.until && r.created_time && String(r.created_time).slice(0,10) > R.until) return false;
+    if(ORG_NET!=='all'  && r.network!==ORG_NET) return false;
+    if(ORG_KIND!=='all' && r.kind!==ORG_KIND) return false;
+    if(ORG_PAGE!=='all' && String(r.page_id)!==String(ORG_PAGE)) return false;
+    if(ORG_Q){ const q=ORG_Q.toLowerCase(); if(!String(r.message||'').toLowerCase().includes(q) && !String(r.page_name||'').toLowerCase().includes(q)) return false; }
+    return true;
+  });
+  const S=ORG_SORT;
+  rows.sort(function(a,b){
+    if(S==='reach')       return (Number(b.reach)||0)-(Number(a.reach)||0);
+    if(S==='impressions') return (Number(b.impressions)||0)-(Number(a.impressions)||0);
+    if(S==='engagement')  return orgEng(b)-orgEng(a);
+    if(S==='er')          return orgER(b)-orgER(a);
+    if(S==='likes')       return (Number(b.likes)||0)-(Number(a.likes)||0);
+    if(S==='comments')    return (Number(b.comments)||0)-(Number(a.comments)||0);
+    return String(b.created_time||'').localeCompare(String(a.created_time||''));
+  });
+
+  const tot=rows.reduce(function(a,r){
+    a.reach+=Number(r.reach)||0; a.imp+=Number(r.impressions)||0; a.eng+=orgEng(r);
+    a.likes+=Number(r.likes)||0; a.comments+=Number(r.comments)||0; a.shares+=Number(r.shares)||0;
+    a.saves+=Number(r.saves)||0; a.clicks+=Number(r.clicks)||0; a.vv+=Number(r.video_views)||0;
+    return a;
+  },{reach:0,imp:0,eng:0,likes:0,comments:0,shares:0,saves:0,clicks:0,vv:0});
+  const avgER=tot.reach?(tot.eng/tot.reach*100):0;
+
+  const kpi=function(icon,k,val,sub){return '<div class="org-kpi"><div class="k"><i class="fa-solid '+icon+'"></i> '+k+'</div><div class="v">'+val+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';};
+  const kpis='<div class="org-kpis">'
+    +kpi('fa-layer-group','Content',String(rows.length),'posts & reels')
+    +kpi('fa-users','Reach',orgN(tot.reach),'unique people')
+    +kpi('fa-eye','Impressions',orgN(tot.imp),'total views')
+    +kpi('fa-heart','Engagement',orgN(tot.eng),'likes+comments+shares')
+    +kpi('fa-percent','Engagement rate',avgER.toFixed(2)+'%','of reach')
+    +kpi('fa-thumbs-up','Likes',orgN(tot.likes),'')
+    +kpi('fa-comment','Comments',orgN(tot.comments),'')
+    +kpi('fa-share','Shares',orgN(tot.shares),'')
+    +(tot.saves?kpi('fa-bookmark','Saves',orgN(tot.saves),''):'')
+    +(tot.clicks?kpi('fa-arrow-pointer','Link clicks',orgN(tot.clicks),''):'')
+    +(tot.vv?kpi('fa-play','Video views',orgN(tot.vv),''):'')
+    +'</div>';
+
+  // filter bar
+  const kinds=['all','post','photo','video','reel','carousel','link'];
+  const kc={}; rows.forEach(function(r){kc[r.kind]=(kc[r.kind]||0)+1;});
+  const kbtns=kinds.map(function(k){
+    const n=k==='all'?rows.length:(kc[k]||0);
+    if(k!=='all'&&!n&&ORG_KIND!==k) return '';
+    return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(k==='all'?'All types':k)+'<span class="n">'+n+'</span></button>';
+  }).join('');
+  const nbtns=[['all','All'],['facebook','Facebook'],['instagram','Instagram']].map(function(n){
+    return '<button class="org-fbtn'+(ORG_NET===n[0]?' on':'')+'" onclick="orgSetNet(\''+n[0]+'\')">'+esc(n[1])+'</button>';
+  }).join('');
+  const pageSel='<select class="org-sel" onchange="orgSetPageId(this.value)"><option value="all"'+(ORG_PAGE==='all'?' selected':'')+'>All pages</option>'
+    +(ORG_PAGES||[]).map(function(p){return '<option value="'+esc(p.id)+'"'+(String(ORG_PAGE)===String(p.id)?' selected':'')+'>'+esc(p.name||p.id)+'</option>';}).join('')+'</select>';
+  const sortSel='<select class="org-sel" onchange="orgSetSort(this.value)">'
+    +[['date','Newest first'],['reach','Most reach'],['impressions','Most impressions'],['engagement','Most engagement'],['er','Best engagement rate'],['likes','Most likes'],['comments','Most comments']]
+      .map(function(o){return '<option value="'+o[0]+'"'+(ORG_SORT===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
+
+  const bar='<div class="org-bar">'+orgDatePicker()
+    +'<button class="btn" id="orgSyncBtn" onclick="orgSync()"><i class="fa-solid fa-rotate"></i> Sync now</button>'
+    +'<input class="org-search" id="orgQ" placeholder="Search caption or page…" value="'+esc(ORG_Q)+'" oninput="orgSearch(this.value)">'
+    +pageSel+sortSel+'</div>'
+    +'<div class="org-bar">'+nbtns+'<span style="width:8px"></span>'+kbtns+'</div>';
+
+  // ---- body ----
+  let body='';
+  if(!rows.length){
+    const anyData=(ORG_ROWS||[]).length>0;
+    body='<div class="org-empty"><i class="fa-regular fa-folder-open"></i>'
+      +(anyData?'No posts in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.'
+               :'Nothing synced yet.<br>Press <b>Sync now</b> — if it reports a token problem, the system user needs the Pages assigned plus <b>pages_show_list</b>, <b>pages_read_engagement</b> and <b>pages_read_user_content</b>.')
+      +'</div>';
+  } else if(ti===0){
+    // Overview: breakdown by type and by page
+    const byKind={}; rows.forEach(function(r){ const k=r.kind||'post'; (byKind[k]=byKind[k]||{n:0,reach:0,eng:0}); byKind[k].n++; byKind[k].reach+=Number(r.reach)||0; byKind[k].eng+=orgEng(r); });
+    const byPage={}; rows.forEach(function(r){ const k=r.page_name||'—'; (byPage[k]=byPage[k]||{n:0,reach:0,eng:0}); byPage[k].n++; byPage[k].reach+=Number(r.reach)||0; byPage[k].eng+=orgEng(r); });
+    const tbl=function(title,obj,lbl){
+      const keys=Object.keys(obj).sort(function(a,b){return obj[b].reach-obj[a].reach;});
+      return '<div class="org-tblwrap" style="margin-bottom:14px"><table class="org-tbl" style="min-width:520px"><thead><tr><th>'+lbl+'</th><th class="n">Posts</th><th class="n">Reach</th><th class="n">Engagement</th><th class="n">Eng. rate</th></tr></thead><tbody>'
+        +keys.map(function(k){const o=obj[k];return '<tr style="cursor:default"><td><b>'+esc(k)+'</b></td><td class="n">'+o.n+'</td><td class="n">'+orgN(o.reach)+'</td><td class="n">'+orgN(o.eng)+'</td><td class="n org-er">'+(o.reach?(o.eng/o.reach*100).toFixed(2):'0.00')+'%</td></tr>';}).join('')
+        +'</tbody></table></div>';
+    };
+    body=tbl('type',byKind,'Content type')+tbl('page',byPage,'Page');
+  } else {
+    const list=(ti===2)?rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,20):rows;
+    const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
+    if(ORG_PG>=pages)ORG_PG=pages-1;
+    const slice=(ti===2)?list:list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
+    body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
+      +'<th>Content</th><th>Type</th><th>Where</th><th>Date</th>'
+      +'<th class="n">Reach</th><th class="n">Impr.</th><th class="n">Likes</th><th class="n">Comm.</th><th class="n">Shares</th><th class="n">Eng. rate</th></tr></thead><tbody>'
+      +slice.map(function(r){
+        const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;org-thumb-ph&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>\'">'
+                               :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
+        const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
+        return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
+          +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div></div></td>'
+          +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(r.kind||'post')+'</span></td>'
+          +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
+          +'<td style="white-space:nowrap;font-size:12.5px;color:var(--slate)">'+orgDT(r.created_time)+'</td>'
+          +'<td class="n">'+orgN(r.reach)+'</td><td class="n">'+orgN(r.impressions)+'</td>'
+          +'<td class="n">'+orgN(r.likes)+'</td><td class="n">'+orgN(r.comments)+'</td><td class="n">'+orgN(r.shares)+'</td>'
+          +'<td class="n org-er">'+orgER(r).toFixed(2)+'%</td></tr>';
+      }).join('')+'</tbody></table></div>'
+      +(ti===2?'':'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
+        +'<span><button onclick="orgGo(-1)"'+(ORG_PG<=0?' disabled':'')+'><i class="fa-solid fa-chevron-left"></i> Previous</button> '
+        +'<button onclick="orgGo(1)"'+(ORG_PG>=pages-1?' disabled':'')+'>Next <i class="fa-solid fa-chevron-right"></i></button></span></div>');
+  }
+
+  v.innerHTML=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels')+bar+mTabs('organic',tabs,ti)
+    +'<div style="margin-top:14px">'+(rows.length?kpis:'')+body+'</div>';
+};
+
+VIEWS.transcription=async function(v,seg){
+  setCrumb(['Growth & Strategy','Transcription']);
+  if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
+    +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>'
+    +'<div id="trKpis"></div>'
+    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+  const rows=await trFetch(true);
+  trRenderList();
+  rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
+};
+
+function trRenderList(){
+  const rows=TR_ROWS||[];
+  const kh=$('trKpis');
+  if(kh){
+    const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
+    const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
+    const proc=rows.filter(function(r){return r.status==='processing';}).length;
+    kh.innerHTML=mKpis([
+      ['Calls',String(rows.length),'all time'],
+      ['Qualified',String(qual),'leads matched','#16a34a'],
+      ['Not Qualified',String(notq),'did not match','#dc2626'],
+      ['Processing',String(proc),proc?'in progress':'all clear',proc?'#d97706':'#16a34a'],
+    ]);
+  }
+  const host=$('trRows');if(!host)return;
+  if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  host.innerHTML=rows.map(function(r){
+    const fname=r.file_name||'Recording';
+    const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+    // Main line = the recording's file name (truncated with … if too long, full name on hover);
+    // below it = the detected customer name, when the call identified one.
+    const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+    return '<tr'+clickable+'>'
+      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
+      +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+      +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
+      +'<td>'+trLangTags(r.languages)+'</td>'
+      +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
+      +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
+      +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+        +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
+        +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
+      +'</td></tr>';
+  }).join('');
+}
+
+async function trPollOnce(id){
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'poll',id:id})});
+  return res.json().catch(function(){return null;});
+}
+function trStartPolling(id){
+  if(TR_TIMERS[id])return;
+  const tick=async function(){
+    let out=null;try{out=await trPollOnce(id);}catch(e){}
+    if(out&&out.row){const i=(TR_ROWS||[]).findIndex(function(x){return x.id===out.row.id;});if(i>=0)TR_ROWS[i]=out.row;}
+    const st=out&&(out.status||(out.row&&out.row.status));
+    if(st==='done'||st==='error'){delete TR_TIMERS[id];if(PAGE==='transcription')renderPage();return;}
+    TR_TIMERS[id]=setTimeout(tick,6000);
+  };
+  TR_TIMERS[id]=setTimeout(tick,3000);
+}
+
+window.trDelete=async function(id){
+  const ok=await confirmDialog('Delete this recording and its transcript? This cannot be undone.');
+  if(!ok)return;
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  TR_ROWS=(TR_ROWS||[]).filter(function(x){return x.id!==id;});
+  trRenderList();
+  try{await sb.schema('acc').from('transcriptions').delete().eq('id',id);}catch(e){}
+  if(r&&r.s3_path)try{s3Delete(r.s3_path);}catch(e){}
+  toast('Recording deleted','ok');
+};
+
+// Re-run analysis on a failed row using the recording already in S3 — no re-upload needed.
+window.trRetry=async function(id){
+  const i=(TR_ROWS||[]).findIndex(function(x){return x.id===id;});
+  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList(); }
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  try{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'retry',id:id})});
+    const out=await res.json().catch(function(){return {};});
+    if(!res.ok||!out.row) throw new Error(out.error||'could not retry');
+    trStartPolling(id);
+    toast('Retrying…','ok');
+  }catch(e){
+    toast('Could not retry: '+((e&&e.message)||e),'err');
+    if(i>=0){ TR_ROWS[i].status='error'; trRenderList(); }
+  }
+};
+
+window.trUploadModal=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload call recordings</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — pick up to 50 at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
+    +'<input type="file" id="trFile" class="hidden" multiple accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
+    +'<div id="trFileList" style="margin-top:12px"></div>'
+    +'<div id="trUpMsg" style="margin-top:10px"></div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="trUpBtn" onclick="trUploadStart()" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify</button></div>','md');
+};
+window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();for(let i=0;i<dt.files.length;i++)buf.items.add(dt.files[i]);inp.files=buf.files;trUpPick();};
+window.trUpPick=function(){
+  const files=Array.prototype.slice.call(($('trFile').files)||[]);
+  const over=files.length>50;const n=Math.min(files.length,50);
+  $('trUpName').textContent=files.length?(files.length===1?files[0].name:(files.length+' files selected'+(over?' — first 50 will be used':''))):'Drag & drop or click to select recordings — pick up to 50 at once';
+  const list=$('trFileList');
+  if(list){
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Selected recording'+(n>1?'s':'')+'</label>'
+      +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
+      +files.slice(0,50).map(function(f,i){
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+          +'<i class="fa-solid fa-file-audio" style="color:#0d9488"></i>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(f.name)+'">'+esc(f.name)+'</div></div>'
+          +'</div>';
+      }).join('')+'</div>'
+      +(over?'<div style="font-size:12px;color:#d97706;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> You picked '+files.length+' files — only the first 50 upload at a time.</div>':'')):'';
+  }
+  trUpValidate();
+};
+window.trUpValidate=function(){
+  // No phone field anymore — just enable the button once at least one recording is picked.
+  const n=Math.min((($('trFile').files||[]).length),50);
+  const btn=$('trUpBtn');if(btn){btn.disabled=!(n>0);btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
+};
+// Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
+// domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
+// fall back to the server-side proxy so it still uploads from anywhere.
+// Read an audio/video file's duration (seconds) in the browser, so the list shows real length.
+function trAudioDuration(file){return new Promise(function(resolve){try{const el=document.createElement('audio');el.preload='metadata';const url=URL.createObjectURL(file);let done=false;const fin=function(d){if(done)return;done=true;try{URL.revokeObjectURL(url);}catch(_){}resolve(d);};el.onloadedmetadata=function(){const d=el.duration;fin(isFinite(d)&&d>0?Math.round(d):null);};el.onerror=function(){fin(null);};setTimeout(function(){fin(null);},8000);el.src=url;}catch(e){resolve(null);}});}
+async function trUploadOne(f,token){
+  const key=s3KeyForTranscription(f.name);
+  let path=null;
+  try{ const up=await uploadFileToS3(key,f); if(up&&up.data&&up.data.path) path=up.data.path; }catch(_e){}
+  if(!path){
+    const up=await fetch(SUPABASE_URL+'/functions/v1/transcription-upload?key='+encodeURIComponent(key),{method:'POST',headers:{'Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY,'Content-Type':f.type||'application/octet-stream'},body:f});
+    const uj=await up.json().catch(function(){return {};});
+    if(!up.ok||!uj.path) throw new Error(uj.error||'upload failed');
+    path=uj.path;
+  }
+  return path;
+}
+window.trUploadStart=async function(){
+  let files=Array.prototype.slice.call(($('trFile').files)||[]);
+  if(!files.length){toast('Select at least one recording','err');return;}
+  if(files.length>50)files=files.slice(0,50);
+  // Phone field removed — the caller's name/number is picked up from the call itself.
+  const phones=files.map(function(){return null;});
+  const btn=$('trUpBtn');if(btn)btn.disabled=true;
+  const msg=$('trUpMsg');
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  const total=files.length;let done=0,failed=0,idx=0;
+  const paint=function(){const pct=Math.round((done+failed)/total*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">Processed '+(done+failed)+' of '+total+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
+  paint();
+  const worker=async function(){
+    while(idx<files.length){
+      const i=idx++;const f=files[i];
+      try{
+        const dur=await trAudioDuration(f);
+        const path=await trUploadOne(f,token);
+        const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size,duration:dur})});
+        const out=await res.json().catch(function(){return {};});
+        if(!res.ok||!out.row) throw new Error(out.error||'could not start');
+        if(!TR_ROWS)TR_ROWS=[];
+        TR_ROWS.unshift(out.row);
+        trStartPolling(out.row.id);
+        done++;
+      }catch(e){ failed++; }
+      paint();
+    }
+  };
+  const K=Math.min(4,files.length);
+  await Promise.all(Array.from({length:K},function(){return worker();}));
+  toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
+  closeModal();
+  if(PAGE==='transcription')renderPage();
+};
+
+async function trDetail(v,id){
+  setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Recording']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  let r=null;
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').eq('id',id).single();r=data;}catch(e){}
+  if(!r){v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Recording not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription\')">Back</button></div>';return;}
+  const phone=r.phone||r.title||'';
+  const name=phone?trPhoneFmt(phone):(r.file_name||'Recording');
+  const a=r.analysis||{};
+  const sub=(r.customer_name?esc(r.customer_name)+' · ':'')+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0]);
+  const qb=r.qualification==='Qualified';
+  const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+    +'<div id="trAudio" style="margin:6px 0 16px"></div>'
+    +banner
+    +mKpis([
+      ['Duration',trFmtDur(r.duration_seconds),''],
+      ['Languages',(r.languages&&r.languages.length?r.languages.map(trLangName).join(', '):'—'),'detected'],
+      ['Project',(r.project&&r.project!=='Unclear'?r.project:'—'),'discussed'],
+      ['Speakers',String(a.num_speakers||0),'diarised'],
+    ])
+    +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trGrid">'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Qualification checklist</div>'+trCriteriaHtml(r)+'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+trAnalysisHtml(r)+'</div></div>'
+    +'</div>'
+    +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>';
+  TR_DETAIL_ROW=r;
+  const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
+  if(r.s3_path){
+    try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
+  }
+}
+
+function trCriteriaHtml(r){
+  const c=r.criteria||{};
+  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+  return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it,idx){
+    const ok=c[it[0]]===true;
+    const badge=(idx===0)?'<span style="font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 5px;margin-left:6px">PRIORITY</span>':'';
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+badge+'</div>';
+  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match.</div></div>';
+}
+function trAnalysisHtml(r){
+  const a=r.analysis||{};
+  const lb=a.language_breakdown||{};
+  const rows=[];
+  const langKeys=Object.keys(lb);
+  if(langKeys.length){
+    const total=langKeys.reduce(function(s,k){return s+lb[k];},0)||1;
+    rows.push('<div style="font-size:12px;color:var(--slate);margin-bottom:6px">Language mix (by utterances)</div>');
+    langKeys.sort(function(x,y){return lb[y]-lb[x];}).forEach(function(k){
+      const pct=Math.round(lb[k]/total*100);
+      rows.push('<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>'+esc(trLangName(k))+'</span><span style="color:var(--slate)">'+pct+'%</span></div><div style="height:7px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:#0d9488"></div></div></div>');
+    });
+  }
+  if(Array.isArray(a.entities)&&a.entities.length){
+    const ents=a.entities.slice(0,24).map(function(e){return '<span class="tag t-gray" style="margin:0 4px 4px 0">'+esc(e.text||e.value||e.entity||'')+'</span>';}).join('');
+    if(ents.trim())rows.push('<div style="font-size:12px;color:var(--slate);margin:12px 0 6px">Key entities mentioned</div><div>'+ents+'</div>');
+  }
+  if(!rows.length)return '<div style="color:var(--slate);font-size:13px">No additional analysis available.</div>';
+  return rows.join('');
+}
+
+let TR_DETAIL_ROW=null;
+function trTranscriptHtml(r,lang){
+  const txt=(lang==='bn')?(r.transcript_bn||r.transcript||''):(r.transcript_en||r.transcript||'');
+  if(txt)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(txt)+'</div>';
+  return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
+}
+window.trSetLang=function(lang){
+  if(!TR_DETAIL_ROW)return;
+  const b=$('trTranscriptBody');if(b)b.innerHTML=trTranscriptHtml(TR_DETAIL_ROW,lang);
+  const en=$('trLangEn'),bn=$('trLangBn');
+  if(en)en.className='btn btn-sm'+(lang==='en'?' btn-primary':'');
+  if(bn)bn.className='btn btn-sm'+(lang==='bn'?' btn-primary':'');
+};
+
+window.trDownload=async function(id){
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  let path=r&&r.s3_path;
+  if(!path){try{const {data}=await sb.schema('acc').from('transcriptions').select('s3_path,file_name').eq('id',id).single();if(data){path=data.s3_path;}}catch(e){}}
+  if(!path){toast('Recording file not available','err');return;}
+  s3OpenSigned(path,(r&&r.file_name)||undefined);
 };

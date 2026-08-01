@@ -9,3 +9,6 @@ node_modules/
 # Generated reports with real business/employee data — not meant for version control
 *.xlsx
 *.xls
+
+# Local Claude Code settings — not meant for version control
+.claude/
