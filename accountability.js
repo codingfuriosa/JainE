@@ -44,7 +44,7 @@
     .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
     .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
     .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
-    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:7px;border-bottom:0;padding:2px 2px 6px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:12.5px;gap:5px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}}
+    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:8px;border-bottom:0;padding:2px 2px 8px;margin-bottom:12px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:9px 15px;font-size:13px;gap:7px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand);color:var(--brand)}}
     .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
     .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
     .ac-pbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
@@ -1029,34 +1029,26 @@
     }catch(e){ toast('Could not save workflow: '+((e&&e.message)||e),'err'); }
   };
 
+  // A timeline card is deliberately minimal: step name, status, who, how long. No department, no
+  // action buttons — Revert and Reject live on the person's own task page, and the received/done
+  // timestamps are on the status pills in the table. Keeps the card short on a phone even when
+  // somebody has a very long name.
   function wfTimelineHtml(steps,opt){
     opt=opt||{};
     return steps.map(function(s,i){
       const person=s.owner_email||s.person;
-      const dept=wfDeptOf(person);
       const who=person
-        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span>'+(dept?'<span class="wf-dept">'+esc2(dept)+'</span>':'')+'</span>')
+        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span></span>')
         :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
       const dur=wfDurText(s.duration_value,s.duration_unit); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
-      let extra='', badge='', cls='';
+      let badge='', cls='';
       if(opt.live){
         const done=s.status==='done'||!!s.forwarded_at;
         const cur=!done && (s.status==='received'||s.received_at||s.appeared_at);
         cls=done?'wf-tl-done':(cur?'wf-tl-cur':'wf-tl-wait');
         badge=done?'<span class="wf-badge ok">Done</span>':(cur?'<span class="wf-badge cur">In progress</span>':'<span class="wf-badge wait">Waiting</span>');
-        const bits=[];
-        if(s.received_at) bits.push('Received '+wfDT(s.received_at));
-        if(s.forwarded_at) bits.push('Completed '+wfDT(s.forwarded_at));
-        if(s.received_at&&s.forwarded_at) bits.push('<b>Took '+wfHms(new Date(s.forwarded_at)-new Date(s.received_at))+'</b>');
-        else if(s.received_at&&!s.forwarded_at) bits.push('running for '+wfHms(Date.now()-new Date(s.received_at)));
-        if(bits.length) extra='<div class="wf-tl-track">'+bits.join(' · ')+'</div>';
-        // Every person can revert their OWN completed step (pulls the flow back to them) while the instance is active.
-        const active=opt.caseStatus!=='Done' && opt.caseStatus!=='Cancelled';
-        if(done && active && eq(person, me()) && s.id!=null){
-          extra+='<div style="margin-top:8px"><button class="ac-btn danger" style="height:28px;padding:0 11px;font-size:12px" onclick="wfRevert('+s.id+')"><i class="fa-solid fa-rotate-left"></i> Revert to my step</button></div>';
-        }
       }
-      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div>'+extra+'</div></div>';
+      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
     }).join('');
   }
 
@@ -1446,6 +1438,10 @@
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
     .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
     /* list header + full-width rows */
+    /* Workflow task Details: always two columns of three, never one long list */
+    .wf-tp .tp-grid{grid-template-columns:1fr 1fr;gap:12px 22px}
+    .wf-tp .tp-f{min-width:0}
+    .wf-tp .tp-f .v{overflow-wrap:anywhere}
     .wf-listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
     .wf-listhead-t{font-size:15px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px}
     .wf-listhead-t i{color:var(--brand)}
@@ -1478,22 +1474,23 @@
     .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px}
     .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
     .wf-timeline{display:flex;flex-direction:column}
-    .wf-tl-item{display:flex;gap:14px;padding-bottom:20px;position:relative}
+    /* Slim timeline row: one line on a normal screen, wrapping to two on a phone. */
+    .wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
     .wf-tl-item:last-child{padding-bottom:0}
-    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:14px;top:30px;bottom:0;width:2px;background:var(--line)}
+    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:12px;top:26px;bottom:0;width:2px;background:var(--line)}
     .wf-tl-done:not(:last-child)::before{background:#bbf7d0}
-    .wf-tl-num{flex:0 0 30px;height:30px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;z-index:1}
+    .wf-tl-num{flex:0 0 26px;height:26px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;z-index:1;margin-top:5px}
     .wf-tl-cur .wf-tl-num{background:var(--brand);box-shadow:0 0 0 4px var(--brand-a10,#eef2ff)}
     .wf-tl-done .wf-tl-num{background:#16a34a}
     .wf-tl-wait .wf-tl-num{background:#cbd5e1}
-    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
+    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:6px 24px;flex-wrap:wrap}
     .wf-tl-cur .wf-tl-body{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}
-    .wf-tl-title{font-weight:650;font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+    .wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
-    .wf-tl-meta{display:flex;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap}
-    .wf-who{display:inline-flex;align-items:center}
-    .wf-av{width:24px;height:24px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-right:8px}
-    .wf-who-nm{font-size:13px;color:var(--ink);font-weight:600}
+    .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
+    .wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
+    .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-right:7px;flex:none}
+    .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .wf-dept{font-size:11.5px;color:var(--slate);margin-left:8px}
     .wf-dur{font-size:12.5px;color:var(--slate);display:inline-flex;align-items:center;gap:6px}
     .wf-badge{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:none;letter-spacing:0}
@@ -1556,18 +1553,24 @@
     @media(max-width:640px){
       .wf-page-head h1{font-size:16px;flex:1 1 100%;order:2}
       .wf-page-head .ac-btn.ic:first-child{order:1}
-      .wf-head-acts{order:3;flex:1 1 100%}
-      .wf-head-acts .ac-btn{flex:1;justify-content:center}
+      /* header buttons: wrap onto their own line and keep a readable width instead of
+         being squeezed into three slivers */
+      .wf-head-acts{order:3;flex:1 1 100%;gap:8px}
+      .wf-head-acts .ac-btn{flex:1 1 auto;min-width:104px;justify-content:center}
       .wf-btxt{display:inline}
       .wf-card{padding:14px}
-      .wf-lrow{padding:12px 13px;gap:10px}
-      .wf-lrow-right{gap:9px}
+      /* workflow list: name/trigger on one line, people + step count underneath */
+      .wf-lrow{flex-wrap:wrap;padding:13px 14px;gap:9px}
+      .wf-lrow-main{flex:1 1 100%}
+      .wf-lrow-right{flex:1 1 100%;justify-content:flex-start;gap:10px}
+      .wf-lrow-right .wf-go{margin-left:auto}
+      .wf-tl-body{padding:8px 12px;gap:5px 14px}
+      .wf-tl-body .wf-who-nm{max-width:46vw}
       .wf-upd-b{max-width:82%}
       .wf-detlist{grid-template-columns:1fr}
       .wf-tp .tp-head{flex-wrap:wrap;gap:10px}
       .wf-tp .tp-acts{flex-wrap:wrap;width:100%}
       .wf-tp .tp-acts .ac-btn{flex:1 1 auto;justify-content:center}
-      .wf-tp .tp-grid{grid-template-columns:1fr}
       .wf-tp .wf-updbar .ac-in{min-width:0}
     }
     `;
