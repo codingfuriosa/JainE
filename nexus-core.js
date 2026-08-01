@@ -294,7 +294,8 @@ function renderShell(){
   });
   document.addEventListener('click',e=>{if(!_gs.parentElement.contains(e.target))_gsDrop.style.display='none';});
   // hamburger / responsive sidebar
-  var hb=$('hamburger'); if(hb) hb.onclick=function(e){ e.stopPropagation(); var mobile=window.innerWidth<=1024; document.body.classList.toggle(mobile?'nav-open':'nav-closed'); };
+  if(window.innerWidth>1024 && localStorage.getItem('nav_closed')==='1') document.body.classList.add('nav-closed');
+  var hb=$('hamburger'); if(hb) hb.onclick=function(e){ e.stopPropagation(); var mobile=window.innerWidth<=1024; document.body.classList.toggle(mobile?'nav-open':'nav-closed'); if(!mobile){ try{ localStorage.setItem('nav_closed', document.body.classList.contains('nav-closed')?'1':'0'); }catch(_){} } };
   var bd=$('sbBackdrop'); if(bd) bd.onclick=function(){ document.body.classList.remove('nav-open'); };
   document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
 }
@@ -935,7 +936,6 @@ async function docLibrary(v){
   setCrumb(['Documents',dept]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid ${m[0]}" style="color:${m[1]}"></i> ${esc(dept)} Library</h1><p>Folder navigation, categories & version-controlled storage</p></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
-    <button class="btn" title="Index all un-indexed files so their contents are searchable" onclick="docReindexAll(null)"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button>
     <button class="btn" onclick="docNewFolder('${esc(dept)}')"><i class="fa-solid fa-folder-plus"></i> New Folder</button>
     <button class="btn btn-primary" onclick="docUploadModal('${esc(dept)}')"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div class="split"><div><div class="subnav" id="catNav"></div></div><div><div id="docTableHost"></div></div></div>`;
@@ -973,7 +973,6 @@ async function docAll(v,title){
   setCrumb(['Documents',title]);
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-table-list" style="color:#1d4ed8"></i> ${esc(title)}</h1><p>Search and manage documents across every department</p></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" onclick="location.hash='#/documents'"><i class="fa-solid fa-arrow-left"></i> Libraries</button>
-    <button class="btn" title="Index all un-indexed files in this dept" onclick="docReindexAll(DOC.dept)"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button>
     <button class="btn btn-primary" onclick="docUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button></div></div>
     <div id="docTableHost"></div>`;
   docRenderTable($('docTableHost'),null);
@@ -1402,33 +1401,65 @@ async function docSignedUrlFor(d,seconds){
   if(isS3Path(d.storage_path)){const {data,error}=await s3Sign('get',d.storage_path.slice(3));if(error)return {error};return {data:{signedUrl:data.url}};}
   return sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,seconds);
 }
+// File types the Gemini OCR edge function handles (scanned PDFs & images — the Legal case).
+// Everything else (docx/xlsx/pptx/txt) still uses the client-side extractor below.
+const DOC_GEMINI_TYPES=['pdf','png','jpg','jpeg','webp','heic','heif'];
+function docFileExt(d){return (d.file_type||(d.file_name||'').split('.').pop()||'').toLowerCase();}
+// Server-side OCR/text extraction via Gemini. Returns {ok,chars} | {skip} | {error}.
+async function docOcrGemini(id){
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  try{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/document-ocr',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'ocr',id:id})});
+    return await res.json();
+  }catch(e){return {error:String(e)};}
+}
+// Index one document into content_text: Gemini for scans/images, client-side reader otherwise.
+async function docIndexOne(d){
+  const ext=docFileExt(d);
+  if(DOC_GEMINI_TYPES.includes(ext)){
+    const out=await docOcrGemini(d.id);
+    if(out&&out.ok)return out.chars?true:false;      // done (true if any text found)
+    if(!(out&&out.skip))return false;                 // hard error — skip (re-runnable later)
+    // out.skip -> fall through to the client-side reader
+  }
+  const {data,error}=await docSignedUrlFor(d,300);
+  if(error)return false;
+  const txt=await extractUrlText(data.signedUrl,d.file_type);
+  if(txt==null)return false;
+  await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',d.id);
+  return true;
+}
 window.docReindex=async function(id){
   const d=await getDoc(id);if(!d)return;
   if(!d.storage_path){toast(d.link?'Linked intranet files cannot be content-indexed':'No file to index','');return;}
-  toast('Indexing file text…','');
-  const {data,error}=await docSignedUrlFor(d,180);
-  if(error){toast(error.message,'err');return;}
-  const txt=await extractUrlText(data.signedUrl,d.file_type);
-  if(txt==null){toast('Could not read text from this file (maybe a scanned image).','err');return;}
-  await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',id);
-  toast('Indexed — words inside the file are now searchable','ok');
+  toast('Reading the text inside this file…','');
+  const ok=await docIndexOne(d);
+  toast(ok?'Indexed — words inside the file are now searchable':'Could not read text from this file.',ok?'ok':'err');
+  const host=$('docTableHost');if(host)docRenderTable(host,DOC.dept||undefined);
 };
 window.docReindexAll=async function(dept){
   const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept});
   const toIndex=all.filter(d=>d.storage_path&&(!d.content_text||d.content_text.length<200));
   if(!toIndex.length){toast('All files already indexed','ok');return;}
-  toast('Indexing '+toIndex.length+' file(s)… this may take a minute','');
-  let done=0,failed=0;
-  for(const d of toIndex){
-    try{
-      const {data,error}=await docSignedUrlFor(d,300);
-      if(error){failed++;continue;}
-      const txt=await extractUrlText(data.signedUrl,d.file_type);
-      if(txt==null){failed++;continue;}
-      await sb.schema('doc').from('documents').update({content_text:txt}).eq('id',d.id);
-      done++;
-    }catch(e){failed++;}
-  }
+  const total=toIndex.length;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Indexing files for search</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><p style="font-size:13px;color:var(--slate);margin:0 0 12px">Reading the text inside <b>'+total+'</b> file(s) with AI (Gemini) so words <i>inside</i> them become searchable — scanned/unclear legal documents included. This can take a while for large batches; keep this window open.</p>'
+    +'<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" id="docIdxFill" style="width:0%"></div></div><div class="psa-progress-label" id="docIdxLbl">Starting…</div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+  let done=0,failed=0,idx=0;
+  const paint=function(){const p=Math.round((done+failed)/total*100);const f=$('docIdxFill');if(f)f.style.width=p+'%';const l=$('docIdxLbl');if(l)l.textContent='Processed '+(done+failed)+' of '+total+' · '+done+' indexed'+(failed?', '+failed+' skipped':'');};
+  paint();
+  const worker=async function(){
+    while(idx<toIndex.length){
+      const d=toIndex[idx++];
+      try{ if(await docIndexOne(d))done++; else failed++; }catch(e){ failed++; }
+      paint();
+    }
+  };
+  const K=Math.min(4,toIndex.length);
+  await Promise.all(Array.from({length:K},function(){return worker();}));
+  const l=$('docIdxLbl');if(l)l.textContent='Done — '+done+' indexed'+(failed?', '+failed+' skipped (re-run to retry)':'');
   toast(done+' file(s) indexed'+(failed?' · '+failed+' skipped':''),'ok');
   // Refresh the table in place — don't call route() which resets the search
   const host=$('docTableHost');
@@ -1458,11 +1489,15 @@ window.docUploadSave=async function(){
     if(upErr){toast('Upload failed: '+upErr.message,'err');continue;}
     const ti=titleIns.find(x=>x.dataset.i==idx);
     const title=(ti&&ti.value.trim())||f.name.replace(/\.[^.]+$/,'');
-    btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading & indexing (OCR if needed)…';
-    const ctext=await extractFileText(f);
+    const fileExt=(f.name.split('.').pop()||'').toLowerCase();
+    const useGemini=DOC_GEMINI_TYPES.includes(fileExt); // scanned PDFs / images -> strong Gemini OCR (server-side)
+    let ctext=null;
+    if(!useGemini){ btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading & indexing…'; ctext=await extractFileText(f); }
     btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
-    const {error}=await sb.schema('doc').from('documents').insert({title,department:dept,category:cat,folder_id:folderId,description:desc,version:ver,tags:'',visibility:vis,status,confidential:conf,file_name:f.name,file_size:f.size,file_type:f.name.split('.').pop(),storage_path:upData.path,content_text:ctext,uploaded_by:state.email});
-    if(error){toast('Saved file but metadata failed: '+error.message,'err');}else ok++;
+    const {data:insData,error}=await sb.schema('doc').from('documents').insert({title,department:dept,category:cat,folder_id:folderId,description:desc,version:ver,tags:'',visibility:vis,status,confidential:conf,file_name:f.name,file_size:f.size,file_type:fileExt,storage_path:upData.path,content_text:ctext,uploaded_by:state.email}).select('id').single();
+    if(error){toast('Saved file but metadata failed: '+error.message,'err');}
+    // Auto-index scanned/image uploads with Gemini in the background — no "Index All" needed, search just works.
+    else { ok++; if(useGemini&&insData&&insData.id){ docOcrGemini(insData.id); } }
   }
   closeModal();if(ok)toast(ok+' document'+(ok>1?'s':'')+' uploaded to S3','ok');route();
 };
@@ -1491,7 +1526,7 @@ async function legalDocsView(seg){
   }
   setCrumb(['Legal',crumbTail]);
   const hAct=$('legalHeadActions');
-  if(hAct)hAct.innerHTML=`<button class="btn" onclick="docReindexAll('Legal')"><i class="fa-solid fa-wand-magic-sparkles"></i> Index All Files</button><button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
+  if(hAct)hAct.innerHTML=`<button class="btn btn-primary" onclick="docUploadModal('Legal')"><i class="fa-solid fa-upload"></i> Upload</button>`;
   const body=$('legalBody');if(!body)return;
   body.innerHTML=`<div class="split"><div><div class="subnav" id="legalNav"></div></div><div><div id="docTableHost"></div></div></div>`;
   legalNav();
@@ -3833,7 +3868,7 @@ const HD_KB=[
  {k:['upload document','upload file','add document','add file','put file','upload a doc'],a:`To upload a document: open <b>Document Library</b> from the sidebar, pick a department tab, then click <b>Upload</b>. Select your file, choose or type a <b>Category/Folder</b>, and save. Large files (up to 5 GB) are supported via resumable upload.`},
  {k:['folder','category','new folder','create folder','add category'],a:`To create a folder/category: inside any Document Library click <b>+ New Folder</b>. In <b>Legal</b>, every folder and category in the tree has a small <b>+</b> icon — click it to add a category inside that exact spot (Litigation, Projects, a project, or a category), or use <b>+ Add main folder</b> at the bottom for a brand-new top-level folder.`},
  {k:['search document','find document','document search','search file','search by name'],a:`Use the <b>Find a Document</b> tab here to search by file name, title or document number. In the Document Library you can filter by status and date. Word-inside-file search has been replaced with name-based search for speed.`},
- {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`To re-index files for OCR: open a Document Library and click <b>Index All Files</b> at the top. This re-scans all PDFs, images, Word, Excel and PowerPoint files using triple-pass OCR (PSM 3, 6, 11) and stores extracted text. Numbers with commas (e.g. 2,90,39) are normalised and searchable.`},
+ {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`Indexing is now <b>automatic</b> — when you upload a scanned PDF or image it is read by AI (Gemini OCR) in the background, so the words inside it become searchable within moments. There's nothing to click: just type in the search box in a Document Library or the Legal module and matching files appear by name and by text inside them.`},
  {k:['download file','download document','get file','open file','preview file'],a:`To download or preview: find the file in <b>Document Library</b>, click the file row to open its detail panel, then click <b>Open</b> or <b>Download</b>. Files open in a new tab.`},
  {k:['delete document','remove file','delete file'],a:`To delete a document: open the file in <b>Document Library</b>, then click <b>Delete</b> in the detail panel. This removes both the database record and the stored file.`},
  {k:['legal','vault','title deed','deed','rera','agreement','noc','sanction','land record','court'],a:`The <b>Legal Vault</b> is organised as a tree: two main folders, <b>Litigation</b> and <b>Projects</b>. Under <b>Projects</b> sit the individual projects (Dream Gurukul, Dream World City, Dream One, Dream Eco City, Dream Valley, Dream Exotica, Dream Ananta), and each project has <b>History of Land / Chain</b>, <b>Title Papers</b>, <b>Permissions & Sanctions</b>, <b>RERA & Compliance</b> and <b>Project Manual</b>. Click the <b>+</b> next to any folder to add a category inside it, and <b>Upload</b> to add files to a category.`},
@@ -6398,6 +6433,7 @@ function rtRender(){
       <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
       <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
       <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
+      ${rtCanShare()?`<button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`:''}
     </div>
   </div>
   <div class="card" style="overflow:hidden">
@@ -6429,6 +6465,8 @@ window.rtSyncToolbar=function(){
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   if(ren){ren.disabled=n!==1;ren.style.cssText=n===1?'':dis;}
   if(del){del.disabled=n===0;del.style.cssText=n>0?'color:var(--err);border-color:var(--err)':dis+';color:var(--err);border-color:var(--err)';}
+  const shr=$('rtShareBtn');
+  if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
 window.rtAdd=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -6485,6 +6523,91 @@ window.rtDelete=async function(){
   if(error){toast(error.message,'err');return;}
   RT_RECORDS=(RT_RECORDS||[]).filter(r=>!sel.includes(r.id));
   toast(sel.length+' test(s) deleted');rtRender();
+};
+
+/* ── Share Test (email a form link to candidates via the Email API backend) ── */
+// Visibility is limited to these people, matched by their JainE profile full name.
+// (Others with recruitment access will NOT see the Share button.)
+// NOTE: 'administrator' & 'abhay mati' added for testing — remove later if the 3 named
+// staff should be the only ones with Share access.
+const RT_SHARE_ALLOWED=['shuchandra das','khushbu singh','uzma ahmed','administrator','abhay mati'];
+function rtShareNorm(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function rtCanShare(){
+  const nm=rtShareNorm((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'');
+  return RT_SHARE_ALLOWED.includes(nm);
+}
+function rtShareFieldRow(val){
+  return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
+    <button type="button" class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none;padding:6px 10px" onclick="rtShareRemoveField(this)" title="Remove this email"><i class="fa-solid fa-xmark"></i></button>
+  </div>`;
+}
+window.rtShareRemoveField=function(btn){const row=btn.closest('.rt-share-field');if(row)row.remove();};
+window.rtShareAddN=function(){
+  const raw=parseInt(($('rtAddN')||{}).value);
+  const n=Math.max(1,Math.min(50,isNaN(raw)?1:raw));
+  const cont=$('rtEmailFields');if(!cont)return;
+  for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
+};
+window.rtShare=function(){
+  if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
+  if(sel.length!==1){toast('Select exactly one test to share','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const subject=`Check This ${rec.name} provided by JainGroup`;
+  const body=`Dear Candidate,\nFill This Test at the latest.\nTest Attachment`;
+  const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <div style="background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--slate);margin-bottom:4px">Sending as <b style="color:var(--ink)">${esc(senderName)}</b> · ${esc(state.email||'')}</div>
+    <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
+    <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
+    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
+    ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
+    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(each field must be filled)</span></label>
+    <div id="rtEmailFields">${fields}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
+      <button type="button" class="btn btn-sm" onclick="rtShareAddN()"><i class="fa-solid fa-plus"></i> Add Field(s)</button>
+    </div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="rtShareSend(${rec.id})"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.rtShareSend=async function(id){
+  if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
+  const inps=[...document.querySelectorAll('#rtEmailFields .rt-email-inp')];
+  if(!inps.length){toast('Add at least one candidate email','err');return;}
+  const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emails=[];
+  for(const el of inps){
+    const v=(el.value||'').trim();
+    el.style.borderColor='';
+    if(!v){el.style.borderColor='var(--err)';toast('Every email field must be filled (or remove it)','err');el.focus();return;}
+    if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
+    if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
+    emails.push(v.toLowerCase());
+  }
+  const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
+  const body=($('rtShareBody')||{}).value?.trim()||'';
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const btn=$('rtShareSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({test_id:id,test_name:rec.name,link:rec.link||'',subject,body,recipients:emails,sender_name:senderName,sender_email:state.email||''})
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    closeModal();toast('Test shared with '+emails.length+' candidate'+(emails.length>1?'s':''),'ok');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
 };
 window.rtPreview=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
@@ -6914,8 +7037,228 @@ VIEWS.compliance=function(v,seg){
   else { body=mTable(['Item','Asset','Provider','Expiry','Status'],[['Lift AMC','Passenger lift','OTIS','Mar-27','Active'],['DG warranty','DG Set 250 kVA','Cummins','Dec-26','Active']]); }
   v.innerHTML=mHead('fa-calendar-check','#b45309','Renewals & Compliance')+mKpis(kpis)+mTabs('compliance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
-let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta';
+let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta',CMP_STATUS='all';
+window.cmpSetStatus=function(s){CMP_STATUS=s;CMP_AD_PAGE=0;renderPage();};
+function cmpStatusBar(counts){
+  const b=function(k,label){return '<button class="cmp-fbtn'+(CMP_STATUS===k?' on':'')+'" onclick="cmpSetStatus(\''+k+'\')">'+esc(label)+(counts&&counts[k]!=null?(' <span class="cmp-fcount">'+counts[k]+'</span>'):'')+'</button>';};
+  return '<div class="cmp-fbar">'+b('all','All')+b('active','Active')+b('inactive','Inactive')+'</div>';
+}
+function cmpIsActive(st){const s=String(st||'').toUpperCase();return s==='ACTIVE'||s==='ENABLED';}
 const CMP_PRESETS=[['today','Today'],['yesterday','Yesterday'],['last_7d','Last 7 days'],['last_14d','Last 14 days'],['last_month','Last month'],['last_year','Last year'],['custom','Custom']];
+
+/* ============ Trend / Fatigue / Best-&-Worst (shared by the Meta, Google and Both tabs) ============
+   "Trend" = this period compared with the SAME-LENGTH period immediately before it. We ask the live
+   sync functions for that earlier window too (as a custom range), then compare the two. */
+function cmpDayStr(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}
+function cmpAddDays(d,n){const x=new Date(d.getTime());x.setDate(x.getDate()+n);return x;}
+// The equivalent window immediately before the one being viewed.
+function cmpPrevRange(){
+  const today=new Date();today.setHours(12,0,0,0);
+  const P=CMP_PERIOD;
+  if(P==='today'){const d=cmpAddDays(today,-1);return {since:cmpDayStr(d),until:cmpDayStr(d)};}
+  if(P==='yesterday'){const d=cmpAddDays(today,-2);return {since:cmpDayStr(d),until:cmpDayStr(d)};}
+  if(P==='last_7d')return {since:cmpDayStr(cmpAddDays(today,-14)),until:cmpDayStr(cmpAddDays(today,-8))};
+  if(P==='last_14d')return {since:cmpDayStr(cmpAddDays(today,-28)),until:cmpDayStr(cmpAddDays(today,-15))};
+  if(P==='last_month'){const first=new Date(today.getFullYear(),today.getMonth()-2,1);const last=new Date(today.getFullYear(),today.getMonth()-1,0);return {since:cmpDayStr(first),until:cmpDayStr(last)};}
+  if(P==='last_year')return {since:cmpDayStr(cmpAddDays(today,-729)),until:cmpDayStr(cmpAddDays(today,-365))};
+  if(P==='custom'&&CMP_SINCE&&CMP_UNTIL){
+    const s=new Date(CMP_SINCE+'T12:00:00'),u=new Date(CMP_UNTIL+'T12:00:00');
+    const len=Math.max(1,Math.round((u-s)/86400000)+1);
+    return {since:cmpDayStr(cmpAddDays(s,-len)),until:cmpDayStr(cmpAddDays(s,-1))};
+  }
+  return null;
+}
+function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
+function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
+// Sync the previous window for META only — google-ads-live now fills both buckets in one call
+// (see its prev_since/prev_until parameters), so asking it twice is unnecessary.
+async function cmpSyncPrev(which){
+  if(which!=='meta'&&which!=='both')return;
+  const p=cmpPrevRange(); if(!p)return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+    await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){});
+  }catch(e){}
+}
+// Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
+function cmpTrend(cur,prev,lowerIsBetter){
+  cur=Number(cur)||0;
+  if(prev===null||prev===undefined||!isFinite(Number(prev))||Number(prev)===0){
+    return '<span class="cmp-tr none" title="No data for '+esc(cmpPrevLabel())+' to compare against">—</span>';
+  }
+  prev=Number(prev);
+  const pct=(cur-prev)/Math.abs(prev)*100;
+  if(Math.abs(pct)<1)return '<span class="cmp-tr flat" title="Barely changed vs '+esc(cmpPrevLabel())+'"><i class="fa-solid fa-minus"></i> 0%</span>';
+  const up=pct>0, good=lowerIsBetter?!up:up;
+  const tip=(up?'Up ':'Down ')+Math.abs(pct).toFixed(0)+'% vs '+cmpPrevLabel()+(good?' — better':' — worse');
+  return '<span class="cmp-tr '+(good?'good':'bad')+'" title="'+esc(tip)+'"><i class="fa-solid '+(up?'fa-arrow-trend-up':'fa-arrow-trend-down')+'"></i> '+(up?'+':'−')+Math.abs(pct).toFixed(0)+'%</span>';
+}
+/* Ad fatigue. Meta gives a real per-person "frequency" (how many times each person saw the ad) —
+   high frequency plus a falling CTR is classic creative burnout. Google Ads has no per-user
+   frequency for Search, so there we score on the CTR fall alone. */
+function cmpFatigue(freq,ctr,prevCtr){
+  const f=Number(freq)||0;
+  const c=(ctr==null)?null:Number(ctr), pc=(prevCtr==null)?null:Number(prevCtr);
+  const drop=(pc&&pc>0&&c!=null)?(1-(c/pc)):null;
+  if(!f&&drop===null)return '<span class="cmp-fg na" title="Not enough data yet">—</span>';
+  let score=0;
+  if(f>=4)score+=2;else if(f>=3)score+=1.5;else if(f>=2.5)score+=1;
+  if(drop!==null&&drop>=0.30)score+=2;else if(drop!==null&&drop>=0.15)score+=1;
+  const bits=[];
+  if(f)bits.push('Seen '+f.toFixed(1)+'x per person');
+  if(drop!==null)bits.push(drop>0?('CTR down '+Math.round(drop*100)+'%'):('CTR up '+Math.round(-drop*100)+'%'));
+  const tip=bits.join(' · ')||'No signal';
+  if(score>=3)return '<span class="cmp-fg hi" title="'+esc(tip+' — refresh the creative')+'"><i class="fa-solid fa-fire"></i> High</span>';
+  if(score>=1.5)return '<span class="cmp-fg md" title="'+esc(tip+' — keep an eye on it')+'"><i class="fa-solid fa-triangle-exclamation"></i> Watch</span>';
+  return '<span class="cmp-fg ok" title="'+esc(tip)+'"><i class="fa-solid fa-circle-check"></i> Fresh</span>';
+}
+/* ---------------- TREND page ----------------
+   rows = [{name, sub, spend, pspend, res, pres, cpr, pcpr, ctr, pctr}] */
+function cmpTrendPage(rows,totals,inr,num,resLabel){
+  const chg=function(cur,prev){ if(prev==null||!isFinite(Number(prev))||Number(prev)===0)return null; return (Number(cur||0)-Number(prev))/Math.abs(Number(prev))*100; };
+  const mrow=function(label,cur,prev,fmt,lowerIsBetter){
+    const c=chg(cur,prev);
+    return '<tr><td class="cmp-mlbl">'+esc(label)+'</td>'
+      +'<td class="num muted">'+fmt(prev)+'</td>'
+      +'<td class="num strong">'+fmt(cur)+'</td>'
+      +'<td class="num">'+cmpTrend(cur,prev,lowerIsBetter)+'</td>'
+      +'<td class="cmp-bar">'+(c==null?'':('<span class="cmp-barfill '+(((lowerIsBetter?-c:c)>=0)?'up':'down')+'" style="width:'+Math.min(100,Math.abs(c))+'%"></span>'))+'</td></tr>';
+  };
+  const summary='<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Period comparison</span><h3>This period vs the one before</h3></div><span class="cmp-chip">'+esc(cmpPrevLabel())+'</span></div>'
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Metric</th><th class="num">Previous</th><th class="num">Current</th><th class="num">Change</th><th style="width:120px"></th></tr></thead><tbody>'
+    +mrow('Spend',totals.spend,totals.pspend,inr,false)
+    +mrow(resLabel.charAt(0).toUpperCase()+resLabel.slice(1),totals.res,totals.pres,function(v){return num(Math.round(Number(v)||0));},false)
+    +mrow('Cost per '+resLabel.replace(/s$/,''),totals.cpr,totals.pcpr,function(v){return v==null?'—':inr(v);},true)
+    +mrow('Clicks',totals.clk,totals.pclk,function(v){return num(Math.round(Number(v)||0));},false)
+    +mrow('CTR',totals.ctr,totals.pctr,function(v){return (Number(v)||0).toFixed(2)+'%';},false)
+    +'</tbody></table></div></div>';
+  const sorted=rows.slice().sort(function(a,b){return (b.spend||0)-(a.spend||0);});
+  const body=sorted.length?sorted.map(function(r){
+    const c=chg(r.spend,r.pspend);
+    return '<tr><td><div class="cmp-nm">'+esc(r.name)+'</div>'+(r.sub?'<div class="cmp-sub">'+esc(r.sub)+'</div>':'')+'</td>'
+      +'<td class="num muted">'+inr(r.pspend||0)+'</td>'
+      +'<td class="num strong">'+inr(r.spend||0)+'</td>'
+      +'<td class="num">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+      +'<td class="num muted">'+num(Math.round(r.pres||0))+'</td>'
+      +'<td class="num strong">'+num(Math.round(r.res||0))+'</td>'
+      +'<td class="num">'+cmpTrend(r.res,r.pres,false)+'</td>'
+      +'<td class="num">'+(r.cpr!=null?inr(r.cpr):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(r.cpr,r.pcpr,true)+'</td></tr>';
+  }).join(''):'<tr><td colspan="9" class="cmp-none">No data for this period</td></tr>';
+  const detail='<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Breakdown</span><h3>Movement by '+esc(resLabel==='conversions'?'account':'project')+'</h3></div></div>'
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Name</th><th class="num" colspan="3">Spend — prev / now / change</th><th class="num" colspan="3">'+esc(resLabel)+' — prev / now / change</th><th class="num" colspan="2">Cost / '+esc(resLabel.replace(/s$/,''))+'</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+  return summary+detail;
+}
+/* ---------------- AD FATIGUE page ----------------
+   rows = [{name, sub, freq, ctr, pctr, spend, impr}] */
+function cmpFatiguePage(rows,inr,num,note,hideFreq){
+  const grade=function(r){
+    const f=Number(r.freq)||0, c=(r.ctr==null?null:Number(r.ctr)), pc=(r.pctr==null?null:Number(r.pctr));
+    const drop=(pc&&pc>0&&c!=null)?(1-(c/pc)):null;
+    let s=0;
+    if(f>=4)s+=2;else if(f>=3)s+=1.5;else if(f>=2.5)s+=1;
+    if(drop!==null&&drop>=0.30)s+=2;else if(drop!==null&&drop>=0.15)s+=1;
+    return {score:s,drop:drop,level:(s>=3?'hi':(s>=1.5?'md':'ok'))};
+  };
+  const scored=rows.map(function(r){return Object.assign({},r,{g:grade(r)});})
+    .sort(function(a,b){ if(b.g.score!==a.g.score)return b.g.score-a.g.score; return (b.spend||0)-(a.spend||0); });
+  const nHi=scored.filter(function(x){return x.g.level==='hi';}).length;
+  const nMd=scored.filter(function(x){return x.g.level==='md';}).length;
+  const nOk=scored.length-nHi-nMd;
+  const stat=function(v,l,cls){return '<div class="cmp-stat '+cls+'"><div class="v">'+v+'</div><div class="l">'+esc(l)+'</div></div>';};
+  const advice=function(x){
+    if(x.g.level==='hi')return 'Refresh the creative — swap images/headlines';
+    if(x.g.level==='md')return 'Watch it; plan a new variant';
+    return 'Healthy';
+  };
+  // Google Ads publishes no per-person frequency, so on that source we drop the column entirely
+  // rather than showing a row of dashes.
+  const cols=hideFreq?7:8;
+  const body=scored.length?scored.map(function(x){
+    return '<tr><td><div class="cmp-nm">'+esc(x.name)+'</div>'+(x.sub?'<div class="cmp-sub">'+esc(x.sub)+'</div>':'')+'</td>'
+      +(hideFreq?'':'<td class="num">'+(x.freq?(Number(x.freq).toFixed(1)+'×'):'—')+'</td>')
+      +'<td class="num muted">'+(x.pctr!=null?(Number(x.pctr).toFixed(2)+'%'):'—')+'</td>'
+      +'<td class="num strong">'+(x.ctr!=null?(Number(x.ctr).toFixed(2)+'%'):'—')+'</td>'
+      +'<td class="num">'+(x.g.drop===null?'—':('<span class="'+(x.g.drop>0?'cmp-dn':'cmp-up')+'">'+(x.g.drop>0?'−':'+')+Math.abs(Math.round(x.g.drop*100))+'%</span>'))+'</td>'
+      +'<td class="num">'+inr(x.spend||0)+'</td>'
+      +'<td>'+cmpFatigue(x.freq,x.ctr,x.pctr)+'</td>'
+      +'<td class="cmp-adv">'+esc(advice(x))+'</td></tr>';
+  }).join(''):'<tr><td colspan="'+cols+'" class="cmp-none">Not enough data to judge fatigue yet</td></tr>';
+  return '<div class="cmp-stats">'+stat(nHi,'Need refresh','hi')+stat(nMd,'Watching','md')+stat(nOk,'Healthy','ok')+'</div>'
+    +'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Ad fatigue</span><h3>Worst first</h3></div><span class="cmp-chip">'+esc(note||'')+'</span></div>'
+    +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Name</th>'+(hideFreq?'':'<th class="num">Seen / person</th>')+'<th class="num">CTR before</th><th class="num">CTR now</th><th class="num">Change</th><th class="num">Spend</th><th>Verdict</th><th>What to do</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+}
+/* Refined, restrained visual language — neutral surfaces, one accent, no candy colours.
+   Loaded AFTER each view's older inline styles so these rules win. */
+const CMP_EXTRA_CSS='<style>'
+  /* neutralise the old colourful KPI treatment */
+  +'.cmp-kpi{border-radius:12px!important;box-shadow:none!important;border:1px solid var(--line)!important;padding:14px 15px!important;background:#fff!important}'
+  +'.cmp-kpi::before{display:none!important}'
+  +'.cmp-kpi .ki{background:transparent!important;color:#94a3b8!important;width:auto!important;height:auto!important;font-size:12.5px!important}'
+  +'.cmp-kpi .kl{font-size:10.5px!important;letter-spacing:.07em!important;color:#8a94a6!important;font-weight:600!important}'
+  +'.cmp-kpi .kv{font-size:23px!important;font-weight:650!important;letter-spacing:-.6px!important;margin-top:9px!important;color:var(--ink)!important;font-variant-numeric:tabular-nums}'
+  +'.cmp-kpi .ks{font-size:11px!important;color:#98a2b3!important;margin-top:3px!important}'
+  +'.cmp-kpi:hover{border-color:#d6dced!important}'
+  +'.cmp-kpis{gap:12px!important;margin-bottom:16px!important}'
+  +'.cmp-kpi .ktr{margin-top:8px}'
+  /* trend + fatigue: quiet text, not loud pills */
+  +'.cmp-tr{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle;cursor:default;font-variant-numeric:tabular-nums}'
+  +'.cmp-tr i{font-size:9.5px}'
+  +'.cmp-tr.good{color:#15803d}.cmp-tr.bad{color:#c0392f}.cmp-tr.flat{color:#98a2b3}.cmp-tr.none{color:#cbd5e1}'
+  +'.cmp-fg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:default}'
+  +'.cmp-fg i{font-size:9px}'
+  +'.cmp-fg.hi{color:#c0392f}.cmp-fg.md{color:#a16207}.cmp-fg.ok{color:#5b6674}.cmp-fg.na{color:#cbd5e1}'
+  +'.cmp-up{color:#15803d;font-weight:600}.cmp-dn{color:#c0392f;font-weight:600}'
+  /* panels */
+  +'.cmp-panel{background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 16px;overflow:hidden}'
+  +'.cmp-phead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:15px 18px 13px;border-bottom:1px solid var(--line-2)}'
+  +'.cmp-over{display:block;font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#a3adbe;margin-bottom:3px}'
+  +'.cmp-phead h3{margin:0;font-size:15px;font-weight:650;letter-spacing:-.2px;color:var(--ink)}'
+  +'.cmp-chip{font-size:11px;color:#7d8798;background:#f6f8fc;border:1px solid var(--line-2);border-radius:6px;padding:3px 9px;white-space:nowrap}'
+  /* tables */
+  +'.cmp-tblwrap{overflow-x:auto}'
+  +'.cmp-tbl{width:100%;border-collapse:collapse;font-size:13px}'
+  +'.cmp-tbl th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#a3adbe;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:#fcfdff}'
+  +'.cmp-tbl th.num{text-align:right}'
+  +'.cmp-tbl td{padding:11px 14px;border-bottom:1px solid var(--line-2);vertical-align:middle}'
+  +'.cmp-tbl tbody tr:last-child td{border-bottom:0}'
+  +'.cmp-tbl tbody tr:hover{background:#fbfcfe}'
+  +'.cmp-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}'
+  +'.cmp-tbl td.muted{color:#98a2b3}.cmp-tbl td.strong{font-weight:650;color:var(--ink)}'
+  +'.cmp-mlbl{font-weight:600;color:#5b6674}'
+  +'.cmp-nm{font-weight:600;color:var(--ink);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  +'.cmp-sub{font-size:11px;color:#98a2b3;margin-top:2px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  +'.cmp-adv{font-size:12px;color:#7d8798}'
+  +'.cmp-none{text-align:center;color:#a3adbe;padding:28px 14px;font-size:12.5px}'
+  +'.cmp-bar{padding-right:18px!important}'
+  +'.cmp-barfill{display:block;height:5px;border-radius:3px;background:#dbe2ee;min-width:2px}'
+  +'.cmp-barfill.up{background:#9fc9ae}.cmp-barfill.down{background:#e0b4ae}'
+  /* stat strip on the fatigue page */
+  +'.cmp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 16px}'
+  +'.cmp-stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;position:relative}'
+  +'.cmp-stat .v{font-size:25px;font-weight:650;letter-spacing:-.7px;color:var(--ink);font-variant-numeric:tabular-nums}'
+  +'.cmp-stat .l{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#8a94a6;margin-top:4px}'
+  +'.cmp-stat.hi .v{color:#c0392f}.cmp-stat.md .v{color:#a16207}'
+  +'@media(max-width:640px){.cmp-stats{grid-template-columns:1fr}}'
+  /* filter row */
+  +'.cmp-fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}'
+  +'.cmp-fbtn{font-size:12.5px;font-weight:600;color:#5b6674;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 13px;cursor:pointer;transition:.12s;font-family:inherit}'
+  +'.cmp-fbtn:hover{border-color:#c3ccdd;color:var(--ink)}'
+  +'.cmp-fbtn.on{background:#111318;border-color:#111318;color:#fff}'
+  +'.cmp-fcount{font-size:12px;color:#98a2b3;margin-left:2px}'
+  +'.cmp-legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:11.5px;color:#98a2b3;margin:-4px 0 16px}'
+  +'.cmp-cap{font-size:11.5px!important;color:#98a2b3!important}'
+  +'.cmp-chcard{border-radius:12px!important;box-shadow:none!important;border:1px solid var(--line)!important}'
+  +'.cmp-chcard h4{font-size:14px!important;font-weight:650!important;letter-spacing:-.2px}'
+  +'.cmp-chcard .sub{font-size:11px!important;color:#98a2b3!important}'
+  +'</style>';
+// Background watchdog: raise email + bell alerts for spend spikes and other critical problems.
+// Safe to call often — the server only alerts once per issue per day.
+function cmpRunAlerts(){
+  if(window._cmpAlertsRan)return; window._cmpAlertsRan=true;
+  try{ fetch(SUPABASE_URL+'/functions/v1/campaign-alerts',{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY},body:'{}'}).catch(function(){}); }catch(e){}
+}
 window.cmpSetSource=function(s){CMP_SOURCE=s;CMP_AD_PAGE=0;location.hash='#/campaigns';renderPage();};
 function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"><button class="seg-btn'+(CMP_SOURCE==='meta'?' on':'')+'" onclick="cmpSetSource(\'meta\')"><i class="fa-brands fa-facebook"></i> &nbsp;Meta</button><button class="seg-btn'+(CMP_SOURCE==='google'?' on':'')+'" onclick="cmpSetSource(\'google\')"><i class="fa-brands fa-google"></i> &nbsp;Google Ads</button><button class="seg-btn'+(CMP_SOURCE==='both'?' on':'')+'" onclick="cmpSetSource(\'both\')"><i class="fa-solid fa-layer-group"></i> &nbsp;Both</button></div></div>';}
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
@@ -6941,28 +7284,33 @@ window.cmpShowProject=function(accId){
   if(!acc)return;
   const inr=CMP_LAST.inr,num=CMP_LAST.num;
   const belongsToProj=function(c,a){ return c.name&&a.name&&String(c.name).trim().toLowerCase().startsWith(String(a.name).trim().toLowerCase()); };
+  const prevMap=CMP_LAST.cPrevMap||{};
   const rows=CMP_LAST.campaigns.filter(c=>c.ad_account_id===accId&&belongsToProj(c,acc)).map(c=>{
     const i=CMP_LAST.cInsMap[c.id]||{};
+    const p=prevMap[c.id]||null;
     const spend=Number(i.spend)||0,leads=Number(i.leads)||0;
     const budget=c.daily_budget!=null?Number(c.daily_budget):(c.lifetime_budget!=null?Number(c.lifetime_budget):null);
-    return {c,i,spend,leads,budget,cpl:leads?spend/leads:null};
+    const pspend=p?(Number(p.spend)||0):null, pleads=p?(Number(p.leads)||0):0;
+    return {c,i,spend,leads,budget,cpl:leads?spend/leads:null,
+      pspend,pcpl:pleads?((Number(p.spend)||0)/pleads):null,pctr:p?(Number(p.ctr)||0):null};
   }).sort((a,b)=>b.spend-a.spend);
   const totalSpend=rows.reduce((s,r)=>s+r.spend,0);
   const totalLeads=rows.reduce((s,r)=>s+r.leads,0);
   const statusTag=function(st){const s=(st||'').toUpperCase();if(s==='ACTIVE')return '<span class="tag t-green">Active</span>';if(s==='PAUSED')return '<span class="tag t-amber">Paused</span>';return s?'<span class="tag" style="background:#f1f5f9;color:#475569">'+esc(s)+'</span>':'—';};
   const tbl=rows.length?('<div class="card qc-table-card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    ['Campaign','Status','Budget','Spend','Results (Leads)','Cost / Lead','Impressions','Reach','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+    ['Campaign','Status','Budget','Spend','Trend','Results (Leads)','Cost / Lead','Reach','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
     '</tr></thead><tbody>'+
     rows.map(function(r){return '<tr>'+
       '<td style="font-weight:600">'+esc(r.c.name||'—')+'</td>'+
       '<td>'+statusTag(r.c.status)+'</td>'+
       '<td style="text-align:right">'+(r.budget?inr(r.budget)+(r.c.daily_budget!=null?'/day':' total'):'—')+'</td>'+
-      '<td style="text-align:right">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'+
       '<td style="text-align:right">'+num(r.leads)+'</td>'+
-      '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'+
-      '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+      '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'+
       '<td style="text-align:right">'+num(r.i.reach)+'</td>'+
       '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+      '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,r.pctr)+'</td>'+
     '</tr>';}).join('')+
     '</tbody></table></div></div>'):'<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-chart-line"></i><div>No campaign data for this period</div></div>';
   openModal(
@@ -6985,16 +7333,19 @@ window.cmpShowProjectAds=function(accId){
   const totalSpend=rows.reduce((s,r)=>s+r.spend,0);
   const statusTag=function(st){const s=(st||'').toUpperCase();if(s==='ACTIVE')return '<span class="tag t-green">Active</span>';if(s==='PAUSED')return '<span class="tag t-amber">Paused</span>';return s?'<span class="tag" style="background:#f1f5f9;color:#475569">'+esc(s)+'</span>':'—';};
   const tbl=rows.length?('<div class="card qc-table-card" style="padding:0;margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-    ['Ad','Campaign','Status','Spend','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+    ['Ad','Campaign','Status','Spend','Trend','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
     '</tr></thead><tbody>'+
-    rows.map(function(r){return '<tr>'+
+    rows.map(function(r){
+      const p=(CMP_LAST.aPrevMap||{})[r.a.id]||null;
+      return '<tr>'+
       '<td style="font-weight:600">'+esc(r.a.name||'—')+'</td>'+
       '<td>'+esc(r.camp?r.camp.name:'—')+'</td>'+
       '<td>'+statusTag(r.a.effective_status||r.a.status)+'</td>'+
-      '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-      '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+      '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+      '<td style="text-align:right">'+cmpTrend(r.spend,p?(Number(p.spend)||0):null,false)+'</td>'+
       '<td style="text-align:right">'+num(r.i.clicks)+'</td>'+
       '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+      '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,p?(Number(p.ctr)||0):null)+'</td>'+
     '</tr>';}).join('')+
     '</tbody></table></div></div>'):'<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-rectangle-ad"></i><div>No ad data for this period</div></div>';
   openModal(
@@ -7004,7 +7355,7 @@ window.cmpShowProjectAds=function(accId){
   );
 };
 async function cmpBothView(v,seg){
-  const tabs=['Overview','By source'];const ti=mTab(seg,tabs.length);
+  const tabs=['Overview','Sources','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
@@ -7014,19 +7365,61 @@ async function cmpBothView(v,seg){
       const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
       const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
       const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      const pr0=cmpPrevRange(); if(pr0){gbody.prev_since=pr0.since;gbody.prev_until=pr0.until;}
       await Promise.all([
         fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
         fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
       ]);
     }catch(e){}
   }
+  await cmpSyncPrev('both');
   const C=function(){return sb.schema('camp');};
-  let mIns=[],gIns=[];
-  try{ const r=await Promise.all([C().from('campaign_insights').select('spend,impressions,clicks,leads').eq('period',periodKey),C().from('g_campaign_insights').select('spend,impressions,clicks,conversions').eq('period',periodKey)]); mIns=r[0].data||[];gIns=r[1].data||[]; }catch(e){}
+  const prevKey=cmpPrevKey();
+  let mIns=[],gIns=[],mPrev=[],gPrev=[],mAccts=[],mCamps=[],gAccts=[],gCamps=[];
+  try{
+    const calls=[
+      C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',periodKey),
+      C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',periodKey),
+      C().from('ad_accounts').select('ad_account_id,name'),
+      C().from('campaigns').select('id,ad_account_id,name,daily_budget,lifetime_budget'),
+      C().from('g_accounts').select('customer_id,name'),
+      C().from('g_campaigns').select('id,customer_id,name,status,budget_amount')
+    ];
+    if(prevKey){
+      calls.push(C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',prevKey));
+      calls.push(C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',prevKey));
+    }
+    const r=await Promise.all(calls);
+    mIns=r[0].data||[];gIns=r[1].data||[];mAccts=r[2].data||[];mCamps=r[3].data||[];gAccts=r[4].data||[];gCamps=r[5].data||[];
+    if(prevKey){mPrev=(r[6]&&r[6].data)||[];gPrev=(r[7]&&r[7].data)||[];}
+  }catch(e){}
   const sum=function(arr,k){return arr.reduce(function(s,x){return s+(Number(x[k])||0);},0);};
   const M={spend:sum(mIns,'spend'),res:sum(mIns,'leads'),impr:sum(mIns,'impressions'),clk:sum(mIns,'clicks')};
   const Gg={spend:sum(gIns,'spend'),res:sum(gIns,'conversions'),impr:sum(gIns,'impressions'),clk:sum(gIns,'clicks')};
   const T={spend:M.spend+Gg.spend,res:M.res+Gg.res,impr:M.impr+Gg.impr,clk:M.clk+Gg.clk};
+  const Mp={spend:sum(mPrev,'spend'),res:sum(mPrev,'leads'),impr:sum(mPrev,'impressions'),clk:sum(mPrev,'clicks')};
+  const Gp={spend:sum(gPrev,'spend'),res:sum(gPrev,'conversions'),impr:sum(gPrev,'impressions'),clk:sum(gPrev,'clicks')};
+  const Tp={spend:Mp.spend+Gp.spend,res:Mp.res+Gp.res,impr:Mp.impr+Gp.impr,clk:Mp.clk+Gp.clk};
+  const avgFreq=function(arr){const f=arr.map(function(x){return Number(x.frequency)||0;}).filter(function(x){return x>0;});return f.length?(f.reduce(function(a,b){return a+b;},0)/f.length):0;};
+  const mFreq=avgFreq(mIns);
+  // total live daily budget across both platforms
+  const mBudget=mCamps.reduce(function(s,c){return s+(Number(c.daily_budget)||0);},0);
+  const gBudget=gCamps.filter(function(c){return String(c.status||'').toUpperCase()==='ENABLED';}).reduce(function(s,c){return s+(Number(c.budget_amount)||0);},0);
+  const tBudget=mBudget+gBudget;
+  // combined best / worst across Meta projects and Google accounts
+  const mInsMap={};mIns.forEach(function(x){mInsMap[x.campaign_id]=x;});
+  const gInsMap={};gIns.forEach(function(x){gInsMap[x.campaign_id]=x;});
+  const bwItems=[];
+  mAccts.forEach(function(a){
+    let sp=0,rs=0;
+    mCamps.filter(function(c){return c.ad_account_id===a.ad_account_id&&c.name&&a.name&&String(c.name).trim().toLowerCase().indexOf(String(a.name).trim().toLowerCase())===0;}).forEach(function(c){const i=mInsMap[c.id];if(i){sp+=Number(i.spend)||0;rs+=Number(i.leads)||0;}});
+    if(sp>0)bwItems.push({name:'Meta · '+a.name,spend:sp,res:rs,cpr:rs?sp/rs:null});
+  });
+  gAccts.forEach(function(a){
+    let sp=0,rs=0;
+    gCamps.filter(function(c){return c.customer_id===a.customer_id;}).forEach(function(c){const i=gInsMap[c.id];if(i){sp+=Number(i.spend)||0;rs+=Number(i.conversions)||0;}});
+    if(sp>0)bwItems.push({name:'Google · '+a.name,spend:sp,res:rs,cpr:rs?sp/rs:null});
+  });
   const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
   const num=function(n){return Number(n||0).toLocaleString('en-IN');};
   const cmpCss='<style>'
@@ -7046,32 +7439,92 @@ async function cmpBothView(v,seg){
     +'.cmp-chcard h4{margin:0;font-size:13.5px;font-weight:700;color:var(--ink,#0f172a)}'
     +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
     +'</style>';
-  const cmpKpi=function(iconCls,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="'+iconCls+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
-  const cpr=T.res?T.spend/T.res:null;
+  const cmpKpi=function(iconCls,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="'+iconCls+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
+  const cpr=T.res?T.spend/T.res:null, pcpr=Tp.res?Tp.spend/Tp.res:null;
   const kpiStrip='<div class="cmp-kpis">'
-    +cmpKpi('fa-solid fa-indian-rupee-sign','Total Spend',inr(T.spend),'Meta + Google','#334155','#f1f5f9')
-    +cmpKpi('fa-solid fa-bullseye','Total Results',num(Math.round(T.res)),'leads + conversions','#0d9488','#f0fdfa')
-    +cmpKpi('fa-solid fa-tags','Cost / Result',cpr!=null?inr(cpr):'—','blended','#0ea5e9','#f0f9ff')
-    +cmpKpi('fa-solid fa-eye','Impressions',num(T.impr),'','#7c3aed','#f5f3ff')
-    +cmpKpi('fa-solid fa-hand-pointer','Clicks',num(T.clk),'','#2563eb','#eff6ff')
-    +cmpKpi('fa-brands fa-facebook','Meta Spend',inr(M.spend),T.spend?Math.round(M.spend/T.spend*100)+'% of spend':'','#1877f2','#eff6ff')
-    +cmpKpi('fa-brands fa-google','Google Spend',inr(Gg.spend),T.spend?Math.round(Gg.spend/T.spend*100)+'% of spend':'','#ea4335','#fef2f2')
+    +cmpKpi('fa-solid fa-indian-rupee-sign','Total Spend',inr(T.spend),'Meta + Google','#334155','#f1f5f9',cmpTrend(T.spend,Tp.spend,false))
+    +cmpKpi('fa-solid fa-wallet','Daily Budget',tBudget?inr(tBudget):'—','both platforms','#6366f1','#eef2ff',tBudget?('<span class="cmp-tr flat" title="Share of the daily budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(T.spend/tBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-solid fa-bullseye','Total Results',num(Math.round(T.res)),'leads + conversions','#0d9488','#f0fdfa',cmpTrend(T.res,Tp.res,false))
+    +cmpKpi('fa-solid fa-tags','Cost / Result',cpr!=null?inr(cpr):'—','blended','#0ea5e9','#f0f9ff',cmpTrend(cpr,pcpr,true))
+    +cmpKpi('fa-solid fa-eye','Impressions',num(T.impr),'','#7c3aed','#f5f3ff',cmpTrend(T.impr,Tp.impr,false))
+    +cmpKpi('fa-solid fa-hand-pointer','Clicks',num(T.clk),'','#2563eb','#eff6ff',cmpTrend(T.clk,Tp.clk,false))
+    +cmpKpi('fa-brands fa-facebook','Meta Spend',inr(M.spend),T.spend?Math.round(M.spend/T.spend*100)+'% of spend':'','#1877f2','#eff6ff',cmpTrend(M.spend,Mp.spend,false))
+    +cmpKpi('fa-brands fa-google','Google Spend',inr(Gg.spend),T.spend?Math.round(Gg.spend/T.spend*100)+'% of spend':'','#ea4335','#fef2f2',cmpTrend(Gg.spend,Gp.spend,false))
     +'</div>';
+  const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue: Meta uses real per-person frequency, Google uses CTR decline</span></div>';
   let body;
   if(ti===0){
     body='<div class="cmp-charts">'
       +'<div class="cmp-chcard"><h4>Spend: Meta vs Google</h4><div class="sub">'+esc(periodLabel)+'</div><div style="height:260px"><canvas id="bCh1"></canvas></div></div>'
       +'<div class="cmp-chcard"><h4>Results: Meta vs Google</h4><div class="sub">leads + conversions</div><div style="height:260px"><canvas id="bCh2"></canvas></div></div>'
       +'</div>';
-  } else {
-    const rowT=function(label,d,trStyle){const c=d.res?d.spend/d.res:null;const ctr=d.impr?d.clk/d.impr*100:0;return '<tr'+(trStyle?(' style="'+trStyle+'"'):'')+'><td style="font-weight:600">'+label+'</td><td style="text-align:right">'+inr(d.spend)+'</td><td style="text-align:right">'+num(Math.round(d.res))+'</td><td style="text-align:right">'+(c!=null?inr(c):'—')+'</td><td style="text-align:right">'+num(d.impr)+'</td><td style="text-align:right">'+num(d.clk)+'</td><td style="text-align:right">'+ctr.toFixed(2)+'%</td></tr>';};
-    body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Source','Spend','Results','Cost / Result','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'
-      +rowT('<i class="fa-brands fa-facebook" style="color:#1877f2"></i> &nbsp;Meta',M,'')
-      +rowT('<i class="fa-brands fa-google" style="color:#ea4335"></i> &nbsp;Google',Gg,'')
-      +rowT('Total',T,'background:#f8fafc;font-weight:700')
+  } else if(ti===1){
+    const mCtr=M.impr?M.clk/M.impr*100:0, mpCtr=Mp.impr?Mp.clk/Mp.impr*100:0;
+    const gCtr=Gg.impr?Gg.clk/Gg.impr*100:0, gpCtr=Gp.impr?Gp.clk/Gp.impr*100:0;
+    const tCtr=T.impr?T.clk/T.impr*100:0, tpCtr=Tp.impr?Tp.clk/Tp.impr*100:0;
+    const rowT=function(label,d,p,ctr,pCtr,budget,fatigue,isTotal){
+      const c=d.res?d.spend/d.res:null, pc=p&&p.res?p.spend/p.res:null;
+      return '<tr'+(isTotal?' style="background:#fbfcfe"':'')+'><td'+(isTotal?' class="strong"':'')+'>'+label+'</td>'
+      +'<td class="num">'+(budget?inr(budget):'—')+'</td>'
+      +'<td class="num strong">'+inr(d.spend)+'</td>'
+      +'<td class="num">'+cmpTrend(d.spend,p?p.spend:null,false)+'</td>'
+      +'<td class="num">'+num(Math.round(d.res))+'</td>'
+      +'<td class="num">'+cmpTrend(d.res,p?p.res:null,false)+'</td>'
+      +'<td class="num">'+(c!=null?inr(c):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(c,pc,true)+'</td>'
+      +'<td class="num">'+ctr.toFixed(2)+'%</td>'
+      +'<td>'+fatigue+'</td></tr>';
+    };
+    body='<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Sources</span><h3>Meta vs Google</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Source</th><th class="num">Budget / day</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Results</th><th class="num">vs prev</th><th class="num">Cost / Result</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'
+      +rowT('<i class="fa-brands fa-facebook" style="color:#8a94a6"></i> &nbsp;Meta',M,Mp,mCtr,mpCtr,mBudget,cmpFatigue(mFreq,mCtr,mpCtr),false)
+      +rowT('<i class="fa-brands fa-google" style="color:#8a94a6"></i> &nbsp;Google',Gg,Gp,gCtr,gpCtr,gBudget,cmpFatigue(0,gCtr,gpCtr),false)
+      +rowT('Total',T,Tp,tCtr,tpCtr,tBudget,cmpFatigue(mFreq,tCtr,tpCtr),true)
       +'</tbody></table></div></div>';
+  } else if(ti===2){
+    const tCtr=T.impr?T.clk/T.impr*100:0, tpCtr=Tp.impr?Tp.clk/Tp.impr*100:0;
+    const prevByName={};
+    const pmMap={};mPrev.forEach(function(x){pmMap[x.campaign_id]=x;});
+    const pgMap={};gPrev.forEach(function(x){pgMap[x.campaign_id]=x;});
+    mAccts.forEach(function(a){
+      let sp=0,rs=0;
+      mCamps.filter(function(c){return c.ad_account_id===a.ad_account_id&&c.name&&a.name&&String(c.name).trim().toLowerCase().indexOf(String(a.name).trim().toLowerCase())===0;}).forEach(function(c){const p=pmMap[c.id];if(p){sp+=Number(p.spend)||0;rs+=Number(p.leads)||0;}});
+      prevByName['Meta · '+a.name]={spend:sp,res:rs};
+    });
+    gAccts.forEach(function(a){
+      let sp=0,rs=0;
+      gCamps.filter(function(c){return c.customer_id===a.customer_id;}).forEach(function(c){const p=pgMap[c.id];if(p){sp+=Number(p.spend)||0;rs+=Number(p.conversions)||0;}});
+      prevByName['Google · '+a.name]={spend:sp,res:rs};
+    });
+    body=cmpTrendPage(bwItems.map(function(x){
+      const p=prevByName[x.name]||{spend:null,res:0};
+      return {name:x.name,sub:'',spend:x.spend,pspend:p.spend,res:x.res,pres:p.res,cpr:x.cpr,pcpr:p.res?(p.spend/p.res):null};
+    }),{spend:T.spend,pspend:Tp.spend,res:T.res,pres:Tp.res,cpr:cpr,pcpr:pcpr,clk:T.clk,pclk:Tp.clk,ctr:tCtr,pctr:tpCtr},inr,num,'results');
+  } else {
+    const fr=[];
+    const mAccName={};mAccts.forEach(function(a){mAccName[a.ad_account_id]=a.name;});
+    const gAccName={};gAccts.forEach(function(a){gAccName[a.customer_id]=a.name;});
+    const pmMap={};mPrev.forEach(function(x){pmMap[x.campaign_id]=x;});
+    const pgMap={};gPrev.forEach(function(x){pgMap[x.campaign_id]=x;});
+    mCamps.forEach(function(c){
+      const i=mInsMap[c.id]; if(!i)return; const p=pmMap[c.id]||null;
+      const imp=Number(i.impressions)||0, pimp=p?(Number(p.impressions)||0):0;
+      fr.push({name:c.name||'Campaign',sub:'Meta · '+(mAccName[c.ad_account_id]||''),freq:Number(i.frequency)||0,
+        ctr:imp?((Number(i.clicks)||0)/imp*100):null,
+        pctr:pimp?((Number(p.clicks)||0)/pimp*100):null,
+        spend:Number(i.spend)||0,impr:imp});
+    });
+    gCamps.forEach(function(c){
+      const i=gInsMap[c.id]; if(!i)return; const p=pgMap[c.id]||null;
+      fr.push({name:c.name||'Campaign',sub:'Google · '+(gAccName[c.customer_id]||''),freq:0,
+        ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+    });
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta + Google · campaign level');
   }
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  const showKpis=(ti!==2&&ti!==3);
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+legend+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const opt={responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:12}}}}};
     try{new Chart(document.getElementById('bCh1'),{type:'doughnut',data:{labels:['Meta','Google'],datasets:[{data:[M.spend,Gg.spend],backgroundColor:['#1877f2','#ea4335'],borderWidth:2,borderColor:'#fff'}]},options:opt});}catch(e){}
@@ -7079,7 +7532,8 @@ async function cmpBothView(v,seg){
   },60);}
 }
 async function cmpGoogleView(v,seg){
-  const tabs=['Overview','By account','Campaigns'];const ti=mTab(seg,tabs.length);
+  const tabs=['Overview','Accounts','Campaigns','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const needGAds=(ti===3||ti===5);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
@@ -7087,26 +7541,54 @@ async function cmpGoogleView(v,seg){
   if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
     try{
       const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
-      const body=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
-      await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(body)});
+      const pr=cmpPrevRange();
+      const base=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
+      if(pr){base.prev_since=pr.since;base.prev_until=pr.until;}   // one call fills both buckets
+      const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
+      const jobs=[fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(base)}).catch(function(){})];
+      if(needGAds)jobs.push(fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(Object.assign({},base,{level:'ad'}))}).catch(function(){}));
+      await Promise.all(jobs);
     }catch(e){}
   }
   const G=function(){return sb.schema('camp');};
-  let accts=[],camps=[],ins=[];
+  const prevKey=cmpPrevKey();
+  let accts=[],camps=[],ins=[],pIns=[],gAds=[],gAdIns=[],gAdPrev=[];
   try{
-    const r=await Promise.all([G().from('g_accounts').select('*').order('name'),G().from('g_campaigns').select('*'),G().from('g_campaign_insights').select('*').eq('period',periodKey)]);
-    accts=r[0].data||[];camps=r[1].data||[];ins=r[2].data||[];
+    const calls=[G().from('g_accounts').select('*').order('name'),G().from('g_campaigns').select('*'),G().from('g_campaign_insights').select('*').eq('period',periodKey)];
+    const iPrev=calls.length; if(prevKey)calls.push(G().from('g_campaign_insights').select('*').eq('period',prevKey));
+    let iAds=-1,iAdIns=-1,iAdPrev=-1;
+    if(needGAds){ iAds=calls.length; calls.push(G().from('g_ads').select('*')); iAdIns=calls.length; calls.push(G().from('g_ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iAdPrev=calls.length; calls.push(G().from('g_ad_insights').select('*').eq('period',prevKey)); } }
+    const r=await Promise.all(calls);
+    const at=function(i){return (i>=0&&r[i]&&r[i].data)?r[i].data:[];};
+    accts=at(0);camps=at(1);ins=at(2);
+    if(prevKey)pIns=at(iPrev);
+    if(needGAds){gAds=at(iAds);gAdIns=at(iAdIns);if(iAdPrev>=0)gAdPrev=at(iAdPrev);}
   }catch(e){}
   const insMap={};ins.forEach(function(x){insMap[x.campaign_id]=x;});
+  const pInsMap={};pIns.forEach(function(x){pInsMap[x.campaign_id]=x;});
+  const gAdInsMap={};gAdIns.forEach(function(x){gAdInsMap[x.ad_id]=x;});
+  const gAdPrevMap={};gAdPrev.forEach(function(x){gAdPrevMap[x.ad_id]=x;});
   const inr=function(n){return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});};
   const num=function(n){return Number(n||0).toLocaleString('en-IN');};
+  const isLive=function(c){return String(c.status||'').toUpperCase()==='ENABLED';};
   const rows=accts.map(function(a){
     const acs=camps.filter(function(c){return c.customer_id===a.customer_id;});
-    let spend=0,impr=0,clk=0,conv=0;
-    acs.forEach(function(c){const i=insMap[c.id];if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clk+=Number(i.clicks)||0;conv+=Number(i.conversions)||0;}});
-    return {a:a,campaigns:acs.length,spend:spend,impr:impr,clk:clk,conv:conv,ctr:impr?clk/impr*100:0,cpl:conv?spend/conv:null};
+    let spend=0,impr=0,clk=0,conv=0,budget=0;
+    let pspend=0,pimpr=0,pclk=0,pconv=0;
+    acs.forEach(function(c){
+      const i=insMap[c.id];if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clk+=Number(i.clicks)||0;conv+=Number(i.conversions)||0;}
+      const p=pInsMap[c.id];if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclk+=Number(p.clicks)||0;pconv+=Number(p.conversions)||0;}
+      if(isLive(c))budget+=Number(c.budget_amount)||0;
+    });
+    return {a:a,campaigns:acs.length,spend:spend,impr:impr,clk:clk,conv:conv,budget:budget,
+      ctr:impr?clk/impr*100:0,cpl:conv?spend/conv:null,
+      pspend:pspend,pconv:pconv,pctr:pimpr?pclk/pimpr*100:0,pcpl:pconv?pspend/pconv:null};
   }).sort(function(x,y){return y.spend-x.spend;});
   const tSpend=rows.reduce(function(s,r){return s+r.spend;},0),tImpr=rows.reduce(function(s,r){return s+r.impr;},0),tClk=rows.reduce(function(s,r){return s+r.clk;},0),tConv=rows.reduce(function(s,r){return s+r.conv;},0);
+  const tBudget=rows.reduce(function(s,r){return s+r.budget;},0);
+  const pSpend=rows.reduce(function(s,r){return s+r.pspend;},0),pConv=rows.reduce(function(s,r){return s+r.pconv;},0);
+  const pImprT=pIns.reduce(function(s,x){return s+(Number(x.impressions)||0);},0),pClkT=pIns.reduce(function(s,x){return s+(Number(x.clicks)||0);},0);
+  const pAvgCtr=pImprT?pClkT/pImprT*100:0, pCpl=pConv?pSpend/pConv:null, pAvgCpc=pClkT?pSpend/pClkT:null;
   const avgCtr=tImpr?tClk/tImpr*100:0,avgCpc=tClk?tSpend/tClk:null,cpl=tConv?tSpend/tConv:null;
   const cmpCss='<style>'
     +'.cmp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 18px}'
@@ -7126,17 +7608,19 @@ async function cmpGoogleView(v,seg){
     +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
     +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
     +'</style>';
-  const cmpKpi=function(icon,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const cmpKpi=function(icon,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
   const kpiStrip='<div class="cmp-kpis">'
-    +cmpKpi('fa-indian-rupee-sign','Spend',inr(tSpend),accts.length+' account'+(accts.length===1?'':'s'),'#4285f4','#eff6ff')
-    +cmpKpi('fa-bullseye','Conversions',num(Math.round(tConv)),tConv?'':'none yet','#0d9488','#f0fdfa')
-    +cmpKpi('fa-tags','Cost / Conv.',cpl!=null?inr(cpl):'—','lower is better','#0ea5e9','#f0f9ff')
-    +cmpKpi('fa-eye','Impressions',num(tImpr),'','#7c3aed','#f5f3ff')
-    +cmpKpi('fa-hand-pointer','Clicks',num(tClk),'','#2563eb','#eff6ff')
-    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'','#16a34a','#f0fdf4')
-    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(tSpend),accts.length+' account'+(accts.length===1?'':'s'),'#4285f4','#eff6ff',cmpTrend(tSpend,pSpend,false))
+    +cmpKpi('fa-wallet','Daily Budget',tBudget?inr(tBudget):'—','active campaigns','#6366f1','#eef2ff',tBudget?('<span class="cmp-tr flat" title="Share of today\'s budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(tSpend/tBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-bullseye','Conversions',num(Math.round(tConv)),tConv?'':'none yet','#0d9488','#f0fdfa',cmpTrend(tConv,pConv,false))
+    +cmpKpi('fa-tags','Cost / Conv.',cpl!=null?inr(cpl):'—','lower is better','#0ea5e9','#f0f9ff',cmpTrend(cpl,pCpl,true))
+    +cmpKpi('fa-eye','Impressions',num(tImpr),'','#7c3aed','#f5f3ff',cmpTrend(tImpr,pImprT,false))
+    +cmpKpi('fa-hand-pointer','Clicks',num(tClk),'','#2563eb','#eff6ff',cmpTrend(tClk,pClkT,false))
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'','#16a34a','#f0fdf4',cmpTrend(avgCtr,pAvgCtr,false))
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
     +'</div>';
   const cap='<div class="cmp-cap"><i class="fa-brands fa-google" style="color:#ea4335"></i> Live Google Ads · '+esc(periodLabel)+' · '+accts.length+' account'+(accts.length===1?'':'s')+'</div>';
+  const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Google has no per-person frequency, so fatigue = CTR falling while spend continues</span></div>';
   let body;
   if(ti===0){
     body='<div class="cmp-charts">'
@@ -7146,12 +7630,99 @@ async function cmpGoogleView(v,seg){
       +'<div class="cmp-chcard"><h4>Cost per conversion by account</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="gCh4"></canvas></div></div>'
       +'</div>';
   } else if(ti===1){
-    body=rows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Account','Campaigns','Spend','Conversions','Cost / Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.a.name)+'</td><td style="text-align:right">'+r.campaigns+'</td><td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(r.conv))+'</td><td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td><td style="text-align:right">'+num(r.impr)+'</td><td style="text-align:right">'+num(r.clk)+'</td><td style="text-align:right">'+r.ctr.toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No Google Ads data for this period</div></div>';
+    body=rows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Account','Campaigns','Daily Budget','Spend','Trend','Conversions','Cost / Conv','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){
+      const used=r.budget?Math.round(r.spend/r.budget*100):null;
+      return '<tr><td style="font-weight:600">'+esc(r.a.name)+'</td><td style="text-align:right">'+r.campaigns+'</td>'
+      +'<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'
+      +'<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'
+      +'<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+      +'<td style="text-align:right">'+num(Math.round(r.conv))+'</td>'
+      +'<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'
+      +'<td style="text-align:right">'+num(r.clk)+'</td><td style="text-align:right">'+r.ctr.toFixed(2)+'%</td>'
+      +'<td style="text-align:right">'+cmpFatigue(0,r.ctr,r.pctr)+'</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No Google Ads data for this period</div></div>';
+  } else if(ti===2){
+    const all=camps.map(function(c){const i=insMap[c.id]||null;const p=pInsMap[c.id]||null;const acc=accts.find(function(a){return a.customer_id===c.customer_id;});
+      return {c:c,i:i||{},p:p,acc:acc,spend:i?(Number(i.spend)||0):0,active:cmpIsActive(c.status),hasData:!!i};}).filter(function(r){return r.acc;});
+    const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
+    const crow=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(x,y){return y.spend-x.spend;}).slice(0,300);
+    const rowsHtml=crow.length?crow.map(function(r){
+      const bud=Number(r.c.budget_amount)||0, sp=r.spend;
+      const conv=Number(r.i.conversions)||0, cpc=conv?sp/conv:null;
+      const psp=r.p?(Number(r.p.spend)||0):null;
+      const pconv=r.p?(Number(r.p.conversions)||0):0, pcpc=(r.p&&pconv)?((Number(r.p.spend)||0)/pconv):null;
+      const pctr=r.p?(Number(r.p.ctr)||0):null;
+      const used=bud?Math.round(sp/bud*100):null;
+      const chan=String(r.c.channel_type||'').replace(/_/g,' ').toLowerCase();
+      return '<tr><td><div class="cmp-nm">'+esc(r.c.name)+'</div><div class="cmp-sub">'+esc(r.acc.name)+(chan?(' · '+esc(chan)):'')+'</div></td>'
+      +'<td>'+(r.active?'<span class="cmp-fg ok"><i class="fa-solid fa-circle"></i> Active</span>':'<span class="cmp-fg na" style="color:#98a2b3"><i class="fa-solid fa-circle"></i> '+esc(String(r.c.status||'Inactive').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</span>')+'</td>'
+      +'<td class="num">'+(bud?(inr(bud)+(used!=null?'<div class="cmp-sub" style="text-align:right'+(used>100?';color:#c0392f':'')+'">'+used+'% used</div>':'')):'—')+'</td>'
+      +'<td class="num strong">'+inr(sp)+'</td>'
+      +'<td class="num">'+cmpTrend(sp,psp,false)+'</td>'
+      +'<td class="num">'+num(Math.round(conv))+'</td>'
+      +'<td class="num">'+(cpc!=null?inr(cpc):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(cpc,pcpc,true)+'</td>'
+      +'<td class="num">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td>'
+      +'<td>'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join(''):'<tr><td colspan="10" class="cmp-none">No campaigns match this filter</td></tr>';
+    body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Campaigns</span><h3>'+crow.length+' campaign'+(crow.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Campaign</th><th>Status</th><th class="num">Budget</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Conv</th><th class="num">Cost / Conv</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
+  } else if(ti===3){
+    // ---- Ad-wise (Google) ----
+    const campNameMap={};camps.forEach(function(c){campNameMap[c.id]=c.name;});
+    const all=gAds.map(function(a){
+      const i=gAdInsMap[a.id]||null, p=gAdPrevMap[a.id]||null;
+      const acc=accts.find(function(x){return x.customer_id===a.customer_id;});
+      return {a:a,i:i||{},p:p,acc:acc,spend:i?(Number(i.spend)||0):0,active:cmpIsActive(a.status),hasData:!!i};
+    }).filter(function(r){return r.hasData;});
+    const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
+    const shown=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(x,y){return y.spend-x.spend;}).slice(0,300);
+    const rowsHtml=shown.length?shown.map(function(r){
+      const conv=Number(r.i.conversions)||0, sp=r.spend, cpc=conv?sp/conv:null;
+      const psp=r.p?(Number(r.p.spend)||0):null;
+      const pconv=r.p?(Number(r.p.conversions)||0):0, pcpc=(r.p&&pconv)?((Number(r.p.spend)||0)/pconv):null;
+      const pctr=r.p?(Number(r.p.ctr)||0):null;
+      const sub=[(r.acc&&r.acc.name)||'',campNameMap[r.a.campaign_id]||'',r.a.ad_group_name||''].filter(Boolean).join(' · ');
+      return '<tr><td><div class="cmp-nm">'+esc(r.a.name||'Ad')+'</div><div class="cmp-sub">'+esc(sub)+'</div></td>'
+      +'<td>'+(r.active?'<span class="cmp-fg ok"><i class="fa-solid fa-circle"></i> Active</span>':'<span class="cmp-fg na" style="color:#98a2b3"><i class="fa-solid fa-circle"></i> '+esc(String(r.a.status||'Inactive').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</span>')+'</td>'
+      +'<td class="num strong">'+inr(sp)+'</td>'
+      +'<td class="num">'+cmpTrend(sp,psp,false)+'</td>'
+      +'<td class="num">'+num(Math.round(conv))+'</td>'
+      +'<td class="num">'+(cpc!=null?inr(cpc):'—')+'</td>'
+      +'<td class="num">'+cmpTrend(cpc,pcpc,true)+'</td>'
+      +'<td class="num">'+num(r.i.clicks)+'</td>'
+      +'<td class="num">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td>'
+      +'<td>'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join(''):'<tr><td colspan="10" class="cmp-none">No ad-level data for this period</td></tr>';
+    body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Ads</span><h3>'+shown.length+' ad'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Ad</th><th>Status</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Conv</th><th class="num">Cost / Conv</th><th class="num">vs prev</th><th class="num">Clicks</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
+  } else if(ti===4){
+    body=cmpTrendPage(rows.map(function(r){return {name:r.a.name,sub:r.campaigns+' campaign'+(r.campaigns===1?'':'s'),spend:r.spend,pspend:r.pspend,res:r.conv,pres:r.pconv,cpr:r.cpl,pcpr:r.pcpl};}),
+      {spend:tSpend,pspend:pSpend,res:tConv,pres:pConv,cpr:cpl,pcpr:pCpl,clk:tClk,pclk:pClkT,ctr:avgCtr,pctr:pAvgCtr},inr,num,'conversions');
   } else {
-    const crow=camps.map(function(c){const i=insMap[c.id]||{};const acc=accts.find(function(a){return a.customer_id===c.customer_id;});return {c:c,i:i,acc:acc,spend:Number(i.spend)||0};}).filter(function(r){return r.acc&&insMap[r.c.id];}).sort(function(x,y){return y.spend-x.spend;}).slice(0,200);
-    body=crow.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+['Campaign','Account','Status','Spend','Conv','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+'</tr></thead><tbody>'+crow.map(function(r){return '<tr><td style="font-weight:600">'+esc(r.c.name)+'</td><td>'+esc(r.acc.name)+'</td><td>'+esc(String(r.c.status||'').replace('ENABLED','Active').replace('PAUSED','Paused').replace('REMOVED','Removed'))+'</td><td style="text-align:right">'+inr(r.spend)+'</td><td style="text-align:right">'+num(Math.round(Number(r.i.conversions)||0))+'</td><td style="text-align:right">'+num(r.i.impressions)+'</td><td style="text-align:right">'+num(r.i.clicks)+'</td><td style="text-align:right">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No campaigns with data for this period</div></div>';
+    // ---- Ad Fatigue (Google): per ad when loaded, else per campaign ----
+    const campNameMap={};camps.forEach(function(c){campNameMap[c.id]=c.name;});
+    const fr=[];
+    gAds.forEach(function(a){
+      const i=gAdInsMap[a.id]; if(!i)return;
+      const p=gAdPrevMap[a.id]||null;
+      const acc=accts.find(function(x){return x.customer_id===a.customer_id;});
+      fr.push({name:a.name||'Ad',sub:[(acc&&acc.name)||'',campNameMap[a.campaign_id]||''].filter(Boolean).join(' · '),
+        freq:0,ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+    });
+    if(!fr.length){
+      camps.forEach(function(c){
+        const i=insMap[c.id]; if(!i)return;
+        const p=pInsMap[c.id]||null;
+        const acc=accts.find(function(x){return x.customer_id===c.customer_id;});
+        fr.push({name:c.name||'Campaign',sub:(acc&&acc.name)||'',freq:0,
+          ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+          spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+      });
+    }
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Google · CTR trend (Google publishes no per-person frequency)',true);
   }
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  const showKpis=(ti!==4&&ti!==5);
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+cap+legend+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=rows.map(function(r){return r.a.name;});
     const palette=['#4285f4','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#2563eb','#0891b2'];
@@ -7166,9 +7737,9 @@ VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
-  const tabs=['Overview','By Project','Ads'];const ti=mTab(seg,tabs.length);
+  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
-  const needAd=ti===2;
+  const needAd=(ti===3||ti===5);
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
   // Ask the live Edge Function to make sure this exact period+level is fresh (it caches
@@ -7182,19 +7753,27 @@ VIEWS.campaigns=async function(v,seg){
       await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(reqBody)});
     }catch(e){}
   }
+  await cmpSyncPrev('meta');
   const CMP=()=>sb.schema('camp');
-  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[];
+  const prevKey=cmpPrevKey();
+  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[];
   try{
     const calls=[
       CMP().from('ad_accounts').select('*').order('name'),
       CMP().from('campaigns').select('*'),
       CMP().from('campaign_insights').select('*').eq('period',periodKey)
     ];
-    if(needAd){calls.push(CMP().from('ads').select('*'));calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey));}
+    const iPrevC=calls.length; if(prevKey)calls.push(CMP().from('campaign_insights').select('*').eq('period',prevKey));
+    let iAds=-1,iAdIns=-1,iPrevA=-1;
+    if(needAd){ iAds=calls.length; calls.push(CMP().from('ads').select('*')); iAdIns=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iPrevA=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',prevKey)); } }
     const results=await Promise.all(calls);
-    accounts=results[0].data||[];campaigns=results[1].data||[];cIns=results[2].data||[];
-    if(needAd){ads=results[3].data||[];aIns=results[4].data||[];}
+    const at=function(i){return (i>=0&&results[i]&&results[i].data)?results[i].data:[];};
+    accounts=at(0);campaigns=at(1);cIns=at(2);
+    if(prevKey)cPrev=at(iPrevC);
+    if(needAd){ads=at(iAds);aIns=at(iAdIns);if(iPrevA>=0)aPrev=at(iPrevA);}
   }catch(e){}
+  const cPrevMap={};cPrev.forEach(function(x){cPrevMap[x.campaign_id]=x;});
+  const aPrevMap={};aPrev.forEach(function(x){aPrevMap[x.ad_id]=x;});
   const cInsMap={};cIns.forEach(x=>cInsMap[x.campaign_id]=x);
   const aInsMap={};aIns.forEach(x=>aInsMap[x.ad_id]=x);
   const campMap={};campaigns.forEach(x=>campMap[x.id]=x);
@@ -7203,21 +7782,38 @@ VIEWS.campaigns=async function(v,seg){
   const belongsToProj=function(c,acc){ return c.name&&acc.name&&String(c.name).trim().toLowerCase().startsWith(String(acc.name).trim().toLowerCase()); };
   const projRows=accounts.map(acc=>{
     const accCamps=campaigns.filter(c=>c.ad_account_id===acc.ad_account_id&&belongsToProj(c,acc));
-    let spend=0,impr=0,clicks=0,leads=0,reach=0,budget=0;
+    let spend=0,impr=0,clicks=0,leads=0,reach=0,budget=0,freqSum=0,freqN=0;
+    let pspend=0,pimpr=0,pclicks=0,pleads=0;
     accCamps.forEach(c=>{
       const i=cInsMap[c.id];
-      if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;}
+      if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;const f=Number(i.frequency)||0;if(f>0){freqSum+=f;freqN++;}}
+      const p=cPrevMap[c.id];
+      if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclicks+=Number(p.clicks)||0;pleads+=Number(p.leads)||0;}
       budget+=Number(c.daily_budget)||Number(c.lifetime_budget)||0;
     });
-    return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,ctr:impr?(clicks/impr*100):0,cpl:leads?(spend/leads):null};
+    return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,
+      freq:freqN?(freqSum/freqN):0,
+      ctr:impr?(clicks/impr*100):0,cpl:leads?(spend/leads):null,
+      pspend,pleads,pctr:pimpr?(pclicks/pimpr*100):0,pcpl:pleads?(pspend/pleads):null};
   });
-  CMP_LAST={accounts,campaigns,cInsMap,periodLabel,inr,num,ads,aInsMap,campMap};
+  CMP_LAST={accounts,campaigns,cInsMap,periodLabel,inr,num,ads,aInsMap,campMap,cPrevMap,aPrevMap};
   const totalSpend=projRows.reduce((s,r)=>s+r.spend,0);
   const totalImpr=projRows.reduce((s,r)=>s+r.impr,0);
   const totalClicks=projRows.reduce((s,r)=>s+r.clicks,0);
   const totalLeads=projRows.reduce((s,r)=>s+r.leads,0);
   const avgCtr=totalImpr?(totalClicks/totalImpr*100):0;
   const totalCpl=totalLeads?(totalSpend/totalLeads):null;
+  // previous-period totals (for the Trend pills)
+  const pTotSpend=cPrev.reduce((s,x)=>s+(Number(x.spend)||0),0);
+  const pTotImpr=cPrev.reduce((s,x)=>s+(Number(x.impressions)||0),0);
+  const pTotClicks=cPrev.reduce((s,x)=>s+(Number(x.clicks)||0),0);
+  const pTotLeads=cPrev.reduce((s,x)=>s+(Number(x.leads)||0),0);
+  const pTotReach=cPrev.reduce((s,x)=>s+(Number(x.reach)||0),0);
+  const pAvgCtr=pTotImpr?(pTotClicks/pTotImpr*100):0;
+  const pTotCpl=pTotLeads?(pTotSpend/pTotLeads):null;
+  const pAvgCpc=pTotClicks?(pTotSpend/pTotClicks):null;
+  const metaFreq=(function(){const f=projRows.map(r=>r.freq).filter(x=>x>0);return f.length?(f.reduce((a,b)=>a+b,0)/f.length):0;})();
+  const metaBudget=projRows.reduce((s,r)=>s+r.budget,0);
   const kpis=[['Spend ('+periodLabel+')',inr(totalSpend),accounts.length+' projects'],['Results (Leads)',num(totalLeads),''],['Cost / Lead',totalCpl!=null?inr(totalCpl):'—','',totalCpl!=null?'#16855a':'var(--slate)'],['Impressions',num(totalImpr),''],['Avg CTR',avgCtr.toFixed(2)+'%','',avgCtr>=1?'#16855a':'#c2410c']];
   let body;
   if(ti===0){ body='<div class="cmp-charts">'
@@ -7227,22 +7823,86 @@ VIEWS.campaigns=async function(v,seg){
       +'<div class="cmp-chcard"><h4>Cost per lead by project</h4><div class="sub">lower is better · in ₹</div><div style="height:260px"><canvas id="cmpCh4"></canvas></div></div>'
     +'</div>'; }
   else if(ti===1){
+    // Campaign-wise, with Active / Inactive filtering
+    const all=campaigns.map(function(c){
+      const acc=accounts.find(function(a){return a.ad_account_id===c.ad_account_id;});
+      const i=cInsMap[c.id]||null, p=cPrevMap[c.id]||null;
+      const spend=i?(Number(i.spend)||0):0, leads=i?(Number(i.leads)||0):0;
+      const budget=c.daily_budget!=null?Number(c.daily_budget):(c.lifetime_budget!=null?Number(c.lifetime_budget):null);
+      return {c:c,acc:acc,i:i,p:p,spend:spend,leads:leads,budget:budget,
+        cpl:leads?spend/leads:null,ctr:i&&i.ctr!=null?Number(i.ctr):null,
+        pspend:p?(Number(p.spend)||0):null,
+        pcpl:(p&&(Number(p.leads)||0))?((Number(p.spend)||0)/(Number(p.leads)||0)):null,
+        pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        active:cmpIsActive(c.status)};
+    }).filter(function(r){return r.acc;});
+    const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
+    const shown=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(a,b){return b.spend-a.spend;});
+    const rowsHtml=shown.length?shown.map(function(r){
+      const used=r.budget?Math.round(r.spend/r.budget*100):null;
+      return '<tr><td><div class="cmp-nm">'+esc(r.c.name||'—')+'</div><div class="cmp-sub">'+esc(r.acc.name)+(r.c.objective?(' · '+esc(String(r.c.objective).replace(/_/g,' ').toLowerCase())):'')+'</div></td>'
+        +'<td>'+(r.active?'<span class="cmp-fg ok"><i class="fa-solid fa-circle"></i> Active</span>':'<span class="cmp-fg na" style="color:#98a2b3"><i class="fa-solid fa-circle"></i> '+esc(r.c.status?String(r.c.status).charAt(0)+String(r.c.status).slice(1).toLowerCase():'Inactive')+'</span>')+'</td>'
+        +'<td class="num">'+(r.budget?(inr(r.budget)+(used!=null?'<div class="cmp-sub" style="text-align:right'+(used>100?';color:#c0392f':'')+'">'+used+'% used</div>':'')):'—')+'</td>'
+        +'<td class="num strong">'+inr(r.spend)+'</td>'
+        +'<td class="num">'+cmpTrend(r.spend,r.pspend,false)+'</td>'
+        +'<td class="num">'+num(r.leads)+'</td>'
+        +'<td class="num">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'
+        +'<td class="num">'+cmpTrend(r.cpl,r.pcpl,true)+'</td>'
+        +'<td class="num">'+(r.ctr!=null?r.ctr.toFixed(2)+'%':'—')+'</td>'
+        +'<td>'+cmpFatigue(r.i?(Number(r.i.frequency)||0):0,r.ctr,r.pctr)+'</td></tr>';
+    }).join(''):'<tr><td colspan="10" class="cmp-none">No campaigns match this filter</td></tr>';
+    body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Campaigns</span><h3>'+shown.length+' campaign'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+      +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Campaign</th><th>Status</th><th class="num">Budget</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Leads</th><th class="num">Cost / Lead</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
+  }
+  else if(ti===2){
     const sorted=projRows.slice().sort((a,b)=>b.spend-a.spend);
     body=sorted.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      ['Project','Campaigns','Spend','Budget','Results (Leads)','Cost / Lead','Impressions','Reach','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+      ['Project','Campaigns','Daily Budget','Spend','Trend','Results (Leads)','Cost / Lead','Reach','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
       '</tr></thead><tbody>'+
-      sorted.map(function(r){return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
+      sorted.map(function(r){
+        const used=r.budget?Math.round(r.spend/r.budget*100):null;
+        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
         '<td style="font-weight:600">'+esc(r.acc.name)+'</td>'+
         '<td style="text-align:right">'+r.campaigns+'</td>'+
-        '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-        '<td style="text-align:right">'+(r.budget?inr(r.budget)+'/day':'—')+'</td>'+
-        '<td style="text-align:right">'+num(r.leads)+'</td>'+
-        '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+'</td>'+
-        '<td style="text-align:right">'+num(r.impr)+'</td>'+
+        '<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'+
+        '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+        '<td style="text-align:right">'+cmpTrend(r.spend,r.pspend,false)+'</td>'+
+        '<td style="text-align:right">'+num(r.leads)+' '+cmpTrend(r.leads,r.pleads,false)+'</td>'+
+        '<td style="text-align:right">'+(r.cpl!=null?inr(r.cpl):'—')+' '+cmpTrend(r.cpl,r.pcpl,true)+'</td>'+
         '<td style="text-align:right">'+num(r.reach)+'</td>'+
         '<td style="text-align:right">'+r.ctr.toFixed(2)+'%</td>'+
+        '<td style="text-align:right">'+cmpFatigue(r.freq,r.ctr,r.pctr)+'</td>'+
       '</tr>';}).join('')+
       '</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-chart-pie"></i><div>No project data for this period</div></div>';
+  }
+  else if(ti===4){
+    // ---- Trend page ----
+    body=cmpTrendPage(projRows.map(function(r){return {name:r.acc.name,sub:r.campaigns+' campaign'+(r.campaigns===1?'':'s'),spend:r.spend,pspend:r.pspend,res:r.leads,pres:r.pleads,cpr:r.cpl,pcpr:r.pcpl};}),
+      {spend:totalSpend,pspend:pTotSpend,res:totalLeads,pres:pTotLeads,cpr:totalCpl,pcpr:pTotCpl,clk:totalClicks,pclk:pTotClicks,ctr:avgCtr,pctr:pAvgCtr},inr,num,'leads');
+  }
+  else if(ti===5){
+    // ---- Ad Fatigue page (per ad when available, else per campaign) ----
+    const fr=[];
+    ads.forEach(function(a){
+      const i=aInsMap[a.id]; if(!i)return;
+      const p=aPrevMap[a.id]||null;
+      const acc=accounts.find(function(x){return x.ad_account_id===a.ad_account_id;});
+      const camp=campMap[a.campaign_id];
+      fr.push({name:a.name||'Ad',sub:[(acc&&acc.name)||'',(camp&&camp.name)||''].filter(Boolean).join(' · '),
+        freq:Number(i.frequency)||0,ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+        spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+    });
+    if(!fr.length){
+      campaigns.forEach(function(c){
+        const i=cInsMap[c.id]; if(!i)return;
+        const p=cPrevMap[c.id]||null;
+        const acc=accounts.find(function(x){return x.ad_account_id===c.ad_account_id;});
+        fr.push({name:c.name||'Campaign',sub:(acc&&acc.name)||'',freq:Number(i.frequency)||0,
+          ctr:i.ctr!=null?Number(i.ctr):null,pctr:p&&p.ctr!=null?Number(p.ctr):null,
+          spend:Number(i.spend)||0,impr:Number(i.impressions)||0});
+      });
+    }
+    body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta · per-person frequency + CTR trend');
   }
   else {
     const filteredAccIds=new Set((CMP_AD_PROJECT==='all'?accounts:accounts.filter(a=>a.ad_account_id===CMP_AD_PROJECT)).map(a=>a.ad_account_id));
@@ -7260,17 +7920,21 @@ VIEWS.campaigns=async function(v,seg){
     const curPage=Math.min(CMP_AD_PAGE,totalPages-1);
     const pageRows=allAdRows.slice(curPage*PAGE_SIZE,(curPage+1)*PAGE_SIZE);
     const tbl=pageRows.length?('<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+
-      ['Ad','Project','Campaign','Status','Spend','Impressions','Clicks','CTR'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
+      ['Ad','Project','Campaign','Status','Spend','Trend','Clicks','CTR','Fatigue'].map(function(h){return '<th>'+esc(h)+'</th>';}).join('')+
       '</tr></thead><tbody>'+
-      pageRows.map(function(r){return '<tr class="clk" onclick="cmpShowProjectAds(\''+r.acc.ad_account_id+'\')">'+
+      pageRows.map(function(r){
+        const p=aPrevMap[r.a.id]||null;
+        const pSp=p?(Number(p.spend)||0):null, pCt=p?(Number(p.ctr)||0):null;
+        return '<tr class="clk" onclick="cmpShowProjectAds(\''+r.acc.ad_account_id+'\')">'+
         '<td style="font-weight:600">'+esc(r.a.name)+'</td>'+
         '<td>'+esc(r.acc.name)+'</td>'+
         '<td>'+esc(r.camp.name)+'</td>'+
         '<td>'+esc(r.a.effective_status||r.a.status||'—')+'</td>'+
-        '<td style="text-align:right">'+inr(r.spend)+'</td>'+
-        '<td style="text-align:right">'+num(r.i.impressions)+'</td>'+
+        '<td style="text-align:right;font-weight:600">'+inr(r.spend)+'</td>'+
+        '<td style="text-align:right">'+cmpTrend(r.spend,pSp,false)+'</td>'+
         '<td style="text-align:right">'+num(r.i.clicks)+'</td>'+
         '<td style="text-align:right">'+(r.i.ctr!=null?Number(r.i.ctr).toFixed(2)+'%':'—')+'</td>'+
+        '<td style="text-align:right">'+cmpFatigue(Number(r.i.frequency)||0,r.i.ctr,pCt)+'</td>'+
       '</tr>';}).join('')+
       '</tbody></table></div></div>'):'<div class="card card-pad empty"><i class="fa-solid fa-rectangle-ad"></i><div>No ad-level data for this project/period</div></div>';
     const pager=allAdRows.length>PAGE_SIZE?('<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px">'+
@@ -7301,19 +7965,24 @@ VIEWS.campaigns=async function(v,seg){
     +'.cmp-chcard .sub{font-size:11.5px;color:var(--slate);margin:3px 0 12px}'
     +'.cmp-cap{font-size:12px;color:var(--slate);margin:-4px 0 14px;display:flex;align-items:center;gap:7px}'
     +'</style>';
-  const cmpKpi=function(icon,label,value,sub,color,bg){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div></div>';};
+  const cmpKpi=function(icon,label,value,sub,color,bg,trend){return '<div class="cmp-kpi" style="--kc:'+color+';--kbg:'+bg+'"><div class="kh"><span class="kl">'+esc(label)+'</span><span class="ki"><i class="fa-solid '+icon+'"></i></span></div><div class="kv">'+esc(value)+'</div><div class="ks">'+esc(sub||'')+'</div>'+(trend?'<div class="ktr">'+trend+'</div>':'')+'</div>';};
   const kpiStrip='<div class="cmp-kpis">'
-    +cmpKpi('fa-indian-rupee-sign','Spend',inr(totalSpend),accounts.length+' project'+(accounts.length===1?'':'s'),'#db2777','#fdf2f8')
-    +cmpKpi('fa-user-plus','Results (Leads)',num(totalLeads),totalLeads?'generated':'no leads yet','#7c3aed','#f5f3ff')
-    +cmpKpi('fa-tags','Cost / Lead',totalCpl!=null?inr(totalCpl):'—','lower is better','#0ea5e9','#f0f9ff')
-    +cmpKpi('fa-eye','Impressions',num(totalImpr),'','#0891b2','#ecfeff')
-    +cmpKpi('fa-users','Reach',num(totalReach),(totalReach&&totalImpr)?((totalImpr/totalReach).toFixed(1)+'x seen on avg'):'','#0d9488','#f0fdfa')
-    +cmpKpi('fa-hand-pointer','Clicks',num(totalClicks),'','#2563eb','#eff6ff')
-    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'below 1%','#16a34a','#f0fdf4')
-    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed')
+    +cmpKpi('fa-indian-rupee-sign','Spend',inr(totalSpend),accounts.length+' project'+(accounts.length===1?'':'s'),'#db2777','#fdf2f8',cmpTrend(totalSpend,pTotSpend,false))
+    +cmpKpi('fa-wallet','Daily Budget',metaBudget?inr(metaBudget):'—','across campaigns','#6366f1','#eef2ff',metaBudget?('<span class="cmp-tr flat" title="Share of the daily budget already spent"><i class="fa-solid fa-gauge-high"></i> '+Math.round(totalSpend/metaBudget*100)+'% used</span>'):'')
+    +cmpKpi('fa-user-plus','Results (Leads)',num(totalLeads),totalLeads?'generated':'no leads yet','#7c3aed','#f5f3ff',cmpTrend(totalLeads,pTotLeads,false))
+    +cmpKpi('fa-tags','Cost / Lead',totalCpl!=null?inr(totalCpl):'—','lower is better','#0ea5e9','#f0f9ff',cmpTrend(totalCpl,pTotCpl,true))
+    +cmpKpi('fa-eye','Impressions',num(totalImpr),'','#0891b2','#ecfeff',cmpTrend(totalImpr,pTotImpr,false))
+    +cmpKpi('fa-users','Reach',num(totalReach),(totalReach&&totalImpr)?((totalImpr/totalReach).toFixed(1)+'x seen on avg'):'','#0d9488','#f0fdfa',cmpTrend(totalReach,pTotReach,false))
+    +cmpKpi('fa-hand-pointer','Clicks',num(totalClicks),'','#2563eb','#eff6ff',cmpTrend(totalClicks,pTotClicks,false))
+    +cmpKpi('fa-percent','Avg CTR',avgCtr.toFixed(2)+'%',avgCtr>=1?'healthy':'below 1%','#16a34a','#f0fdf4',cmpTrend(avgCtr,pAvgCtr,false))
+    +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
+    +cmpKpi('fa-fire','Ad Fatigue',metaFreq?(metaFreq.toFixed(1)+'x'):'—','seen per person','#e11d48','#fff1f2',cmpFatigue(metaFreq,avgCtr,pAvgCtr))
     +'</div>';
   const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
-  v.innerHTML=cmpCss+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+kpiStrip+body+'</div>';
+  const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
+  const showKpis=(ti!==4&&ti!==5);
+  v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
+  cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
     const labels=projRows.map(r=>r.acc.name);
     const accIds=projRows.map(r=>r.acc.ad_account_id);
@@ -7453,7 +8122,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>'
     +'<div id="trKpis"></div>'
     +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Phone Number</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
@@ -7476,17 +8145,20 @@ function trRenderList(){
   const host=$('trRows');if(!host)return;
   if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
   host.innerHTML=rows.map(function(r){
-    const phone=r.phone||r.title||r.customer_name||'';
+    const fname=r.file_name||'Recording';
     const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+    // Main line = the recording's file name (truncated with … if too long, full name on hover);
+    // below it = the detected customer name, when the call identified one.
     const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
     return '<tr'+clickable+'>'
-      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-phone" style="color:#0d9488;font-size:15px"></i><div><div style="font-weight:600">'+trPhoneFmt(phone)+'</div>'+nameLine+'</div></div></td>'
+      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
       +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
-      +'<td style="max-width:280px"><div style="font-size:12.5px;color:var(--slate);line-height:1.45">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
+      +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
       +'<td>'+trLangTags(r.languages)+'</td>'
       +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
       +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
       +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+        +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
         +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
       +'</td></tr>';
   }).join('');
@@ -7521,10 +8193,28 @@ window.trDelete=async function(id){
   toast('Recording deleted','ok');
 };
 
+// Re-run analysis on a failed row using the recording already in S3 — no re-upload needed.
+window.trRetry=async function(id){
+  const i=(TR_ROWS||[]).findIndex(function(x){return x.id===id;});
+  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList(); }
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  try{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'retry',id:id})});
+    const out=await res.json().catch(function(){return {};});
+    if(!res.ok||!out.row) throw new Error(out.error||'could not retry');
+    trStartPolling(id);
+    toast('Retrying…','ok');
+  }catch(e){
+    toast('Could not retry: '+((e&&e.message)||e),'err');
+    if(i>=0){ TR_ROWS[i].status='error'; trRenderList(); }
+  }
+};
+
 window.trUploadModal=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload call recordings</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body frm">'
-    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — you can pick many at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
+    +'<div class="dropzone" ondragover="event.preventDefault()" ondrop="trDrop(event)" onclick="document.getElementById(\'trFile\').click()"><i class="fa-solid fa-file-audio"></i><div id="trUpName">Drag &amp; drop or click to select recordings — pick up to 50 at once</div><div style="font-size:12px;margin-top:4px">mp3 · wav · m4a · webm · mp4 · mov and more · Hindi / English / Bengali</div></div>'
     +'<input type="file" id="trFile" class="hidden" multiple accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.webm,.flac,.mp4,.mov,.mkv,.3gp,.amr" onchange="trUpPick()">'
     +'<div id="trFileList" style="margin-top:12px"></div>'
     +'<div id="trUpMsg" style="margin-top:10px"></div>'
@@ -7533,29 +8223,33 @@ window.trUploadModal=function(){
 };
 window.trDrop=function(ev){ev.preventDefault();const dt=ev.dataTransfer;if(!dt||!dt.files||!dt.files.length)return;const inp=$('trFile');if(!inp)return;const buf=new DataTransfer();for(let i=0;i<dt.files.length;i++)buf.items.add(dt.files[i]);inp.files=buf.files;trUpPick();};
 window.trUpPick=function(){
-  const files=($('trFile').files||[]);const n=files.length;
-  $('trUpName').textContent=n?(n===1?files[0].name:(n+' files selected')):'Drag & drop or click to select recordings — you can pick many at once';
+  const files=Array.prototype.slice.call(($('trFile').files)||[]);
+  const over=files.length>50;const n=Math.min(files.length,50);
+  $('trUpName').textContent=files.length?(files.length===1?files[0].name:(files.length+' files selected'+(over?' — first 50 will be used':''))):'Drag & drop or click to select recordings — pick up to 50 at once';
   const list=$('trFileList');
   if(list){
-    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Customer phone number for each recording <span style="color:#dc2626">*</span></label>'
-      +Array.prototype.map.call(files,function(f,i){
+    list.innerHTML=n?('<label style="display:block;margin-bottom:6px">Selected recording'+(n>1?'s':'')+'</label>'
+      +'<div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
+      +files.slice(0,50).map(function(f,i){
         return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
           +'<i class="fa-solid fa-file-audio" style="color:#0d9488"></i>'
           +'<div style="flex:1;min-width:0"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(f.name)+'">'+esc(f.name)+'</div></div>'
-          +'<input type="tel" id="trPhone_'+i+'" class="sel" style="width:170px;flex-shrink:0" maxlength="15" placeholder="10-digit mobile" oninput="trUpValidate()">'
           +'</div>';
-      }).join('')):'';
+      }).join('')+'</div>'
+      +(over?'<div style="font-size:12px;color:#d97706;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> You picked '+files.length+' files — only the first 50 upload at a time.</div>':'')):'';
   }
   trUpValidate();
 };
 window.trUpValidate=function(){
-  const files=($('trFile').files||[]);const n=files.length;let allValid=n>0;
-  for(let i=0;i<n;i++){const inp=$('trPhone_'+i);if(!inp){allValid=false;continue;}const ok=trPhoneValid(inp.value);inp.style.borderColor=inp.value?(ok?'#16a34a':'#dc2626'):'';if(!ok)allValid=false;}
-  const btn=$('trUpBtn');if(btn){btn.disabled=!allValid;btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
+  // No phone field anymore — just enable the button once at least one recording is picked.
+  const n=Math.min((($('trFile').files||[]).length),50);
+  const btn=$('trUpBtn');if(btn){btn.disabled=!(n>0);btn.innerHTML='<i class="fa-solid fa-wand-magic-sparkles"></i> Transcribe &amp; Qualify'+(n>1?(' '+n+' calls'):'');}
 };
 // Upload one recording: try direct browser->S3 first (fast, no size limit, works on the live
 // domain); if that's blocked (e.g. testing from localhost, whose origin S3's CORS doesn't allow)
 // fall back to the server-side proxy so it still uploads from anywhere.
+// Read an audio/video file's duration (seconds) in the browser, so the list shows real length.
+function trAudioDuration(file){return new Promise(function(resolve){try{const el=document.createElement('audio');el.preload='metadata';const url=URL.createObjectURL(file);let done=false;const fin=function(d){if(done)return;done=true;try{URL.revokeObjectURL(url);}catch(_){}resolve(d);};el.onloadedmetadata=function(){const d=el.duration;fin(isFinite(d)&&d>0?Math.round(d):null);};el.onerror=function(){fin(null);};setTimeout(function(){fin(null);},8000);el.src=url;}catch(e){resolve(null);}});}
 async function trUploadOne(f,token){
   const key=s3KeyForTranscription(f.name);
   let path=null;
@@ -7569,32 +8263,37 @@ async function trUploadOne(f,token){
   return path;
 }
 window.trUploadStart=async function(){
-  const files=Array.prototype.slice.call(($('trFile').files)||[]);
+  let files=Array.prototype.slice.call(($('trFile').files)||[]);
   if(!files.length){toast('Select at least one recording','err');return;}
-  const phones=[];
-  for(let i=0;i<files.length;i++){const inp=$('trPhone_'+i);const v=inp?inp.value:'';if(!trPhoneValid(v)){toast('Enter a valid 10-digit mobile number for every recording','err');if(inp)inp.focus();return;}phones.push(trPhoneNorm(v));}
+  if(files.length>50)files=files.slice(0,50);
+  // Phone field removed — the caller's name/number is picked up from the call itself.
+  const phones=files.map(function(){return null;});
   const btn=$('trUpBtn');if(btn)btn.disabled=true;
   const msg=$('trUpMsg');
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
-  let done=0,failed=0;
-  const paint=function(cur){const pct=Math.round((done+failed)/files.length*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">'+esc(cur||('Processed '+(done+failed)+' of '+files.length))+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
-  paint('Starting…');
-  for(let i=0;i<files.length;i++){
-    const f=files[i];
-    paint('Uploading '+(i+1)+' of '+files.length+': '+f.name);
-    try{
-      const path=await trUploadOne(f,token);
-      const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size})});
-      const out=await res.json().catch(function(){return {};});
-      if(!res.ok||!out.row) throw new Error(out.error||'could not start');
-      if(!TR_ROWS)TR_ROWS=[];
-      TR_ROWS.unshift(out.row);
-      trStartPolling(out.row.id);
-      done++;
-    }catch(e){ failed++; }
-    paint();
-  }
+  const total=files.length;let done=0,failed=0,idx=0;
+  const paint=function(){const pct=Math.round((done+failed)/total*100);if(msg)msg.innerHTML='<div class="psa-progress"><div class="psa-progress-bar"><div class="psa-progress-fill" style="width:'+pct+'%"></div></div><div class="psa-progress-label">Processed '+(done+failed)+' of '+total+' · '+done+' ok'+(failed?', '+failed+' failed':'')+'</div></div>';};
+  paint();
+  const worker=async function(){
+    while(idx<files.length){
+      const i=idx++;const f=files[i];
+      try{
+        const dur=await trAudioDuration(f);
+        const path=await trUploadOne(f,token);
+        const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-analyze',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'start',key:path,phone:phones[i],name:f.name,size:f.size,duration:dur})});
+        const out=await res.json().catch(function(){return {};});
+        if(!res.ok||!out.row) throw new Error(out.error||'could not start');
+        if(!TR_ROWS)TR_ROWS=[];
+        TR_ROWS.unshift(out.row);
+        trStartPolling(out.row.id);
+        done++;
+      }catch(e){ failed++; }
+      paint();
+    }
+  };
+  const K=Math.min(4,files.length);
+  await Promise.all(Array.from({length:K},function(){return worker();}));
   toast(done+' call'+(done===1?'':'s')+' submitted'+(failed?(', '+failed+' failed'):''), failed?'warn':'ok');
   closeModal();
   if(PAGE==='transcription')renderPage();
@@ -7626,7 +8325,8 @@ async function trDetail(v,id){
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Qualification checklist</div>'+trCriteriaHtml(r)+'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+trAnalysisHtml(r)+'</div></div>'
     +'</div>'
-    +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div>'+trTranscriptHtml(r)+'</div>';
+    +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>';
+  TR_DETAIL_ROW=r;
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
   if(r.s3_path){
     try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
@@ -7635,11 +8335,12 @@ async function trDetail(v,id){
 
 function trCriteriaHtml(r){
   const c=r.criteria||{};
-  const items=[['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction'],['customer_agrees','Customer agrees'],['site_visit_interested','Wants site visit']];
-  return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it){
+  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+  return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it,idx){
     const ok=c[it[0]]===true;
-    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+'</div>';
-  }).join('')+'</div>';
+    const badge=(idx===0)?'<span style="font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 5px;margin-left:6px">PRIORITY</span>':'';
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+badge+'</div>';
+  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match.</div></div>';
 }
 function trAnalysisHtml(r){
   const a=r.analysis||{};
@@ -7662,17 +8363,19 @@ function trAnalysisHtml(r){
   return rows.join('');
 }
 
-function trTranscriptHtml(r){
-  const u=r.utterances;
-  if(Array.isArray(u)&&u.length){
-    return '<div style="display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow:auto">'+u.map(function(x){
-      const spk=(x.speaker!==null&&x.speaker!==undefined)?('Speaker '+(typeof x.speaker==='number'?x.speaker+1:x.speaker)):'Speaker';
-      return '<div style="display:flex;gap:10px"><div style="flex-shrink:0;width:96px"><div style="font-weight:600;font-size:12.5px">'+esc(spk)+'</div><div style="font-size:11px;color:var(--slate)">'+trFmtDur(x.start)+(x.language?' · '+esc(trLangName(x.language)):'')+'</div></div><div style="font-size:13.5px;line-height:1.55;flex:1">'+esc(x.text||'')+'</div></div>';
-    }).join('')+'</div>';
-  }
-  if(r.transcript)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(r.transcript)+'</div>';
+let TR_DETAIL_ROW=null;
+function trTranscriptHtml(r,lang){
+  const txt=(lang==='bn')?(r.transcript_bn||r.transcript||''):(r.transcript_en||r.transcript||'');
+  if(txt)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(txt)+'</div>';
   return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
 }
+window.trSetLang=function(lang){
+  if(!TR_DETAIL_ROW)return;
+  const b=$('trTranscriptBody');if(b)b.innerHTML=trTranscriptHtml(TR_DETAIL_ROW,lang);
+  const en=$('trLangEn'),bn=$('trLangBn');
+  if(en)en.className='btn btn-sm'+(lang==='en'?' btn-primary':'');
+  if(bn)bn.className='btn btn-sm'+(lang==='bn'?' btn-primary':'');
+};
 
 window.trDownload=async function(id){
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});

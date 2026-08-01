@@ -38,16 +38,19 @@
     if (document.getElementById('accCss')) return;
     const s=document.createElement('style'); s.id='accCss';
     s.textContent = `
+    /* Hide scrollbars page-wide on Accountability — scrolling still works, just no visible bar (vertical or horizontal) */
+    *{scrollbar-width:none;-ms-overflow-style:none}
+    *::-webkit-scrollbar{width:0;height:0;display:none}
     .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
     .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
     .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
-    .wf-tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:7px;border-radius:9px;background:#dc2626;color:#fff;font-size:11px;font-weight:700;line-height:1;box-shadow:0 0 0 2px var(--bg-card)}
-    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:7px;border-bottom:0;padding:2px 2px 6px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:12.5px;gap:5px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}}
+    @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:8px;border-bottom:0;padding:2px 2px 8px;margin-bottom:12px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:9px 15px;font-size:13px;gap:7px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand);color:var(--brand)}}
     .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
     .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
     .ac-pbtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
     .ac-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
     .ac-btn:hover{border-color:var(--brand);color:var(--brand)}
+    .wf-inst-tools .ac-btn:disabled{opacity:.4;cursor:default;pointer-events:none}
     .ac-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.ac-btn.primary:hover{color:#fff;filter:brightness(.94)}
     .ac-btn.ok{background:#16a34a;border-color:#16a34a;color:#fff}.ac-btn.ok:hover{color:#fff}
     .ac-btn.danger{color:#b91c1c}.ac-btn.danger:hover{border-color:#b91c1c}
@@ -106,16 +109,53 @@
     .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
+    .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font:italic 700 11px/1 Georgia,'Times New Roman',serif;letter-spacing:0;text-transform:none;cursor:pointer;position:relative;flex:none;margin-left:5px;vertical-align:middle;outline:none;user-select:none;padding-right:1px}
+    .wf-tip:hover,.wf-tip:focus{background:var(--brand)}
+    .wf-poptip{position:relative;cursor:pointer}
+    /* the bubble text lives in the markup only as the content source - it is never shown in place
+       (cards/modals with overflow would clip it). wfTipShow() copies it into #wfTipLayer on <body>. */
+    .wf-tip-txt{display:none}
+    #wfTipLayer{position:fixed;top:0;left:0;z-index:2147483600;background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.5;width:max-content;max-width:min(260px,80vw);text-align:center;white-space:normal;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 8px 22px rgba(0,0,0,.28)}
+    #wfTipLayer.show{opacity:1;visibility:visible}
+    #wfTipLayer::after{content:'';position:absolute;top:100%;left:var(--tipx,50%);transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
+    #wfTipLayer.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#1e293b}
+    /* ----- Workflow builder form -----
+       Two sections (Basics, Steps). Paired fields go side by side from 760px up and
+       stack below that; every field owns its own label so nothing drifts out of line. */
+    .wf-form{display:flex;flex-direction:column;gap:24px}
+    .wf-fsec{display:flex;flex-direction:column;gap:13px}
+    .wf-fsec-h{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+    .wf-fsec-h i{color:var(--brand);font-size:12px}
+    .wf-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:15px 20px;align-items:start}
+    .wf-fld{display:flex;flex-direction:column;min-width:0}
+    .wf-fld-wide{grid-column:1/-1}
+    .wf-fld .wf-lbl{margin:0 0 6px}
+    /* Every control in the builder is exactly 40px tall and shares one text inset, so the
+       labels, inputs, person pickers and dropdowns all line up on the same edges. */
+    .wf-fld .ac-in{width:100%;box-sizing:border-box}
+    .wf-fld input.ac-in,.wf-step-fields input.ac-in,.wf-evt-form input.ac-in{height:40px;padding-top:0;padding-bottom:0}
+    .wf-fld .ac-in,.wf-step-fields .ac-in,.wf-step-fields .wf-pp-nm,.wf-step-fields .wf-pp-ph{font-size:13px}
+    .wf-fld .ac-in::placeholder,.wf-step-fields .ac-in::placeholder{font-size:13px;color:#94a3b8}
+    .wf-step-sub input[type=number].ac-in{appearance:textfield;-moz-appearance:textfield}
+    .wf-step-sub input[type=number].ac-in::-webkit-outer-spin-button,.wf-step-sub input[type=number].ac-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+    /* native selects sit at a different height/inset per OS — draw our own caret instead */
+    .wf-step-sub select.ac-in,.wf-fld select.ac-in{appearance:none;-webkit-appearance:none;-moz-appearance:none;height:40px;padding:0 30px 0 12px;cursor:pointer;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
+    .wf-step-sub select.ac-in::-ms-expand,.wf-fld select.ac-in::-ms-expand{display:none}
     .wf-steps-head{margin-top:20px}
-    .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
-    .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
-    .wf-step-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
-    .wf-step-sub{display:flex;gap:7px}
-    .wf-step-sub .wf-s-person{flex:2;min-width:0}
-    .wf-step-sub .wf-s-dur{flex:0 0 92px}
-    .wf-step-sub .wf-s-unit{flex:0 0 96px}
-    .wf-s-del{margin-top:4px;flex:0 0 auto}
-    .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+    /* Step card: a header strip carries the number and the remove button, so the inputs
+       underneath run the full width of the card rather than being pinched between them. */
+    .wf-step{display:block;padding:12px 13px 13px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--bg-card)}
+    .wf-step:hover{border-color:#cbd5e1}
+    .wf-step-hd{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+    .wf-step-num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+    .wf-step-hd-t{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate)}
+    .wf-step-fields{min-width:0;display:flex;flex-direction:column;gap:8px}
+    .wf-step-sub{display:flex;gap:8px;min-width:0}
+    .wf-step-sub .wf-s-person{flex:1 1 auto;min-width:0}
+    .wf-step-sub .wf-s-dur{flex:0 0 104px;min-width:0}
+    .wf-step-sub .wf-s-unit{flex:0 0 108px;min-width:0}
+    .wf-s-del{margin-left:auto;flex:0 0 auto}
+    .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
     .wf-trig{font-size:11.5px;color:var(--brand);margin-top:3px}
     .wf-desc{color:var(--slate);font-size:13px;margin-bottom:10px}
     .wf-trig-box{background:var(--brand-a10,#eef2ff);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;margin-bottom:18px}
@@ -131,18 +171,41 @@
     .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600}
     .wf-dept{font-size:11.5px;color:var(--slate);margin-left:7px}
     .wf-dur{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:5px}
-    @media(max-width:700px){.wf-step-sub{flex-wrap:wrap}.wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}.wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 44%}}
-    /* Workflow step person picker (avatar + department-grouped) */
+    /* Workflow step person picker (avatar + department-grouped).
+       NOTE the .ac-in.wf-pp-btn selector: the picker also carries .ac-in, whose padding rule is
+       declared further down this sheet and would otherwise win on source order and make the
+       picker 46px tall next to 40px inputs. The doubled class keeps it aligned. */
     .wf-step-sub .wf-pp{flex:2;min-width:0}
     .wf-pp{position:relative}
-    .wf-pp-btn{width:100%;display:flex;align-items:center;gap:9px;text-align:left;cursor:pointer;padding:6px 10px;min-height:40px}
-    .wf-pp-av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center;flex:none}
-    .wf-pp-nm{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .wf-pp-ph{font-size:13px;color:var(--slate)}
-    .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px}
-    .wf-pp-panel{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:220px;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;display:none;max-height:280px;overflow:auto}
+    .ac-in.wf-pp-btn{width:100%;height:40px;min-height:40px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:0 12px;text-align:left;cursor:pointer;line-height:1;overflow:hidden}
+    .ac-in.wf-pp-btn:hover{border-color:var(--brand)}
+    .wf-pp.open>.ac-in.wf-pp-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .wf-pp-av{width:22px;height:22px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;flex:none}
+    .wf-pp-nm{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .wf-pp-ph{font-size:13px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px;flex:none;transition:transform .15s}
+    .wf-pp.open .wf-pp-caret{transform:rotate(180deg)}
+    /* Panel matches the trigger's width exactly (left:0 + right:0, no min-width). Anything
+       wider — the old min-width:220px — pushed past the card and gave the page a sideways
+       scrollbar whenever the picker sat in a narrow column. */
+    .wf-pp-panel{position:absolute;top:calc(100% + 5px);left:0;right:0;width:auto;min-width:0;max-width:none;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:6px;display:none;max-height:min(300px,50vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+    .wf-pp-panel .ms-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .wf-pp.open .wf-pp-panel{display:block}
-    .wf-pp-panel .ms-search{margin-bottom:6px}
+    .wf-pp-panel .ms-search{margin-bottom:6px;width:100%;box-sizing:border-box}
+    /* Workflow form responsiveness — kept AFTER the picker rules above, otherwise
+       the wf-step-sub wf-pp flex:2 rule wins on source order and the picker stays squashed. */
+    @media(max-width:760px){.wf-fgrid{grid-template-columns:1fr;gap:14px}}
+    @media(max-width:700px){
+      .wf-step-sub{flex-wrap:wrap}
+      .wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}
+      /* duration + unit split the row evenly instead of leaving a ragged gap */
+      .wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 0;min-width:0}
+      .wf-step{padding:11px}
+      .wf-form{gap:20px}
+      .wf-actions .ac-btn{flex:1;justify-content:center}
+      .wf-owner-pick{flex-wrap:wrap}
+      .wf-owner-pick .wf-pp{flex:1 1 100%}
+    }
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
     .ac-addrow{display:flex;gap:8px;margin:3px 0}
     .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
@@ -347,6 +410,16 @@
     .mtg-log-badge.pending{background:#fef9c3;color:#a16207}
     .mtg-log-badge.none{background:#f1f5f9;color:#94a3b8}
     .mtg-log-transcript{margin-top:6px;font-size:13px;color:#334155;line-height:1.6;max-height:260px;overflow:auto;background:#f8fafc;border-radius:8px;padding:12px}
+    .mtg-log-summary{margin:6px 0 12px;font-size:13px;color:#334155;line-height:1.65;background:#fff;border:1px solid var(--line);border-left:3px solid #0d9488;border-radius:8px;padding:11px 13px}
+    .mtg-log-sumh{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#0d9488;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .mtg-tr-facts{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 12px}
+    .mtg-tr-fact{flex:1 1 110px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+    .mtg-tr-fact .k{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#a3adbe}
+    .mtg-tr-fact .v{font-size:17px;font-weight:650;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
+    .mtg-tr-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+    .mtg-tr-h{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#8a94a6;display:flex;align-items:center;gap:7px}
+    .mtg-tr-btns{display:flex;gap:6px}
+    .mtg-tr-btns .ac-btn{padding:5px 12px;font-size:12.5px}
     .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
     .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-bar{width:4px;border-radius:3px;flex:none}
@@ -506,7 +579,7 @@
     dd.innerHTML=`<div style="padding:11px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center"><b style="font-size:13px">Notifications</b><button class="ac-btn" style="margin-left:auto;height:26px;padding:0 9px;font-size:11px" onclick="accNotifReadAll()">Mark all read</button></div><div style="max-height:440px;overflow:auto">${body}</div>`;
   }
   window.accNotifGoto=function(tid){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+tid;renderPage();} else location.href='tasks.html#/task/'+tid; };
-  window.accNotifOpen=async function(id){ const n=NOTIFS.find(x=>x.id===id); if(!n)return; if(!n.read){try{await ACC().from('notifications').update({read:true}).eq('id',id);n.read=true;notifPaint();}catch(e){}} if(n.kind==='meeting'||n.kind==='meeting_cancel'||n.kind==='meeting_update'||n.kind==='meeting_reminder'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); navTo('tasks/meetings'); return; } accNotifGoto(n.task_id); };
+  window.accNotifOpen=async function(id){ const n=NOTIFS.find(x=>x.id===id); if(!n)return; if(!n.read){try{await ACC().from('notifications').update({read:true}).eq('id',id);n.read=true;notifPaint();}catch(e){}} if(n.kind==='meeting'||n.kind==='meeting_cancel'||n.kind==='meeting_update'||n.kind==='meeting_reminder'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); navTo('tasks/meetings'); return; } if(n.kind==='campaign_alert'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); location.href='campaigns.html#/campaigns'; return; } if(n.task_id==null){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); return; } accNotifGoto(n.task_id); };
   window.accNotifReadAll=async function(){ try{await ACC().from('notifications').update({read:true}).eq('recipient',me()).eq('read',false).neq('kind','approval');}catch(e){} await notifLoad(); await computeUrgent(); paintBell(); const dd=$('notifDd'); if(dd&&dd.classList.contains('show'))notifPaint2(); };
   function wireBell(){ const b=$('notifBtn'); if(b)b._accW=true; }
 
@@ -605,11 +678,10 @@
       <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
-      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow<span class="wf-tab-badge" id="wfTabBadge" style="display:none"></span></div>
+      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
       <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
-    wfUpdateTabBadge();
     if (tab==='scoreboard') return scoreboardTab();
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
@@ -646,9 +718,9 @@
       if(t.due_date) metaParts.push(`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`);
     }
     const meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
-    const wfIcon=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
+    const wfIcon='';
     const ownerVis=(t.flow_case_step_id!=null)
-      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
     return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${wfIcon}${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
@@ -656,10 +728,18 @@
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
   window.accTaskSearch=function(val){
     const q=(val||'').trim().toLowerCase();
-    document.querySelectorAll('#acBody .ac-row').forEach(function(row){
+    const body=document.getElementById('acBody'); if(!body)return;
+    body.querySelectorAll('.ac-row').forEach(function(row){
       const el=row.querySelector('.ti .t');
       const txt=el?el.textContent.toLowerCase():'';
       row.style.display=(!q||txt.includes(q))?'':'none';
+    });
+    // While searching, hide the "Add task" dotted rows unless their group still has a visible task.
+    body.querySelectorAll('.ac-addrow-ghost, .ac-ins, .ac-addrow').forEach(function(g){
+      if(!q){ g.style.display=''; return; }
+      const parent=g.parentElement;
+      const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
+      g.style.display=hasVisible?'':'none';
     });
   };
 
@@ -717,21 +797,13 @@
   function wfAddDuration(base,value,unit){ const d=new Date(base.getTime()); value=Number(value)||0; if(unit==='hours')d.setHours(d.getHours()+value); else if(unit==='weeks')d.setDate(d.getDate()+value*7); else d.setDate(d.getDate()+value); return d; }
   function wfDateOnly(d){ const z=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
   function wfDT(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
+  // Same as wfDT but always carries the year too, for the timeline cards.
+  function wfDTFull(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
   function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
   function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
-
-  // Workflow-tab badge: number of workflow instances currently active for (awaiting an action from) the user.
-  async function wfMarkSeen(){ /* retained no-op: badge now reflects live active-instance count */ }
-  async function wfUpdateTabBadge(){
-    const el=$('wfTabBadge'); if(!el) return;
-    if(!window._wfBadgeTimer){ window._wfBadgeTimer=setInterval(function(){ if(document.getElementById('wfTabBadge')) wfUpdateTabBadge(); }, 30000); }
-    let n=0; try{ const {data}=await ACC().rpc('wf_active_count'); n=Number(data)||0; }catch(e){ n=0; }
-    if(n>0){ el.textContent=(n>99?'99+':String(n)); el.style.display=''; el.title=n+' workflow'+(n===1?'':'s')+' waiting on you'; }
-    else { el.textContent=''; el.style.display='none'; }
-  }
 
   async function workflowTab(){
     const b=$('acBody');
@@ -770,15 +842,119 @@
   window.wfEdit=function(id){ navTo('tasks/workflow/edit/'+id); };
   window.wfOpen=function(id){ navTo('tasks/workflow/'+id); };
   window.wfCancel=function(){ navTo('tasks/workflow'); };
+  // Reusable tooltip for secondary hint text: a small (i) icon. Desktop = hover, mobile = tap.
+  // The bubble is drawn in a single fixed layer on <body> so cards/modals can never clip it.
+  // The "i" is a plain character, not a Font Awesome glyph — the icon font renders it far too
+  // small inside a 16px circle (and silently shows nothing if the CDN is slow or blocked).
+  function tip(text){ var s=esc2(String(text||'')); return '<span class="wf-tip" tabindex="0" role="button" aria-label="More information">i<span class="wf-tip-txt">'+s+'</span></span>'; }
+  function wfTipLayer(){ var l=document.getElementById('wfTipLayer'); if(!l){ l=document.createElement('div'); l.id='wfTipLayer'; document.body.appendChild(l); } return l; }
+  function wfTipHide(){ var l=document.getElementById('wfTipLayer'); if(l) l.classList.remove('show'); }
+  function wfTipShow(anchor){
+    var src=anchor&&anchor.querySelector&&anchor.querySelector('.wf-tip-txt'); if(!src) return;
+    var l=wfTipLayer(); l.innerHTML=src.innerHTML; l.classList.add('show'); l.classList.remove('below');
+    // measure after the content is in, then place above the icon (or below if there's no room)
+    var r=anchor.getBoundingClientRect(), b=l.getBoundingClientRect(), pad=8;
+    var left=r.left+r.width/2-b.width/2;
+    left=Math.max(pad,Math.min(left,window.innerWidth-b.width-pad));
+    var top=r.top-b.height-8, below=false;
+    if(top<pad){ top=r.bottom+8; below=true; }
+    l.style.left=Math.round(left)+'px'; l.style.top=Math.round(top)+'px';
+    l.style.setProperty('--tipx',Math.round(r.left+r.width/2-left)+'px');
+    if(below) l.classList.add('below');
+  }
+  if(!window._acTipInit){ window._acTipInit=1;
+    var reAnchor=function(){ var a=window._wfTipAnchor; if(a&&document.body.contains(a)) wfTipShow(a); else wfTipHide(); };
+    document.addEventListener('mouseover',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip,.wf-poptip');
+      if(el){ window._wfTipAnchor=el; wfTipShow(el); }
+    },true);
+    document.addEventListener('mouseout',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip,.wf-poptip');
+      if(el&&!(e.relatedTarget&&el.contains(e.relatedTarget))){ if(window._wfTipAnchor===el&&!el.classList.contains('show')){ window._wfTipAnchor=null; wfTipHide(); } }
+    },true);
+    document.addEventListener('focusin',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+      if(el){ window._wfTipAnchor=el; wfTipShow(el); }
+    },true);
+    document.addEventListener('focusout',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+      if(el&&window._wfTipAnchor===el){ window._wfTipAnchor=null; wfTipHide(); }
+    },true);
+    document.addEventListener('click',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+      if(el){ e.stopPropagation(); window._wfTipAnchor=el; wfTipShow(el); try{ el.focus(); }catch(_){} return; }
+      if(!(e.target&&e.target.closest&&e.target.closest('.wf-poptip'))){
+        document.querySelectorAll('.wf-poptip.show').forEach(function(x){x.classList.remove('show');});
+        window._wfTipAnchor=null; wfTipHide();
+      }
+    },true);
+    window.addEventListener('scroll',reAnchor,true);
+    window.addEventListener('resize',reAnchor);
+  }
+  window.wfPopToggle=function(el){ var was=el.classList.contains('show'); document.querySelectorAll('.wf-poptip.show').forEach(function(x){ if(x!==el) x.classList.remove('show'); }); el.classList.toggle('show', !was); if(was){ window._wfTipAnchor=null; wfTipHide(); } else { window._wfTipAnchor=el; wfTipShow(el); } };
+  // Workflow instance detail formatters (used for task Title / Description).
+  function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
+  function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(l).trim()&&!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(v); }).filter(Boolean).join('<br>'); }
+  function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
+
+  /* ----- What does this workflow actually process? -----------------------------------------
+     A workflow called "Invoice Processing" with the trigger "Invoice Received" is really about
+     INVOICES, so the UI should say "New Invoice" and "Invoices" instead of the meaningless
+     "New Event" / "Instances". The word is worked out once by the flow-noun edge function
+     (Anthropic Claude) when the workflow is saved, and kept on the flow row. wfNounOf() falls
+     back to a local guess so the screen is never blank if that hasn't run yet. */
+  var WF_STOPW={a:1,an:1,the:1,'new':1,of:1,'for':1,to:1,is:1,are:1,received:1,receiving:1,receipt:1,submitted:1,submission:1,created:1,creation:1,raised:1,approved:1,approval:1,rejected:1,generated:1,requested:1,completed:1,complete:1,processing:1,process:1,processed:1,initiated:1,initiation:1,arrives:1,arrival:1,comes:1,coming:1,logged:1,registered:1,sent:1,issued:1,filed:1,opened:1,closed:1,cancelled:1,done:1,when:1,after:1,before:1,on:1,'in':1,from:1,by:1,'with':1,and:1,applies:1,joins:1,handling:1,coordination:1,flow:1,management:1,requests:1,submits:1,sends:1,uploads:1,asks:1,places:1,reports:1,receives:1,raises:1,customer:1};
+  function wfNounCase(s){ return String(s||'').replace(/\w\S*/g,function(t){return t.charAt(0).toUpperCase()+t.slice(1).toLowerCase();}); }
+  function wfPlural(n){
+    var w=String(n||'').trim(); if(!w) return w;
+    var parts=w.split(/\s+/), last=parts[parts.length-1], p;
+    if(/[^s]s$/i.test(last)) p=last;                       // already plural — leave it alone
+    else if(/[^aeiou]y$/i.test(last)) p=last.replace(/y$/i,'ies');
+    else if(/(s|x|z|ch|sh)$/i.test(last)) p=last+'es';
+    else p=last+'s';
+    parts[parts.length-1]=p; return parts.join(' ');
+  }
+  function wfGuessNoun(name,trigger){
+    var pick=function(src){
+      var words=String(src||'').replace(/[^A-Za-z0-9 ]/g,' ').split(/\s+/).filter(function(w){ return w && !WF_STOPW[w.toLowerCase()]; });
+      if(!words.length) return '';
+      var out=[words[0]];
+      if(words[1] && !/(ing|ed)$/i.test(words[1]) && (out[0].length+words[1].length)<=22) out.push(words[1]);
+      return wfNounCase(out.join(' '));
+    };
+    return pick(trigger)||pick(name)||'Event';
+  }
+  // Returns the words to use for one flow: {one:'Invoice', many:'Invoices', lc:'invoice', lcMany:'invoices'}
+  function wfNounOf(flow){
+    var one=(flow&&flow.instance_noun||'').trim();
+    if(!one) one=wfGuessNoun(flow&&flow.name, flow&&flow.trigger_event);
+    var many=(flow&&flow.instance_noun_plural||'').trim()||wfPlural(one);
+    return {one:one, many:many, lc:one.toLowerCase(), lcMany:many.toLowerCase()};
+  }
+  // Ask Claude for the word (fire-and-forget: it saves onto the flow row for next time).
+  async function wfNounLearn(flowId,name,trigger){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token; if(!token) return null;
+      const res=await fetch(SUPABASE_URL+'/functions/v1/flow-noun',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},body:JSON.stringify({flow_id:flowId,name:name,trigger_event:trigger})});
+      return await res.json().catch(function(){return null;});
+    }catch(e){ return null; }
+  }
 
   function wfStepRowHtml(idx,step){
     step=step||{};
     const unit=(step.duration_unit||'days');
+    // Number and the remove button live in a header strip, so every input below gets the
+    // full width of the card instead of being squeezed between them.
     return '<div class="wf-step">'
-      +'<span class="wf-step-num">'+idx+'</span>'
+      +'<div class="wf-step-hd">'
+        +'<span class="wf-step-num">'+idx+'</span>'
+        +'<span class="wf-step-hd-t">Step '+idx+'</span>'
+        +'<button class="ac-btn ic danger wf-s-del" title="Remove step" onclick="wfRemoveStep(this)"><i class="fa-solid fa-xmark"></i></button>'
+      +'</div>'
       +'<div class="wf-step-fields">'
         +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
-        +'<input class="ac-in wf-s-desc" placeholder="Write the Description" value="'+esc2(step.description||'')+'">'
+        +'<input class="ac-in wf-s-desc" placeholder="Description (optional)" value="'+esc2(step.description||'')+'">'
         +'<div class="wf-step-sub">'
           +wfPersonPickerHtml(step.owner_email)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
@@ -789,7 +965,6 @@
           +'</select>'
         +'</div>'
       +'</div>'
-      +'<button class="ac-btn ic danger wf-s-del" title="Remove step" onclick="wfRemoveStep(this)"><i class="fa-solid fa-xmark"></i></button>'
     +'</div>';
   }
 
@@ -810,23 +985,47 @@
       +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
       +'<div class="wf-card">'
       +'<div class="wf-form" data-id="'+(id||'')+'">'
-        +'<label class="wf-lbl">Workflow name</label>'
-        +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
-        +'<label class="wf-lbl">Triggering event <span class="wf-hint">— what starts this workflow</span></label>'
-        +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-        +'<label class="wf-lbl">Event owner <span class="wf-hint">— required; only this person can start instances of this workflow</span></label>'
-        +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
-        +'<label class="wf-lbl">Description <span class="wf-hint">— optional</span></label>'
-        +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
-        +'<div class="wf-steps-head"><label class="wf-lbl" style="margin:0">Steps <span class="wf-hint">— in order; each done by one person within a set time</span></label></div>'
-        +'<div id="wfSteps">'+stepsHtml+'</div>'
-        +'<div class="wf-addstep-ghost" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</div>'
+        // Section 1 — what the workflow is. Paired fields sit side by side on a wide screen.
+        +'<div class="wf-fsec">'
+          +'<div class="wf-fsec-h"><i class="fa-solid fa-circle-info"></i> Basics</div>'
+          +'<div class="wf-fgrid">'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl" for="wfName">Workflow name</label>'
+              +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
+            +'</div>'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl" for="wfTrigger">Triggering event '+tip('What starts this workflow.')+'</label>'
+              +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
+            +'</div>'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
+              +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
+            +'</div>'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl" for="wfDesc">Description '+tip('Optional.')+'</label>'
+              +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
+            +'</div>'
+          +'</div>'
+        +'</div>'
+        // Section 2 — the ordered steps.
+        +'<div class="wf-fsec">'
+          +'<div class="wf-fsec-h"><i class="fa-solid fa-list-ol"></i> Steps '+tip('In order; each step is done by one person within a set time.')+'</div>'
+          +'<div id="wfSteps">'+stepsHtml+'</div>'
+          +'<div class="wf-addstep-ghost" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</div>'
+        +'</div>'
         +'<div class="wf-actions">'
           +'<button class="ac-btn" onclick="wfCancel()">Cancel</button>'
-          +'<button class="ac-btn primary" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
+          +'<button class="ac-btn primary" title="Press Enter to save · Esc to close" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
         +'</div>'
-        +'<div class="wf-keyhint">Press <b>Enter</b> to save · <b>Esc</b> to close</div>'
       +'</div></div></div>';
+    // Keep the owner tooltip naming whatever this workflow will process, as they type.
+    const refreshNoun=function(){
+      const g=wfNounOf({name:($('wfName')||{}).value||'', trigger_event:($('wfTrigger')||{}).value||''});
+      const ot=$('wfOwnerTip');
+      if(ot) ot.innerHTML=tip('Required. Only this person can start a new '+g.lc+'.');
+    };
+    ['wfName','wfTrigger'].forEach(function(k){ const el=$(k); if(el) el.addEventListener('input',refreshNoun); });
+    refreshNoun();
     // Enter = save, Esc = close (ignore while typing in the person-search box)
     const page=v.querySelector('.wf-form');
     if(page){ page.addEventListener('keydown',function(e){
@@ -850,7 +1049,10 @@
   };
   function wfRenumber(){
     const wrap=$('wfSteps'); if(!wrap)return;
-    [].slice.call(wrap.querySelectorAll('.wf-step')).forEach(function(r,i){ const n=r.querySelector('.wf-step-num'); if(n)n.textContent=(i+1); });
+    [].slice.call(wrap.querySelectorAll('.wf-step')).forEach(function(r,i){
+      const n=r.querySelector('.wf-step-num'); if(n)n.textContent=(i+1);
+      const t=r.querySelector('.wf-step-hd-t'); if(t)t.textContent='Step '+(i+1);
+    });
   }
   window.wfClearTrigOwner=function(){
     const box=$('wfTrigOwner'); if(!box)return;
@@ -884,40 +1086,46 @@
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
-    if(!owner){ toast('Please select the Event owner (Triggering Event member)','warn'); return; }
+    if(!owner){ toast('Please select the Triggering event owner','warn'); return; }
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
       const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null});
       if(error)throw error;
       toast('Workflow saved','ok');
+      // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
+      // opening the detail page, so the buttons already read correctly
+      try{ await wfNounLearn(flowId,name,trigger); }catch(_e){}
       navTo('tasks/workflow/'+flowId);
     }catch(e){ toast('Could not save workflow: '+((e&&e.message)||e),'err'); }
   };
 
+  // A timeline card is deliberately minimal: step name, status, who, how long. No department, no
+  // action buttons — Revert and Reject live on the person's own task page, and the received/done
+  // timestamps are on the status pills in the table. Keeps the card short on a phone even when
+  // somebody has a very long name.
   function wfTimelineHtml(steps,opt){
     opt=opt||{};
     return steps.map(function(s,i){
       const person=s.owner_email||s.person;
-      const dept=wfDeptOf(person);
       const who=person
-        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span>'+(dept?'<span class="wf-dept">'+esc2(dept)+'</span>':'')+'</span>')
+        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span></span>')
         :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
       const dur=wfDurText(s.duration_value,s.duration_unit); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
-      let extra='', badge='', cls='';
+      let badge='', cls='', whenHtml='';
       if(opt.live){
         const done=s.status==='done'||!!s.forwarded_at;
         const cur=!done && (s.status==='received'||s.received_at||s.appeared_at);
         cls=done?'wf-tl-done':(cur?'wf-tl-cur':'wf-tl-wait');
         badge=done?'<span class="wf-badge ok">Done</span>':(cur?'<span class="wf-badge cur">In progress</span>':'<span class="wf-badge wait">Waiting</span>');
-        const bits=[];
-        if(s.received_at) bits.push('Received '+wfDT(s.received_at));
-        if(s.forwarded_at) bits.push('Completed '+wfDT(s.forwarded_at));
-        if(s.received_at&&s.forwarded_at) bits.push('<b>Took '+wfHms(new Date(s.forwarded_at)-new Date(s.received_at))+'</b>');
-        else if(s.received_at&&!s.forwarded_at) bits.push('running for '+wfHms(Date.now()-new Date(s.received_at)));
-        if(bits.length) extra='<div class="wf-tl-track">'+bits.join(' · ')+'</div>';
+        // both moments, with full date + time
+        if(s.received_at) whenHtml+='<span class="wf-tl-when"><b>Received</b> '+esc2(wfDTFull(s.received_at))+'</span>';
+        if(s.forwarded_at) whenHtml+='<span class="wf-tl-when done"><b>Done</b> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
       }
-      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div>'+(s.description?('<div class="wf-tl-desc">'+esc2(s.description)+'</div>'):'')+'<div class="wf-tl-meta">'+who+durHtml+'</div>'+extra+'</div></div>';
+      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
+        +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
+        +'<div class="wf-tl-times">'+whenHtml+'</div>'
+      +'</div></div>';
     }).join('');
   }
 
@@ -935,40 +1143,54 @@
     const isCreator=eq(flow.created_by||'',mySelf);
     const canEvent = !flow.trigger_owner || eq(flow.trigger_owner, mySelf);
     window._wfFlowId=id; window._wfDelId = isCreator ? id : null; wfWireDeleteKey();
+    // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
+    const N=wfNounOf(flow); window._wfNoun=N;
+    // older workflows saved before this feature have no word yet — learn it once, quietly
+    if(!flow.instance_noun){ wfNounLearn(id,flow.name,flow.trigger_event).then(function(r){
+      if(r&&r.noun&&r.noun!==N.one&&ROUTE&&ROUTE.tab==='workflow') renderPage();
+    }); }
     const members=[];
     if(flow.trigger_owner && !members.some(function(e){return eq(e,flow.trigger_owner);})) members.push(flow.trigger_owner);
     steps.forEach(function(s){ if(s.owner_email&&!members.some(function(e){return eq(e,s.owner_email);}))members.push(s.owner_email); });
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
-    window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps</div></div>'+defTL;
+    window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps'+tip('The steps every '+N.lc+' goes through, in order, with who does each one and how long they have. Click a row in the table below to see how a particular '+N.lc+' is progressing.')+'</div></div>'+defTL;
 
     // Instances table
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
-      const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('')+'<th>Status</th>';
+      const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
+      const head='<th class="wf-chk-col"></th><th>No.</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
-          if(cs&&(cs.status==='done'||cs.forwarded_at)) return '<td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>';
-          if(c.status==='Pending' && c.current_step===s.seq) return '<td><span class="wf-pill cur"><i class="fa-solid fa-circle-dot"></i> Current</span></td>';
+          if(cs&&(cs.status==='done'||cs.forwarded_at)){ var rcv=cs.received_at?wfDT(cs.received_at):'—'; var don=cs.forwarded_at?wfDT(cs.forwarded_at):'—'; return '<td><span class="wf-pill ok wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-check"></i> Done<span class="wf-tip-txt">Received: '+esc2(rcv)+'<br>Done: '+esc2(don)+'</span></span></td>'; }
+          if(c.status==='Pending' && c.current_step===s.seq){
+            if(cs&&cs.received_at) return '<td><span class="wf-pill cur wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-inbox"></i> Received<span class="wf-tip-txt">Received: '+esc2(wfDT(cs.received_at))+'</span></span></td>';
+            return '<td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>';
+          }
           return '<td><span class="wf-pill wait">·</span></td>';
         }).join('');
-        const st=c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">Pending</span>');
+        const fst=firstSeq!=null?(byCase[c.id]||{})[firstSeq]:null;
+        const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
+        const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
+        const instOver=(c.status==='Done'||c.status==='Cancelled');
         return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
-          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
-          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'<td>'+st+'</td></tr>';
+          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
+          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span><span class="wf-card-hint">— tick one to edit, one or more to delete; click a row to see its progress</span>'
-        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
+        +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
+        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
 
     const headActs='<div class="wf-head-acts">'
       +(isCreator?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      +(canEvent?'<button class="ac-btn primary" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New Event</span></button>':'')
+      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     v.innerHTML='<div class="wf-page">'
@@ -984,22 +1206,30 @@
     if(selCaseId){ wfShowCase(selCaseId, null); }
   }
 
+  function wfN(){ return window._wfNoun || {one:'Event',many:'Events',lc:'event',lcMany:'events'}; }
   window.wfInstSelChange=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
-    const eb=$('wfInstEdit'), db=$('wfInstDel');
-    if(eb) eb.disabled = checks.length!==1;
-    if(db) db.disabled = checks.length<1;
+    const eb=$('wfInstEdit'), db=$('wfInstDel'), N=wfN();
+    const oneSel = checks.length===1;
+    const editBlocked = oneSel && checks[0].getAttribute('data-inst-over')==='1';
+    const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
+    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? ('Can’t edit — this '+N.lc+' is already over (completed)') : ('Edit selected '+N.lc); }
+    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)') : 'Delete selected'; }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
+    if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this '+wfN().lc+' is already over','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
   window.wfInstDelSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(!checks.length) return;
+    const N=wfN();
+    if(checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; })){ toast('Can’t delete — a selected '+N.lc+' has already started (first step received)','err'); return; }
     const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
-    wfConfirm({ title:'Delete '+ids.length+' instance'+(ids.length===1?'':'s')+'?', body:'This permanently removes the selected instance'+(ids.length===1?'':'s')+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+    const word=(ids.length===1?N.lc:N.lcMany);
+    wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
       toast('Deleted','ok'); renderPage();
     }});
@@ -1007,7 +1237,7 @@
 
   async function wfCaseRoute(v, caseId){
     let c=null; try{ const {data}=await ACC().from('flow_cases').select('flow_id').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(!c){ toast('Instance not found','err'); return navTo('tasks/workflow'); }
+    if(!c){ toast('Not found','err'); return navTo('tasks/workflow'); }
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
@@ -1022,27 +1252,30 @@
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     if(!box)return;
-    if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Instance not found</div>'; return; }
+    if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
-    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
-      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true})||'')+'</div>'
-      +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status})||'')+'</div>'
+      +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div><div class="wf-updmini-list">'+updates.map(wfUpdateHtml).join('')+'</div></div>'):'');
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
 
   window.wfDelete=function(id){
-    wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its instances and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+    wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its '+wfN().lcMany+' and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_delete_flow',{p_id:id}); if(error)throw error; }
       catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); return; }
       window._wfDelId=null; toast('Workflow deleted','ok'); navTo('tasks/workflow');
     }});
   };
 
-  /* ----- Instance (New Event) form ----- */
-  function wfEvtRowHtml(label,value){ return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>'; }
+  /* ----- New <Noun> form (e.g. "New Invoice") ----- */
+  function wfEvtRowHtml(label,value,locked){
+    if(locked){ return '<div class="wf-evt-row"><div class="ac-in wf-evt-labelro" style="flex:1;min-width:0;background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--slate);flex:none"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc2(label||'')+'</span></div><input type="hidden" class="wf-evt-label" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"></div>'; }
+    return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>';
+  }
   window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
 
@@ -1054,38 +1287,47 @@
     try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
     if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
     if(!flow){ toast('Workflow not found','err'); return; }
-    if(!caseId && !steps.length){ toast('Add steps to this workflow before starting an instance','warn'); return; }
+    const N=wfNounOf(flow); window._wfNoun=N;
+    if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
-    const src = editing ? (Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]) : (Array.isArray(flow.trigger_template)?flow.trigger_template:[]);
-    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t.label||'', editing?(t.value||''):'');}):[wfEvtRowHtml('','')]).join('');
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+(editing?('Edit instance '+(caseRow.case_no||caseId)):'New instance')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    // Once the detail fields have been defined for this workflow (trigger_template is set), the field
+    // LABELS are locked: they can't be edited, added or removed — you only fill in the values.
+    const template=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
+    const locked=template.length>0;
+    let src;
+    if(editing){ src=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]; }
+    else if(locked){ src=template.map(function(t){return {label:(t&&t.label)||'',value:''};}); }
+    else { src=[]; }
+    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml((t&&t.label)||'', (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow.case_no||caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<label class="wf-lbl">Details <span class="wf-hint">— specifics for this instance</span></label>'
+        +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +'<div id="wfEvtDetails">'+rowsHtml+'</div>'
-        +'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'
+        +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>')
       +'</div>'
-      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+(editing?'Save changes':'Create instance')+'</button></div>','md');
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','md');
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
   };
 
   window.wfEventSave=async function(flowId, caseId){
     const wrap=$('wfEvtDetails'); const details=[];
     if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){ const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim(); const value=((r.querySelector('.wf-evt-value')||{}).value||'').trim(); if(label||value) details.push({label:label,value:value}); }); }
+    const N=wfN();
     try{
       if(caseId){
         const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
         try{ closeModal(); }catch(e){}
-        toast('Instance updated','ok');
+        toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
         const {error}=await ACC().rpc('wf_create_instance',{p_flow_id:flowId, p_details:details}); if(error)throw error;
         try{ closeModal(); }catch(e){}
-        toast('Instance created — first step assigned','ok');
+        toast(N.one+' created — first step assigned','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
-    }catch(e){ toast('Could not save instance: '+((e&&e.message)||e),'err'); }
+    }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
   };
 
 
@@ -1126,7 +1368,7 @@
     } else if(amAssignee && caseActive){
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
-         +'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
+         +(isFirst?'':'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>');
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
@@ -1137,13 +1379,18 @@
     const statusChip=forwarded?'<span class="ac-chip ac-c-Completed">Completed</span>':'<span class="ac-chip ac-c-Pending">Pending</span>';
     let takenTxt='—'; if(fcs.received_at&&fcs.forwarded_at) takenTxt=wfHms(new Date(fcs.forwarded_at)-new Date(fcs.received_at)); else if(fcs.received_at) takenTxt='running · '+wfHms(Date.now()-new Date(fcs.received_at));
     const person=fcs.person;
-    v.innerHTML='<div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(t.title)+'</div>'
+    const wfDetailsArr=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
+    const wfInline=wfDetailsInline(wfDetailsArr);
+    const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow&&caseRow.case_no?(' #'+caseRow.case_no):'');
+    const wfStepName=wfTitleCase(fcs.title||'');
+    const wfDescFmt=wfDetailsFmt(wfDetailsArr);
+    v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
-      +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
+      +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTitleCase((flow&&flow.name)||'Workflow')+': '+wfTitleCase(fcs.title||''))+'</b>'+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details</h3><div class="tp-grid">'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':'')+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
         +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
         +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
         +'<div class="tp-f"><div class="k">Status</div><div class="v">'+statusChip+'</div></div>'
@@ -1151,11 +1398,11 @@
         +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
-      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback <span class="wf-hint" style="font-weight:600">— visible to everyone in this instance</span></h3>'
+      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfNounOf(flow).lc+' as it moves to the next person, and rejection reasons appear here too.')+'</h3>'
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
-      +'</div>';
+      +'</div></div>';
     if(window._wfAutoReject && window._wfAutoReject===fcs.id){ window._wfAutoReject=null; setTimeout(function(){ wfRejectStart(fcs.id, fcs.case_id); },60); }
   }
 
@@ -1209,21 +1456,20 @@
 
   // Reject: an in-app note (Updates & Feedback) then bounce to the previous person
   // Reject flows through the Updates & Feedback section (no popup): scroll there, reveal the confirm bar.
+  // Reject now asks for confirmation in a popup (no jumping to Updates & Feedback).
   window.wfRejectStart=function(fcsId, caseId){
-    const card=$('wfUpdCard'), bar=$('wfRejectBar'), inp=$('wfUpdIn');
-    if(bar) bar.style.display='';
-    if(card){ try{ card.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){ card.scrollIntoView(); } }
-    if(inp){ inp.placeholder='Reason for rejecting (optional)…'; try{ inp.focus(); }catch(_){} }
+    wfConfirm({ title:'Reject this step?', body:'This sends the task back to the previous person.', okLabel:'Reject', okClass:'danger', onOk:async function(){
+      try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
+      catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+      toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
+    }});
   };
-  window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; const inp=$('wfUpdIn'); if(inp) inp.placeholder='Write an update…'; };
-  // Called from a task-list row: open the task, then auto-start the reject flow there.
-  window.wfRowReject=function(fcsId, caseId, taskId){ window._wfAutoReject=fcsId; navTo('tasks/task/'+taskId); };
+  window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
+  // From a task-list row: same confirmation popup, no navigation needed.
+  window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
-    const inp=$('wfUpdIn'); const note=(inp&&inp.value||'').trim();
-    try{
-      if(note){ try{ await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:note}); }catch(e){} }
-      const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error;
-    }catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
+    catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
     toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
   };
 
@@ -1232,13 +1478,14 @@
     wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not revert: '+((e&&e.message)||e),'err'); return; }
-      toast('Reverted — the task is back with you','ok'); navTo('tasks/work');
+      toast('Reverted — the task is back with you','ok');
+      if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
     }});
   };
 
   // Reopen: bring the completed final step back (instance Done -> In progress)
   window.wfReopen=function(fcsId){
-    wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and the instance moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
+    wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and this '+wfN().lc+' moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
       toast('Reopened','ok'); navTo('tasks/work');
@@ -1269,6 +1516,10 @@
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
     .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
     /* list header + full-width rows */
+    /* Workflow task Details: always two columns of three, never one long list */
+    .wf-tp .tp-grid{grid-template-columns:1fr 1fr;gap:12px 22px}
+    .wf-tp .tp-f{min-width:0}
+    .wf-tp .tp-f .v{overflow-wrap:anywhere}
     .wf-listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
     .wf-listhead-t{font-size:15px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px}
     .wf-listhead-t i{color:var(--brand)}
@@ -1301,22 +1552,32 @@
     .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px}
     .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
     .wf-timeline{display:flex;flex-direction:column}
-    .wf-tl-item{display:flex;gap:14px;padding-bottom:20px;position:relative}
+    /* Slim timeline row: one line on a normal screen, wrapping to two on a phone. */
+    .wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
     .wf-tl-item:last-child{padding-bottom:0}
-    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:14px;top:30px;bottom:0;width:2px;background:var(--line)}
+    .wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:12px;top:26px;bottom:0;width:2px;background:var(--line)}
     .wf-tl-done:not(:last-child)::before{background:#bbf7d0}
-    .wf-tl-num{flex:0 0 30px;height:30px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;z-index:1}
+    .wf-tl-num{flex:0 0 26px;height:26px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;z-index:1;margin-top:5px}
     .wf-tl-cur .wf-tl-num{background:var(--brand);box-shadow:0 0 0 4px var(--brand-a10,#eef2ff)}
     .wf-tl-done .wf-tl-num{background:#16a34a}
     .wf-tl-wait .wf-tl-num{background:#cbd5e1}
-    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
+    /* line 1 = what + who, line 2 = the timestamps on their own rule, so a fully-stamped
+       step reads as two calm rows instead of one crowded one */
+    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:9px 15px;display:flex;flex-direction:column;gap:7px}
+    .wf-tl-row{display:flex;align-items:center;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;min-width:0}
+    .wf-tl-times{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;min-width:0;padding-top:7px;border-top:1px dashed var(--line)}
+    .wf-tl-times:empty{display:none}
     .wf-tl-cur .wf-tl-body{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}
-    .wf-tl-title{font-weight:650;font-size:14px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+    .wf-tl-cur .wf-tl-times{border-top-color:#c7d2fe}
+    .wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
-    .wf-tl-meta{display:flex;align-items:center;gap:16px;margin-top:8px;flex-wrap:wrap}
-    .wf-who{display:inline-flex;align-items:center}
-    .wf-av{width:24px;height:24px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-right:8px}
-    .wf-who-nm{font-size:13px;color:var(--ink);font-weight:600}
+    .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
+    .wf-tl-when{font-size:11.5px;color:var(--slate);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+    .wf-tl-when b{font-weight:700;color:var(--ink);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-tl-when.done b{color:#16a34a}
+    .wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
+    .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-right:7px;flex:none}
+    .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .wf-dept{font-size:11.5px;color:var(--slate);margin-left:8px}
     .wf-dur{font-size:12.5px;color:var(--slate);display:inline-flex;align-items:center;gap:6px}
     .wf-badge{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:none;letter-spacing:0}
@@ -1345,6 +1606,7 @@
     .wf-pill.ok{background:#dcfce7;color:#166534}
     .wf-pill.cur{background:#dbeafe;color:#1e40af}
     .wf-pill.wait{background:#f1f5f9;color:#cbd5e1;padding:3px 12px}
+    .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
     .wf-upd-sys i{opacity:.6;margin-right:4px}
     .wf-inst-tools{margin-left:auto;display:flex;gap:6px}
@@ -1361,7 +1623,8 @@
     /* task page bits */
     .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
     .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
-    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:340px;overflow:auto;margin-bottom:12px}
+    /* Roughly five messages tall, then it scrolls — the card never keeps growing. */
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;margin-bottom:12px;padding-right:4px}
     .wf-upd{display:flex;gap:10px;align-items:flex-start}
     .wf-upd.me{flex-direction:row-reverse}
     .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
@@ -1375,17 +1638,33 @@
     .wf-reject-acts{display:flex;gap:7px;flex:none}
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
+    /* thin, unobtrusive scrollbars on the message lists */
+    .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+    .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
+    .wf-updlist::-webkit-scrollbar-thumb,.wf-updmini-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
     @media(max-width:640px){
       .wf-page-head h1{font-size:16px;flex:1 1 100%;order:2}
       .wf-page-head .ac-btn.ic:first-child{order:1}
-      .wf-head-acts{order:3;flex:1 1 100%}
-      .wf-head-acts .ac-btn{flex:1;justify-content:center}
+      /* header buttons: wrap onto their own line and keep a readable width instead of
+         being squeezed into three slivers */
+      .wf-head-acts{order:3;flex:1 1 100%;gap:8px}
+      .wf-head-acts .ac-btn{flex:1 1 auto;min-width:104px;justify-content:center}
       .wf-btxt{display:inline}
       .wf-card{padding:14px}
-      .wf-lrow{padding:12px 13px;gap:10px}
-      .wf-lrow-right{gap:9px}
+      /* workflow list: name/trigger on one line, people + step count underneath */
+      .wf-lrow{flex-wrap:wrap;padding:13px 14px;gap:9px}
+      .wf-lrow-main{flex:1 1 100%}
+      .wf-lrow-right{flex:1 1 100%;justify-content:flex-start;gap:10px}
+      .wf-lrow-right .wf-go{margin-left:auto}
+      .wf-tl-body{padding:8px 12px;gap:5px 14px}
+      .wf-tl-body .wf-who-nm{max-width:46vw}
       .wf-upd-b{max-width:82%}
       .wf-detlist{grid-template-columns:1fr}
+      .wf-tp .tp-head{flex-wrap:wrap;gap:10px}
+      .wf-tp .tp-acts{flex-wrap:wrap;width:100%}
+      .wf-tp .tp-acts .ac-btn{flex:1 1 auto;justify-content:center}
+      .wf-tp .wf-updbar .ac-in{min-width:0}
     }
     `;
     document.head.appendChild(s);
@@ -2724,8 +3003,41 @@
   let MTG_REC=null, MTG_WRAP=null;
   function mtgSecFmt(s){ s=Math.max(0,s|0); const m=Math.floor(s/60), ss=s%60; return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
   function mtgClockIST(iso){ try{ return new Date(iso).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'Asia/Kolkata'}); }catch(e){ return ''; } }
+  let MTG_LOG_LANG='en';   // which transcript version the user is viewing
+  const MTG_LANG_NAMES={en:'English',hi:'Hindi',bn:'Bengali',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',ur:'Urdu',pa:'Punjabi'};
+  function mtgLangName(c){return MTG_LANG_NAMES[String(c||'').toLowerCase()]||String(c||'').toUpperCase();}
+  function mtgTrText(l,lang){ return (lang==='bn')?(l.transcript_bn||l.transcript||''):(l.transcript_en||l.transcript||''); }
+  function mtgTrBody(l,lang){
+    const txt=mtgTrText(l,lang);
+    if(!txt) return '<p style="color:var(--slate);font-size:13px;margin:8px 0 0">'+(lang==='bn'?'The original-language version isn\'t stored for this recording — record it again to get both versions.':'No transcript text available.')+'</p>';
+    return '<div class="mtg-log-transcript">'+esc2(txt).replace(/\n/g,'<br>')+'</div>';
+  }
+  window.mtgSetLang=function(lang){
+    MTG_LOG_LANG=lang;
+    const l=window._mtgLogRow; if(!l)return;
+    const b=document.getElementById('mtgTrBody'); if(b)b.innerHTML=mtgTrBody(l,lang);
+    ['en','bn'].forEach(function(k){ const btn=document.getElementById('mtgLang_'+k); if(btn){ if(k===lang)btn.classList.add('primary'); else btn.classList.remove('primary'); } });
+  };
   function mtgTranscriptHtml(l){
-    if(l.transcript_status==='ready') return '<div class="mtg-log-transcript">'+esc2(l.transcript||'').replace(/\n/g,'<br>')+'</div>';
+    if(l.transcript_status==='ready'){
+      window._mtgLogRow=l;
+      const sum=(l.summary||'').trim();
+      const sumHtml=sum?('<div class="mtg-log-summary"><div class="mtg-log-sumh"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Summary</div><div>'+esc2(sum).replace(/\n/g,'<br>')+'</div></div>'):'';
+      // quick facts about the recording
+      const enTxt=mtgTrText(l,'en'), words=enTxt?enTxt.trim().split(/\s+/).length:0;
+      const langs=Array.isArray(l.languages)?l.languages.filter(Boolean):[];
+      const facts=[];
+      if(l.num_speakers)facts.push(['Speakers',String(l.num_speakers)]);
+      if(langs.length)facts.push(['Languages',langs.map(mtgLangName).join(', ')]);
+      if(words)facts.push(['Words',words.toLocaleString('en-IN')]);
+      const factsHtml=facts.length?('<div class="mtg-tr-facts">'+facts.map(function(f){return '<div class="mtg-tr-fact"><div class="k">'+esc2(f[0])+'</div><div class="v">'+esc2(f[1])+'</div></div>';}).join('')+'</div>'):'';
+      const hasBn=!!(l.transcript_bn&&String(l.transcript_bn).trim());
+      const lang=(MTG_LOG_LANG==='bn'&&hasBn)?'bn':'en';
+      const toggle='<div class="mtg-tr-bar"><div class="mtg-tr-h"><i class="fa-solid fa-quote-left"></i> Transcript</div>'
+        +'<div class="mtg-tr-btns"><button class="ac-btn'+(lang==='en'?' primary':'')+'" id="mtgLang_en" onclick="mtgSetLang(\'en\')">English</button>'
+        +'<button class="ac-btn'+(lang==='bn'?' primary':'')+'" id="mtgLang_bn" onclick="mtgSetLang(\'bn\')">বাংলা / Original</button></div></div>';
+      return factsHtml+sumHtml+toggle+'<div id="mtgTrBody">'+mtgTrBody(l,lang)+'</div>';
+    }
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
     if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
     if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
@@ -2881,7 +3193,7 @@
       n++;
       const el=document.getElementById('mtgWrapTranscript');
       if(!el||n>120){ clearInterval(iv); return; }
-      try{ const {data}=await ACC().from('meeting_logs').select('transcript,transcript_status').eq('id',logId).maybeSingle();
+      try{ const {data}=await ACC().from('meeting_logs').select('transcript,transcript_en,transcript_bn,summary,languages,num_speakers,transcript_status').eq('id',logId).maybeSingle();
         if(data){ el.innerHTML=mtgTranscriptHtml(data); if(data.transcript_status==='ready'||data.transcript_status==='failed'||data.transcript_status==='none'){ clearInterval(iv); } }
       }catch(e){}
     },5000);
@@ -3039,11 +3351,22 @@
     try{
       const wfIds=tasks.filter(function(t){return t.flow_case_step_id!=null;}).map(function(t){return t.flow_case_step_id;});
       if(wfIds.length){
-        const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at').in('id',wfIds);
+        const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at,forwarded_at,title').in('id',wfIds);
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
-        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq').in('case_id',caseIds); allc=(r&&r.data)||[]; }
-        const bounds={}; allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; });
-        (steps||[]).forEach(function(s){ const bb=bounds[s.case_id]||{min:s.seq,max:s.seq}; window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,minSeq:bb.min,maxSeq:bb.max}; });
+        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
+        const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
+        const bounds={}, bySeq={};
+        allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (bySeq[s.case_id]=bySeq[s.case_id]||{})[s.seq]=s; });
+        (steps||[]).forEach(function(s){
+          const bb=bounds[s.case_id]||{min:s.seq,max:s.seq};
+          const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
+          const nextStep=(bySeq[s.case_id]||{})[s.seq+1]||null;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:!!nextStep};
+        });
       }
     }catch(e){ window._wfStepInfo={}; }
 
@@ -3414,7 +3737,8 @@
       ? (wfNeedsReceive ? ''
          : `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`)
       : `<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`):'';
-    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button></div>`:'';
+    const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
+    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`}</div>`:'';
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
@@ -3430,11 +3754,15 @@
       const metaParts=[t.due_date?`<i class="fa-regular fa-calendar"></i> ${fmtDate(t.due_date)}`:'',t._projName?`<i class="fa-solid fa-diagram-project"></i> ${esc2(t._projName)}`:''].filter(Boolean);
       meta=metaParts.length?`<div class="rtd">${metaParts.join(' · ')}</div>`:'';
     }
-    const wfIcon2=(t.flow_case_step_id!=null)?`<i class="fa-solid fa-diagram-project" title="Workflow task" style="color:#1d4ed8;margin-right:6px"></i>`:'';
+    const wfIcon2='';
     const ownerVis=(t.flow_case_step_id!=null)
-      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:12px"><i class="fa-solid fa-diagram-project"></i></span>`
+      ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${esc2(t.title)}</div></div><div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}${wfRR}</div>`;
+    const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
+    const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
+    const wfCombined=[wfStepNm,wfDet].filter(Boolean).join(' - ');
+    const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
+    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
