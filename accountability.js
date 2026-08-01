@@ -122,16 +122,28 @@
     .wf-nounprev{font-size:11.5px;color:var(--slate);margin-top:6px;line-height:1.5}
     .wf-nounprev b{color:var(--brand)}
     .wf-nounprev:empty{display:none}
+    /* ----- Workflow builder form -----
+       Two sections (Basics, Steps). Paired fields go side by side from 760px up and
+       stack below that; every field owns its own label so nothing drifts out of line. */
+    .wf-form{display:flex;flex-direction:column;gap:24px}
+    .wf-fsec{display:flex;flex-direction:column;gap:13px}
+    .wf-fsec-h{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+    .wf-fsec-h i{color:var(--brand);font-size:12px}
+    .wf-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:15px 20px;align-items:start}
+    .wf-fld{display:flex;flex-direction:column;min-width:0}
+    .wf-fld-wide{grid-column:1/-1}
+    .wf-fld .wf-lbl{margin:0 0 6px}
+    .wf-fld .ac-in{width:100%;box-sizing:border-box}
     .wf-steps-head{margin-top:20px}
-    .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
+    .wf-step{display:flex;align-items:flex-start;gap:10px;padding:11px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
-    .wf-step-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
-    .wf-step-sub{display:flex;gap:7px}
+    .wf-step-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+    .wf-step-sub{display:flex;gap:8px}
     .wf-step-sub .wf-s-person{flex:2;min-width:0}
-    .wf-step-sub .wf-s-dur{flex:0 0 92px}
-    .wf-step-sub .wf-s-unit{flex:0 0 96px}
+    .wf-step-sub .wf-s-dur{flex:0 0 92px;min-width:0}
+    .wf-step-sub .wf-s-unit{flex:0 0 96px;min-width:0}
     .wf-s-del{margin-top:4px;flex:0 0 auto}
-    .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+    .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
     .wf-trig{font-size:11.5px;color:var(--brand);margin-top:3px}
     .wf-desc{color:var(--slate);font-size:13px;margin-bottom:10px}
     .wf-trig-box{background:var(--brand-a10,#eef2ff);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;margin-bottom:18px}
@@ -147,7 +159,6 @@
     .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600}
     .wf-dept{font-size:11.5px;color:var(--slate);margin-left:7px}
     .wf-dur{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:5px}
-    @media(max-width:700px){.wf-step-sub{flex-wrap:wrap}.wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}.wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 44%}}
     /* Workflow step person picker (avatar + department-grouped) */
     .wf-step-sub .wf-pp{flex:2;min-width:0}
     .wf-pp{position:relative}
@@ -159,6 +170,21 @@
     .wf-pp-panel{position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:220px;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;display:none;max-height:280px;overflow:auto}
     .wf-pp.open .wf-pp-panel{display:block}
     .wf-pp-panel .ms-search{margin-bottom:6px}
+    /* Workflow form responsiveness — kept AFTER the picker rules above, otherwise
+       the wf-step-sub wf-pp flex:2 rule wins on source order and the picker stays squashed. */
+    @media(max-width:760px){.wf-fgrid{grid-template-columns:1fr;gap:14px}}
+    @media(max-width:700px){
+      .wf-step-sub{flex-wrap:wrap}
+      .wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}
+      /* duration + unit split the row evenly instead of leaving a ragged gap */
+      .wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 0;min-width:0}
+      .wf-step{padding:10px;gap:8px}
+      .wf-step-num{flex:0 0 24px;height:24px;font-size:12px;margin-top:8px}
+      .wf-form{gap:20px}
+      .wf-actions .ac-btn{flex:1;justify-content:center}
+      .wf-owner-pick{flex-wrap:wrap}
+      .wf-owner-pick .wf-pp{flex:1 1 100%}
+    }
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
     .ac-addrow{display:flex;gap:8px;margin:3px 0}
     .ac-addrow-ghost{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;border:1px dashed var(--line);color:var(--slate);font-size:13px;cursor:pointer;margin:3px 0;transition:.15s}
@@ -750,6 +776,8 @@
   function wfAddDuration(base,value,unit){ const d=new Date(base.getTime()); value=Number(value)||0; if(unit==='hours')d.setHours(d.getHours()+value); else if(unit==='weeks')d.setDate(d.getDate()+value*7); else d.setDate(d.getDate()+value); return d; }
   function wfDateOnly(d){ const z=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
   function wfDT(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
+  // Same as wfDT but always carries the year too, for the timeline cards.
+  function wfDTFull(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
   function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
@@ -929,18 +957,35 @@
       +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
       +'<div class="wf-card">'
       +'<div class="wf-form" data-id="'+(id||'')+'">'
-        +'<label class="wf-lbl">Workflow name</label>'
-        +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
-        +'<label class="wf-lbl">Triggering event '+tip('What starts this workflow.')+'</label>'
-        +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-        +'<div class="wf-nounprev" id="wfNounPrev"></div>'
-        +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
-        +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
-        +'<label class="wf-lbl">Description '+tip('Optional.')+'</label>'
-        +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
-        +'<div class="wf-steps-head"><label class="wf-lbl" style="margin:0">Steps '+tip('In order; each step is done by one person within a set time.')+'</label></div>'
-        +'<div id="wfSteps">'+stepsHtml+'</div>'
-        +'<div class="wf-addstep-ghost" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</div>'
+        // Section 1 — what the workflow is. Paired fields sit side by side on a wide screen.
+        +'<div class="wf-fsec">'
+          +'<div class="wf-fsec-h"><i class="fa-solid fa-circle-info"></i> Basics</div>'
+          +'<div class="wf-fgrid">'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl" for="wfName">Workflow name</label>'
+              +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
+            +'</div>'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl" for="wfTrigger">Triggering event '+tip('What starts this workflow.')+'</label>'
+              +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
+            +'</div>'
+            +'<div class="wf-fld wf-fld-wide"><div class="wf-nounprev" id="wfNounPrev"></div></div>'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
+              +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
+            +'</div>'
+            +'<div class="wf-fld">'
+              +'<label class="wf-lbl" for="wfDesc">Description '+tip('Optional.')+'</label>'
+              +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
+            +'</div>'
+          +'</div>'
+        +'</div>'
+        // Section 2 — the ordered steps.
+        +'<div class="wf-fsec">'
+          +'<div class="wf-fsec-h"><i class="fa-solid fa-list-ol"></i> Steps '+tip('In order; each step is done by one person within a set time.')+'</div>'
+          +'<div id="wfSteps">'+stepsHtml+'</div>'
+          +'<div class="wf-addstep-ghost" onclick="wfAddStep()"><i class="fa-solid fa-plus"></i> Add step</div>'
+        +'</div>'
         +'<div class="wf-actions">'
           +'<button class="ac-btn" onclick="wfCancel()">Cancel</button>'
           +'<button class="ac-btn primary" title="Press Enter to save · Esc to close" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
@@ -1041,14 +1086,17 @@
         ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span></span>')
         :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
       const dur=wfDurText(s.duration_value,s.duration_unit); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
-      let badge='', cls='';
+      let badge='', cls='', whenHtml='';
       if(opt.live){
         const done=s.status==='done'||!!s.forwarded_at;
         const cur=!done && (s.status==='received'||s.received_at||s.appeared_at);
         cls=done?'wf-tl-done':(cur?'wf-tl-cur':'wf-tl-wait');
         badge=done?'<span class="wf-badge ok">Done</span>':(cur?'<span class="wf-badge cur">In progress</span>':'<span class="wf-badge wait">Waiting</span>');
+        // full date + time for the moment that matters on this step
+        if(done&&s.forwarded_at) whenHtml='<span class="wf-tl-when"><i class="fa-solid fa-check"></i> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
+        else if(s.received_at) whenHtml='<span class="wf-tl-when"><i class="fa-solid fa-inbox"></i> '+esc2(wfDTFull(s.received_at))+'</span>';
       }
-      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div></div>';
+      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+whenHtml+'</div></div></div>';
     }).join('');
   }
 
@@ -1078,14 +1126,14 @@
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
-    window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps</div></div>'+defTL;
+    window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps'+tip('The steps every '+N.lc+' goes through, in order, with who does each one and how long they have. Click a row in the table below to see how a particular '+N.lc+' is progressing.')+'</div></div>'+defTL;
 
     // Instances table
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head='<th class="wf-chk-col"></th><th>No.</th><th>Triggering event</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+      const head='<th class="wf-chk-col"></th><th>No.</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
@@ -1105,6 +1153,7 @@
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
+        +tip('Every '+N.lc+' started so far, one per row. Each column is a step — click a coloured pill to see exactly when that step was received and finished. Click a row to open its timeline.')
         +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
@@ -1180,7 +1229,7 @@
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status})||'')+'</div>'
-      +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
+      +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first.')+'</div><div class="wf-updmini-list">'+updates.map(wfUpdateHtml).join('')+'</div></div>'):'');
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
@@ -1312,7 +1361,7 @@
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':'')+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details</h3><div class="tp-grid">'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
         +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
         +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
         +'<div class="tp-f"><div class="k">Status</div><div class="v">'+statusChip+'</div></div>'
@@ -1320,7 +1369,7 @@
         +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
-      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback</h3>'
+      +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Notes shared by everyone on this '+wfNounOf(flow).lc+'. Whatever you write here stays with it as it moves to the next person, and a rejection reason shows up here too.')+'</h3>'
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
@@ -1488,6 +1537,9 @@
     .wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
     .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
+    .wf-tl-when{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+    .wf-tl-done .wf-tl-when i{color:#16a34a}
+    .wf-tl-cur .wf-tl-when i{color:var(--brand)}
     .wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
     .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-right:7px;flex:none}
     .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1536,7 +1588,8 @@
     /* task page bits */
     .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
     .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
-    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:340px;overflow:auto;margin-bottom:12px}
+    /* Roughly five messages tall, then it scrolls — the card never keeps growing. */
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;margin-bottom:12px;padding-right:4px}
     .wf-upd{display:flex;gap:10px;align-items:flex-start}
     .wf-upd.me{flex-direction:row-reverse}
     .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
@@ -1550,6 +1603,11 @@
     .wf-reject-acts{display:flex;gap:7px;flex:none}
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
+    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
+    /* thin, unobtrusive scrollbars on the message lists */
+    .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+    .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
+    .wf-updlist::-webkit-scrollbar-thumb,.wf-updmini-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
     @media(max-width:640px){
       .wf-page-head h1{font-size:16px;flex:1 1 100%;order:2}
       .wf-page-head .ac-btn.ic:first-child{order:1}
