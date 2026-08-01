@@ -4088,6 +4088,48 @@ async function hrEmployees(force){
 function hrName(code){const e=(HR_EMP||[]).find(x=>x.emp_code===code);return e?e.full_name:(code||'—');}
 function hrCan(){return state.super||(state.roles&&state.roles.hr);}
 function hrCanWrite(){return state.super||(state.roles&&['ADMIN','MANAGER','EDITOR','HR'].includes(state.roles.hr));}
+
+/* ---- Recruitment write access ------------------------------------------------------------
+   Adding, editing and deleting anything in Recruitment is limited to Administrators, Abhay
+   Mati, and whoever sits in the HR department. Everyone else keeps read-only access: the
+   controls are stripped from the page AND every action re-checks, so a stale page can't be
+   used to slip a change through. */
+const REC_RO_CSS='<style id="recRoCss">.rec-ro{display:flex;align-items:center;gap:9px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 14px;font-size:12.5px;font-weight:600;margin:0 0 14px}.rec-ro i{color:#d97706}</style>';
+function recCanWrite(){
+  if(state.super) return true;
+  const p=state.profile||{}, r=state.roles||{};
+  const em=String(state.email||'').trim().toLowerCase();
+  const nm=String(p.full_name||r.full_name||'').trim().toLowerCase();
+  if(em==='system1@thejaingroup.com'||nm==='abhay mati') return true;
+  const dep=[].concat(p.department||r.department||[]);
+  return dep.some(function(d){ return /^\s*(hr|human\s*resources?)\s*$/i.test(String(d||'')); });
+}
+function recGuard(){
+  if(recCanWrite()) return true;
+  toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
+  return false;
+}
+const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareAddN','rtShareSend',
+  'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
+  'recUploadModal','recDeleteSel','recJdSave','recJdDelete'];
+function recStripWriteControls(root){
+  if(recCanWrite()) return;
+  const re=new RegExp('^\\s*(?:'+REC_WRITE_FNS.join('|')+')\\s*\\(');
+  (root||document).querySelectorAll('[onclick]').forEach(function(el){
+    if(re.test(el.getAttribute('onclick')||'')) el.remove();
+  });
+}
+// Several Recruitment bars are re-rendered on the fly, so watch the view and re-strip.
+function recWatchPerms(){
+  if(recCanWrite()) return;
+  const host=document.getElementById('view'); if(!host) return;
+  recStripWriteControls(host);
+  if(window._recObs) window._recObs.disconnect();
+  window._recObs=new MutationObserver(function(){ recStripWriteControls(host); recStripWriteControls(document.getElementById('modalHost')); });
+  window._recObs.observe(host,{childList:true,subtree:true});
+  const mh=document.getElementById('modalHost');
+  if(mh) window._recObs.observe(mh,{childList:true,subtree:true});
+}
 function hrEmpOptions(sel){return (HR_EMP||[]).map(e=>`<option value="${esc(e.emp_code)}" ${e.emp_code===sel?'selected':''}>${esc(e.full_name)} (${esc(e.emp_code)})</option>`).join('');}
 
 VIEWS.hr=async function(v,seg){
@@ -6406,7 +6448,10 @@ let REC_SEL=new Set();
 VIEWS.recruitment=async function(v,seg){
   setCrumb(['People','Recruitment (ATS)']);
   const tabs=['Tests','Descriptions','ManPower Form'];const ti=mTab(seg,tabs.length);
-  v.innerHTML=mHead('fa-user-plus','#0369a1','Recruitment (ATS)')+mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  v.innerHTML=REC_RO_CSS+mHead('fa-user-plus','#0369a1','Recruitment (ATS)')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Read-only — adding, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
+    +mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  recWatchPerms();
   if(ti===2){recManpower();return;}
   if(ti===0){await recTests();return;}
   await recLoadJDs(v);
@@ -6469,7 +6514,7 @@ window.rtSyncToolbar=function(){
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
-window.rtAdd=function(){
+window.rtAdd=function(){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
@@ -6491,7 +6536,7 @@ window.rtSave=async function(){
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
 };
-window.rtRename=function(){
+window.rtRename=function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   if(sel.length!==1)return;
   const id=parseInt(sel[0].value);
@@ -6516,7 +6561,7 @@ window.rtUpdate=async function(id){
   if(rec){rec.name=name;rec.link=link;rec.response_sheet_url=sheet||null;}
   closeModal();toast('Test updated');rtRender();
 };
-window.rtDelete=async function(){
+window.rtDelete=async function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
   if(!await confirmDialog('Delete '+sel.length+' test(s)? All associated responses will also be deleted. This cannot be undone.'))return;
@@ -6746,12 +6791,12 @@ window.mpSyncToolbar=function(){
   if(editBtn){editBtn.disabled=n!==1;editBtn.style.cssText=n===1?'':'opacity:.38;cursor:not-allowed;pointer-events:none';}
   if(delBtn){delBtn.disabled=n===0;delBtn.style.cssText=n>0?'color:var(--err);border-color:var(--err)':'opacity:.38;cursor:not-allowed;pointer-events:none;color:var(--err);border-color:var(--err)';}
 };
-window.mpEditSel=function(){
+window.mpEditSel=function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.mp-chk:checked')];
   if(sel.length!==1)return;
   mpEdit(parseInt(sel[0].value));
 };
-window.mpDeleteSel=async function(){
+window.mpDeleteSel=async function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.mp-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
   if(!await confirmDialog('Delete '+sel.length+' requisition(s)? This cannot be undone.'))return;
@@ -6867,7 +6912,7 @@ function mpCollect(){
     submitted_at:new Date().toISOString()
   };
 }
-window.mpFillForm=function(){mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
+window.mpFillForm=function(){if(!recGuard())return;mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
 window.mpSave=async function(){
   const d=mpCollect();
   if(!d.job_title){toast('Job Title is required','err');return;}
@@ -6876,7 +6921,7 @@ window.mpSave=async function(){
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
   MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Requisition submitted');recManpower();
 };
-window.mpEdit=function(id){
+window.mpEdit=function(id){if(!recGuard())return;
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
   mpModal('Edit Requisition',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
 };
@@ -6889,7 +6934,7 @@ window.mpUpdate=async function(id){
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
   closeModal();toast('Updated');recManpower();
 };
-window.mpDeleteOne=async function(id){
+window.mpDeleteOne=async function(id){if(!recGuard())return;
   if(!await confirmDialog('Delete this requisition?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
@@ -6969,7 +7014,7 @@ window.recRefreshBar=function(){
     <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:'color:var(--err)'}" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
     ${n>0?`<span style="font-size:12px;color:var(--slate)">${n} selected</span>`:''}`;
 };
-window.recUploadModal=function(){
+window.recUploadModal=function(){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pdf"></i> Upload Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Position / Title</label><input id="recJdName" placeholder="e.g. General Manager Commercial">
@@ -7004,7 +7049,7 @@ window.recDownloadSel=async function(){
     await new Promise(r=>setTimeout(r,300));
   }
 };
-window.recDeleteSel=async function(){
+window.recDeleteSel=async function(){if(!recGuard())return;
   if(!REC_SEL.size)return;
   if(!await confirmDialog(`Delete ${REC_SEL.size} file(s)?`))return;
   let jds=[];try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jds=data||[];}catch(e){}
@@ -7038,7 +7083,7 @@ VIEWS.compliance=function(v,seg){
   else { body=mTable(['Item','Asset','Provider','Expiry','Status'],[['Lift AMC','Passenger lift','OTIS','Mar-27','Active'],['DG warranty','DG Set 250 kVA','Cummins','Dec-26','Active']]); }
   v.innerHTML=mHead('fa-calendar-check','#b45309','Renewals & Compliance')+mKpis(kpis)+mTabs('compliance',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
-let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta',CMP_STATUS='all';
+let CMP_PERIOD='today',CMP_SINCE='',CMP_UNTIL='',CMP_LAST=null,CMP_AD_PROJECT='all',CMP_AD_PAGE=0,CMP_SOURCE='meta',CMP_STATUS='all',CMP_CAMP_PROJECT='all';
 window.cmpSetStatus=function(s){CMP_STATUS=s;CMP_AD_PAGE=0;renderPage();};
 function cmpStatusBar(counts){
   const b=function(k,label){return '<button class="cmp-fbtn'+(CMP_STATUS===k?' on':'')+'" onclick="cmpSetStatus(\''+k+'\')">'+esc(label)+(counts&&counts[k]!=null?(' <span class="cmp-fcount">'+counts[k]+'</span>'):'')+'</button>';};
@@ -7244,6 +7289,11 @@ const CMP_EXTRA_CSS='<style>'
   +'@media(max-width:640px){.cmp-stats{grid-template-columns:1fr}}'
   /* filter row */
   +'.cmp-fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}'
+  +'.cmp-projbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}'
+  +'.cmp-projsel{height:38px;min-width:210px;border:1px solid var(--line);border-radius:9px;padding:0 32px 0 12px;font-size:13px;font-family:inherit;font-weight:600;color:var(--ink);background-color:var(--bg-card);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%2364748b\' stroke-width=\'1.8\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:11px 8px}'
+  +'.cmp-projsel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,#eef2ff)}'
+  +'.cmp-reload{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 15px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;margin-top:10px}'
+  +'.cmp-reload:hover{border-color:var(--brand);color:var(--brand)}'
   +'.cmp-fbtn{font-size:12.5px;font-weight:600;color:#5b6674;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 13px;cursor:pointer;transition:.12s;font-family:inherit}'
   +'.cmp-fbtn:hover{border-color:#c3ccdd;color:var(--ink)}'
   +'.cmp-fbtn.on{background:#111318;border-color:#111318;color:#fff}'
@@ -7265,6 +7315,25 @@ function cmpSourceBar(){return '<div style="margin-bottom:12px"><div class="seg"
 window.cmpSetPeriod=function(p){CMP_PERIOD=p;if(p!=='custom'){CMP_SINCE='';CMP_UNTIL='';}renderPage();};
 window.cmpSetCustom=function(){const s=$('cmpSince')&&$('cmpSince').value,u=$('cmpUntil')&&$('cmpUntil').value;if(!s||!u){toast('Pick both dates','err');return;}if(s>u){toast('Start date must be before end date','err');return;}CMP_SINCE=s;CMP_UNTIL=u;CMP_PERIOD='custom';renderPage();};
 window.cmpSetAdProject=function(v){CMP_AD_PROJECT=v;CMP_AD_PAGE=0;renderPage();};
+window.cmpSetCampProject=function(v){CMP_CAMP_PROJECT=v;renderPage();};
+// Pull Google ad-level rows for the period on screen. The first fetch for an unseen period can
+// take a while (it walks every account), so this reports honestly instead of failing silently.
+window.cmpLoadGoogleAds=async function(){
+  const btn=document.querySelector('.cmp-reload');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Loading — this can take a minute…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const base=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL,level:'ad'}:{period:CMP_PERIOD,level:'ad'};
+    const res=await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(base)});
+    const jr=await res.json().catch(function(){return {};});
+    if(!res.ok||jr.error) throw new Error(jr.error||('Google returned '+res.status));
+    toast('Loaded '+(jr.ad_insight_rows!=null?jr.ad_insight_rows:0)+' ad rows','ok');
+  }catch(e){ toast('Could not load ad data: '+((e&&e.message)||e),'err'); }
+  renderPage();
+};
 window.cmpSetAdPage=function(p){CMP_AD_PAGE=p;renderPage();};
 function cmpPeriodBar(){
   const segBtns=CMP_PRESETS.map(function(p){return '<button class="seg-btn'+(CMP_PERIOD===p[0]?' on':'')+'" onclick="cmpSetPeriod(\''+p[0]+'\')">'+p[1]+'</button>';}).join('');
@@ -7382,7 +7451,7 @@ async function cmpBothView(v,seg){
       C().from('campaign_insights').select('campaign_id,spend,impressions,clicks,leads,frequency').eq('period',periodKey),
       C().from('g_campaign_insights').select('campaign_id,spend,impressions,clicks,conversions,ctr').eq('period',periodKey),
       C().from('ad_accounts').select('ad_account_id,name'),
-      C().from('campaigns').select('id,ad_account_id,name,daily_budget,lifetime_budget'),
+      C().from('campaigns').select('id,ad_account_id,name,daily_budget,lifetime_budget,status'),
       C().from('g_accounts').select('customer_id,name'),
       C().from('g_campaigns').select('id,customer_id,name,status,budget_amount')
     ];
@@ -7403,8 +7472,9 @@ async function cmpBothView(v,seg){
   const Tp={spend:Mp.spend+Gp.spend,res:Mp.res+Gp.res,impr:Mp.impr+Gp.impr,clk:Mp.clk+Gp.clk};
   const avgFreq=function(arr){const f=arr.map(function(x){return Number(x.frequency)||0;}).filter(function(x){return x>0;});return f.length?(f.reduce(function(a,b){return a+b;},0)/f.length):0;};
   const mFreq=avgFreq(mIns);
-  // total live daily budget across both platforms
-  const mBudget=mCamps.reduce(function(s,c){return s+(Number(c.daily_budget)||0);},0);
+  // total live daily budget across both platforms — ACTIVE campaigns only, since a paused
+  // campaign isn't spending its budget and shouldn't inflate the figure
+  const mBudget=mCamps.filter(function(c){return cmpIsActive(c.status);}).reduce(function(s,c){return s+(Number(c.daily_budget)||0);},0);
   const gBudget=gCamps.filter(function(c){return String(c.status||'').toUpperCase()==='ENABLED';}).reduce(function(s,c){return s+(Number(c.budget_amount)||0);},0);
   const tBudget=mBudget+gBudget;
   // combined best / worst across Meta projects and Google accounts
@@ -7691,7 +7761,11 @@ async function cmpGoogleView(v,seg){
       +'<td class="num">'+cmpTrend(cpc,pcpc,true)+'</td>'
       +'<td class="num">'+num(r.i.clicks)+'</td>'
       +'<td class="num">'+(Number(r.i.ctr)||0).toFixed(2)+'%</td>'
-      +'<td>'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join(''):'<tr><td colspan="10" class="cmp-none">No ad-level data for this period</td></tr>';
+      +'<td>'+cmpFatigue(0,Number(r.i.ctr)||0,pctr)+'</td></tr>';}).join('')
+      // Ad-level data is pulled per period on demand and the first pull for a new period is slow,
+      // so an empty table usually just means "not fetched yet" — offer the retry rather than a dead end.
+      :'<tr><td colspan="10" class="cmp-none">No ad data loaded for '+esc(periodLabel)+' yet.'
+        +'<div><button class="cmp-reload" onclick="cmpLoadGoogleAds()"><i class="fa-solid fa-rotate"></i> Load ad data for this period</button></div></td></tr>';
     body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Ads</span><h3>'+shown.length+' ad'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
       +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Ad</th><th>Status</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Conv</th><th class="num">Cost / Conv</th><th class="num">vs prev</th><th class="num">Clicks</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
   } else if(ti===4){
@@ -7790,7 +7864,8 @@ VIEWS.campaigns=async function(v,seg){
       if(i){spend+=Number(i.spend)||0;impr+=Number(i.impressions)||0;clicks+=Number(i.clicks)||0;leads+=Number(i.leads)||0;reach+=Number(i.reach)||0;const f=Number(i.frequency)||0;if(f>0){freqSum+=f;freqN++;}}
       const p=cPrevMap[c.id];
       if(p){pspend+=Number(p.spend)||0;pimpr+=Number(p.impressions)||0;pclicks+=Number(p.clicks)||0;pleads+=Number(p.leads)||0;}
-      budget+=Number(c.daily_budget)||Number(c.lifetime_budget)||0;
+      // budget counts ACTIVE campaigns only — paused ones aren't spending
+      if(cmpIsActive(c.status)) budget+=Number(c.daily_budget)||Number(c.lifetime_budget)||0;
     });
     return {acc,campaigns:accCamps.length,spend,impr,clicks,leads,reach,budget,
       freq:freqN?(freqSum/freqN):0,
@@ -7836,9 +7911,14 @@ VIEWS.campaigns=async function(v,seg){
         pcpl:(p&&(Number(p.leads)||0))?((Number(p.spend)||0)/(Number(p.leads)||0)):null,
         pctr:p&&p.ctr!=null?Number(p.ctr):null,
         active:cmpIsActive(c.status)};
-    }).filter(function(r){return r.acc;});
+    }).filter(function(r){return r.acc;})
+      .filter(function(r){return CMP_CAMP_PROJECT==='all'||r.acc.ad_account_id===CMP_CAMP_PROJECT;});
     const counts={all:all.length,active:all.filter(function(r){return r.active;}).length,inactive:all.filter(function(r){return !r.active;}).length};
     const shown=all.filter(function(r){return CMP_STATUS==='all'||(CMP_STATUS==='active'?r.active:!r.active);}).sort(function(a,b){return b.spend-a.spend;});
+    const projBar='<div class="cmp-projbar"><select class="cmp-projsel" onchange="cmpSetCampProject(this.value)">'
+      +'<option value="all"'+(CMP_CAMP_PROJECT==='all'?' selected':'')+'>All Projects</option>'
+      +accounts.map(function(a){return '<option value="'+esc(a.ad_account_id)+'"'+(CMP_CAMP_PROJECT===a.ad_account_id?' selected':'')+'>'+esc(a.name)+'</option>';}).join('')
+      +'</select></div>';
     const rowsHtml=shown.length?shown.map(function(r){
       const used=r.budget?Math.round(r.spend/r.budget*100):null;
       return '<tr><td><div class="cmp-nm">'+esc(r.c.name||'—')+'</div><div class="cmp-sub">'+esc(r.acc.name)+(r.c.objective?(' · '+esc(String(r.c.objective).replace(/_/g,' ').toLowerCase())):'')+'</div></td>'
@@ -7852,7 +7932,7 @@ VIEWS.campaigns=async function(v,seg){
         +'<td class="num">'+(r.ctr!=null?r.ctr.toFixed(2)+'%':'—')+'</td>'
         +'<td>'+cmpFatigue(r.i?(Number(r.i.frequency)||0):0,r.ctr,r.pctr)+'</td></tr>';
     }).join(''):'<tr><td colspan="10" class="cmp-none">No campaigns match this filter</td></tr>';
-    body=cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Campaigns</span><h3>'+shown.length+' campaign'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
+    body=projBar+cmpStatusBar(counts)+'<div class="cmp-panel"><div class="cmp-phead"><div><span class="cmp-over">Campaigns</span><h3>'+shown.length+' campaign'+(shown.length===1?'':'s')+'</h3></div><span class="cmp-chip">'+esc(periodLabel)+'</span></div>'
       +'<div class="cmp-tblwrap"><table class="cmp-tbl"><thead><tr><th>Campaign</th><th>Status</th><th class="num">Budget</th><th class="num">Spend</th><th class="num">Trend</th><th class="num">Leads</th><th class="num">Cost / Lead</th><th class="num">vs prev</th><th class="num">CTR</th><th>Fatigue</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div></div>';
   }
   else if(ti===2){
