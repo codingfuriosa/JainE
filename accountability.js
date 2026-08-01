@@ -119,9 +119,6 @@
     #wfTipLayer.show{opacity:1;visibility:visible}
     #wfTipLayer::after{content:'';position:absolute;top:100%;left:var(--tipx,50%);transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
     #wfTipLayer.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#1e293b}
-    .wf-nounprev{font-size:11.5px;color:var(--slate);margin-top:6px;line-height:1.5}
-    .wf-nounprev b{color:var(--brand)}
-    .wf-nounprev:empty{display:none}
     /* ----- Workflow builder form -----
        Two sections (Basics, Steps). Paired fields go side by side from 760px up and
        stack below that; every field owns its own label so nothing drifts out of line. */
@@ -137,20 +134,27 @@
        labels, inputs, person pickers and dropdowns all line up on the same edges. */
     .wf-fld .ac-in{width:100%;box-sizing:border-box}
     .wf-fld input.ac-in,.wf-step-fields input.ac-in,.wf-evt-form input.ac-in{height:40px;padding-top:0;padding-bottom:0}
+    .wf-fld .ac-in,.wf-step-fields .ac-in,.wf-step-fields .wf-pp-nm,.wf-step-fields .wf-pp-ph{font-size:13px}
+    .wf-fld .ac-in::placeholder,.wf-step-fields .ac-in::placeholder{font-size:13px;color:#94a3b8}
     .wf-step-sub input[type=number].ac-in{appearance:textfield;-moz-appearance:textfield}
     .wf-step-sub input[type=number].ac-in::-webkit-outer-spin-button,.wf-step-sub input[type=number].ac-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     /* native selects sit at a different height/inset per OS — draw our own caret instead */
     .wf-step-sub select.ac-in,.wf-fld select.ac-in{appearance:none;-webkit-appearance:none;-moz-appearance:none;height:40px;padding:0 30px 0 12px;cursor:pointer;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
     .wf-step-sub select.ac-in::-ms-expand,.wf-fld select.ac-in::-ms-expand{display:none}
     .wf-steps-head{margin-top:20px}
-    .wf-step{display:flex;align-items:flex-start;gap:10px;padding:11px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
-    .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
-    .wf-step-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
-    .wf-step-sub{display:flex;gap:8px}
-    .wf-step-sub .wf-s-person{flex:2;min-width:0}
-    .wf-step-sub .wf-s-dur{flex:0 0 92px;min-width:0}
-    .wf-step-sub .wf-s-unit{flex:0 0 96px;min-width:0}
-    .wf-s-del{margin-top:4px;flex:0 0 auto}
+    /* Step card: a header strip carries the number and the remove button, so the inputs
+       underneath run the full width of the card rather than being pinched between them. */
+    .wf-step{display:block;padding:12px 13px 13px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--bg-card)}
+    .wf-step:hover{border-color:#cbd5e1}
+    .wf-step-hd{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+    .wf-step-num{flex:0 0 24px;height:24px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+    .wf-step-hd-t{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate)}
+    .wf-step-fields{min-width:0;display:flex;flex-direction:column;gap:8px}
+    .wf-step-sub{display:flex;gap:8px;min-width:0}
+    .wf-step-sub .wf-s-person{flex:1 1 auto;min-width:0}
+    .wf-step-sub .wf-s-dur{flex:0 0 104px;min-width:0}
+    .wf-step-sub .wf-s-unit{flex:0 0 108px;min-width:0}
+    .wf-s-del{margin-left:auto;flex:0 0 auto}
     .wf-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
     .wf-trig{font-size:11.5px;color:var(--brand);margin-top:3px}
     .wf-desc{color:var(--slate);font-size:13px;margin-bottom:10px}
@@ -181,8 +185,11 @@
     .wf-pp-ph{font-size:13px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
     .wf-pp-caret{margin-left:auto;color:var(--slate);font-size:11px;flex:none;transition:transform .15s}
     .wf-pp.open .wf-pp-caret{transform:rotate(180deg)}
-    /* panel hangs from the left edge of its trigger, at least as wide as it, never off-screen */
-    .wf-pp-panel{position:absolute;top:calc(100% + 5px);left:0;right:auto;width:max-content;min-width:100%;max-width:min(320px,86vw);z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:6px;display:none;max-height:min(300px,50vh);overflow:auto;overscroll-behavior:contain}
+    /* Panel matches the trigger's width exactly (left:0 + right:0, no min-width). Anything
+       wider — the old min-width:220px — pushed past the card and gave the page a sideways
+       scrollbar whenever the picker sat in a narrow column. */
+    .wf-pp-panel{position:absolute;top:calc(100% + 5px);left:0;right:0;width:auto;min-width:0;max-width:none;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:6px;display:none;max-height:min(300px,50vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+    .wf-pp-panel .ms-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .wf-pp.open .wf-pp-panel{display:block}
     .wf-pp-panel .ms-search{margin-bottom:6px;width:100%;box-sizing:border-box}
     /* Workflow form responsiveness — kept AFTER the picker rules above, otherwise
@@ -193,8 +200,7 @@
       .wf-step-sub .wf-s-person,.wf-step-sub .wf-pp{flex:1 1 100%}
       /* duration + unit split the row evenly instead of leaving a ragged gap */
       .wf-step-sub .wf-s-dur,.wf-step-sub .wf-s-unit{flex:1 1 0;min-width:0}
-      .wf-step{padding:10px;gap:8px}
-      .wf-step-num{flex:0 0 24px;height:24px;font-size:12px;margin-top:8px}
+      .wf-step{padding:11px}
       .wf-form{gap:20px}
       .wf-actions .ac-btn{flex:1;justify-content:center}
       .wf-owner-pick{flex-wrap:wrap}
@@ -938,11 +944,17 @@
   function wfStepRowHtml(idx,step){
     step=step||{};
     const unit=(step.duration_unit||'days');
+    // Number and the remove button live in a header strip, so every input below gets the
+    // full width of the card instead of being squeezed between them.
     return '<div class="wf-step">'
-      +'<span class="wf-step-num">'+idx+'</span>'
+      +'<div class="wf-step-hd">'
+        +'<span class="wf-step-num">'+idx+'</span>'
+        +'<span class="wf-step-hd-t">Step '+idx+'</span>'
+        +'<button class="ac-btn ic danger wf-s-del" title="Remove step" onclick="wfRemoveStep(this)"><i class="fa-solid fa-xmark"></i></button>'
+      +'</div>'
       +'<div class="wf-step-fields">'
         +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
-        +'<input class="ac-in wf-s-desc" placeholder="Write the Description" value="'+esc2(step.description||'')+'">'
+        +'<input class="ac-in wf-s-desc" placeholder="Description (optional)" value="'+esc2(step.description||'')+'">'
         +'<div class="wf-step-sub">'
           +wfPersonPickerHtml(step.owner_email)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
@@ -953,7 +965,6 @@
           +'</select>'
         +'</div>'
       +'</div>'
-      +'<button class="ac-btn ic danger wf-s-del" title="Remove step" onclick="wfRemoveStep(this)"><i class="fa-solid fa-xmark"></i></button>'
     +'</div>';
   }
 
@@ -986,7 +997,6 @@
               +'<label class="wf-lbl" for="wfTrigger">Triggering event '+tip('What starts this workflow.')+'</label>'
               +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
             +'</div>'
-            +'<div class="wf-fld wf-fld-wide"><div class="wf-nounprev" id="wfNounPrev"></div></div>'
             +'<div class="wf-fld">'
               +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
               +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
@@ -1008,13 +1018,9 @@
           +'<button class="ac-btn primary" title="Press Enter to save · Esc to close" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
         +'</div>'
       +'</div></div></div>';
-    // Live preview of the word this workflow will use ("New Invoice"), refreshed as they type.
+    // Keep the owner tooltip naming whatever this workflow will process, as they type.
     const refreshNoun=function(){
       const g=wfNounOf({name:($('wfName')||{}).value||'', trigger_event:($('wfTrigger')||{}).value||''});
-      const pv=$('wfNounPrev');
-      if(pv) pv.innerHTML=(($('wfName')||{}).value||($('wfTrigger')||{}).value)
-        ? 'Each one of these will be called a <b>'+esc2(g.one)+'</b> — the button will read “New '+esc2(g.one)+'”.'
-        : '';
       const ot=$('wfOwnerTip');
       if(ot) ot.innerHTML=tip('Required. Only this person can start a new '+g.lc+'.');
     };
@@ -1043,7 +1049,10 @@
   };
   function wfRenumber(){
     const wrap=$('wfSteps'); if(!wrap)return;
-    [].slice.call(wrap.querySelectorAll('.wf-step')).forEach(function(r,i){ const n=r.querySelector('.wf-step-num'); if(n)n.textContent=(i+1); });
+    [].slice.call(wrap.querySelectorAll('.wf-step')).forEach(function(r,i){
+      const n=r.querySelector('.wf-step-num'); if(n)n.textContent=(i+1);
+      const t=r.querySelector('.wf-step-hd-t'); if(t)t.textContent='Step '+(i+1);
+    });
   }
   window.wfClearTrigOwner=function(){
     const box=$('wfTrigOwner'); if(!box)return;
@@ -1109,9 +1118,9 @@
         const cur=!done && (s.status==='received'||s.received_at||s.appeared_at);
         cls=done?'wf-tl-done':(cur?'wf-tl-cur':'wf-tl-wait');
         badge=done?'<span class="wf-badge ok">Done</span>':(cur?'<span class="wf-badge cur">In progress</span>':'<span class="wf-badge wait">Waiting</span>');
-        // full date + time for the moment that matters on this step
-        if(done&&s.forwarded_at) whenHtml='<span class="wf-tl-when"><i class="fa-solid fa-check"></i> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
-        else if(s.received_at) whenHtml='<span class="wf-tl-when"><i class="fa-solid fa-inbox"></i> '+esc2(wfDTFull(s.received_at))+'</span>';
+        // both moments, with full date + time
+        if(s.received_at) whenHtml+='<span class="wf-tl-when"><b>Received</b> '+esc2(wfDTFull(s.received_at))+'</span>';
+        if(s.forwarded_at) whenHtml+='<span class="wf-tl-when done"><b>Done</b> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
       }
       return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+whenHtml+'</div></div></div>';
     }).join('');
@@ -1170,7 +1179,7 @@
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
-        +tip('Every '+N.lc+' started so far, one per row. Tick one to edit or delete it. A '+N.lc+' can no longer be DELETED once its first step has been received, and can no longer be EDITED once the whole '+N.lc+' is completed. Click a coloured pill for the exact times, or a row for its timeline.')
+        +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
@@ -1554,9 +1563,9 @@
     .wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
     .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
-    .wf-tl-when{font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
-    .wf-tl-done .wf-tl-when i{color:#16a34a}
-    .wf-tl-cur .wf-tl-when i{color:var(--brand)}
+    .wf-tl-when{font-size:11.5px;color:var(--slate);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+    .wf-tl-when b{font-weight:700;color:var(--ink);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-tl-when.done b{color:#16a34a}
     .wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
     .wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-right:7px;flex:none}
     .wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
