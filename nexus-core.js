@@ -8294,6 +8294,8 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-pager .info{font-size:12.5px;color:var(--slate)}'
 +'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
 +'.org-pager button:disabled{opacity:.45;cursor:not-allowed}'
++'.org-note{display:flex;align-items:flex-start;gap:9px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:10px 13px;font-size:12px;color:var(--slate);line-height:1.55;margin:-6px 0 16px}'
++'.org-note i{color:#94a3b8;margin-top:2px;flex:none}'
 +'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
 +'.org-empty i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
 +'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
@@ -8305,7 +8307,10 @@ const ORG_CSS='<style id="orgCss">'
 function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).replace(/\.00$/,'')+' Cr'; if(n>=1e5)return (n/1e5).toFixed(2).replace(/\.00$/,'')+' L'; if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k'; return String(n);}
 function orgDT(s){ if(!s)return '—'; try{return new Date(s).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return String(s);} }
 function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(r.shares)||0)+(Number(r.saves)||0); }
-function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : 0; }
+// Meta retired per-post reach on the API, so an engagement RATE is only meaningful where a
+// reach/impression figure actually came back (reels, Instagram). Elsewhere we show '—'.
+function orgHasReach(r){ return (Number(r.reach)||0)>0; }
+function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : null; }
 
 window.orgToggleDp=function(e){ if(e)e.stopPropagation(); ORG_OPEN=!ORG_OPEN; renderPage(); };
 window.orgSetPeriod=function(p){
@@ -8356,13 +8361,13 @@ window.orgOpen=function(id){
       +'<div style="font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;max-height:170px;overflow:auto">'+esc(r.message||'(no caption)')+'</div>'
       +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
       +'<div class="org-dtl-grid">'
-        +f('Reach',orgN(r.reach))+f('Impressions',orgN(r.impressions))
-        +f('Engaged users',orgN(r.engaged_users))+f('Engagement rate',orgER(r).toFixed(2)+'%')
-        +f('Likes',orgN(r.likes))+f('Comments',orgN(r.comments))
-        +f('Shares',orgN(r.shares))+f('Saves',orgN(r.saves))
-        +f('Link clicks',orgN(r.clicks))+f('Negative feedback',orgN(r.negative_feedback))
-        +(r.impressions_organic||r.impressions_paid?f('Organic reach',orgN(r.impressions_organic))+f('Paid reach',orgN(r.impressions_paid)):'')
-        +(r.video_views?f('Video views',orgN(r.video_views))+f('Avg watch time',((Number(r.video_avg_watch_ms)||0)/1000).toFixed(1)+'s'):'')
+        +f('Total engagement',orgN(orgEng(r)))
+        +f('Likes',orgN(r.likes))+f('Comments',orgN(r.comments))+f('Shares',orgN(r.shares))
+        +(Number(r.clicks)?f('Clicks on post',orgN(r.clicks)):'')
+        +(Number(r.saves)?f('Saves',orgN(r.saves)):'')
+        +(Number(r.video_views)?f('Views',orgN(r.video_views))+f('Avg watch time',((Number(r.video_avg_watch_ms)||0)/1000).toFixed(1)+'s'):'')
+        +(Number(r.video_length_s)?f('Length',Number(r.video_length_s).toFixed(0)+'s'):'')
+        +(orgHasReach(r)?f('Reach',orgN(r.reach))+f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
         +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
            ?f('Reactions','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
       +'</div>'
@@ -8431,19 +8436,21 @@ VIEWS.organic=async function(v,seg){
   const avgER=tot.reach?(tot.eng/tot.reach*100):0;
 
   const kpi=function(icon,k,val,sub){return '<div class="org-kpi"><div class="k"><i class="fa-solid '+icon+'"></i> '+k+'</div><div class="v">'+val+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';};
+  // Reach / impressions only appear where Meta actually returned them (reels, Instagram) —
+  // showing a hard 0 for photo posts would read as "nobody saw it", which is not what it means.
   const kpis='<div class="org-kpis">'
     +kpi('fa-layer-group','Content',String(rows.length),'posts & reels')
-    +kpi('fa-users','Reach',orgN(tot.reach),'unique people')
-    +kpi('fa-eye','Impressions',orgN(tot.imp),'total views')
+    +(tot.vv?kpi('fa-play','Views',orgN(tot.vv),'reels & videos'):'')
     +kpi('fa-heart','Engagement',orgN(tot.eng),'likes+comments+shares')
-    +kpi('fa-percent','Engagement rate',avgER.toFixed(2)+'%','of reach')
     +kpi('fa-thumbs-up','Likes',orgN(tot.likes),'')
     +kpi('fa-comment','Comments',orgN(tot.comments),'')
     +kpi('fa-share','Shares',orgN(tot.shares),'')
+    +(tot.clicks?kpi('fa-arrow-pointer','Clicks',orgN(tot.clicks),'on the post'):'')
     +(tot.saves?kpi('fa-bookmark','Saves',orgN(tot.saves),''):'')
-    +(tot.clicks?kpi('fa-arrow-pointer','Link clicks',orgN(tot.clicks),''):'')
-    +(tot.vv?kpi('fa-play','Video views',orgN(tot.vv),''):'')
-    +'</div>';
+    +(tot.reach?kpi('fa-users','Reach',orgN(tot.reach),'where Meta reports it'):'')
+    +(tot.reach?kpi('fa-percent','Engagement rate',avgER.toFixed(2)+'%','of measured reach'):'')
+    +'</div>'
+    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Meta withdrew per-post reach and impressions from its API, so those columns only fill for reels and Instagram. Likes, comments, shares, clicks and views are exact.</div>';
 
   // filter bar
   const kinds=['all','post','photo','video','reel','carousel','link'];
@@ -8478,15 +8485,24 @@ VIEWS.organic=async function(v,seg){
       +'</div>';
   } else if(ti===0){
     // Overview: breakdown by type and by page
-    const byKind={}; rows.forEach(function(r){ const k=r.kind||'post'; (byKind[k]=byKind[k]||{n:0,reach:0,eng:0}); byKind[k].n++; byKind[k].reach+=Number(r.reach)||0; byKind[k].eng+=orgEng(r); });
-    const byPage={}; rows.forEach(function(r){ const k=r.page_name||'—'; (byPage[k]=byPage[k]||{n:0,reach:0,eng:0}); byPage[k].n++; byPage[k].reach+=Number(r.reach)||0; byPage[k].eng+=orgEng(r); });
-    const tbl=function(title,obj,lbl){
-      const keys=Object.keys(obj).sort(function(a,b){return obj[b].reach-obj[a].reach;});
-      return '<div class="org-tblwrap" style="margin-bottom:14px"><table class="org-tbl" style="min-width:520px"><thead><tr><th>'+lbl+'</th><th class="n">Posts</th><th class="n">Reach</th><th class="n">Engagement</th><th class="n">Eng. rate</th></tr></thead><tbody>'
-        +keys.map(function(k){const o=obj[k];return '<tr style="cursor:default"><td><b>'+esc(k)+'</b></td><td class="n">'+o.n+'</td><td class="n">'+orgN(o.reach)+'</td><td class="n">'+orgN(o.eng)+'</td><td class="n org-er">'+(o.reach?(o.eng/o.reach*100).toFixed(2):'0.00')+'%</td></tr>';}).join('')
+    const agg=function(keyFn){
+      const o={}; rows.forEach(function(r){ const k=keyFn(r)||'—';
+        (o[k]=o[k]||{n:0,views:0,eng:0,likes:0,comments:0});
+        o[k].n++; o[k].views+=Number(r.video_views)||0; o[k].eng+=orgEng(r);
+        o[k].likes+=Number(r.likes)||0; o[k].comments+=Number(r.comments)||0; });
+      return o;
+    };
+    const byKind=agg(function(r){return r.kind||'post';});
+    const byPage=agg(function(r){return r.page_name;});
+    const tbl=function(obj,lbl){
+      const keys=Object.keys(obj).sort(function(a,b){return obj[b].eng-obj[a].eng;});
+      return '<div class="org-tblwrap" style="margin-bottom:14px"><table class="org-tbl" style="min-width:560px"><thead><tr><th>'+lbl+'</th><th class="n">Posts</th><th class="n">Views</th><th class="n">Likes</th><th class="n">Comments</th><th class="n">Engagement</th><th class="n">Avg / post</th></tr></thead><tbody>'
+        +keys.map(function(k){const o=obj[k];return '<tr style="cursor:default"><td><b>'+esc(k)+'</b></td><td class="n">'+o.n+'</td>'
+          +'<td class="n">'+(o.views?orgN(o.views):'—')+'</td><td class="n">'+orgN(o.likes)+'</td><td class="n">'+orgN(o.comments)+'</td>'
+          +'<td class="n">'+orgN(o.eng)+'</td><td class="n org-er">'+orgN(Math.round(o.eng/o.n))+'</td></tr>';}).join('')
         +'</tbody></table></div>';
     };
-    body=tbl('type',byKind,'Content type')+tbl('page',byPage,'Page');
+    body=tbl(byKind,'Content type')+tbl(byPage,'Page');
   } else {
     const list=(ti===2)?rows.slice().sort(function(a,b){return orgEng(b)-orgEng(a);}).slice(0,20):rows;
     const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
@@ -8494,7 +8510,7 @@ VIEWS.organic=async function(v,seg){
     const slice=(ti===2)?list:list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
     body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
       +'<th>Content</th><th>Type</th><th>Where</th><th>Date</th>'
-      +'<th class="n">Reach</th><th class="n">Impr.</th><th class="n">Likes</th><th class="n">Comm.</th><th class="n">Shares</th><th class="n">Eng. rate</th></tr></thead><tbody>'
+      +'<th class="n">Views</th><th class="n">Likes</th><th class="n">Comm.</th><th class="n">Shares</th><th class="n">Clicks</th><th class="n">Engaged</th></tr></thead><tbody>'
       +slice.map(function(r){
         const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;org-thumb-ph&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>\'">'
                                :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
@@ -8504,9 +8520,10 @@ VIEWS.organic=async function(v,seg){
           +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(r.kind||'post')+'</span></td>'
           +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
           +'<td style="white-space:nowrap;font-size:12.5px;color:var(--slate)">'+orgDT(r.created_time)+'</td>'
-          +'<td class="n">'+orgN(r.reach)+'</td><td class="n">'+orgN(r.impressions)+'</td>'
+          +'<td class="n">'+(Number(r.video_views)?orgN(r.video_views):'—')+'</td>'
           +'<td class="n">'+orgN(r.likes)+'</td><td class="n">'+orgN(r.comments)+'</td><td class="n">'+orgN(r.shares)+'</td>'
-          +'<td class="n org-er">'+orgER(r).toFixed(2)+'%</td></tr>';
+          +'<td class="n">'+(Number(r.clicks)?orgN(r.clicks):'—')+'</td>'
+          +'<td class="n org-er">'+orgN(orgEng(r))+'</td></tr>';
       }).join('')+'</tbody></table></div>'
       +(ti===2?'':'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
         +'<span><button onclick="orgGo(-1)"'+(ORG_PG<=0?' disabled':'')+'><i class="fa-solid fa-chevron-left"></i> Previous</button> '
