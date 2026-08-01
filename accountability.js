@@ -1122,7 +1122,10 @@
         if(s.received_at) whenHtml+='<span class="wf-tl-when"><b>Received</b> '+esc2(wfDTFull(s.received_at))+'</span>';
         if(s.forwarded_at) whenHtml+='<span class="wf-tl-when done"><b>Done</b> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
       }
-      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+whenHtml+'</div></div></div>';
+      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
+        +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
+        +'<div class="wf-tl-times">'+whenHtml+'</div>'
+      +'</div></div>';
     }).join('');
   }
 
@@ -1558,8 +1561,14 @@
     .wf-tl-cur .wf-tl-num{background:var(--brand);box-shadow:0 0 0 4px var(--brand-a10,#eef2ff)}
     .wf-tl-done .wf-tl-num{background:#16a34a}
     .wf-tl-wait .wf-tl-num{background:#cbd5e1}
-    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:6px 24px;flex-wrap:wrap}
+    /* line 1 = what + who, line 2 = the timestamps on their own rule, so a fully-stamped
+       step reads as two calm rows instead of one crowded one */
+    .wf-tl-body{flex:1;min-width:0;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:9px 15px;display:flex;flex-direction:column;gap:7px}
+    .wf-tl-row{display:flex;align-items:center;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;min-width:0}
+    .wf-tl-times{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;min-width:0;padding-top:7px;border-top:1px dashed var(--line)}
+    .wf-tl-times:empty{display:none}
     .wf-tl-cur .wf-tl-body{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}
+    .wf-tl-cur .wf-tl-times{border-top-color:#c7d2fe}
     .wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
     .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
