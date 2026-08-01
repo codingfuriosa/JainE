@@ -44,7 +44,6 @@
     .ac-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--line)}
     .ac-tab{padding:9px 15px;font-size:13.5px;font-weight:600;color:var(--slate);cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px}
     .ac-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
-    .wf-tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:7px;border-radius:9px;background:#dc2626;color:#fff;font-size:11px;font-weight:700;line-height:1;box-shadow:0 0 0 2px var(--bg-card)}
     @media(max-width:700px){.ac-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:7px;border-bottom:0;padding:2px 2px 6px}.ac-tabs::-webkit-scrollbar{display:none}.ac-tab{flex:0 0 auto;white-space:nowrap;justify-content:center;border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:12.5px;gap:5px}.ac-tab.active{background:var(--brand-a10,#eef2ff);border-color:var(--brand)}}
     .ac-3p{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
     .ac-pbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border:1px solid var(--line);border-radius:20px;background:var(--bg-card);color:var(--body);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
@@ -110,11 +109,19 @@
     .wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
     .wf-lbl:first-child{margin-top:0}
     .wf-hint{font-weight:500;color:var(--slate)}
-    .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font-size:9px;font-weight:700;cursor:pointer;position:relative;flex:none;margin-left:4px;vertical-align:middle}
+    .wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font-size:9px;font-weight:700;cursor:pointer;position:relative;flex:none;margin-left:4px;vertical-align:middle;outline:none}
+    .wf-tip:hover,.wf-tip:focus{background:var(--brand)}
     .wf-poptip{position:relative;cursor:pointer}
-    .wf-tip-txt{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.5;width:max-content;max-width:min(240px,72vw);text-align:center;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s;z-index:99999;box-shadow:0 6px 18px rgba(0,0,0,.22)}
-    .wf-tip-txt::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
-    .wf-tip:hover>.wf-tip-txt,.wf-tip:focus>.wf-tip-txt,.wf-poptip.show>.wf-tip-txt{opacity:1;visibility:visible}
+    /* the bubble text lives in the markup only as the content source - it is never shown in place
+       (cards/modals with overflow would clip it). wfTipShow() copies it into #wfTipLayer on <body>. */
+    .wf-tip-txt{display:none}
+    #wfTipLayer{position:fixed;top:0;left:0;z-index:2147483600;background:#1e293b;color:#fff;padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:500;line-height:1.5;width:max-content;max-width:min(260px,80vw);text-align:center;white-space:normal;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 8px 22px rgba(0,0,0,.28)}
+    #wfTipLayer.show{opacity:1;visibility:visible}
+    #wfTipLayer::after{content:'';position:absolute;top:100%;left:var(--tipx,50%);transform:translateX(-50%);border:5px solid transparent;border-top-color:#1e293b}
+    #wfTipLayer.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#1e293b}
+    .wf-nounprev{font-size:11.5px;color:var(--slate);margin-top:6px;line-height:1.5}
+    .wf-nounprev b{color:var(--brand)}
+    .wf-nounprev:empty{display:none}
     .wf-steps-head{margin-top:20px}
     .wf-step{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--bg-card)}
     .wf-step-num{flex:0 0 26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;margin-top:6px}
@@ -624,11 +631,10 @@
       <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
-      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow<span class="wf-tab-badge" id="wfTabBadge" style="display:none"></span></div>
+      <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
       <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
-    wfUpdateTabBadge();
     if (tab==='scoreboard') return scoreboardTab();
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
@@ -750,16 +756,6 @@
   function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
 
-  // Workflow-tab badge: number of workflow instances currently active for (awaiting an action from) the user.
-  async function wfMarkSeen(){ /* retained no-op: badge now reflects live active-instance count */ }
-  async function wfUpdateTabBadge(){
-    const el=$('wfTabBadge'); if(!el) return;
-    if(!window._wfBadgeTimer){ window._wfBadgeTimer=setInterval(function(){ if(document.getElementById('wfTabBadge')) wfUpdateTabBadge(); }, 30000); }
-    let n=0; try{ const {data}=await ACC().rpc('wf_active_count'); n=Number(data)||0; }catch(e){ n=0; }
-    if(n>0){ el.textContent=(n>99?'99+':String(n)); el.style.display=''; el.title=n+' workflow'+(n===1?'':'s')+' waiting on you'; }
-    else { el.textContent=''; el.style.display='none'; }
-  }
-
   async function workflowTab(){
     const b=$('acBody');
     b.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -797,19 +793,102 @@
   window.wfEdit=function(id){ navTo('tasks/workflow/edit/'+id); };
   window.wfOpen=function(id){ navTo('tasks/workflow/'+id); };
   window.wfCancel=function(){ navTo('tasks/workflow'); };
-  // Reusable tooltip for secondary hint text: a small (i) icon. Desktop = hover (native title);
-  // mobile = tap shows the text as a toast. Keeps forms/lists compact (esp. on phones).
+  // Reusable tooltip for secondary hint text: a small (i) icon. Desktop = hover, mobile = tap.
+  // The bubble is drawn in a single fixed layer on <body> so cards/modals can never clip it.
   function tip(text){ var s=esc2(String(text||'')); return '<span class="wf-tip" tabindex="0"><i class="fa-solid fa-info"></i><span class="wf-tip-txt">'+s+'</span></span>'; }
-  if(!window._acTipInit){ window._acTipInit=1; document.addEventListener('click',function(e){
-    var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
-    if(el){ e.stopPropagation(); try{ el.focus(); }catch(_){} }
-    if(!(e.target&&e.target.closest&&e.target.closest('.wf-poptip'))){ document.querySelectorAll('.wf-poptip.show').forEach(function(x){x.classList.remove('show');}); }
-  },true); }
-  window.wfPopToggle=function(el){ var was=el.classList.contains('show'); document.querySelectorAll('.wf-poptip.show').forEach(function(x){ if(x!==el) x.classList.remove('show'); }); el.classList.toggle('show', !was); };
+  function wfTipLayer(){ var l=document.getElementById('wfTipLayer'); if(!l){ l=document.createElement('div'); l.id='wfTipLayer'; document.body.appendChild(l); } return l; }
+  function wfTipHide(){ var l=document.getElementById('wfTipLayer'); if(l) l.classList.remove('show'); }
+  function wfTipShow(anchor){
+    var src=anchor&&anchor.querySelector&&anchor.querySelector('.wf-tip-txt'); if(!src) return;
+    var l=wfTipLayer(); l.innerHTML=src.innerHTML; l.classList.add('show'); l.classList.remove('below');
+    // measure after the content is in, then place above the icon (or below if there's no room)
+    var r=anchor.getBoundingClientRect(), b=l.getBoundingClientRect(), pad=8;
+    var left=r.left+r.width/2-b.width/2;
+    left=Math.max(pad,Math.min(left,window.innerWidth-b.width-pad));
+    var top=r.top-b.height-8, below=false;
+    if(top<pad){ top=r.bottom+8; below=true; }
+    l.style.left=Math.round(left)+'px'; l.style.top=Math.round(top)+'px';
+    l.style.setProperty('--tipx',Math.round(r.left+r.width/2-left)+'px');
+    if(below) l.classList.add('below');
+  }
+  if(!window._acTipInit){ window._acTipInit=1;
+    var reAnchor=function(){ var a=window._wfTipAnchor; if(a&&document.body.contains(a)) wfTipShow(a); else wfTipHide(); };
+    document.addEventListener('mouseover',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip,.wf-poptip');
+      if(el){ window._wfTipAnchor=el; wfTipShow(el); }
+    },true);
+    document.addEventListener('mouseout',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip,.wf-poptip');
+      if(el&&!(e.relatedTarget&&el.contains(e.relatedTarget))){ if(window._wfTipAnchor===el&&!el.classList.contains('show')){ window._wfTipAnchor=null; wfTipHide(); } }
+    },true);
+    document.addEventListener('focusin',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+      if(el){ window._wfTipAnchor=el; wfTipShow(el); }
+    },true);
+    document.addEventListener('focusout',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+      if(el&&window._wfTipAnchor===el){ window._wfTipAnchor=null; wfTipHide(); }
+    },true);
+    document.addEventListener('click',function(e){
+      var el=e.target&&e.target.closest&&e.target.closest('.wf-tip');
+      if(el){ e.stopPropagation(); window._wfTipAnchor=el; wfTipShow(el); try{ el.focus(); }catch(_){} return; }
+      if(!(e.target&&e.target.closest&&e.target.closest('.wf-poptip'))){
+        document.querySelectorAll('.wf-poptip.show').forEach(function(x){x.classList.remove('show');});
+        window._wfTipAnchor=null; wfTipHide();
+      }
+    },true);
+    window.addEventListener('scroll',reAnchor,true);
+    window.addEventListener('resize',reAnchor);
+  }
+  window.wfPopToggle=function(el){ var was=el.classList.contains('show'); document.querySelectorAll('.wf-poptip.show').forEach(function(x){ if(x!==el) x.classList.remove('show'); }); el.classList.toggle('show', !was); if(was){ window._wfTipAnchor=null; wfTipHide(); } else { window._wfTipAnchor=el; wfTipShow(el); } };
   // Workflow instance detail formatters (used for task Title / Description).
   function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(l).trim()&&!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(v); }).filter(Boolean).join('<br>'); }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
+
+  /* ----- What does this workflow actually process? -----------------------------------------
+     A workflow called "Invoice Processing" with the trigger "Invoice Received" is really about
+     INVOICES, so the UI should say "New Invoice" and "Invoices" instead of the meaningless
+     "New Event" / "Instances". The word is worked out once by the flow-noun edge function
+     (Anthropic Claude) when the workflow is saved, and kept on the flow row. wfNounOf() falls
+     back to a local guess so the screen is never blank if that hasn't run yet. */
+  var WF_STOPW={a:1,an:1,the:1,'new':1,of:1,'for':1,to:1,is:1,are:1,received:1,receiving:1,receipt:1,submitted:1,submission:1,created:1,creation:1,raised:1,approved:1,approval:1,rejected:1,generated:1,requested:1,completed:1,complete:1,processing:1,process:1,processed:1,initiated:1,initiation:1,arrives:1,arrival:1,comes:1,coming:1,logged:1,registered:1,sent:1,issued:1,filed:1,opened:1,closed:1,cancelled:1,done:1,when:1,after:1,before:1,on:1,'in':1,from:1,by:1,'with':1,and:1,applies:1,joins:1,handling:1,coordination:1,flow:1,management:1,requests:1,submits:1,sends:1,uploads:1,asks:1,places:1,reports:1,receives:1,raises:1,customer:1};
+  function wfNounCase(s){ return String(s||'').replace(/\w\S*/g,function(t){return t.charAt(0).toUpperCase()+t.slice(1).toLowerCase();}); }
+  function wfPlural(n){
+    var w=String(n||'').trim(); if(!w) return w;
+    var parts=w.split(/\s+/), last=parts[parts.length-1], p;
+    if(/[^s]s$/i.test(last)) p=last;                       // already plural — leave it alone
+    else if(/[^aeiou]y$/i.test(last)) p=last.replace(/y$/i,'ies');
+    else if(/(s|x|z|ch|sh)$/i.test(last)) p=last+'es';
+    else p=last+'s';
+    parts[parts.length-1]=p; return parts.join(' ');
+  }
+  function wfGuessNoun(name,trigger){
+    var pick=function(src){
+      var words=String(src||'').replace(/[^A-Za-z0-9 ]/g,' ').split(/\s+/).filter(function(w){ return w && !WF_STOPW[w.toLowerCase()]; });
+      if(!words.length) return '';
+      var out=[words[0]];
+      if(words[1] && !/(ing|ed)$/i.test(words[1]) && (out[0].length+words[1].length)<=22) out.push(words[1]);
+      return wfNounCase(out.join(' '));
+    };
+    return pick(trigger)||pick(name)||'Event';
+  }
+  // Returns the words to use for one flow: {one:'Invoice', many:'Invoices', lc:'invoice', lcMany:'invoices'}
+  function wfNounOf(flow){
+    var one=(flow&&flow.instance_noun||'').trim();
+    if(!one) one=wfGuessNoun(flow&&flow.name, flow&&flow.trigger_event);
+    var many=(flow&&flow.instance_noun_plural||'').trim()||wfPlural(one);
+    return {one:one, many:many, lc:one.toLowerCase(), lcMany:many.toLowerCase()};
+  }
+  // Ask Claude for the word (fire-and-forget: it saves onto the flow row for next time).
+  async function wfNounLearn(flowId,name,trigger){
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token; if(!token) return null;
+      const res=await fetch(SUPABASE_URL+'/functions/v1/flow-noun',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},body:JSON.stringify({flow_id:flowId,name:name,trigger_event:trigger})});
+      return await res.json().catch(function(){return null;});
+    }catch(e){ return null; }
+  }
 
   function wfStepRowHtml(idx,step){
     step=step||{};
@@ -854,7 +933,8 @@
         +'<input id="wfName" class="ac-in" placeholder="e.g. Invoice Processing" value="'+esc2(flow.name||'')+'">'
         +'<label class="wf-lbl">Triggering event '+tip('What starts this workflow.')+'</label>'
         +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-        +'<label class="wf-lbl">Triggering event owner '+tip('Required. Only this person can start instances of this workflow.')+'</label>'
+        +'<div class="wf-nounprev" id="wfNounPrev"></div>'
+        +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
         +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
         +'<label class="wf-lbl">Description '+tip('Optional.')+'</label>'
         +'<input id="wfDesc" class="ac-in" placeholder="Short note about this workflow" value="'+esc2(flow.description||'')+'">'
@@ -866,6 +946,18 @@
           +'<button class="ac-btn primary" title="Press Enter to save · Esc to close" onclick="wfSave()"><i class="fa-solid fa-floppy-disk"></i> Save workflow</button>'
         +'</div>'
       +'</div></div></div>';
+    // Live preview of the word this workflow will use ("New Invoice"), refreshed as they type.
+    const refreshNoun=function(){
+      const g=wfNounOf({name:($('wfName')||{}).value||'', trigger_event:($('wfTrigger')||{}).value||''});
+      const pv=$('wfNounPrev');
+      if(pv) pv.innerHTML=(($('wfName')||{}).value||($('wfTrigger')||{}).value)
+        ? 'Each one of these will be called a <b>'+esc2(g.one)+'</b> — the button will read “New '+esc2(g.one)+'”.'
+        : '';
+      const ot=$('wfOwnerTip');
+      if(ot) ot.innerHTML=tip('Required. Only this person can start a new '+g.lc+'.');
+    };
+    ['wfName','wfTrigger'].forEach(function(k){ const el=$(k); if(el) el.addEventListener('input',refreshNoun); });
+    refreshNoun();
     // Enter = save, Esc = close (ignore while typing in the person-search box)
     const page=v.querySelector('.wf-form');
     if(page){ page.addEventListener('keydown',function(e){
@@ -930,6 +1022,9 @@
       const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null});
       if(error)throw error;
       toast('Workflow saved','ok');
+      // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
+      // opening the detail page, so the buttons already read correctly
+      try{ await wfNounLearn(flowId,name,trigger); }catch(_e){}
       navTo('tasks/workflow/'+flowId);
     }catch(e){ toast('Could not save workflow: '+((e&&e.message)||e),'err'); }
   };
@@ -979,6 +1074,12 @@
     const isCreator=eq(flow.created_by||'',mySelf);
     const canEvent = !flow.trigger_owner || eq(flow.trigger_owner, mySelf);
     window._wfFlowId=id; window._wfDelId = isCreator ? id : null; wfWireDeleteKey();
+    // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
+    const N=wfNounOf(flow); window._wfNoun=N;
+    // older workflows saved before this feature have no word yet — learn it once, quietly
+    if(!flow.instance_noun){ wfNounLearn(id,flow.name,flow.trigger_event).then(function(r){
+      if(r&&r.noun&&r.noun!==N.one&&ROUTE&&ROUTE.tab==='workflow') renderPage();
+    }); }
     const members=[];
     if(flow.trigger_owner && !members.some(function(e){return eq(e,flow.trigger_owner);})) members.push(flow.trigger_owner);
     steps.forEach(function(s){ if(s.owner_email&&!members.some(function(e){return eq(e,s.owner_email);}))members.push(s.owner_email); });
@@ -1011,15 +1112,15 @@
           +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
           +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> Instances <span class="cnt">'+cases.length+'</span>'
-        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected instance" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
+        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }
 
     const headActs='<div class="wf-head-acts">'
       +(isCreator?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      +(canEvent?'<button class="ac-btn primary" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New Event</span></button>':'')
+      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     v.innerHTML='<div class="wf-page">'
@@ -1035,27 +1136,30 @@
     if(selCaseId){ wfShowCase(selCaseId, null); }
   }
 
+  function wfN(){ return window._wfNoun || {one:'Event',many:'Events',lc:'event',lcMany:'events'}; }
   window.wfInstSelChange=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
-    const eb=$('wfInstEdit'), db=$('wfInstDel');
+    const eb=$('wfInstEdit'), db=$('wfInstDel'), N=wfN();
     const oneSel = checks.length===1;
     const editBlocked = oneSel && checks[0].getAttribute('data-inst-over')==='1';
     const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
-    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? 'Can’t edit — this instance is already over (completed)' : 'Edit selected instance'; }
-    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? 'Can’t delete — a selected instance has already started (first step received)' : 'Delete selected'; }
+    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? ('Can’t edit — this '+N.lc+' is already over (completed)') : ('Edit selected '+N.lc); }
+    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)') : 'Delete selected'; }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
-    if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this instance is already over','err'); return; }
+    if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this '+wfN().lc+' is already over','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
   window.wfInstDelSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(!checks.length) return;
-    if(checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; })){ toast('Can’t delete — a selected instance has already started (first step received)','err'); return; }
+    const N=wfN();
+    if(checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; })){ toast('Can’t delete — a selected '+N.lc+' has already started (first step received)','err'); return; }
     const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
-    wfConfirm({ title:'Delete '+ids.length+' instance'+(ids.length===1?'':'s')+'?', body:'This permanently removes the selected instance'+(ids.length===1?'':'s')+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+    const word=(ids.length===1?N.lc:N.lcMany);
+    wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
       toast('Deleted','ok'); renderPage();
     }});
@@ -1063,7 +1167,7 @@
 
   async function wfCaseRoute(v, caseId){
     let c=null; try{ const {data}=await ACC().from('flow_cases').select('flow_id').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(!c){ toast('Instance not found','err'); return navTo('tasks/workflow'); }
+    if(!c){ toast('Not found','err'); return navTo('tasks/workflow'); }
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
@@ -1078,10 +1182,10 @@
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     if(!box)return;
-    if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Instance not found</div>'; return; }
+    if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
-    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> Instance '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status})||'')+'</div>'
       +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates</div>'+updates.map(wfUpdateHtml).join('')+'</div>'):'');
@@ -1090,14 +1194,14 @@
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
 
   window.wfDelete=function(id){
-    wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its instances and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+    wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its '+wfN().lcMany+' and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_delete_flow',{p_id:id}); if(error)throw error; }
       catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); return; }
       window._wfDelId=null; toast('Workflow deleted','ok'); navTo('tasks/workflow');
     }});
   };
 
-  /* ----- Instance (New Event) form ----- */
+  /* ----- New <Noun> form (e.g. "New Invoice") ----- */
   function wfEvtRowHtml(label,value,locked){
     if(locked){ return '<div class="wf-evt-row"><div class="ac-in wf-evt-labelro" style="flex:1;min-width:0;background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--slate);flex:none"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc2(label||'')+'</span></div><input type="hidden" class="wf-evt-label" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"></div>'; }
     return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>';
@@ -1113,7 +1217,8 @@
     try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
     if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
     if(!flow){ toast('Workflow not found','err'); return; }
-    if(!caseId && !steps.length){ toast('Add steps to this workflow before starting an instance','warn'); return; }
+    const N=wfNounOf(flow); window._wfNoun=N;
+    if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
     // Once the detail fields have been defined for this workflow (trigger_template is set), the field
     // LABELS are locked: they can't be edited, added or removed — you only fill in the values.
@@ -1124,34 +1229,35 @@
     else if(locked){ src=template.map(function(t){return {label:(t&&t.label)||'',value:''};}); }
     else { src=[]; }
     const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml((t&&t.label)||'', (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+(editing?('Edit instance '+(caseRow.case_no||caseId)):'New instance')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow.case_no||caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':'Specifics for this instance. Add or remove detail fields as needed.')+'</label>'
+        +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +'<div id="wfEvtDetails">'+rowsHtml+'</div>'
         +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>')
       +'</div>'
-      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+(editing?'Save changes':'Create instance')+'</button></div>','md');
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','md');
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
   };
 
   window.wfEventSave=async function(flowId, caseId){
     const wrap=$('wfEvtDetails'); const details=[];
     if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){ const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim(); const value=((r.querySelector('.wf-evt-value')||{}).value||'').trim(); if(label||value) details.push({label:label,value:value}); }); }
+    const N=wfN();
     try{
       if(caseId){
         const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
         try{ closeModal(); }catch(e){}
-        toast('Instance updated','ok');
+        toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
         const {error}=await ACC().rpc('wf_create_instance',{p_flow_id:flowId, p_details:details}); if(error)throw error;
         try{ closeModal(); }catch(e){}
-        toast('Instance created — first step assigned','ok');
+        toast(N.one+' created — first step assigned','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
-    }catch(e){ toast('Could not save instance: '+((e&&e.message)||e),'err'); }
+    }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
   };
 
 
@@ -1211,7 +1317,7 @@
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
-      +(caseRow?'<button class="ac-btn" title="View instance timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
+      +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':'')+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details</h3><div class="tp-grid">'
@@ -1309,7 +1415,7 @@
 
   // Reopen: bring the completed final step back (instance Done -> In progress)
   window.wfReopen=function(fcsId){
-    wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and the instance moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
+    wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and this '+wfN().lc+' moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
       try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
       toast('Reopened','ok'); navTo('tasks/work');
