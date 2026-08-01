@@ -8265,7 +8265,7 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-fbtn .n{font-size:11px;opacity:.75;font-weight:700}'
 +'.org-search{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 12px;font-size:13px;font-family:inherit;min-width:190px;flex:1 1 190px;max-width:300px;background:var(--bg-card);color:var(--ink);box-sizing:border-box}'
 +'.org-sel{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 30px 0 11px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%2364748b\' stroke-width=\'1.8\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}'
-+'.org-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px;margin-bottom:16px}'
++'.org-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}'
 +'.org-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}'
 +'.org-kpi .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);display:flex;align-items:center;gap:6px}'
 +'.org-kpi .v{font-size:22px;font-weight:800;color:var(--ink);margin-top:5px;letter-spacing:-.02em}'
@@ -8299,9 +8299,19 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;color:var(--slate);font-size:13.5px;line-height:1.6}'
 +'.org-empty i{font-size:26px;color:#cbd5e1;display:block;margin-bottom:10px}'
 +'.org-dtl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:4px}'
++'.org-dtl-f{min-width:0}'
 +'.org-dtl-f .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--slate)}'
-+'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px}'
-+'@media(max-width:760px){.org-dp-list{grid-template-columns:1fr}.org-kpi .v{font-size:19px}.org-post{max-width:220px}}'
++'.org-dtl-f .v{font-size:14px;font-weight:700;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}'
+/* the whole picture, letterboxed - never cropped, never wider than the dialog */
++'.org-dtl-img{width:100%;max-width:100%;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}'
++'.org-dtl-img img{max-width:100%;max-height:340px;width:auto;height:auto;object-fit:contain;display:block}'
++'.org-dtl-img .org-thumb-ph{width:100%;height:150px}'
++'.org-dtl-msg{font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-height:170px;overflow-y:auto;overflow-x:hidden}'
++'.org-dtl *{max-width:100%;box-sizing:border-box}'
++'.org-fresh{font-size:11.5px;color:var(--slate);margin-left:auto;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}'
++'@media(max-width:1100px){.org-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}'
++'@media(max-width:760px){.org-dp-list{grid-template-columns:1fr}.org-kpi .v{font-size:19px}.org-post{max-width:220px}.org-fresh{margin-left:0}}'
++'@media(max-width:480px){.org-kpis{grid-template-columns:1fr}}'
 +'</style>';
 
 function orgN(v){const n=Number(v)||0; if(n>=1e7)return (n/1e7).toFixed(2).replace(/\.00$/,'')+' Cr'; if(n>=1e5)return (n/1e5).toFixed(2).replace(/\.00$/,'')+' L'; if(n>=1000)return (n/1000).toFixed(1).replace(/\.0$/,'')+'k'; return String(n);}
@@ -8311,6 +8321,19 @@ function orgEng(r){ return (Number(r.likes)||0)+(Number(r.comments)||0)+(Number(
 // reach/impression figure actually came back (reels, Instagram). Elsewhere we show '—'.
 function orgHasReach(r){ return (Number(r.reach)||0)>0; }
 function orgER(r){ const reach=Number(r.reach)||0; return reach? (orgEng(r)/reach*100) : null; }
+function orgKindLabel(k){ return k==='reel'?'Reel':(k==='carousel'?'Carousel':'Post'); }
+// Meta reports watch time in milliseconds.
+function orgSecs(ms){ const s=(Number(ms)||0)/1000; return s>=60?(Math.floor(s/60)+'m '+Math.round(s%60)+'s'):(s<10?s.toFixed(1)+'s':Math.round(s)+'s'); }
+function orgWatch(ms){ const s=(Number(ms)||0)/1000;
+  if(s>=3600){ const h=Math.floor(s/3600); return h+'h '+Math.round((s%3600)/60)+'m'; }
+  if(s>=60) return Math.floor(s/60)+'m '+Math.round(s%60)+'s';
+  return Math.round(s)+'s'; }
+// Some thumbnails 404 or are blocked; swap in a placeholder rather than a broken image.
+window.orgThumbFail=function(img){
+  const ph=document.createElement('div'); ph.className=img.className.replace('org-thumb','org-thumb-ph');
+  ph.innerHTML='<i class="fa-regular fa-image"></i>';
+  if(img.parentNode) img.parentNode.replaceChild(ph,img);
+};
 
 window.orgToggleDp=function(e){ if(e)e.stopPropagation(); ORG_OPEN=!ORG_OPEN; renderPage(); };
 window.orgSetPeriod=function(p){
@@ -8332,6 +8355,31 @@ window.orgSearch=function(v){ORG_Q=v;ORG_PG=0;
   clearTimeout(window._orgQT); window._orgQT=setTimeout(function(){renderPage(); const el=document.getElementById('orgQ'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} },320);
 };
 window.orgGo=function(d){ORG_PG=Math.max(0,ORG_PG+d);renderPage();};
+
+// Refresh in the background whenever the page is opened, so there is no button to press.
+// Rows already on screen stay visible while it runs; the table re-renders when it lands.
+window.orgAutoSync=async function(){
+  if(window._orgSyncing) return;
+  window._orgSyncing=true;
+  const tag=document.getElementById('orgFresh');
+  if(tag) tag.innerHTML='<i class="fa-solid fa-rotate fa-spin"></i> Updating…';
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const r=orgRange();
+    const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(ORG_PERIOD==='lifetime'?{max_pages:8}:{since:r.since,until:r.until})});
+    const jr=await res.json().catch(function(){return {};});
+    if(jr.error){ if(tag) tag.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> '+esc(String(jr.error).slice(0,90)); window._orgSyncing=false; return; }
+    ORG_ROWS=null; ORG_PAGES=null;
+    window._orgSyncing=false;
+    if(ROUTE_PAGE()==='organic') renderPage();
+    return;
+  }catch(e){ if(tag) tag.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Could not refresh'; }
+  window._orgSyncing=false;
+};
+function ROUTE_PAGE(){ return PAGE; }
 
 window.orgSync=async function(){
   const btn=document.getElementById('orgSyncBtn');
@@ -8355,19 +8403,26 @@ window.orgOpen=function(id){
   const r=(ORG_ROWS||[]).find(function(x){return String(x.id)===String(id);}); if(!r)return;
   const rx=r.reactions||{};
   const f=function(k,v){return '<div class="org-dtl-f"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(r.kind||'Post')+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="min-width:min(94vw,640px)">'
-      +(r.thumbnail?'<img src="'+esc(r.thumbnail)+'" style="width:100%;max-height:230px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:12px">':'')
-      +'<div style="font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap;max-height:170px;overflow:auto">'+esc(r.message||'(no caption)')+'</div>'
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-photo-film"></i> '+esc(orgKindLabel(r.kind))+' details</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    // width is capped and everything inside is box-sized, so the body never scrolls sideways;
+    // the image is CONTAINed rather than cropped, so the whole picture is visible
+    +'<div class="modal-body org-dtl" style="width:min(94vw,640px);max-width:100%;box-sizing:border-box;overflow-x:hidden">'
+      +(r.thumbnail?'<div class="org-dtl-img"><img src="'+esc(r.thumbnail)+'" referrerpolicy="no-referrer" onerror="orgThumbFail(this)"></div>':'')
+      +'<div class="org-dtl-msg">'+esc(r.message||'(no caption)')+'</div>'
       +'<div style="font-size:12px;color:var(--slate);margin:10px 0 4px">'+esc(r.page_name||'')+' · '+orgDT(r.created_time)+'</div>'
       +'<div class="org-dtl-grid">'
-        +f('Total engagement',orgN(orgEng(r)))
+        +f('Interactions',orgN(orgEng(r)))
         +f('Likes',orgN(r.likes))+f('Comments',orgN(r.comments))+f('Shares',orgN(r.shares))
+        +(Number(r.reach)?f('Reach',orgN(r.reach)):'')
+        +(Number(r.video_views)?f('Views',orgN(r.video_views)):'')
+        +(Number(r.viewers)?f('Viewers',orgN(r.viewers)):'')
+        +(Number(r.follows)?f('Follows',orgN(r.follows)):'')
         +(Number(r.clicks)?f('Clicks on post',orgN(r.clicks)):'')
         +(Number(r.saves)?f('Saves',orgN(r.saves)):'')
-        +(Number(r.video_views)?f('Views',orgN(r.video_views))+f('Avg watch time',((Number(r.video_avg_watch_ms)||0)/1000).toFixed(1)+'s'):'')
-        +(Number(r.video_length_s)?f('Length',Number(r.video_length_s).toFixed(0)+'s'):'')
-        +(orgHasReach(r)?f('Reach',orgN(r.reach))+f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
+        +(Number(r.video_total_time_ms)?f('Watch time',orgWatch(r.video_total_time_ms)):'')
+        +(Number(r.video_avg_watch_ms)?f('Avg play time',orgSecs(r.video_avg_watch_ms)):'')
+        +(Number(r.video_length_s)?f('Duration',orgSecs(Number(r.video_length_s)*1000)):'')
+        +(orgHasReach(r)?f('Engagement rate',(orgER(r)||0).toFixed(2)+'%'):'')
         +((rx.like||rx.love||rx.wow||rx.haha||rx.sad||rx.angry||rx.care)
            ?f('Reactions','👍 '+orgN(rx.like)+'  ❤️ '+orgN(rx.love)+'  😮 '+orgN(rx.wow)+'  😂 '+orgN(rx.haha)+'  😢 '+orgN(rx.sad)+'  😠 '+orgN(rx.angry)+'  🤗 '+orgN(rx.care)):'')
       +'</div>'
@@ -8417,48 +8472,48 @@ VIEWS.organic=async function(v,seg){
     return true;
   });
   const S=ORG_SORT;
+  const nOf=function(r,k){return Number(r[k])||0;};
   rows.sort(function(a,b){
-    if(S==='reach')       return (Number(b.reach)||0)-(Number(a.reach)||0);
-    if(S==='impressions') return (Number(b.impressions)||0)-(Number(a.impressions)||0);
-    if(S==='engagement')  return orgEng(b)-orgEng(a);
-    if(S==='er')          return orgER(b)-orgER(a);
-    if(S==='likes')       return (Number(b.likes)||0)-(Number(a.likes)||0);
-    if(S==='comments')    return (Number(b.comments)||0)-(Number(a.comments)||0);
+    if(S==='views')        return nOf(b,'video_views')-nOf(a,'video_views');
+    if(S==='interactions') return orgEng(b)-orgEng(a);
+    if(S==='likes')        return nOf(b,'likes')-nOf(a,'likes');
+    if(S==='comments')     return nOf(b,'comments')-nOf(a,'comments');
+    if(S==='shares')       return nOf(b,'shares')-nOf(a,'shares');
+    if(S==='watch')        return nOf(b,'video_total_time_ms')-nOf(a,'video_total_time_ms');
     return String(b.created_time||'').localeCompare(String(a.created_time||''));
   });
 
   const tot=rows.reduce(function(a,r){
-    a.reach+=Number(r.reach)||0; a.imp+=Number(r.impressions)||0; a.eng+=orgEng(r);
+    a.reach+=Number(r.reach)||0; a.eng+=orgEng(r);
     a.likes+=Number(r.likes)||0; a.comments+=Number(r.comments)||0; a.shares+=Number(r.shares)||0;
-    a.saves+=Number(r.saves)||0; a.clicks+=Number(r.clicks)||0; a.vv+=Number(r.video_views)||0;
+    a.clicks+=Number(r.clicks)||0; a.vv+=Number(r.video_views)||0;
+    a.viewers+=Number(r.viewers)||0; a.follows+=Number(r.follows)||0;
+    a.watch+=Number(r.video_total_time_ms)||0;
     return a;
-  },{reach:0,imp:0,eng:0,likes:0,comments:0,shares:0,saves:0,clicks:0,vv:0});
-  const avgER=tot.reach?(tot.eng/tot.reach*100):0;
+  },{reach:0,eng:0,likes:0,comments:0,shares:0,clicks:0,vv:0,viewers:0,follows:0,watch:0});
 
   const kpi=function(icon,k,val,sub){return '<div class="org-kpi"><div class="k"><i class="fa-solid '+icon+'"></i> '+k+'</div><div class="v">'+val+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';};
-  // Reach / impressions only appear where Meta actually returned them (reels, Instagram) —
-  // showing a hard 0 for photo posts would read as "nobody saw it", which is not what it means.
+  // Exactly eight cards, four to a row.
   const kpis='<div class="org-kpis">'
-    +kpi('fa-layer-group','Content',String(rows.length),'posts & reels')
-    +(tot.vv?kpi('fa-play','Views',orgN(tot.vv),'reels & videos'):'')
-    +kpi('fa-heart','Engagement',orgN(tot.eng),'likes+comments+shares')
-    +kpi('fa-thumbs-up','Likes',orgN(tot.likes),'')
+    +kpi('fa-layer-group','Content',String(rows.length),'posts, reels & carousels')
+    +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','video plays')
+    +kpi('fa-eye','Viewers',tot.viewers?orgN(tot.viewers):'—','unique watchers')
+    +kpi('fa-users','Reach',tot.reach?orgN(tot.reach):'—','where Meta reports it')
+    +kpi('fa-hand-pointer','Interactions',orgN(tot.eng),'likes+comments+shares')
     +kpi('fa-comment','Comments',orgN(tot.comments),'')
     +kpi('fa-share','Shares',orgN(tot.shares),'')
-    +(tot.clicks?kpi('fa-arrow-pointer','Clicks',orgN(tot.clicks),'on the post'):'')
-    +(tot.saves?kpi('fa-bookmark','Saves',orgN(tot.saves),''):'')
-    +(tot.reach?kpi('fa-users','Reach',orgN(tot.reach),'where Meta reports it'):'')
-    +(tot.reach?kpi('fa-percent','Engagement rate',avgER.toFixed(2)+'%','of measured reach'):'')
+    +kpi('fa-clock','Watch time',tot.watch?orgWatch(tot.watch):'—','total')
     +'</div>'
-    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Meta withdrew per-post reach and impressions from its API, so those columns only fill for reels and Instagram. Likes, comments, shares, clicks and views are exact.</div>';
+    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Meta withdrew per-post Reach, Viewers and Follows from its API — those fill for reels and video only, and show — elsewhere. Views, interactions, comments, shares and watch time are exact.</div>';
 
   // filter bar
-  const kinds=['all','post','photo','video','reel','carousel','link'];
+  const kinds=['all','post','reel','carousel'];
   const kc={}; rows.forEach(function(r){kc[r.kind]=(kc[r.kind]||0)+1;});
   const kbtns=kinds.map(function(k){
     const n=k==='all'?rows.length:(kc[k]||0);
     if(k!=='all'&&!n&&ORG_KIND!==k) return '';
-    return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(k==='all'?'All types':k)+'<span class="n">'+n+'</span></button>';
+    const lbl=k==='all'?'All types':(k==='post'?'Posts':(k==='reel'?'Reels':'Carousel'));
+    return '<button class="org-fbtn'+(ORG_KIND===k?' on':'')+'" onclick="orgSetKind(\''+k+'\')">'+esc(lbl)+'<span class="n">'+n+'</span></button>';
   }).join('');
   const nbtns=[['all','All'],['facebook','Facebook'],['instagram','Instagram']].map(function(n){
     return '<button class="org-fbtn'+(ORG_NET===n[0]?' on':'')+'" onclick="orgSetNet(\''+n[0]+'\')">'+esc(n[1])+'</button>';
@@ -8466,13 +8521,13 @@ VIEWS.organic=async function(v,seg){
   const pageSel='<select class="org-sel" onchange="orgSetPageId(this.value)"><option value="all"'+(ORG_PAGE==='all'?' selected':'')+'>All pages</option>'
     +(ORG_PAGES||[]).map(function(p){return '<option value="'+esc(p.id)+'"'+(String(ORG_PAGE)===String(p.id)?' selected':'')+'>'+esc(p.name||p.id)+'</option>';}).join('')+'</select>';
   const sortSel='<select class="org-sel" onchange="orgSetSort(this.value)">'
-    +[['date','Newest first'],['reach','Most reach'],['impressions','Most impressions'],['engagement','Most engagement'],['er','Best engagement rate'],['likes','Most likes'],['comments','Most comments']]
+    +[['date','Newest first'],['views','Most views'],['interactions','Most interactions'],['likes','Most likes'],['comments','Most comments'],['shares','Most shares'],['watch','Most watch time']]
       .map(function(o){return '<option value="'+o[0]+'"'+(ORG_SORT===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
 
   const bar='<div class="org-bar">'+orgDatePicker()
-    +'<button class="btn" id="orgSyncBtn" onclick="orgSync()"><i class="fa-solid fa-rotate"></i> Sync now</button>'
     +'<input class="org-search" id="orgQ" placeholder="Search caption or page…" value="'+esc(ORG_Q)+'" oninput="orgSearch(this.value)">'
-    +pageSel+sortSel+'</div>'
+    +pageSel+sortSel
+    +'<span class="org-fresh" id="orgFresh"></span></div>'
     +'<div class="org-bar">'+nbtns+'<span style="width:8px"></span>'+kbtns+'</div>';
 
   // ---- body ----
@@ -8480,8 +8535,8 @@ VIEWS.organic=async function(v,seg){
   if(!rows.length){
     const anyData=(ORG_ROWS||[]).length>0;
     body='<div class="org-empty"><i class="fa-regular fa-folder-open"></i>'
-      +(anyData?'No posts in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.'
-               :'Nothing synced yet.<br>Press <b>Sync now</b> — if it reports a token problem, the system user needs the Pages assigned plus <b>pages_show_list</b>, <b>pages_read_engagement</b> and <b>pages_read_user_content</b>.')
+      +(anyData?'No content in this date range or filter.<br>Try widening the dates, or choose <b>Lifetime</b>.'
+               :'Fetching your content from Meta…<br>If nothing appears, the system user needs the Pages assigned with the <b>Insights</b> task.')
       +'</div>';
   } else if(ti===0){
     // Overview: breakdown by type and by page
@@ -8508,22 +8563,31 @@ VIEWS.organic=async function(v,seg){
     const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
     if(ORG_PG>=pages)ORG_PG=pages-1;
     const slice=(ti===2)?list:list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
+    const dash=function(v,fmt){ const n=Number(v)||0; return n?(fmt?fmt(n):orgN(n)):'—'; };
     body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
-      +'<th>Content</th><th>Type</th><th>Where</th><th>Date</th>'
-      +'<th class="n">Views</th><th class="n">Likes</th><th class="n">Comm.</th><th class="n">Shares</th><th class="n">Clicks</th><th class="n">Engaged</th></tr></thead><tbody>'
+      +'<th>Content</th><th>Date</th><th>Account</th><th>Type</th>'
+      +'<th class="n">Reach</th><th class="n">Views</th><th class="n">Viewers</th><th class="n">Follows</th>'
+      +'<th class="n">Interactions</th><th class="n">Comments</th><th class="n">Shares</th>'
+      +'<th class="n">Watch time</th><th class="n">Avg play</th><th class="n">Duration</th></tr></thead><tbody>'
       +slice.map(function(r){
-        const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;org-thumb-ph&quot;><i class=&quot;fa-regular fa-image&quot;></i></div>\'">'
+        const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">'
                                :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
         const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
         return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
           +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div></div></td>'
-          +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(r.kind||'post')+'</span></td>'
-          +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
           +'<td style="white-space:nowrap;font-size:12.5px;color:var(--slate)">'+orgDT(r.created_time)+'</td>'
-          +'<td class="n">'+(Number(r.video_views)?orgN(r.video_views):'—')+'</td>'
-          +'<td class="n">'+orgN(r.likes)+'</td><td class="n">'+orgN(r.comments)+'</td><td class="n">'+orgN(r.shares)+'</td>'
-          +'<td class="n">'+(Number(r.clicks)?orgN(r.clicks):'—')+'</td>'
-          +'<td class="n org-er">'+orgN(orgEng(r))+'</td></tr>';
+          +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
+          +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
+          +'<td class="n">'+dash(r.reach)+'</td>'
+          +'<td class="n">'+dash(r.video_views)+'</td>'
+          +'<td class="n">'+dash(r.viewers)+'</td>'
+          +'<td class="n">'+dash(r.follows)+'</td>'
+          +'<td class="n org-er">'+orgN(orgEng(r))+'</td>'
+          +'<td class="n">'+orgN(r.comments)+'</td>'
+          +'<td class="n">'+orgN(r.shares)+'</td>'
+          +'<td class="n">'+dash(r.video_total_time_ms,orgWatch)+'</td>'
+          +'<td class="n">'+dash(r.video_avg_watch_ms,orgSecs)+'</td>'
+          +'<td class="n">'+(Number(r.video_length_s)?orgSecs(Number(r.video_length_s)*1000):'—')+'</td></tr>';
       }).join('')+'</tbody></table></div>'
       +(ti===2?'':'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
         +'<span><button onclick="orgGo(-1)"'+(ORG_PG<=0?' disabled':'')+'><i class="fa-solid fa-chevron-left"></i> Previous</button> '
@@ -8532,6 +8596,11 @@ VIEWS.organic=async function(v,seg){
 
   v.innerHTML=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels')+bar+mTabs('organic',tabs,ti)
     +'<div style="margin-top:14px">'+(rows.length?kpis:'')+body+'</div>';
+  // pull fresh data on entry (and when the date range changes) — no button to press
+  const rk=ORG_PERIOD+'|'+R.since+'|'+R.until;
+  if(window._orgLastKey!==rk){ window._orgLastKey=rk; orgAutoSync(); }
+  else { const tag=document.getElementById('orgFresh');
+         if(tag&&!window._orgSyncing) tag.innerHTML='<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Up to date'; }
 };
 
 VIEWS.transcription=async function(v,seg){
