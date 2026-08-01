@@ -1,6 +1,18 @@
 // Reference copy of the deployed Supabase edge function `social-organic-live`.
 // Organic content (Business Suite -> Content -> Posts & Reels) for our own Pages, into camp.social_*.
 //
+// DE-DUPLICATION - the big one. A reel appears TWICE in the Graph API: once on video_reels
+// (with the real play/watch metrics) and again on published_posts as a plain video post with a
+// different id and mostly zeroed video metrics. Storing both double-counted every reel and put
+// an empty-looking twin next to each real row. The published_posts copy carries
+// attachments.target.id, which IS the reel's video id, so reels are fetched FIRST and any post
+// pointing at a known reel is skipped.
+//
+// NEVER OVERWRITE GOOD DATA WITH A FAILED CALL - if a reel's video_insights request fails
+// (Meta throttles with "Please reduce the amount of data you're asking for"), that reel is
+// skipped for the round so the previously stored numbers survive. Writing the zeros instead
+// would quietly wipe the metrics.
+//
 // METRIC NAMES MATTER MORE THAN THE DOCS SUGGEST - all probed live against the real Page:
 //   posts : post_clicks, post_clicks_by_type, post_reactions_by_type_total,
 //           post_activity_by_action_type, post_video_views, post_video_views_unique,
@@ -12,12 +24,12 @@
 //           post_follows - rejected as invalid on v20, so Reach cannot be had at all.
 //
 // CRITICAL: Graph fails the ENTIRE insights request if ONE metric name is invalid for that
-// object type. post_video_views_unique is valid on posts but NOT on reels, and including it in
+// object type. post_video_views_unique is valid on posts but NOT on reels, and its presence in
 // the reel batch silently blanked every reel metric. Only add a name probed on its own first.
 //
 // PERFORMANCE: post insights come back inline (one call per 50 posts). Reels have no inline
-// equivalent, so their insight calls are fired in CONCURRENT batches - 150 sequential round
-// trips exceeded the worker's wall-clock budget.
+// equivalent, so their insight calls run in CONCURRENT batches - 150 sequential round trips
+// exceeded the worker's wall-clock budget.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Access-Control-Allow-Methods':'POST, OPTIONS'};
 const j=(o:any,s=200)=>new Response(JSON.stringify(o),{status:s,headers:{...cors,'Content-Type':'application/json'}});
@@ -41,7 +53,6 @@ async function gall(url:string, maxPages:number, cap:number){
   }
   return {data:out};
 }
-// run an async mapper over items, `size` at a time
 async function inBatches<T,R>(items:T[], size:number, fn:(x:T)=>Promise<R>):Promise<R[]>{
   const out:R[]=[];
   for(let i=0;i<items.length;i+=size){ out.push(...await Promise.all(items.slice(i,i+size).map(fn))); }
@@ -59,6 +70,7 @@ function thumbOf(p:any){
   const a=p.attachments?.data?.[0];
   return p.full_picture || a?.media?.image?.src || a?.subattachments?.data?.[0]?.media?.image?.src || null;
 }
+function targetId(p:any){ const a=p.attachments?.data?.[0]; return a?.target?.id?String(a.target.id):null; }
 function rxObj(rx:any){ rx=rx||{}; return {like:num(rx.like),love:num(rx.love),wow:num(rx.wow),haha:num(rx.haha),sad:num(rx.sorry||rx.sad),angry:num(rx.anger||rx.angry),care:num(rx.care)}; }
 function rxTotal(o:any){ return Object.keys(o||{}).reduce((a,k)=>a+(Number(o[k])||0),0); }
 function reelRx(o:any){ o=o||{}; const g=(k:string)=>num(o['REACTION_'+k]||o[k.toLowerCase()]);
@@ -82,9 +94,9 @@ Deno.serve(async (req:Request)=>{
   const since=body.since||'', until=body.until||'';
   const maxPages=Math.min(Number(body.max_pages)||4, 12);
   const cap=maxPages*50;
-  const reelPages=Math.min(Number(body.reel_pages)||2, 8);
+  const reelPages=Math.min(Number(body.reel_pages)||3, 8);
   const doPosts=body.only!=='reels', doReels=body.only!=='posts';
-  const report:any={pages:0, posts:0, reels:0, ig:0, truncated:false, errors:[] as string[]};
+  const report:any={pages:0, posts:0, reels:0, ig:0, skipped_reel_duplicates:0, reels_kept_from_before:0, truncated:false, errors:[] as string[]};
 
   const pg=await gget(G+'/me/accounts?fields=id,name,username,access_token,followers_count,fan_count,picture{url},instagram_business_account{id,username,followers_count,profile_picture_url}&limit=50&access_token='+t);
   if((pg as any).err) return j({error:'Cannot list Pages: '+(pg as any).err},400);
@@ -102,16 +114,59 @@ Deno.serve(async (req:Request)=>{
     },{onConflict:'id'});
     report.pages++;
 
+    // ---- reels FIRST, so posts can be de-duplicated against them ----
+    const rl:any=await gall(G+'/'+P.id+'/video_reels?limit=50&fields=id,description,title,created_time,permalink_url,picture,length,views,'
+      +'likes.summary(true).limit(0),comments.summary(true).limit(0)&access_token='+pt, reelPages, reelPages*50);
+    if(rl.err) report.errors.push(P.name+' reels: '+rl.err);
+    const reelIds=new Set((rl.data||[]).map((r:any)=>String(r.id)));
+
+    if(doReels){
+      const built=await inBatches((rl.data||[]), 6, async (r:any)=>{
+        const vi:any=await gget(G+'/'+r.id+'/video_insights?metric='+REEL_METRICS+'&access_token='+pt);
+        // a throttled/failed call must NOT be written as zeros over good numbers
+        if(vi?.err){ if(report.errors.length<6) report.errors.push('reel insights: '+vi.err); return null; }
+        const M:any={}; (vi.data||[]).forEach((x:any)=>{M[x.name]=x.values?.[0]?.value;});
+        const rx=reelRx(M.post_video_likes_by_reaction_type);
+        const plays=num(M.fb_reels_total_plays)||num(r.views)||num(M.blue_reels_play_count);
+        const likes=num(r.likes?.summary?.total_count)||rxTotal(rx);
+        const comments=num(r.comments?.summary?.total_count);
+        return {
+          id:r.id, page_id:P.id, page_name:P.name, network:'facebook', kind:'reel',
+          message:r.description||r.title||'', permalink:r.permalink_url||null, thumbnail:r.picture||null,
+          created_time:r.created_time||null, video_length_s:r.length||null,
+          likes:likes, comments:comments, shares:0, interactions:likes+comments,
+          reactions:rx,
+          video_views:plays, follows:num(M.post_video_followers),
+          video_total_time_ms:num(M.post_video_view_time), video_avg_watch_ms:num(M.post_video_avg_time_watched),
+          synced_at:new Date().toISOString()
+        };
+      });
+      const rrows=built.filter(Boolean) as any[];
+      report.reels_kept_from_before=built.length-rrows.length;
+      for(let i=0;i<rrows.length;i+=100){
+        const { error }=await db.schema('camp').from('social_posts').upsert(rrows.slice(i,i+100),{onConflict:'id'});
+        if(error) report.errors.push('save reels: '+error.message);
+      }
+      report.reels+=rrows.length;
+    }
+
+    // ---- posts, skipping anything that is really one of the reels above ----
     if(doPosts){
       let purl=G+'/'+P.id+'/published_posts?limit=50&fields=id,message,story,created_time,permalink_url,full_picture,status_type,'
-        +'attachments{media_type,type,url,media,subattachments},shares,comments.summary(true).limit(0),likes.summary(true).limit(0),'
+        +'attachments{media_type,type,url,media,target,subattachments},shares,comments.summary(true).limit(0),likes.summary(true).limit(0),'
         +'insights.metric('+POST_METRICS+')&access_token='+pt;
       if(since) purl+='&since='+since;
       if(until) purl+='&until='+until;
       const posts:any=await gall(purl, maxPages, cap);
       if(posts.err) report.errors.push(P.name+' posts: '+posts.err);
       if((posts.data||[]).length>=cap) report.truncated=true;
-      const rows=(posts.data||[]).map((p:any)=>{
+
+      const keep=(posts.data||[]).filter((p:any)=>{
+        const tid=targetId(p);
+        if(tid && reelIds.has(tid)){ report.skipped_reel_duplicates++; return false; }
+        return true;
+      });
+      const rows=keep.map((p:any)=>{
         const M=nested(p), act=M.post_activity_by_action_type||{};
         const rx=rxObj(M.post_reactions_by_type_total);
         const likes=num(p.likes?.summary?.total_count)||rxTotal(rx);
@@ -135,36 +190,6 @@ Deno.serve(async (req:Request)=>{
         if(error) report.errors.push('save posts: '+error.message);
       }
       report.posts+=rows.length;
-    }
-
-    if(doReels){
-      const rl:any=await gall(G+'/'+P.id+'/video_reels?limit=50&fields=id,description,title,created_time,permalink_url,picture,length,views,'
-        +'likes.summary(true).limit(0),comments.summary(true).limit(0)&access_token='+pt, reelPages, reelPages*50);
-      if(rl.err) report.errors.push(P.name+' reels: '+rl.err);
-      const rrows=await inBatches((rl.data||[]), 10, async (r:any)=>{
-        const vi:any=await gget(G+'/'+r.id+'/video_insights?metric='+REEL_METRICS+'&access_token='+pt);
-        if(vi?.err && report.errors.length<6) report.errors.push('reel insights: '+vi.err);
-        const M:any={}; if(!vi?.err)(vi.data||[]).forEach((x:any)=>{M[x.name]=x.values?.[0]?.value;});
-        const rx=reelRx(M.post_video_likes_by_reaction_type);
-        const plays=num(M.fb_reels_total_plays)||num(r.views)||num(M.blue_reels_play_count);
-        const likes=num(r.likes?.summary?.total_count)||rxTotal(rx);
-        const comments=num(r.comments?.summary?.total_count);
-        return {
-          id:r.id, page_id:P.id, page_name:P.name, network:'facebook', kind:'reel',
-          message:r.description||r.title||'', permalink:r.permalink_url||null, thumbnail:r.picture||null,
-          created_time:r.created_time||null, video_length_s:r.length||null,
-          likes:likes, comments:comments, shares:0, interactions:likes+comments,
-          reactions:rx,
-          video_views:plays, follows:num(M.post_video_followers),
-          video_total_time_ms:num(M.post_video_view_time), video_avg_watch_ms:num(M.post_video_avg_time_watched),
-          synced_at:new Date().toISOString()
-        };
-      });
-      for(let i=0;i<rrows.length;i+=100){
-        const { error }=await db.schema('camp').from('social_posts').upsert(rrows.slice(i,i+100),{onConflict:'id'});
-        if(error) report.errors.push('save reels: '+error.message);
-      }
-      report.reels+=rrows.length;
     }
 
     if(ig?.id && doPosts){
