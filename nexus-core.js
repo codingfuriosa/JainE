@@ -6391,15 +6391,14 @@ window.netRefresh=async function(){
       toast('No office laptop is online','err');
       return;
     }
-    const measurer=alive[0].device_key;
-    netMsg('Asking <b>'+esc(measurer)+'</b> to run a speed test… this takes about 30–60 seconds.');
+    netMsg('Asking the <b>office network</b> to run a speed test… this takes about 30–60 seconds.');
 
     const q=await sb.rpc('net_request_test',{p_source:'intranet'});
     if(q.error)throw q.error;
     const req=Array.isArray(q.data)?q.data[0]:q.data;
     if(!req||!req.id)throw new Error('the database did not return a request to follow');
 
-    await netFollowRequest(req.id,measurer);
+    await netFollowRequest(req.id);
   }catch(e){
     netMsg('Could not request a test — '+esc(e.message||String(e)),'#c83232');
     toast('Refresh failed','err');
@@ -6407,7 +6406,7 @@ window.netRefresh=async function(){
     NET_BUSY=false; netBtnBusy(false);
   }
 };
-async function netFollowRequest(id,measurer){
+async function netFollowRequest(id){
   const t0=Date.now();
   while(Date.now()-t0<NET_GIVEUP_MS){
     await new Promise(r=>setTimeout(r,NET_POLL_MS));
@@ -6417,8 +6416,8 @@ async function netFollowRequest(id,measurer){
     if(!req){ netMsg('The refresh request disappeared.','#c83232'); return; }
     const secs=Math.round((Date.now()-t0)/1000);
 
-    if(req.status==='pending'){ netMsg('Waiting for <b>'+esc(measurer)+'</b> to pick it up… ('+secs+'s)'); continue; }
-    if(req.status==='running'){ netMsg('<b>'+esc(req.claimed_by)+'</b> is testing the office internet now… ('+secs+'s)'); continue; }
+    if(req.status==='pending'){ netMsg('Waiting for the <b>office network</b> to pick it up… ('+secs+'s)'); continue; }
+    if(req.status==='running'){ netMsg('The <b>office network</b> is testing the office internet now… ('+secs+'s)'); continue; }
     if(req.status==='done'){
       toast('Office internet measured','ok');
       renderPage();                                   // pulls the new reading in
@@ -6452,10 +6451,9 @@ VIEWS.network=async function(v,seg){
   const tag=s=>'<span class="tag '+(s==='ok'?'t-green':s==='low'?'t-red':'t-amber')+'">'+esc(s||'—')+'</span>';
   try{
     const dayAgoMs=Date.now()-24*3600*1000;
-    const [tRes,sRes,dRes,pRes]=await Promise.all([
+    const [tRes,sRes,pRes]=await Promise.all([
       sb.from('net_speed_tests').select('id,device_key,tested_at,download_mbps,upload_mbps,ping_ms,jitter_ms,isp,server_location,status').order('tested_at',{ascending:false}).limit(5000),
       sb.from('net_settings').select('*').eq('device_key','office').maybeSingle(),
-      sb.from('net_devices').select('device_key,display_name'),
       sb.from('net_presence').select('device_key,last_seen,joined_at').order('joined_at',{ascending:true}),
       /* ---- alerts: DISABLED ------------------------------------------------
          The alert rows drove the Snapshot column and the "Low readings" KPI.
@@ -6477,16 +6475,13 @@ VIEWS.network=async function(v,seg){
     // measuring the office line at all.
     const aliveCut=Date.now()-NET_LEASE_S*1000;
     const alive=((pRes&&pRes.data)||[]).filter(x=>new Date(x.last_seen).getTime()>=aliveCut);
-    const devMap={};(dRes.data||[]).forEach(d=>devMap[d.device_key]=d.display_name||d.device_key);
-    const nameOfDev=k=>devMap[k]||k||'—';
-
     // Say plainly whether anything is measuring — that is the difference between
     // "waiting for the next test" and "no internet connection at the office".
+    // The actual laptop/device name is never shown to users — only this generic label.
     const pool=$('netPoolMsg');
     if(pool){
       pool.innerHTML=alive.length
-        ? '<b>'+esc(nameOfDev(alive[0].device_key))+'</b> is measuring'
-          +(alive.length>1?' · '+(alive.length-1)+' laptop'+(alive.length>2?'s':'')+' on standby':'')
+        ? '<b>Office network</b> measuring'
         : '<span style="color:#c83232">No office laptop is online — nothing is measuring the office line right now.</span>';
     }
 
