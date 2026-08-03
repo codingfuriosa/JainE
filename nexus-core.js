@@ -8368,14 +8368,17 @@ window.orgAutoSync=async function(){
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
-    const r=orgRange();
+    // Deliberately NOT bounded by the displayed date range. Preset ranges like "Last 28 days"
+    // end yesterday, so passing them as the sync window skipped anything posted today and left
+    // fresh content showing stale view counts. Facebook returns newest-first, so paging from the
+    // top always refreshes the most recent content; the range still filters what's displayed.
     const res=await fetch(SUPABASE_URL+'/functions/v1/social-organic-live',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify(ORG_PERIOD==='lifetime'?{max_pages:8}:{since:r.since,until:r.until})});
+      body:JSON.stringify(ORG_PERIOD==='lifetime'?{max_pages:8,reel_pages:4}:{max_pages:2,reel_pages:1})});
     const jr=await res.json().catch(function(){return {};});
     if(jr.error){ if(tag) tag.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> '+esc(String(jr.error).slice(0,90)); window._orgSyncing=false; return; }
     ORG_ROWS=null; ORG_PAGES=null;
-    window._orgSyncing=false;
+    window._orgSyncing=false; window._orgSyncedAt=Date.now();
     if(ROUTE_PAGE()==='organic') renderPage();
     return;
   }catch(e){ if(tag) tag.innerHTML='<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Could not refresh'; }
@@ -8587,14 +8590,20 @@ VIEWS.organic=async function(v,seg){
       {k:'Reach',        get:function(r){return Number(r.reach)||0;},               fmt:orgN, has:function(r){return r.network==='instagram';},
        why:'Facebook merged Reach into Views in Nov 2025 — Instagram still reports it'},
       {k:'Views',        get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN, has:function(){return true;}},
-      {k:'Viewers',      get:function(r){return Number(r.viewers)||0;},             fmt:orgN, has:hasVideo,
-       why:'unique viewers are only reported for video'},
+      // Viewers: post_video_views_unique works on standalone VIDEO posts but is rejected on
+      // reels (and total_video_views_unique returns null there), so reels cannot report it.
+      {k:'Viewers',      get:function(r){return Number(r.viewers)||0;},             fmt:orgN,
+       has:function(r){return r.network==='instagram'||(hasVideo(r)&&!isReel(r));},
+       why:'Facebook reports unique viewers for standalone videos, not for reels'},
       {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN, has:hasVideo,
        why:'follows gained are only reported for video'},
       {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true, has:function(){return true;}},
       {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN, has:function(){return true;}},
+      // Shares on reels: not exposed anywhere. post_video_social_actions and
+      // total_video_stories_by_action_type both come back empty, post_video_shares /
+      // blue_reels_share_count are invalid, and the reel object has no `shares` field at all.
       {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN, has:function(r){return !isReel(r);},
-       why:'Facebook does not report shares on reels'}
+       why:'Facebook exposes no share count for reels — not in insights or on the reel itself'}
     ];
     const VIDEO=[
       {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:hasVideo},
@@ -8633,11 +8642,13 @@ VIEWS.organic=async function(v,seg){
 
   v.innerHTML=ORG_CSS+mHead('fa-photo-film','#7c3aed','Posts & Reels')+bar+mTabs('organic',tabs,ti)
     +'<div style="margin-top:14px">'+(rows.length?kpis:'')+body+'</div>';
-  // pull fresh data on entry (and when the date range changes) — no button to press
-  const rk=ORG_PERIOD+'|'+R.since+'|'+R.until;
-  if(window._orgLastKey!==rk){ window._orgLastKey=rk; orgAutoSync(); }
+  // Refresh once per visit, and again if the page has been open a while. The sync is no longer
+  // tied to the date range, so changing dates just re-filters what is already held.
+  const STALE_MS=5*60*1000;
+  const age=Date.now()-(window._orgSyncedAt||0);
+  if(!window._orgSyncedAt || age>STALE_MS){ window._orgSyncedAt=Date.now(); orgAutoSync(); }
   else { const tag=document.getElementById('orgFresh');
-         if(tag&&!window._orgSyncing) tag.innerHTML='<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Up to date'; }
+         if(tag&&!window._orgSyncing) tag.innerHTML='<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Updated '+Math.max(1,Math.round(age/60000))+'m ago'; }
 };
 
 VIEWS.transcription=async function(v,seg){
