@@ -8290,7 +8290,8 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-net{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--slate);white-space:nowrap}'
 +'.org-net i.fa-facebook{color:#1877f2}.org-net i.fa-instagram{color:#e1306c}'
 +'.org-er{font-weight:700}'
-+'.org-na{color:#cbd5e1}'
++'.org-na{color:#cbd5e1;cursor:help}'
++'.org-zero{color:#94a3b8}'
 +'.org-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}'
 +'.org-pager .info{font-size:12.5px;color:var(--slate)}'
 +'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
@@ -8573,19 +8574,23 @@ VIEWS.organic=async function(v,seg){
     // shares or clicks; photo posts have shares and clicks but no video data at all — so a fixed
     // column set leaves most cells blank. Filtering to Reels or Posts narrows the table to just
     // the numbers that type reports.
+    // `has` says whether Facebook reports this metric for that content type at all — used to
+    // tell a real 0 apart from "not applicable". Reels never report shares or clicks; photo
+    // posts never report watch time or duration.
+    const isReel=function(r){return r.kind==='reel';};
     const COLS=[
-      {k:'Likes',        get:function(r){return Number(r.likes)||0;},               fmt:orgN},
-      {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN},
-      {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN},
-      {k:'Clicks',       get:function(r){return Number(r.clicks)||0;},              fmt:orgN},
-      {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true},
+      {k:'Likes',        get:function(r){return Number(r.likes)||0;},               fmt:orgN, has:function(){return true;}},
+      {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN, has:function(){return true;}},
+      {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN, has:function(r){return !isReel(r);}},
+      {k:'Clicks',       get:function(r){return Number(r.clicks)||0;},              fmt:orgN, has:function(r){return !isReel(r);}},
+      {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true, has:function(){return true;}},
       // Views = reel/video plays where we have them, otherwise post_media_view (Meta's
-      // replacement for impressions, stored in `impressions`). One column, filled for every type.
-      {k:'Views',        get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN},
-      {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch},
-      {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs},
-      {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs},
-      {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN}
+      // replacement for impressions, stored in `impressions`). One column, every type.
+      {k:'Views',        get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN, has:function(){return true;}},
+      {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:isReel},
+      {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs,  has:isReel},
+      {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs, has:isReel},
+      {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN,     has:isReel}
     ].filter(function(c){ return slice.some(function(r){ return c.get(r)>0; }); });
 
     body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
@@ -8601,8 +8606,13 @@ VIEWS.organic=async function(v,seg){
           +'<td style="white-space:nowrap;font-size:12.5px;color:var(--slate)">'+orgDT(r.created_time)+'</td>'
           +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
           +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
-          +COLS.map(function(c){ const v=c.get(r);
-            return '<td class="n'+(c.strong?' org-er':'')+'">'+(v?c.fmt(v):'<span class="org-na">·</span>')+'</td>'; }).join('')
+          // A genuine zero is data — a post published an hour ago really does have 0 likes.
+          // Show it as 0 (muted) rather than a dot, which read as "missing" and made the table
+          // look half-broken. The dot is reserved for a metric this content type cannot report.
+          +COLS.map(function(c){ const v=c.get(r), na=!c.has(r);
+            return '<td class="n'+(c.strong?' org-er':'')+'">'
+              +(na?'<span class="org-na" title="Facebook does not report this for a '+esc(orgKindLabel(r.kind))+'">·</span>'
+                  :(v?c.fmt(v):'<span class="org-zero">0</span>'))+'</td>'; }).join('')
         +'</tr>';
       }).join('')+'</tbody></table></div>'
       +(ti===2?'':'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
