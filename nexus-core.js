@@ -8290,6 +8290,7 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-net{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--slate);white-space:nowrap}'
 +'.org-net i.fa-facebook{color:#1877f2}.org-net i.fa-instagram{color:#e1306c}'
 +'.org-er{font-weight:700}'
++'.org-na{color:#cbd5e1}'
 +'.org-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}'
 +'.org-pager .info{font-size:12.5px;color:var(--slate)}'
 +'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
@@ -8493,18 +8494,22 @@ VIEWS.organic=async function(v,seg){
   },{reach:0,eng:0,likes:0,comments:0,shares:0,clicks:0,vv:0,viewers:0,follows:0,watch:0});
 
   const kpi=function(icon,k,val,sub){return '<div class="org-kpi"><div class="k"><i class="fa-solid '+icon+'"></i> '+k+'</div><div class="v">'+val+'</div>'+(sub?'<div class="s">'+sub+'</div>':'')+'</div>';};
-  // Exactly eight cards, four to a row.
+  // Exactly eight cards, four to a row. Reach and Viewers are deliberately absent: Facebook
+  // rejects every per-post impression metric on every API version from v18 to v25, so a card for
+  // them could only ever read zero.
+  const nReels=rows.filter(function(r){return r.kind==='reel';}).length;
+  const avgEng=rows.length?Math.round(tot.eng/rows.length):0;
   const kpis='<div class="org-kpis">'
-    +kpi('fa-layer-group','Content',String(rows.length),'posts, reels & carousels')
-    +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','video plays')
-    +kpi('fa-eye','Viewers',tot.viewers?orgN(tot.viewers):'—','unique watchers')
-    +kpi('fa-users','Reach',tot.reach?orgN(tot.reach):'—','where Meta reports it')
+    +kpi('fa-layer-group','Content',String(rows.length),rows.length?(nReels+' reels · '+(rows.length-nReels)+' posts'):'')
     +kpi('fa-hand-pointer','Interactions',orgN(tot.eng),'likes+comments+shares')
+    +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','reel & video plays')
+    +kpi('fa-clock','Watch time',tot.watch?orgWatch(tot.watch):'—','total')
+    +kpi('fa-thumbs-up','Likes',orgN(tot.likes),'')
     +kpi('fa-comment','Comments',orgN(tot.comments),'')
     +kpi('fa-share','Shares',orgN(tot.shares),'')
-    +kpi('fa-clock','Watch time',tot.watch?orgWatch(tot.watch):'—','total')
+    +kpi('fa-chart-simple','Avg per post',orgN(avgEng),'interactions')
     +'</div>'
-    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Meta withdrew per-post Reach, Viewers and Follows from its API — those fill for reels and video only, and show — elsewhere. Views, interactions, comments, shares and watch time are exact.</div>';
+    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Columns adapt to what Facebook actually reports for the content on screen — reels carry views, watch time and duration; photo posts carry shares and clicks. Per-post <b>Reach</b> is not shown because Facebook rejects it on every API version (v18–v25); page-level reach is available and can be added as a trend.</div>';
 
   // filter bar
   const kinds=['all','post','reel','carousel'];
@@ -8563,12 +8568,28 @@ VIEWS.organic=async function(v,seg){
     const pages=Math.max(1,Math.ceil(list.length/ORG_PER));
     if(ORG_PG>=pages)ORG_PG=pages-1;
     const slice=(ti===2)?list:list.slice(ORG_PG*ORG_PER,(ORG_PG+1)*ORG_PER);
-    const dash=function(v,fmt){ const n=Number(v)||0; return n?(fmt?fmt(n):orgN(n)):'—'; };
+    // Only show a metric column if something on screen actually has that metric. Facebook gives
+    // completely different fields per content type — reels have views/watch/duration but never
+    // shares or clicks; photo posts have shares and clicks but no video data at all — so a fixed
+    // column set leaves most cells blank. Filtering to Reels or Posts narrows the table to just
+    // the numbers that type reports.
+    const COLS=[
+      {k:'Likes',        get:function(r){return Number(r.likes)||0;},               fmt:orgN},
+      {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN},
+      {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN},
+      {k:'Clicks',       get:function(r){return Number(r.clicks)||0;},              fmt:orgN},
+      {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true},
+      {k:'Views',        get:function(r){return Number(r.video_views)||0;},         fmt:orgN},
+      {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch},
+      {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs},
+      {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs},
+      {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN}
+    ].filter(function(c){ return slice.some(function(r){ return c.get(r)>0; }); });
+
     body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
       +'<th>Content</th><th>Date</th><th>Account</th><th>Type</th>'
-      +'<th class="n">Reach</th><th class="n">Views</th><th class="n">Viewers</th><th class="n">Follows</th>'
-      +'<th class="n">Interactions</th><th class="n">Comments</th><th class="n">Shares</th>'
-      +'<th class="n">Watch time</th><th class="n">Avg play</th><th class="n">Duration</th></tr></thead><tbody>'
+      +COLS.map(function(c){return '<th class="n">'+esc(c.k)+'</th>';}).join('')
+      +'</tr></thead><tbody>'
       +slice.map(function(r){
         const thumb=r.thumbnail?'<img class="org-thumb" src="'+esc(r.thumbnail)+'" loading="lazy" referrerpolicy="no-referrer" onerror="orgThumbFail(this)">'
                                :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
@@ -8578,16 +8599,9 @@ VIEWS.organic=async function(v,seg){
           +'<td style="white-space:nowrap;font-size:12.5px;color:var(--slate)">'+orgDT(r.created_time)+'</td>'
           +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
           +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
-          +'<td class="n">'+dash(r.reach)+'</td>'
-          +'<td class="n">'+dash(r.video_views)+'</td>'
-          +'<td class="n">'+dash(r.viewers)+'</td>'
-          +'<td class="n">'+dash(r.follows)+'</td>'
-          +'<td class="n org-er">'+orgN(orgEng(r))+'</td>'
-          +'<td class="n">'+orgN(r.comments)+'</td>'
-          +'<td class="n">'+orgN(r.shares)+'</td>'
-          +'<td class="n">'+dash(r.video_total_time_ms,orgWatch)+'</td>'
-          +'<td class="n">'+dash(r.video_avg_watch_ms,orgSecs)+'</td>'
-          +'<td class="n">'+(Number(r.video_length_s)?orgSecs(Number(r.video_length_s)*1000):'—')+'</td></tr>';
+          +COLS.map(function(c){ const v=c.get(r);
+            return '<td class="n'+(c.strong?' org-er':'')+'">'+(v?c.fmt(v):'<span class="org-na">·</span>')+'</td>'; }).join('')
+        +'</tr>';
       }).join('')+'</tbody></table></div>'
       +(ti===2?'':'<div class="org-pager"><span class="info">Showing '+(ORG_PG*ORG_PER+1)+'–'+Math.min((ORG_PG+1)*ORG_PER,list.length)+' of '+list.length+'</span>'
         +'<span><button onclick="orgGo(-1)"'+(ORG_PG<=0?' disabled':'')+'><i class="fa-solid fa-chevron-left"></i> Previous</button> '
