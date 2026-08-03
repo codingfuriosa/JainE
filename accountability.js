@@ -260,7 +260,7 @@
     .gcal-body{padding:0}
     .gcal-mgrid{display:grid;grid-template-columns:repeat(7,1fr)}
     .gcal-mdow{text-align:center;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:8px 0;border-bottom:1px solid #e5e7eb}
-    .gcal-mcell{min-height:104px;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:6px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .1s}
+    .gcal-mcell{min-height:104px;min-width:0;overflow:hidden;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:6px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .1s}
     .gcal-mcell:nth-child(7n){border-right:0}
     .gcal-mcell:hover{background:#f8fafc}
     .gcal-mcell.other{background:#fafafa}
@@ -268,7 +268,7 @@
     .gcal-mcell.today .gcal-mnum{background:#2563eb;color:#fff}
     .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
     .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
-    .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%}
+    .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%;min-width:0}
     .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
     .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
     .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}

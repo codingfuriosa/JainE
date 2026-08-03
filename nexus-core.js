@@ -1637,24 +1637,61 @@ function misCellHtml(f,r){
   if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)">'+esc(misTrunc(v,26)||'—')+'</td>';
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
 }
-// "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) get a
-// second checkbox, separate from the bulk-select one, that records TODAY's date as
-// next_date_recorded_at — the Scoreboard scores off the gap between that and next_date_iso.
+// "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) are
+// marked handled by SLIDING the row left (misWireSwipe/misSwipeHandle below), not a separate
+// checkbox column. The slide checks the row's existing selection checkbox in a locked, "unusual"
+// state — checked but disabled, so it never counts toward the Edit/Delete selection total and
+// can't be unchecked by sliding again. Clicking a checkbox the normal way is unaffected and still
+// works exactly as it always did for bulk Edit/Delete.
 function misRowHtml(r,isPinned){
-  const handled=isPinned
-    ? `<input type="checkbox" class="mis-cb mis-handled-cb" data-id="${r.id}" ${r.next_date_recorded_at?'checked':''} onchange="misRecordDate(${r.id},this.checked)" title="Mark this Next Date as handled">`
-    : '';
-  return `<tr data-id="${r.id}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
-    <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" onchange="misRowCheck(this)"></td>
-    <td onclick="event.stopPropagation()">${handled}</td>
+  const handled=isPinned&&r.next_date_recorded_at;
+  const cbAttrs=handled?'checked disabled':'';
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
+    <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)"></td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
 }
-window.misRecordDate=async function(id,checked){
-  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:checked?todayStr():null}).eq('id',id);
-  if(error){toast('Could not update: '+error.message,'err');return;}
-  const row=(window._misRows||[]).find(r=>r.id===id); if(row)row.next_date_recorded_at=checked?todayStr():null;
-  toast(checked?'Marked handled':'Unmarked','ok');
+// Sliding a pinned row left records today as next_date_recorded_at (feeds the Scoreboard score)
+// and locks its checkbox. A no-op if it's already handled — matches "cannot be unchecked by
+// sliding again". Mouse AND touch both use pointer events; a small threshold tells a slide apart
+// from a normal click-to-edit.
+function misWireSwipe(){
+  document.querySelectorAll('#misTbody tr.mis-pinned').forEach(function(tr){
+    if(tr._swipeWired)return; tr._swipeWired=true;
+    tr.style.touchAction='pan-y';
+    tr.addEventListener('pointerdown',function(e){
+      if(e.target.closest('.mis-cb'))return; // the checkbox itself keeps its normal click behaviour
+      const startX=e.clientX,startY=e.clientY;
+      let dx=0,armed=false;
+      function move(ev){
+        dx=ev.clientX-startX; const dy=ev.clientY-startY;
+        if(!armed){ if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy))return; armed=true; tr.classList.add('mis-swiping'); }
+        if(dx<0){ tr.style.transition='none'; tr.style.transform='translateX('+Math.max(dx,-88)+'px)'; }
+      }
+      function up(){
+        document.removeEventListener('pointermove',move);
+        document.removeEventListener('pointerup',up);
+        tr.classList.remove('mis-swiping');
+        tr.style.transition='transform .15s'; tr.style.transform='';
+        if(armed){ tr._suppressClick=true; if(dx<-44) misSwipeHandle(Number(tr.dataset.id)); }
+      }
+      document.addEventListener('pointermove',move);
+      document.addEventListener('pointerup',up);
+    });
+    // the pointerdown→move→up sequence can still end in a click event on release; swallow the one
+    // click that follows an actual slide so it doesn't also pop open the edit modal.
+    tr.addEventListener('click',function(e){ if(tr._suppressClick){ tr._suppressClick=false; e.stopPropagation(); } },true);
+  });
+}
+window.misSwipeHandle=async function(id){
+  const row=(window._misRows||[]).find(r=>r.id===id);
+  if(!row||row.next_date_recorded_at)return; // already handled — sliding again does nothing
+  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:todayStr()}).eq('id',id);
+  if(error){toast('Could not mark handled: '+error.message,'err');return;}
+  row.next_date_recorded_at=todayStr();
+  const cb=document.querySelector('#misTbody tr[data-id="'+id+'"] .mis-row-cb');
+  if(cb){cb.checked=true;cb.disabled=true;}
+  toast('Marked handled — recorded today','ok');
 };
 async function legalMIS(){
   setCrumb(['Legal','MIS']);
@@ -1699,6 +1736,9 @@ async function legalMIS(){
       .mis-ai-badge{margin-left:6px}
       #misTbl tbody td{padding:11px 12px;vertical-align:top}
       .mis-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
+      .mis-cb:disabled{cursor:not-allowed;accent-color:#1e3a8a;opacity:.85}
+      #misTbl tbody tr.mis-pinned{touch-action:pan-y}
+      #misTbl tbody tr.mis-swiping{background:#eef2ff}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
       #misTbl td,#misTbl th{overflow:hidden}
       @media(max-width:768px){
@@ -1732,20 +1772,20 @@ async function legalMIS(){
     <div class="card" style="overflow:hidden">
       <div style="overflow-x:auto">
       <table id="misTbl">
-        <colgroup><col style="width:36px"><col style="width:80px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
+        <colgroup><col style="width:36px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
         <thead><tr>
           <th style="width:36px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
-          <th style="width:80px" title="Ticked once this Next Date has been acted on — feeds the Scoreboard">Handled</th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
         </tr></thead>
         <tbody id="misTbody">
           ${misPinned.map(r=>misRowHtml(r,true)).join('')}
-          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+2}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
+          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+1}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
           ${misRest.map(r=>misRowHtml(r,false)).join('')}
         </tbody>
       </table>
       </div>
     </div>`;
+  misWireSwipe();
 }
 // Score = how far ahead of the deadline the case was actually handled, using the confirmed rule:
 // gap = Next Date − Recorded Date (days). gap>7 -> +1 (handled well ahead), 0..7 -> 0 (cut it
@@ -1775,6 +1815,10 @@ async function legalScoreboard(){
     const {data,error}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,next_date_recorded_at').gte('next_date_iso',todayS).order('next_date_iso',{ascending:true});
     if(error)throw error; rows=data||[];
   }catch(e){toast((e&&e.message)||'Could not load Scoreboard','err');}
+  // Total only sums cases that actually have a score yet (checkbox ticked) — "Pending" ones
+  // shouldn't silently count as 0 and dilute the total for cases nobody has acted on yet.
+  const scored=rows.map(misScoreOf).filter(s=>s!==null);
+  const scoreTotal=scored.reduce((a,s)=>a+s,0);
   body.innerHTML=`<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="background:var(--bg-subtle,#f8fafc)">
       ${['Case Type','Cause Title / Parties','Case No.','Priority','Next Date','Recorded Date','Score'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:2px solid var(--line)">${esc(l)}</th>`).join('')}
@@ -1793,6 +1837,10 @@ async function legalScoreboard(){
         </tr>`;
       }).join(''):`<tr><td colspan="7"><div class="empty" style="padding:30px"><i class="fa-regular fa-calendar-check"></i><div>No cases currently pinned to the Calendar (need a parseable, upcoming Next Date in MIS)</div></div></td></tr>`}
     </tbody>
+    ${rows.length?`<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">
+      <td colspan="6" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">Total (${scored.length} scored of ${rows.length})</td>
+      <td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">${scoreTotal>0?'+':''}${scoreTotal}</td>
+    </tr></tfoot>`:''}
   </table></div></div>`;
 }
 window.misRowCheck=function(cb){
