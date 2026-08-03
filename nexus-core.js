@@ -1638,22 +1638,20 @@ function misCellHtml(f,r){
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
 }
 // "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) are
-// marked handled by SLIDING the row left (misWireSwipe/misSwipeHandle below), not a separate
-// checkbox column. The slide checks the row's existing selection checkbox in a locked, "unusual"
-// state — checked but disabled, so it never counts toward the Edit/Delete selection total and
-// can't be unchecked by sliding again. Clicking a checkbox the normal way is unaffected and still
-// works exactly as it always did for bulk Edit/Delete.
+// marked handled by SLIDING the row left (misWireSwipe/misSwipeToggle below), not a separate
+// checkbox column. Sliding TOGGLES the row's existing selection checkbox — check to mark handled,
+// slide again to unmark — and while checked this way it's excluded from the Edit/Delete selection
+// count (it means "handled", not "selected for bulk action"). Clicking a checkbox the normal way
+// is unaffected and still works exactly as it always did for bulk Edit/Delete.
 function misRowHtml(r,isPinned){
   const handled=isPinned&&r.next_date_recorded_at;
-  const cbAttrs=handled?'checked disabled':'';
   return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
-    <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)"></td>
+    <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" ${handled?'checked':''} onchange="misRowCheck(this)"></td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
 }
-// Sliding a pinned row left records today as next_date_recorded_at (feeds the Scoreboard score)
-// and locks its checkbox. A no-op if it's already handled — matches "cannot be unchecked by
-// sliding again". Mouse AND touch both use pointer events; a small threshold tells a slide apart
+// Sliding a pinned row left toggles next_date_recorded_at (today's date, or cleared) — feeds the
+// Scoreboard score. Mouse AND touch both use pointer events; a small threshold tells a slide apart
 // from a normal click-to-edit.
 function misWireSwipe(){
   document.querySelectorAll('#misTbody tr.mis-pinned').forEach(function(tr){
@@ -1673,7 +1671,7 @@ function misWireSwipe(){
         document.removeEventListener('pointerup',up);
         tr.classList.remove('mis-swiping');
         tr.style.transition='transform .15s'; tr.style.transform='';
-        if(armed){ tr._suppressClick=true; if(dx<-44) misSwipeHandle(Number(tr.dataset.id)); }
+        if(armed){ tr._suppressClick=true; if(dx<-44) misSwipeToggle(Number(tr.dataset.id)); }
       }
       document.addEventListener('pointermove',move);
       document.addEventListener('pointerup',up);
@@ -1683,15 +1681,16 @@ function misWireSwipe(){
     tr.addEventListener('click',function(e){ if(tr._suppressClick){ tr._suppressClick=false; e.stopPropagation(); } },true);
   });
 }
-window.misSwipeHandle=async function(id){
+window.misSwipeToggle=async function(id){
   const row=(window._misRows||[]).find(r=>r.id===id);
-  if(!row||row.next_date_recorded_at)return; // already handled — sliding again does nothing
-  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:todayStr()}).eq('id',id);
-  if(error){toast('Could not mark handled: '+error.message,'err');return;}
-  row.next_date_recorded_at=todayStr();
+  if(!row)return;
+  const nowHandled=!row.next_date_recorded_at;
+  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:nowHandled?todayStr():null}).eq('id',id);
+  if(error){toast('Could not update: '+error.message,'err');return;}
+  row.next_date_recorded_at=nowHandled?todayStr():null;
   const cb=document.querySelector('#misTbody tr[data-id="'+id+'"] .mis-row-cb');
-  if(cb){cb.checked=true;cb.disabled=true;}
-  toast('Marked handled — recorded today','ok');
+  if(cb)cb.checked=nowHandled;
+  toast(nowHandled?'Marked handled — recorded today':'Unmarked','ok');
 };
 async function legalMIS(){
   setCrumb(['Legal','MIS']);
