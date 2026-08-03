@@ -814,10 +814,15 @@ async function s3Delete(storagePath){
 }
 const DOC={dept:null,cat:null,q:'',sort:'created_at.desc',page:1,per:10,sel:new Set(),scope:'documents',legalExpanded:new Set()};
 
-async function docFetch({dept,cat,q,extraNonLegal,folderId,folderIds}={}){
+// `full` pulls content_text too — needed only by the re-index staleness check (docReindexAll),
+// which needs to know how much text a doc already has. Every other caller only renders
+// title/category/size/etc., so leaving content_text out saves dragging up to ~400KB of OCR text
+// per row (Legal has hundreds of OCR'd PDFs now) across the wire just to draw a file list.
+const DOC_LIST_COLS='id,doc_no,title,register_code,department,doc_type,version,tags,storage_path,link,status,confidential,uploaded_by,created_at,category,subcategory,description,file_name,file_size,file_type,visibility,pinned,folder,updated_at,folder_id';
+async function docFetch({dept,cat,q,extraNonLegal,folderId,folderIds,full}={}){
   const [col,dir]=DOC.sort.split('.');
   const build=()=>{
-    let qb=sb.schema('doc').from('documents').select('*');
+    let qb=sb.schema('doc').from('documents').select(full?'*':DOC_LIST_COLS);
     if(dept)qb=qb.eq('department',dept);
     if(extraNonLegal)qb=qb.neq('department','Legal');
     if(cat)qb=qb.eq('category',cat);
@@ -1440,7 +1445,7 @@ window.docReindex=async function(id){
   const host=$('docTableHost');if(host)docRenderTable(host,DOC.dept||undefined);
 };
 window.docReindexAll=async function(dept){
-  const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept});
+  const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept,full:true});
   const toIndex=all.filter(d=>d.storage_path&&(!d.content_text||d.content_text.length<200));
   if(!toIndex.length){toast('All files already indexed','ok');return;}
   const total=toIndex.length;
@@ -1505,15 +1510,17 @@ window.docUploadSave=async function(){
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
 VIEWS.legal=async function(v,seg){
-  const tab=(seg[0]==='mis')?'mis':'docs';
+  const tab=(seg[0]==='mis')?'mis':(seg[0]==='scoreboard')?'scoreboard':'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
     <div class="tabs">
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
+      <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
   if(tab==='mis') legalMIS();
+  else if(tab==='scoreboard') legalScoreboard();
   else legalDocsView(seg);
 };
 async function legalDocsView(seg){
@@ -1630,6 +1637,25 @@ function misCellHtml(f,r){
   if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)">'+esc(misTrunc(v,26)||'—')+'</td>';
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
 }
+// "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) get a
+// second checkbox, separate from the bulk-select one, that records TODAY's date as
+// next_date_recorded_at — the Scoreboard scores off the gap between that and next_date_iso.
+function misRowHtml(r,isPinned){
+  const handled=isPinned
+    ? `<input type="checkbox" class="mis-cb mis-handled-cb" data-id="${r.id}" ${r.next_date_recorded_at?'checked':''} onchange="misRecordDate(${r.id},this.checked)" title="Mark this Next Date as handled">`
+    : '';
+  return `<tr data-id="${r.id}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
+    <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" onchange="misRowCheck(this)"></td>
+    <td onclick="event.stopPropagation()">${handled}</td>
+    ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
+  </tr>`;
+}
+window.misRecordDate=async function(id,checked){
+  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:checked?todayStr():null}).eq('id',id);
+  if(error){toast('Could not update: '+error.message,'err');return;}
+  const row=(window._misRows||[]).find(r=>r.id===id); if(row)row.next_date_recorded_at=checked?todayStr():null;
+  toast(checked?'Marked handled':'Unmarked','ok');
+};
 async function legalMIS(){
   setCrumb(['Legal','MIS']);
   const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
@@ -1641,6 +1667,12 @@ async function legalMIS(){
   window._misSel=new Set();
   const searchKeys=MIS_FIELDS.map(f=>f.k);
   rows.forEach(r=>{ r._blob=searchKeys.map(k=>String(r[k]||'')).join(' ␟ ').toLowerCase(); });
+  // "Pinned" = currently showing on the Calendar (next_date_iso parsed and not in the past) — not a
+  // stored flag, so it can never drift out of sync with what the Calendar actually shows.
+  const todayS=todayStr();
+  const misPinned=rows.filter(r=>r.next_date_iso&&r.next_date_iso>=todayS).sort((a,b)=>String(a.next_date_iso).localeCompare(String(b.next_date_iso)));
+  const misRest=rows.filter(r=>!(r.next_date_iso&&r.next_date_iso>=todayS));
+  const misOrdered=misPinned.concat(misRest);
   body.innerHTML=`
     <style>
       .mis-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -1663,6 +1695,8 @@ async function legalMIS(){
       #misTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s;cursor:pointer}
       #misTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
       #misTbl tbody tr.mis-selected{background:#eff6ff}
+      #misTbl tbody tr.mis-ai-match{background:#fefaf0}
+      .mis-ai-badge{margin-left:6px}
       #misTbl tbody td{padding:11px 12px;vertical-align:top}
       .mis-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
@@ -1692,25 +1726,74 @@ async function legalMIS(){
           <i class="fa-solid fa-magnifying-glass"></i>
           <input id="misSearch" placeholder="Search anything — a value, a column name, or e.g. &quot;priority is empty&quot;" oninput="misFilter()">
         </div>
+        <span class="mis-count" id="misAiStatus"></span>
       </div>
     </div>
     <div class="card" style="overflow:hidden">
       <div style="overflow-x:auto">
       <table id="misTbl">
-        <colgroup><col style="width:36px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
+        <colgroup><col style="width:36px"><col style="width:80px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
         <thead><tr>
           <th style="width:36px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
+          <th style="width:80px" title="Ticked once this Next Date has been acted on — feeds the Scoreboard">Handled</th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
         </tr></thead>
         <tbody id="misTbody">
-          ${rows.map(r=>`<tr data-id="${r.id}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
-            <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" onchange="misRowCheck(this)"></td>
-            ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
-          </tr>`).join('')}
+          ${misPinned.map(r=>misRowHtml(r,true)).join('')}
+          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+2}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
+          ${misRest.map(r=>misRowHtml(r,false)).join('')}
         </tbody>
       </table>
       </div>
     </div>`;
+}
+// Score = how far ahead of the deadline the case was actually handled, using the confirmed rule:
+// gap = Next Date − Recorded Date (days). gap>7 -> +1 (handled well ahead), 0..7 -> 0 (cut it
+// close), gap<=0 (recorded on/after the Next Date) -> -1 (missed/late). No score yet if the
+// "Handled" checkbox in MIS hasn't been ticked for this Next Date.
+function misScoreOf(r){
+  if(!r.next_date_recorded_at||!r.next_date_iso)return null;
+  const gap=Math.round((new Date(r.next_date_iso+'T00:00:00')-new Date(r.next_date_recorded_at+'T00:00:00'))/86400000);
+  if(gap>7)return 1;
+  if(gap>=0)return 0;
+  return -1;
+}
+function misScoreTag(s){
+  if(s===null)return '<span class="mis-ptag mis-ptag--gray">Pending</span>';
+  if(s===1)return '<span class="mis-ptag mis-ptag--green">+1</span>';
+  if(s===0)return '<span class="mis-ptag mis-ptag--amber">0</span>';
+  return '<span class="mis-ptag mis-ptag--red">−1</span>';
+}
+async function legalScoreboard(){
+  setCrumb(['Legal','Scoreboard']);
+  const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
+  const body=$('legalBody');if(!body)return;
+  loader(body);
+  let rows=[];
+  try{
+    const todayS=todayStr();
+    const {data,error}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,next_date_recorded_at').gte('next_date_iso',todayS).order('next_date_iso',{ascending:true});
+    if(error)throw error; rows=data||[];
+  }catch(e){toast((e&&e.message)||'Could not load Scoreboard','err');}
+  body.innerHTML=`<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:var(--bg-subtle,#f8fafc)">
+      ${['Case Type','Cause Title / Parties','Case No.','Priority','Next Date','Recorded Date','Score'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:2px solid var(--line)">${esc(l)}</th>`).join('')}
+    </tr></thead>
+    <tbody>
+      ${rows.length?rows.map(r=>{
+        const score=misScoreOf(r);
+        return `<tr style="border-bottom:1px solid var(--line-2)">
+          <td style="padding:11px 12px;font-weight:600">${esc(r.case_type||'—')}</td>
+          <td style="padding:11px 12px">${esc(r.cause_title||'—')}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${esc(r.case_no||'—')}</td>
+          <td style="padding:11px 12px">${misPriorityTag(r.priority)}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${fmtDate(r.next_date_iso)}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${r.next_date_recorded_at?fmtDate(r.next_date_recorded_at):'—'}</td>
+          <td style="padding:11px 12px">${misScoreTag(score)}</td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="7"><div class="empty" style="padding:30px"><i class="fa-regular fa-calendar-check"></i><div>No cases currently pinned to the Calendar (need a parseable, upcoming Next Date in MIS)</div></div></td></tr>`}
+    </tbody>
+  </table></div></div>`;
 }
 window.misRowCheck=function(cb){
   const id=Number(cb.dataset.id);
@@ -1801,6 +1884,7 @@ window.misFilter=function(){
   const parsed=misParseQuery(q);
   let vis=0;
   document.querySelectorAll('#misTbody tr').forEach(tr=>{
+    if(tr.classList.contains('mis-spacer')) return; // the pinned/rest divider row is never a searchable case
     const id=Number(tr.dataset.id);
     const row=(window._misRows||[]).find(r=>r.id===id);
     let show;
@@ -1825,6 +1909,37 @@ window.misFilter=function(){
     }
   });
   misUpdateToolbar();
+  // Instant substring search above stays as-is; this ADDS rows ChatGPT judges relevant in meaning
+  // (e.g. "eviction" also finding a "tenant removal" row), a few hundred ms later, without touching
+  // rows the fast keyword pass already matched.
+  clearTimeout(window._misAiT);
+  const qEl=$('misAiStatus'); if(qEl)qEl.textContent='';
+  if(raw&&raw.length>=3) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
+};
+window.misAiSearch=async function(raw){
+  const statusEl=$('misAiStatus');
+  try{
+    if(statusEl)statusEl.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking for related cases…';
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const rows=(window._misRows||[]).map(r=>({id:r.id,case_type:r.case_type,cause_title:r.cause_title,case_no:r.case_no,status:r.status,remarks:r.remarks,court:r.court}));
+    const res=await fetch(SUPABASE_URL+'/functions/v1/mis-ai-search',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({query:raw,rows})});
+    const jr=await res.json().catch(()=>({}));
+    if(($('misSearch')&&$('misSearch').value.trim().toLowerCase())!==raw)return; // query changed while we waited — drop stale results
+    if(jr.error){ if(statusEl)statusEl.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i> AI search unavailable ('+esc(String(jr.error).slice(0,60))+')'; return; }
+    const ids=jr.ids||[];
+    let added=0;
+    ids.forEach(id=>{
+      const tr=document.querySelector('#misTbody tr[data-id="'+id+'"]');
+      if(tr && tr.style.display==='none'){ tr.style.display=''; tr.classList.add('mis-ai-match'); added++;
+        if(!tr.querySelector('.mis-ai-badge')){ const td=tr.querySelector('td:last-child'); if(td)td.insertAdjacentHTML('beforeend',' <span class="mis-ai-badge mis-ptag mis-ptag--gray" title="Matched by meaning, not exact text"><i class="fa-solid fa-wand-magic-sparkles"></i> AI</span>'); }
+      }
+    });
+    if(added){ const c=$('misCount'); if(c)c.textContent=(parseInt(c.textContent,10)||0)+added+' cases'; }
+    if(statusEl)statusEl.textContent=added?added+' more found by meaning':'';
+  }catch(e){ if(statusEl)statusEl.textContent=''; }
 };
 window.misCreate=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-gavel"></i> Add Case</h3><span class="x" onclick="closeModal()">&times;</span></div>

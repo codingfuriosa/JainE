@@ -1729,8 +1729,21 @@
 
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
-  let GCAL_FILTERS=new Set(['toMe','byMe','meeting']);
+  let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
   let GCAL_LAST=null; // {byDate,list,asg}
+  let GCAL_CASES=[]; // Legal cases with an upcoming Next Date — only ever populated for users with 'legal' module access
+  // Legal Next Dates ride the same Calendar as tasks/meetings, but visibility is permission-based
+  // (module access), not participation-based like tasks/meetings — not everyone who can see the
+  // Calendar has Legal access, so this must be checked before ever querying mis_cases.
+  function gcalCanSeeCases(){ return !!(state && (state.super || (state.roles && Array.isArray(state.roles.modules) && state.roles.modules.includes('legal')))); }
+  async function gcalCasesLoadData(){
+    if(!gcalCanSeeCases()){ GCAL_CASES=[]; return GCAL_CASES; }
+    try{
+      const {data}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,court').gte('next_date_iso',todayISO());
+      GCAL_CASES=(data||[]).filter(function(c){return !!c.next_date_iso;}).map(function(c){ c.title=c.cause_title||c.case_no||('Case #'+c.id); return c; });
+    }catch(e){ GCAL_CASES=[]; }
+    return GCAL_CASES;
+  }
   let GCAL_PANEL_ANCHOR=null; // date the slide-in panel's day-list is anchored to, or null when the panel shows something else (a task/meeting detail) or is closed
   function calShiftISO(iso,delta){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+delta); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
   function gcalWeekBounds(dateStr){
@@ -1741,7 +1754,7 @@
     return [iso(mon),iso(sun)];
   }
   async function gcalLoadData(){
-    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData()]).then(r=>[r[0],r[1]]);
+    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData(), gcalCasesLoadData()]).then(r=>[r[0],r[1]]);
     // Completed tasks never appear on the calendar (matches the old behaviour) — only active, dated tasks.
     const withDue=tasks.filter(t=>t.due_date && stOf(t)!=='approved');
     const byDate={};
@@ -1754,17 +1767,21 @@
   function gcalVisibleItems(dateStr){
     const items=(GCAL_LAST&&GCAL_LAST.byDate[dateStr])||[];
     const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr) && !MTG_DONE.has(m.id+'|'+dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
-    return items.concat(mtgItems).filter(x=>{
+    // Past dates just stop being included here — same "render-time exclusion, row untouched" pattern
+    // used for recurring meetings (mtgOccursOn) rather than any server-side delete/archive.
+    const caseItems=(dateStr<istTodayISO())?[]:(GCAL_CASES||[]).filter(function(c){return c.next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'case'};});
+    return items.concat(mtgItems).concat(caseItems).filter(x=>{
       if(!GCAL_FILTERS.has(x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':'#16a34a'); }
-  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : String(x.t.id); }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':'#16a34a')); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : String(x.t.id)); }
   window.gcalOpenItem=function(key){
     key=String(key);
     if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
+    else if(key.charAt(0)==='c'){ window.gcalOpenCase(Number(key.slice(1))); }
     else { window.gcalOpenTask(Number(key)); }
   };
 
@@ -1800,8 +1817,12 @@
     const rows=[['toMe','Assigned to me','#2563eb'],['byMe','Assigned by me','#16a34a']].map(function(f){
       return '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has(f[0])?'checked':'')+' onchange="gcalToggleFilter(\''+f[0]+'\',this.checked)"><span class="gcal-filter-dot" style="background:'+f[2]+'"></span>'+f[1]+'</label>';
     }).join('');
+    const caseRow=gcalCanSeeCases()
+      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal next dates</label>'
+      : '';
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
       +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
+      +caseRow
       +'</div>';
   }
   window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k); gcalRenderOnly(); };
@@ -1864,7 +1885,7 @@
       const items=gcalVisibleItems(dateStr);
       // Show every task for the day (row height grows to fit) — the title itself still truncates with an ellipsis so long names don't widen the cell.
       const evs=items.map(function(x){
-        const dragAttrs=x.kind!=='meeting'?(' data-task="'+x.t.id+'" data-date="'+dateStr+'"'):'';
+        const dragAttrs = x.kind==='meeting' ? '' : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"'));
         return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'"'+dragAttrs+' onclick="event.stopPropagation();if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
       }).join('');
       const cls='gcal-mcell'+(dateStr===todayStr?' today':'');
@@ -2011,8 +2032,8 @@
       const mtgDraggable = x.kind==='meeting' && (mtgRt0==='none'||mtgRt0==='weekly'||mtgRt0==='monthly');
       const draggable = x.kind!=='meeting' || mtgDraggable;
       let dragAttrs='';
-      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"');
-      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='toMe'?'To me':'By me');
+      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"'));
+      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='case' ? 'Next date' : (x.kind==='toMe'?'To me':'By me'));
       return '<div class="gcal-lrow"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'"><span class="gcal-lrow-dot" style="background:'+gcalEvColor(x.kind)+'"></span><span class="gcal-lrow-title">'+esc2(x.t.title)+'</span><span class="gcal-lrow-tag">'+esc2(tag)+'</span></div>';
     }).join(''):'<div class="gcal-lrow empty">Nothing scheduled</div>';
     return '<div class="gcal-lday'+(isToday?' today':'')+'" data-date="'+dateStr+'"><div class="gcal-lday-head">'+esc2(label)+(isToday?' <span class="gcal-lday-badge">Today</span>':'')+'</div><div class="gcal-lday-rows">'+rows+'</div></div>';
@@ -2072,6 +2093,22 @@
     if(t.description) html+='<div class="gcal-panel-row"><i class="fa-solid fa-align-left"></i> <div>'+mdBold(t.description)+'</div></div>';
     gcalShowPanel(html, tid);
   };
+  window.gcalOpenCase=function(cid){
+    const c=(GCAL_CASES||[]).find(function(x){return x.id===cid;});
+    if(!c)return;
+    let html='<div class="gcal-panel-title">'+esc2(c.title)+'</div>';
+    if(c.case_type) html+='<div class="gcal-panel-row"><i class="fa-solid fa-scale-balanced"></i> '+esc2(c.case_type)+'</div>';
+    if(c.case_no) html+='<div class="gcal-panel-row"><i class="fa-solid fa-hashtag"></i> '+esc2(c.case_no)+'</div>';
+    if(c.court) html+='<div class="gcal-panel-row"><i class="fa-solid fa-building-columns"></i> '+esc2(c.court)+'</div>';
+    if(c.priority) html+='<div class="gcal-panel-row"><i class="fa-solid fa-flag"></i> '+esc2(c.priority)+'</div>';
+    html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Next date: '+fmtDateY(c.next_date_iso)+'</div>';
+    const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
+    GCAL_PANEL_ANCHOR=null;
+    const bodyEl=panel.querySelector('.gcal-panel-body'); if(bodyEl)bodyEl.innerHTML=html;
+    const foot=panel.querySelector('.gcal-panel-foot');
+    if(foot)foot.innerHTML='<button class="ac-btn" onclick="gcalClosePanel()">Close</button><button class="ac-btn primary" onclick="navTo(\'legal/mis\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in Legal MIS</button>';
+    panel.classList.add('open'); if(backdrop)backdrop.classList.add('open');
+  };
 
   /* ---- Create button + floating action button ----
      Task-creation from the calendar is disabled for now — once Meetings exist this
@@ -2096,7 +2133,7 @@
      in Month view instead to open the agenda-list panel, which has properly-sized draggable rows. */
   function gcalWireDrag(root){
     const body=root||$('gcalBody'); if(!body)return;
-    body.querySelectorAll('.gcal-mev[data-task], .gcal-lrow[data-task], .gcal-lrow[data-meeting]').forEach(function(chip){
+    body.querySelectorAll('.gcal-mev[data-task], .gcal-lrow[data-task], .gcal-lrow[data-meeting], .gcal-mev[data-case], .gcal-lrow[data-case]').forEach(function(chip){
       if(chip._dragWired)return; chip._dragWired=true;
       const inMonthGrid=!!chip.closest('.gcal-mcell');
       chip.style.touchAction='none';
@@ -2107,6 +2144,7 @@
         const startX=e.clientX, startY=e.clientY;
         const tid=chip.dataset.task!=null?Number(chip.dataset.task):null;
         const mid=chip.dataset.meeting!=null?Number(chip.dataset.meeting):null;
+        const cid=chip.dataset.case!=null?Number(chip.dataset.case):null;
         const fromDate=chip.dataset.date;
         let armed=false, curTarget=null, longPressTimer=null;
         function arm(){
@@ -2152,6 +2190,7 @@
               if(newDate && newDate!==fromDate){
                 if(tid!=null) gcalTaskDrop(tid,newDate);
                 else if(mid!=null) gcalMeetingDateDrop(mid,newDate,fromDate);
+                else if(cid!=null) gcalCaseDrop(cid,newDate);
               }
             }
           }
@@ -2187,6 +2226,20 @@
       await gcalLoadData();
       await gcalRefresh();
     }catch(e){ toast('Failed to move task','err'); }
+  };
+  // Dragging a Legal case to a new day writes straight into mis_cases.next_date (public schema,
+  // not acc — see gcalCasesLoadData). This fully replaces whatever free text was there before,
+  // same as dragging a task fully overwrites its due_date; a DB trigger on mis_cases recomputes
+  // next_date_iso from the new value and clears next_date_recorded_at (new date = new deadline).
+  window.gcalCaseDrop=async function(cid,newDate){
+    try{
+      if(newDate<todayISO()){ toast('Cannot move a case to a date before today','err'); return; }
+      const {error}=await sb.from('mis_cases').update({next_date:newDate}).eq('id',cid);
+      if(error){ toast('Failed to move case: '+error.message,'err'); return; }
+      toast('Next date moved to '+fmtDateY(newDate),'ok');
+      await gcalLoadData();
+      await gcalRefresh();
+    }catch(e){ toast('Failed to move case','err'); }
   };
   // Dragging a one-time meeting onto another day's section changes its meeting_date. This resyncs
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
