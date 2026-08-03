@@ -39,7 +39,7 @@ const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'au
 const j=(o:any,s=200)=>new Response(JSON.stringify(o),{status:s,headers:{...cors,'Content-Type':'application/json'}});
 const G='https://graph.facebook.com/v20.0';
 const num=(x:any)=>{const n=Number(x);return isFinite(n)?Math.round(n):0;};
-const POST_METRICS='post_clicks,post_clicks_by_type,post_reactions_by_type_total,post_activity_by_action_type,post_video_views,post_video_views_unique,post_video_avg_time_watched,post_video_view_time,post_media_view';
+const POST_METRICS='post_clicks,post_clicks_by_type,post_reactions_by_type_total,post_activity_by_action_type,post_video_views,post_video_views_unique,post_video_avg_time_watched,post_video_view_time,post_media_view,post_video_followers';
 const REEL_METRICS='fb_reels_total_plays,blue_reels_play_count,post_video_view_time,post_video_avg_time_watched,post_video_followers,post_video_likes_by_reaction_type';
 
 async function gget(url:string){
@@ -185,7 +185,7 @@ Deno.serve(async (req:Request)=>{
           reactions:rx,
           clicks:num(M.post_clicks), clicks_by_type:M.post_clicks_by_type||null,
           video_views:num(M.post_video_views), viewers:num(M.post_video_views_unique),
-          impressions:num(M.post_media_view),
+          impressions:num(M.post_media_view), follows:num(M.post_video_followers),
           video_avg_watch_ms:num(M.post_video_avg_time_watched), video_total_time_ms:num(M.post_video_view_time),
           synced_at:new Date().toISOString()
         };

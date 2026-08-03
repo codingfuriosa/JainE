@@ -8574,24 +8574,34 @@ VIEWS.organic=async function(v,seg){
     // shares or clicks; photo posts have shares and clicks but no video data at all — so a fixed
     // column set leaves most cells blank. Filtering to Reels or Posts narrows the table to just
     // the numbers that type reports.
-    // `has` says whether Facebook reports this metric for that content type at all — used to
-    // tell a real 0 apart from "not applicable". Reels never report shares or clicks; photo
-    // posts never report watch time or duration.
+    // The requested column set. `has` says whether Facebook reports the metric for that content
+    // type, so a genuine 0 is distinguishable from "not applicable" (which shows a dot + tooltip).
+    // These columns are ALWAYS shown even when empty — they were asked for explicitly — except
+    // the video-only ones, which appear when there is video on screen.
     const isReel=function(r){return r.kind==='reel';};
-    const COLS=[
-      {k:'Likes',        get:function(r){return Number(r.likes)||0;},               fmt:orgN, has:function(){return true;}},
-      {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN, has:function(){return true;}},
-      {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN, has:function(r){return !isReel(r);}},
-      {k:'Clicks',       get:function(r){return Number(r.clicks)||0;},              fmt:orgN, has:function(r){return !isReel(r);}},
-      {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true, has:function(){return true;}},
-      // Views = reel/video plays where we have them, otherwise post_media_view (Meta's
-      // replacement for impressions, stored in `impressions`). One column, every type.
+    const hasVideo=function(r){return isReel(r)||Number(r.video_views)>0||Number(r.video_length_s)>0;};
+    const ALWAYS=[
+      // Reach: Meta merged Reach into Views for Facebook posts in Nov 2025 and exposes no
+      // per-post reach metric (30 candidate names probed, all rejected). Instagram still
+      // reports true unique reach, so this fills once an IG account is linked.
+      {k:'Reach',        get:function(r){return Number(r.reach)||0;},               fmt:orgN, has:function(r){return r.network==='instagram';},
+       why:'Facebook merged Reach into Views in Nov 2025 — Instagram still reports it'},
       {k:'Views',        get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN, has:function(){return true;}},
-      {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:isReel},
-      {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs,  has:isReel},
-      {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs, has:isReel},
-      {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN,     has:isReel}
-    ].filter(function(c){ return slice.some(function(r){ return c.get(r)>0; }); });
+      {k:'Viewers',      get:function(r){return Number(r.viewers)||0;},             fmt:orgN, has:hasVideo,
+       why:'unique viewers are only reported for video'},
+      {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN, has:hasVideo,
+       why:'follows gained are only reported for video'},
+      {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true, has:function(){return true;}},
+      {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN, has:function(){return true;}},
+      {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN, has:function(r){return !isReel(r);},
+       why:'Facebook does not report shares on reels'}
+    ];
+    const VIDEO=[
+      {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:hasVideo},
+      {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs,  has:hasVideo},
+      {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs, has:hasVideo}
+    ].filter(function(){ return slice.some(hasVideo); });
+    const COLS=ALWAYS.concat(VIDEO);
 
     body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
       +'<th>Content</th><th>Date</th><th>Account</th><th>Type</th>'
@@ -8610,8 +8620,9 @@ VIEWS.organic=async function(v,seg){
           // Show it as 0 (muted) rather than a dot, which read as "missing" and made the table
           // look half-broken. The dot is reserved for a metric this content type cannot report.
           +COLS.map(function(c){ const v=c.get(r), na=!c.has(r);
+            const tip=c.why||('Facebook does not report this for a '+orgKindLabel(r.kind));
             return '<td class="n'+(c.strong?' org-er':'')+'">'
-              +(na?'<span class="org-na" title="Facebook does not report this for a '+esc(orgKindLabel(r.kind))+'">·</span>'
+              +(na?'<span class="org-na" title="'+esc(tip)+'">·</span>'
                   :(v?c.fmt(v):'<span class="org-zero">0</span>'))+'</td>'; }).join('')
         +'</tr>';
       }).join('')+'</tbody></table></div>'
