@@ -96,7 +96,7 @@ Deno.serve(async (req:Request)=>{
   const db=createClient(SB,SRV);
   let body:any={}; try{ body=await req.json(); }catch(_e){}
   const since=body.since||'', until=body.until||'';
-  const maxPages=Math.min(Number(body.max_pages)||4, 12);
+  const maxPages=Math.min(Number(body.max_pages)||4, 40);   // 40 x 50 = 2000 posts; insights are inline so each page is ONE call
   const cap=maxPages*50;
   const reelPages=Math.min(Number(body.reel_pages)||3, 8);
   const doPosts=body.only!=='reels', doReels=body.only!=='posts';
