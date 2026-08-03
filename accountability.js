@@ -1026,6 +1026,21 @@
     };
     ['wfName','wfTrigger'].forEach(function(k){ const el=$(k); if(el) el.addEventListener('input',refreshNoun); });
     refreshNoun();
+    // Inject the "Instance detail fields" section (Claude-suggested from the triggering event).
+    (function(){
+      const f=v.querySelector('.wf-form'); if(!f)return;
+      const firstSec=f.querySelector('.wf-fsec'); if(!firstSec)return;
+      const holder=document.createElement('div'); holder.className='wf-fsec'; holder.id='wfFieldsSec';
+      holder.innerHTML='<div class="wf-fsec-h"><i class="fa-solid fa-wand-magic-sparkles"></i> Instance detail fields'+(typeof tip==='function'?tip('Auto-suggested from the triggering event using Claude. Edit if needed — these become the fixed fields people fill in when they start an instance.'):'')+'</div>'
+        +'<div id="wfTrigFieldRows" style="display:flex;flex-direction:column;gap:8px"></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button type="button" class="ac-btn" onclick="wfAddTrigField()"><i class="fa-solid fa-plus"></i> Add field</button><button type="button" class="ac-btn" onclick="wfSuggestFields(true)"><i class="fa-solid fa-wand-magic-sparkles"></i> Suggest with Claude</button></div>'
+        +'<div id="wfTrigFieldsStatus" style="font-size:12px;color:var(--slate);margin-top:8px"></div>';
+      firstSec.parentNode.insertBefore(holder, firstSec.nextSibling);
+      const existing=(Array.isArray(flow.trigger_template)?flow.trigger_template:[]).map(function(t){return (t&&t.label)||'';}).filter(Boolean);
+      if(existing.length){ window._wfTrigAnalyzed=(($('wfTrigger')||{}).value||'').trim(); wfRenderTrigFields(existing); }
+      else { wfRenderTrigFields(['','','']); }
+      const tg=$('wfTrigger'); if(tg){ tg.addEventListener('blur',function(){ wfSuggestFields(false); }); }
+    })();
     // Enter = save, Esc = close (ignore while typing in the person-search box)
     const page=v.querySelector('.wf-form');
     if(page){ page.addEventListener('keydown',function(e){
@@ -1061,6 +1076,24 @@
     box.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
   };
 
+  /* ---- Claude-suggested instance detail fields (from the triggering event) ---- */
+  function wfTrigFieldRow(label){ return '<div class="wf-tf-row" style="display:flex;gap:8px"><input class="ac-in wf-tf-input" value="'+esc2(label||'')+'" placeholder="Field label" style="flex:1;min-width:0"><button type="button" class="ac-btn ic danger" title="Remove" onclick="this.closest(\'.wf-tf-row\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'; }
+  function wfRenderTrigFields(labels){ const rows=document.getElementById('wfTrigFieldRows'); if(!rows)return; const arr=(labels&&labels.length)?labels.slice(0,8):['','','']; rows.innerHTML=arr.map(function(l){return wfTrigFieldRow(l);}).join(''); }
+  window.wfAddTrigField=function(){ const rows=document.getElementById('wfTrigFieldRows'); if(rows) rows.insertAdjacentHTML('beforeend', wfTrigFieldRow('')); };
+  window.wfSuggestFields=async function(force){
+    const trig=(($('wfTrigger')||{}).value||'').trim();
+    const status=document.getElementById('wfTrigFieldsStatus');
+    if(!trig){ if(status)status.textContent='Enter a triggering event above to get suggestions.'; return; }
+    if(!force && window._wfTrigAnalyzed===trig) return;
+    if(status)status.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Analysing the triggering event…';
+    try{
+      const r=await fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/wf-suggest-fields',{method:'POST',headers:{'Content-Type':'application/json','apikey':'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'},body:JSON.stringify({trigger_event:trig,name:(($('wfName')||{}).value||'')})});
+      const d=await r.json();
+      if(d&&Array.isArray(d.fields)&&d.fields.length){ wfRenderTrigFields(d.fields); window._wfTrigAnalyzed=trig; if(status)status.textContent=''; }
+      else { if(status)status.textContent='Could not suggest fields — add them manually below.'; }
+    }catch(e){ if(status)status.textContent='Could not reach the suggester — add fields manually below.'; }
+  };
+
   window.wfSave=async function(){
     const name=($('wfName')?$('wfName').value:'').trim();
     const trigger=($('wfTrigger')?$('wfTrigger').value:'').trim();
@@ -1092,6 +1125,11 @@
     try{
       const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null});
       if(error)throw error;
+      // Persist the (Claude-suggested / edited) instance detail fields as this workflow's template.
+      try{
+        const tfields=[].slice.call(document.querySelectorAll('#wfTrigFieldRows .wf-tf-input')).map(function(i){return (i.value||'').trim();}).filter(Boolean);
+        await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields: tfields.map(function(l){return {label:l};}) });
+      }catch(_e){}
       toast('Workflow saved','ok');
       // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
       // opening the detail page, so the buttons already read correctly
@@ -1290,9 +1328,23 @@
     const N=wfNounOf(flow); window._wfNoun=N;
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
+    // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
+    // Fetched once and cached into trigger_template so every instance uses the same fields.
+    let tmpl=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
+    let usable=tmpl.map(function(t){return ((t&&t.label)||'').trim();}).filter(Boolean);
+    if(!editing && usable.length<3 && (flow.trigger_event||'').trim()){
+      try{
+        const r=await fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/wf-suggest-fields',{method:'POST',headers:{'Content-Type':'application/json','apikey':'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'},body:JSON.stringify({trigger_event:flow.trigger_event, name:flow.name})});
+        const d=await r.json();
+        if(d&&Array.isArray(d.fields)&&d.fields.length){
+          tmpl=d.fields.slice(0,3).map(function(l){return {label:l};});
+          try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:tmpl}); }catch(_e){}
+        }
+      }catch(_e){}
+    }
     // Once the detail fields have been defined for this workflow (trigger_template is set), the field
     // LABELS are locked: they can't be edited, added or removed — you only fill in the values.
-    const template=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
+    const template=tmpl;
     const locked=template.length>0;
     let src;
     if(editing){ src=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]; }
