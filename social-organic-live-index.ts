@@ -20,8 +20,12 @@
 //   reels : the post_video_* names on the video_insights edge - NOT the total_video_* family,
 //           which is accepted but returns null. fb_reels_total_plays is the complete play count
 //           (blue_reels_play_count undercounts: 619 vs 726 on the same reel).
+//   VIEWS : Meta retired impressions on 2025-11-15 and replaced them with the media-view family.
+//           post_media_view IS valid on POSTS and works inline - that is our per-post Views number.
+//           It is NOT valid on reels: adding it to the reel batch breaks the whole request, so
+//           reels keep fb_reels_total_plays. page_media_view is the page-level equivalent.
 //   GONE  : post_impressions, post_impressions_unique, post_reach, post_engaged_users,
-//           post_follows - rejected as invalid on v20, so Reach cannot be had at all.
+//           post_follows - rejected on every version v18-v25 under every period.
 //
 // CRITICAL: Graph fails the ENTIRE insights request if ONE metric name is invalid for that
 // object type. post_video_views_unique is valid on posts but NOT on reels, and its presence in
@@ -35,7 +39,7 @@ const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'au
 const j=(o:any,s=200)=>new Response(JSON.stringify(o),{status:s,headers:{...cors,'Content-Type':'application/json'}});
 const G='https://graph.facebook.com/v20.0';
 const num=(x:any)=>{const n=Number(x);return isFinite(n)?Math.round(n):0;};
-const POST_METRICS='post_clicks,post_clicks_by_type,post_reactions_by_type_total,post_activity_by_action_type,post_video_views,post_video_views_unique,post_video_avg_time_watched,post_video_view_time';
+const POST_METRICS='post_clicks,post_clicks_by_type,post_reactions_by_type_total,post_activity_by_action_type,post_video_views,post_video_views_unique,post_video_avg_time_watched,post_video_view_time,post_media_view';
 const REEL_METRICS='fb_reels_total_plays,blue_reels_play_count,post_video_view_time,post_video_avg_time_watched,post_video_followers,post_video_likes_by_reaction_type';
 
 async function gget(url:string){
@@ -181,6 +185,7 @@ Deno.serve(async (req:Request)=>{
           reactions:rx,
           clicks:num(M.post_clicks), clicks_by_type:M.post_clicks_by_type||null,
           video_views:num(M.post_video_views), viewers:num(M.post_video_views_unique),
+          impressions:num(M.post_media_view),
           video_avg_watch_ms:num(M.post_video_avg_time_watched), video_total_time_ms:num(M.post_video_view_time),
           synced_at:new Date().toISOString()
         };

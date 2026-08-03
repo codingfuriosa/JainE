@@ -8487,7 +8487,7 @@ VIEWS.organic=async function(v,seg){
   const tot=rows.reduce(function(a,r){
     a.reach+=Number(r.reach)||0; a.eng+=orgEng(r);
     a.likes+=Number(r.likes)||0; a.comments+=Number(r.comments)||0; a.shares+=Number(r.shares)||0;
-    a.clicks+=Number(r.clicks)||0; a.vv+=Number(r.video_views)||0;
+    a.clicks+=Number(r.clicks)||0; a.vv+=(Number(r.video_views)||Number(r.impressions)||0);
     a.viewers+=Number(r.viewers)||0; a.follows+=Number(r.follows)||0;
     a.watch+=Number(r.video_total_time_ms)||0;
     return a;
@@ -8502,14 +8502,14 @@ VIEWS.organic=async function(v,seg){
   const kpis='<div class="org-kpis">'
     +kpi('fa-layer-group','Content',String(rows.length),rows.length?(nReels+' reels · '+(rows.length-nReels)+' posts'):'')
     +kpi('fa-hand-pointer','Interactions',orgN(tot.eng),'likes+comments+shares')
-    +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','reel & video plays')
+    +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','plays & post views')
     +kpi('fa-clock','Watch time',tot.watch?orgWatch(tot.watch):'—','total')
     +kpi('fa-thumbs-up','Likes',orgN(tot.likes),'')
     +kpi('fa-comment','Comments',orgN(tot.comments),'')
     +kpi('fa-share','Shares',orgN(tot.shares),'')
     +kpi('fa-chart-simple','Avg per post',orgN(avgEng),'interactions')
     +'</div>'
-    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Columns adapt to what Facebook actually reports for the content on screen — reels carry views, watch time and duration; photo posts carry shares and clicks. Per-post <b>Reach</b> is not shown because Facebook rejects it on every API version (v18–v25); page-level reach is available and can be added as a trend.</div>';
+    +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Columns adapt to what Facebook reports for the content on screen — reels carry watch time and duration; photo posts carry shares and clicks. <b>Views</b> is Meta\'s current measure (it replaced Impressions in Nov 2025) and now fills for every content type.</div>';
 
   // filter bar
   const kinds=['all','post','reel','carousel'];
@@ -8579,7 +8579,9 @@ VIEWS.organic=async function(v,seg){
       {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN},
       {k:'Clicks',       get:function(r){return Number(r.clicks)||0;},              fmt:orgN},
       {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true},
-      {k:'Views',        get:function(r){return Number(r.video_views)||0;},         fmt:orgN},
+      // Views = reel/video plays where we have them, otherwise post_media_view (Meta's
+      // replacement for impressions, stored in `impressions`). One column, filled for every type.
+      {k:'Views',        get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN},
       {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch},
       {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs},
       {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs},
