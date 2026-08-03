@@ -8292,6 +8292,9 @@ const ORG_CSS='<style id="orgCss">'
 +'.org-er{font-weight:700}'
 +'.org-na{color:#cbd5e1;cursor:help}'
 +'.org-zero{color:#94a3b8}'
++'.org-date{white-space:nowrap;font-size:12.5px;color:var(--slate)}'
++'.org-netic{margin-left:auto;flex:none;font-size:13px;opacity:.55}'
++'.org-netic.fa-facebook{color:#1877f2}.org-netic.fa-instagram{color:#e1306c}'
 +'.org-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}'
 +'.org-pager .info{font-size:12.5px;color:var(--slate)}'
 +'.org-pager button{height:34px;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-card);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}'
@@ -8479,12 +8482,12 @@ VIEWS.organic=async function(v,seg){
   const S=ORG_SORT;
   const nOf=function(r,k){return Number(r[k])||0;};
   rows.sort(function(a,b){
-    if(S==='views')        return nOf(b,'video_views')-nOf(a,'video_views');
+    const vw=function(r){return nOf(r,'video_views')||nOf(r,'impressions');};
+    if(S==='views')        return vw(b)-vw(a);
     if(S==='interactions') return orgEng(b)-orgEng(a);
-    if(S==='likes')        return nOf(b,'likes')-nOf(a,'likes');
-    if(S==='comments')     return nOf(b,'comments')-nOf(a,'comments');
-    if(S==='shares')       return nOf(b,'shares')-nOf(a,'shares');
+    if(S==='follows')      return nOf(b,'follows')-nOf(a,'follows');
     if(S==='watch')        return nOf(b,'video_total_time_ms')-nOf(a,'video_total_time_ms');
+    if(S==='avgwatch')     return nOf(b,'video_avg_watch_ms')-nOf(a,'video_avg_watch_ms');
     return String(b.created_time||'').localeCompare(String(a.created_time||''));
   });
 
@@ -8504,13 +8507,13 @@ VIEWS.organic=async function(v,seg){
   const nReels=rows.filter(function(r){return r.kind==='reel';}).length;
   const avgEng=rows.length?Math.round(tot.eng/rows.length):0;
   const kpis='<div class="org-kpis">'
-    +kpi('fa-layer-group','Content',String(rows.length),rows.length?(nReels+' reels · '+(rows.length-nReels)+' posts'):'')
-    +kpi('fa-hand-pointer','Interactions',orgN(tot.eng),'likes+comments+shares')
+    +kpi('fa-layer-group','Posts',String(rows.length),rows.length?(nReels+' reels · '+(rows.length-nReels)+' posts'):'')
+    +kpi('fa-users','Reach',tot.reach?orgN(tot.reach):'—','Instagram only')
     +kpi('fa-play','Views',tot.vv?orgN(tot.vv):'—','plays & post views')
-    +kpi('fa-clock','Watch time',tot.watch?orgWatch(tot.watch):'—','total')
-    +kpi('fa-thumbs-up','Likes',orgN(tot.likes),'')
-    +kpi('fa-comment','Comments',orgN(tot.comments),'')
-    +kpi('fa-share','Shares',orgN(tot.shares),'')
+    +kpi('fa-hand-pointer','Interactions',orgN(tot.eng),'')
+    +kpi('fa-user-plus','Follows',tot.follows?orgN(tot.follows):'—','from video')
+    +kpi('fa-clock','Total Watch Time',tot.watch?orgWatch(tot.watch):'—','')
+    +kpi('fa-stopwatch','Avg Watch Time',tot.watch&&nReels?orgSecs(tot.watch/Math.max(1,nReels)):'—','per reel')
     +kpi('fa-chart-simple','Avg per post',orgN(avgEng),'interactions')
     +'</div>'
     +'<div class="org-note"><i class="fa-solid fa-circle-info"></i> Columns adapt to what Facebook reports for the content on screen — reels carry watch time and duration; photo posts carry shares and clicks. <b>Views</b> is Meta\'s current measure (it replaced Impressions in Nov 2025) and now fills for every content type.</div>';
@@ -8530,7 +8533,7 @@ VIEWS.organic=async function(v,seg){
   const pageSel='<select class="org-sel" onchange="orgSetPageId(this.value)"><option value="all"'+(ORG_PAGE==='all'?' selected':'')+'>All pages</option>'
     +(ORG_PAGES||[]).map(function(p){return '<option value="'+esc(p.id)+'"'+(String(ORG_PAGE)===String(p.id)?' selected':'')+'>'+esc(p.name||p.id)+'</option>';}).join('')+'</select>';
   const sortSel='<select class="org-sel" onchange="orgSetSort(this.value)">'
-    +[['date','Newest first'],['views','Most views'],['interactions','Most interactions'],['likes','Most likes'],['comments','Most comments'],['shares','Most shares'],['watch','Most watch time']]
+    +[['date','Newest first'],['views','Most views'],['interactions','Most interactions'],['follows','Most follows'],['watch','Most watch time'],['avgwatch','Longest avg watch']]
       .map(function(o){return '<option value="'+o[0]+'"'+(ORG_SORT===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';
 
   const bar='<div class="org-bar">'+orgDatePicker()
@@ -8583,37 +8586,29 @@ VIEWS.organic=async function(v,seg){
     // the video-only ones, which appear when there is video on screen.
     const isReel=function(r){return r.kind==='reel';};
     const hasVideo=function(r){return isReel(r)||Number(r.video_views)>0||Number(r.video_length_s)>0;};
-    const ALWAYS=[
-      // Reach: Meta merged Reach into Views for Facebook posts in Nov 2025 and exposes no
-      // per-post reach metric (30 candidate names probed, all rejected). Instagram still
-      // reports true unique reach, so this fills once an IG account is linked.
-      {k:'Reach',        get:function(r){return Number(r.reach)||0;},               fmt:orgN, has:function(r){return r.network==='instagram';},
-       why:'Facebook merged Reach into Views in Nov 2025 — Instagram still reports it'},
-      {k:'Views',        get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN, has:function(){return true;}},
-      // Viewers: post_video_views_unique works on standalone VIDEO posts but is rejected on
-      // reels (and total_video_views_unique returns null there), so reels cannot report it.
-      {k:'Viewers',      get:function(r){return Number(r.viewers)||0;},             fmt:orgN,
-       has:function(r){return r.network==='instagram'||(hasVideo(r)&&!isReel(r));},
-       why:'Facebook reports unique viewers for standalone videos, not for reels'},
-      {k:'Follows',      get:function(r){return Number(r.follows)||0;},             fmt:orgN, has:hasVideo,
+    const COLS=[
+      // Reach: no per-post reach metric exists on Facebook — 30 names and 42 permutations probed
+      // across v18-v25. Business Suite shows it because Meta computes it internally without
+      // exposing it. Instagram does report true unique reach, so this fills for IG content.
+      {k:'Reach',            get:function(r){return Number(r.reach)||0;},               fmt:orgN,
+       has:function(r){return r.network==='instagram';},
+       why:'Facebook does not expose per-post Reach through its API — Instagram does'},
+      {k:'Views',            get:function(r){return Number(r.video_views)||Number(r.impressions)||0;}, fmt:orgN,
+       has:function(){return true;}},
+      {k:'Interactions',     get:function(r){return orgEng(r);},                        fmt:orgN, strong:true,
+       has:function(){return true;}},
+      {k:'Follows',          get:function(r){return Number(r.follows)||0;},             fmt:orgN, has:hasVideo,
        why:'follows gained are only reported for video'},
-      {k:'Interactions', get:function(r){return orgEng(r);},                        fmt:orgN, strong:true, has:function(){return true;}},
-      {k:'Comments',     get:function(r){return Number(r.comments)||0;},            fmt:orgN, has:function(){return true;}},
-      // Shares on reels: not exposed anywhere. post_video_social_actions and
-      // total_video_stories_by_action_type both come back empty, post_video_shares /
-      // blue_reels_share_count are invalid, and the reel object has no `shares` field at all.
-      {k:'Shares',       get:function(r){return Number(r.shares)||0;},              fmt:orgN, has:function(r){return !isReel(r);},
-       why:'Facebook exposes no share count for reels — not in insights or on the reel itself'}
+      {k:'Duration',         get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs, has:hasVideo,
+       why:'video only'},
+      {k:'Avg Watch Time',   get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs,  has:hasVideo,
+       why:'video only'},
+      {k:'Total Watch Time', get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:hasVideo,
+       why:'video only'}
     ];
-    const VIDEO=[
-      {k:'Watch time',   get:function(r){return Number(r.video_total_time_ms)||0;}, fmt:orgWatch, has:hasVideo},
-      {k:'Avg play',     get:function(r){return Number(r.video_avg_watch_ms)||0;},  fmt:orgSecs,  has:hasVideo},
-      {k:'Duration',     get:function(r){return (Number(r.video_length_s)||0)*1000;},fmt:orgSecs, has:hasVideo}
-    ].filter(function(){ return slice.some(hasVideo); });
-    const COLS=ALWAYS.concat(VIDEO);
 
     body='<div class="org-tblwrap"><table class="org-tbl"><thead><tr>'
-      +'<th>Content</th><th>Date</th><th>Account</th><th>Type</th>'
+      +'<th>Post Date</th><th>Post</th><th>Format</th>'
       +COLS.map(function(c){return '<th class="n">'+esc(c.k)+'</th>';}).join('')
       +'</tr></thead><tbody>'
       +slice.map(function(r){
@@ -8621,9 +8616,9 @@ VIEWS.organic=async function(v,seg){
                                :'<div class="org-thumb-ph"><i class="fa-regular fa-image"></i></div>';
         const txt=String(r.message||'').replace(/\s+/g,' ').trim()||'(no caption)';
         return '<tr onclick="orgOpen(\''+esc(String(r.id))+'\')">'
-          +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div></div></td>'
-          +'<td style="white-space:nowrap;font-size:12.5px;color:var(--slate)">'+orgDT(r.created_time)+'</td>'
-          +'<td><span class="org-net"><i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+'"></i> '+esc(r.page_name||'')+'</span></td>'
+          +'<td class="org-date">'+orgDT(r.created_time)+'</td>'
+          +'<td><div class="org-post">'+thumb+'<div class="org-ptxt"><b>'+esc(txt.slice(0,120))+'</b></div>'
+            +'<i class="fa-brands '+(r.network==='instagram'?'fa-instagram':'fa-facebook')+' org-netic" title="'+esc(r.page_name||'')+'"></i></div></td>'
           +'<td><span class="org-tag '+esc(r.kind||'post')+'">'+esc(orgKindLabel(r.kind))+'</span></td>'
           // A genuine zero is data — a post published an hour ago really does have 0 likes.
           // Show it as 0 (muted) rather than a dot, which read as "missing" and made the table
