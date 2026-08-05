@@ -1647,9 +1647,11 @@ function misRowHtml(r,isPinned){
   const handled=isPinned&&r.next_date_recorded_at;
   const cbAttrs=handled?'checked disabled':'';
   const cbCls='mis-cb mis-row-cb'+(handled?' mis-handled':'');
-  const handle=isPinned?`<i class="fa-solid fa-grip-vertical mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
+  // Reuses the app's existing .drag-handle look (accountability task/checklist rows) instead of a
+  // one-off style, so spacing/size/touch-target match what's already established elsewhere.
+  const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
   return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misEdit(${r.id})">
-    <td onclick="event.stopPropagation()" style="white-space:nowrap"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
+    <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
 }
@@ -1745,9 +1747,9 @@ async function legalMIS(){
       .mis-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
       .mis-cb:disabled{cursor:not-allowed}
       .mis-cb.mis-handled{accent-color:#94a3b8}
-      .mis-handle{color:var(--slate);font-size:12px;margin-left:6px;cursor:grab;touch-action:pan-y}
-      .mis-handle:active{cursor:grabbing}
-      #misTbl tbody tr.mis-swiping{background:#eef2ff}
+      .mis-cb-cell{display:flex;align-items:center;gap:11px}
+      .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
+      #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
       #misTbl td,#misTbl th{overflow:hidden}
       @media(max-width:768px){
