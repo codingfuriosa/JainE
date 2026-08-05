@@ -221,6 +221,7 @@ const NAV=[
   ]},
   {group:'Growth & Strategy',items:[
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
+    {id:'competitors',label:'Competitor Ads',icon:'fa-magnifying-glass-chart'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
@@ -8277,6 +8278,117 @@ VIEWS.playbook=function(v,seg){
   } else if(ti===1){ body=mCard('Featured play — Lead → Booking',mStep(['Capture','Qualify','Site visit','Negotiate','Token','Booking','Agreement','Register'],'Site visit')); }
   else { body=mTable(['Step','Responsible','Accountable','Consulted','Informed'],[['Site visit','Sales Exec','Sales Head','CRM','Director'],['Booking','Sales Head','Director','Finance','Legal']]); }
   v.innerHTML=mHead('fa-book-open','#4338ca','Playbook')+mTabs('playbook',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+};
+
+/* ---------- COMPETITOR ADS — Meta Ad Library watchlist ---------- */
+// Tracks a fixed watchlist of competitors against Meta's public Ad Library API (ads_archive) via
+// the competitor-ads-sync edge function. Deliberately NOT spend/reach — Meta only exposes those
+// for political/issue ads, never ordinary commercial ones — this is "what are they running and
+// for how long", sourced from camp.competitor_watchlist / camp.competitor_ads.
+VIEWS.competitors=async function(v,seg){
+  setCrumb(['Growth & Strategy','Competitor Ads']);
+  v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
+    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 16px">'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — not spend or reach, which Meta only exposes for political/issue ads.</p>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add Competitor</button>'
+        +'<button class="btn btn-primary" id="compSyncAllBtn" onclick="compSyncAll()"><i class="fa-solid fa-rotate"></i> Sync All</button>'
+      +'</div>'
+    +'</div>'
+    +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
+  await compRender();
+};
+async function compRender(){
+  const host=$('compBody'); if(!host)return;
+  let wl=[],ads=[];
+  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('created_at',{ascending:false}); wl=data||[]; }catch(e){}
+  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('last_seen_at',{ascending:false}).limit(500); ads=data||[]; }catch(e){}
+  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
+  host.innerHTML=wl.map(function(w){
+    const wads=ads.filter(function(a){return a.watchlist_id===w.id;});
+    const running=wads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
+    return '<div class="card card-pad" style="margin-bottom:16px">'
+      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc(w.name)+'</div><div style="color:var(--slate);font-size:12px">Search term: "'+esc(w.search_term)+'" · '+wads.length+' ad(s) seen · '+running+' currently running</div></div>'
+        +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> Active</label>'
+        +'<button class="btn btn-sm" onclick="compSync('+w.id+',this)"><i class="fa-solid fa-rotate"></i> Sync</button>'
+        +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
+      +'</div>'
+      +(wads.length
+        ?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">'+wads.slice(0,24).map(compAdCard).join('')+'</div>'
+        :'<div class="empty" style="padding:20px"><i class="fa-regular fa-clock"></i><div>Not synced yet — click Sync</div></div>')
+      +'</div>';
+  }).join('');
+}
+function compAdCard(a){
+  const stillRunning=!a.ad_delivery_stop_time;
+  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
+  const bodyText=bodies.length?String(bodies[0]).slice(0,140):'(no ad text)';
+  const platforms=(Array.isArray(a.publisher_platforms)?a.publisher_platforms:[]).join(', ')||'—';
+  const thumb=a.media_s3_path
+    ?'<div style="height:120px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);cursor:pointer" onclick="s3OpenSigned(\''+esc(a.media_s3_path)+'\')"><i class="fa-regular fa-image" style="font-size:20px"></i></div>'
+    :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" style="height:120px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
+  return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px">'
+    +thumb
+    +'<div style="font-size:12.5px;margin:8px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
+    +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+' · '+esc(platforms)+'</div>'
+    +'<div style="font-size:11px;color:var(--slate);margin-top:4px">'+(stillRunning?'<span style="color:#16a34a;font-weight:600">Still running</span>':'Ended '+fmtDate(a.ad_delivery_stop_time))+' · since '+fmtDate(a.ad_delivery_start_time)+'</div>'
+  +'</div>';
+}
+window.compAddModal=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Competitor</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><label>Display name<input id="compName" placeholder="e.g. Godrej Properties"></label>'
+    +'<label>Search term sent to Meta<input id="compSearchTerm" placeholder="Defaults to the name above"></label></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
+};
+window.compSave=async function(){
+  const name=(($('compName')&&$('compName').value)||'').trim();
+  const term=(($('compSearchTerm')&&$('compSearchTerm').value)||'').trim()||name;
+  if(!name){toast('Enter a name','err');return;}
+  const {error}=await sb.schema('camp').from('competitor_watchlist').insert({name:name,search_term:term});
+  if(error){toast(error.message,'err');return;}
+  closeModal();toast('Competitor added','ok');
+  await compRender();
+};
+window.compToggleActive=async function(id,active){
+  await sb.schema('camp').from('competitor_watchlist').update({active:active}).eq('id',id);
+};
+window.compRemove=async function(id){
+  const ok=await confirmDialog('Remove this competitor? Its stored ads will be deleted too.',{okLabel:'Remove'});
+  if(!ok)return;
+  await sb.schema('camp').from('competitor_watchlist').delete().eq('id',id);
+  toast('Removed','ok');
+  await compRender();
+};
+window.compSync=async function(id,btn){
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({watchlist_id:id})});
+    const jr=await res.json().catch(function(){return {};});
+    if(jr.error){toast(jr.error,'err');}
+    else toast('Synced — '+(jr.newAds||0)+' new ad(s)','ok');
+  }catch(e){toast('Sync failed','err');}
+  await compRender();
+};
+window.compSyncAll=async function(){
+  const btn=$('compSyncAllBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Syncing…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({})});
+    const jr=await res.json().catch(function(){return {};});
+    if(jr.error){toast(jr.error,'err');}
+    else toast('Synced — '+(jr.newAds||0)+' new ad(s) across '+(jr.synced||0)+' total','ok');
+  }catch(e){toast('Sync failed','err');}
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> Sync All';}
+  await compRender();
 };
 
 
