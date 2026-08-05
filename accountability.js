@@ -189,9 +189,11 @@
        wider — the old min-width:220px — pushed past the card and gave the page a sideways
        scrollbar whenever the picker sat in a narrow column. */
     .wf-pp-panel{position:absolute;top:calc(100% + 5px);left:0;right:0;width:auto;min-width:0;max-width:none;z-index:60;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:6px;display:none;max-height:min(300px,50vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
-    .wf-pp-panel .ms-row{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .wf-pp.open .wf-pp-panel{display:block}
-    .wf-pp-panel .ms-search{margin-bottom:6px;width:100%;box-sizing:border-box}
+    .wf-pp-panel .ms-search{margin-bottom:6px;width:100%;box-sizing:border-box;height:36px}
+    /* The person list reuses the shared .ms-dept / .ms-opt / avatar styles (nexus.css) so it
+       matches the app's other member dropdown exactly. */
+    .wf-pp-panel .ms-opt.on{background:var(--brand-a10,#eef2ff)}
     /* Workflow form responsiveness — kept AFTER the picker rules above, otherwise
        the wf-step-sub wf-pp flex:2 rule wins on source order and the picker stays squashed. */
     @media(max-width:760px){.wf-fgrid{grid-template-columns:1fr;gap:14px}}
@@ -761,7 +763,8 @@
     const groups={}; (WF_PEOPLE||[]).forEach(function(pp){ const ds=(Array.isArray(pp.depts)?pp.depts:[]).map(function(d){return String(d||'').trim();}).filter(Boolean); const key=ds.length?ds.slice().sort().join(', '):'Unassigned'; (groups[key]=groups[key]||[]).push(pp); });
     const order=Object.keys(groups).sort(function(a,b){ return a==='Unassigned'?1:(b==='Unassigned'?-1:a.localeCompare(b)); });
     let listHtml='';
-    order.forEach(function(d){ listHtml+='<div class="ms-grp">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ const on=eq(pp.email,sel); listHtml+='<div class="ms-row'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)"><span class="ms-av" style="background:'+colorFor(pp.email)+'">'+esc2(iniOf(pp.name).toUpperCase())+'</span><span class="ms-nm">'+esc2(pp.name)+'</span><i class="fa-solid fa-check ms-ck"></i></div>'; }); });
+    const avOf=function(nm){ try{ return (typeof avatar==='function')?avatar(nm):('<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'); }catch(e){ return '<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'; } };
+    order.forEach(function(d){ listHtml+='<div class="ms-dept">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ const on=eq(pp.email,sel); listHtml+='<div class="ms-opt'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)">'+avOf(pp.name)+'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc2(pp.name)+'</span>'+(on?'<i class="fa-solid fa-check" style="color:var(--brand)"></i>':'')+'</div>'; }); });
     return '<div class="wf-pp" id="'+pid+'">'
       +'<input type="hidden" class="wf-s-person" value="'+esc2(sel||'')+'">'
       +'<button type="button" class="ac-in wf-pp-btn" onclick="wfPersonToggle(this)">'+trig+'<i class="fa-solid fa-chevron-down wf-pp-caret"></i></button>'
@@ -779,15 +782,15 @@
     const email=row.getAttribute('data-email')||'', name=row.getAttribute('data-name')||email;
     const hid=pp.querySelector('.wf-s-person'); if(hid)hid.value=email;
     const btn=pp.querySelector('.wf-pp-btn'); if(btn)btn.innerHTML='<span class="wf-pp-av" style="background:'+colorFor(email)+'">'+esc2(iniOf(name).toUpperCase())+'</span><span class="wf-pp-nm">'+esc2(name)+'</span><i class="fa-solid fa-chevron-down wf-pp-caret"></i>';
-    pp.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
+    pp.querySelectorAll('.ms-opt.on').forEach(function(x){x.classList.remove('on');});
     row.classList.add('on');
     pp.classList.remove('open');
   };
   window.wfPersonFilter=function(inp){
     const panel=inp.closest('.wf-pp-panel'); if(!panel)return; const box=panel.querySelector('.ms-list'); if(!box)return;
     const q=(inp.value||'').toLowerCase();
-    box.querySelectorAll('.ms-row').forEach(function(l){ l.style.display=(!q||(l.dataset.n||'').includes(q))?'':'none'; });
-    box.querySelectorAll('.ms-grp').forEach(function(g){ let n=g.nextElementSibling,vis=false; while(n&&n.classList&&n.classList.contains('ms-row')){ if(n.style.display!=='none')vis=true; n=n.nextElementSibling; } g.style.display=vis?'':'none'; });
+    box.querySelectorAll('.ms-opt').forEach(function(l){ l.style.display=(!q||(l.dataset.n||'').includes(q))?'':'none'; });
+    box.querySelectorAll('.ms-dept').forEach(function(g){ let n=g.nextElementSibling,vis=false; while(n&&n.classList&&n.classList.contains('ms-opt')){ if(n.style.display!=='none')vis=true; n=n.nextElementSibling; } g.style.display=vis?'':'none'; });
   };
 
   /* small workflow helpers */
@@ -1026,21 +1029,6 @@
     };
     ['wfName','wfTrigger'].forEach(function(k){ const el=$(k); if(el) el.addEventListener('input',refreshNoun); });
     refreshNoun();
-    // Inject the "Instance detail fields" section (Claude-suggested from the triggering event).
-    (function(){
-      const f=v.querySelector('.wf-form'); if(!f)return;
-      const firstSec=f.querySelector('.wf-fsec'); if(!firstSec)return;
-      const holder=document.createElement('div'); holder.className='wf-fsec'; holder.id='wfFieldsSec';
-      holder.innerHTML='<div class="wf-fsec-h"><i class="fa-solid fa-wand-magic-sparkles"></i> Instance detail fields'+(typeof tip==='function'?tip('Auto-suggested from the triggering event using Claude. Edit if needed — these become the fixed fields people fill in when they start an instance.'):'')+'</div>'
-        +'<div id="wfTrigFieldRows" style="display:flex;flex-direction:column;gap:8px"></div>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button type="button" class="ac-btn" onclick="wfAddTrigField()"><i class="fa-solid fa-plus"></i> Add field</button><button type="button" class="ac-btn" onclick="wfSuggestFields(true)"><i class="fa-solid fa-wand-magic-sparkles"></i> Suggest with Claude</button></div>'
-        +'<div id="wfTrigFieldsStatus" style="font-size:12px;color:var(--slate);margin-top:8px"></div>';
-      firstSec.parentNode.insertBefore(holder, firstSec.nextSibling);
-      const existing=(Array.isArray(flow.trigger_template)?flow.trigger_template:[]).map(function(t){return (t&&t.label)||'';}).filter(Boolean);
-      if(existing.length){ window._wfTrigAnalyzed=(($('wfTrigger')||{}).value||'').trim(); wfRenderTrigFields(existing); }
-      else { wfRenderTrigFields(['','','']); }
-      const tg=$('wfTrigger'); if(tg){ tg.addEventListener('blur',function(){ wfSuggestFields(false); }); }
-    })();
     // Enter = save, Esc = close (ignore while typing in the person-search box)
     const page=v.querySelector('.wf-form');
     if(page){ page.addEventListener('keydown',function(e){
@@ -1076,23 +1064,6 @@
     box.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
   };
 
-  /* ---- Claude-suggested instance detail fields (from the triggering event) ---- */
-  function wfTrigFieldRow(label){ return '<div class="wf-tf-row" style="display:flex;gap:8px"><input class="ac-in wf-tf-input" value="'+esc2(label||'')+'" placeholder="Field label" style="flex:1;min-width:0"><button type="button" class="ac-btn ic danger" title="Remove" onclick="this.closest(\'.wf-tf-row\').remove()"><i class="fa-solid fa-xmark"></i></button></div>'; }
-  function wfRenderTrigFields(labels){ const rows=document.getElementById('wfTrigFieldRows'); if(!rows)return; const arr=(labels&&labels.length)?labels.slice(0,8):['','','']; rows.innerHTML=arr.map(function(l){return wfTrigFieldRow(l);}).join(''); }
-  window.wfAddTrigField=function(){ const rows=document.getElementById('wfTrigFieldRows'); if(rows) rows.insertAdjacentHTML('beforeend', wfTrigFieldRow('')); };
-  window.wfSuggestFields=async function(force){
-    const trig=(($('wfTrigger')||{}).value||'').trim();
-    const status=document.getElementById('wfTrigFieldsStatus');
-    if(!trig){ if(status)status.textContent='Enter a triggering event above to get suggestions.'; return; }
-    if(!force && window._wfTrigAnalyzed===trig) return;
-    if(status)status.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Analysing the triggering event…';
-    try{
-      const r=await fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/wf-suggest-fields',{method:'POST',headers:{'Content-Type':'application/json','apikey':'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'},body:JSON.stringify({trigger_event:trig,name:(($('wfName')||{}).value||'')})});
-      const d=await r.json();
-      if(d&&Array.isArray(d.fields)&&d.fields.length){ wfRenderTrigFields(d.fields); window._wfTrigAnalyzed=trig; if(status)status.textContent=''; }
-      else { if(status)status.textContent='Could not suggest fields — add them manually below.'; }
-    }catch(e){ if(status)status.textContent='Could not reach the suggester — add fields manually below.'; }
-  };
 
   window.wfSave=async function(){
     const name=($('wfName')?$('wfName').value:'').trim();
@@ -1125,11 +1096,6 @@
     try{
       const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null});
       if(error)throw error;
-      // Persist the (Claude-suggested / edited) instance detail fields as this workflow's template.
-      try{
-        const tfields=[].slice.call(document.querySelectorAll('#wfTrigFieldRows .wf-tf-input')).map(function(i){return (i.value||'').trim();}).filter(Boolean);
-        await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields: tfields.map(function(l){return {label:l};}) });
-      }catch(_e){}
       toast('Workflow saved','ok');
       // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
       // opening the detail page, so the buttons already read correctly
