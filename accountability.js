@@ -269,10 +269,6 @@
     .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
     .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
     .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%;min-width:0}
-    .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-    .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
-    .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}
-    .gcal-mev.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:1px}
     .gcal-mcell.gcal-drop-hover,.gcal-allday-col.gcal-drop-hover{outline:2px dashed #2563eb;outline-offset:-2px;background:rgba(37,99,235,.08)}
     .gcal-wrap{display:flex;flex-direction:column;max-height:66vh;overflow:auto}
     .gcal-allday{display:flex;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
@@ -329,10 +325,14 @@
     .gcal-panel-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#1f2937}
     .gcal-panel-head .x{margin-left:auto;cursor:pointer;color:#6b7280;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center}
     .gcal-panel-head .x:hover{background:#f1f5f9;color:#1f2937}
-    .gcal-panel-body{flex:1;overflow-y:auto;padding:18px}
-    .gcal-panel-title{font-size:16px;font-weight:700;color:#1f2937;margin-bottom:14px;line-height:1.4}
-    .gcal-panel-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;font-size:13.5px;color:#374151;line-height:1.5}
+    .gcal-panel-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:18px}
+    .gcal-panel-title{font-size:16px;font-weight:700;color:#1f2937;margin-bottom:14px;line-height:1.4;overflow-wrap:anywhere}
+    .gcal-panel-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;font-size:13.5px;color:#374151;line-height:1.5;min-width:0;overflow-wrap:anywhere}
     .gcal-panel-row i{width:16px;color:#6b7280;margin-top:2px;flex:none}
+    /* Inside the panel/menu specifically, long titles wrap to a new line instead of the ellipsis
+       truncation used elsewhere (e.g. the Week view list) — no horizontal scroll in here either way. */
+    .gcal-panel .gcal-lrow{align-items:flex-start}
+    .gcal-panel .gcal-lrow-title{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
     .gcal-panel-foot{padding:14px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px}
     .gcal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.15);z-index:199;opacity:0;pointer-events:none;transition:opacity .18s}
     .gcal-backdrop.open{opacity:1;pointer-events:auto}
@@ -1884,9 +1884,10 @@
       const dateStr=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
       const items=gcalVisibleItems(dateStr);
       // Show every task for the day (row height grows to fit) — the title itself still truncates with an ellipsis so long names don't widen the cell.
+      // No drag here by design — the Month grid is view-only; click a day to open its agenda panel,
+      // where dragging to reschedule is still available (see gcalListDayHtml).
       const evs=items.map(function(x){
-        const dragAttrs = x.kind==='meeting' ? '' : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"'));
-        return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'"'+dragAttrs+' onclick="event.stopPropagation();if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
+        return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'" onclick="event.stopPropagation();gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
       }).join('');
       const cls='gcal-mcell'+(dateStr===todayStr?' today':'');
       cells+='<div class="'+cls+'" data-date="'+dateStr+'" onclick="gcalOpenDay(\''+dateStr+'\')"><div class="gcal-mnum">'+d+'</div><div class="gcal-mevents">'+evs+'</div></div>';
@@ -2115,25 +2116,24 @@
      will be redesigned around them rather than quietly creating a plain Task. */
   window.gcalQuickAdd=function(){ window._mtgAutoOpenCreate=true; navTo('tasks/meetings'); };
 
-  /* ---- drag & drop: dragging a task or one-time-meeting chip/row onto another day moves its date ----
+  /* ---- drag & drop: dragging a task or one-time-meeting row onto another day moves its date ----
      Uses pointer events (not native HTML5 DnD) to match the touch-friendly drag pattern already used
-     elsewhere in this file (wirePointerDrag/wireSwapDrag). Works in three places: Month view's grid
-     chips (.gcal-mev[data-task] — meetings aren't draggable there), and the shared 10-day agenda list
-     used by Week view and Month's day-click panel (.gcal-lrow[data-task]/.gcal-lrow[data-meeting] —
-     one-time meetings ARE draggable there, recurring ones aren't since "the date" isn't a single field
-     for them). `root` scopes the query so it can be wired inside the slide-in panel too, not just #gcalBody.
+     elsewhere in this file (wirePointerDrag/wireSwapDrag). By design, the Month grid ITSELF is
+     view-only — no drag there at all, on any chip kind — since long/varied content (Legal case
+     titles especially) made stray drags too easy to trigger by accident on a small chip. Click a
+     day to open its agenda panel (.gcal-lrow[data-task]/[data-meeting]/[data-case]), where dragging
+     to reschedule is still available — one-time meetings ARE draggable there, recurring ones aren't
+     since "the date" isn't a single field for them. `root` scopes the query so it can be wired
+     inside the slide-in panel too, not just #gcalBody.
      Mouse/pen: a small movement threshold distinguishes a drag from a normal click.
      Touch: a movement threshold alone doesn't work on phones — the very first finger move is
      indistinguishable from "the user is trying to scroll the calendar", so instant-arm-on-move would
      fight the page's native scrolling. Instead touch uses a long-press-to-pick-up gesture (like
      reordering a card in Trello/Asana's mobile apps): hold still for ~380ms to arm the drag; moving
-     more than a few px before that timer fires cancels arming and lets the normal scroll happen.
-     Exception: inside the Month grid itself, touch dragging is skipped entirely — the chips there are
-     tiny mobile dots that are too fragile to drag reliably even with long-press. On mobile, tap a day
-     in Month view instead to open the agenda-list panel, which has properly-sized draggable rows. */
+     more than a few px before that timer fires cancels arming and lets the normal scroll happen. */
   function gcalWireDrag(root){
     const body=root||$('gcalBody'); if(!body)return;
-    body.querySelectorAll('.gcal-mev[data-task], .gcal-lrow[data-task], .gcal-lrow[data-meeting], .gcal-mev[data-case], .gcal-lrow[data-case]').forEach(function(chip){
+    body.querySelectorAll('.gcal-lrow[data-task], .gcal-lrow[data-meeting], .gcal-lrow[data-case]').forEach(function(chip){
       if(chip._dragWired)return; chip._dragWired=true;
       const inMonthGrid=!!chip.closest('.gcal-mcell');
       chip.style.touchAction='none';

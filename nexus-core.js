@@ -1637,48 +1637,49 @@ function misCellHtml(f,r){
   if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)">'+esc(misTrunc(v,26)||'—')+'</td>';
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
 }
-// "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) are
-// marked handled by SLIDING the row left (misWireSwipe/misSwipeToggle below), not a separate
-// checkbox column. Sliding TOGGLES the row's existing selection checkbox — check to mark handled,
-// slide again to unmark — and while checked this way it's excluded from the Edit/Delete selection
-// count (it means "handled", not "selected for bulk action"). Clicking a checkbox the normal way
-// is unaffected and still works exactly as it always did for bulk Edit/Delete.
+// "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) get a
+// dedicated 6-dot grip handle next to the checkbox. Sliding THAT HANDLE left toggles the checkbox
+// into a grey, disabled "handled" state (slide again to release it) — a normal click directly on
+// the checkbox is a totally separate action (plain bulk-select, unaffected). While grey/handled,
+// the row is excluded from the Edit/Delete selection count; a normally-checked row still counts as
+// one selected row same as always.
 function misRowHtml(r,isPinned){
   const handled=isPinned&&r.next_date_recorded_at;
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
-    <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" ${handled?'checked':''} onchange="misRowCheck(this)"></td>
+  const cbAttrs=handled?'checked disabled':'';
+  const cbCls='mis-cb mis-row-cb'+(handled?' mis-handled':'');
+  const handle=isPinned?`<i class="fa-solid fa-grip-vertical mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misEdit(${r.id})">
+    <td onclick="event.stopPropagation()" style="white-space:nowrap"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
 }
-// Sliding a pinned row left toggles next_date_recorded_at (today's date, or cleared) — feeds the
-// Scoreboard score. Mouse AND touch both use pointer events; a small threshold tells a slide apart
-// from a normal click-to-edit.
+// Sliding the grip handle left toggles next_date_recorded_at (today's date, or cleared) — feeds
+// the Scoreboard score. Mouse AND touch both use pointer events. Scoped to the handle icon only —
+// dragging elsewhere on the row does nothing, so a plain click anywhere else still opens Edit.
 function misWireSwipe(){
-  document.querySelectorAll('#misTbody tr.mis-pinned').forEach(function(tr){
-    if(tr._swipeWired)return; tr._swipeWired=true;
-    tr.style.touchAction='pan-y';
-    tr.addEventListener('pointerdown',function(e){
-      if(e.target.closest('.mis-cb'))return; // the checkbox itself keeps its normal click behaviour
+  document.querySelectorAll('#misTbody .mis-handle').forEach(function(handle){
+    if(handle._dragWired)return; handle._dragWired=true;
+    handle.style.touchAction='pan-y';
+    handle.addEventListener('pointerdown',function(e){
+      e.stopPropagation();
+      const tr=handle.closest('tr'); if(!tr)return;
       const startX=e.clientX,startY=e.clientY;
       let dx=0,armed=false;
       function move(ev){
         dx=ev.clientX-startX; const dy=ev.clientY-startY;
         if(!armed){ if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy))return; armed=true; tr.classList.add('mis-swiping'); }
-        if(dx<0){ tr.style.transition='none'; tr.style.transform='translateX('+Math.max(dx,-88)+'px)'; }
+        if(dx<0){ ev.preventDefault(); tr.style.transition='none'; tr.style.transform='translateX('+Math.max(dx,-88)+'px)'; }
       }
       function up(){
         document.removeEventListener('pointermove',move);
         document.removeEventListener('pointerup',up);
         tr.classList.remove('mis-swiping');
         tr.style.transition='transform .15s'; tr.style.transform='';
-        if(armed){ tr._suppressClick=true; if(dx<-44) misSwipeToggle(Number(tr.dataset.id)); }
+        if(armed&&dx<-44) misSwipeToggle(Number(tr.dataset.id));
       }
       document.addEventListener('pointermove',move);
       document.addEventListener('pointerup',up);
     });
-    // the pointerdown→move→up sequence can still end in a click event on release; swallow the one
-    // click that follows an actual slide so it doesn't also pop open the edit modal.
-    tr.addEventListener('click',function(e){ if(tr._suppressClick){ tr._suppressClick=false; e.stopPropagation(); } },true);
   });
 }
 window.misSwipeToggle=async function(id){
@@ -1689,7 +1690,14 @@ window.misSwipeToggle=async function(id){
   if(error){toast('Could not update: '+error.message,'err');return;}
   row.next_date_recorded_at=nowHandled?todayStr():null;
   const cb=document.querySelector('#misTbody tr[data-id="'+id+'"] .mis-row-cb');
-  if(cb)cb.checked=nowHandled;
+  if(cb){
+    cb.checked=nowHandled; cb.disabled=nowHandled; cb.classList.toggle('mis-handled',nowHandled);
+    // Going grey always drops it from the bulk-selection set — "handled" and "selected" are
+    // mutually exclusive states for this checkbox.
+    if(nowHandled&&window._misSel.has(id)){
+      window._misSel.delete(id); const tr=cb.closest('tr'); if(tr)tr.classList.remove('mis-selected'); misUpdateToolbar();
+    }
+  }
   toast(nowHandled?'Marked handled — recorded today':'Unmarked','ok');
 };
 async function legalMIS(){
@@ -1735,8 +1743,10 @@ async function legalMIS(){
       .mis-ai-badge{margin-left:6px}
       #misTbl tbody td{padding:11px 12px;vertical-align:top}
       .mis-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
-      .mis-cb:disabled{cursor:not-allowed;accent-color:#1e3a8a;opacity:.85}
-      #misTbl tbody tr.mis-pinned{touch-action:pan-y}
+      .mis-cb:disabled{cursor:not-allowed}
+      .mis-cb.mis-handled{accent-color:#94a3b8}
+      .mis-handle{color:var(--slate);font-size:12px;margin-left:6px;cursor:grab;touch-action:pan-y}
+      .mis-handle:active{cursor:grabbing}
       #misTbl tbody tr.mis-swiping{background:#eef2ff}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
       #misTbl td,#misTbl th{overflow:hidden}
@@ -1771,9 +1781,9 @@ async function legalMIS(){
     <div class="card" style="overflow:hidden">
       <div style="overflow-x:auto">
       <table id="misTbl">
-        <colgroup><col style="width:36px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
+        <colgroup><col style="width:60px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
         <thead><tr>
-          <th style="width:36px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
+          <th style="width:60px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
         </tr></thead>
         <tbody id="misTbody">
