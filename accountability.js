@@ -806,7 +806,7 @@
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
   function wfCaseNo5(c){ return String((c&&c.case_no)||0).padStart(5,'0'); }
   // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
-  function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'.'+h; }
+  function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'d '+h+'h'; }
   // 2+ people -> the whole group becomes hoverable (desktop) / tappable (mobile), showing the
   // full name list via the existing .wf-poptip/.wf-tip-txt tooltip layer (same one the "i" hints
   // and status pills already use) instead of relying on each tiny circle's own native title,
@@ -1211,8 +1211,14 @@
     // the previous `!flow.trigger_owner || ...` showed this button to everyone whenever
     // trigger_owner happened to be unset); when there's no trigger_owner, any step owner can.
     const isStepOwner = steps.some(function(s){ return eq(s.owner_email||'', mySelf); });
-    const canEvent = isCreator || (flow.trigger_owner ? eq(flow.trigger_owner, mySelf) : isStepOwner);
-    window._wfFlowId=id; window._wfDelId = isCreator ? id : null; wfWireDeleteKey();
+    // Starting a new instance ("New <Noun>") is additionally open to everyone in Systems or
+    // Administration, on top of the creator/trigger-owner/step-owner paths — mirrors
+    // acc.wf_create_instance's own OR acc.wf_can_create_flow() check server-side.
+    const canEvent = isCreator || (flow.trigger_owner ? eq(flow.trigger_owner, mySelf) : isStepOwner) || wfInAnyDept(WF_CREATE_DEPTS);
+    // Editing/deleting the workflow itself (and, further down, its instances) is Administration-
+    // department only — mirrors acc.wf_is_admin_dept(), the real server-side enforcement.
+    const canManage = wfInDept('Administration');
+    window._wfFlowId=id; window._wfDelId = canManage ? id : null; wfWireDeleteKey();
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
     // older workflows saved before this feature have no word yet — learn it once, quietly
@@ -1232,7 +1238,7 @@
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head='<th class="wf-chk-col"></th><th>No.</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+      const head=(canManage?'<th class="wf-chk-col"></th>':'')+'<th>Id</th><th>Unique Bill Id</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
@@ -1247,24 +1253,29 @@
         const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
         const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
         const instOver=(c.status==='Done'||c.status==='Cancelled');
+        const uniqueBillId=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Unique bill Id');});
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNo5(c)+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
-          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
-          +'<td><b>'+wfCaseNo5(c)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
+          +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
+          +'<td><b>'+wfCaseNo5(c)+'</b></td><td>'+esc2((uniqueBillId&&uniqueBillId.value)||'—')+'</td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
-        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
+        +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<input class="ac-in" id="wfInstSearch" placeholder="Search by Id…" oninput="wfInstFilter()">'
-          +'<label class="wf-lbl" style="margin:0">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstFilter()"></label>'
-          +'<label class="wf-lbl" style="margin:0">To<input type="date" class="ac-in" id="wfInstDateTo" onchange="wfInstFilter()"></label>'
-          +'<button class="ac-btn ic" title="Clear filters" onclick="wfInstFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="Search by Id…" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-dates">'
+            +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
+            +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
+            +'<label class="wf-lbl">To<input type="date" class="ac-in" id="wfInstDateTo"></label>'
+            +'<button class="ac-btn primary" onclick="wfInstDateApply()"><i class="fa-solid fa-check"></i> Update</button>'
+            +'<button class="ac-btn ic" title="Clear filters" onclick="wfInstFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
+          +'</div>'
         +'</div>'
         +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table><div id="wfInstNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div></div>';
     }
 
     const headActs='<div class="wf-head-acts">'
-      +(isCreator?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
+      +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
@@ -1284,12 +1295,13 @@
 
   function wfN(){ return window._wfNoun || {one:'Event',many:'Events',lc:'event',lcMany:'events'}; }
   // Instance search (by the 5-digit Id ONLY — not Unique Bill Id or any other field, per the
-  // user's explicit instruction) + a created-date range filter. Pure client-side over the
-  // already-fetched/rendered rows, same spirit as the plain Tasks list's search.
+  // user's explicit instruction) is live as you type; the created-date range only takes effect
+  // once "Update" is clicked (not on every date pick), so it's tracked separately here rather
+  // than read straight from the inputs on every filter pass.
+  window._wfInstDateFilter={from:'',to:''};
   window.wfInstFilter=function(){
     const q=(($('wfInstSearch')||{}).value||'').trim();
-    const from=(($('wfInstDateFrom')||{}).value||'');
-    const to=(($('wfInstDateTo')||{}).value||'');
+    const from=window._wfInstDateFilter.from, to=window._wfInstDateFilter.to;
     const rows=[].slice.call(document.querySelectorAll('.wf-itable tbody tr'));
     let shown=0;
     rows.forEach(function(r){
@@ -1304,9 +1316,21 @@
     });
     const nm=$('wfInstNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
   };
+  // To can never be earlier than From — once From is picked, To's minimum becomes that date
+  // (and if To was already set to something now-invalid, it's cleared rather than left wrong).
+  window.wfInstDateFromChange=function(){
+    const f=$('wfInstDateFrom'), t=$('wfInstDateTo'); if(!f||!t)return;
+    t.min=f.value||'';
+    if(f.value && t.value && t.value<f.value) t.value='';
+  };
+  window.wfInstDateApply=function(){
+    window._wfInstDateFilter={from:(($('wfInstDateFrom')||{}).value||''), to:(($('wfInstDateTo')||{}).value||'')};
+    wfInstFilter();
+  };
   window.wfInstFilterClear=function(){
     const s=$('wfInstSearch'), f=$('wfInstDateFrom'), t=$('wfInstDateTo');
-    if(s)s.value=''; if(f)f.value=''; if(t)t.value='';
+    if(s)s.value=''; if(f)f.value=''; if(t){t.value='';t.min='';}
+    window._wfInstDateFilter={from:'',to:''};
     wfInstFilter();
   };
   window.wfInstSelChange=function(){
@@ -1408,7 +1432,10 @@
       +'</div>';
     } else {
       const inputType=type==='date'?'date':(type==='number'?'number':'text');
-      valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+(f.optional?'Optional':'Detail')+'" value="'+esc2(value||'')+'">';
+      // "Unique bill Id" always follows the c<4 digits> convention (e.g. c2950) — hinted via
+      // placeholder here, enforced in wfEventSave before it's allowed to save.
+      const placeholder=eq(label,'Unique bill Id')?'e.g. c2950':(f.optional?'Optional':'Detail');
+      valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
     }
     const removeBtn=locked?'':'<button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button>';
     return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
@@ -1490,14 +1517,20 @@
   };
 
   window.wfEventSave=async function(flowId, caseId){
-    const wrap=$('wfEvtDetails'); const details=[]; let missing='';
+    const wrap=$('wfEvtDetails'); const details=[]; let missing='', badFormat='';
     if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){
       const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim();
-      const value=((r.querySelector('.wf-evt-value')||{}).value||'').trim();
+      let value=((r.querySelector('.wf-evt-value')||{}).value||'').trim();
       if(!missing && label && !value && r.getAttribute('data-optional')!=='1') missing=label;
+      // Unique bill Id is always "c" + exactly 4 digits (e.g. c2950) — normalize case, then check.
+      if(eq(label,'Unique bill Id') && value){
+        if(!/^c\d{4}$/i.test(value)){ if(!badFormat) badFormat=value; }
+        else value='c'+value.slice(1);
+      }
       if(label||value) details.push({label:label,value:value});
     }); }
     if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
+    if(badFormat){ toast('Unique bill Id should look like c2950 (c + 4 digits)','warn'); return; }
     const N=wfN();
     try{
       if(caseId){
@@ -1765,9 +1798,15 @@
     .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
     .wf-card-hd i{color:var(--slate);font-size:13px}
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
-    .wf-inst-filterbar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
-    .wf-inst-filterbar #wfInstSearch{flex:1;min-width:160px}
-    .wf-inst-filterbar .wf-lbl{font-size:11.5px;color:var(--slate);display:flex;flex-direction:column;gap:4px}
+    .wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px}
+    .wf-inst-filter-search{position:relative;flex:1;min-width:180px}
+    .wf-inst-filter-search i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none}
+    .wf-inst-filter-search .ac-in{width:100%;padding-left:30px;box-sizing:border-box}
+    .wf-inst-filter-dates{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+    .wf-inst-filterbar .wf-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;display:flex;flex-direction:column;gap:5px;margin:0}
+    .wf-inst-filterbar .wf-lbl .ac-in{min-width:140px}
+    .wf-daterange-sep{color:var(--slate);font-size:12px;margin:0 -2px 9px}
+    .wf-inst-filter-dates .ac-btn.primary{height:38px}
     .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
     /* list header + full-width rows */
     /* Workflow task Details: always two columns of three, never one long list */
