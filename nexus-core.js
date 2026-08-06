@@ -4629,7 +4629,10 @@ const HD_SUGGEST=[
   {g:'Legal',     q:['Which hearings are in the next 10 days?','Show me the High priority cases','Any case at the High Court?']},
   {g:'Workflow',  q:['How many invoices are still in progress?','Which step is each pending invoice sitting at?']},
   {g:'Around me', q:['Who is in the Legal department?','Who does Ankita report to?','What meetings are coming up?','What did the last meeting cover?']},
-  {g:'How do I',  q:['How do I delegate a task?','How do I upload a document?','How do I record an online meeting?','How do I export a causelist?']}
+  {g:'How do I',  q:['How do I delegate a task?','How do I upload a document?','How do I record an online meeting?','How do I export a causelist?']},
+  {g:'Modules',   q:['Which modules are actually live?','Is CRM ready yet?','Is the Finance Vault real data?','Can I see competitor ads?']},
+  {g:'Account',   q:['How do I sign in or get an account?','I forgot my password','Why is a module missing from my sidebar?','Where do I change my profile?']},
+  {g:'Problems',  q:['Why am I not getting emails?','The page is showing an error','My transcript is stuck on Transcribing','Which outside services does the portal use?']}
 ];
 function hdAssistant(){
   const b=$('hdBody');
@@ -4707,7 +4710,7 @@ function hdAssistant(){
   </div></div>`;
   $('hdChips').innerHTML=HD_SUGGEST.map(g=>'<div class="hd-sug-g"><span class="hd-sug-lbl">'+esc(g.g)+'</span>'
     +g.q.map(q=>'<button class="hd-chip" onclick="hdAsk(this.textContent)">'+esc(q)+'</button>').join('')+'</div>').join('');
-  if(!HD_MSGS.length) HD_MSGS=[{who:'bot',md:"Ask me anything about your work here — I can read the live data.\n\n- **Your plate** — what's open, overdue, or waiting on you\n- **Legal** — hearings coming up, a case, a court, a priority\n- **Workflow** — where an invoice has got to, and what's still moving\n- **People** — who is in which department, who reports to whom\n- **Meetings, documents, calls, ad spend** — figures and summaries\n\nOr just ask how to do something in the portal."}];
+  if(!HD_MSGS.length) HD_MSGS=[{who:'bot',md:"Ask me anything about your work here — I can read the live data.\n\n- **Your plate** — what's open, overdue, or waiting on you\n- **Legal** — hearings coming up, a case, a court, a priority\n- **Workflow** — where an invoice has got to, and what's still moving\n- **People** — who is in which department, who reports to whom\n- **Meetings, documents, calls, ad spend** — figures and summaries\n- **Any module** — whether it's live yet, and what it does\n- **Signing in, email, settings, errors** — and which outside services we use\n\nI only read — I can't change anything, and I'll tell you plainly when a module hasn't started yet rather than quote its sample figures."}];
   hdRenderChat();
   setTimeout(()=>{const i=$('hdQ'); if(i)try{i.focus();}catch(_e){}},60);
 }
