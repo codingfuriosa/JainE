@@ -1244,6 +1244,24 @@
     const h=Math.floor(ms/3600000);
     return Math.floor(h/24)+'d '+(h%24)+'h';
   }
+  // Who owns a step, in words. Some steps have no fixed person — they land on whoever the
+  // instance's own answers point to (a "Dept Check" goes to that bill's department, a cheque is
+  // signed by whichever director owns it). Those used to read as a bare dash. Now: a handful of
+  // possible people is named outright ("Shuchandra Das / Shafat Mehar"), and a longer list is
+  // summarised by the field that decides it ("Department wise").
+  function wfStepWhoText(s){
+    if(s && s.owner_email) return wfNm(s.owner_email);
+    const map=(s && s.owner_resolve_map && typeof s.owner_resolve_map==='object') ? s.owner_resolve_map : null;
+    if(map){
+      const seen=[], emails=Object.keys(map).map(function(k){ return map[k]; });
+      emails.forEach(function(e){ const n=wfNm(e); if(n && seen.indexOf(n)===-1) seen.push(n); });
+      if(seen.length && seen.length<=2) return seen.join(' / ');
+      if(s.owner_resolve_field) return String(s.owner_resolve_field)+' wise';
+      if(seen.length) return seen.length+' possible people';
+    }
+    if(s && s.owner_role) return String(s.owner_role);
+    return '—';
+  }
   function wfTrackerHtml(flow, steps, cases, fcs){
     if(!steps.length) return '<div class="ac-empty" style="cursor:default">Add steps to this workflow to track them</div>';
     if(!cases.length) return '<div class="ac-empty" style="cursor:default">Nothing recorded yet</div>';
@@ -1276,7 +1294,7 @@
     };
     const head=codeRow
       +bandRow('WHAT',zero.what,function(s){ return s.title||('Step '+s.seq); })
-      +bandRow('WHO',zero.who,function(s){ return wfNm(s.owner_email)||'—'; })
+      +bandRow('WHO',zero.who,wfStepWhoText)
       +bandRow('HOW',zero.how,function(s){ return s.method||''; })
       +bandRow('WHEN',zero.when,function(s){ const d=wfDurText(s.duration_value,s.duration_unit); return d?('In next '+d):''; })
       +'<tr class="wf-tk-cols">'+fixed.map(function(f){ return '<th>'+esc2(f.k)+'</th>'; }).join('')
@@ -1578,7 +1596,8 @@
       valueHtml='<div class="wf-evt-att">'
         +(has
           ?('<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> Attached <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span>')
-          :('<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)">'))
+          :('<label class="wf-evt-attbox"><i class="fa-solid fa-paperclip"></i> Choose a file'
+             +'<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"></label>'))
         +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
       +'</div>';
     } else {
@@ -1596,19 +1615,24 @@
   window.wfEvtAttPick=async function(input){
     const file=input.files&&input.files[0]; if(!file)return;
     const wrap=input.closest('.wf-evt-att'); if(!wrap)return;
+    const box=input.closest('.wf-evt-attbox');
     input.disabled=true;
+    if(box){ box.classList.add('busy'); box.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+esc2(file.name); box.appendChild(input); }
     try{
       const evtForm=document.querySelector('.wf-evt-form');
       const key=s3KeyForFlowEvent((evtForm&&evtForm.getAttribute('data-flow'))||'0', file.name);
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> '+esc2(file.name)+' <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
-    }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); input.disabled=false; }
+    }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
-  window.wfEvtAttClear=function(btn){
-    const wrap=btn.closest('.wf-evt-att'); if(!wrap)return;
-    wrap.innerHTML='<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"><input type="hidden" class="wf-evt-value" value="">';
-  };
+  function wfEvtAttReset(wrap){
+    if(!wrap) return;
+    wrap.innerHTML='<label class="wf-evt-attbox"><i class="fa-solid fa-paperclip"></i> Choose a file'
+      +'<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"></label>'
+      +'<input type="hidden" class="wf-evt-value" value="">';
+  }
+  window.wfEvtAttClear=function(btn){ wfEvtAttReset(btn.closest('.wf-evt-att')); };
   window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
 
@@ -2041,8 +2065,27 @@
     .wf-evt-row{display:flex;gap:8px;margin-bottom:8px}
     .wf-evt-row .wf-evt-label{flex:0 0 40%;min-width:0}
     .wf-evt-row .wf-evt-value{flex:1;min-width:0}
+    /* Dropdowns in this form matched the plain text inputs, so a field with a list looked no
+       different from one you type into. Now they carry their own caret and hover/focus states. */
+    .wf-evt-row select.wf-evt-value{appearance:none;-webkit-appearance:none;-moz-appearance:none;
+      height:40px;padding:0 34px 0 12px;cursor:pointer;font-weight:500;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23e0121c' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px;
+      transition:border-color .12s,box-shadow .12s}
+    .wf-evt-row select.wf-evt-value:hover{border-color:var(--slate)}
+    .wf-evt-row select.wf-evt-value:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-evt-row select.wf-evt-value optgroup{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate)}
+    .wf-evt-row select.wf-evt-value option{font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);padding:6px 8px}
+    /* File picker: the browser's raw "Choose File" control replaced by a proper dashed drop box
+       with the real input laid invisibly over it, so it still works with one click. */
     .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
-    .wf-evt-att .wf-evt-attinput{flex:1;min-width:0;font-size:13px}
+    .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
+      height:40px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
+      color:var(--slate);font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+    .wf-evt-attbox:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,rgba(224,18,28,.06))}
+    .wf-evt-attbox i{font-size:12px}
+    .wf-evt-att .wf-evt-attinput{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+    .wf-evt-attbox.busy{opacity:.6;pointer-events:none}
     .wf-evt-att-name{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px;width:100%}
     /* instances table */
     .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
@@ -3097,9 +3140,14 @@
     const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
     let join;
     if(doneToday) join='<button class="mtg-join" disabled title="Already done today">Done</button>';
-    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
-    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
-    else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
+    // Online meetings get Join AND Record — recording an online meeting captures the shared meeting
+    // tab's audio as well as the microphone, so it too can be transcribed by Gemini.
+    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>'
+      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
+    // An online meeting with no link yet can still be recorded; Join is what's unavailable.
+    else if(m.mode==='online') join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>'
+      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
+    else join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
     const mine = eq(m.created_by,me());
     const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
     const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
@@ -3457,7 +3505,8 @@
     const invitedNames=(l.attendee_emails||[]).map(function(e){ return nameOf(plist,e)||e; });
     const actualDur=mtgActualDurationText(l);
     let audioSrc=null;
-    if(l.mode==='offline' && l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
+    // Either kind of meeting can now carry a recording, so this no longer checks the mode.
+    if(l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
     const durationHtml = '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgLogTimeLabel(l))
       +(actualDur?(' <span style="color:#166534;font-weight:600;margin-left:6px">'+esc2(actualDur)+' actual</span>'):' <span style="color:var(--slate);font-weight:400;margin-left:6px">(scheduled)</span>')
       +'</div>'
@@ -3501,9 +3550,13 @@
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No attendance data for this meeting — either it wasn\'t actually held, or the organizer wasn\'t connected to Google at the time.</p>';
     }
     const transcriptHtml=mtgTranscriptHtml(l);
-    const recordingHtml = l.mode==='offline'
-      ? (audioSrc?('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>'):'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.</p>')
-      : '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Recording isn\'t available on your current Google Workspace plan (requires Business Standard or higher).</p>';
+    // Both kinds of meeting can be recorded in the portal now, so the panel is the same for both.
+    // The old message about the Google Workspace plan referred to Google's OWN recording feature,
+    // which we no longer depend on for a transcript.
+    const recordingHtml = audioSrc
+      ? ('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>')
+      : ('<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.'
+         +(l.mode==='online'?' Use the <b>Record</b> button during an online meeting and share the meeting tab\'s audio to capture one.':'')+'</p>');
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
     // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
@@ -3587,6 +3640,12 @@
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
     if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
     if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
+    // 'unavailable' was set on online meetings back when a transcript could only come from Google's
+    // own recording. It can now come from a recording made here, so say what to do about it.
+    if(l.transcript_status==='unavailable'||!l.transcript_status){
+      return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript — this meeting wasn\'t recorded'
+        +(l.mode==='online'?' in the portal. Record the next one with the <b>Record</b> button and it will be transcribed automatically.':'.')+'</p>';
+    }
     return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript for this meeting.</p>';
   }
   function mtgInjectRecCss(){
@@ -3625,13 +3684,17 @@
     MTG_REC={meeting:m, rec:null, chunks:[], stream:null, startedAt:null, wakeLock:null, secs:0, timer:null, mime:''};
     const when=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     v.innerHTML='<div class="tp-head">'
-      +'<div><div class="tp-title"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Record — '+esc2(m.title)+'</div><div class="tp-sub">'+esc2(when)+' · Offline</div></div>'
+      +'<div><div class="tp-title"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Record — '+esc2(m.title)+'</div><div class="tp-sub">'+esc2(when)+' · '+(m.mode==='online'?'Online':'Offline')+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Cancel" onclick="mtgRecCancel()"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card mtg-rec-card">'
         +'<div class="mtg-rec-dot" id="mtgRecDot"></div>'
         +'<div class="mtg-rec-timer" id="mtgRecTimer">00:00</div>'
-        +'<div class="mtg-rec-hint" id="mtgRecHint">Tap Start when the meeting begins. Keep this screen open — recording captures this device\'s microphone.</div>'
+        +'<div class="mtg-rec-hint" id="mtgRecHint">'
+          +(m.mode==='online'
+             ? 'Tap Start, then choose the <b>Meet tab</b> and tick <b>Share tab audio</b> — that captures everyone else. Your microphone is recorded too, so both sides are transcribed.'
+             : 'Tap Start when the meeting begins. Keep this screen open — recording captures this device\'s microphone.')
+        +'</div>'
         +'<div class="mtg-rec-btns">'
           +'<button class="ac-btn primary lg" id="mtgRecStart" onclick="mtgRecStart()"><i class="fa-solid fa-microphone"></i> Start recording</button>'
           +'<button class="ac-btn danger lg" id="mtgRecStop" style="display:none" onclick="mtgRecStop()"><i class="fa-solid fa-stop"></i> Stop &amp; finish</button>'
@@ -3641,12 +3704,43 @@
   window.mtgRecStart=async function(){
     const R=MTG_REC; if(!R||!R.meeting)return;
     if(typeof MediaRecorder==='undefined'||!navigator.mediaDevices){ toast('Recording isn\'t supported on this browser.','err'); return; }
-    let stream;
-    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ toast('Microphone permission is needed to record.','err'); return; }
+    // An OFFLINE meeting happens in the room, so the microphone hears everyone.
+    // An ONLINE meeting does not: the other people arrive as sound coming OUT of this device, which
+    // a microphone either misses entirely (headphones) or picks up faintly. So for online meetings
+    // we also ask the browser to share the Meet tab's audio and mix the two together, giving Gemini
+    // one track with both sides of the conversation. If that share is declined we fall back to the
+    // microphone alone rather than failing outright.
+    const isOnline=(R.meeting.mode==='online');
+    let stream, mic=null, tab=null, mixCtx=null;
+    try{ mic=await navigator.mediaDevices.getUserMedia({audio:true}); }
+    catch(e){ toast('Microphone permission is needed to record.','err'); return; }
+    if(isOnline && navigator.mediaDevices.getDisplayMedia){
+      try{
+        tab=await navigator.mediaDevices.getDisplayMedia({audio:true, video:true});
+        // we only want the sound — drop the picture immediately so nothing is captured visually
+        (tab.getVideoTracks()||[]).forEach(function(t){ t.stop(); tab.removeTrack(t); });
+        if(!(tab.getAudioTracks()||[]).length){
+          toast('That share had no sound — tick “Share tab audio” when picking the Meet tab. Recording the microphone only.','warn');
+          try{ (tab.getTracks()||[]).forEach(function(t){t.stop();}); }catch(_e){}
+          tab=null;
+        }
+      }catch(_e){ toast('Recording the microphone only — the meeting tab wasn\'t shared.','warn'); tab=null; }
+    }
+    if(tab){
+      try{
+        const AC=window.AudioContext||window.webkitAudioContext;
+        mixCtx=new AC();
+        const dest=mixCtx.createMediaStreamDestination();
+        mixCtx.createMediaStreamSource(mic).connect(dest);
+        mixCtx.createMediaStreamSource(tab).connect(dest);
+        stream=dest.stream;
+      }catch(_e){ stream=mic; try{ if(mixCtx)mixCtx.close(); }catch(_e2){} mixCtx=null; }
+    } else { stream=mic; }
     let mime='audio/webm';
     if(!MediaRecorder.isTypeSupported(mime)) mime=MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'';
     let rec; try{ rec=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream); }catch(e){ rec=new MediaRecorder(stream); }
     R.stream=stream; R.rec=rec; R.chunks=[]; R.mime=rec.mimeType||mime||'audio/webm';
+    R.extraStreams=[mic,tab].filter(Boolean); R.mixCtx=mixCtx;   // stopped alongside R.stream later
     rec.ondataavailable=function(e){ if(e.data&&e.data.size)R.chunks.push(e.data); };
     rec.start(1000);
     R.startedAt=new Date().toISOString(); R.secs=0;
@@ -3665,6 +3759,9 @@
     const endedAt=new Date().toISOString();
     await new Promise(function(resolve){ try{ R.rec.onstop=resolve; R.rec.stop(); }catch(_e){ resolve(); } });
     try{ (R.stream.getTracks()||[]).forEach(function(t){t.stop();}); }catch(_e){}
+    // the microphone and the shared-tab stream are separate from the mixed one handed to the recorder
+    try{ (R.extraStreams||[]).forEach(function(s){ (s.getTracks()||[]).forEach(function(t){t.stop();}); }); }catch(_e){}
+    try{ if(R.mixCtx){ R.mixCtx.close(); R.mixCtx=null; } }catch(_e){}
     try{ if(R.wakeLock){R.wakeLock.release();R.wakeLock=null;} }catch(_e){}
     const blob=new Blob(R.chunks,{type:R.mime||'audio/webm'});
     const occ=istTodayISO();
@@ -3817,14 +3914,14 @@
       try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
     }finally{ WT_busy=false; wtChip(false); again(3000); }
   }
-  function mtgStartBrowserTranscriber(){
-    if(WT_started) return;
-    if(wtIsMobile()) return;                                   // don't drain phones/tablets
-    if(!(window.AudioContext||window.webkitAudioContext)) return;
-    if(typeof me!=='function' || !me()) return;                // only for a signed-in user
-    WT_started=true;
-    setTimeout(wtTick, 8000);                                  // begin shortly after load
-  }
+  // TURNED OFF. Recordings are transcribed server-side by GEMINI (the transcribe-pending function,
+  // which runs on its own every couple of minutes) — the same engine the Transcription module uses.
+  // Gemini is markedly better on the Bengali/Hindi/English code-switching in these meetings than the
+  // small in-browser Whisper model was, and it doesn't need anyone to leave a desktop browser open.
+  // Both paths claim from the same queue, so leaving this running would race Gemini and sometimes
+  // win with the worse transcript. The worker code above is left in place as a fallback should the
+  // Gemini key ever be withdrawn.
+  function mtgStartBrowserTranscriber(){ return; }
 
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}

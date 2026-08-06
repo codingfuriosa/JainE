@@ -2082,7 +2082,10 @@ async function legalMIS(){
         </span>
         <div class="mis-search-wrap">
           <i class="fa-solid fa-magnifying-glass"></i>
-          <input id="misSearch" placeholder="Search anything — a value, a column name, or e.g. &quot;priority is empty&quot;" oninput="misFilter()">
+          <input id="misSearch" placeholder="Search anything — or put &quot;quotes&quot; around an exact phrase" oninput="misFilter()"
+                 title="Plain words: rows containing all of them, in any order or field.
+&quot;in quotes&quot;: that exact phrase, word for word.
+priority is empty / court is high court: search one column.">
         </div>
         <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
         <span class="mis-count" id="misAiStatus"></span>
@@ -2314,8 +2317,28 @@ function misKeywords(q){
   const stop=new Set(['give','giv','show','find','all','the','rows','row','cases','case','which','are','is','where','that','having','with','for','of','a','an','me','list','display','get','or','and','this','these']);
   return q.split(/[^a-z0-9]+/).filter(w=>w&&!stop.has(w));
 }
+/* Anything inside quotes is an exact phrase: "high court" only matches those two words together,
+   in that order, inside one field. Quoting also switches off the smart field parser for that bit,
+   so "priority is empty" in quotes searches for the literal words instead of being read as a
+   condition. Straight and curly quotes both work, since phones insert curly ones. */
+function misSplitPhrases(q){
+  const phrases=[];
+  const rest=String(q||'').replace(/"([^"]*)"|“([^”]*)”/g,function(_m,a,b){
+    const p=String(a!=null?a:(b!=null?b:'')).trim();
+    if(p) phrases.push(p);
+    return ' ';
+  });
+  return {phrases:phrases, rest:rest.replace(/\s+/g,' ').trim()};
+}
 function misParseQuery(raw){
-  const q=(raw||'').toLowerCase().trim();
+  const whole=(raw||'').toLowerCase().trim();
+  const split=misSplitPhrases(whole);
+  if(split.phrases.length){
+    // the unquoted remainder (if any) is still parsed normally and both must match
+    const inner=split.rest?misParseQuery(split.rest):{type:'none'};
+    return Object.assign({}, inner, {phrases:split.phrases});
+  }
+  const q=whole;
   if(!q)return {type:'none'};
   const candidates=[];
   Object.keys(MIS_ALIASES).forEach(k=>{
@@ -2367,6 +2390,7 @@ window.misFilter=function(){
     const row=(window._misRows||[]).find(r=>r.id===id);
     let show;
     if(!raw) show=true;
+    else if(parsed.type==='none') show=true;          // quotes only, handled by the phrase gate below
     else if(parsed.type==='fields'){
       show=!!row&&parsed.conds.every(cond=>{
         const v=row[cond.field];
@@ -2377,6 +2401,11 @@ window.misFilter=function(){
       });
     }
     else { const blob=row?row._blob:''; show=parsed.words&&parsed.words.length?parsed.words.every(w=>blob.indexOf(w)!==-1):(blob.indexOf(q)!==-1); }
+    // every quoted phrase must appear, word for word, in one of the row's fields
+    if(show && parsed.phrases && parsed.phrases.length){
+      const blob=row?row._blob:'';
+      show=parsed.phrases.every(p=>blob.indexOf(p)!==-1);
+    }
     if(show && row && !misInRange(row)) show=false;   // hearing-date window
     tr.style.display=show?'':'none';if(show)vis++;
   });
@@ -4562,56 +4591,183 @@ VIEWS.helpdesk=function(v,seg){
   </div><div id="hdBody"></div>`;
   if(tab==='docs')hdDocs(); else if(tab==='tickets')hdTickets(); else hdAssistant();
 };
+/* The assistant answers in markdown — bold, bullets, and small tables when it lists things — so it
+   needs rendering rather than dumping. Deliberately a small, closed renderer over escaped text:
+   the reply travels through ChatGPT and can quote case titles and document contents, so nothing is
+   ever treated as HTML. Only the handful of shapes the assistant is asked to produce are turned
+   back into tags. */
+function hdMd(src){
+  let s=esc(String(src==null?'':src));
+  // tables first, while the pipe rows are still on their own lines
+  s=s.replace(/(?:^\|.*\|[ \t]*\n)+/gm,function(block){
+    const lines=block.trim().split('\n').map(l=>l.trim()).filter(Boolean);
+    const cells=l=>l.replace(/^\|/,'').replace(/\|$/,'').split('|').map(c=>c.trim());
+    if(lines.length<2||!/^\|[\s:|-]+\|$/.test(lines[1])) return block;
+    const head=cells(lines[0]), body=lines.slice(2).map(cells);
+    return '<table class="hd-tbl"><thead><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'
+      +body.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table>\n';
+  });
+  s=s.replace(/```([\s\S]*?)```/g,(_m,c)=>'<pre class="hd-pre">'+c.replace(/^\n/,'')+'</pre>');
+  s=s.replace(/`([^`\n]+)`/g,'<code class="hd-code">$1</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+  s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g,'$1<i>$2</i>');
+  s=s.replace(/^#{1,4}\s+(.+)$/gm,'<div class="hd-h">$1</div>');
+  // bullet and numbered runs
+  s=s.replace(/(?:^[-*]\s+.+\n?)+/gm,function(b){
+    return '<ul class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^[-*]\s+/,'')+'</li>').join('')+'</ul>';
+  });
+  s=s.replace(/(?:^\d+\.\s+.+\n?)+/gm,function(b){
+    return '<ol class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^\d+\.\s+/,'')+'</li>').join('')+'</ol>';
+  });
+  s=s.replace(/\n{2,}/g,'<br><br>').replace(/\n/g,'<br>');
+  s=s.replace(/<br>\s*(<(?:ul|ol|table|pre|div class="hd-h")\b)/g,'$1');
+  s=s.replace(/(<\/(?:ul|ol|table|pre)>)\s*<br>/g,'$1');
+  return s;
+}
+const HD_SUGGEST=[
+  {g:'My work',   q:['Where do I stand right now?','What have I got overdue?','What am I waiting to approve?','What are my goals at?']},
+  {g:'Legal',     q:['Which hearings are in the next 10 days?','Show me the High priority cases','Any case at the High Court?']},
+  {g:'Workflow',  q:['How many invoices are still in progress?','Which step is each pending invoice sitting at?']},
+  {g:'Around me', q:['Who is in the Legal department?','Who does Ankita report to?','What meetings are coming up?','What did the last meeting cover?']},
+  {g:'How do I',  q:['How do I delegate a task?','How do I upload a document?','How do I record an online meeting?','How do I export a causelist?']}
+];
 function hdAssistant(){
   const b=$('hdBody');
-  b.innerHTML=`<div class="card" style="max-width:840px;margin:0 auto">
-    <div id="hdChat" style="padding:18px;height:44vh;min-height:300px;overflow:auto;background:#fafbfd"></div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;border-top:1px solid var(--line)" id="hdChips"></div>
-    <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)">
-      <input id="hdQ" class="sel" style="flex:1;height:42px" placeholder="Ask anything… e.g. How do I upload a document?" onkeydown="if(event.key==='Enter')hdSend()">
-      <button class="btn btn-primary" onclick="hdSend()"><i class="fa-solid fa-paper-plane"></i> Send</button>
-    </div></div>`;
-  const chips=['How do I upload a document?','How do I delegate a task?','How do I create a task?','What is Procurement?','What is in the Legal module?','How does Control Panel work?'];
-  $('hdChips').innerHTML=chips.map(c=>`<div class="chip" onclick="hdAsk(this.textContent)">${esc(c)}</div>`).join('');
-  if(!HD_MSGS.length)HD_MSGS=[{who:'bot',text:`Hi! I'm the <b>JAIN-E</b> assistant. Ask me how to do something in the portal, find a document, or I can raise a ticket for you. Try a suggestion below.`}];
+  b.innerHTML=`<style>
+    .hd-wrap{max-width:900px;margin:0 auto}
+    .hd-shell{border:1px solid var(--line);border-radius:16px;background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+    .hd-top{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f766e,#0d5f59)}
+    .hd-top .ava{width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;flex:none}
+    .hd-top .who{color:#fff;font-size:14px;font-weight:700;line-height:1.25}
+    .hd-top .sub{color:rgba(255,255,255,.72);font-size:11.5px}
+    .hd-top .live{margin-left:auto;display:flex;align-items:center;gap:6px;color:rgba(255,255,255,.85);font-size:11px;font-weight:600}
+    .hd-top .live i{font-size:7px;color:#4ade80}
+    .hd-new{border:1px solid rgba(255,255,255,.28);background:transparent;color:#fff;height:28px;padding:0 10px;border-radius:8px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    .hd-new:hover{background:rgba(255,255,255,.14)}
+    .hd-scroll{padding:18px 16px;height:52vh;min-height:320px;overflow-y:auto;background:var(--bg-subtle,#fafbfd)}
+    .hd-msg{display:flex;gap:11px;margin-bottom:16px;align-items:flex-start}
+    .hd-msg.me{flex-direction:row-reverse}
+    .hd-ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+    .hd-ic.bot{background:#0f766e}
+    .hd-bub{max-width:78%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.62;overflow-wrap:anywhere}
+    .hd-msg.bot .hd-bub{background:var(--bg-card);border:1px solid var(--line);border-top-left-radius:4px;color:var(--ink)}
+    .hd-msg.me  .hd-bub{background:var(--brand);color:#fff;border-top-right-radius:4px}
+    .hd-bub b{font-weight:700}
+    .hd-h{font-weight:700;font-size:13.5px;margin:10px 0 4px}
+    .hd-ul{margin:6px 0 6px 18px;padding:0}
+    .hd-ul li{margin:3px 0}
+    .hd-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin:9px 0;display:block;overflow-x:auto}
+    .hd-tbl th,.hd-tbl td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+    .hd-tbl th{background:var(--bg-subtle,#f8fafc);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap}
+    .hd-pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:8px 0}
+    .hd-code{background:var(--bg-subtle,#f1f5f9);padding:1px 5px;border-radius:4px;font-size:12.5px}
+    .hd-tools{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);color:var(--slate);font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .hd-tools .tp{background:var(--bg-subtle,#f1f5f9);border-radius:5px;padding:1px 6px;font-weight:600}
+    .hd-foot{color:var(--slate);font-size:11.5px;margin-top:8px}
+    .hd-foot a{color:var(--brand);font-weight:600;cursor:pointer}
+    .hd-sug{padding:12px 16px;border-top:1px solid var(--line);background:var(--bg-card)}
+    .hd-sug-g{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+    .hd-sug-g:last-child{margin-bottom:0}
+    .hd-sug-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);flex:0 0 76px}
+    .hd-chip{border:1px solid var(--line);background:var(--bg-card);color:var(--ink);border-radius:20px;padding:5px 12px;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:border-color .12s,color .12s,background .12s}
+    .hd-chip:hover{border-color:#0f766e;color:#0f766e;background:#f0fdfa}
+    .hd-bar{display:flex;gap:9px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end;background:var(--bg-card)}
+    .hd-in{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:13.5px;font-family:inherit;line-height:1.5;max-height:132px;background:var(--bg-card);color:var(--ink)}
+    .hd-in:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.12)}
+    .hd-send{height:42px;width:42px;flex:none;border:0;border-radius:12px;background:#0f766e;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:filter .12s}
+    .hd-send:hover:not(:disabled){filter:brightness(1.12)}
+    .hd-send:disabled{opacity:.5;cursor:not-allowed}
+    .hd-dots span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:var(--slate);animation:hdb 1s infinite}
+    .hd-dots span:nth-child(2){animation-delay:.15s}
+    .hd-dots span:nth-child(3){animation-delay:.3s}
+    @keyframes hdb{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+    .hd-hint{text-align:center;color:var(--slate);font-size:11px;padding:0 16px 11px;background:var(--bg-card)}
+    @media(max-width:760px){
+      .hd-scroll{height:56vh;padding:14px 12px}
+      .hd-bub{max-width:88%}
+      .hd-sug-lbl{flex:1 1 100%}
+      .hd-sug{max-height:132px;overflow-y:auto}
+    }
+  </style>
+  <div class="hd-wrap"><div class="hd-shell">
+    <div class="hd-top">
+      <div class="ava"><i class="fa-solid fa-robot"></i></div>
+      <div><div class="who">JAIN-E Assistant</div><div class="sub">Reads your live portal data · never changes anything</div></div>
+      <span class="live"><i class="fa-solid fa-circle"></i> Online</span>
+      <button class="hd-new" onclick="hdReset()"><i class="fa-solid fa-rotate-left"></i> New chat</button>
+    </div>
+    <div class="hd-scroll" id="hdChat"></div>
+    <div class="hd-sug" id="hdChips"></div>
+    <div class="hd-bar">
+      <textarea id="hdQ" class="hd-in" rows="1" placeholder="Ask anything — your tasks, a hearing date, where an invoice is stuck, how to do something…"
+        oninput="hdGrow(this)" onkeydown="hdKey(event)"></textarea>
+      <button class="hd-send" id="hdSendBtn" onclick="hdSend()" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+    </div>
+    <div class="hd-hint">Enter to send · Shift+Enter for a new line. Answers come from live data — double-check anything you act on.</div>
+  </div></div>`;
+  $('hdChips').innerHTML=HD_SUGGEST.map(g=>'<div class="hd-sug-g"><span class="hd-sug-lbl">'+esc(g.g)+'</span>'
+    +g.q.map(q=>'<button class="hd-chip" onclick="hdAsk(this.textContent)">'+esc(q)+'</button>').join('')+'</div>').join('');
+  if(!HD_MSGS.length) HD_MSGS=[{who:'bot',md:"Ask me anything about your work here — I can read the live data.\n\n- **Your plate** — what's open, overdue, or waiting on you\n- **Legal** — hearings coming up, a case, a court, a priority\n- **Workflow** — where an invoice has got to, and what's still moving\n- **People** — who is in which department, who reports to whom\n- **Meetings, documents, calls, ad spend** — figures and summaries\n\nOr just ask how to do something in the portal."}];
   hdRenderChat();
+  setTimeout(()=>{const i=$('hdQ'); if(i)try{i.focus();}catch(_e){}},60);
 }
+window.hdGrow=function(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,132)+'px'; };
+window.hdKey=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); hdSend(); } };
+window.hdReset=function(){ HD_MSGS=[]; hdAssistant(); };
+/* A message carries EITHER .md (markdown from the assistant, rendered through hdMd) or .html (a
+   fixed bit of our own markup, e.g. the typing dots). A person's own message is escaped text. */
 function hdRenderChat(){
   const c=$('hdChat');if(!c)return;
-  c.innerHTML=HD_MSGS.map(m=>m.who==='bot'
-    ?`<div style="display:flex;gap:10px;margin-bottom:14px"><div class="n-ic t-green" style="flex-shrink:0;width:32px;height:32px"><i class="fa-solid fa-robot"></i></div><div style="background:#fff;border:1px solid var(--line);border-radius:2px 12px 12px 12px;padding:11px 14px;font-size:13.5px;max-width:80%;line-height:1.55">${m.text}</div></div>`
-    :`<div style="display:flex;gap:10px;margin-bottom:14px;flex-direction:row-reverse"><div class="avatar-sm" style="flex-shrink:0;background:${colorFor(state.email)}">${esc(initials((state.profile&&state.profile.full_name)||state.email).toUpperCase())}</div><div style="background:var(--brand);color:#fff;border-radius:12px 2px 12px 12px;padding:11px 14px;font-size:13.5px;max-width:80%">${esc(m.text)}</div></div>`).join('');
+  const mine=esc(initials((state.profile&&state.profile.full_name)||state.email).toUpperCase());
+  c.innerHTML=HD_MSGS.map(function(m){
+    if(m.who!=='bot'){
+      return '<div class="hd-msg me"><div class="hd-ic" style="background:'+colorFor(state.email)+'">'+mine+'</div>'
+        +'<div class="hd-bub">'+esc(m.text||'')+'</div></div>';
+    }
+    let body=m.html||hdMd(m.md||'');
+    if(m.tools&&m.tools.length){
+      const seen=[]; m.tools.forEach(function(t){ if(t&&seen.indexOf(t)===-1) seen.push(t); });
+      body+='<div class="hd-tools"><i class="fa-solid fa-database"></i> read '
+        +seen.map(function(t){ return '<span class="tp">'+esc(String(t).replace(/_/g,' '))+'</span>'; }).join(' ')+'</div>';
+    }
+    if(m.offerTicket) body+='<div class="hd-foot">Not what you needed? <a onclick="navTo(\'helpdesk/tickets\')">Raise a ticket</a>.</div>';
+    return '<div class="hd-msg bot"><div class="hd-ic bot"><i class="fa-solid fa-robot"></i></div>'
+      +'<div class="hd-bub">'+body+'</div></div>';
+  }).join('');
   c.scrollTop=c.scrollHeight;
 }
-window.hdAsk=function(q){const i=$('hdQ');if(i){i.value=q;}hdSend();};
+window.hdAsk=function(q){const i=$('hdQ');if(i){i.value=q;hdGrow(i);}hdSend();};
 window.hdSend=async function(){
-  const inp=$('hdQ');const q=(inp.value||'').trim();if(!q)return;inp.value='';inp.disabled=true;
+  const inp=$('hdQ'), btn=$('hdSendBtn');
+  const q=((inp&&inp.value)||'').trim(); if(!q)return;
+  inp.value=''; hdGrow(inp); inp.disabled=true; if(btn)btn.disabled=true;
   HD_MSGS.push({who:'me',text:q});
-  HD_MSGS.push({who:'bot',text:'<span class="hd-typing"><span></span><span></span><span></span></span>',isLoading:true});
+  HD_MSGS.push({who:'bot',html:'<span class="hd-dots"><span></span><span></span><span></span></span>',isLoading:true});
   hdRenderChat();
-  // Call the AI edge function
+  // The last few turns go with the question so follow-ups ("and the one after that?") make sense.
+  const history=HD_MSGS.filter(function(m){ return !m.isLoading && (m.text||m.md); })
+    .slice(-9,-1)
+    .map(function(m){ return {role:(m.who==='bot'?'assistant':'user'), content:(m.md||m.text||'')}; });
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/helpdesk-ai',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({question:q})
+      body:JSON.stringify({question:q, history:history})
     });
-    const {answer}=await res.json();
+    const d=await res.json();
     HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    // If AI not configured yet, fall back to KB silently
-    const finalAns=(answer&&!answer.startsWith('AI assistant is not configured'))
-      ?answer:(hdAnswer(q)||answer||'Sorry, no answer available.');
-    HD_MSGS.push({who:'bot',text:(finalAns||'Sorry, no answer available.')+
-      '<div style="margin-top:8px;color:var(--slate);font-size:12px">Not what you needed? <a style="color:var(--brand);font-weight:600;cursor:pointer" onclick="navTo(`helpdesk/tickets`)">Raise a ticket</a>.</div>'});
+    // hdAnswer() is the old hard-coded answer sheet — still the fallback if the key is missing.
+    const notSetUp=d.answer&&/not configured/i.test(d.answer);
+    const md=notSetUp?(hdAnswer(q)||d.answer):(d.answer||'I could not work that out.');
+    HD_MSGS.push({who:'bot', md:md, tools:d.tools_used||[], offerTicket:true});
   }catch(e){
     HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    // fallback to KB
-    const ans=hdAnswer(q);
-    HD_MSGS.push({who:'bot',text:ans||'Having trouble connecting. Please try again or <a style="color:var(--brand);font-weight:600;cursor:pointer" onclick="navTo(`helpdesk/tickets`)">raise a ticket</a>.'});
+    HD_MSGS.push({who:'bot', md:hdAnswer(q)||'I could not reach the assistant just now. Please try again in a moment.', offerTicket:true});
   }
-  inp.disabled=false;inp.focus();
+  inp.disabled=false; if(btn)btn.disabled=false;
+  try{inp.focus();}catch(_e){}
   hdRenderChat();
 };
 function hdDocs(){
