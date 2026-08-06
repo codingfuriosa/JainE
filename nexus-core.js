@@ -1580,6 +1580,54 @@ window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpa
 window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 
 /* ============================ LEGAL MIS ============================ */
+/* Hearing-date window. Filters the table by Next Date and is what the causelist export
+   uses — the export refuses to run on "All dates", since a causelist is by definition
+   for a period. */
+const MIS_RANGES=[
+  ['all','All dates'],
+  ['this_month','This Month'],
+  ['next_month','Next Month'],
+  ['next_week','Next Week'],
+  ['next_30','Next 30 Days'],
+  ['custom','Custom']
+];
+let MIS_RANGE='all', MIS_FROM='', MIS_TO='';
+function misDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function misAddDays(d,n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+// Weeks run Monday to Sunday, matching how the courts list them.
+function misMonday(d){ const x=new Date(d.getTime()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+function misRangeDates(){
+  const t=new Date(); t.setHours(12,0,0,0);
+  switch(MIS_RANGE){
+    case 'this_month':  return {from:misDay(new Date(t.getFullYear(),t.getMonth(),1)),   to:misDay(new Date(t.getFullYear(),t.getMonth()+1,0))};
+    case 'next_month':  return {from:misDay(new Date(t.getFullYear(),t.getMonth()+1,1)), to:misDay(new Date(t.getFullYear(),t.getMonth()+2,0))};
+    case 'next_week':   { const m=misAddDays(misMonday(t),7); return {from:misDay(m), to:misDay(misAddDays(m,6))}; }
+    case 'next_30':     return {from:misDay(t), to:misDay(misAddDays(t,30))};
+    case 'custom':      return (MIS_FROM&&MIS_TO)?{from:MIS_FROM,to:MIS_TO}:null;
+    default:            return null;
+  }
+}
+function misRangeLabel(){
+  const r=misRangeDates(); if(!r) return '';
+  const f=s=>{const d=new Date(s+'T00:00:00');return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();};
+  return f(r.from)+' – '+f(r.to);
+}
+window.misSetRange=function(v){
+  MIS_RANGE=v;
+  if(v==='custom'&&(!MIS_FROM||!MIS_TO)){ const t=new Date(); MIS_FROM=misDay(t); MIS_TO=misDay(misAddDays(t,30)); }
+  legalMIS();
+};
+// A row's hearing date, preferring the sortable copy and falling back to parsing the text.
+function misRowIso(r){
+  if(r.next_date_iso) return String(r.next_date_iso).slice(0,10);
+  const d=misToIso(r.next_date); return d?misIsoStr(d):null;
+}
+function misInRange(r){
+  const w=misRangeDates(); if(!w) return true;
+  const iso=misRowIso(r); if(!iso) return false;
+  return iso>=w.from && iso<=w.to;
+}
+
 const MIS_FIELDS=[
   {k:'case_type',l:'Case Type'},
   {k:'cause_title',l:'Cause Title / Parties'},
@@ -1590,6 +1638,7 @@ const MIS_FIELDS=[
   {k:'advocate_incharge',l:'Advocate In-Charge'},
   {k:'court',l:'Court'},
   {k:'status',l:'Status / Purpose'},
+  {k:'action_needed',l:'Action Needed'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
   {k:'date_of_filing',l:'Date of Filing'},
@@ -1598,23 +1647,79 @@ const MIS_FIELDS=[
   {k:'cnr_no',l:'CNR No.'}
 ];
 function misLabel(k){const f=MIS_FIELDS.find(x=>x.k===k);return f?f.l:k;}
-function misInput(k,vals){return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc((vals||{})[k]||'')+'"></div>';}
+
+/* Fields offering a dropdown of what's already in use while still accepting a new value.
+   A <datalist> gives both: pick from the list, or type something new — and because the new
+   value is saved onto the row, it is in the list automatically next time. No extra table. */
+const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge','advocate_incharge','court']);
+const MIS_PC_DEFAULT='ANKITA BHANDARI';
+function misDistinct(k){
+  const seen=new Map();
+  (window._misRows||[]).forEach(r=>{ const v=String(r[k]==null?'':r[k]).trim(); if(!v)return;
+    const key=v.toLowerCase(); if(!seen.has(key)) seen.set(key,v); });
+  return [...seen.values()].sort((a,b)=>a.localeCompare(b));
+}
+// The level most cases already sit at — pre-selected on a new case, still changeable.
+function misCommonPriority(){
+  const c={High:0,Medium:0,Low:0};
+  (window._misRows||[]).forEach(r=>{ const p=String(r.priority||'').trim(); if(c[p]!==undefined)c[p]++; });
+  return (c.High>=c.Medium&&c.High>=c.Low)?'High':(c.Medium>=c.Low?'Medium':'Low');
+}
+function misInput(k,vals,opt){
+  opt=opt||{};
+  const v=(vals||{})[k]||'';
+  const ro=opt.readonly?' readonly style="background:var(--bg,#f8fafc);color:var(--slate)"':'';
+  const hint=opt.hint?'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+esc(opt.hint)+'</div>':'';
+  if(k==='priority'){
+    const cur=v||opt.dflt||'';
+    return '<div><label>'+misLabel(k)+'</label><select id="misF_'+k+'" class="sel">'
+      +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
+      +'</select>'+hint+'</div>';
+  }
+  if(MIS_SUGGEST.has(k)){
+    const list='misL_'+k;
+    return '<div><label>'+misLabel(k)+'</label>'
+      +'<input id="misF_'+k+'" class="sel" list="'+list+'" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro+'>'
+      +'<datalist id="'+list+'">'+misDistinct(k).map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'
+      +hint+'</div>';
+  }
+  return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'>'+hint+'</div>';
+}
 function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
-const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks']);
-function misFormHtml(vals){
-  vals=vals||{};
+const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
+
+/* mode 'add'  — Previous Date is not shown at all; it only ever comes from a real reschedule.
+   mode 'edit' — Status and Next Date come first because they are what actually get changed,
+                 and Previous Date is read-only: it fills itself from the old Next Date the
+                 moment Next Date is edited. */
+function misFormHtml(vals,mode){
+  vals=vals||{}; mode=mode||'add';
+  const isEdit=(mode==='edit');
   let html='', pending=null;
   function flush(){ if(pending!==null){ html+='<div class="two">'+pending+'</div>'; pending=null; } }
+  function put(k,opt){
+    if(MIS_AREA_FIELDS.has(k)){ flush(); html+=misArea(k,vals,k==='cause_title'?2:3); return; }
+    const cell=misInput(k,vals,opt);
+    if(pending===null) pending=cell;
+    else { html+='<div class="two">'+pending+cell+'</div>'; pending=null; }
+  }
+  const done=new Set();
+  if(isEdit){
+    html+='<div class="mis-prio-head"><i class="fa-solid fa-bolt"></i> Usually updated</div>';
+    put('status');                                    done.add('status');
+    put('next_date',{hint:'dd/mm/yyyy — changing this moves the old date into Previous Date'});
+    put('previous_date',{readonly:true,hint:'set automatically from the previous Next Date'});
+    done.add('next_date'); done.add('previous_date');
+    flush();
+    html+='<div class="mis-prio-head" style="margin-top:6px"><i class="fa-solid fa-list"></i> Case details</div>';
+  }
   MIS_FIELDS.forEach(f=>{
-    if(MIS_AREA_FIELDS.has(f.k)){
-      flush();
-      html+=misArea(f.k,vals,f.k==='cause_title'?2:3);
-    } else if(pending===null){
-      pending=misInput(f.k,vals);
-    } else {
-      html+='<div class="two">'+pending+misInput(f.k,vals)+'</div>';
-      pending=null;
-    }
+    if(done.has(f.k)) return;
+    if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
+    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:'left blank saves as NA'});
+    if(f.k==='next_date')    return put(f.k,{hint:'dd/mm/yyyy'});
+    put(f.k);
   });
   flush();
   return html;
@@ -1629,9 +1734,9 @@ function misPriorityTag(p){
   if(!p)return '<span class="mis-ptag mis-ptag--gray">—</span>';
   return '<span class="mis-ptag mis-ptag--'+cls.replace('t-','')+'">'+esc(misTrunc(label,14))+'</span>';
 }
-const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name']);
+const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
+const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1739,6 +1844,23 @@ async function legalMIS(){
       .mis-ptag--amber{background:#fef3c7;color:#92400e}
       .mis-ptag--green{background:#d1fae5;color:#065f46}
       .mis-ptag--gray{background:#f1f5f9;color:#475569}
+      /* section heading inside the Edit Case form */
+      .mis-prio-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);padding-bottom:7px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+      .mis-prio-head i{color:var(--brand)}
+      /* date-range filter */
+      .mis-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+      .mis-range .to{font-size:12.5px;color:var(--slate)}
+      .mis-toolbar.has-custom .mis-search-wrap{flex:0 1 190px;min-width:120px}
+      @media(max-width:900px){
+        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%}
+        .mis-toolbar .mis-actions{flex:1 1 100%}
+        .mis-toolbar .mis-actions .btn{flex:1 1 auto;justify-content:center}
+        select.mis-sel{min-width:0;flex:1 1 140px}
+        .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
+        .mis-range{flex:1 1 100%}
+        .mis-range input[type=date]{flex:1 1 40%;min-width:0}
+      }
       #misTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:2200px;table-layout:fixed}
       #misTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
       #misTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s;cursor:pointer}
@@ -1768,7 +1890,7 @@ async function legalMIS(){
         #misTbl thead th,#misTbl tbody td{padding:9px 8px}
       }
     </style>
-    <div class="mis-toolbar">
+    <div class="mis-toolbar${MIS_RANGE==='custom'?' has-custom':''}">
       <div class="mis-actions">
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
         <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
@@ -1776,10 +1898,19 @@ async function legalMIS(){
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
+        <select class="mis-sel" id="misRangeSel" onchange="misSetRange(this.value)">
+          ${MIS_RANGES.map(r=>`<option value="${r[0]}"${MIS_RANGE===r[0]?' selected':''}>${esc(r[1])}</option>`).join('')}
+        </select>
+        <span class="mis-range" id="misRangeCustom" style="display:${MIS_RANGE==='custom'?'flex':'none'}">
+          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misFilter()">
+          <span class="to">to</span>
+          <input type="date" id="misTo" value="${esc(MIS_TO)}" onchange="misFilter()">
+        </span>
         <div class="mis-search-wrap">
           <i class="fa-solid fa-magnifying-glass"></i>
           <input id="misSearch" placeholder="Search anything — a value, a column name, or e.g. &quot;priority is empty&quot;" oninput="misFilter()">
         </div>
+        <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
         <span class="mis-count" id="misAiStatus"></span>
       </div>
     </div>
@@ -1799,17 +1930,23 @@ async function legalMIS(){
       </table>
       </div>
     </div>`;
+  // apply the hearing-date window straight away, not only when someone types
+  if(MIS_RANGE!=='all') setTimeout(misFilter,0);
   misWireSwipe();
 }
-// Score = how far ahead of the deadline the case was actually handled, using the confirmed rule:
-// gap = Next Date − Recorded Date (days). gap>7 -> +1 (handled well ahead), 0..7 -> 0 (cut it
-// close), gap<=0 (recorded on/after the Next Date) -> -1 (missed/late). No score yet if the
-// "Handled" checkbox in MIS hasn't been ticked for this Next Date.
+// Score = how far ahead of the deadline the case was actually handled.
+// gap = Next Date − Recorded Date (days).
+//   gap > 7   -> +1  handled well ahead
+//   gap 1..7  ->  0  cut it close
+//   gap <= 0  -> -1  recorded ON the hearing date or after it, i.e. left to the day or missed
+// Recording it on the day itself counts as late, not neutral — a case dealt with only when it
+// is already due was not managed ahead of time.
+// No score yet if the "Handled" checkbox in MIS hasn't been ticked for this Next Date.
 function misScoreOf(r){
   if(!r.next_date_recorded_at||!r.next_date_iso)return null;
   const gap=Math.round((new Date(r.next_date_iso+'T00:00:00')-new Date(r.next_date_recorded_at+'T00:00:00'))/86400000);
   if(gap>7)return 1;
-  if(gap>=0)return 0;
+  if(gap>0)return 0;
   return -1;
 }
 function misScoreTag(s){
@@ -1857,6 +1994,81 @@ async function legalScoreboard(){
     </tr></tfoot>`:''}
   </table></div></div>`;
 }
+/* ---- Causelist export ------------------------------------------------------------------
+   Mirrors CAUSTLIST - AUGUST26.pdf: title, generated stamp, then
+   SL NO. | CASE TYPE | CASE DETAILS | CASE NO. | DATE | Advocate incharge | Court Name |
+   STATUS | ACTION NEEDED.
+   A causelist covers a period, so it refuses to run until a date range is chosen. */
+window.misExportCauselist=function(){
+  const win=misRangeDates();
+  if(!win){
+    toast(MIS_RANGE==='custom'
+      ? 'Pick both a From and a To date before exporting the causelist'
+      : 'Choose a date range first — a causelist has to cover a period','warn');
+    const sel=$('misRangeSel'); if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
+      setTimeout(function(){ sel.style.borderColor=''; },1800); }
+    return;
+  }
+  const rows=(window._misRows||[]).filter(misInRange)
+    .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
+  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
+
+  const label=(MIS_RANGES.find(function(r){return r[0]===MIS_RANGE;})||[])[1]||'';
+  const stamp=new Date().toLocaleString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const dmy=function(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
+  const cell=function(v){ return esc(String(v==null?'':v).trim()||'—').replace(/\n/g,'<br>'); };
+
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Causelist '+esc(label)+'</title>'
+   +'<style>'
+   +'@page{size:A4 landscape;margin:12mm}'
+   +'*{box-sizing:border-box}'
+   +'body{font-family:Calibri,Arial,sans-serif;color:#111;margin:0;font-size:10.5px}'
+   +'h1{font-size:17px;margin:0 0 2px;letter-spacing:.5px}'
+   +'.sub{font-size:11px;color:#444;margin-bottom:12px}'
+   +'table{width:100%;border-collapse:collapse;table-layout:fixed}'
+   +'th,td{border:1px solid #999;padding:5px 6px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}'
+   +'th{background:#dbe5f1;font-weight:700;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em}'
+   +'tr{page-break-inside:avoid}'
+   +'thead{display:table-header-group}'
+   +'td.sl{text-align:center;font-weight:700}'
+   +'td.dt{white-space:nowrap;font-weight:600}'
+   +'.foot{margin-top:10px;font-size:10px;color:#555}'
+   +'@media print{.noprint{display:none}}'
+   +'</style></head><body>'
+   +'<div class="noprint" style="margin-bottom:10px">'
+   +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
+   +'</div>'
+   +'<h1>CAUSELIST — '+esc(label.toUpperCase())+'</h1>'
+   +'<div class="sub">'+esc(misRangeLabel())+' &nbsp;·&nbsp; '+rows.length+' matter'+(rows.length===1?'':'s')+' &nbsp;·&nbsp; generated '+esc(stamp)+'</div>'
+   +'<table><colgroup>'
+   +'<col style="width:34px"><col style="width:9%"><col style="width:22%"><col style="width:12%">'
+   +'<col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:14%">'
+   +'</colgroup><thead><tr>'
+   +'<th>SL NO.</th><th>Case Type</th><th>Case Details</th><th>Case No.</th><th>Date</th>'
+   +'<th>Advocate Incharge</th><th>Court Name</th><th>Status</th><th>Action Needed</th>'
+   +'</tr></thead><tbody>'
+   +rows.map(function(r,i){
+      return '<tr><td class="sl">'+(i+1)+'</td>'
+        +'<td>'+cell(r.case_type)+'</td>'
+        +'<td>'+cell(r.cause_title)+'</td>'
+        +'<td>'+cell(r.case_no)+'</td>'
+        +'<td class="dt">'+esc(dmy(misRowIso(r)))+'</td>'
+        +'<td>'+cell(r.advocate_incharge)+'</td>'
+        +'<td>'+cell(r.court)+'</td>'
+        +'<td>'+cell(r.status)+'</td>'
+        +'<td>'+cell(r.action_needed)+'</td></tr>';
+    }).join('')
+   +'</tbody></table>'
+   +'<div class="foot">JAIN-E · Legal MIS · '+esc(stamp)+'</div>'
+   +'</body></html>';
+
+  const w=window.open('','_blank');
+  if(!w){ toast('Allow pop-ups to export the causelist','err'); return; }
+  w.document.write(html); w.document.close();
+  toast('Causelist ready — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+};
+
 window.misRowCheck=function(cb){
   const id=Number(cb.dataset.id);
   if(cb.checked) window._misSel.add(id); else window._misSel.delete(id);
@@ -1938,6 +2150,9 @@ function misParseQuery(raw){
   return {type:'fields', conds};
 }
 window.misFilter=function(){
+  // keep the custom range in sync before filtering
+  const fEl=$('misFrom'), tEl=$('misTo');
+  if(fEl) MIS_FROM=fEl.value||''; if(tEl) MIS_TO=tEl.value||'';
   const raw=($('misSearch').value||'').trim();
   const q=raw.toLowerCase();
   const wantsCompleteness=q.indexOf('completeness')!==-1;
@@ -1961,6 +2176,7 @@ window.misFilter=function(){
       });
     }
     else { const blob=row?row._blob:''; show=parsed.words&&parsed.words.length?parsed.words.every(w=>blob.indexOf(w)!==-1):(blob.indexOf(q)!==-1); }
+    if(show && row && !misInRange(row)) show=false;   // hearing-date window
     tr.style.display=show?'':'none';if(show)vis++;
   });
   const c=$('misCount');if(c)c.textContent=vis+' cases';
@@ -2005,12 +2221,41 @@ window.misAiSearch=async function(raw){
 };
 window.misCreate=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-gavel"></i> Add Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">${misFormHtml({})}</div>
+  <div class="modal-body frm">${misFormHtml({},'add')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misSave()"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg');
 };
-function misCollect(){
+/* dd/mm/yyyy in, ISO out — so the date filter and causelist have something sortable.
+   Also accepts what people actually type: 3-8-2026, 03.08.2026, 2026-08-03. */
+function misToIso(s){
+  s=String(s==null?'':s).trim(); if(!s) return null;
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m){ const d=new Date(+m[1],+m[2]-1,+m[3]); return isNaN(d)?null:d; }
+  m=s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if(m){ const d=new Date(+m[3],+m[2]-1,+m[1]); return isNaN(d)?null:d; }
+  return null;
+}
+function misIsoStr(d){ return d?(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')):null; }
+function misDmy(d){ return d?(String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()):null; }
+
+function misCollect(orig){
   const row={};
-  MIS_FIELDS.forEach(f=>{ const el=$('misF_'+f.k); row[f.k]=el?(((el.value||'').trim())||null):null; });
+  MIS_FIELDS.forEach(f=>{ const el=$('misF_'+f.k); if(el) row[f.k]=((el.value||'').trim())||null; });
+  // PC In-Charge: blank means nobody assigned, recorded as NA rather than left empty
+  if(!row.pc_in_charge) row.pc_in_charge='NA';
+  // Dates normalised to dd/mm/yyyy, with the sortable copy kept in step
+  const nd=misToIso(row.next_date);
+  if(nd){ row.next_date=misDmy(nd); row.next_date_iso=misIsoStr(nd); }
+  else if(row.next_date){ row.next_date_iso=null; }
+  const pd=misToIso(row.previous_date);
+  if(pd) row.previous_date=misDmy(pd);
+  // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
+  if(orig){
+    const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
+    if(before && after && before!==after){
+      row.previous_date=before;
+      row.next_date_recorded_at=misIsoStr(new Date());
+    }
+  }
   return row;
 }
 window.misSave=async function(){
@@ -2031,11 +2276,23 @@ window.misEditSel=function(){
 window.misEdit=async function(id){
   const r=(window._misRows||[]).find(x=>x.id===id);if(!r)return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">${misFormHtml(r)}</div>
+  <div class="modal-body frm">${misFormHtml(r,'edit')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button></div>`,'lg');
+  // Live preview of the shift: typing a new Next Date immediately shows the old one moving
+  // into Previous Date, so it is obvious what will be saved.
+  window._misEditOrig=r;
+  setTimeout(function(){
+    const nd=$('misF_next_date'), pd=$('misF_previous_date');
+    if(!nd||!pd)return;
+    const before=String(r.next_date||'').trim(), wasPrev=String(r.previous_date||'').trim();
+    nd.addEventListener('input',function(){
+      const now=String(nd.value||'').trim();
+      pd.value=(before&&now&&now!==before)?before:wasPrev;
+    });
+  },30);
 };
 window.misUpdate=async function(id){
-  const row=misCollect();
+  const row=misCollect(window._misEditOrig);
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.from('mis_cases').update(row).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
@@ -8731,8 +8988,13 @@ VIEWS.mail=function(v,seg){
    & analysed by Gladia (Hindi / English / Bengali, code-switching aware) via
    the `transcription-analyze` edge function. Results land in acc.transcriptions. */
 const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',pa:'Punjabi'};
+// Fixed folder set — mirrors the project list the qualification prompt (transcription-analyze
+// edge function) matches calls against, so a call's r.project always lands in one of these.
+const TR_PROJECTS=['Dream Gurukul','Dream World City','Dream Valley','Dream Eco City','Dream Exotica'];
 const TR_TIMERS={};
 let TR_ROWS=null;
+let TR_FILTER='all'; // 'all'|'qualified'|'notqualified'|'processing' — driven by the KPI cards
+let TR_PROJECT=null; // project folder currently drilled into on the "By Project" tab
 function trLangName(c){return TR_LANG_NAMES[c]||(c?String(c).toUpperCase():'—');}
 function trLangTags(langs){if(!langs||!langs.length)return '<span style="color:var(--slate)">—</span>';return langs.map(function(c){return '<span class="tag t-blue" style="margin-right:4px">'+esc(trLangName(c))+'</span>';}).join('');}
 function trFmtDur(s){s=Number(s||0);if(!s)return '—';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.floor(s%60);const p=function(n){return (n<10?'0':'')+n;};return (h?h+':':'')+p(m)+':'+p(ss);}
@@ -9213,10 +9475,21 @@ VIEWS.organic=async function(v,seg){
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
-  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
-    +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>'
+  const tabs=['All Calls','By Project'];
+  const ti=mTab(seg,tabs.length);
+  const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
+  if(ti===1){
+    const rows=await trFetch(true);
+    const proj=seg[1]?decodeURIComponent(seg[1]):null;
+    TR_PROJECT=proj;
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +(proj?trProjectCallsHtml(rows,proj):trFolderGridHtml(rows));
+    return;
+  }
+  TR_PROJECT=null;
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
     +'<div id="trKpis"></div>'
-    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
+    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn" onclick="trExport()"><i class="fa-solid fa-file-export"></i> Export</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
@@ -9226,38 +9499,168 @@ VIEWS.transcription=async function(v,seg){
 function trRenderList(){
   const rows=TR_ROWS||[];
   const kh=$('trKpis');
-  if(kh){
-    const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
-    const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
-    const proc=rows.filter(function(r){return r.status==='processing';}).length;
-    kh.innerHTML=mKpis([
-      ['Calls',String(rows.length),'all time'],
-      ['Qualified',String(qual),'leads matched','#16a34a'],
-      ['Not Qualified',String(notq),'did not match','#dc2626'],
-      ['Processing',String(proc),proc?'in progress':'all clear',proc?'#d97706':'#16a34a'],
-    ]);
-  }
+  if(kh)kh.innerHTML=trKpisHtml(rows);
   const host=$('trRows');if(!host)return;
   if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
-  host.innerHTML=rows.map(function(r){
-    const fname=r.file_name||'Recording';
-    const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
-    // Main line = the recording's file name (truncated with … if too long, full name on hover);
-    // below it = the detected customer name, when the call identified one.
-    const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
-    return '<tr'+clickable+'>'
-      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
-      +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
-      +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
-      +'<td>'+trLangTags(r.languages)+'</td>'
-      +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
-      +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
-      +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
-        +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
-        +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
-      +'</td></tr>';
-  }).join('');
+  const filtered=trApplyFilter(rows);
+  if(!filtered.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button></div></td></tr>';return;}
+  host.innerHTML=trRowsBodyHtml(filtered);
 }
+// KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
+function trApplyFilter(rows){
+  if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
+  if(TR_FILTER==='notqualified')return rows.filter(function(r){return r.qualification==='Not Qualified';});
+  if(TR_FILTER==='processing')return rows.filter(function(r){return r.status==='processing';});
+  return rows;
+}
+window.trSetFilter=function(f){TR_FILTER=(TR_FILTER===f)?'all':f;trRenderList();};
+function trKpisHtml(rows){
+  const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
+  const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
+  const proc=rows.filter(function(r){return r.status==='processing';}).length;
+  const cards=[['all','Calls',rows.length,'all time','var(--slate)'],['qualified','Qualified',qual,'leads matched','#16a34a'],['notqualified','Not Qualified',notq,'did not match','#dc2626'],['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
+  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
+    const active=TR_FILTER===c[0];
+    return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
+      +'<div class="lbl" style="margin-bottom:7px">'+esc(c[1])+(active?' <i class="fa-solid fa-filter" style="font-size:10px"></i>':'')+'</div>'
+      +'<div class="val">'+c[2]+'</div>'
+      +'<div style="font-size:12px;color:'+c[4]+';margin-top:3px">'+esc(c[3])+'</div></div>';
+  }).join('')+'</div>';
+}
+// Shared row template — used by the flat list (tab 0) and the per-project drill-in (tab 1).
+function trRowHtml(r){
+  const fname=r.file_name||'Recording';
+  const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+  // Main line = the recording's file name (truncated with … if too long, full name on hover);
+  // below it = the detected customer name, when the call identified one.
+  const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+  return '<tr'+clickable+'>'
+    +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
+    +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+    +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
+    +'<td>'+trLangTags(r.languages)+'</td>'
+    +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
+    +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
+    +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+      +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Export this call" onclick="trExportOne('+r.id+')"><i class="fa-solid fa-file-export"></i></button> ':'')
+      +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
+      +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
+    +'</td></tr>';
+}
+function trRowsBodyHtml(rows){return rows.map(trRowHtml).join('');}
+
+/* ---------- By-project folders ---------- */
+function trFolderCardHtml(name,list){
+  const isMisc=(name==='Unassigned');
+  const qual=list.filter(function(r){return r.qualification==='Qualified';}).length;
+  return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/1/'+encodeURIComponent(name)+'\')">'
+    +'<div style="display:flex;align-items:center;gap:12px">'
+    +'<i class="fa-solid '+(isMisc?'fa-folder-open':'fa-folder')+'" style="font-size:26px;color:'+(isMisc?'#94a3b8':'#0d9488')+'"></i>'
+    +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(name)+'</div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-top:2px">'+list.length+' call'+(list.length===1?'':'s')+(list.length?(' · '+qual+' qualified'):'')+'</div></div>'
+    +'</div></div>';
+}
+function trProjectRows(rows,name){
+  return (rows||[]).filter(function(r){
+    if(name==='Unassigned')return !(r.project&&TR_PROJECTS.indexOf(r.project)>=0);
+    return r.project===name;
+  });
+}
+function trFolderGridHtml(rows){
+  const groups={};TR_PROJECTS.forEach(function(p){groups[p]=[];});
+  const misc=[];
+  (rows||[]).forEach(function(r){
+    if(r.project&&TR_PROJECTS.indexOf(r.project)>=0)groups[r.project].push(r);
+    else misc.push(r);
+  });
+  const cards=TR_PROJECTS.map(function(p){return trFolderCardHtml(p,groups[p]);}).concat([trFolderCardHtml('Unassigned',misc)]);
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:16px">'+cards.join('')+'</div>';
+}
+function trProjectCallsHtml(rows,name){
+  const list=trProjectRows(rows,name);
+  return '<div class="toolbar" style="margin:16px 0"><button class="btn btn-sm" onclick="navTo(\'transcription/1\')"><i class="fa-solid fa-arrow-left"></i> All projects</button><div class="grow"></div>'
+    +(list.length?'<button class="btn btn-sm" onclick="trExportProject(\''+esc(name).replace(/'/g,"\\'")+'\')"><i class="fa-solid fa-file-export"></i> Export</button>':'')+'</div>'
+    +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid '+(name==='Unassigned'?'fa-folder-open':'fa-folder')+'" style="color:'+(name==='Unassigned'?'#94a3b8':'#0d9488')+'"></i> '+esc(name)+'</h1></div>'
+    +'<div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
+    +'<tbody id="trProjRows">'+(list.length?trRowsBodyHtml(list):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this project yet</div></div></td></tr>')+'</tbody></table></div></div>';
+}
+// Keeps the project drill-in list (if open) in sync after an optimistic delete/retry — a no-op
+// when that view isn't currently on screen, same guard pattern as trRenderList's #trRows check.
+function trRenderProjectRows(){
+  const host=$('trProjRows');if(!host||!TR_PROJECT)return;
+  const list=trProjectRows(TR_ROWS||[],TR_PROJECT);
+  host.innerHTML=list.length?trRowsBodyHtml(list):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this project yet</div></div></td></tr>';
+}
+
+/* ---------- Export ---------- */
+// Builds a self-contained, print-ready HTML document (no dependency on nexus.css, since it opens
+// in its own blank tab) — the browser's own Print dialog ("Save as PDF") is the export mechanism.
+function trExportHtml(rows,heading){
+  const now=new Date();
+  const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const cards=rows.map(function(r){
+    const qb=r.qualification==='Qualified';
+    const badge=r.qualification?('<span class="badge" style="background:'+(qb?'#dcfce7':'#fee2e2')+';color:'+(qb?'#166534':'#991b1b')+'">'+esc(r.qualification)+'</span>'):'';
+    const langs=(r.languages&&r.languages.length)?r.languages.map(trLangName).join(', '):'—';
+    const reasonHtml=r.reason?('<div class="sec"><div class="sec-h">Qualification reason</div><div class="pre">'+esc(r.reason)+'</div></div>'):'';
+    const summaryHtml=r.summary?('<div class="sec"><div class="sec-h">Summary</div><div class="pre">'+esc(r.summary)+'</div></div>'):'';
+    const c=r.criteria||{};
+    const critItems=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+    const critHtml='<div class="sec"><div class="sec-h">Qualification checklist</div><ul class="crit">'+critItems.map(function(it){const ok=c[it[0]]===true;return '<li style="color:'+(ok?'#166534':'#991b1b')+'">'+(ok?'&#10003;':'&#10007;')+' '+esc(it[1])+'</li>';}).join('')+'</ul></div>';
+    const transcript=r.transcript_en||r.transcript||'';
+    const transcriptHtml=transcript?('<div class="sec"><div class="sec-h">Transcript (English)</div><div class="pre transcript">'+esc(transcript)+'</div></div>'):'';
+    return '<div class="call">'
+      +'<div class="call-h"><div><div class="fn">'+esc(r.file_name||'Recording')+'</div>'
+      +(r.customer_name?'<div class="cn">'+esc(r.customer_name)+'</div>':'')+'</div>'+badge+'</div>'
+      +'<div class="meta">Project: <b>'+esc(r.project&&r.project!=='Unclear'?r.project:'Unclear')+'</b> &nbsp;&middot;&nbsp; Duration: '+esc(trFmtDur(r.duration_seconds))+' &nbsp;&middot;&nbsp; Languages: '+esc(langs)+' &nbsp;&middot;&nbsp; Uploaded: '+esc(fmtDate(r.created_at))+'</div>'
+      +reasonHtml+summaryHtml+critHtml+transcriptHtml
+      +'</div>';
+  }).join('');
+  return '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(heading)+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:32px;background:#fff}'
+    +'.top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0d9488;padding-bottom:14px;margin-bottom:22px}'
+    +'.top h1{margin:0;font-size:20px;color:#0d9488}'
+    +'.top .sub{font-size:12px;color:#64748b;margin-top:4px}'
+    +'.call{border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;margin-bottom:20px;page-break-inside:avoid}'
+    +'.call-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}'
+    +'.fn{font-weight:700;font-size:15px}'
+    +'.cn{font-size:12.5px;color:#64748b;margin-top:2px}'
+    +'.badge{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}'
+    +'.meta{font-size:12px;color:#475569;margin:8px 0 12px}'
+    +'.sec{margin-top:12px}'
+    +'.sec-h{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#0d9488;margin-bottom:5px}'
+    +'.pre{font-size:13px;line-height:1.6;white-space:pre-wrap}'
+    +'ul.crit{margin:0;padding:0;list-style:none;font-size:13px;line-height:1.8}'
+    +'@media print{.call{page-break-after:always}.call:last-child{page-break-after:auto}}'
+    +'</style></head><body>'
+    +'<div class="top"><div><h1>Jain Group — Pre-Sales Call Transcriptions</h1><div class="sub">'+esc(heading)+'</div></div><div class="sub">Exported '+esc(dateStr)+' &middot; '+rows.length+' call'+(rows.length===1?'':'s')+'</div></div>'
+    +cards
+    +'<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},300);});<\/script>'
+    +'</body></html>';
+}
+function trOpenExport(rows,heading){
+  const doneRows=(rows||[]).filter(function(r){return r.status==='done';});
+  if(!doneRows.length){toast('No finished calls to export','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow pop-ups to export','err');return;}
+  w.document.open();w.document.write(trExportHtml(doneRows,heading));w.document.close();
+}
+window.trExport=function(){
+  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='processing'?'Processing calls':'All calls'));
+  trOpenExport(trApplyFilter(TR_ROWS||[]),label);
+};
+window.trExportOne=function(id){
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  if(!r){toast('Call not found','err');return;}
+  trOpenExport([r],r.file_name||'Call export');
+};
+window.trExportDetail=function(){
+  if(!TR_DETAIL_ROW){toast('Nothing to export','err');return;}
+  trOpenExport([TR_DETAIL_ROW],TR_DETAIL_ROW.file_name||'Call export');
+};
+window.trExportProject=function(name){
+  trOpenExport(trProjectRows(TR_ROWS||[],name),name);
+};
 
 async function trPollOnce(id){
   const {data:{session}}=await sb.auth.getSession();
@@ -9282,7 +9685,7 @@ window.trDelete=async function(id){
   if(!ok)return;
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
   TR_ROWS=(TR_ROWS||[]).filter(function(x){return x.id!==id;});
-  trRenderList();
+  trRenderList();trRenderProjectRows();
   try{await sb.schema('acc').from('transcriptions').delete().eq('id',id);}catch(e){}
   if(r&&r.s3_path)try{s3Delete(r.s3_path);}catch(e){}
   toast('Recording deleted','ok');
@@ -9291,7 +9694,7 @@ window.trDelete=async function(id){
 // Re-run analysis on a failed row using the recording already in S3 — no re-upload needed.
 window.trRetry=async function(id){
   const i=(TR_ROWS||[]).findIndex(function(x){return x.id===id;});
-  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList(); }
+  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList();trRenderProjectRows(); }
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
   try{
@@ -9302,7 +9705,7 @@ window.trRetry=async function(id){
     toast('Retrying…','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
-    if(i>=0){ TR_ROWS[i].status='error'; trRenderList(); }
+    if(i>=0){ TR_ROWS[i].status='error'; trRenderList();trRenderProjectRows(); }
   }
 };
 
@@ -9407,7 +9810,7 @@ async function trDetail(v,id){
   const qb=r.qualification==='Qualified';
   const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
-  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+(r.status==='done'?'<button class="btn" onclick="trExportDetail()"><i class="fa-solid fa-file-export"></i> Export</button>':'')+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
     +banner
     +mKpis([

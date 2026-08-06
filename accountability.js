@@ -1109,7 +1109,9 @@
     const box=$('wfTrigOwner'); if(!box)return;
     const hid=box.querySelector('.wf-s-person'); if(hid)hid.value='';
     const btn=box.querySelector('.wf-pp-btn'); if(btn)btn.innerHTML='<span class="wf-pp-ph">Anyone (no specific owner)</span><i class="fa-solid fa-chevron-down wf-pp-caret"></i>';
-    box.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
+    // the picker renders .ms-opt rows (shared app styles); .ms-row is the older markup and
+    // left the previously chosen person still ticked after clearing
+    box.querySelectorAll('.ms-opt.on,.ms-row.on').forEach(function(x){x.classList.remove('on');});
   };
 
 
