@@ -262,7 +262,7 @@
     .gcal-body{padding:0}
     .gcal-mgrid{display:grid;grid-template-columns:repeat(7,1fr)}
     .gcal-mdow{text-align:center;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;padding:8px 0;border-bottom:1px solid #e5e7eb}
-    .gcal-mcell{min-height:104px;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:6px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .1s}
+    .gcal-mcell{min-height:104px;min-width:0;overflow:hidden;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:6px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .1s}
     .gcal-mcell:nth-child(7n){border-right:0}
     .gcal-mcell:hover{background:#f8fafc}
     .gcal-mcell.other{background:#fafafa}
@@ -270,11 +270,7 @@
     .gcal-mcell.today .gcal-mnum{background:#2563eb;color:#fff}
     .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
     .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
-    .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%}
-    .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
-    .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
-    .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}
-    .gcal-mev.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:1px}
+    .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%;min-width:0}
     .gcal-mcell.gcal-drop-hover,.gcal-allday-col.gcal-drop-hover{outline:2px dashed #2563eb;outline-offset:-2px;background:rgba(37,99,235,.08)}
     .gcal-wrap{display:flex;flex-direction:column;max-height:66vh;overflow:auto}
     .gcal-allday{display:flex;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
@@ -331,10 +327,14 @@
     .gcal-panel-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#1f2937}
     .gcal-panel-head .x{margin-left:auto;cursor:pointer;color:#6b7280;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center}
     .gcal-panel-head .x:hover{background:#f1f5f9;color:#1f2937}
-    .gcal-panel-body{flex:1;overflow-y:auto;padding:18px}
-    .gcal-panel-title{font-size:16px;font-weight:700;color:#1f2937;margin-bottom:14px;line-height:1.4}
-    .gcal-panel-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;font-size:13.5px;color:#374151;line-height:1.5}
+    .gcal-panel-body{flex:1;overflow-y:auto;overflow-x:hidden;padding:18px}
+    .gcal-panel-title{font-size:16px;font-weight:700;color:#1f2937;margin-bottom:14px;line-height:1.4;overflow-wrap:anywhere}
+    .gcal-panel-row{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;font-size:13.5px;color:#374151;line-height:1.5;min-width:0;overflow-wrap:anywhere}
     .gcal-panel-row i{width:16px;color:#6b7280;margin-top:2px;flex:none}
+    /* Inside the panel/menu specifically, long titles wrap to a new line instead of the ellipsis
+       truncation used elsewhere (e.g. the Week view list) — no horizontal scroll in here either way. */
+    .gcal-panel .gcal-lrow{align-items:flex-start}
+    .gcal-panel .gcal-lrow-title{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
     .gcal-panel-foot{padding:14px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px}
     .gcal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.15);z-index:199;opacity:0;pointer-events:none;transition:opacity .18s}
     .gcal-backdrop.open{opacity:1;pointer-events:auto}
@@ -803,8 +803,40 @@
   // Same as wfDT but always carries the year too, for the timeline cards.
   function wfDTFull(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
-  function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
-  function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
+  // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
+  function wfCaseNo5(c){ return String((c&&c.case_no)||0).padStart(5,'0'); }
+  // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
+  function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'d '+h+'h'; }
+  // 2+ people -> the whole group becomes hoverable (desktop) / tappable (mobile), showing the
+  // full name list via the existing .wf-poptip/.wf-tip-txt tooltip layer (same one the "i" hints
+  // and status pills already use) instead of relying on each tiny circle's own native title,
+  // which never worked for the "+N" overflow circle and only ever showed one name at a time.
+  function wfCircles(emails,extra){
+    emails=(emails||[]).filter(Boolean);
+    if(!emails.length) return '<span class="wf-circle wf-none" title="No members yet">·</span>';
+    const max=5, shown=emails.slice(0,max), multi=emails.length>=2;
+    let h='<span class="wf-circles'+(multi?' wf-poptip':'')+' '+(extra||'')+'"'+(multi?' tabindex="0" role="button" aria-label="Show all people" onclick="event.stopPropagation();wfPopToggle(this)"':'')+'>';
+    shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
+    if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>';
+    if(multi)h+='<span class="wf-tip-txt">'+emails.map(function(e){return esc2(wfNm(e));}).join('<br>')+'</span>';
+    h+='</span>';
+    return h;
+  }
+  // My own department(s), from the same people() list already loaded for the person-picker.
+  function wfMyDepts(){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,me());}); return (p&&Array.isArray(p.depts))?p.depts:[]; }
+  function wfInDept(dept){ return wfMyDepts().some(function(d){return eq(d,dept);}); }
+  function wfInAnyDept(depts){ const mine=wfMyDepts(); return (depts||[]).some(function(d){return mine.some(function(m){return eq(m,d);});}); }
+  // Who can create a brand-new workflow — mirrors acc.wf_can_create_flow() server-side exactly.
+  var WF_CREATE_DEPTS=['Systems','Administration'];
+  function wfCanSee(f,ownersByFlow){
+    const o=(ownersByFlow&&ownersByFlow[f.id])||[];
+    return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());})
+      // A flow can be opened up to whole departments (e.g. Invoice Processing -> Systems +
+      // Administration) instead of just its creator/trigger-owner/step-owners — mirrors the
+      // backend's own acc.wf_can_see_flow RLS check, which is the real enforcement; this is just
+      // the matching client-side filter so the list doesn't have to round-trip a denied row.
+      || wfInAnyDept(f.visible_departments);
+  }
   function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
 
@@ -836,8 +868,12 @@
         +'<div class="wf-lrow-right">'+wfCircles(owners)+'<span class="wf-lrow-steps">'+n+' step'+(n===1?'':'s')+'</span><i class="fa-solid fa-chevron-right wf-go"></i></div>'
       +'</div>';
     }).join('');
-    const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet — create your first one with the button above.</div>';
-    b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div><button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button></div>'
+    const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet.</div>';
+    // Creating a brand-new workflow (not just viewing one) is restricted to Systems/Administration
+    // — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which is the real
+    // enforcement; this is just the matching client-side button visibility.
+    const canCreate=wfInAnyDept(WF_CREATE_DEPTS);
+    b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div>'+(canCreate?'<button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button>':'')+'</div>'
       +inner;
   }
 
@@ -899,6 +935,19 @@
   function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(l).trim()&&!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(v); }).filter(Boolean).join('<br>'); }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
+  // Curated instance summary — Bill No./Bill Date/Unique bill Id/Company/Amount (+ the 5-digit
+  // Id), explicitly WITHOUT Department, per the user's request. Falls back to null (caller shows
+  // the generic full detail list instead) for any workflow that doesn't have these field labels,
+  // so other workflows (Leave approval, etc.) are unaffected.
+  var WF_SUMMARY_FIELDS=['Bill No.','Bill Date','Unique bill Id','Company','Amount'];
+  function wfCaseSummaryHtml(c){
+    const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
+    const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    const items=[{k:'Id',v:wfCaseNo5(c)}];
+    WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
+    if(items.length<=1) return '';
+    return '<div class="tp-grid" style="margin-top:10px">'+items.map(function(it){return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';}).join('')+'</div>';
+  }
 
   /* ----- What does this workflow actually process? -----------------------------------------
      A workflow called "Invoice Processing" with the trigger "Invoice Received" is really about
@@ -957,7 +1006,6 @@
       +'</div>'
       +'<div class="wf-step-fields">'
         +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
-        +'<input class="ac-in wf-s-desc" placeholder="Description (optional)" value="'+esc2(step.description||'')+'">'
         +'<div class="wf-step-sub">'
           +wfPersonPickerHtml(step.owner_email)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
@@ -1061,7 +1109,9 @@
     const box=$('wfTrigOwner'); if(!box)return;
     const hid=box.querySelector('.wf-s-person'); if(hid)hid.value='';
     const btn=box.querySelector('.wf-pp-btn'); if(btn)btn.innerHTML='<span class="wf-pp-ph">Anyone (no specific owner)</span><i class="fa-solid fa-chevron-down wf-pp-caret"></i>';
-    box.querySelectorAll('.ms-row.on').forEach(function(x){x.classList.remove('on');});
+    // the picker renders .ms-opt rows (shared app styles); .ms-row is the older markup and
+    // left the previously chosen person still ticked after clearing
+    box.querySelectorAll('.ms-opt.on,.ms-row.on').forEach(function(x){x.classList.remove('on');});
   };
 
 
@@ -1076,7 +1126,6 @@
     const steps=[]; let bad='';
     rows.forEach(function(r,i){
       const t=((r.querySelector('.wf-s-title')||{}).value||'').trim();
-      const desc=((r.querySelector('.wf-s-desc')||{}).value||'').trim();
       const person=(r.querySelector('.wf-s-person')||{}).value||'';
       const durRaw=(r.querySelector('.wf-s-dur')||{}).value;
       const unit=(r.querySelector('.wf-s-unit')||{}).value||'days';
@@ -1086,7 +1135,7 @@
         else if(!person) bad='Step '+(i+1)+': assign a person.';
         else if(!(dur>=1)) bad='Step '+(i+1)+': set a duration.';
       }
-      steps.push({seq:steps.length+1,title:t,description:desc||null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
+      steps.push({seq:steps.length+1,title:t,description:null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
@@ -1125,6 +1174,20 @@
         // both moments, with full date + time
         if(s.received_at) whenHtml+='<span class="wf-tl-when"><b>Received</b> '+esc2(wfDTFull(s.received_at))+'</span>';
         if(s.forwarded_at) whenHtml+='<span class="wf-tl-when done"><b>Done</b> '+esc2(wfDTFull(s.forwarded_at))+'</span>';
+        // Transition = how long it sat between the previous step finishing (or, for the very
+        // first step, the triggering event's initiation) and this step actually being received.
+        // Retention = how long THIS step held it between being received and being forwarded —
+        // both in the user's requested "Days.Hours" format (e.g. "1.2" = 1 day 2 hours).
+        if(s.received_at){
+          const transStart = i===0 ? opt.caseCreatedAt : (steps[i-1] && steps[i-1].forwarded_at);
+          if(transStart){
+            const tt=wfDaysHoursText(new Date(s.received_at)-new Date(transStart));
+            if(tt) whenHtml+='<span class="wf-tl-when"><b>Transition</b> '+esc2(tt)+'</span>';
+          }
+          const retMs=s.forwarded_at?(new Date(s.forwarded_at)-new Date(s.received_at)):(Date.now()-new Date(s.received_at));
+          const rt=wfDaysHoursText(retMs);
+          if(rt) whenHtml+='<span class="wf-tl-when'+(s.forwarded_at?' done':'')+'"><b>Retention</b> '+esc2(rt)+(s.forwarded_at?'':' · running')+'</span>';
+        }
       }
       return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
         +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
@@ -1145,8 +1208,19 @@
     if(cases.length){ try{ const {data}=await ACC().from('flow_case_steps').select('*').in('case_id',cases.map(function(c){return c.id;})); fcs=data||[]; }catch(e){} }
     const mySelf=me();
     const isCreator=eq(flow.created_by||'',mySelf);
-    const canEvent = !flow.trigger_owner || eq(flow.trigger_owner, mySelf);
-    window._wfFlowId=id; window._wfDelId = isCreator ? id : null; wfWireDeleteKey();
+    // Matches the backend's own acc.wf_create_instance permission check exactly: the creator can
+    // always start one; when a trigger_owner is set, ONLY that person can (not every visitor —
+    // the previous `!flow.trigger_owner || ...` showed this button to everyone whenever
+    // trigger_owner happened to be unset); when there's no trigger_owner, any step owner can.
+    const isStepOwner = steps.some(function(s){ return eq(s.owner_email||'', mySelf); });
+    // Starting a new instance ("New <Noun>") is additionally open to everyone in Systems or
+    // Administration, on top of the creator/trigger-owner/step-owner paths — mirrors
+    // acc.wf_create_instance's own OR acc.wf_can_create_flow() check server-side.
+    const canEvent = isCreator || (flow.trigger_owner ? eq(flow.trigger_owner, mySelf) : isStepOwner) || wfInAnyDept(WF_CREATE_DEPTS);
+    // Editing/deleting the workflow itself (and, further down, its instances) is Administration-
+    // department only — mirrors acc.wf_is_admin_dept(), the real server-side enforcement.
+    const canManage = wfInDept('Administration');
+    window._wfFlowId=id; window._wfDelId = canManage ? id : null; wfWireDeleteKey();
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
     // older workflows saved before this feature have no word yet — learn it once, quietly
@@ -1166,7 +1240,7 @@
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head='<th class="wf-chk-col"></th><th>No.</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+      const head=(canManage?'<th class="wf-chk-col"></th>':'')+'<th>Id</th><th>Unique Bill Id</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
@@ -1181,18 +1255,29 @@
         const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
         const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
         const instOver=(c.status==='Done'||c.status==='Cancelled');
-        return '<tr data-case="'+c.id+'" onclick="wfShowCase('+c.id+',this)">'
-          +'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>'
-          +'<td><b>'+(c.case_no||c.id)+'</b></td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
+        const uniqueBillId=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Unique bill Id');});
+        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNo5(c)+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+          +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
+          +'<td><b>'+wfCaseNo5(c)+'</b></td><td>'+esc2((uniqueBillId&&uniqueBillId.value)||'—')+'</td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
-        +'<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span></div>'
-        +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+        +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
+        +'<div class="wf-inst-filterbar">'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="Search by Id…" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-dates">'
+            +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
+            +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
+            +'<label class="wf-lbl">To<input type="date" class="ac-in" id="wfInstDateTo"></label>'
+            +'<button class="ac-btn primary" onclick="wfInstDateApply()"><i class="fa-solid fa-check"></i> Update</button>'
+            +'<button class="ac-btn ic" title="Clear filters" onclick="wfInstFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
+          +'</div>'
+        +'</div>'
+        +'<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table><div id="wfInstNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div></div>';
     }
 
     const headActs='<div class="wf-head-acts">'
-      +(isCreator?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
+      +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
@@ -1211,6 +1296,45 @@
   }
 
   function wfN(){ return window._wfNoun || {one:'Event',many:'Events',lc:'event',lcMany:'events'}; }
+  // Instance search (by the 5-digit Id ONLY — not Unique Bill Id or any other field, per the
+  // user's explicit instruction) is live as you type; the created-date range only takes effect
+  // once "Update" is clicked (not on every date pick), so it's tracked separately here rather
+  // than read straight from the inputs on every filter pass.
+  window._wfInstDateFilter={from:'',to:''};
+  window.wfInstFilter=function(){
+    const q=(($('wfInstSearch')||{}).value||'').trim();
+    const from=window._wfInstDateFilter.from, to=window._wfInstDateFilter.to;
+    const rows=[].slice.call(document.querySelectorAll('.wf-itable tbody tr'));
+    let shown=0;
+    rows.forEach(function(r){
+      const id5=r.getAttribute('data-caseno5')||'';
+      const created=r.getAttribute('data-created')||'';
+      let ok=true;
+      if(q && id5.indexOf(q)===-1) ok=false;
+      if(ok && from && created && created<from) ok=false;
+      if(ok && to && created && created>to) ok=false;
+      r.style.display=ok?'':'none';
+      if(ok) shown++;
+    });
+    const nm=$('wfInstNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
+  };
+  // To can never be earlier than From — once From is picked, To's minimum becomes that date
+  // (and if To was already set to something now-invalid, it's cleared rather than left wrong).
+  window.wfInstDateFromChange=function(){
+    const f=$('wfInstDateFrom'), t=$('wfInstDateTo'); if(!f||!t)return;
+    t.min=f.value||'';
+    if(f.value && t.value && t.value<f.value) t.value='';
+  };
+  window.wfInstDateApply=function(){
+    window._wfInstDateFilter={from:(($('wfInstDateFrom')||{}).value||''), to:(($('wfInstDateTo')||{}).value||'')};
+    wfInstFilter();
+  };
+  window.wfInstFilterClear=function(){
+    const s=$('wfInstSearch'), f=$('wfInstDateFrom'), t=$('wfInstDateTo');
+    if(s)s.value=''; if(f)f.value=''; if(t){t.value='';t.min='';}
+    window._wfInstDateFilter={from:'',to:''};
+    wfInstFilter();
+  };
   window.wfInstSelChange=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     const eb=$('wfInstEdit'), db=$('wfInstDel'), N=wfN();
@@ -1251,18 +1375,22 @@
     const box=$('wfTL'); if(box) box.innerHTML='<div class="loader"><div class="spin"></div></div>';
     document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');});
     const tr=rowEl||document.querySelector('.wf-itable tbody tr[data-case="'+caseId+'"]'); if(tr)tr.classList.add('sel');
-    let c=null,fcs=[],updates=[];
+    let c=null,fcs=[],updates=[],atts=[];
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
+    if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
+    const attsByUpdate={}; atts.forEach(function(a){ (attsByUpdate[a.update_id]=attsByUpdate[a.update_id]||[]).push(a); });
     if(!box)return;
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'';
-    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+(c.case_no||c.id)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+    const detHtml=wfCaseSummaryHtml(c) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const pinned=wfOriginalAttachmentHtml(c);
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNo5(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
-      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status})||'')+'</div>'
-      +(updates.length?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div><div class="wf-updmini-list">'+updates.map(wfUpdateHtml).join('')+'</div></div>'):'');
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
+      +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
+    wfHydrateAttThumbs();
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
@@ -1276,10 +1404,60 @@
   };
 
   /* ----- New <Noun> form (e.g. "New Invoice") ----- */
-  function wfEvtRowHtml(label,value,locked){
-    if(locked){ return '<div class="wf-evt-row"><div class="ac-in wf-evt-labelro" style="flex:1;min-width:0;background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--slate);flex:none"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc2(label||'')+'</span></div><input type="hidden" class="wf-evt-label" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"></div>'; }
-    return '<div class="wf-evt-row"><input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label||'')+'"><input class="ac-in wf-evt-value" placeholder="Detail" value="'+esc2(value||'')+'"><button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button></div>';
+  // Event-field types. Historically every trigger_template field was plain free text; a field
+  // entry can now optionally carry a `type` ('text'|'date'|'number'|'select'|'attachment') and,
+  // for 'select', an `options:[{label,group?}]` list — absent `type` still means 'text', so every
+  // pre-existing workflow's plain-text fields render exactly as before.
+  function wfEvtRowHtml(field,value,locked){
+    const f=(typeof field==='string')?{label:field}:(field||{});
+    const label=f.label||'', type=f.type||'text';
+    const labelHtml=locked
+      ?('<div class="ac-in wf-evt-labelro" style="flex:1;min-width:0;background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--slate);flex:none"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc2(label)+(f.optional?' <span style="color:var(--slate);font-weight:400">(optional)</span>':'')+'</span></div><input type="hidden" class="wf-evt-label" value="'+esc2(label)+'">')
+      :('<input class="ac-in wf-evt-label" placeholder="Label (e.g. Customer, Unit no.)" value="'+esc2(label)+'">');
+    let valueHtml;
+    if(type==='select'){
+      const opts=Array.isArray(f.options)?f.options:[];
+      const groups={}, order=[];
+      opts.forEach(function(o){ const g=(o&&o.group)||''; if(!groups[g]){groups[g]=[];order.push(g);} groups[g].push(o); });
+      const optHtml=order.map(function(g){
+        const inner=groups[g].map(function(o){ return '<option value="'+esc2(o.label)+'"'+(eq(o.label,value)?' selected':'')+'>'+esc2(o.label)+'</option>'; }).join('');
+        return g?('<optgroup label="'+esc2(g)+'">'+inner+'</optgroup>'):inner;
+      }).join('');
+      valueHtml='<select class="ac-in wf-evt-value">'+(f.optional?'<option value="">—</option>':'<option value="" disabled'+(value?'':' selected')+'>Select…</option>')+optHtml+'</select>';
+    } else if(type==='attachment'){
+      const has=value && String(value).indexOf('s3:')===0;
+      valueHtml='<div class="wf-evt-att">'
+        +(has
+          ?('<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> Attached <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span>')
+          :('<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)">'))
+        +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
+      +'</div>';
+    } else {
+      const inputType=type==='date'?'date':(type==='number'?'number':'text');
+      // "Unique bill Id" always follows the c<4 digits> convention (e.g. c2950) — hinted via
+      // placeholder here, enforced in wfEventSave before it's allowed to save.
+      const placeholder=eq(label,'Unique bill Id')?'e.g. c2950':(f.optional?'Optional':'Detail');
+      valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
+    }
+    const removeBtn=locked?'':'<button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button>';
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
+  window.wfEvtAttPick=async function(input){
+    const file=input.files&&input.files[0]; if(!file)return;
+    const wrap=input.closest('.wf-evt-att'); if(!wrap)return;
+    input.disabled=true;
+    try{
+      const evtForm=document.querySelector('.wf-evt-form');
+      const key=s3KeyForFlowEvent((evtForm&&evtForm.getAttribute('data-flow'))||'0', file.name);
+      const {data,error}=await uploadFileToS3(key,file);
+      if(error) throw error;
+      wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> '+esc2(file.name)+' <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
+    }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); input.disabled=false; }
+  };
+  window.wfEvtAttClear=function(btn){
+    const wrap=btn.closest('.wf-evt-att'); if(!wrap)return;
+    wrap.innerHTML='<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"><input type="hidden" class="wf-evt-value" value="">';
+  };
   window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
 
@@ -1310,14 +1488,25 @@
     }
     // Once the detail fields have been defined for this workflow (trigger_template is set), the field
     // LABELS are locked: they can't be edited, added or removed — you only fill in the values.
-    const template=tmpl;
-    const locked=template.length>0;
+    let template=tmpl;
+    let locked=template.length>0;
+    // Every workflow gets an optional Attachment field by default, added lazily the first time
+    // anyone opens "New <Noun>"/edits an instance for it (covers pre-existing workflows too,
+    // without a one-off migration touching their data ahead of time).
+    if(locked && !template.some(function(t){return eq((t&&t.label)||'','Attachment');})){
+      template=template.concat([{label:'Attachment',type:'attachment',optional:true}]);
+      try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:template}); }catch(_e){}
+    }
     let src;
-    if(editing){ src=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]; }
-    else if(locked){ src=template.map(function(t){return {label:(t&&t.label)||'',value:''};}); }
+    if(editing){
+      const savedByLabel={}; (Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]).forEach(function(d){ if(d&&d.label) savedByLabel[d.label]=d.value; });
+      src=locked ? template.map(function(t){ return Object.assign({},t,{value:savedByLabel[(t&&t.label)||'']||''}); })
+                 : (Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
+    }
+    else if(locked){ src=template.map(function(t){ return Object.assign({},t,{value:''}); }); }
     else { src=[]; }
-    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml((t&&t.label)||'', (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow.case_no||caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNo5(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
@@ -1330,8 +1519,20 @@
   };
 
   window.wfEventSave=async function(flowId, caseId){
-    const wrap=$('wfEvtDetails'); const details=[];
-    if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){ const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim(); const value=((r.querySelector('.wf-evt-value')||{}).value||'').trim(); if(label||value) details.push({label:label,value:value}); }); }
+    const wrap=$('wfEvtDetails'); const details=[]; let missing='', badFormat='';
+    if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){
+      const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim();
+      let value=((r.querySelector('.wf-evt-value')||{}).value||'').trim();
+      if(!missing && label && !value && r.getAttribute('data-optional')!=='1') missing=label;
+      // Unique bill Id is always "c" + exactly 4 digits (e.g. c2950) — normalize case, then check.
+      if(eq(label,'Unique bill Id') && value){
+        if(!/^c\d{4}$/i.test(value)){ if(!badFormat) badFormat=value; }
+        else value='c'+value.slice(1);
+      }
+      if(label||value) details.push({label:label,value:value});
+    }); }
+    if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
+    if(badFormat){ toast('Unique bill Id should look like c2950 (c + 4 digits)','warn'); return; }
     const N=wfN();
     try{
       if(caseId){
@@ -1349,10 +1550,55 @@
   };
 
 
-  function wfUpdateHtml(u){
+  // Attachments (Updates & Feedback, and the pinned original trigger-event Attachment) live in
+  // S3 behind presigned URLs — an <img> can't just point at the s3: path, so image attachments
+  // render as a placeholder with data-path and get their real src filled in by
+  // wfHydrateAttThumbs() after the HTML lands in the DOM (same pattern used for Competitor Ads
+  // thumbnails: sign once, cache, reuse).
+  window._wfSignCache=window._wfSignCache||{};
+  async function wfSignedUrl(path){
+    if(!path) return null;
+    if(window._wfSignCache[path]) return window._wfSignCache[path];
+    const {data,error}=await s3Sign('get', path.slice(3));
+    if(error||!data) return null;
+    window._wfSignCache[path]=data.url;
+    return data.url;
+  }
+  async function wfHydrateAttThumbs(){
+    const els=[].slice.call(document.querySelectorAll('.wf-att-img[data-path]'));
+    await Promise.all(els.map(async function(el){
+      const path=el.getAttribute('data-path');
+      const url=await wfSignedUrl(path);
+      if(url && el.isConnected) el.src=url;
+    }));
+  }
+  window.wfAttOpen=function(path,name){ s3OpenSigned(path,name||''); };
+  function wfAttachmentHtml(a){
+    const name=a.file_name||(a.storage_path||'').split('/').pop();
+    const isImg=/\.(png|jpe?g|gif|webp|bmp)$/i.test(name||'');
+    if(isImg){
+      return '<span class="wf-att-thumb" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')" title="'+esc2(name)+'"><img class="wf-att-img" data-path="'+esc2(a.storage_path)+'" alt=""></span>';
+    }
+    return '<span class="wf-att-file" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')"><i class="fa-solid fa-file-arrow-down"></i> '+esc2(name)+'</span>';
+  }
+  function wfAttachmentsRowHtml(atts){
+    if(!atts||!atts.length) return '';
+    return '<div class="wf-att-row">'+atts.map(wfAttachmentHtml).join('')+'</div>';
+  }
+  // The case's own trigger-event Attachment field (if any) — a read-only "original attachment"
+  // pinned above the Updates thread, distinct from anything added afterward in Updates & Feedback.
+  function wfOriginalAttachmentHtml(c){
+    const det=Array.isArray(c&&c.trigger_details)?c.trigger_details:[];
+    const f=det.find(function(d){ return d&&eq(d.label,'Attachment')&&d.value; });
+    if(!f) return '';
+    return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment</div>'+wfAttachmentHtml({storage_path:f.value})+'</div>';
+  }
+
+  function wfUpdateHtml(u,atts){
+    const attHtml=wfAttachmentsRowHtml(atts);
     if(u.system){ return '<div class="wf-upd-sys"><i class="fa-solid fa-circle-info"></i> '+esc2(wfNm(u.author))+' '+esc2(u.body)+' · '+wfDT(u.created_at)+'</div>'; }
     const mine=eq(u.author,me());
-    return '<div class="wf-upd'+(mine?' me':'')+'"><span class="wf-upd-av" style="background:'+colorFor(u.author)+'">'+esc2(iniOf(wfNm(u.author)).toUpperCase())+'</span><div class="wf-upd-b"><div class="wf-upd-meta"><b>'+esc2(wfNm(u.author))+'</b> · '+wfDT(u.created_at)+'</div><div class="wf-upd-body">'+esc2(u.body)+'</div></div></div>';
+    return '<div class="wf-upd'+(mine?' me':'')+'"><span class="wf-upd-av" style="background:'+colorFor(u.author)+'">'+esc2(iniOf(wfNm(u.author)).toUpperCase())+'</span><div class="wf-upd-b"><div class="wf-upd-meta"><b>'+esc2(wfNm(u.author))+'</b> · '+wfDT(u.created_at)+'</div>'+(u.body?('<div class="wf-upd-body">'+esc2(u.body)+'</div>'):'')+attHtml+'</div></div>';
   }
 
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
@@ -1367,6 +1613,8 @@
     if(caseRow){ try{ const {data}=await ACC().from('flows').select('*').eq('id',caseRow.flow_id).maybeSingle(); flow=data; }catch(e){} }
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',fcs.case_id).order('seq',{ascending:true}); allSteps=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',fcs.case_id).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
+    let atts=[]; if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
+    const attsByUpdate={}; atts.forEach(function(a){ (attsByUpdate[a.update_id]=attsByUpdate[a.update_id]||[]).push(a); });
     const idx=allSteps.findIndex(function(s){return s.id===fcs.id;});
     const isFirst=idx<=0, isLast=idx===(allSteps.length-1);
     const amAssignee=(members||[]).some(function(e){return eq(e,me());});
@@ -1399,7 +1647,7 @@
     const person=fcs.person;
     const wfDetailsArr=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
     const wfInline=wfDetailsInline(wfDetailsArr);
-    const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow&&caseRow.case_no?(' #'+caseRow.case_no):'');
+    const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow?(' #'+wfCaseNo5(caseRow)):'');
     const wfStepName=wfTitleCase(fcs.title||'');
     const wfDescFmt=wfDetailsFmt(wfDetailsArr);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
@@ -1417,10 +1665,13 @@
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
       +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfNounOf(flow).lc+' as it moves to the next person, and rejection reasons appear here too.')+'</h3>'
-        +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(wfUpdateHtml).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
+        +wfOriginalAttachmentHtml(caseRow)
+        +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
-        +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+        +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+        +'<div id="wfUpdFileList" class="wf-updfile-list"></div>'
       +'</div></div>';
+    wfHydrateAttThumbs();
     if(window._wfAutoReject && window._wfAutoReject===fcs.id){ window._wfAutoReject=null; setTimeout(function(){ wfRejectStart(fcs.id, fcs.case_id); },60); }
   }
 
@@ -1510,11 +1761,28 @@
     }});
   };
 
+  window.wfUpdFilePicked=function(input){
+    const list=$('wfUpdFileList'); if(!list)return;
+    const files=input.files?[].slice.call(input.files):[];
+    list.innerHTML=files.length?('<i class="fa-solid fa-paperclip"></i> '+files.map(function(f){return esc2(f.name);}).join(', ')):'';
+  };
   window.wfPostUpdate=async function(caseId){
-    const inp=$('wfUpdIn'); const body=(inp&&inp.value||'').trim(); if(!body) return;
-    try{ const {error}=await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:body}); if(error)throw error; }
+    const inp=$('wfUpdIn'); const body=(inp&&inp.value||'').trim();
+    const fileInput=$('wfUpdFile'); const files=(fileInput&&fileInput.files)?[].slice.call(fileInput.files):[];
+    if(!body && !files.length) return;
+    let updateId=null;
+    try{ const {data,error}=await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:body}); if(error)throw error; updateId=data; }
     catch(e){ toast('Could not post update: '+((e&&e.message)||e),'err'); return; }
-    if(inp)inp.value=''; renderPage();
+    for(const file of files){
+      try{
+        const key=s3KeyForFlowUpdate(caseId, file.name);
+        const {data:up,error:upErr}=await uploadFileToS3(key,file);
+        if(upErr) throw upErr;
+        const {error:insErr}=await ACC().from('flow_update_attachments').insert({update_id:updateId, storage_path:up.path, file_name:file.name});
+        if(insErr) throw insErr;
+      }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
+    }
+    if(inp)inp.value=''; if(fileInput)fileInput.value=''; renderPage();
   };
 
   function wfInjectCss(){
@@ -1532,6 +1800,15 @@
     .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
     .wf-card-hd i{color:var(--slate);font-size:13px}
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
+    .wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px}
+    .wf-inst-filter-search{position:relative;flex:1;min-width:180px}
+    .wf-inst-filter-search i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none}
+    .wf-inst-filter-search .ac-in{width:100%;padding-left:30px;box-sizing:border-box}
+    .wf-inst-filter-dates{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+    .wf-inst-filterbar .wf-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;display:flex;flex-direction:column;gap:5px;margin:0}
+    .wf-inst-filterbar .wf-lbl .ac-in{min-width:140px}
+    .wf-daterange-sep{color:var(--slate);font-size:12px;margin:0 -2px 9px}
+    .wf-inst-filter-dates .ac-btn.primary{height:38px}
     .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
     /* list header + full-width rows */
     /* Workflow task Details: always two columns of three, never one long list */
@@ -1609,6 +1886,9 @@
     .wf-evt-row{display:flex;gap:8px;margin-bottom:8px}
     .wf-evt-row .wf-evt-label{flex:0 0 40%;min-width:0}
     .wf-evt-row .wf-evt-value{flex:1;min-width:0}
+    .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
+    .wf-evt-att .wf-evt-attinput{flex:1;min-width:0;font-size:13px}
+    .wf-evt-att-name{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px;width:100%}
     /* instances table */
     .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
     .wf-itable{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
@@ -1642,7 +1922,7 @@
     .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
     .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
     /* Roughly five messages tall, then it scrolls — the card never keeps growing. */
-    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;margin-bottom:12px;padding-right:4px}
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;margin-bottom:12px;padding-right:4px}
     .wf-upd{display:flex;gap:10px;align-items:flex-start}
     .wf-upd.me{flex-direction:row-reverse}
     .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
@@ -1650,13 +1930,20 @@
     .wf-upd.me .wf-upd-b{background:var(--brand-a10,#eef2ff)}
     .wf-upd-meta{font-size:11px;color:var(--slate);margin-bottom:2px}
     .wf-upd-body{font-size:13.5px;color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word}
-    .wf-updbar{display:flex;gap:8px}
+    .wf-att-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .wf-att-thumb{display:inline-block;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--bg,#f1f5f9)}
+    .wf-att-img{width:100%;height:100%;object-fit:cover;display:block}
+    .wf-att-file{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--brand);background:var(--brand-a10,#eef2ff);border-radius:8px;padding:6px 10px;cursor:pointer}
+    .wf-upd-pinned{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+    .wf-upd-pinned-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .wf-updfile-list{font-size:12px;color:var(--slate);margin-top:6px}
+    .wf-updbar{display:flex;gap:8px;align-items:center}
     .wf-updbar .ac-in{flex:1}
     .wf-reject-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:9px 12px;font-size:12.5px;font-weight:600;margin-bottom:10px}
     .wf-reject-acts{display:flex;gap:7px;flex:none}
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
-    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
+    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;padding-right:4px}
     /* thin, unobtrusive scrollbars on the message lists */
     .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
     .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
@@ -1695,8 +1982,21 @@
 
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
-  let GCAL_FILTERS=new Set(['toMe','byMe','meeting']);
+  let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
   let GCAL_LAST=null; // {byDate,list,asg}
+  let GCAL_CASES=[]; // Legal cases with an upcoming Next Date — only ever populated for users with 'legal' module access
+  // Legal Next Dates ride the same Calendar as tasks/meetings, but visibility is permission-based
+  // (module access), not participation-based like tasks/meetings — not everyone who can see the
+  // Calendar has Legal access, so this must be checked before ever querying mis_cases.
+  function gcalCanSeeCases(){ return !!(state && (state.super || (state.roles && Array.isArray(state.roles.modules) && state.roles.modules.includes('legal')))); }
+  async function gcalCasesLoadData(){
+    if(!gcalCanSeeCases()){ GCAL_CASES=[]; return GCAL_CASES; }
+    try{
+      const {data}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,court').gte('next_date_iso',todayISO());
+      GCAL_CASES=(data||[]).filter(function(c){return !!c.next_date_iso;}).map(function(c){ c.title=c.cause_title||c.case_no||('Case #'+c.id); return c; });
+    }catch(e){ GCAL_CASES=[]; }
+    return GCAL_CASES;
+  }
   let GCAL_PANEL_ANCHOR=null; // date the slide-in panel's day-list is anchored to, or null when the panel shows something else (a task/meeting detail) or is closed
   function calShiftISO(iso,delta){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+delta); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
   function gcalWeekBounds(dateStr){
@@ -1707,7 +2007,7 @@
     return [iso(mon),iso(sun)];
   }
   async function gcalLoadData(){
-    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData()]).then(r=>[r[0],r[1]]);
+    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData(), gcalCasesLoadData()]).then(r=>[r[0],r[1]]);
     // Completed tasks never appear on the calendar (matches the old behaviour) — only active, dated tasks.
     const withDue=tasks.filter(t=>t.due_date && stOf(t)!=='approved');
     const byDate={};
@@ -1720,17 +2020,21 @@
   function gcalVisibleItems(dateStr){
     const items=(GCAL_LAST&&GCAL_LAST.byDate[dateStr])||[];
     const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr) && !MTG_DONE.has(m.id+'|'+dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
-    return items.concat(mtgItems).filter(x=>{
+    // Past dates just stop being included here — same "render-time exclusion, row untouched" pattern
+    // used for recurring meetings (mtgOccursOn) rather than any server-side delete/archive.
+    const caseItems=(dateStr<istTodayISO())?[]:(GCAL_CASES||[]).filter(function(c){return c.next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'case'};});
+    return items.concat(mtgItems).concat(caseItems).filter(x=>{
       if(!GCAL_FILTERS.has(x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':'#16a34a'); }
-  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : String(x.t.id); }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':'#16a34a')); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : String(x.t.id)); }
   window.gcalOpenItem=function(key){
     key=String(key);
     if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
+    else if(key.charAt(0)==='c'){ window.gcalOpenCase(Number(key.slice(1))); }
     else { window.gcalOpenTask(Number(key)); }
   };
 
@@ -1766,8 +2070,12 @@
     const rows=[['toMe','Assigned to me','#2563eb'],['byMe','Assigned by me','#16a34a']].map(function(f){
       return '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has(f[0])?'checked':'')+' onchange="gcalToggleFilter(\''+f[0]+'\',this.checked)"><span class="gcal-filter-dot" style="background:'+f[2]+'"></span>'+f[1]+'</label>';
     }).join('');
+    const caseRow=gcalCanSeeCases()
+      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal next dates</label>'
+      : '';
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
       +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
+      +caseRow
       +'</div>';
   }
   window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k); gcalRenderOnly(); };
@@ -1829,9 +2137,10 @@
       const dateStr=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
       const items=gcalVisibleItems(dateStr);
       // Show every task for the day (row height grows to fit) — the title itself still truncates with an ellipsis so long names don't widen the cell.
+      // No drag here by design — the Month grid is view-only; click a day to open its agenda panel,
+      // where dragging to reschedule is still available (see gcalListDayHtml).
       const evs=items.map(function(x){
-        const dragAttrs=x.kind!=='meeting'?(' data-task="'+x.t.id+'" data-date="'+dateStr+'"'):'';
-        return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'"'+dragAttrs+' onclick="event.stopPropagation();if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
+        return '<div class="gcal-mev" style="background:'+gcalEvColor(x.kind)+'" onclick="event.stopPropagation();gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'">'+esc2(x.t.title)+'</div>';
       }).join('');
       const cls='gcal-mcell'+(dateStr===todayStr?' today':'');
       cells+='<div class="'+cls+'" data-date="'+dateStr+'" onclick="gcalOpenDay(\''+dateStr+'\')"><div class="gcal-mnum">'+d+'</div><div class="gcal-mevents">'+evs+'</div></div>';
@@ -1977,8 +2286,8 @@
       const mtgDraggable = x.kind==='meeting' && (mtgRt0==='none'||mtgRt0==='weekly'||mtgRt0==='monthly');
       const draggable = x.kind!=='meeting' || mtgDraggable;
       let dragAttrs='';
-      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"');
-      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='toMe'?'To me':'By me');
+      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"'));
+      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='case' ? 'Next date' : (x.kind==='toMe'?'To me':'By me'));
       return '<div class="gcal-lrow"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'"><span class="gcal-lrow-dot" style="background:'+gcalEvColor(x.kind)+'"></span><span class="gcal-lrow-title">'+esc2(x.t.title)+'</span><span class="gcal-lrow-tag">'+esc2(tag)+'</span></div>';
     }).join(''):'<div class="gcal-lrow empty">Nothing scheduled</div>';
     return '<div class="gcal-lday'+(isToday?' today':'')+'" data-date="'+dateStr+'"><div class="gcal-lday-head">'+esc2(label)+(isToday?' <span class="gcal-lday-badge">Today</span>':'')+'</div><div class="gcal-lday-rows">'+rows+'</div></div>';
@@ -2038,31 +2347,46 @@
     if(t.description) html+='<div class="gcal-panel-row"><i class="fa-solid fa-align-left"></i> <div>'+mdBold(t.description)+'</div></div>';
     gcalShowPanel(html, tid);
   };
+  window.gcalOpenCase=function(cid){
+    const c=(GCAL_CASES||[]).find(function(x){return x.id===cid;});
+    if(!c)return;
+    let html='<div class="gcal-panel-title">'+esc2(c.title)+'</div>';
+    if(c.case_type) html+='<div class="gcal-panel-row"><i class="fa-solid fa-scale-balanced"></i> '+esc2(c.case_type)+'</div>';
+    if(c.case_no) html+='<div class="gcal-panel-row"><i class="fa-solid fa-hashtag"></i> '+esc2(c.case_no)+'</div>';
+    if(c.court) html+='<div class="gcal-panel-row"><i class="fa-solid fa-building-columns"></i> '+esc2(c.court)+'</div>';
+    if(c.priority) html+='<div class="gcal-panel-row"><i class="fa-solid fa-flag"></i> '+esc2(c.priority)+'</div>';
+    html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Next date: '+fmtDateY(c.next_date_iso)+'</div>';
+    const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
+    GCAL_PANEL_ANCHOR=null;
+    const bodyEl=panel.querySelector('.gcal-panel-body'); if(bodyEl)bodyEl.innerHTML=html;
+    const foot=panel.querySelector('.gcal-panel-foot');
+    if(foot)foot.innerHTML='<button class="ac-btn" onclick="gcalClosePanel()">Close</button><button class="ac-btn primary" onclick="navTo(\'legal/mis\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in Legal MIS</button>';
+    panel.classList.add('open'); if(backdrop)backdrop.classList.add('open');
+  };
 
   /* ---- Create button + floating action button ----
      Task-creation from the calendar is disabled for now — once Meetings exist this
      will be redesigned around them rather than quietly creating a plain Task. */
   window.gcalQuickAdd=function(){ window._mtgAutoOpenCreate=true; navTo('tasks/meetings'); };
 
-  /* ---- drag & drop: dragging a task or one-time-meeting chip/row onto another day moves its date ----
+  /* ---- drag & drop: dragging a task or one-time-meeting row onto another day moves its date ----
      Uses pointer events (not native HTML5 DnD) to match the touch-friendly drag pattern already used
-     elsewhere in this file (wirePointerDrag/wireSwapDrag). Works in three places: Month view's grid
-     chips (.gcal-mev[data-task] — meetings aren't draggable there), and the shared 10-day agenda list
-     used by Week view and Month's day-click panel (.gcal-lrow[data-task]/.gcal-lrow[data-meeting] —
-     one-time meetings ARE draggable there, recurring ones aren't since "the date" isn't a single field
-     for them). `root` scopes the query so it can be wired inside the slide-in panel too, not just #gcalBody.
+     elsewhere in this file (wirePointerDrag/wireSwapDrag). By design, the Month grid ITSELF is
+     view-only — no drag there at all, on any chip kind — since long/varied content (Legal case
+     titles especially) made stray drags too easy to trigger by accident on a small chip. Click a
+     day to open its agenda panel (.gcal-lrow[data-task]/[data-meeting]/[data-case]), where dragging
+     to reschedule is still available — one-time meetings ARE draggable there, recurring ones aren't
+     since "the date" isn't a single field for them. `root` scopes the query so it can be wired
+     inside the slide-in panel too, not just #gcalBody.
      Mouse/pen: a small movement threshold distinguishes a drag from a normal click.
      Touch: a movement threshold alone doesn't work on phones — the very first finger move is
      indistinguishable from "the user is trying to scroll the calendar", so instant-arm-on-move would
      fight the page's native scrolling. Instead touch uses a long-press-to-pick-up gesture (like
      reordering a card in Trello/Asana's mobile apps): hold still for ~380ms to arm the drag; moving
-     more than a few px before that timer fires cancels arming and lets the normal scroll happen.
-     Exception: inside the Month grid itself, touch dragging is skipped entirely — the chips there are
-     tiny mobile dots that are too fragile to drag reliably even with long-press. On mobile, tap a day
-     in Month view instead to open the agenda-list panel, which has properly-sized draggable rows. */
+     more than a few px before that timer fires cancels arming and lets the normal scroll happen. */
   function gcalWireDrag(root){
     const body=root||$('gcalBody'); if(!body)return;
-    body.querySelectorAll('.gcal-mev[data-task], .gcal-lrow[data-task], .gcal-lrow[data-meeting]').forEach(function(chip){
+    body.querySelectorAll('.gcal-lrow[data-task], .gcal-lrow[data-meeting], .gcal-lrow[data-case]').forEach(function(chip){
       if(chip._dragWired)return; chip._dragWired=true;
       const inMonthGrid=!!chip.closest('.gcal-mcell');
       chip.style.touchAction='none';
@@ -2073,6 +2397,7 @@
         const startX=e.clientX, startY=e.clientY;
         const tid=chip.dataset.task!=null?Number(chip.dataset.task):null;
         const mid=chip.dataset.meeting!=null?Number(chip.dataset.meeting):null;
+        const cid=chip.dataset.case!=null?Number(chip.dataset.case):null;
         const fromDate=chip.dataset.date;
         let armed=false, curTarget=null, longPressTimer=null;
         function arm(){
@@ -2118,6 +2443,7 @@
               if(newDate && newDate!==fromDate){
                 if(tid!=null) gcalTaskDrop(tid,newDate);
                 else if(mid!=null) gcalMeetingDateDrop(mid,newDate,fromDate);
+                else if(cid!=null) gcalCaseDrop(cid,newDate);
               }
             }
           }
@@ -2153,6 +2479,20 @@
       await gcalLoadData();
       await gcalRefresh();
     }catch(e){ toast('Failed to move task','err'); }
+  };
+  // Dragging a Legal case to a new day writes straight into mis_cases.next_date (public schema,
+  // not acc — see gcalCasesLoadData). This fully replaces whatever free text was there before,
+  // same as dragging a task fully overwrites its due_date; a DB trigger on mis_cases recomputes
+  // next_date_iso from the new value and clears next_date_recorded_at (new date = new deadline).
+  window.gcalCaseDrop=async function(cid,newDate){
+    try{
+      if(newDate<todayISO()){ toast('Cannot move a case to a date before today','err'); return; }
+      const {error}=await sb.from('mis_cases').update({next_date:newDate}).eq('id',cid);
+      if(error){ toast('Failed to move case: '+error.message,'err'); return; }
+      toast('Next date moved to '+fmtDateY(newDate),'ok');
+      await gcalLoadData();
+      await gcalRefresh();
+    }catch(e){ toast('Failed to move case','err'); }
   };
   // Dragging a one-time meeting onto another day's section changes its meeting_date. This resyncs
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger

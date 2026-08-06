@@ -224,6 +224,7 @@ const NAV=[
   ]},
   {group:'Growth & Strategy',items:[
     {id:'campaigns',label:'Campaign Analytics',icon:'fa-bullhorn'},
+    {id:'competitors',label:'Competitor Ads',icon:'fa-magnifying-glass-chart'},
     {id:'organic',label:'Posts & Reels',icon:'fa-photo-film'},
     {id:'transcription',label:'Transcription',icon:'fa-microphone-lines'},
     {id:'scaling',label:'Scaling Up',icon:'fa-arrow-trend-up'},
@@ -783,6 +784,8 @@ function s3KeyForJD(filename){return `recruitment/descriptions/${s3Stamp()}_${s3
 function s3KeyForDefectImg(filename){return `defect-img/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForPostSalesAdhoc(filename){return `postsales/adhoc/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForTranscription(filename){return `transcription/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForFlowUpdate(caseId,filename){return `accountability/flow-updates/${caseId}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/${flowId}/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -814,10 +817,15 @@ async function s3Delete(storagePath){
 }
 const DOC={dept:null,cat:null,q:'',sort:'created_at.desc',page:1,per:10,sel:new Set(),scope:'documents',legalExpanded:new Set()};
 
-async function docFetch({dept,cat,q,extraNonLegal,folderId,folderIds}={}){
+// `full` pulls content_text too — needed only by the re-index staleness check (docReindexAll),
+// which needs to know how much text a doc already has. Every other caller only renders
+// title/category/size/etc., so leaving content_text out saves dragging up to ~400KB of OCR text
+// per row (Legal has hundreds of OCR'd PDFs now) across the wire just to draw a file list.
+const DOC_LIST_COLS='id,doc_no,title,register_code,department,doc_type,version,tags,storage_path,link,status,confidential,uploaded_by,created_at,category,subcategory,description,file_name,file_size,file_type,visibility,pinned,folder,updated_at,folder_id';
+async function docFetch({dept,cat,q,extraNonLegal,folderId,folderIds,full}={}){
   const [col,dir]=DOC.sort.split('.');
   const build=()=>{
-    let qb=sb.schema('doc').from('documents').select('*');
+    let qb=sb.schema('doc').from('documents').select(full?'*':DOC_LIST_COLS);
     if(dept)qb=qb.eq('department',dept);
     if(extraNonLegal)qb=qb.neq('department','Legal');
     if(cat)qb=qb.eq('category',cat);
@@ -1440,7 +1448,7 @@ window.docReindex=async function(id){
   const host=$('docTableHost');if(host)docRenderTable(host,DOC.dept||undefined);
 };
 window.docReindexAll=async function(dept){
-  const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept});
+  const all=await docFetch({dept:dept||undefined,extraNonLegal:!dept,full:true});
   const toIndex=all.filter(d=>d.storage_path&&(!d.content_text||d.content_text.length<200));
   if(!toIndex.length){toast('All files already indexed','ok');return;}
   const total=toIndex.length;
@@ -1505,15 +1513,17 @@ window.docUploadSave=async function(){
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
 VIEWS.legal=async function(v,seg){
-  const tab=(seg[0]==='mis')?'mis':'docs';
+  const tab=(seg[0]==='mis')?'mis':(seg[0]==='scoreboard')?'scoreboard':'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
     <div class="tabs">
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
+      <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
   if(tab==='mis') legalMIS();
+  else if(tab==='scoreboard') legalScoreboard();
   else legalDocsView(seg);
 };
 async function legalDocsView(seg){
@@ -1570,6 +1580,54 @@ window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpa
 window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 
 /* ============================ LEGAL MIS ============================ */
+/* Hearing-date window. Filters the table by Next Date and is what the causelist export
+   uses — the export refuses to run on "All dates", since a causelist is by definition
+   for a period. */
+const MIS_RANGES=[
+  ['all','All dates'],
+  ['this_month','This Month'],
+  ['next_month','Next Month'],
+  ['next_week','Next Week'],
+  ['next_30','Next 30 Days'],
+  ['custom','Custom']
+];
+let MIS_RANGE='all', MIS_FROM='', MIS_TO='';
+function misDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function misAddDays(d,n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+// Weeks run Monday to Sunday, matching how the courts list them.
+function misMonday(d){ const x=new Date(d.getTime()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+function misRangeDates(){
+  const t=new Date(); t.setHours(12,0,0,0);
+  switch(MIS_RANGE){
+    case 'this_month':  return {from:misDay(new Date(t.getFullYear(),t.getMonth(),1)),   to:misDay(new Date(t.getFullYear(),t.getMonth()+1,0))};
+    case 'next_month':  return {from:misDay(new Date(t.getFullYear(),t.getMonth()+1,1)), to:misDay(new Date(t.getFullYear(),t.getMonth()+2,0))};
+    case 'next_week':   { const m=misAddDays(misMonday(t),7); return {from:misDay(m), to:misDay(misAddDays(m,6))}; }
+    case 'next_30':     return {from:misDay(t), to:misDay(misAddDays(t,30))};
+    case 'custom':      return (MIS_FROM&&MIS_TO)?{from:MIS_FROM,to:MIS_TO}:null;
+    default:            return null;
+  }
+}
+function misRangeLabel(){
+  const r=misRangeDates(); if(!r) return '';
+  const f=s=>{const d=new Date(s+'T00:00:00');return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();};
+  return f(r.from)+' – '+f(r.to);
+}
+window.misSetRange=function(v){
+  MIS_RANGE=v;
+  if(v==='custom'&&(!MIS_FROM||!MIS_TO)){ const t=new Date(); MIS_FROM=misDay(t); MIS_TO=misDay(misAddDays(t,30)); }
+  legalMIS();
+};
+// A row's hearing date, preferring the sortable copy and falling back to parsing the text.
+function misRowIso(r){
+  if(r.next_date_iso) return String(r.next_date_iso).slice(0,10);
+  const d=misToIso(r.next_date); return d?misIsoStr(d):null;
+}
+function misInRange(r){
+  const w=misRangeDates(); if(!w) return true;
+  const iso=misRowIso(r); if(!iso) return false;
+  return iso>=w.from && iso<=w.to;
+}
+
 const MIS_FIELDS=[
   {k:'case_type',l:'Case Type'},
   {k:'cause_title',l:'Cause Title / Parties'},
@@ -1580,6 +1638,7 @@ const MIS_FIELDS=[
   {k:'advocate_incharge',l:'Advocate In-Charge'},
   {k:'court',l:'Court'},
   {k:'status',l:'Status / Purpose'},
+  {k:'action_needed',l:'Action Needed'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
   {k:'date_of_filing',l:'Date of Filing'},
@@ -1588,23 +1647,79 @@ const MIS_FIELDS=[
   {k:'cnr_no',l:'CNR No.'}
 ];
 function misLabel(k){const f=MIS_FIELDS.find(x=>x.k===k);return f?f.l:k;}
-function misInput(k,vals){return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc((vals||{})[k]||'')+'"></div>';}
+
+/* Fields offering a dropdown of what's already in use while still accepting a new value.
+   A <datalist> gives both: pick from the list, or type something new — and because the new
+   value is saved onto the row, it is in the list automatically next time. No extra table. */
+const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge','advocate_incharge','court']);
+const MIS_PC_DEFAULT='ANKITA BHANDARI';
+function misDistinct(k){
+  const seen=new Map();
+  (window._misRows||[]).forEach(r=>{ const v=String(r[k]==null?'':r[k]).trim(); if(!v)return;
+    const key=v.toLowerCase(); if(!seen.has(key)) seen.set(key,v); });
+  return [...seen.values()].sort((a,b)=>a.localeCompare(b));
+}
+// The level most cases already sit at — pre-selected on a new case, still changeable.
+function misCommonPriority(){
+  const c={High:0,Medium:0,Low:0};
+  (window._misRows||[]).forEach(r=>{ const p=String(r.priority||'').trim(); if(c[p]!==undefined)c[p]++; });
+  return (c.High>=c.Medium&&c.High>=c.Low)?'High':(c.Medium>=c.Low?'Medium':'Low');
+}
+function misInput(k,vals,opt){
+  opt=opt||{};
+  const v=(vals||{})[k]||'';
+  const ro=opt.readonly?' readonly style="background:var(--bg,#f8fafc);color:var(--slate)"':'';
+  const hint=opt.hint?'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+esc(opt.hint)+'</div>':'';
+  if(k==='priority'){
+    const cur=v||opt.dflt||'';
+    return '<div><label>'+misLabel(k)+'</label><select id="misF_'+k+'" class="sel">'
+      +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
+      +'</select>'+hint+'</div>';
+  }
+  if(MIS_SUGGEST.has(k)){
+    const list='misL_'+k;
+    return '<div><label>'+misLabel(k)+'</label>'
+      +'<input id="misF_'+k+'" class="sel" list="'+list+'" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro+'>'
+      +'<datalist id="'+list+'">'+misDistinct(k).map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'
+      +hint+'</div>';
+  }
+  return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'>'+hint+'</div>';
+}
 function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
-const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks']);
-function misFormHtml(vals){
-  vals=vals||{};
+const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
+
+/* mode 'add'  — Previous Date is not shown at all; it only ever comes from a real reschedule.
+   mode 'edit' — Status and Next Date come first because they are what actually get changed,
+                 and Previous Date is read-only: it fills itself from the old Next Date the
+                 moment Next Date is edited. */
+function misFormHtml(vals,mode){
+  vals=vals||{}; mode=mode||'add';
+  const isEdit=(mode==='edit');
   let html='', pending=null;
   function flush(){ if(pending!==null){ html+='<div class="two">'+pending+'</div>'; pending=null; } }
+  function put(k,opt){
+    if(MIS_AREA_FIELDS.has(k)){ flush(); html+=misArea(k,vals,k==='cause_title'?2:3); return; }
+    const cell=misInput(k,vals,opt);
+    if(pending===null) pending=cell;
+    else { html+='<div class="two">'+pending+cell+'</div>'; pending=null; }
+  }
+  const done=new Set();
+  if(isEdit){
+    html+='<div class="mis-prio-head"><i class="fa-solid fa-bolt"></i> Usually updated</div>';
+    put('status');                                    done.add('status');
+    put('next_date',{hint:'dd/mm/yyyy — changing this moves the old date into Previous Date'});
+    put('previous_date',{readonly:true,hint:'set automatically from the previous Next Date'});
+    done.add('next_date'); done.add('previous_date');
+    flush();
+    html+='<div class="mis-prio-head" style="margin-top:6px"><i class="fa-solid fa-list"></i> Case details</div>';
+  }
   MIS_FIELDS.forEach(f=>{
-    if(MIS_AREA_FIELDS.has(f.k)){
-      flush();
-      html+=misArea(f.k,vals,f.k==='cause_title'?2:3);
-    } else if(pending===null){
-      pending=misInput(f.k,vals);
-    } else {
-      html+='<div class="two">'+pending+misInput(f.k,vals)+'</div>';
-      pending=null;
-    }
+    if(done.has(f.k)) return;
+    if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
+    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:'left blank saves as NA'});
+    if(f.k==='next_date')    return put(f.k,{hint:'dd/mm/yyyy'});
+    put(f.k);
   });
   flush();
   return html;
@@ -1619,9 +1734,9 @@ function misPriorityTag(p){
   if(!p)return '<span class="mis-ptag mis-ptag--gray">—</span>';
   return '<span class="mis-ptag mis-ptag--'+cls.replace('t-','')+'">'+esc(misTrunc(label,14))+'</span>';
 }
-const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name']);
+const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
+const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1630,6 +1745,71 @@ function misCellHtml(f,r){
   if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)">'+esc(misTrunc(v,26)||'—')+'</td>';
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
 }
+// "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) get a
+// dedicated 6-dot grip handle next to the checkbox. Sliding THAT HANDLE left toggles the checkbox
+// into a grey, disabled "handled" state (slide again to release it) — a normal click directly on
+// the checkbox is a totally separate action (plain bulk-select, unaffected). While grey/handled,
+// the row is excluded from the Edit/Delete selection count; a normally-checked row still counts as
+// one selected row same as always.
+function misRowHtml(r,isPinned){
+  const handled=isPinned&&r.next_date_recorded_at;
+  const cbAttrs=handled?'checked disabled':'';
+  const cbCls='mis-cb mis-row-cb'+(handled?' mis-handled':'');
+  // Reuses the app's existing .drag-handle look (accountability task/checklist rows) instead of a
+  // one-off style, so spacing/size/touch-target match what's already established elsewhere.
+  const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misEdit(${r.id})">
+    <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
+    ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
+  </tr>`;
+}
+// Sliding the grip handle left toggles next_date_recorded_at (today's date, or cleared) — feeds
+// the Scoreboard score. Mouse AND touch both use pointer events. Scoped to the handle icon only —
+// dragging elsewhere on the row does nothing, so a plain click anywhere else still opens Edit.
+function misWireSwipe(){
+  document.querySelectorAll('#misTbody .mis-handle').forEach(function(handle){
+    if(handle._dragWired)return; handle._dragWired=true;
+    handle.style.touchAction='pan-y';
+    handle.addEventListener('pointerdown',function(e){
+      e.stopPropagation();
+      const tr=handle.closest('tr'); if(!tr)return;
+      const startX=e.clientX,startY=e.clientY;
+      let dx=0,armed=false;
+      function move(ev){
+        dx=ev.clientX-startX; const dy=ev.clientY-startY;
+        if(!armed){ if(Math.abs(dx)<8||Math.abs(dx)<Math.abs(dy))return; armed=true; tr.classList.add('mis-swiping'); }
+        if(dx<0){ ev.preventDefault(); tr.style.transition='none'; tr.style.transform='translateX('+Math.max(dx,-88)+'px)'; }
+      }
+      function up(){
+        document.removeEventListener('pointermove',move);
+        document.removeEventListener('pointerup',up);
+        tr.classList.remove('mis-swiping');
+        tr.style.transition='transform .15s'; tr.style.transform='';
+        if(armed&&dx<-44) misSwipeToggle(Number(tr.dataset.id));
+      }
+      document.addEventListener('pointermove',move);
+      document.addEventListener('pointerup',up);
+    });
+  });
+}
+window.misSwipeToggle=async function(id){
+  const row=(window._misRows||[]).find(r=>r.id===id);
+  if(!row)return;
+  const nowHandled=!row.next_date_recorded_at;
+  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:nowHandled?todayStr():null}).eq('id',id);
+  if(error){toast('Could not update: '+error.message,'err');return;}
+  row.next_date_recorded_at=nowHandled?todayStr():null;
+  const cb=document.querySelector('#misTbody tr[data-id="'+id+'"] .mis-row-cb');
+  if(cb){
+    cb.checked=nowHandled; cb.disabled=nowHandled; cb.classList.toggle('mis-handled',nowHandled);
+    // Going grey always drops it from the bulk-selection set — "handled" and "selected" are
+    // mutually exclusive states for this checkbox.
+    if(nowHandled&&window._misSel.has(id)){
+      window._misSel.delete(id); const tr=cb.closest('tr'); if(tr)tr.classList.remove('mis-selected'); misUpdateToolbar();
+    }
+  }
+  toast(nowHandled?'Marked handled — recorded today':'Unmarked','ok');
+};
 async function legalMIS(){
   setCrumb(['Legal','MIS']);
   const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
@@ -1641,6 +1821,12 @@ async function legalMIS(){
   window._misSel=new Set();
   const searchKeys=MIS_FIELDS.map(f=>f.k);
   rows.forEach(r=>{ r._blob=searchKeys.map(k=>String(r[k]||'')).join(' ␟ ').toLowerCase(); });
+  // "Pinned" = currently showing on the Calendar (next_date_iso parsed and not in the past) — not a
+  // stored flag, so it can never drift out of sync with what the Calendar actually shows.
+  const todayS=todayStr();
+  const misPinned=rows.filter(r=>r.next_date_iso&&r.next_date_iso>=todayS).sort((a,b)=>String(a.next_date_iso).localeCompare(String(b.next_date_iso)));
+  const misRest=rows.filter(r=>!(r.next_date_iso&&r.next_date_iso>=todayS));
+  const misOrdered=misPinned.concat(misRest);
   body.innerHTML=`
     <style>
       .mis-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -1658,13 +1844,37 @@ async function legalMIS(){
       .mis-ptag--amber{background:#fef3c7;color:#92400e}
       .mis-ptag--green{background:#d1fae5;color:#065f46}
       .mis-ptag--gray{background:#f1f5f9;color:#475569}
+      /* section heading inside the Edit Case form */
+      .mis-prio-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);padding-bottom:7px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+      .mis-prio-head i{color:var(--brand)}
+      /* date-range filter */
+      .mis-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+      .mis-range .to{font-size:12.5px;color:var(--slate)}
+      .mis-toolbar.has-custom .mis-search-wrap{flex:0 1 190px;min-width:120px}
+      @media(max-width:900px){
+        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%}
+        .mis-toolbar .mis-actions{flex:1 1 100%}
+        .mis-toolbar .mis-actions .btn{flex:1 1 auto;justify-content:center}
+        select.mis-sel{min-width:0;flex:1 1 140px}
+        .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
+        .mis-range{flex:1 1 100%}
+        .mis-range input[type=date]{flex:1 1 40%;min-width:0}
+      }
       #misTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:2200px;table-layout:fixed}
       #misTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
       #misTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s;cursor:pointer}
       #misTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
       #misTbl tbody tr.mis-selected{background:#eff6ff}
+      #misTbl tbody tr.mis-ai-match{background:#fefaf0}
+      .mis-ai-badge{margin-left:6px}
       #misTbl tbody td{padding:11px 12px;vertical-align:top}
       .mis-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
+      .mis-cb:disabled{cursor:not-allowed}
+      .mis-cb.mis-handled{accent-color:#94a3b8}
+      .mis-cb-cell{display:flex;align-items:center;gap:11px}
+      .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
+      #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
       #misTbl td,#misTbl th{overflow:hidden}
       @media(max-width:768px){
@@ -1680,7 +1890,7 @@ async function legalMIS(){
         #misTbl thead th,#misTbl tbody td{padding:9px 8px}
       }
     </style>
-    <div class="mis-toolbar">
+    <div class="mis-toolbar${MIS_RANGE==='custom'?' has-custom':''}">
       <div class="mis-actions">
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
         <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
@@ -1688,30 +1898,177 @@ async function legalMIS(){
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
+        <select class="mis-sel" id="misRangeSel" onchange="misSetRange(this.value)">
+          ${MIS_RANGES.map(r=>`<option value="${r[0]}"${MIS_RANGE===r[0]?' selected':''}>${esc(r[1])}</option>`).join('')}
+        </select>
+        <span class="mis-range" id="misRangeCustom" style="display:${MIS_RANGE==='custom'?'flex':'none'}">
+          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misFilter()">
+          <span class="to">to</span>
+          <input type="date" id="misTo" value="${esc(MIS_TO)}" onchange="misFilter()">
+        </span>
         <div class="mis-search-wrap">
           <i class="fa-solid fa-magnifying-glass"></i>
           <input id="misSearch" placeholder="Search anything — a value, a column name, or e.g. &quot;priority is empty&quot;" oninput="misFilter()">
         </div>
+        <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
+        <span class="mis-count" id="misAiStatus"></span>
       </div>
     </div>
     <div class="card" style="overflow:hidden">
       <div style="overflow-x:auto">
       <table id="misTbl">
-        <colgroup><col style="width:36px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
+        <colgroup><col style="width:60px">${MIS_FIELDS.map(f=>`<col style="width:${MIS_WIDTH[f.k]||140}px">`).join('')}</colgroup>
         <thead><tr>
-          <th style="width:36px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
+          <th style="width:60px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
         </tr></thead>
         <tbody id="misTbody">
-          ${rows.map(r=>`<tr data-id="${r.id}" onclick="if(!event.target.closest('.mis-cb'))misEdit(${r.id})">
-            <td onclick="event.stopPropagation()"><input type="checkbox" class="mis-cb mis-row-cb" data-id="${r.id}" onchange="misRowCheck(this)"></td>
-            ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
-          </tr>`).join('')}
+          ${misPinned.map(r=>misRowHtml(r,true)).join('')}
+          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+1}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
+          ${misRest.map(r=>misRowHtml(r,false)).join('')}
         </tbody>
       </table>
       </div>
     </div>`;
+  // apply the hearing-date window straight away, not only when someone types
+  if(MIS_RANGE!=='all') setTimeout(misFilter,0);
+  misWireSwipe();
 }
+// Score = how far ahead of the deadline the case was actually handled.
+// gap = Next Date − Recorded Date (days).
+//   gap > 7   -> +1  handled well ahead
+//   gap 1..7  ->  0  cut it close
+//   gap <= 0  -> -1  recorded ON the hearing date or after it, i.e. left to the day or missed
+// Recording it on the day itself counts as late, not neutral — a case dealt with only when it
+// is already due was not managed ahead of time.
+// No score yet if the "Handled" checkbox in MIS hasn't been ticked for this Next Date.
+function misScoreOf(r){
+  if(!r.next_date_recorded_at||!r.next_date_iso)return null;
+  const gap=Math.round((new Date(r.next_date_iso+'T00:00:00')-new Date(r.next_date_recorded_at+'T00:00:00'))/86400000);
+  if(gap>7)return 1;
+  if(gap>0)return 0;
+  return -1;
+}
+function misScoreTag(s){
+  if(s===null)return '<span class="mis-ptag mis-ptag--gray">Pending</span>';
+  if(s===1)return '<span class="mis-ptag mis-ptag--green">+1</span>';
+  if(s===0)return '<span class="mis-ptag mis-ptag--amber">0</span>';
+  return '<span class="mis-ptag mis-ptag--red">−1</span>';
+}
+async function legalScoreboard(){
+  setCrumb(['Legal','Scoreboard']);
+  const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
+  const body=$('legalBody');if(!body)return;
+  loader(body);
+  let rows=[];
+  try{
+    const todayS=todayStr();
+    const {data,error}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,next_date_recorded_at').gte('next_date_iso',todayS).order('next_date_iso',{ascending:true});
+    if(error)throw error; rows=data||[];
+  }catch(e){toast((e&&e.message)||'Could not load Scoreboard','err');}
+  // Total only sums cases that actually have a score yet (checkbox ticked) — "Pending" ones
+  // shouldn't silently count as 0 and dilute the total for cases nobody has acted on yet.
+  const scored=rows.map(misScoreOf).filter(s=>s!==null);
+  const scoreTotal=scored.reduce((a,s)=>a+s,0);
+  body.innerHTML=`<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:var(--bg-subtle,#f8fafc)">
+      ${['Case Type','Cause Title / Parties','Case No.','Priority','Next Date','Recorded Date','Score'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:2px solid var(--line)">${esc(l)}</th>`).join('')}
+    </tr></thead>
+    <tbody>
+      ${rows.length?rows.map(r=>{
+        const score=misScoreOf(r);
+        return `<tr style="border-bottom:1px solid var(--line-2)">
+          <td style="padding:11px 12px;font-weight:600">${esc(r.case_type||'—')}</td>
+          <td style="padding:11px 12px">${esc(r.cause_title||'—')}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${esc(r.case_no||'—')}</td>
+          <td style="padding:11px 12px">${misPriorityTag(r.priority)}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${fmtDate(r.next_date_iso)}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${r.next_date_recorded_at?fmtDate(r.next_date_recorded_at):'—'}</td>
+          <td style="padding:11px 12px">${misScoreTag(score)}</td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="7"><div class="empty" style="padding:30px"><i class="fa-regular fa-calendar-check"></i><div>No cases currently pinned to the Calendar (need a parseable, upcoming Next Date in MIS)</div></div></td></tr>`}
+    </tbody>
+    ${rows.length?`<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">
+      <td colspan="6" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">Total (${scored.length} scored of ${rows.length})</td>
+      <td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">${scoreTotal>0?'+':''}${scoreTotal}</td>
+    </tr></tfoot>`:''}
+  </table></div></div>`;
+}
+/* ---- Causelist export ------------------------------------------------------------------
+   Mirrors CAUSTLIST - AUGUST26.pdf: title, generated stamp, then
+   SL NO. | CASE TYPE | CASE DETAILS | CASE NO. | DATE | Advocate incharge | Court Name |
+   STATUS | ACTION NEEDED.
+   A causelist covers a period, so it refuses to run until a date range is chosen. */
+window.misExportCauselist=function(){
+  const win=misRangeDates();
+  if(!win){
+    toast(MIS_RANGE==='custom'
+      ? 'Pick both a From and a To date before exporting the causelist'
+      : 'Choose a date range first — a causelist has to cover a period','warn');
+    const sel=$('misRangeSel'); if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
+      setTimeout(function(){ sel.style.borderColor=''; },1800); }
+    return;
+  }
+  const rows=(window._misRows||[]).filter(misInRange)
+    .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
+  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
+
+  const label=(MIS_RANGES.find(function(r){return r[0]===MIS_RANGE;})||[])[1]||'';
+  const stamp=new Date().toLocaleString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const dmy=function(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
+  const cell=function(v){ return esc(String(v==null?'':v).trim()||'—').replace(/\n/g,'<br>'); };
+
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Causelist '+esc(label)+'</title>'
+   +'<style>'
+   +'@page{size:A4 landscape;margin:12mm}'
+   +'*{box-sizing:border-box}'
+   +'body{font-family:Calibri,Arial,sans-serif;color:#111;margin:0;font-size:10.5px}'
+   +'h1{font-size:17px;margin:0 0 2px;letter-spacing:.5px}'
+   +'.sub{font-size:11px;color:#444;margin-bottom:12px}'
+   +'table{width:100%;border-collapse:collapse;table-layout:fixed}'
+   +'th,td{border:1px solid #999;padding:5px 6px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}'
+   +'th{background:#dbe5f1;font-weight:700;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em}'
+   +'tr{page-break-inside:avoid}'
+   +'thead{display:table-header-group}'
+   +'td.sl{text-align:center;font-weight:700}'
+   +'td.dt{white-space:nowrap;font-weight:600}'
+   +'.foot{margin-top:10px;font-size:10px;color:#555}'
+   +'@media print{.noprint{display:none}}'
+   +'</style></head><body>'
+   +'<div class="noprint" style="margin-bottom:10px">'
+   +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
+   +'</div>'
+   +'<h1>CAUSELIST — '+esc(label.toUpperCase())+'</h1>'
+   +'<div class="sub">'+esc(misRangeLabel())+' &nbsp;·&nbsp; '+rows.length+' matter'+(rows.length===1?'':'s')+' &nbsp;·&nbsp; generated '+esc(stamp)+'</div>'
+   +'<table><colgroup>'
+   +'<col style="width:34px"><col style="width:9%"><col style="width:22%"><col style="width:12%">'
+   +'<col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:14%">'
+   +'</colgroup><thead><tr>'
+   +'<th>SL NO.</th><th>Case Type</th><th>Case Details</th><th>Case No.</th><th>Date</th>'
+   +'<th>Advocate Incharge</th><th>Court Name</th><th>Status</th><th>Action Needed</th>'
+   +'</tr></thead><tbody>'
+   +rows.map(function(r,i){
+      return '<tr><td class="sl">'+(i+1)+'</td>'
+        +'<td>'+cell(r.case_type)+'</td>'
+        +'<td>'+cell(r.cause_title)+'</td>'
+        +'<td>'+cell(r.case_no)+'</td>'
+        +'<td class="dt">'+esc(dmy(misRowIso(r)))+'</td>'
+        +'<td>'+cell(r.advocate_incharge)+'</td>'
+        +'<td>'+cell(r.court)+'</td>'
+        +'<td>'+cell(r.status)+'</td>'
+        +'<td>'+cell(r.action_needed)+'</td></tr>';
+    }).join('')
+   +'</tbody></table>'
+   +'<div class="foot">JAIN-E · Legal MIS · '+esc(stamp)+'</div>'
+   +'</body></html>';
+
+  const w=window.open('','_blank');
+  if(!w){ toast('Allow pop-ups to export the causelist','err'); return; }
+  w.document.write(html); w.document.close();
+  toast('Causelist ready — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+};
+
 window.misRowCheck=function(cb){
   const id=Number(cb.dataset.id);
   if(cb.checked) window._misSel.add(id); else window._misSel.delete(id);
@@ -1793,6 +2150,9 @@ function misParseQuery(raw){
   return {type:'fields', conds};
 }
 window.misFilter=function(){
+  // keep the custom range in sync before filtering
+  const fEl=$('misFrom'), tEl=$('misTo');
+  if(fEl) MIS_FROM=fEl.value||''; if(tEl) MIS_TO=tEl.value||'';
   const raw=($('misSearch').value||'').trim();
   const q=raw.toLowerCase();
   const wantsCompleteness=q.indexOf('completeness')!==-1;
@@ -1801,6 +2161,7 @@ window.misFilter=function(){
   const parsed=misParseQuery(q);
   let vis=0;
   document.querySelectorAll('#misTbody tr').forEach(tr=>{
+    if(tr.classList.contains('mis-spacer')) return; // the pinned/rest divider row is never a searchable case
     const id=Number(tr.dataset.id);
     const row=(window._misRows||[]).find(r=>r.id===id);
     let show;
@@ -1815,6 +2176,7 @@ window.misFilter=function(){
       });
     }
     else { const blob=row?row._blob:''; show=parsed.words&&parsed.words.length?parsed.words.every(w=>blob.indexOf(w)!==-1):(blob.indexOf(q)!==-1); }
+    if(show && row && !misInRange(row)) show=false;   // hearing-date window
     tr.style.display=show?'':'none';if(show)vis++;
   });
   const c=$('misCount');if(c)c.textContent=vis+' cases';
@@ -1825,15 +2187,75 @@ window.misFilter=function(){
     }
   });
   misUpdateToolbar();
+  // Instant substring search above stays as-is; this ADDS rows ChatGPT judges relevant in meaning
+  // (e.g. "eviction" also finding a "tenant removal" row), a few hundred ms later, without touching
+  // rows the fast keyword pass already matched.
+  clearTimeout(window._misAiT);
+  const qEl=$('misAiStatus'); if(qEl)qEl.textContent='';
+  if(raw&&raw.length>=3) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
+};
+window.misAiSearch=async function(raw){
+  const statusEl=$('misAiStatus');
+  try{
+    if(statusEl)statusEl.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking for related cases…';
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const rows=(window._misRows||[]).map(r=>({id:r.id,case_type:r.case_type,cause_title:r.cause_title,case_no:r.case_no,status:r.status,remarks:r.remarks,court:r.court}));
+    const res=await fetch(SUPABASE_URL+'/functions/v1/mis-ai-search',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({query:raw,rows})});
+    const jr=await res.json().catch(()=>({}));
+    if(($('misSearch')&&$('misSearch').value.trim().toLowerCase())!==raw)return; // query changed while we waited — drop stale results
+    if(jr.error){ if(statusEl)statusEl.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i> AI search unavailable ('+esc(String(jr.error).slice(0,60))+')'; return; }
+    const ids=jr.ids||[];
+    let added=0;
+    ids.forEach(id=>{
+      const tr=document.querySelector('#misTbody tr[data-id="'+id+'"]');
+      if(tr && tr.style.display==='none'){ tr.style.display=''; tr.classList.add('mis-ai-match'); added++;
+        if(!tr.querySelector('.mis-ai-badge')){ const td=tr.querySelector('td:last-child'); if(td)td.insertAdjacentHTML('beforeend',' <span class="mis-ai-badge mis-ptag mis-ptag--gray" title="Matched by meaning, not exact text"><i class="fa-solid fa-wand-magic-sparkles"></i> AI</span>'); }
+      }
+    });
+    if(added){ const c=$('misCount'); if(c)c.textContent=(parseInt(c.textContent,10)||0)+added+' cases'; }
+    if(statusEl)statusEl.textContent=added?added+' more found by meaning':'';
+  }catch(e){ if(statusEl)statusEl.textContent=''; }
 };
 window.misCreate=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-gavel"></i> Add Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">${misFormHtml({})}</div>
+  <div class="modal-body frm">${misFormHtml({},'add')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misSave()"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg');
 };
-function misCollect(){
+/* dd/mm/yyyy in, ISO out — so the date filter and causelist have something sortable.
+   Also accepts what people actually type: 3-8-2026, 03.08.2026, 2026-08-03. */
+function misToIso(s){
+  s=String(s==null?'':s).trim(); if(!s) return null;
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m){ const d=new Date(+m[1],+m[2]-1,+m[3]); return isNaN(d)?null:d; }
+  m=s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if(m){ const d=new Date(+m[3],+m[2]-1,+m[1]); return isNaN(d)?null:d; }
+  return null;
+}
+function misIsoStr(d){ return d?(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')):null; }
+function misDmy(d){ return d?(String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()):null; }
+
+function misCollect(orig){
   const row={};
-  MIS_FIELDS.forEach(f=>{ const el=$('misF_'+f.k); row[f.k]=el?(((el.value||'').trim())||null):null; });
+  MIS_FIELDS.forEach(f=>{ const el=$('misF_'+f.k); if(el) row[f.k]=((el.value||'').trim())||null; });
+  // PC In-Charge: blank means nobody assigned, recorded as NA rather than left empty
+  if(!row.pc_in_charge) row.pc_in_charge='NA';
+  // Dates normalised to dd/mm/yyyy, with the sortable copy kept in step
+  const nd=misToIso(row.next_date);
+  if(nd){ row.next_date=misDmy(nd); row.next_date_iso=misIsoStr(nd); }
+  else if(row.next_date){ row.next_date_iso=null; }
+  const pd=misToIso(row.previous_date);
+  if(pd) row.previous_date=misDmy(pd);
+  // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
+  if(orig){
+    const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
+    if(before && after && before!==after){
+      row.previous_date=before;
+      row.next_date_recorded_at=misIsoStr(new Date());
+    }
+  }
   return row;
 }
 window.misSave=async function(){
@@ -1854,11 +2276,23 @@ window.misEditSel=function(){
 window.misEdit=async function(id){
   const r=(window._misRows||[]).find(x=>x.id===id);if(!r)return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">${misFormHtml(r)}</div>
+  <div class="modal-body frm">${misFormHtml(r,'edit')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button></div>`,'lg');
+  // Live preview of the shift: typing a new Next Date immediately shows the old one moving
+  // into Previous Date, so it is obvious what will be saved.
+  window._misEditOrig=r;
+  setTimeout(function(){
+    const nd=$('misF_next_date'), pd=$('misF_previous_date');
+    if(!nd||!pd)return;
+    const before=String(r.next_date||'').trim(), wasPrev=String(r.previous_date||'').trim();
+    nd.addEventListener('input',function(){
+      const now=String(nd.value||'').trim();
+      pd.value=(before&&now&&now!==before)?before:wasPrev;
+    });
+  },30);
 };
 window.misUpdate=async function(id){
-  const row=misCollect();
+  const row=misCollect(window._misEditOrig);
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.from('mis_cases').update(row).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
@@ -8253,6 +8687,243 @@ VIEWS.playbook=function(v,seg){
   } else if(ti===1){ body=mCard('Featured play — Lead → Booking',mStep(['Capture','Qualify','Site visit','Negotiate','Token','Booking','Agreement','Register'],'Site visit')); }
   else { body=mTable(['Step','Responsible','Accountable','Consulted','Informed'],[['Site visit','Sales Exec','Sales Head','CRM','Director'],['Booking','Sales Head','Director','Finance','Legal']]); }
   v.innerHTML=mHead('fa-book-open','#4338ca','Playbook')+mTabs('playbook',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+};
+
+/* ---------- COMPETITOR ADS — Meta Ad Library watchlist ---------- */
+// Tracks a fixed watchlist of competitors against Meta's public Ad Library, scraped by our own
+// Playwright-based Apify Actor (not the official ads_archive API, which never exposes spend/reach
+// for ordinary commercial ads) via the competitor-ads-sync edge function. Sourced from
+// camp.competitor_watchlist / camp.competitor_ads.
+const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram'};
+window._compAdsAll=window._compAdsAll||[];
+window._compSignCache=window._compSignCache||{};
+VIEWS.competitors=async function(v,seg){
+  setCrumb(['Growth & Strategy','Competitor Ads']);
+  v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
+    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 16px">'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — not spend or reach, which Meta only exposes for political/issue ads.</p>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add Competitor</button>'
+        +'<button class="btn btn-primary" id="compSyncAllBtn" onclick="compSyncAll()"><i class="fa-solid fa-rotate"></i> Sync All</button>'
+      +'</div>'
+    +'</div>'
+    +'<div id="compToolbar"></div>'
+    +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
+  await compRender();
+};
+function compToolbarHtml(wl){
+  if(!wl.length)return '';
+  return '<div class="card card-pad" style="margin-bottom:16px">'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">Sync options</div>'
+    +'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
+      +'<div style="min-width:200px">'
+        +'<div style="font-size:12px;color:var(--slate);margin-bottom:6px">Competitors to sync</div>'
+        +'<div style="display:flex;flex-direction:column;gap:4px;max-height:110px;overflow-y:auto;padding-right:6px">'
+          +wl.map(function(w){return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px"><input type="checkbox" class="comp-sync-cb" value="'+w.id+'" checked> '+esc(w.name)+'</label>';}).join('')
+        +'</div>'
+      +'</div>'
+      +'<label style="font-size:12px;color:var(--slate)">From<br><input type="date" id="compDateFrom" class="inp" style="margin-top:4px"></label>'
+      +'<label style="font-size:12px;color:var(--slate)">To<br><input type="date" id="compDateTo" class="inp" style="margin-top:4px"></label>'
+      +'<div><div style="font-size:12px;color:var(--slate);margin-bottom:6px">Status</div>'
+        +'<div style="display:flex;gap:10px">'
+          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="all" checked> Both</label>'
+          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="active"> Active</label>'
+          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="inactive"> Inactive</label>'
+        +'</div>'
+      +'</div>'
+      +'<button class="btn btn-primary" id="compSyncSelectedBtn" onclick="compSyncSelected()"><i class="fa-solid fa-rotate"></i> Sync Selected</button>'
+    +'</div>'
+  +'</div>';
+}
+async function compRender(){
+  const host=$('compBody'); if(!host)return;
+  let wl=[],ads=[];
+  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('created_at',{ascending:false}); wl=data||[]; }catch(e){}
+  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('last_seen_at',{ascending:false}).limit(500); ads=data||[]; }catch(e){}
+  window._compAdsAll=ads;
+  const tb=$('compToolbar'); if(tb)tb.innerHTML=compToolbarHtml(wl);
+  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
+  host.innerHTML=wl.map(function(w){
+    const wads=ads.filter(function(a){return a.watchlist_id===w.id;});
+    const running=wads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
+    return '<div class="card card-pad" style="margin-bottom:16px">'
+      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc(w.name)+'</div><div style="color:var(--slate);font-size:12px">Search term: "'+esc(w.search_term)+'" · '+wads.length+' ad(s) seen · '+running+' currently running</div></div>'
+        +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> Active</label>'
+        +'<button class="btn btn-sm" onclick="compSync('+w.id+',this)"><i class="fa-solid fa-rotate"></i> Sync</button>'
+        +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
+      +'</div>'
+      +(wads.length
+        ?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'+wads.slice(0,24).map(compAdCard).join('')+'</div>'
+        :'<div class="empty" style="padding:20px"><i class="fa-regular fa-clock"></i><div>Not synced yet — click Sync</div></div>')
+      +'</div>';
+  }).join('');
+  compHydrateThumbs();
+}
+function compFirstMedia(a){
+  if(Array.isArray(a.media_items)&&a.media_items.length)return a.media_items[0];
+  if(a.media_s3_path)return {s3_path:a.media_s3_path,media_type:a.media_type||'image'};
+  return null;
+}
+function compPlatformIcons(a){
+  const list=Array.isArray(a.publisher_platforms)?a.publisher_platforms:[];
+  if(!list.length)return '';
+  return list.map(function(p){
+    const icon=COMP_PLATFORM_ICON[p];
+    return icon?'<i class="fa-brands '+icon+'" title="'+esc(p)+'" style="color:var(--slate);font-size:12px"></i>':'<i class="fa-solid fa-share-nodes" title="'+esc(p)+'" style="color:var(--slate);font-size:12px"></i>';
+  }).join(' ');
+}
+function compAdCard(a){
+  const stillRunning=!a.ad_delivery_stop_time;
+  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
+  const bodyText=bodies.length?String(bodies[0]).slice(0,140):'(no ad text)';
+  const media=compFirstMedia(a);
+  const thumb=media
+    ?'<div class="comp-thumb" data-key="'+esc(media.s3_path)+'" data-type="'+esc(media.media_type)+'" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+    :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
+  return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer" onclick="compOpenDetail(\''+esc(a.id)+'\')">'
+    +thumb
+    +'<div style="display:flex;align-items:center;gap:6px;margin-top:8px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
+    +'<div style="font-size:12.5px;margin:6px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
+    +(a.cta_text?'<div style="margin:4px 0"><span class="tag t-blue">'+esc(a.cta_text)+'</span></div>':'')
+    +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+'</div>'
+    +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Running since '+fmtDate(a.ad_delivery_start_time)+'</div>'
+    +'<div style="font-size:10.5px;color:var(--slate);margin-top:4px;opacity:.7">ID '+esc(a.id)+'</div>'
+  +'</div>';
+}
+async function compSignedUrl(key){
+  if(window._compSignCache[key])return window._compSignCache[key];
+  const {data,error}=await s3Sign('get',key.slice(3));
+  if(error||!data)return null;
+  window._compSignCache[key]=data.url;
+  return data.url;
+}
+async function compHydrateThumbs(){
+  const els=Array.from(document.querySelectorAll('.comp-thumb[data-key]'));
+  await Promise.all(els.map(async function(el){
+    const key=el.getAttribute('data-key'),type=el.getAttribute('data-type');
+    const url=await compSignedUrl(key);
+    if(!url||!el.isConnected)return;
+    el.innerHTML=type==='video'
+      ?'<video src="'+url+'" preload="metadata" muted style="width:100%;height:100%;object-fit:cover"></video>'
+      :'<img src="'+url+'" style="width:100%;height:100%;object-fit:cover">';
+  }));
+}
+window.compAddModal=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Competitor</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><label>Display name<input id="compName" placeholder="e.g. Godrej Properties"></label>'
+    +'<label>Search term sent to Meta<input id="compSearchTerm" placeholder="Defaults to the name above"></label></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
+};
+window.compSave=async function(){
+  const name=(($('compName')&&$('compName').value)||'').trim();
+  const term=(($('compSearchTerm')&&$('compSearchTerm').value)||'').trim()||name;
+  if(!name){toast('Enter a name','err');return;}
+  const {error}=await sb.schema('camp').from('competitor_watchlist').insert({name:name,search_term:term});
+  if(error){toast(error.message,'err');return;}
+  closeModal();toast('Competitor added','ok');
+  await compRender();
+};
+window.compToggleActive=async function(id,active){
+  await sb.schema('camp').from('competitor_watchlist').update({active:active}).eq('id',id);
+};
+window.compRemove=async function(id){
+  const ok=await confirmDialog('Remove this competitor? Its stored ads will be deleted too.',{okLabel:'Remove'});
+  if(!ok)return;
+  await sb.schema('camp').from('competitor_watchlist').delete().eq('id',id);
+  toast('Removed','ok');
+  await compRender();
+};
+async function compRunSync(payload,btn,busyLabel,idleLabel){
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'');}
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(payload)});
+    const jr=await res.json().catch(function(){return {};});
+    if(jr.error)toast(jr.error,'err');
+    else if(jr.skipped)toast(jr.message||'Sync skipped','err');
+    else toast('Synced — '+(jr.newAds||0)+' new ad(s) across '+(jr.synced||0)+' total','ok');
+  }catch(e){toast('Sync failed','err');}
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
+  await compRender();
+}
+window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); };
+window.compSyncAll=function(){ compRunSync({},$('compSyncAllBtn'),'Syncing…','Sync All'); };
+window.compSyncSelected=function(){
+  const ids=Array.from(document.querySelectorAll('.comp-sync-cb:checked')).map(function(cb){return Number(cb.value);});
+  if(!ids.length){toast('Select at least one competitor','err');return;}
+  const dateFrom=($('compDateFrom')&&$('compDateFrom').value)||undefined;
+  const dateTo=($('compDateTo')&&$('compDateTo').value)||undefined;
+  const activeStatusEl=document.querySelector('input[name="compActiveStatus"]:checked');
+  compRunSync({watchlist_ids:ids,active_status:activeStatusEl?activeStatusEl.value:'all',date_from:dateFrom,date_to:dateTo},$('compSyncSelectedBtn'),'Syncing…','Sync Selected');
+};
+window.compOpenDetail=function(id){
+  const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
+  if(!a){toast('Ad not found — try refreshing','err');return;}
+  window._compDetailAd=a;
+  window._compDetailIdx=0;
+  openModal(compDetailHtml(a),'lg');
+  compRenderDetailMedia();
+};
+function compDetailHtml(a){
+  const stillRunning=!a.ad_delivery_stop_time;
+  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
+  const bodyText=bodies.length?String(bodies[0]):'(no ad text)';
+  const extraLinks=Array.isArray(a.extra_links)?a.extra_links:[];
+  const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
+  return '<div class="modal-head"><h3><i class="fa-solid fa-magnifying-glass-chart"></i> '+esc(a.page_name||'Ad detail')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="display:flex;gap:18px;flex-wrap:wrap">'
+      +'<div style="flex:1 1 320px;min-width:280px">'
+        +'<div id="compDetailMedia" style="height:320px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+        +(media.length>1
+          ?'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">'
+            +'<button class="btn btn-sm" onclick="compDetailNav(-1)"><i class="fa-solid fa-chevron-left"></i></button>'
+            +'<span id="compDetailMediaCount" style="font-size:12px;color:var(--slate)">1 / '+media.length+'</span>'
+            +'<button class="btn btn-sm" onclick="compDetailNav(1)"><i class="fa-solid fa-chevron-right"></i></button>'
+          +'</div>'
+          :'')
+      +'</div>'
+      +'<div style="flex:1 1 280px;min-width:260px">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
+        +(a.cta_text?'<div style="margin-bottom:10px">'+(a.redirect_url?'<a href="'+esc(a.redirect_url)+'" target="_blank" rel="noopener" class="btn btn-primary btn-sm">'+esc(a.cta_text)+' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>':'<span class="tag t-blue">'+esc(a.cta_text)+'</span>')+'</div>':'')
+        +'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
+        +(extraLinks.length
+          ?'<div style="margin-top:12px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:4px">Extra links</div>'
+            +extraLinks.map(function(l){const u=l&&(l.url||l);return u?'<div style="margin-bottom:3px"><a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(u)+'</a></div>':'';}).join('')
+          +'</div>'
+          :'')
+        +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--slate);display:flex;flex-direction:column;gap:4px">'
+          +'<div>Running since '+fmtDate(a.ad_delivery_start_time)+(stillRunning?'':' · ended '+fmtDate(a.ad_delivery_stop_time))+'</div>'
+          +'<div>Last seen '+fmtDate(a.last_seen_at)+'</div>'
+          +'<div>Library ID '+esc(a.id)+'</div>'
+          +(a.ad_snapshot_url?'<div><a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener">View on Facebook Ad Library →</a></div>':'')
+        +'</div>'
+      +'</div>'
+    +'</div>';
+}
+async function compRenderDetailMedia(){
+  const a=window._compDetailAd; if(!a)return;
+  const host=$('compDetailMedia'); if(!host)return;
+  const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
+  const item=media[window._compDetailIdx||0];
+  if(!item){ host.innerHTML='<i class="fa-regular fa-image" style="font-size:28px"></i>'; return; }
+  const url=await compSignedUrl(item.s3_path);
+  if(!host.isConnected)return;
+  if(!url){ host.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i>'; return; }
+  host.innerHTML=item.media_type==='video'
+    ?'<video src="'+url+'" controls style="max-width:100%;max-height:100%"></video>'
+    :'<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+}
+window.compDetailNav=function(delta){
+  const a=window._compDetailAd; if(!a)return;
+  const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
+  if(!media.length)return;
+  window._compDetailIdx=((window._compDetailIdx||0)+delta+media.length)%media.length;
+  const counter=$('compDetailMediaCount'); if(counter)counter.textContent=(window._compDetailIdx+1)+' / '+media.length;
+  compRenderDetailMedia();
 };
 
 
