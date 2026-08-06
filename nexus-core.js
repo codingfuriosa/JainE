@@ -1570,6 +1570,54 @@ window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpa
 window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 
 /* ============================ LEGAL MIS ============================ */
+/* Hearing-date window. Filters the table by Next Date and is what the causelist export
+   uses — the export refuses to run on "All dates", since a causelist is by definition
+   for a period. */
+const MIS_RANGES=[
+  ['all','All dates'],
+  ['this_month','This Month'],
+  ['next_month','Next Month'],
+  ['next_week','Next Week'],
+  ['next_30','Next 30 Days'],
+  ['custom','Custom']
+];
+let MIS_RANGE='all', MIS_FROM='', MIS_TO='';
+function misDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function misAddDays(d,n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+// Weeks run Monday to Sunday, matching how the courts list them.
+function misMonday(d){ const x=new Date(d.getTime()); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
+function misRangeDates(){
+  const t=new Date(); t.setHours(12,0,0,0);
+  switch(MIS_RANGE){
+    case 'this_month':  return {from:misDay(new Date(t.getFullYear(),t.getMonth(),1)),   to:misDay(new Date(t.getFullYear(),t.getMonth()+1,0))};
+    case 'next_month':  return {from:misDay(new Date(t.getFullYear(),t.getMonth()+1,1)), to:misDay(new Date(t.getFullYear(),t.getMonth()+2,0))};
+    case 'next_week':   { const m=misAddDays(misMonday(t),7); return {from:misDay(m), to:misDay(misAddDays(m,6))}; }
+    case 'next_30':     return {from:misDay(t), to:misDay(misAddDays(t,30))};
+    case 'custom':      return (MIS_FROM&&MIS_TO)?{from:MIS_FROM,to:MIS_TO}:null;
+    default:            return null;
+  }
+}
+function misRangeLabel(){
+  const r=misRangeDates(); if(!r) return '';
+  const f=s=>{const d=new Date(s+'T00:00:00');return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();};
+  return f(r.from)+' – '+f(r.to);
+}
+window.misSetRange=function(v){
+  MIS_RANGE=v;
+  if(v==='custom'&&(!MIS_FROM||!MIS_TO)){ const t=new Date(); MIS_FROM=misDay(t); MIS_TO=misDay(misAddDays(t,30)); }
+  legalMIS();
+};
+// A row's hearing date, preferring the sortable copy and falling back to parsing the text.
+function misRowIso(r){
+  if(r.next_date_iso) return String(r.next_date_iso).slice(0,10);
+  const d=misToIso(r.next_date); return d?misIsoStr(d):null;
+}
+function misInRange(r){
+  const w=misRangeDates(); if(!w) return true;
+  const iso=misRowIso(r); if(!iso) return false;
+  return iso>=w.from && iso<=w.to;
+}
+
 const MIS_FIELDS=[
   {k:'case_type',l:'Case Type'},
   {k:'cause_title',l:'Cause Title / Parties'},
@@ -1580,6 +1628,7 @@ const MIS_FIELDS=[
   {k:'advocate_incharge',l:'Advocate In-Charge'},
   {k:'court',l:'Court'},
   {k:'status',l:'Status / Purpose'},
+  {k:'action_needed',l:'Action Needed'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
   {k:'date_of_filing',l:'Date of Filing'},
@@ -1588,23 +1637,79 @@ const MIS_FIELDS=[
   {k:'cnr_no',l:'CNR No.'}
 ];
 function misLabel(k){const f=MIS_FIELDS.find(x=>x.k===k);return f?f.l:k;}
-function misInput(k,vals){return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc((vals||{})[k]||'')+'"></div>';}
+
+/* Fields offering a dropdown of what's already in use while still accepting a new value.
+   A <datalist> gives both: pick from the list, or type something new — and because the new
+   value is saved onto the row, it is in the list automatically next time. No extra table. */
+const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge','advocate_incharge','court']);
+const MIS_PC_DEFAULT='ANKITA BHANDARI';
+function misDistinct(k){
+  const seen=new Map();
+  (window._misRows||[]).forEach(r=>{ const v=String(r[k]==null?'':r[k]).trim(); if(!v)return;
+    const key=v.toLowerCase(); if(!seen.has(key)) seen.set(key,v); });
+  return [...seen.values()].sort((a,b)=>a.localeCompare(b));
+}
+// The level most cases already sit at — pre-selected on a new case, still changeable.
+function misCommonPriority(){
+  const c={High:0,Medium:0,Low:0};
+  (window._misRows||[]).forEach(r=>{ const p=String(r.priority||'').trim(); if(c[p]!==undefined)c[p]++; });
+  return (c.High>=c.Medium&&c.High>=c.Low)?'High':(c.Medium>=c.Low?'Medium':'Low');
+}
+function misInput(k,vals,opt){
+  opt=opt||{};
+  const v=(vals||{})[k]||'';
+  const ro=opt.readonly?' readonly style="background:var(--bg,#f8fafc);color:var(--slate)"':'';
+  const hint=opt.hint?'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+esc(opt.hint)+'</div>':'';
+  if(k==='priority'){
+    const cur=v||opt.dflt||'';
+    return '<div><label>'+misLabel(k)+'</label><select id="misF_'+k+'" class="sel">'
+      +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
+      +'</select>'+hint+'</div>';
+  }
+  if(MIS_SUGGEST.has(k)){
+    const list='misL_'+k;
+    return '<div><label>'+misLabel(k)+'</label>'
+      +'<input id="misF_'+k+'" class="sel" list="'+list+'" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro+'>'
+      +'<datalist id="'+list+'">'+misDistinct(k).map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'
+      +hint+'</div>';
+  }
+  return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'>'+hint+'</div>';
+}
 function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
-const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks']);
-function misFormHtml(vals){
-  vals=vals||{};
+const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
+
+/* mode 'add'  — Previous Date is not shown at all; it only ever comes from a real reschedule.
+   mode 'edit' — Status and Next Date come first because they are what actually get changed,
+                 and Previous Date is read-only: it fills itself from the old Next Date the
+                 moment Next Date is edited. */
+function misFormHtml(vals,mode){
+  vals=vals||{}; mode=mode||'add';
+  const isEdit=(mode==='edit');
   let html='', pending=null;
   function flush(){ if(pending!==null){ html+='<div class="two">'+pending+'</div>'; pending=null; } }
+  function put(k,opt){
+    if(MIS_AREA_FIELDS.has(k)){ flush(); html+=misArea(k,vals,k==='cause_title'?2:3); return; }
+    const cell=misInput(k,vals,opt);
+    if(pending===null) pending=cell;
+    else { html+='<div class="two">'+pending+cell+'</div>'; pending=null; }
+  }
+  const done=new Set();
+  if(isEdit){
+    html+='<div class="mis-prio-head"><i class="fa-solid fa-bolt"></i> Usually updated</div>';
+    put('status');                                    done.add('status');
+    put('next_date',{hint:'dd/mm/yyyy — changing this moves the old date into Previous Date'});
+    put('previous_date',{readonly:true,hint:'set automatically from the previous Next Date'});
+    done.add('next_date'); done.add('previous_date');
+    flush();
+    html+='<div class="mis-prio-head" style="margin-top:6px"><i class="fa-solid fa-list"></i> Case details</div>';
+  }
   MIS_FIELDS.forEach(f=>{
-    if(MIS_AREA_FIELDS.has(f.k)){
-      flush();
-      html+=misArea(f.k,vals,f.k==='cause_title'?2:3);
-    } else if(pending===null){
-      pending=misInput(f.k,vals);
-    } else {
-      html+='<div class="two">'+pending+misInput(f.k,vals)+'</div>';
-      pending=null;
-    }
+    if(done.has(f.k)) return;
+    if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
+    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:'left blank saves as NA'});
+    if(f.k==='next_date')    return put(f.k,{hint:'dd/mm/yyyy'});
+    put(f.k);
   });
   flush();
   return html;
@@ -1619,9 +1724,9 @@ function misPriorityTag(p){
   if(!p)return '<span class="mis-ptag mis-ptag--gray">—</span>';
   return '<span class="mis-ptag mis-ptag--'+cls.replace('t-','')+'">'+esc(misTrunc(label,14))+'</span>';
 }
-const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name']);
+const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
+const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1658,6 +1763,23 @@ async function legalMIS(){
       .mis-ptag--amber{background:#fef3c7;color:#92400e}
       .mis-ptag--green{background:#d1fae5;color:#065f46}
       .mis-ptag--gray{background:#f1f5f9;color:#475569}
+      /* section heading inside the Edit Case form */
+      .mis-prio-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);padding-bottom:7px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+      .mis-prio-head i{color:var(--brand)}
+      /* date-range filter */
+      .mis-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+      .mis-range .to{font-size:12.5px;color:var(--slate)}
+      .mis-toolbar.has-custom .mis-search-wrap{flex:0 1 190px;min-width:120px}
+      @media(max-width:900px){
+        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%}
+        .mis-toolbar .mis-actions{flex:1 1 100%}
+        .mis-toolbar .mis-actions .btn{flex:1 1 auto;justify-content:center}
+        select.mis-sel{min-width:0;flex:1 1 140px}
+        .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
+        .mis-range{flex:1 1 100%}
+        .mis-range input[type=date]{flex:1 1 40%;min-width:0}
+      }
       #misTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:2200px;table-layout:fixed}
       #misTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
       #misTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s;cursor:pointer}
@@ -1680,7 +1802,7 @@ async function legalMIS(){
         #misTbl thead th,#misTbl tbody td{padding:9px 8px}
       }
     </style>
-    <div class="mis-toolbar">
+    <div class="mis-toolbar${MIS_RANGE==='custom'?' has-custom':''}">
       <div class="mis-actions">
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
         <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
@@ -1688,10 +1810,19 @@ async function legalMIS(){
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
+        <select class="mis-sel" id="misRangeSel" onchange="misSetRange(this.value)">
+          ${MIS_RANGES.map(r=>`<option value="${r[0]}"${MIS_RANGE===r[0]?' selected':''}>${esc(r[1])}</option>`).join('')}
+        </select>
+        <span class="mis-range" id="misRangeCustom" style="display:${MIS_RANGE==='custom'?'flex':'none'}">
+          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misFilter()">
+          <span class="to">to</span>
+          <input type="date" id="misTo" value="${esc(MIS_TO)}" onchange="misFilter()">
+        </span>
         <div class="mis-search-wrap">
           <i class="fa-solid fa-magnifying-glass"></i>
           <input id="misSearch" placeholder="Search anything — a value, a column name, or e.g. &quot;priority is empty&quot;" oninput="misFilter()">
         </div>
+        <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
       </div>
     </div>
     <div class="card" style="overflow:hidden">
@@ -1711,7 +1842,84 @@ async function legalMIS(){
       </table>
       </div>
     </div>`;
+  // apply the hearing-date window straight away, not only when someone types
+  if(MIS_RANGE!=='all') setTimeout(misFilter,0);
 }
+/* ---- Causelist export ------------------------------------------------------------------
+   Mirrors CAUSTLIST - AUGUST26.pdf: title, generated stamp, then
+   SL NO. | CASE TYPE | CASE DETAILS | CASE NO. | DATE | Advocate incharge | Court Name |
+   STATUS | ACTION NEEDED.
+   A causelist covers a period, so it refuses to run until a date range is chosen. */
+window.misExportCauselist=function(){
+  const win=misRangeDates();
+  if(!win){
+    toast(MIS_RANGE==='custom'
+      ? 'Pick both a From and a To date before exporting the causelist'
+      : 'Choose a date range first — a causelist has to cover a period','warn');
+    const sel=$('misRangeSel'); if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
+      setTimeout(function(){ sel.style.borderColor=''; },1800); }
+    return;
+  }
+  const rows=(window._misRows||[]).filter(misInRange)
+    .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
+  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
+
+  const label=(MIS_RANGES.find(function(r){return r[0]===MIS_RANGE;})||[])[1]||'';
+  const stamp=new Date().toLocaleString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const dmy=function(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
+  const cell=function(v){ return esc(String(v==null?'':v).trim()||'—').replace(/\n/g,'<br>'); };
+
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>Causelist '+esc(label)+'</title>'
+   +'<style>'
+   +'@page{size:A4 landscape;margin:12mm}'
+   +'*{box-sizing:border-box}'
+   +'body{font-family:Calibri,Arial,sans-serif;color:#111;margin:0;font-size:10.5px}'
+   +'h1{font-size:17px;margin:0 0 2px;letter-spacing:.5px}'
+   +'.sub{font-size:11px;color:#444;margin-bottom:12px}'
+   +'table{width:100%;border-collapse:collapse;table-layout:fixed}'
+   +'th,td{border:1px solid #999;padding:5px 6px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}'
+   +'th{background:#dbe5f1;font-weight:700;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em}'
+   +'tr{page-break-inside:avoid}'
+   +'thead{display:table-header-group}'
+   +'td.sl{text-align:center;font-weight:700}'
+   +'td.dt{white-space:nowrap;font-weight:600}'
+   +'.foot{margin-top:10px;font-size:10px;color:#555}'
+   +'@media print{.noprint{display:none}}'
+   +'</style></head><body>'
+   +'<div class="noprint" style="margin-bottom:10px">'
+   +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
+   +'</div>'
+   +'<h1>CAUSELIST — '+esc(label.toUpperCase())+'</h1>'
+   +'<div class="sub">'+esc(misRangeLabel())+' &nbsp;·&nbsp; '+rows.length+' matter'+(rows.length===1?'':'s')+' &nbsp;·&nbsp; generated '+esc(stamp)+'</div>'
+   +'<table><colgroup>'
+   +'<col style="width:34px"><col style="width:9%"><col style="width:22%"><col style="width:12%">'
+   +'<col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:14%">'
+   +'</colgroup><thead><tr>'
+   +'<th>SL NO.</th><th>Case Type</th><th>Case Details</th><th>Case No.</th><th>Date</th>'
+   +'<th>Advocate Incharge</th><th>Court Name</th><th>Status</th><th>Action Needed</th>'
+   +'</tr></thead><tbody>'
+   +rows.map(function(r,i){
+      return '<tr><td class="sl">'+(i+1)+'</td>'
+        +'<td>'+cell(r.case_type)+'</td>'
+        +'<td>'+cell(r.cause_title)+'</td>'
+        +'<td>'+cell(r.case_no)+'</td>'
+        +'<td class="dt">'+esc(dmy(misRowIso(r)))+'</td>'
+        +'<td>'+cell(r.advocate_incharge)+'</td>'
+        +'<td>'+cell(r.court)+'</td>'
+        +'<td>'+cell(r.status)+'</td>'
+        +'<td>'+cell(r.action_needed)+'</td></tr>';
+    }).join('')
+   +'</tbody></table>'
+   +'<div class="foot">JAIN-E · Legal MIS · '+esc(stamp)+'</div>'
+   +'</body></html>';
+
+  const w=window.open('','_blank');
+  if(!w){ toast('Allow pop-ups to export the causelist','err'); return; }
+  w.document.write(html); w.document.close();
+  toast('Causelist ready — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+};
+
 window.misRowCheck=function(cb){
   const id=Number(cb.dataset.id);
   if(cb.checked) window._misSel.add(id); else window._misSel.delete(id);
@@ -1793,6 +2001,9 @@ function misParseQuery(raw){
   return {type:'fields', conds};
 }
 window.misFilter=function(){
+  // keep the custom range in sync before filtering
+  const fEl=$('misFrom'), tEl=$('misTo');
+  if(fEl) MIS_FROM=fEl.value||''; if(tEl) MIS_TO=tEl.value||'';
   const raw=($('misSearch').value||'').trim();
   const q=raw.toLowerCase();
   const wantsCompleteness=q.indexOf('completeness')!==-1;
@@ -1815,6 +2026,7 @@ window.misFilter=function(){
       });
     }
     else { const blob=row?row._blob:''; show=parsed.words&&parsed.words.length?parsed.words.every(w=>blob.indexOf(w)!==-1):(blob.indexOf(q)!==-1); }
+    if(show && row && !misInRange(row)) show=false;   // hearing-date window
     tr.style.display=show?'':'none';if(show)vis++;
   });
   const c=$('misCount');if(c)c.textContent=vis+' cases';
@@ -1828,12 +2040,41 @@ window.misFilter=function(){
 };
 window.misCreate=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-gavel"></i> Add Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">${misFormHtml({})}</div>
+  <div class="modal-body frm">${misFormHtml({},'add')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misSave()"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg');
 };
-function misCollect(){
+/* dd/mm/yyyy in, ISO out — so the date filter and causelist have something sortable.
+   Also accepts what people actually type: 3-8-2026, 03.08.2026, 2026-08-03. */
+function misToIso(s){
+  s=String(s==null?'':s).trim(); if(!s) return null;
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m){ const d=new Date(+m[1],+m[2]-1,+m[3]); return isNaN(d)?null:d; }
+  m=s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if(m){ const d=new Date(+m[3],+m[2]-1,+m[1]); return isNaN(d)?null:d; }
+  return null;
+}
+function misIsoStr(d){ return d?(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')):null; }
+function misDmy(d){ return d?(String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()):null; }
+
+function misCollect(orig){
   const row={};
-  MIS_FIELDS.forEach(f=>{ const el=$('misF_'+f.k); row[f.k]=el?(((el.value||'').trim())||null):null; });
+  MIS_FIELDS.forEach(f=>{ const el=$('misF_'+f.k); if(el) row[f.k]=((el.value||'').trim())||null; });
+  // PC In-Charge: blank means nobody assigned, recorded as NA rather than left empty
+  if(!row.pc_in_charge) row.pc_in_charge='NA';
+  // Dates normalised to dd/mm/yyyy, with the sortable copy kept in step
+  const nd=misToIso(row.next_date);
+  if(nd){ row.next_date=misDmy(nd); row.next_date_iso=misIsoStr(nd); }
+  else if(row.next_date){ row.next_date_iso=null; }
+  const pd=misToIso(row.previous_date);
+  if(pd) row.previous_date=misDmy(pd);
+  // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
+  if(orig){
+    const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
+    if(before && after && before!==after){
+      row.previous_date=before;
+      row.next_date_recorded_at=misIsoStr(new Date());
+    }
+  }
   return row;
 }
 window.misSave=async function(){
@@ -1854,11 +2095,23 @@ window.misEditSel=function(){
 window.misEdit=async function(id){
   const r=(window._misRows||[]).find(x=>x.id===id);if(!r)return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">${misFormHtml(r)}</div>
+  <div class="modal-body frm">${misFormHtml(r,'edit')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button></div>`,'lg');
+  // Live preview of the shift: typing a new Next Date immediately shows the old one moving
+  // into Previous Date, so it is obvious what will be saved.
+  window._misEditOrig=r;
+  setTimeout(function(){
+    const nd=$('misF_next_date'), pd=$('misF_previous_date');
+    if(!nd||!pd)return;
+    const before=String(r.next_date||'').trim(), wasPrev=String(r.previous_date||'').trim();
+    nd.addEventListener('input',function(){
+      const now=String(nd.value||'').trim();
+      pd.value=(before&&now&&now!==before)?before:wasPrev;
+    });
+  },30);
 };
 window.misUpdate=async function(id){
-  const row=misCollect();
+  const row=misCollect(window._misEditOrig);
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.from('mis_cases').update(row).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
