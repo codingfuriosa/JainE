@@ -811,14 +811,17 @@
   // My own department(s), from the same people() list already loaded for the person-picker.
   function wfMyDepts(){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,me());}); return (p&&Array.isArray(p.depts))?p.depts:[]; }
   function wfInDept(dept){ return wfMyDepts().some(function(d){return eq(d,dept);}); }
+  function wfInAnyDept(depts){ const mine=wfMyDepts(); return (depts||[]).some(function(d){return mine.some(function(m){return eq(m,d);});}); }
+  // Who can create a brand-new workflow — mirrors acc.wf_can_create_flow() server-side exactly.
+  var WF_CREATE_DEPTS=['Systems','Administration'];
   function wfCanSee(f,ownersByFlow){
     const o=(ownersByFlow&&ownersByFlow[f.id])||[];
     return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());})
-      // A flow can be opened up to a whole department (e.g. Invoice Processing -> Systems) instead
-      // of just its creator/trigger-owner/step-owners — mirrors the backend's own
-      // acc.wf_can_see_flow RLS check, which is the real enforcement; this is just the matching
-      // client-side filter so the list doesn't have to round-trip a denied row.
-      || (f.visible_department && wfInDept(f.visible_department));
+      // A flow can be opened up to whole departments (e.g. Invoice Processing -> Systems +
+      // Administration) instead of just its creator/trigger-owner/step-owners — mirrors the
+      // backend's own acc.wf_can_see_flow RLS check, which is the real enforcement; this is just
+      // the matching client-side filter so the list doesn't have to round-trip a denied row.
+      || wfInAnyDept(f.visible_departments);
   }
   function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
@@ -852,10 +855,10 @@
       +'</div>';
     }).join('');
     const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet.</div>';
-    // Creating a brand-new workflow (not just viewing one) is restricted to the Systems
-    // department — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which
-    // is the real enforcement; this is just the matching client-side button visibility.
-    const canCreate=wfInDept('Systems');
+    // Creating a brand-new workflow (not just viewing one) is restricted to Systems/Administration
+    // — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which is the real
+    // enforcement; this is just the matching client-side button visibility.
+    const canCreate=wfInAnyDept(WF_CREATE_DEPTS);
     b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div>'+(canCreate?'<button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button>':'')+'</div>'
       +inner;
   }
