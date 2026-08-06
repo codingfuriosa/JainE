@@ -8317,8 +8317,13 @@ VIEWS.mail=function(v,seg){
    & analysed by Gladia (Hindi / English / Bengali, code-switching aware) via
    the `transcription-analyze` edge function. Results land in acc.transcriptions. */
 const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',pa:'Punjabi'};
+// Fixed folder set — mirrors the project list the qualification prompt (transcription-analyze
+// edge function) matches calls against, so a call's r.project always lands in one of these.
+const TR_PROJECTS=['Dream Gurukul','Dream World City','Dream Valley','Dream Eco City','Dream Exotica'];
 const TR_TIMERS={};
 let TR_ROWS=null;
+let TR_FILTER='all'; // 'all'|'qualified'|'notqualified'|'processing' — driven by the KPI cards
+let TR_PROJECT=null; // project folder currently drilled into on the "By Project" tab
 function trLangName(c){return TR_LANG_NAMES[c]||(c?String(c).toUpperCase():'—');}
 function trLangTags(langs){if(!langs||!langs.length)return '<span style="color:var(--slate)">—</span>';return langs.map(function(c){return '<span class="tag t-blue" style="margin-right:4px">'+esc(trLangName(c))+'</span>';}).join('');}
 function trFmtDur(s){s=Number(s||0);if(!s)return '—';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.floor(s%60);const p=function(n){return (n<10?'0':'')+n;};return (h?h+':':'')+p(m)+':'+p(ss);}
@@ -8799,10 +8804,21 @@ VIEWS.organic=async function(v,seg){
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
-  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
-    +'<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>'
+  const tabs=['All Calls','By Project'];
+  const ti=mTab(seg,tabs.length);
+  const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
+  if(ti===1){
+    const rows=await trFetch(true);
+    const proj=seg[1]?decodeURIComponent(seg[1]):null;
+    TR_PROJECT=proj;
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +(proj?trProjectCallsHtml(rows,proj):trFolderGridHtml(rows));
+    return;
+  }
+  TR_PROJECT=null;
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
     +'<div id="trKpis"></div>'
-    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
+    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn" onclick="trExport()"><i class="fa-solid fa-file-export"></i> Export</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
@@ -8812,38 +8828,168 @@ VIEWS.transcription=async function(v,seg){
 function trRenderList(){
   const rows=TR_ROWS||[];
   const kh=$('trKpis');
-  if(kh){
-    const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
-    const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
-    const proc=rows.filter(function(r){return r.status==='processing';}).length;
-    kh.innerHTML=mKpis([
-      ['Calls',String(rows.length),'all time'],
-      ['Qualified',String(qual),'leads matched','#16a34a'],
-      ['Not Qualified',String(notq),'did not match','#dc2626'],
-      ['Processing',String(proc),proc?'in progress':'all clear',proc?'#d97706':'#16a34a'],
-    ]);
-  }
+  if(kh)kh.innerHTML=trKpisHtml(rows);
   const host=$('trRows');if(!host)return;
   if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
-  host.innerHTML=rows.map(function(r){
-    const fname=r.file_name||'Recording';
-    const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
-    // Main line = the recording's file name (truncated with … if too long, full name on hover);
-    // below it = the detected customer name, when the call identified one.
-    const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
-    return '<tr'+clickable+'>'
-      +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
-      +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
-      +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
-      +'<td>'+trLangTags(r.languages)+'</td>'
-      +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
-      +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
-      +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
-        +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
-        +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
-      +'</td></tr>';
-  }).join('');
+  const filtered=trApplyFilter(rows);
+  if(!filtered.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button></div></td></tr>';return;}
+  host.innerHTML=trRowsBodyHtml(filtered);
 }
+// KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
+function trApplyFilter(rows){
+  if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
+  if(TR_FILTER==='notqualified')return rows.filter(function(r){return r.qualification==='Not Qualified';});
+  if(TR_FILTER==='processing')return rows.filter(function(r){return r.status==='processing';});
+  return rows;
+}
+window.trSetFilter=function(f){TR_FILTER=(TR_FILTER===f)?'all':f;trRenderList();};
+function trKpisHtml(rows){
+  const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
+  const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
+  const proc=rows.filter(function(r){return r.status==='processing';}).length;
+  const cards=[['all','Calls',rows.length,'all time','var(--slate)'],['qualified','Qualified',qual,'leads matched','#16a34a'],['notqualified','Not Qualified',notq,'did not match','#dc2626'],['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
+  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
+    const active=TR_FILTER===c[0];
+    return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
+      +'<div class="lbl" style="margin-bottom:7px">'+esc(c[1])+(active?' <i class="fa-solid fa-filter" style="font-size:10px"></i>':'')+'</div>'
+      +'<div class="val">'+c[2]+'</div>'
+      +'<div style="font-size:12px;color:'+c[4]+';margin-top:3px">'+esc(c[3])+'</div></div>';
+  }).join('')+'</div>';
+}
+// Shared row template — used by the flat list (tab 0) and the per-project drill-in (tab 1).
+function trRowHtml(r){
+  const fname=r.file_name||'Recording';
+  const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+  // Main line = the recording's file name (truncated with … if too long, full name on hover);
+  // below it = the detected customer name, when the call identified one.
+  const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+  return '<tr'+clickable+'>'
+    +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
+    +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+    +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
+    +'<td>'+trLangTags(r.languages)+'</td>'
+    +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
+    +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
+    +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+      +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Export this call" onclick="trExportOne('+r.id+')"><i class="fa-solid fa-file-export"></i></button> ':'')
+      +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
+      +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
+    +'</td></tr>';
+}
+function trRowsBodyHtml(rows){return rows.map(trRowHtml).join('');}
+
+/* ---------- By-project folders ---------- */
+function trFolderCardHtml(name,list){
+  const isMisc=(name==='Unassigned');
+  const qual=list.filter(function(r){return r.qualification==='Qualified';}).length;
+  return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/1/'+encodeURIComponent(name)+'\')">'
+    +'<div style="display:flex;align-items:center;gap:12px">'
+    +'<i class="fa-solid '+(isMisc?'fa-folder-open':'fa-folder')+'" style="font-size:26px;color:'+(isMisc?'#94a3b8':'#0d9488')+'"></i>'
+    +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(name)+'</div>'
+    +'<div style="font-size:12px;color:var(--slate);margin-top:2px">'+list.length+' call'+(list.length===1?'':'s')+(list.length?(' · '+qual+' qualified'):'')+'</div></div>'
+    +'</div></div>';
+}
+function trProjectRows(rows,name){
+  return (rows||[]).filter(function(r){
+    if(name==='Unassigned')return !(r.project&&TR_PROJECTS.indexOf(r.project)>=0);
+    return r.project===name;
+  });
+}
+function trFolderGridHtml(rows){
+  const groups={};TR_PROJECTS.forEach(function(p){groups[p]=[];});
+  const misc=[];
+  (rows||[]).forEach(function(r){
+    if(r.project&&TR_PROJECTS.indexOf(r.project)>=0)groups[r.project].push(r);
+    else misc.push(r);
+  });
+  const cards=TR_PROJECTS.map(function(p){return trFolderCardHtml(p,groups[p]);}).concat([trFolderCardHtml('Unassigned',misc)]);
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:16px">'+cards.join('')+'</div>';
+}
+function trProjectCallsHtml(rows,name){
+  const list=trProjectRows(rows,name);
+  return '<div class="toolbar" style="margin:16px 0"><button class="btn btn-sm" onclick="navTo(\'transcription/1\')"><i class="fa-solid fa-arrow-left"></i> All projects</button><div class="grow"></div>'
+    +(list.length?'<button class="btn btn-sm" onclick="trExportProject(\''+esc(name).replace(/'/g,"\\'")+'\')"><i class="fa-solid fa-file-export"></i> Export</button>':'')+'</div>'
+    +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid '+(name==='Unassigned'?'fa-folder-open':'fa-folder')+'" style="color:'+(name==='Unassigned'?'#94a3b8':'#0d9488')+'"></i> '+esc(name)+'</h1></div>'
+    +'<div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
+    +'<tbody id="trProjRows">'+(list.length?trRowsBodyHtml(list):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this project yet</div></div></td></tr>')+'</tbody></table></div></div>';
+}
+// Keeps the project drill-in list (if open) in sync after an optimistic delete/retry — a no-op
+// when that view isn't currently on screen, same guard pattern as trRenderList's #trRows check.
+function trRenderProjectRows(){
+  const host=$('trProjRows');if(!host||!TR_PROJECT)return;
+  const list=trProjectRows(TR_ROWS||[],TR_PROJECT);
+  host.innerHTML=list.length?trRowsBodyHtml(list):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this project yet</div></div></td></tr>';
+}
+
+/* ---------- Export ---------- */
+// Builds a self-contained, print-ready HTML document (no dependency on nexus.css, since it opens
+// in its own blank tab) — the browser's own Print dialog ("Save as PDF") is the export mechanism.
+function trExportHtml(rows,heading){
+  const now=new Date();
+  const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const cards=rows.map(function(r){
+    const qb=r.qualification==='Qualified';
+    const badge=r.qualification?('<span class="badge" style="background:'+(qb?'#dcfce7':'#fee2e2')+';color:'+(qb?'#166534':'#991b1b')+'">'+esc(r.qualification)+'</span>'):'';
+    const langs=(r.languages&&r.languages.length)?r.languages.map(trLangName).join(', '):'—';
+    const reasonHtml=r.reason?('<div class="sec"><div class="sec-h">Qualification reason</div><div class="pre">'+esc(r.reason)+'</div></div>'):'';
+    const summaryHtml=r.summary?('<div class="sec"><div class="sec-h">Summary</div><div class="pre">'+esc(r.summary)+'</div></div>'):'';
+    const c=r.criteria||{};
+    const critItems=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+    const critHtml='<div class="sec"><div class="sec-h">Qualification checklist</div><ul class="crit">'+critItems.map(function(it){const ok=c[it[0]]===true;return '<li style="color:'+(ok?'#166534':'#991b1b')+'">'+(ok?'&#10003;':'&#10007;')+' '+esc(it[1])+'</li>';}).join('')+'</ul></div>';
+    const transcript=r.transcript_en||r.transcript||'';
+    const transcriptHtml=transcript?('<div class="sec"><div class="sec-h">Transcript (English)</div><div class="pre transcript">'+esc(transcript)+'</div></div>'):'';
+    return '<div class="call">'
+      +'<div class="call-h"><div><div class="fn">'+esc(r.file_name||'Recording')+'</div>'
+      +(r.customer_name?'<div class="cn">'+esc(r.customer_name)+'</div>':'')+'</div>'+badge+'</div>'
+      +'<div class="meta">Project: <b>'+esc(r.project&&r.project!=='Unclear'?r.project:'Unclear')+'</b> &nbsp;&middot;&nbsp; Duration: '+esc(trFmtDur(r.duration_seconds))+' &nbsp;&middot;&nbsp; Languages: '+esc(langs)+' &nbsp;&middot;&nbsp; Uploaded: '+esc(fmtDate(r.created_at))+'</div>'
+      +reasonHtml+summaryHtml+critHtml+transcriptHtml
+      +'</div>';
+  }).join('');
+  return '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(heading)+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:32px;background:#fff}'
+    +'.top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0d9488;padding-bottom:14px;margin-bottom:22px}'
+    +'.top h1{margin:0;font-size:20px;color:#0d9488}'
+    +'.top .sub{font-size:12px;color:#64748b;margin-top:4px}'
+    +'.call{border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;margin-bottom:20px;page-break-inside:avoid}'
+    +'.call-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}'
+    +'.fn{font-weight:700;font-size:15px}'
+    +'.cn{font-size:12.5px;color:#64748b;margin-top:2px}'
+    +'.badge{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}'
+    +'.meta{font-size:12px;color:#475569;margin:8px 0 12px}'
+    +'.sec{margin-top:12px}'
+    +'.sec-h{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#0d9488;margin-bottom:5px}'
+    +'.pre{font-size:13px;line-height:1.6;white-space:pre-wrap}'
+    +'ul.crit{margin:0;padding:0;list-style:none;font-size:13px;line-height:1.8}'
+    +'@media print{.call{page-break-after:always}.call:last-child{page-break-after:auto}}'
+    +'</style></head><body>'
+    +'<div class="top"><div><h1>Jain Group — Pre-Sales Call Transcriptions</h1><div class="sub">'+esc(heading)+'</div></div><div class="sub">Exported '+esc(dateStr)+' &middot; '+rows.length+' call'+(rows.length===1?'':'s')+'</div></div>'
+    +cards
+    +'<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},300);});<\/script>'
+    +'</body></html>';
+}
+function trOpenExport(rows,heading){
+  const doneRows=(rows||[]).filter(function(r){return r.status==='done';});
+  if(!doneRows.length){toast('No finished calls to export','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow pop-ups to export','err');return;}
+  w.document.open();w.document.write(trExportHtml(doneRows,heading));w.document.close();
+}
+window.trExport=function(){
+  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='processing'?'Processing calls':'All calls'));
+  trOpenExport(trApplyFilter(TR_ROWS||[]),label);
+};
+window.trExportOne=function(id){
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  if(!r){toast('Call not found','err');return;}
+  trOpenExport([r],r.file_name||'Call export');
+};
+window.trExportDetail=function(){
+  if(!TR_DETAIL_ROW){toast('Nothing to export','err');return;}
+  trOpenExport([TR_DETAIL_ROW],TR_DETAIL_ROW.file_name||'Call export');
+};
+window.trExportProject=function(name){
+  trOpenExport(trProjectRows(TR_ROWS||[],name),name);
+};
 
 async function trPollOnce(id){
   const {data:{session}}=await sb.auth.getSession();
@@ -8868,7 +9014,7 @@ window.trDelete=async function(id){
   if(!ok)return;
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
   TR_ROWS=(TR_ROWS||[]).filter(function(x){return x.id!==id;});
-  trRenderList();
+  trRenderList();trRenderProjectRows();
   try{await sb.schema('acc').from('transcriptions').delete().eq('id',id);}catch(e){}
   if(r&&r.s3_path)try{s3Delete(r.s3_path);}catch(e){}
   toast('Recording deleted','ok');
@@ -8877,7 +9023,7 @@ window.trDelete=async function(id){
 // Re-run analysis on a failed row using the recording already in S3 — no re-upload needed.
 window.trRetry=async function(id){
   const i=(TR_ROWS||[]).findIndex(function(x){return x.id===id;});
-  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList(); }
+  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList();trRenderProjectRows(); }
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
   try{
@@ -8888,7 +9034,7 @@ window.trRetry=async function(id){
     toast('Retrying…','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
-    if(i>=0){ TR_ROWS[i].status='error'; trRenderList(); }
+    if(i>=0){ TR_ROWS[i].status='error'; trRenderList();trRenderProjectRows(); }
   }
 };
 
@@ -8993,7 +9139,7 @@ async function trDetail(v,id){
   const qb=r.qualification==='Qualified';
   const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
-  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+(r.status==='done'?'<button class="btn" onclick="trExportDetail()"><i class="fa-solid fa-file-export"></i> Export</button>':'')+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
     +banner
     +mKpis([
