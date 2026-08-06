@@ -8317,13 +8317,14 @@ VIEWS.mail=function(v,seg){
    & analysed by Gladia (Hindi / English / Bengali, code-switching aware) via
    the `transcription-analyze` edge function. Results land in acc.transcriptions. */
 const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',te:'Telugu',mr:'Marathi',gu:'Gujarati',pa:'Punjabi'};
-// Fixed folder set — mirrors the project list the qualification prompt (transcription-analyze
-// edge function) matches calls against, so a call's r.project always lands in one of these.
-const TR_PROJECTS=['Dream Gurukul','Dream World City','Dream Valley','Dream Eco City','Dream Exotica'];
 const TR_TIMERS={};
 let TR_ROWS=null;
+let TR_DELETED_ROWS=null; // soft-deleted calls, shown on their own "Deleted" tab
 let TR_FILTER='all'; // 'all'|'qualified'|'notqualified'|'processing' — driven by the KPI cards
-let TR_PROJECT=null; // project folder currently drilled into on the "By Project" tab
+let TR_FOLDER=null; // folder currently drilled into on the "Folders" tab
+let TR_SELECTED=new Set(); // ids checked in the All Calls log, for folder assignment
+let TR_DATE_FROM=null, TR_DATE_TO=null; // 'YYYY-MM-DD' — applies to the log everywhere (All Calls + inside folders)
+let TR_ADD_TARGET=null; // folder name we navigated here to add calls to, via "Add calls" inside that folder
 function trLangName(c){return TR_LANG_NAMES[c]||(c?String(c).toUpperCase():'—');}
 function trLangTags(langs){if(!langs||!langs.length)return '<span style="color:var(--slate)">—</span>';return langs.map(function(c){return '<span class="tag t-blue" style="margin-right:4px">'+esc(trLangName(c))+'</span>';}).join('');}
 function trFmtDur(s){s=Number(s||0);if(!s)return '—';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=Math.floor(s%60);const p=function(n){return (n<10?'0':'')+n;};return (h?h+':':'')+p(m)+':'+p(ss);}
@@ -8347,9 +8348,74 @@ function trQualTag(r){
 
 async function trFetch(force){
   if(TR_ROWS&&!force)return TR_ROWS;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').order('created_at',{ascending:false}).limit(200);TR_ROWS=data||[];}catch(e){TR_ROWS=[];}
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').is('deleted_at',null).order('created_at',{ascending:false}).limit(200);TR_ROWS=data||[];}catch(e){TR_ROWS=[];}
   return TR_ROWS;
 }
+async function trFetchDeleted(force){
+  if(TR_DELETED_ROWS&&!force)return TR_DELETED_ROWS;
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').not('deleted_at','is',null).order('deleted_at',{ascending:false}).limit(200);TR_DELETED_ROWS=data||[];}catch(e){TR_DELETED_ROWS=[];}
+  return TR_DELETED_ROWS;
+}
+// Date-range filter — applies to every call-log listing (All Calls + inside any folder).
+function trInDateRange(r){
+  if(!TR_DATE_FROM&&!TR_DATE_TO)return true;
+  if(!r.created_at)return false;
+  const d=new Date(r.created_at);
+  const dOnly=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  if(TR_DATE_FROM&&dOnly<TR_DATE_FROM)return false;
+  if(TR_DATE_TO&&dOnly>TR_DATE_TO)return false;
+  return true;
+}
+function trDateFilterRows(rows){return (rows||[]).filter(trInDateRange);}
+function trDateLabelText(){
+  if(!TR_DATE_FROM&&!TR_DATE_TO)return 'All time';
+  if(TR_DATE_FROM&&TR_DATE_TO)return fmtDate(TR_DATE_FROM)+' – '+fmtDate(TR_DATE_TO);
+  if(TR_DATE_FROM)return 'From '+fmtDate(TR_DATE_FROM);
+  return 'Until '+fmtDate(TR_DATE_TO);
+}
+// A proper dropdown (same .dropdown component the profile/notification menus use in the
+// topbar) instead of two bare date inputs sitting loose in the toolbar.
+function trDateRangeHtml(){
+  const active=!!(TR_DATE_FROM||TR_DATE_TO);
+  return '<div style="position:relative;display:inline-block">'
+    +'<button class="btn btn-sm'+(active?' btn-primary':'')+'" id="trDateBtn" onclick="event.stopPropagation();trToggleDateDd()"><i class="fa-solid fa-calendar-days"></i> <span id="trDateBtnLabel">'+esc(trDateLabelText())+'</span> <i class="fa-solid fa-chevron-down" style="font-size:9px;margin-left:2px"></i></button>'
+    +'<div class="dropdown" id="trDateDd" style="top:38px;left:0;right:auto;width:250px;padding:14px" onclick="event.stopPropagation()">'
+      +'<label style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px">From</label>'
+      +'<input type="date" id="trDateFrom" value="'+esc(TR_DATE_FROM||'')+'" style="width:100%;margin:4px 0 10px;box-sizing:border-box">'
+      +'<label style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px">To</label>'
+      +'<input type="date" id="trDateTo" value="'+esc(TR_DATE_TO||'')+'" style="width:100%;margin:4px 0 12px;box-sizing:border-box">'
+      +'<div style="display:flex;justify-content:flex-end;gap:8px">'
+        +'<button class="btn btn-sm" onclick="trClearDateRange()">Clear</button>'
+        +'<button class="btn btn-sm btn-primary" onclick="trApplyDateRange()">Apply</button>'
+      +'</div>'
+    +'</div>'
+  +'</div>';
+}
+window.trToggleDateDd=function(){
+  const dd=$('trDateDd');if(!dd)return;
+  dd.classList.toggle('show');
+  if(!window._trDateDocWired){
+    window._trDateDocWired=true;
+    document.addEventListener('click',function(){const d=$('trDateDd');if(d)d.classList.remove('show');});
+  }
+};
+function trRenderDateBtn(){
+  const btn=$('trDateBtn'),lbl=$('trDateBtnLabel');if(!btn||!lbl)return;
+  btn.className='btn btn-sm'+((TR_DATE_FROM||TR_DATE_TO)?' btn-primary':'');
+  lbl.textContent=trDateLabelText();
+}
+window.trApplyDateRange=function(){
+  TR_DATE_FROM=($('trDateFrom')&&$('trDateFrom').value)||null;
+  TR_DATE_TO=($('trDateTo')&&$('trDateTo').value)||null;
+  const dd=$('trDateDd');if(dd)dd.classList.remove('show');
+  trRenderDateBtn();trRenderList();trRenderFolderRows();
+};
+window.trClearDateRange=function(){
+  TR_DATE_FROM=null;TR_DATE_TO=null;
+  const f=$('trDateFrom'),t=$('trDateTo');if(f)f.value='';if(t)t.value='';
+  const dd=$('trDateDd');if(dd)dd.classList.remove('show');
+  trRenderDateBtn();trRenderList();trRenderFolderRows();
+};
 
 /* ==========================================================================================
    ORGANIC — Posts & Reels  (mirrors Business Suite > Content, for our own Pages + Instagram)
@@ -8804,36 +8870,72 @@ VIEWS.organic=async function(v,seg){
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
-  const tabs=['All Calls','By Project'];
+  const tabs=['All Calls','Folders','Deleted'];
   const ti=mTab(seg,tabs.length);
   const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
-  if(ti===1){
-    const rows=await trFetch(true);
-    const proj=seg[1]?decodeURIComponent(seg[1]):null;
-    TR_PROJECT=proj;
+  if(ti===2){
+    const rows=await trFetchDeleted(true);
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
-      +(proj?trProjectCallsHtml(rows,proj):trFolderGridHtml(rows));
+      +'<div class="toolbar" style="margin:16px 0"><div class="grow"></div><button class="btn btn-sm" onclick="trShowHistory()"><i class="fa-solid fa-clock-rotate-left"></i> Full history</button>'
+      +(rows.length?'<button class="btn btn-sm btn-primary" onclick="trRestoreAll()"><i class="fa-solid fa-rotate-left"></i> Restore all</button>':'')+'</div>'
+      +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Deleted by</th><th>Deleted at</th><th></th></tr></thead>'
+      +'<tbody id="trDeletedRows">'+trDeletedTableBody()+'</tbody></table></div></div>';
     return;
   }
-  TR_PROJECT=null;
-  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+  if(ti===1){
+    const rows=await trFetch(true);
+    const folder=seg[1]?decodeURIComponent(seg[1]):null;
+    TR_FOLDER=folder;
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +'<div id="trFolderArea">'+(folder?trFolderCallsHtml(rows,folder):trFolderGridHtml(rows))+'</div>';
+    return;
+  }
+  TR_FOLDER=null;
+  TR_SELECTED=new Set();
+  const addTargetBanner=TR_ADD_TARGET?('<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><i class="fa-solid fa-folder-plus" style="color:#1d4ed8"></i><div style="flex:1;font-size:13.5px">Tick calls below to add them to <b>'+esc(TR_ADD_TARGET)+'</b></div><button class="btn btn-sm" onclick="trCancelAddTarget()">Cancel</button><button class="btn btn-sm btn-primary" onclick="trDoneAddTarget()">Done, back to folder</button></div>'):'';
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)+addTargetBanner
     +'<div id="trKpis"></div>'
-    +'<div class="toolbar" style="margin:16px 0 0"><div class="grow"></div><button class="btn" onclick="trExport()"><i class="fa-solid fa-file-export"></i> Export</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="7"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div id="trSelBar"></div>'
+    +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn" onclick="trDownloadList()"><i class="fa-solid fa-download"></i> Download</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
+    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="8"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
 };
 
 function trRenderList(){
-  const rows=TR_ROWS||[];
+  const all=TR_ROWS||[];
+  let rows=trDateFilterRows(all);
+  // In "add calls to folder X" mode, calls already in X have nothing to add — hide them so
+  // only genuine candidates show up.
+  if(TR_ADD_TARGET)rows=rows.filter(function(r){return r.folder!==TR_ADD_TARGET;});
   const kh=$('trKpis');
   if(kh)kh.innerHTML=trKpisHtml(rows);
+  trRenderSelBar();
   const host=$('trRows');if(!host)return;
-  if(!rows.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  if(!all.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  if(TR_ADD_TARGET&&!rows.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>Every call is already in "'+esc(TR_ADD_TARGET)+'"</div><button class="btn btn-sm" style="margin-top:12px" onclick="trDoneAddTarget()">Done, back to folder</button></div></td></tr>';return;}
   const filtered=trApplyFilter(rows);
-  if(!filtered.length){host.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button></div></td></tr>';return;}
-  host.innerHTML=trRowsBodyHtml(filtered);
+  if(!filtered.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter'+((TR_DATE_FROM||TR_DATE_TO)?' / date range':'')+'</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button> <button class="btn btn-sm" style="margin-top:12px" onclick="trClearDateRange()">Clear dates</button></div></td></tr>';return;}
+  host.innerHTML=trRowsBodyHtml(trSortPinned(filtered),'list');
+}
+// Pinned calls float to the top, ordered by pin_rank (drag-and-drop sets this — see
+// trPinReorderDrop); unpinned calls just keep whatever order they arrived in (stable sort).
+function trSortPinned(rows){
+  return (rows||[]).map(function(r,i){return {r:r,i:i};}).sort(function(a,b){
+    const pa=a.r.pinned?1:0,pb=b.r.pinned?1:0;
+    if(pa!==pb)return pb-pa;
+    if(pa&&pb){
+      const ra=(typeof a.r.pin_rank==='number')?a.r.pin_rank:a.i;
+      const rb=(typeof b.r.pin_rank==='number')?b.r.pin_rank:b.i;
+      if(ra!==rb)return ra-rb;
+    }
+    return a.i-b.i;
+  }).map(function(x){return x.r;});
+}
+function trNextPinRank(){
+  const ranks=(TR_ROWS||[]).filter(function(r){return r.pinned&&typeof r.pin_rank==='number';}).map(function(r){return r.pin_rank;});
+  return ranks.length?Math.max.apply(null,ranks)+1:0;
 }
 // KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
 function trApplyFilter(rows){
@@ -8856,74 +8958,246 @@ function trKpisHtml(rows){
       +'<div style="font-size:12px;color:'+c[4]+';margin-top:3px">'+esc(c[3])+'</div></div>';
   }).join('')+'</div>';
 }
-// Shared row template — used by the flat list (tab 0) and the per-project drill-in (tab 1).
-function trRowHtml(r){
+
+/* ---------- Selection (All Calls log) → manual folders ---------- */
+function trRenderSelBar(){
+  const host=$('trSelBar');if(!host)return;
+  const n=TR_SELECTED.size;
+  if(!n){host.innerHTML='';return;}
+  host.innerHTML='<div class="toolbar" style="margin:10px 0 0;background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:10px 14px;position:sticky;top:78px;z-index:20;box-shadow:0 2px 8px rgba(16,24,40,.08)">'
+    +'<div style="font-size:13px;font-weight:600;color:#0d9488">'+n+' call'+(n===1?'':'s')+' selected</div><div class="grow"></div>'
+    +'<button class="btn btn-sm" onclick="trClearSelection()">Clear</button>'
+    +'<button class="btn btn-sm" onclick="trPinSelected(true)"><i class="fa-solid fa-thumbtack"></i> Pin</button>'
+    +'<button class="btn btn-sm" onclick="trPinSelected(false)"><i class="fa-solid fa-thumbtack" style="transform:rotate(45deg);display:inline-block"></i> Unpin</button>'
+    +(TR_ADD_TARGET
+      ?'<button class="btn btn-sm btn-primary" onclick="trAddSelectedToTarget()"><i class="fa-solid fa-folder-plus"></i> Add to "'+esc(TR_ADD_TARGET)+'"</button>'
+      :'<button class="btn btn-sm btn-primary" onclick="trFolderAssignModal()"><i class="fa-solid fa-folder-plus"></i> Add to folder</button>')
+    +'</div>';
+}
+window.trToggleSelect=function(id,checked){ if(checked)TR_SELECTED.add(id); else TR_SELECTED.delete(id); trRenderSelBar(); };
+window.trClearSelection=function(){ TR_SELECTED=new Set(); trRenderSelBar(); trRenderList(); };
+window.trPinSelected=async function(pin){
+  if(!TR_SELECTED.size){toast('Select at least one call first','err');return;}
+  const ids=Array.from(TR_SELECTED);
+  let base=trNextPinRank();
+  (TR_ROWS||[]).forEach(function(r){if(ids.indexOf(r.id)>=0){r.pinned=pin;r.pin_rank=pin?base++:null;}});
+  trRenderList();trRenderFolderRows();
+  toast(pin?'Pinned':'Unpinned','ok');
+  try{await Promise.all(ids.map(function(id){const r=(TR_ROWS||[]).find(function(x){return x.id===id;});return sb.schema('acc').from('transcriptions').update({pinned:pin,pin_rank:r?r.pin_rank:null}).eq('id',id);}));}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
+};
+window.trTogglePin=async function(id,pin){
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  if(r){r.pinned=pin;r.pin_rank=pin?trNextPinRank():null;}
+  trRenderList();trRenderFolderRows();
+  try{await sb.schema('acc').from('transcriptions').update({pinned:pin,pin_rank:r?r.pin_rank:null}).eq('id',id);}catch(e){}
+};
+// Reorder pinned calls by drag-and-drop — mirrors the existing checklist drag pattern
+// (clReorderDrop) but persists order as a pin_rank float on the transcription itself.
+window.trPinReorderDrop=async function(e,row){
+  e.preventDefault();
+  const above=row.classList.contains('drop-above');
+  row.classList.remove('drop-above','drop-below');
+  const draggedId=parseInt(e.dataTransfer.getData('text/plain'),10);
+  const targetId=parseInt(row.dataset.id,10);
+  if(!draggedId||draggedId===targetId)return;
+  const pinnedOrder=trSortPinned((TR_ROWS||[]).filter(function(r){return r.pinned;})).map(function(r){return r.id;});
+  let order=pinnedOrder.filter(function(id){return id!==draggedId;});
+  let idx=order.indexOf(targetId);
+  if(idx===-1)idx=order.length;
+  order.splice(above?idx:idx+1,0,draggedId);
+  order.forEach(function(id,i){const r=(TR_ROWS||[]).find(function(x){return x.id===id;});if(r)r.pin_rank=i;});
+  trRenderList();trRenderFolderRows();
+  try{await Promise.all(order.map(function(id,i){return sb.schema('acc').from('transcriptions').update({pin_rank:i}).eq('id',id);}));}catch(e2){toast('Saved locally, but failed to sync: '+((e2&&e2.message)||e2),'err');}
+};
+window.trFolderAssignModal=function(){
+  if(!TR_SELECTED.size){toast('Select at least one call first','err');return;}
+  const existing=trFolderNames(TR_ROWS||[]);
+  window._trFolderChips=existing;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-folder-plus"></i> Add to folder</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+    +(existing.length?('<label>Existing folders</label><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">'+existing.map(function(n,i){return '<button type="button" class="btn btn-sm" onclick="trAssignToFolder(null,'+i+')"><i class="fa-solid fa-folder"></i> '+esc(n)+'</button>';}).join('')+'</div>'):'')
+    +'<label>New folder name</label><input id="trFolderName" placeholder="e.g. Hot leads — Dream Valley">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="trAssignToFolder()"><i class="fa-solid fa-check"></i> Create &amp; add</button></div>','md');
+};
+window.trAssignToFolder=async function(typedName,chipIndex){
+  const name=(chipIndex!=null&&window._trFolderChips)?window._trFolderChips[chipIndex]:(typedName||($('trFolderName')?$('trFolderName').value.trim():''));
+  if(!name){toast('Enter a folder name','err');return;}
+  const ids=Array.from(TR_SELECTED);
+  if(!ids.length){toast('Select at least one call first','err');return;}
+  (TR_ROWS||[]).forEach(function(r){if(ids.indexOf(r.id)>=0)r.folder=name;});
+  closeModal();
+  TR_SELECTED=new Set();
+  trRenderSelBar();trRenderList();
+  toast('Added to "'+name+'"','ok');
+  try{await sb.schema('acc').from('transcriptions').update({folder:name}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
+};
+
+// Shared row template — used by the flat log (mode 'list', with a select checkbox) and the
+// per-folder drill-in (mode 'folder', with a remove-from-folder action instead).
+function trRowHtml(r,mode){
+  mode=mode||'list';
   const fname=r.file_name||'Recording';
-  const clickable=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+  const cursorAttr=r.pinned?' style="cursor:grab"':((r.status==='done')?' style="cursor:pointer"':'');
+  const openAttrs=cursorAttr+((r.status==='done')?' onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'');
+  // Pinned rows are draggable, reusing the same drag mechanics as the checklist reorder
+  // (taskDragOver) elsewhere in this file — persisted via pin_rank in trPinReorderDrop.
+  const dragAttrs=r.pinned?(' draggable="true" data-id="'+r.id+'" ondragstart="event.dataTransfer.setData(\'text/plain\',\''+r.id+'\');this.classList.add(\'dragging\')" ondragend="this.classList.remove(\'dragging\')" ondragover="event.preventDefault();taskDragOver(event,this)" ondragleave="this.classList.remove(\'drop-above\',\'drop-below\')" ondrop="trPinReorderDrop(event,this)"'):'';
+  const rowClass=r.pinned?' class="pin-drag"':'';
   // Main line = the recording's file name (truncated with … if too long, full name on hover);
   // below it = the detected customer name, when the call identified one.
   const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
-  return '<tr'+clickable+'>'
-    +'<td><div style="display:flex;align-items:center;gap:9px"><i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px"></i><div style="min-width:0"><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
+  const checkTd=mode==='list'?('<td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox"'+(TR_SELECTED.has(r.id)?' checked':'')+' onchange="trToggleSelect('+r.id+',this.checked)"></td>'):'';
+  // Pinned rows are draggable from anywhere on the row (no separate grip icon needed — that
+  // used to widen this cell just for pinned rows and forced the table into horizontal scroll).
+  const pinIcon=r.pinned?('<i class="fa-solid fa-thumbtack" style="color:#d97706;font-size:12px;cursor:pointer;flex-shrink:0" title="Drag row to reorder · click to unpin" onclick="event.stopPropagation();trTogglePin('+r.id+',false)"></i>'):'';
+  return '<tr'+rowClass+openAttrs+dragAttrs+'>'
+    +checkTd
+    +'<td><div style="display:flex;align-items:center;gap:8px;max-width:280px">'+pinIcon+'<i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px;flex-shrink:0"></i><div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
     +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
     +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
     +'<td>'+trLangTags(r.languages)+'</td>'
     +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
     +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
     +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
-      +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Export this call" onclick="trExportOne('+r.id+')"><i class="fa-solid fa-file-export"></i></button> ':'')
+      +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Download report" onclick="trDownloadReport('+r.id+')"><i class="fa-solid fa-download"></i></button> ':'')
+      +(mode==='folder'?'<button class="btn btn-sm btn-ghost" title="Remove from folder" onclick="trRemoveFromFolder('+r.id+')"><i class="fa-solid fa-xmark"></i></button> ':'')
       +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
       +'<button class="btn btn-sm btn-ghost" title="Delete" onclick="trDelete('+r.id+')"><i class="fa-solid fa-trash"></i></button>'
     +'</td></tr>';
 }
-function trRowsBodyHtml(rows){return rows.map(trRowHtml).join('');}
+function trRowsBodyHtml(rows,mode){return rows.map(function(r){return trRowHtml(r,mode);}).join('');}
 
-/* ---------- By-project folders ---------- */
-function trFolderCardHtml(name,list){
-  const isMisc=(name==='Unassigned');
+/* ---------- Folders (user-created only, from checkbox selection above) ---------- */
+function trFolderNames(rows){
+  const set=new Set();(rows||[]).forEach(function(r){if(r.folder)set.add(r.folder);});
+  return Array.from(set).sort(function(a,b){return a.localeCompare(b);});
+}
+function trFolderRows(rows,name){return (rows||[]).filter(function(r){return r.folder===name&&trInDateRange(r);});}
+// idx indexes into window._trFolderList (set by trFolderGridHtml) — cards pass it so rename/delete
+// never has to embed the folder name itself as a JS string literal (quote-escaping headaches).
+function trFolderCardHtml(name,list,idx){
   const qual=list.filter(function(r){return r.qualification==='Qualified';}).length;
-  return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/1/'+encodeURIComponent(name)+'\')">'
-    +'<div style="display:flex;align-items:center;gap:12px">'
-    +'<i class="fa-solid '+(isMisc?'fa-folder-open':'fa-folder')+'" style="font-size:26px;color:'+(isMisc?'#94a3b8':'#0d9488')+'"></i>'
+  return '<div class="card card-pad" style="position:relative;cursor:pointer" onclick="navTo(\'transcription/1/'+encodeURIComponent(name)+'\')">'
+    +'<div style="position:absolute;top:8px;right:8px;display:flex;gap:2px" onclick="event.stopPropagation()">'
+      +'<button class="btn btn-sm btn-ghost" title="Rename folder" onclick="trFolderRenameModal('+idx+')"><i class="fa-solid fa-pen" style="font-size:11px"></i></button>'
+      +'<button class="btn btn-sm btn-ghost" title="Delete folder" onclick="trFolderDeleteConfirm('+idx+')"><i class="fa-solid fa-trash" style="font-size:11px"></i></button>'
+    +'</div>'
+    +'<div style="display:flex;align-items:center;gap:12px;padding-right:50px">'
+    +'<i class="fa-solid fa-folder" style="font-size:26px;color:#0d9488"></i>'
     +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(name)+'</div>'
     +'<div style="font-size:12px;color:var(--slate);margin-top:2px">'+list.length+' call'+(list.length===1?'':'s')+(list.length?(' · '+qual+' qualified'):'')+'</div></div>'
     +'</div></div>';
 }
-function trProjectRows(rows,name){
-  return (rows||[]).filter(function(r){
-    if(name==='Unassigned')return !(r.project&&TR_PROJECTS.indexOf(r.project)>=0);
-    return r.project===name;
-  });
-}
 function trFolderGridHtml(rows){
-  const groups={};TR_PROJECTS.forEach(function(p){groups[p]=[];});
-  const misc=[];
-  (rows||[]).forEach(function(r){
-    if(r.project&&TR_PROJECTS.indexOf(r.project)>=0)groups[r.project].push(r);
-    else misc.push(r);
-  });
-  const cards=TR_PROJECTS.map(function(p){return trFolderCardHtml(p,groups[p]);}).concat([trFolderCardHtml('Unassigned',misc)]);
+  const names=trFolderNames(rows);
+  window._trFolderList=names;
+  if(!names.length){
+    return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-folder-open"></i><div>No folders yet</div><div style="font-size:12.5px;color:var(--slate);margin-top:6px">Go to <b>All Calls</b>, tick the calls you want grouped together, then use "Add to folder".</div></div>';
+  }
+  const cards=names.map(function(n,i){return trFolderCardHtml(n,trFolderRows(rows,n),i);});
   return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:16px">'+cards.join('')+'</div>';
 }
-function trProjectCallsHtml(rows,name){
-  const list=trProjectRows(rows,name);
-  return '<div class="toolbar" style="margin:16px 0"><button class="btn btn-sm" onclick="navTo(\'transcription/1\')"><i class="fa-solid fa-arrow-left"></i> All projects</button><div class="grow"></div>'
-    +(list.length?'<button class="btn btn-sm" onclick="trExportProject(\''+esc(name).replace(/'/g,"\\'")+'\')"><i class="fa-solid fa-file-export"></i> Export</button>':'')+'</div>'
-    +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid '+(name==='Unassigned'?'fa-folder-open':'fa-folder')+'" style="color:'+(name==='Unassigned'?'#94a3b8':'#0d9488')+'"></i> '+esc(name)+'</h1></div>'
-    +'<div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
-    +'<tbody id="trProjRows">'+(list.length?trRowsBodyHtml(list):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this project yet</div></div></td></tr>')+'</tbody></table></div></div>';
+function trFolderCallsHtml(rows,name){
+  const list=trFolderRows(rows,name);
+  return '<div class="toolbar" style="margin:16px 0;flex-wrap:wrap;gap:10px"><button class="btn btn-sm" onclick="navTo(\'transcription/1\')"><i class="fa-solid fa-arrow-left"></i> All folders</button>'+trDateRangeHtml()+'<div class="grow"></div>'
+    +'<button class="btn btn-sm" onclick="trGoAddCalls()"><i class="fa-solid fa-plus"></i> Add calls</button>'
+    +'<button class="btn btn-sm" onclick="trFolderRenameModal()"><i class="fa-solid fa-pen"></i> Rename</button>'
+    +'<button class="btn btn-sm" onclick="trFolderDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete folder</button>'
+    +(list.length?'<button class="btn btn-sm" onclick="trDownloadFolder()"><i class="fa-solid fa-download"></i> Download</button>':'')+'</div>'
+    +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid fa-folder" style="color:#0d9488"></i> '+esc(name)+'</h1></div>'
+    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
+    +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
-// Keeps the project drill-in list (if open) in sync after an optimistic delete/retry — a no-op
-// when that view isn't currently on screen, same guard pattern as trRenderList's #trRows check.
-function trRenderProjectRows(){
-  const host=$('trProjRows');if(!host||!TR_PROJECT)return;
-  const list=trProjectRows(TR_ROWS||[],TR_PROJECT);
-  host.innerHTML=list.length?trRowsBodyHtml(list):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this project yet</div></div></td></tr>';
+// Keeps the folder drill-in list (if open) in sync after an optimistic delete/retry/remove — a
+// no-op when that view isn't currently on screen, same guard pattern as trRenderList's #trRows check.
+function trRenderFolderRows(){
+  const host=$('trFolderRowsBody');if(!host||!TR_FOLDER)return;
+  const list=trFolderRows(TR_ROWS||[],TR_FOLDER);
+  host.innerHTML=list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>';
 }
+// "Add calls" takes you to the All Calls log (tab 0) in a targeted mode: a banner up top
+// says which folder you're adding to, and the selection bar's action adds straight into it —
+// no need to re-pick the folder once you get there. See trAddSelectedToTarget / the banner
+// in VIEWS.transcription's All Calls branch.
+window.trGoAddCalls=function(){
+  TR_ADD_TARGET=TR_FOLDER;
+  navTo('transcription');
+};
+window.trCancelAddTarget=function(){ TR_ADD_TARGET=null; renderPage(); };
+window.trDoneAddTarget=function(){
+  const f=TR_ADD_TARGET; TR_ADD_TARGET=null;
+  if(f) navTo('transcription/1/'+encodeURIComponent(f)); else navTo('transcription/1');
+};
+window.trAddSelectedToTarget=async function(){
+  if(!TR_ADD_TARGET)return;
+  const ids=Array.from(TR_SELECTED);
+  if(!ids.length){toast('Select at least one call first','err');return;}
+  const name=TR_ADD_TARGET;
+  (TR_ROWS||[]).forEach(function(r){if(ids.indexOf(r.id)>=0)r.folder=name;});
+  TR_SELECTED=new Set();
+  trRenderSelBar();trRenderList();
+  toast('Added to "'+name+'"','ok');
+  // Wait for the write to land before navigating — the folder page immediately below refetches
+  // from the DB, so jumping there too early could show the list without what was just added.
+  try{await sb.schema('acc').from('transcriptions').update({folder:name}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
+  TR_ADD_TARGET=null;
+  navTo('transcription/1/'+encodeURIComponent(name));
+};
+// Redraws whatever is currently on screen on the Folders tab (grid or a drill-in) from the
+// in-memory TR_ROWS — no refetch, so an in-flight DB write for the same rows can't be raced.
+function trRenderFolderArea(){
+  const host=$('trFolderArea');if(!host)return;
+  const rows=TR_ROWS||[];
+  host.innerHTML=TR_FOLDER?trFolderCallsHtml(rows,TR_FOLDER):trFolderGridHtml(rows);
+}
+window.trRemoveFromFolder=async function(id){
+  const ok=await confirmDialog('Remove this call from the folder? The call itself won\'t be deleted.');
+  if(!ok)return;
+  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  if(r)r.folder=null;
+  trRenderFolderRows();
+  try{await sb.schema('acc').from('transcriptions').update({folder:null}).eq('id',id);}catch(e){}
+  toast('Removed from folder','ok');
+};
+window.trFolderRenameModal=function(idx){
+  const name=(idx!=null&&window._trFolderList)?window._trFolderList[idx]:TR_FOLDER;
+  if(!name)return;
+  window._trFolderRenameTarget=name;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Rename folder</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm"><label>Folder name</label><input id="trFolderRenameInput" value="'+esc(name)+'"></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="trFolderRenameSave()"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+  setTimeout(function(){const i=$('trFolderRenameInput');if(i){i.focus();i.select();}},30);
+};
+window.trFolderRenameSave=async function(){
+  const oldName=window._trFolderRenameTarget;if(!oldName)return;
+  const inp=$('trFolderRenameInput');const newName=inp?inp.value.trim():'';
+  if(!newName){toast('Enter a folder name','err');return;}
+  closeModal();
+  if(newName===oldName)return;
+  const ids=(TR_ROWS||[]).filter(function(r){return r.folder===oldName;}).map(function(r){return r.id;});
+  (TR_ROWS||[]).forEach(function(r){if(r.folder===oldName)r.folder=newName;});
+  if(TR_FOLDER===oldName)TR_FOLDER=newName;
+  trRenderFolderArea();
+  toast('Folder renamed','ok');
+  if(ids.length)try{await sb.schema('acc').from('transcriptions').update({folder:newName}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
+};
+window.trFolderDeleteConfirm=async function(idx){
+  const name=(idx!=null&&window._trFolderList)?window._trFolderList[idx]:TR_FOLDER;
+  if(!name)return;
+  const ids=(TR_ROWS||[]).filter(function(r){return r.folder===name;}).map(function(r){return r.id;});
+  const ok=await confirmDialog('Delete the folder "'+name+'"? The '+ids.length+' call'+(ids.length===1?'':'s')+' inside stay — they just won\'t be in a folder anymore.');
+  if(!ok)return;
+  (TR_ROWS||[]).forEach(function(r){if(r.folder===name)r.folder=null;});
+  const wasViewing=(TR_FOLDER===name);
+  toast('Folder deleted','ok');
+  if(ids.length)try{await sb.schema('acc').from('transcriptions').update({folder:null}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
+  if(wasViewing){ navTo('transcription/1'); } else { trRenderFolderArea(); }
+};
 
-/* ---------- Export ---------- */
-// Builds a self-contained, print-ready HTML document (no dependency on nexus.css, since it opens
-// in its own blank tab) — the browser's own Print dialog ("Save as PDF") is the export mechanism.
+/* ---------- Download ---------- */
+// Builds a self-contained HTML report (letterhead-style, no dependency on nexus.css) and saves
+// it directly as a file — a real download, not a print-dialog flow.
 function trExportHtml(rows,heading){
   const now=new Date();
   const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
@@ -8962,33 +9236,38 @@ function trExportHtml(rows,heading){
     +'ul.crit{margin:0;padding:0;list-style:none;font-size:13px;line-height:1.8}'
     +'@media print{.call{page-break-after:always}.call:last-child{page-break-after:auto}}'
     +'</style></head><body>'
-    +'<div class="top"><div><h1>Jain Group — Pre-Sales Call Transcriptions</h1><div class="sub">'+esc(heading)+'</div></div><div class="sub">Exported '+esc(dateStr)+' &middot; '+rows.length+' call'+(rows.length===1?'':'s')+'</div></div>'
+    +'<div class="top"><div><h1>Jain Group — Pre-Sales Call Transcriptions</h1><div class="sub">'+esc(heading)+'</div></div><div class="sub">Downloaded '+esc(dateStr)+' &middot; '+rows.length+' call'+(rows.length===1?'':'s')+'</div></div>'
     +cards
-    +'<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},300);});<\/script>'
     +'</body></html>';
 }
-function trOpenExport(rows,heading){
-  const doneRows=(rows||[]).filter(function(r){return r.status==='done';});
-  if(!doneRows.length){toast('No finished calls to export','err');return;}
-  const w=window.open('','_blank');
-  if(!w){toast('Please allow pop-ups to export','err');return;}
-  w.document.open();w.document.write(trExportHtml(doneRows,heading));w.document.close();
+function trSafeFilename(s){return (String(s||'transcription').replace(/[^a-z0-9 _-]/gi,'').trim()||'transcription').slice(0,60);}
+function trTriggerDownload(html,filename){
+  const blob=new Blob([html],{type:'text/html'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
 }
-window.trExport=function(){
+function trDownloadRows(rows,heading){
+  const doneRows=(rows||[]).filter(function(r){return r.status==='done';});
+  if(!doneRows.length){toast('No finished calls to download','err');return;}
+  trTriggerDownload(trExportHtml(doneRows,heading),trSafeFilename(heading)+'.html');
+}
+window.trDownloadList=function(){
   const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='processing'?'Processing calls':'All calls'));
-  trOpenExport(trApplyFilter(TR_ROWS||[]),label);
+  trDownloadRows(trApplyFilter(TR_ROWS||[]),label);
 };
-window.trExportOne=function(id){
+window.trDownloadReport=function(id){
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
   if(!r){toast('Call not found','err');return;}
-  trOpenExport([r],r.file_name||'Call export');
+  trDownloadRows([r],r.file_name||'Call');
 };
-window.trExportDetail=function(){
-  if(!TR_DETAIL_ROW){toast('Nothing to export','err');return;}
-  trOpenExport([TR_DETAIL_ROW],TR_DETAIL_ROW.file_name||'Call export');
+window.trDownloadDetail=function(){
+  if(!TR_DETAIL_ROW){toast('Nothing to download','err');return;}
+  trDownloadRows([TR_DETAIL_ROW],TR_DETAIL_ROW.file_name||'Call');
 };
-window.trExportProject=function(name){
-  trOpenExport(trProjectRows(TR_ROWS||[],name),name);
+window.trDownloadFolder=function(){
+  if(!TR_FOLDER)return;
+  trDownloadRows(trFolderRows(TR_ROWS||[],TR_FOLDER),TR_FOLDER);
 };
 
 async function trPollOnce(id){
@@ -9009,21 +9288,93 @@ function trStartPolling(id){
   TR_TIMERS[id]=setTimeout(tick,3000);
 }
 
+// Permanent record of every delete/restore — independent of deleted_at, so the history survives
+// even after something is restored (deleted_at just says "currently deleted or not").
+function trLogActivity(id,fname,action){
+  try{sb.schema('acc').from('transcription_activity').insert({transcription_id:id,file_name:fname||null,actor:(state&&state.email)||null,action:action});}catch(e){}
+}
 window.trDelete=async function(id){
-  const ok=await confirmDialog('Delete this recording and its transcript? This cannot be undone.');
+  const ok=await confirmDialog('Delete this recording? It moves to the Deleted tab, where you can restore it any time — the recording file is kept.');
   if(!ok)return;
   const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
+  const now=new Date().toISOString(), who=(state&&state.email)||null;
   TR_ROWS=(TR_ROWS||[]).filter(function(x){return x.id!==id;});
-  trRenderList();trRenderProjectRows();
-  try{await sb.schema('acc').from('transcriptions').delete().eq('id',id);}catch(e){}
-  if(r&&r.s3_path)try{s3Delete(r.s3_path);}catch(e){}
+  TR_SELECTED.delete(id);
+  if(r){r.deleted_at=now;r.deleted_by=who;TR_DELETED_ROWS=[r].concat(TR_DELETED_ROWS||[]);}
+  trRenderList();trRenderFolderRows();
+  try{await sb.schema('acc').from('transcriptions').update({deleted_at:now,deleted_by:who}).eq('id',id);}catch(e){}
+  trLogActivity(id,r&&r.file_name,'deleted');
   toast('Recording deleted','ok');
+};
+function trDeletedRowHtml(r){
+  const fname=r.file_name||'Recording';
+  const openAttrs=(r.status==='done')?' style="cursor:pointer" onclick="navTo(\'transcription/view/'+r.id+'\')" title="Open this call"':'';
+  return '<tr'+openAttrs+'>'
+    +'<td><div style="font-weight:600;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+(r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'')+'</td>'
+    +'<td>'+trQualTag(r)+'</td>'
+    +'<td style="color:var(--slate);font-size:12.5px">'+esc((r.deleted_by||'—').split('@')[0])+'</td>'
+    +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.deleted_at)+'</td>'
+    +'<td onclick="event.stopPropagation()"><button class="btn btn-sm" onclick="trRestore('+r.id+')"><i class="fa-solid fa-rotate-left"></i> Restore</button></td>'
+  +'</tr>';
+}
+function trDeletedTableBody(){
+  return (TR_DELETED_ROWS||[]).length?TR_DELETED_ROWS.map(trDeletedRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-trash"></i><div>No deleted calls</div></div></td></tr>';
+}
+window.trRestore=async function(id){
+  const r=(TR_DELETED_ROWS||[]).find(function(x){return x.id===id;});
+  TR_DELETED_ROWS=(TR_DELETED_ROWS||[]).filter(function(x){return x.id!==id;});
+  const host=$('trDeletedRows');
+  if(host)host.innerHTML=trDeletedTableBody();
+  TR_ROWS=null; // so All Calls / Folders refetch and pick this call back up next time they're viewed
+  toast('Restored','ok');
+  try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).eq('id',id);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
+  trLogActivity(id,r&&r.file_name,'restored');
+};
+window.trRestoreAll=async function(){
+  const rows=TR_DELETED_ROWS||[];
+  if(!rows.length){toast('Nothing to restore','err');return;}
+  const ok=await confirmDialog('Restore all '+rows.length+' deleted call'+(rows.length===1?'':'s')+'? They\'ll reappear in All Calls / their original folders.');
+  if(!ok)return;
+  const ids=rows.map(function(r){return r.id;});
+  TR_DELETED_ROWS=[];
+  const host=$('trDeletedRows');
+  if(host)host.innerHTML=trDeletedTableBody();
+  TR_ROWS=null;
+  toast('Restored '+ids.length+' call'+(ids.length===1?'':'s'),'ok');
+  try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).in('id',ids);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
+  rows.forEach(function(r){trLogActivity(r.id,r.file_name,'restored');});
+};
+// Every delete/restore ever, regardless of current state — this is the durable record the
+// Deleted tab itself can't give you once something's been restored (its deleted_at is cleared).
+const TR_ACTIVITY_META={
+  deleted:{icon:'fa-trash',color:'#dc2626',label:'Deleted'},
+  restored:{icon:'fa-rotate-left',color:'#16a34a',label:'Restored'},
+  commented:{icon:'fa-comment',color:'#0d9488',label:'Remark added on'},
+  remark_deleted:{icon:'fa-comment-slash',color:'#94a3b8',label:'Remark removed from'}
+};
+window.trShowHistory=async function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> Activity history</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" id="trHistBody"><div class="loader"><div class="spin"></div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','lg');
+  let rows=[];
+  try{const {data}=await sb.schema('acc').from('transcription_activity').select('*').order('created_at',{ascending:false}).limit(300);rows=data||[];}catch(e){}
+  const body=$('trHistBody');if(!body)return;
+  if(!rows.length){body.innerHTML='<div class="empty" style="padding:34px"><i class="fa-solid fa-clock-rotate-left"></i><div>No history yet</div></div>';return;}
+  body.innerHTML='<div style="max-height:60vh;overflow:auto">'+rows.map(function(a){
+    const m=TR_ACTIVITY_META[a.action]||{icon:'fa-circle-info',color:'#64748b',label:a.action};
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line)">'
+      +'<i class="fa-solid '+m.icon+'" style="color:'+m.color+';width:16px"></i>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(a.file_name||('Call #'+a.transcription_id))+'</div>'
+      +'<div style="font-size:11.5px;color:var(--slate)">'+m.label+' by '+esc((a.actor||'—').split('@')[0])+'</div></div>'
+      +'<div style="font-size:11.5px;color:var(--slate);white-space:nowrap">'+fmtDate(a.created_at)+'</div>'
+    +'</div>';
+  }).join('')+'</div>';
 };
 
 // Re-run analysis on a failed row using the recording already in S3 — no re-upload needed.
 window.trRetry=async function(id){
   const i=(TR_ROWS||[]).findIndex(function(x){return x.id===id;});
-  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList();trRenderProjectRows(); }
+  if(i>=0){ TR_ROWS[i].status='processing'; TR_ROWS[i].error_text=null; trRenderList();trRenderFolderRows(); }
   const {data:{session}}=await sb.auth.getSession();
   const token=session&&session.access_token;
   try{
@@ -9034,7 +9385,7 @@ window.trRetry=async function(id){
     toast('Retrying…','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
-    if(i>=0){ TR_ROWS[i].status='error'; trRenderList();trRenderProjectRows(); }
+    if(i>=0){ TR_ROWS[i].status='error'; trRenderList();trRenderFolderRows(); }
   }
 };
 
@@ -9138,8 +9489,10 @@ async function trDetail(v,id){
   const sub=(r.customer_name?esc(r.customer_name)+' · ':'')+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0]);
   const qb=r.qualification==='Qualified';
   const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
+  let comments=[];
+  try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
-  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+(r.status==='done'?'<button class="btn" onclick="trExportDetail()"><i class="fa-solid fa-file-export"></i> Export</button>':'')+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+(r.status==='done'?'<button class="btn" onclick="trDownloadDetail()"><i class="fa-solid fa-file-arrow-down"></i> Download report</button>':'')+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
     +banner
     +mKpis([
@@ -9152,13 +9505,42 @@ async function trDetail(v,id){
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Qualification checklist</div>'+trCriteriaHtml(r)+'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+trAnalysisHtml(r)+'</div></div>'
     +'</div>'
-    +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>';
+    +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>'
+    +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-comments" style="color:#0d9488"></i> Remarks</div>'
+      +'<div class="chat-wrap" id="trCmWrap">'+(comments.length?comments.map(trCmItem).join(''):'<div style="color:var(--slate);font-size:13px;text-align:center;padding:10px">No remarks yet — anyone on the team can add one.</div>')+'</div>'
+      +'<div style="display:flex;gap:8px;margin-top:12px"><input id="trCmNew" placeholder="Add a remark…" style="flex:1" onkeydown="if(event.key===\'Enter\')trCmAdd('+r.id+')"><button class="btn btn-primary" onclick="trCmAdd('+r.id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+    +'</div>';
   TR_DETAIL_ROW=r;
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
   if(r.s3_path){
     try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
   }
 }
+// Remarks — open to anyone who can reach this page (same access model as the rest of the
+// module); every add/delete is mirrored into transcription_activity for a durable record.
+function trCmItem(c){
+  const mine=c.author===state.email;
+  return '<div class="chat-msg'+(mine?' mine':'')+'">'
+    +(mine?'':avatar(nameOf(c.author)))
+    +'<div style="min-width:0">'
+      +'<div class="chat-meta"><b>'+esc(mine?'You':nameOf(c.author))+'</b><span>'+relTime(c.created_at)+'</span><i class="fa-solid fa-trash" style="cursor:pointer;opacity:.55;font-size:10px" title="Delete remark" onclick="trCmDelete('+c.id+')"></i></div>'
+      +'<div class="chat-bubble">'+esc(c.body)+'</div>'
+    +'</div>'
+  +'</div>';
+}
+window.trCmAdd=async function(id){
+  const inp=$('trCmNew');const body=(inp&&inp.value||'').trim();if(!body)return;
+  try{await sb.schema('acc').from('transcription_comments').insert({transcription_id:id,author:(state&&state.email)||null,body});}catch(e){toast('Could not post remark: '+((e&&e.message)||e),'err');return;}
+  trLogActivity(id,TR_DETAIL_ROW&&TR_DETAIL_ROW.file_name,'commented');
+  trDetail($('view'),id);
+};
+window.trCmDelete=async function(cid){
+  const ok=await confirmDialog('Delete this remark?');
+  if(!ok)return;
+  try{await sb.schema('acc').from('transcription_comments').delete().eq('id',cid);}catch(e){toast((e&&e.message)||'Failed to delete','err');return;}
+  const id=TR_DETAIL_ROW&&TR_DETAIL_ROW.id;
+  if(id){trLogActivity(id,TR_DETAIL_ROW&&TR_DETAIL_ROW.file_name,'remark_deleted');toast('Remark deleted','ok');trDetail($('view'),id);}
+};
 
 function trCriteriaHtml(r){
   const c=r.criteria||{};

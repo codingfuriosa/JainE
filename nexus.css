@@ -92,6 +92,11 @@ a{color:inherit;text-decoration:none}
 @media(hover:none){ .drag-handle{font-size:16px;padding:13px 10px} }
 .drag-row.drop-above{box-shadow:inset 0 2px 0 var(--brand)}
 .drag-row.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
+/* Same drag feedback as .drag-row above, but for actual <tr> elements — must NOT set
+   display:flex (that breaks table layout), just the dragging/drop-position visual cues. */
+tr.pin-drag.dragging{opacity:.4}
+tr.pin-drag.drop-above{box-shadow:inset 0 2px 0 var(--brand)}
+tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
 @media(max-width:760px){
   /* once a list runs past ~10 tasks, cap it and scroll instead of the page growing endlessly */
   .drag-list:has(.drag-row:nth-child(11)){max-height:56vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
