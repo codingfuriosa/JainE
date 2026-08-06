@@ -1651,7 +1651,7 @@ function misLabel(k){const f=MIS_FIELDS.find(x=>x.k===k);return f?f.l:k;}
 /* Fields offering a dropdown of what's already in use while still accepting a new value.
    A <datalist> gives both: pick from the list, or type something new — and because the new
    value is saved onto the row, it is in the list automatically next time. No extra table. */
-const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge','advocate_incharge','court']);
+const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge']);
 const MIS_PC_DEFAULT='ANKITA BHANDARI';
 function misDistinct(k){
   const seen=new Map();
@@ -1665,25 +1665,65 @@ function misCommonPriority(){
   (window._misRows||[]).forEach(r=>{ const p=String(r.priority||'').trim(); if(c[p]!==undefined)c[p]++; });
   return (c.High>=c.Medium&&c.High>=c.Low)?'High':(c.Medium>=c.Low?'Medium':'Low');
 }
+// Guidance sits in an (i) beside the label rather than as grey text under the field, so the
+// form stays compact and the rows line up.
+function misTip(text){
+  if(!text) return '';
+  return '<span class="mis-tip" tabindex="0" role="button" aria-label="More information" data-tip="'+esc(text)+'">i</span>';
+}
 function misInput(k,vals,opt){
   opt=opt||{};
   const v=(vals||{})[k]||'';
   const ro=opt.readonly?' readonly style="background:var(--bg,#f8fafc);color:var(--slate)"':'';
-  const hint=opt.hint?'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+esc(opt.hint)+'</div>':'';
+  const lab='<label>'+misLabel(k)+misTip(opt.hint)+'</label>';
   if(k==='priority'){
     const cur=v||opt.dflt||'';
-    return '<div><label>'+misLabel(k)+'</label><select id="misF_'+k+'" class="sel">'
+    return '<div>'+lab+'<select id="misF_'+k+'" class="sel">'
       +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
-      +'</select>'+hint+'</div>';
+      +'</select></div>';
   }
   if(MIS_SUGGEST.has(k)){
-    const list='misL_'+k;
-    return '<div><label>'+misLabel(k)+'</label>'
-      +'<input id="misF_'+k+'" class="sel" list="'+list+'" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro+'>'
-      +'<datalist id="'+list+'">'+misDistinct(k).map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'
-      +hint+'</div>';
+    // A real dropdown that also accepts a new value: the list opens on click and filters as you
+    // type. A bare <datalist> only opens once you start typing, which hid the existing values.
+    const opts=misDistinct(k);
+    return '<div class="mis-combo" data-k="'+k+'">'+lab
+      +'<div class="mis-combo-wrap">'
+        +'<input id="misF_'+k+'" class="sel" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro
+          +' onfocus="misComboOpen(this)" oninput="misComboOpen(this)" onclick="misComboOpen(this)">'
+        +'<i class="fa-solid fa-chevron-down mis-combo-caret" onclick="misComboToggle(this)"></i>'
+        +'<div class="mis-combo-list">'+opts.map(x=>'<div class="mis-combo-opt" data-v="'+esc(x)+'" onmousedown="misComboPick(this)">'+esc(x)+'</div>').join('')
+          +(opts.length?'':'<div class="mis-combo-none">Nothing recorded yet — just type</div>')+'</div>'
+      +'</div></div>';
   }
-  return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'>'+hint+'</div>';
+  return '<div>'+lab+'<input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'></div>';
+}
+window.misComboOpen=function(inp){
+  const box=inp.closest('.mis-combo'); if(!box)return;
+  document.querySelectorAll('.mis-combo.open').forEach(function(x){ if(x!==box) x.classList.remove('open'); });
+  box.classList.add('open');
+  const q=(inp.value||'').toLowerCase();
+  box.querySelectorAll('.mis-combo-opt').forEach(function(o){
+    o.style.display=(!q||o.dataset.v.toLowerCase().includes(q))?'':'none';
+  });
+};
+window.misComboToggle=function(ic){
+  const box=ic.closest('.mis-combo'); if(!box)return;
+  const wasOpen=box.classList.contains('open');
+  document.querySelectorAll('.mis-combo.open').forEach(function(x){x.classList.remove('open');});
+  if(!wasOpen){ box.classList.add('open');
+    box.querySelectorAll('.mis-combo-opt').forEach(function(o){o.style.display='';});
+    const inp=box.querySelector('input'); if(inp) try{inp.focus();}catch(e){} }
+};
+window.misComboPick=function(el){
+  const box=el.closest('.mis-combo'); if(!box)return;
+  const inp=box.querySelector('input'); if(inp) inp.value=el.dataset.v||'';
+  box.classList.remove('open');
+};
+if(!window._misComboWired){ window._misComboWired=true;
+  document.addEventListener('click',function(e){
+    if(!(e.target&&e.target.closest&&e.target.closest('.mis-combo')))
+      document.querySelectorAll('.mis-combo.open').forEach(function(x){x.classList.remove('open');});
+  });
 }
 function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
 const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
@@ -1736,7 +1776,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1847,19 +1887,51 @@ async function legalMIS(){
       /* section heading inside the Edit Case form */
       .mis-prio-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);padding-bottom:7px;margin-bottom:12px;border-bottom:1px solid var(--line)}
       .mis-prio-head i{color:var(--brand)}
+      /* breathing room above the long text areas in the form */
+      .frm textarea.sel{margin-top:2px}
+      .frm > div[style*="margin-bottom:14px"]{margin-top:14px}
+      /* (i) tooltip beside a field label */
+      .mis-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--slate);color:#fff;font:italic 700 10px/1 Georgia,serif;margin-left:6px;cursor:help;position:relative;vertical-align:middle;text-transform:none;letter-spacing:0}
+      .mis-tip:hover,.mis-tip:focus{background:var(--brand);outline:none}
+      .mis-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:6px 9px;border-radius:6px;font:500 11px/1.45 inherit;white-space:normal;width:max-content;max-width:230px;text-align:center;opacity:0;visibility:hidden;transition:opacity .12s;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.22)}
+      .mis-tip:hover::after,.mis-tip:focus::after{opacity:1;visibility:visible}
+      /* dropdown that also accepts a new value */
+      .mis-combo-wrap{position:relative}
+      .mis-combo-wrap input{padding-right:30px}
+      .mis-combo-caret{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:11px;cursor:pointer;pointer-events:auto}
+      .mis-combo.open .mis-combo-caret{transform:translateY(-50%) rotate(180deg)}
+      .mis-combo-list{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:70;background:var(--bg-card);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 26px rgba(15,23,42,.16);max-height:210px;overflow-y:auto;padding:5px}
+      .mis-combo.open .mis-combo-list{display:block}
+      .mis-combo-opt{padding:7px 9px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .mis-combo-opt:hover{background:var(--brand-a10,#eef2ff);color:var(--brand)}
+      .mis-combo-none{padding:7px 9px;font-size:12px;color:var(--slate)}
       /* date-range filter */
-      .mis-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
-      .mis-range .to{font-size:12.5px;color:var(--slate)}
-      .mis-toolbar.has-custom .mis-search-wrap{flex:0 1 190px;min-width:120px}
-      @media(max-width:900px){
-        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%}
-        .mis-toolbar .mis-actions{flex:1 1 100%}
-        .mis-toolbar .mis-actions .btn{flex:1 1 auto;justify-content:center}
-        select.mis-sel{min-width:0;flex:1 1 140px}
-        .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
-        .mis-range{flex:1 1 100%}
-        .mis-range input[type=date]{flex:1 1 40%;min-width:0}
+      .mis-range{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink);min-width:0;flex:1 1 132px}
+      .mis-range input[type=date]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      .mis-range .to{font-size:12px;color:var(--slate);flex:none}
+      select.mis-sel{appearance:none;-webkit-appearance:none;padding-right:30px;font-weight:600;
+        background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
+      select.mis-sel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      /* Custom range needs real room — give the filter row its own line rather than letting
+         the date inputs squeeze the search box into nothing. */
+      .mis-toolbar.has-custom .mis-filters{flex:1 1 100%;margin-left:0;flex-wrap:nowrap}
+      .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 160px;min-width:120px}
+      @media(max-width:1100px){
+        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%;flex-wrap:wrap}
+        .mis-toolbar.has-custom .mis-filters{flex-wrap:wrap}
+      }
+      @media(max-width:760px){
+        .mis-toolbar{gap:10px}
+        .mis-toolbar .mis-actions{flex:1 1 100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .mis-toolbar .mis-actions .btn{width:100%;justify-content:center;white-space:nowrap}
+        .mis-toolbar .mis-actions .btn:first-child{grid-column:1/-1}
+        .mis-count{grid-column:1/-1;text-align:center}
+        .mis-filters select.mis-sel{flex:1 1 100%;min-width:0}
+        .mis-filters .mis-search-wrap,.mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
+        .mis-filters .btn{flex:1 1 100%;justify-content:center}
+        .mis-range{flex:1 1 100%;flex-wrap:nowrap}
       }
       #misTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:2200px;table-layout:fixed}
       #misTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
@@ -2013,40 +2085,53 @@ window.misExportCauselist=function(){
     .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
 
-  const label=(MIS_RANGES.find(function(r){return r[0]===MIS_RANGE;})||[])[1]||'';
-  const stamp=new Date().toLocaleString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  const dmy=function(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+  // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
+  // out of that file: doc name "CAUSTLIST" top-left, sheet tab name top-right, page number,
+  // an M/D/YYYY H:MM:SS stamp, the "<MONTH> CAUSTLIST" heading, and these nine column labels
+  // with precisely this capitalisation.
+  const now=new Date();
+  const MONTHS=['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+  // the month the listed hearings fall in, taken from the range start
+  const first=new Date(win.from+'T00:00:00');
+  const monthName=MONTHS[first.getMonth()];
+  const tabName=monthName+String(first.getFullYear()).slice(2);   // e.g. AUGUST26, as in the PDF
+  const h24=now.getHours();
+  const stamp=(now.getMonth()+1)+'/'+now.getDate()+'/'+now.getFullYear()+' '
+    +String(h24).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+  const dmy=function(iso){ if(!iso)return ''; const d=new Date(iso+'T00:00:00');
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
-  const cell=function(v){ return esc(String(v==null?'':v).trim()||'—').replace(/\n/g,'<br>'); };
+  const cell=function(v){ return esc(String(v==null?'':v).trim()).replace(/\n/g,'<br>'); };
 
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Causelist '+esc(label)+'</title>'
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>CAUSTLIST</title>'
    +'<style>'
-   +'@page{size:A4 landscape;margin:12mm}'
+   +'@page{size:A4 landscape;margin:10mm}'
    +'*{box-sizing:border-box}'
-   +'body{font-family:Calibri,Arial,sans-serif;color:#111;margin:0;font-size:10.5px}'
-   +'h1{font-size:17px;margin:0 0 2px;letter-spacing:.5px}'
-   +'.sub{font-size:11px;color:#444;margin-bottom:12px}'
+   +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:9px}'
+   +'.pghead{display:flex;justify-content:space-between;font-size:9px;color:#000;margin-bottom:2px}'
+   +'.pgmeta{font-size:9px;color:#000;margin-bottom:10px}'
+   +'h1{font-size:11px;font-weight:700;margin:0 0 8px;text-align:center}'
    +'table{width:100%;border-collapse:collapse;table-layout:fixed}'
-   +'th,td{border:1px solid #999;padding:5px 6px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}'
-   +'th{background:#dbe5f1;font-weight:700;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em}'
+   +'th,td{border:1px solid #000;padding:3px 4px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere;line-height:1.25}'
+   +'th{font-weight:700;text-align:center;font-size:9px}'
    +'tr{page-break-inside:avoid}'
    +'thead{display:table-header-group}'
-   +'td.sl{text-align:center;font-weight:700}'
-   +'td.dt{white-space:nowrap;font-weight:600}'
-   +'.foot{margin-top:10px;font-size:10px;color:#555}'
+   +'td.sl{text-align:center}'
+   +'td.dt{white-space:nowrap;text-align:center}'
    +'@media print{.noprint{display:none}}'
    +'</style></head><body>'
    +'<div class="noprint" style="margin-bottom:10px">'
    +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
    +'</div>'
-   +'<h1>CAUSELIST — '+esc(label.toUpperCase())+'</h1>'
-   +'<div class="sub">'+esc(misRangeLabel())+' &nbsp;·&nbsp; '+rows.length+' matter'+(rows.length===1?'':'s')+' &nbsp;·&nbsp; generated '+esc(stamp)+'</div>'
+   +'<div class="pghead"><span>CAUSTLIST</span><span>'+esc(tabName)+'</span></div>'
+   +'<div class="pgmeta">1</div>'
+   +'<div class="pgmeta">'+esc(stamp)+'</div>'
+   +'<h1>'+esc(monthName)+' CAUSTLIST</h1>'
    +'<table><colgroup>'
    +'<col style="width:34px"><col style="width:9%"><col style="width:22%"><col style="width:12%">'
    +'<col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:14%">'
    +'</colgroup><thead><tr>'
-   +'<th>SL NO.</th><th>Case Type</th><th>Case Details</th><th>Case No.</th><th>Date</th>'
-   +'<th>Advocate Incharge</th><th>Court Name</th><th>Status</th><th>Action Needed</th>'
+   +'<th>SL NO.</th><th>CASE TYPE</th><th>CASE DETAILS</th><th>CASE NO.</th><th>DATE</th>'
+   +'<th>Advocate incharge</th><th>Court Name</th><th>STATUS</th><th>ACTION NEEDED</th>'
    +'</tr></thead><tbody>'
    +rows.map(function(r,i){
       return '<tr><td class="sl">'+(i+1)+'</td>'
@@ -2060,7 +2145,6 @@ window.misExportCauselist=function(){
         +'<td>'+cell(r.action_needed)+'</td></tr>';
     }).join('')
    +'</tbody></table>'
-   +'<div class="foot">JAIN-E · Legal MIS · '+esc(stamp)+'</div>'
    +'</body></html>';
 
   const w=window.open('','_blank');

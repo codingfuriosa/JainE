@@ -805,6 +805,14 @@
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
   function wfCaseNo5(c){ return String((c&&c.case_no)||0).padStart(5,'0'); }
+  // Is this the bill-style workflow (Invoice Processing)? Decided from the workflow's OWN detail
+  // fields — only that one carries a "Unique bill Id" — so nothing here is hard-wired to a
+  // particular workflow row. Everything gated on this stays off ordinary workflows, which keep
+  // the plain "No." column they have always had and never grow a Unique Bill Id column.
+  function wfIsBillFlow(flow){
+    const t=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    return t.some(function(f){ return f && eq((f.label||''),'Unique bill Id'); });
+  }
   // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
   function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'d '+h+'h'; }
   // 2+ people -> the whole group becomes hoverable (desktop) / tappable (mobile), showing the
@@ -1015,6 +1023,9 @@
             +'<option value="weeks"'+(unit==='weeks'?' selected':'')+'>Weeks</option>'
           +'</select>'
         +'</div>'
+        // "How" is the tracker's HOW row — the channel the step runs through (Google Form, ERP,
+        // physically, ...). Optional, so leaving it blank changes nothing.
+        +'<input class="ac-in wf-s-method" placeholder="How is it done? (optional — e.g. Google Form, ERP, Physically)" value="'+esc2(step.method||'')+'">'
       +'</div>'
     +'</div>';
   }
@@ -1135,7 +1146,8 @@
         else if(!person) bad='Step '+(i+1)+': assign a person.';
         else if(!(dur>=1)) bad='Step '+(i+1)+': set a duration.';
       }
-      steps.push({seq:steps.length+1,title:t,description:null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
+      const method=((r.querySelector('.wf-s-method')||{}).value||'').trim();
+      steps.push({seq:steps.length+1,title:t,description:null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit,method:method||null});
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
@@ -1196,55 +1208,90 @@
     }).join('');
   }
 
-  // The "Tracker" tab — a sheet-style table mirroring the original spreadsheet layout: one row
-  // per instance, a frozen block of the trigger-event fields on the left (Timestamp/Id + every
-  // non-attachment field this workflow's trigger_template defines, so it's reusable for any
-  // workflow, not hardcoded to Invoice Processing), then Planned/Actual/Delay per step scrolling
-  // on the right (desktop/laptop only — see the media query in wfInjectCss). Populated straight
-  // from the same `cases`/`fcs` already fetched for the Workflow tab; new instances just show up
-  // as new rows, nothing extra to "register".
+  /* ----- Tracker tab ------------------------------------------------------------------------
+     A like-for-like rebuild of the bill tracker spreadsheet's header block (its rows 1-7), driven
+     live off the workflow instead of manual typing:
+
+        row 1  o1 · o2 · o3 …   the step code, spanning that step's three columns
+        row 2  WHAT             what happens in the step
+        row 3  WHO              whose step it is
+        row 4  HOW              the channel it runs through (Google Form / ERP / Physically …)
+        row 5  WHEN             how long that step is allowed
+        row 6                   the real column headers
+        row 7+                  one row per instance
+
+     Better than the sheet in three ways: the bill columns come from the workflow's own detail
+     fields, so they can never drift out of step with the form; Planned/Actual/Time Delay are read
+     from what actually happened rather than typed in; and a delay is coloured, not just printed.
+     Tracker lives on bill-style workflows only — ordinary workflows never show this tab. */
+  function wfTrackDT(iso){ if(!iso) return ''; try{ const d=new Date(iso);
+    const p=function(n){return String(n).padStart(2,'0');};
+    return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+  }catch(e){ return String(iso); } }
+  // Overshoot against the planned date, in the sheet's own "Dd Hh" shape. Blank when on time.
+  function wfTrackDelay(planned,actual){
+    if(!planned||!actual) return '';
+    const ms=new Date(actual).getTime()-new Date(planned).getTime();
+    if(!(ms>0)) return '';
+    const h=Math.floor(ms/3600000);
+    return Math.floor(h/24)+'d '+(h%24)+'h';
+  }
   function wfTrackerHtml(flow, steps, cases, fcs){
-    const N=wfNounOf(flow);
-    if(!cases.length) return '<div class="wf-card"><div class="ac-empty" style="cursor:default">No '+N.lcMany+' yet.</div></div>';
+    if(!steps.length) return '<div class="ac-empty" style="cursor:default">Add steps to this workflow to track them</div>';
+    if(!cases.length) return '<div class="ac-empty" style="cursor:default">Nothing recorded yet</div>';
+    // The bill columns = this workflow's own detail fields, minus the attachment (a file has no
+    // place in a tracking grid). Order follows the form, so the two always read the same way.
+    const tmpl=(Array.isArray(flow.trigger_template)?flow.trigger_template:[])
+      .filter(function(f){ return f && f.label && (f.type||'text')!=='attachment'; });
+    const fixed=[{k:'Id'},{k:'Timestamp'}].concat(tmpl.map(function(f){ return {k:f.label}; }));
+    const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
-    function fieldVal(c,label){ const d=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(x){return x&&eq(x.label,label);}); return (d&&d.value)||''; }
-    const WIDTH_BY_TYPE={select:130,number:100,date:100,text:130};
-    const tmplFields=(Array.isArray(flow.trigger_template)?flow.trigger_template:[]).filter(function(t){return t&&t.label&&t.type!=='attachment';});
-    const FIXED=[
-      {label:'Timestamp', w:110, get:function(c){return wfDT(c.created_at);}},
-      {label:'Id', w:60, get:function(c){return wfCaseNo5(c);}}
-    ].concat(tmplFields.map(function(t){ return {label:t.label, w:(WIDTH_BY_TYPE[t.type]||130), get:function(c){return fieldVal(c,t.label);}}; }));
-    let cum=0; const lefts=FIXED.map(function(f){ const l=cum; cum+=f.w; return l; });
 
-    const fixedHeadCells=FIXED.map(function(f,i){ return '<th class="wf-trk-fx" rowspan="2" style="left:'+lefts[i]+'px;width:'+f.w+'px;min-width:'+f.w+'px">'+esc2(f.label)+'</th>'; }).join('');
-    const stepGroupCells=steps.map(function(s){ return '<th class="wf-trk-stephead" colspan="3" title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>'; }).join('');
-    const subCells=steps.map(function(){ return '<th class="wf-trk-sub">Planned</th><th class="wf-trk-sub">Actual</th><th class="wf-trk-sub">Delay</th>'; }).join('');
+    const codeRow='<tr class="wf-tk-code"><th colspan="'+F+'"></th>'
+      +steps.map(function(s,i){ return '<th colspan="3">o'+(i+1)+'</th>'; }).join('')
+      +'<th></th></tr>';
+    const bandRow=function(label,pick){
+      return '<tr class="wf-tk-band"><th class="wf-tk-bandlbl">'+label+'</th>'+(F>1?'<th colspan="'+(F-1)+'"></th>':'')
+        +steps.map(function(s){ const v=pick(s); return '<th colspan="3" title="'+esc2(v||'')+'">'+esc2(v||'—')+'</th>'; }).join('')
+        +'<th></th></tr>';
+    };
+    const head=codeRow
+      +bandRow('WHAT',function(s){ return s.title||('Step '+s.seq); })
+      +bandRow('WHO',function(s){ return wfNm(s.owner_email)||'—'; })
+      +bandRow('HOW',function(s){ return s.method||''; })
+      +bandRow('WHEN',function(s){ const d=wfDurText(s.duration_value,s.duration_unit); return d?('In next '+d):''; })
+      +'<tr class="wf-tk-cols">'+fixed.map(function(f){ return '<th>'+esc2(f.k)+'</th>'; }).join('')
+        +steps.map(function(){ return '<th>Planned</th><th>Actual</th><th>Time Delay</th>'; }).join('')
+        +'<th>Current Step</th></tr>';
 
-    const rows=cases.map(function(c){
-      const fixedTds=FIXED.map(function(f,i){ return '<td class="wf-trk-fx" style="left:'+lefts[i]+'px;width:'+f.w+'px;min-width:'+f.w+'px">'+esc2(f.get(c)||'—')+'</td>'; }).join('');
-      const stepTds=steps.map(function(s){
-        const cs=(byCase[c.id]||{})[s.seq];
-        const planned=cs&&cs.due_at?wfDT(cs.due_at):'—';
-        const actual=cs&&cs.forwarded_at?wfDT(cs.forwarded_at):(cs&&cs.received_at?'In progress':'—');
-        let delay='—';
-        if(cs&&cs.forwarded_at&&cs.due_at){
-          const diff=new Date(cs.forwarded_at)-new Date(cs.due_at);
-          delay=diff<=0?'On time':(wfDaysHoursText(diff)+' late');
-        }
-        return '<td>'+esc2(planned)+'</td><td>'+esc2(actual)+'</td><td>'+esc2(delay)+'</td>';
+    const body=cases.map(function(c){
+      const by={}; (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+      const left='<td><b>'+wfCaseNo5(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'
+        +tmpl.map(function(f){ return '<td>'+esc2(by[f.label]||'')+'</td>'; }).join('');
+      const cells=steps.map(function(s){
+        const cs=byCase[c.id]&&byCase[c.id][s.seq];
+        const planned=cs&&cs.due_at, actual=cs&&cs.forwarded_at;
+        const delay=wfTrackDelay(planned,actual);
+        return '<td>'+esc2(planned?wfTrackDT(planned):'')+'</td>'
+          +'<td>'+esc2(actual?wfTrackDT(actual):'')+'</td>'
+          +'<td'+(delay?' class="wf-tk-late"':'')+'>'+esc2(delay)+'</td>';
       }).join('');
-      const curTitle=c.status==='Done'?'Completed':(c.status==='Cancelled'?'Cancelled':((steps.find(function(s){return s.seq===c.current_step;})||{}).title||('Step '+c.current_step)));
-      return '<tr>'+fixedTds+stepTds+'<td>'+esc2(curTitle)+'</td></tr>';
+      let now='Done';
+      if(c.status==='Cancelled') now='Cancelled';
+      else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
+        now=cur?(cur.title||('Step '+cur.seq)):'—'; }
+      return '<tr>'+left+cells+'<td><b>'+esc2(now)+'</b></td></tr>';
     }).join('');
 
-    return '<div class="wf-card wf-trk-card"><div class="wf-card-hd"><i class="fa-solid fa-table-cells"></i> Tracker <span class="cnt">'+cases.length+'</span>'
-      +tip('The full sheet-style view — every '+N.lc+' as a row, with Planned/Actual/Delay per step. The left columns stay in place while the step columns scroll (desktop/laptop only).')
-      +'</div><div class="wf-trk-wrap"><table class="wf-trktable"><thead><tr>'+fixedHeadCells+stepGroupCells+'<th rowspan="2">Current Step</th></tr><tr>'+subCells+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
   }
-  window.wfSwitchTab=function(tab){
-    const body=$('wfTabBody'); if(!body)return;
-    body.innerHTML = tab==='tracker' ? (window._wfTrackerHtml||'') : (window._wfWorkflowTabHtml||'');
-    [].slice.call(document.querySelectorAll('.wf-subtab')).forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-tab')===tab); });
+  // The two panes of a bill-style workflow. Ordinary workflows have no strip and no Tracker.
+  window.wfTabShow=function(which){
+    ['main','tracker'].forEach(function(k){
+      const p=$('wfPane_'+k), b=$('wfTabBtn_'+k);
+      if(p) p.style.display=(k===which)?'':'none';
+      if(b) b.classList.toggle('on', k===which);
+    });
   };
 
   async function wfDetailPage(v, id, selCaseId){
@@ -1287,11 +1334,14 @@
     window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps'+tip('The steps every '+N.lc+' goes through, in order, with who does each one and how long they have. Click a row in the table below to see how a particular '+N.lc+' is progressing.')+'</div></div>'+defTL;
 
     // Instances table
+    const isBill=wfIsBillFlow(flow);
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head=(canManage?'<th class="wf-chk-col"></th>':'')+'<th>Id</th><th>Unique Bill Id</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+      const head=(canManage?'<th class="wf-chk-col"></th>':'')
+        +'<th>'+(isBill?'Id':'No.')+'</th>'+(isBill?'<th>Unique Bill Id</th>':'')
+        +'<th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
@@ -1309,13 +1359,13 @@
         const uniqueBillId=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Unique bill Id');});
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNo5(c)+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNo5(c)+'</b></td><td>'+esc2((uniqueBillId&&uniqueBillId.value)||'—')+'</td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
+          +'<td><b>'+wfCaseNo5(c)+'</b></td>'+(isBill?('<td>'+esc2((uniqueBillId&&uniqueBillId.value)||'—')+'</td>'):'')+'<td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="Search by Id…" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -1340,8 +1390,19 @@
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
         +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
       +'</div>'
-      +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
-      +tableHtml
+      +(isBill?('<div class="wf-tabs">'
+          +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
+          +'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>'
+        +'</div>'):'')
+      +'<div id="wfPane_main">'
+        +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
+        +tableHtml
+      +'</div>'
+      +(isBill?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
+          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
+          +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
+          +wfTrackerHtml(flow,steps,cases,fcs)
+        +'</div></div>'):'')
     +'</div>';
     if(selCaseId){ wfShowCase(selCaseId, null); }
   }
@@ -1491,7 +1552,9 @@
       valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
     }
     const removeBtn=locked?'':'<button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button>';
-    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
+    // data-orig remembers what was already saved in this field, so wfEventSave can tell an
+    // untouched legacy value apart from something the person actually typed just now.
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'" data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
   window.wfEvtAttPick=async function(input){
     const file=input.files&&input.files[0]; if(!file)return;
@@ -1576,7 +1639,11 @@
       let value=((r.querySelector('.wf-evt-value')||{}).value||'').trim();
       if(!missing && label && !value && r.getAttribute('data-optional')!=='1') missing=label;
       // Unique bill Id is always "c" + exactly 4 digits (e.g. c2950) — normalize case, then check.
-      if(eq(label,'Unique bill Id') && value){
+      // Only what's typed now is checked: invoices recorded before this rule existed hold ids in
+      // the old style, and blocking those made every one of them impossible to edit at all, even
+      // when the change was to a completely different field. An untouched value passes through.
+      const orig=r.getAttribute('data-orig')||'';
+      if(eq(label,'Unique bill Id') && value && value!==orig){
         if(!/^c\d{4}$/i.test(value)){ if(!badFormat) badFormat=value; }
         else value='c'+value.slice(1);
       }
@@ -1951,6 +2018,28 @@
     .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
     .wf-itable tbody tr:last-child td{border-bottom:0}
     .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+    /* Tracker tab */
+    .wf-tabs{display:flex;gap:6px;margin:16px 0 -4px;border-bottom:1px solid var(--line);overflow-x:auto}
+    .wf-tab{flex:none;display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 15px;border:0;background:transparent;color:var(--slate);font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+    .wf-tab:hover{color:var(--ink)}
+    .wf-tab.on{color:var(--brand);border-bottom-color:var(--brand)}
+    .wf-tk-wrap{max-height:70vh;overflow:auto}
+    .wf-tktable{min-width:100%;font-size:12px}
+    .wf-tktable th,.wf-tktable td{padding:7px 10px;white-space:nowrap;border-right:1px solid var(--line)}
+    .wf-tktable tbody tr{cursor:default}
+    /* The step bands read across, so they get a centred, sentence-case look of their own rather
+       than the uppercase column-header styling. */
+    .wf-tk-code th{text-align:center;background:var(--brand-a10,#eef2ff);color:var(--brand);font-size:11px}
+    .wf-tk-band th{text-align:center;text-transform:none;letter-spacing:0;font-weight:600;font-size:11px;color:var(--slate);max-width:230px;overflow:hidden;text-overflow:ellipsis}
+    .wf-tk-bandlbl{text-align:left !important;color:var(--ink) !important;font-weight:800 !important;letter-spacing:.04em !important;text-transform:uppercase !important}
+    .wf-tk-cols th{border-bottom:2px solid var(--line)}
+    .wf-tk-late{color:#dc2626;font-weight:700}
+    .wf-tktable thead th{position:sticky;top:0;z-index:2}
+    .wf-tktable thead tr:nth-child(2) th{top:30px}
+    .wf-tktable thead tr:nth-child(3) th{top:60px}
+    .wf-tktable thead tr:nth-child(4) th{top:90px}
+    .wf-tktable thead tr:nth-child(5) th{top:120px}
+    .wf-tktable thead tr:nth-child(6) th{top:150px}
     .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
     .wf-pill.ok{background:#dcfce7;color:#166534}
     .wf-pill.cur{background:#dbeafe;color:#1e40af}
