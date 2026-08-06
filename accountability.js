@@ -807,7 +807,21 @@
   function wfCaseNo5(c){ return String((c&&c.case_no)||0).padStart(5,'0'); }
   // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
   function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'.'+h; }
-  function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
+  // 2+ people -> the whole group becomes hoverable (desktop) / tappable (mobile), showing the
+  // full name list via the existing .wf-poptip/.wf-tip-txt tooltip layer (same one the "i" hints
+  // and status pills already use) instead of relying on each tiny circle's own native title,
+  // which never worked for the "+N" overflow circle and only ever showed one name at a time.
+  function wfCircles(emails,extra){
+    emails=(emails||[]).filter(Boolean);
+    if(!emails.length) return '<span class="wf-circle wf-none" title="No members yet">·</span>';
+    const max=5, shown=emails.slice(0,max), multi=emails.length>=2;
+    let h='<span class="wf-circles'+(multi?' wf-poptip':'')+' '+(extra||'')+'"'+(multi?' tabindex="0" role="button" aria-label="Show all people" onclick="event.stopPropagation();wfPopToggle(this)"':'')+'>';
+    shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
+    if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>';
+    if(multi)h+='<span class="wf-tip-txt">'+emails.map(function(e){return esc2(wfNm(e));}).join('<br>')+'</span>';
+    h+='</span>';
+    return h;
+  }
   // My own department(s), from the same people() list already loaded for the person-picker.
   function wfMyDepts(){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,me());}); return (p&&Array.isArray(p.depts))?p.depts:[]; }
   function wfInDept(dept){ return wfMyDepts().some(function(d){return eq(d,dept);}); }
