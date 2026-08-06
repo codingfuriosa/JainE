@@ -1194,6 +1194,57 @@
     }).join('');
   }
 
+  // The "Tracker" tab — a sheet-style table mirroring the original spreadsheet layout: one row
+  // per instance, a frozen block of the trigger-event fields on the left (Timestamp/Id + every
+  // non-attachment field this workflow's trigger_template defines, so it's reusable for any
+  // workflow, not hardcoded to Invoice Processing), then Planned/Actual/Delay per step scrolling
+  // on the right (desktop/laptop only — see the media query in wfInjectCss). Populated straight
+  // from the same `cases`/`fcs` already fetched for the Workflow tab; new instances just show up
+  // as new rows, nothing extra to "register".
+  function wfTrackerHtml(flow, steps, cases, fcs){
+    const N=wfNounOf(flow);
+    if(!cases.length) return '<div class="wf-card"><div class="ac-empty" style="cursor:default">No '+N.lcMany+' yet.</div></div>';
+    const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+    function fieldVal(c,label){ const d=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(x){return x&&eq(x.label,label);}); return (d&&d.value)||''; }
+    const WIDTH_BY_TYPE={select:130,number:100,date:100,text:130};
+    const tmplFields=(Array.isArray(flow.trigger_template)?flow.trigger_template:[]).filter(function(t){return t&&t.label&&t.type!=='attachment';});
+    const FIXED=[
+      {label:'Timestamp', w:110, get:function(c){return wfDT(c.created_at);}},
+      {label:'Id', w:60, get:function(c){return wfCaseNo5(c);}}
+    ].concat(tmplFields.map(function(t){ return {label:t.label, w:(WIDTH_BY_TYPE[t.type]||130), get:function(c){return fieldVal(c,t.label);}}; }));
+    let cum=0; const lefts=FIXED.map(function(f){ const l=cum; cum+=f.w; return l; });
+
+    const fixedHeadCells=FIXED.map(function(f,i){ return '<th class="wf-trk-fx" rowspan="2" style="left:'+lefts[i]+'px;width:'+f.w+'px;min-width:'+f.w+'px">'+esc2(f.label)+'</th>'; }).join('');
+    const stepGroupCells=steps.map(function(s){ return '<th class="wf-trk-stephead" colspan="3" title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>'; }).join('');
+    const subCells=steps.map(function(){ return '<th class="wf-trk-sub">Planned</th><th class="wf-trk-sub">Actual</th><th class="wf-trk-sub">Delay</th>'; }).join('');
+
+    const rows=cases.map(function(c){
+      const fixedTds=FIXED.map(function(f,i){ return '<td class="wf-trk-fx" style="left:'+lefts[i]+'px;width:'+f.w+'px;min-width:'+f.w+'px">'+esc2(f.get(c)||'—')+'</td>'; }).join('');
+      const stepTds=steps.map(function(s){
+        const cs=(byCase[c.id]||{})[s.seq];
+        const planned=cs&&cs.due_at?wfDT(cs.due_at):'—';
+        const actual=cs&&cs.forwarded_at?wfDT(cs.forwarded_at):(cs&&cs.received_at?'In progress':'—');
+        let delay='—';
+        if(cs&&cs.forwarded_at&&cs.due_at){
+          const diff=new Date(cs.forwarded_at)-new Date(cs.due_at);
+          delay=diff<=0?'On time':(wfDaysHoursText(diff)+' late');
+        }
+        return '<td>'+esc2(planned)+'</td><td>'+esc2(actual)+'</td><td>'+esc2(delay)+'</td>';
+      }).join('');
+      const curTitle=c.status==='Done'?'Completed':(c.status==='Cancelled'?'Cancelled':((steps.find(function(s){return s.seq===c.current_step;})||{}).title||('Step '+c.current_step)));
+      return '<tr>'+fixedTds+stepTds+'<td>'+esc2(curTitle)+'</td></tr>';
+    }).join('');
+
+    return '<div class="wf-card wf-trk-card"><div class="wf-card-hd"><i class="fa-solid fa-table-cells"></i> Tracker <span class="cnt">'+cases.length+'</span>'
+      +tip('The full sheet-style view — every '+N.lc+' as a row, with Planned/Actual/Delay per step. The left columns stay in place while the step columns scroll (desktop/laptop only).')
+      +'</div><div class="wf-trk-wrap"><table class="wf-trktable"><thead><tr>'+fixedHeadCells+stepGroupCells+'<th rowspan="2">Current Step</th></tr><tr>'+subCells+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  }
+  window.wfSwitchTab=function(tab){
+    const body=$('wfTabBody'); if(!body)return;
+    body.innerHTML = tab==='tracker' ? (window._wfTrackerHtml||'') : (window._wfWorkflowTabHtml||'');
+    [].slice.call(document.querySelectorAll('.wf-subtab')).forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-tab')===tab); });
+  };
+
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
