@@ -1633,6 +1633,19 @@ window.misRangeToggle=function(){
   }
 };
 window.misRangePick=function(v){ const m=$('misRangeMenu'); if(m)m.classList.remove('open'); misSetRange(v); };
+// To can never be earlier than From. Picking a From date raises To's floor, and clears a To that
+// has just become impossible rather than leaving a backwards range sitting there.
+window.misDateFromChange=function(){
+  const f=$('misFrom'), t=$('misTo'); if(!f||!t) return;
+  t.min=f.value||'';
+  if(f.value && t.value && t.value<f.value){ t.value=''; toast('To date cleared — it was before the From date','warn'); }
+  misFilter();
+};
+window.misDateToChange=function(){
+  const f=$('misFrom'), t=$('misTo'); if(!f||!t) return;
+  if(f.value && t.value && t.value<f.value){ t.value=f.value; toast('To date cannot be before the From date','warn'); }
+  misFilter();
+};
 // A row's hearing date, preferring the sortable copy and falling back to parsing the text.
 function misRowIso(r){
   if(r.next_date_iso) return String(r.next_date_iso).slice(0,10);
@@ -1772,9 +1785,10 @@ function misFormHtml(vals,mode){
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
     if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    // No (i) tooltips on the Add Case form — they only appear when editing.
     if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
-    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:'left blank saves as NA'});
-    if(f.k==='next_date')    return put(f.k,{hint:'dd/mm/yyyy'});
+    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:isEdit?'left blank saves as NA':''});
+    if(f.k==='next_date')    return put(f.k,{hint:isEdit?'dd/mm/yyyy':''});
     put(f.k);
   });
   flush();
@@ -1897,7 +1911,9 @@ async function legalMIS(){
       .mis-toolbar .btn:not(:disabled):hover{background:var(--bg-subtle,#f8fafc);border-color:var(--slate)}
       .mis-toolbar .btn:disabled{cursor:not-allowed}
       .mis-toolbar .btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
-      .mis-toolbar .btn-primary:not(:disabled):hover{filter:brightness(1.08);border-color:var(--brand)}
+      /* Must restate the background: the generic hover rule above has the same specificity, so
+         without this the primary button went white on hover with only its border left coloured. */
+      .mis-toolbar .btn-primary:not(:disabled):hover{background:var(--brand);border-color:var(--brand);color:#fff;filter:brightness(1.09)}
       .mis-toolbar .btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--brand-a10)}
       .mis-search-wrap{position:relative;display:flex;align-items:center;flex:1;min-width:0}
       .mis-search-wrap i{position:absolute;left:10px;color:var(--slate);font-size:13px;pointer-events:none}
@@ -2003,6 +2019,24 @@ async function legalMIS(){
       .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
       #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
+      /* Desktop only — mobile keeps exactly the widths above. A person's name never fills a
+         150px column, while Cause Title and Status are the ones people actually need to read,
+         so the slack is taken off the name/date columns and handed to the text ones.
+         !important is needed because the widths are inline on each <col>. */
+      @media(min-width:769px){
+        #misTbl col:nth-child(3){width:320px !important}   /* Cause Title / Parties */
+        #misTbl col:nth-child(5){width:92px  !important}   /* Previous Date */
+        #misTbl col:nth-child(6){width:92px  !important}   /* Next Date */
+        #misTbl col:nth-child(7){width:92px  !important}   /* Priority */
+        #misTbl col:nth-child(8){width:128px !important}   /* Advocate In-Charge */
+        #misTbl col:nth-child(10){width:260px !important}  /* Status / Purpose */
+        #misTbl col:nth-child(11){width:260px !important}  /* Action Needed */
+        #misTbl col:nth-child(12){width:230px !important}  /* Remarks */
+        #misTbl col:nth-child(14){width:95px  !important}  /* Date of Filing */
+        #misTbl col:nth-child(15){width:108px !important}  /* PC In-Charge */
+        /* the wider columns can afford a third line before they clip */
+        .mis-cell-clamp{-webkit-line-clamp:3}
+      }
       #misTbl td,#misTbl th{overflow:hidden}
       @media(max-width:768px){
         .mis-toolbar{flex-direction:column;align-items:stretch}
@@ -2042,9 +2076,9 @@ async function legalMIS(){
           </div>
         </div>
         <span class="mis-range" id="misRangeCustom" style="display:${MIS_RANGE==='custom'?'flex':'none'}">
-          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misFilter()">
+          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misDateFromChange()">
           <span class="to">to</span>
-          <input type="date" id="misTo" value="${esc(MIS_TO)}" onchange="misFilter()">
+          <input type="date" id="misTo" min="${esc(MIS_FROM)}" value="${esc(MIS_TO)}" onchange="misDateToChange()">
         </span>
         <div class="mis-search-wrap">
           <i class="fa-solid fa-magnifying-glass"></i>
@@ -2193,14 +2227,11 @@ window.misExportCauselist=function(){
    +'thead{display:table-header-group}'
    +'td.sl{text-align:center}'
    +'td.dt{white-space:nowrap;text-align:center}'
-   +'@media print{.noprint{display:none}.sheet{max-width:none;padding:0}}'
+   +'@media print{.sheet{max-width:none;padding:0}}'
    +'@media screen{body{background:#525659;padding:18px 0}'
      +'.sheet{background:#fff;width:210mm;max-width:96vw;padding:14mm 12mm;box-shadow:0 4px 22px rgba(0,0,0,.4)}}'
    +'</style></head><body>'
    +'<div class="sheet">'
-   +'<div class="noprint" style="margin-bottom:10px">'
-   +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
-   +'</div>'
    +'<div class="pghead"><span>CAUSTLIST</span><span>'+esc(tabName)+'</span></div>'
    +'<div class="pgmeta">1</div>'
    +'<div class="pgmeta stamp">'+esc(stamp)+'</div>'
@@ -2227,7 +2258,7 @@ window.misExportCauselist=function(){
    +'</div></body></html>';
 
   // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
-  // laid out exactly as here, with a Print / Save as PDF button on it.
+  // laid out exactly as here — print it from the browser's own File > Print when needed.
   const name='CAUSTLIST - '+tabName+'.html';
   try{
     const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));

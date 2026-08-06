@@ -1264,7 +1264,8 @@
       how:(flow.trigger_method||''),
       when:'Whenever needed'
     };
-    const codeRow='<tr class="wf-tk-code"><th colspan="'+F+'">o0</th>'
+    // The bill columns get no step code of their own — the sheet doesn't label them either.
+    const codeRow='<tr class="wf-tk-code"><th colspan="'+F+'" class="wf-tk-nocode"></th>'
       +steps.map(function(s,i){ return '<th colspan="3" class="wf-tk-gap">o'+(i+1)+'</th>'; }).join('')
       +'<th class="wf-tk-gap"></th></tr>';
     const bandRow=function(label,zeroVal,pick){
@@ -2073,7 +2074,7 @@
     /* The step bands read across, so they get a centred, sentence-case look of their own rather
        than the uppercase column-header styling. */
     .wf-tk-code th{text-align:center;background:var(--brand);color:#fff;font-size:11px;font-weight:700;letter-spacing:.08em;padding-top:6px;padding-bottom:6px}
-    .wf-tk-code th:first-child{background:var(--brand);opacity:.82}
+    .wf-tk-code th.wf-tk-nocode{background:var(--bg-subtle,#f8fafc)}
     .wf-tk-band th{text-align:center;text-transform:none;letter-spacing:0;font-weight:600;font-size:11px;color:var(--slate);
       max-width:260px;white-space:normal;line-height:1.45;vertical-align:middle}
     .wf-tk-band th[colspan]{padding-left:12px;padding-right:12px}
