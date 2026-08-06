@@ -784,6 +784,8 @@ function s3KeyForJD(filename){return `recruitment/descriptions/${s3Stamp()}_${s3
 function s3KeyForDefectImg(filename){return `defect-img/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForPostSalesAdhoc(filename){return `postsales/adhoc/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForTranscription(filename){return `transcription/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForFlowUpdate(caseId,filename){return `accountability/flow-updates/${caseId}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/${flowId}/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -8431,10 +8433,13 @@ VIEWS.playbook=function(v,seg){
 };
 
 /* ---------- COMPETITOR ADS — Meta Ad Library watchlist ---------- */
-// Tracks a fixed watchlist of competitors against Meta's public Ad Library API (ads_archive) via
-// the competitor-ads-sync edge function. Deliberately NOT spend/reach — Meta only exposes those
-// for political/issue ads, never ordinary commercial ones — this is "what are they running and
-// for how long", sourced from camp.competitor_watchlist / camp.competitor_ads.
+// Tracks a fixed watchlist of competitors against Meta's public Ad Library, scraped by our own
+// Playwright-based Apify Actor (not the official ads_archive API, which never exposes spend/reach
+// for ordinary commercial ads) via the competitor-ads-sync edge function. Sourced from
+// camp.competitor_watchlist / camp.competitor_ads.
+const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram'};
+window._compAdsAll=window._compAdsAll||[];
+window._compSignCache=window._compSignCache||{};
 VIEWS.competitors=async function(v,seg){
   setCrumb(['Growth & Strategy','Competitor Ads']);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
@@ -8445,14 +8450,41 @@ VIEWS.competitors=async function(v,seg){
         +'<button class="btn btn-primary" id="compSyncAllBtn" onclick="compSyncAll()"><i class="fa-solid fa-rotate"></i> Sync All</button>'
       +'</div>'
     +'</div>'
+    +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
   await compRender();
 };
+function compToolbarHtml(wl){
+  if(!wl.length)return '';
+  return '<div class="card card-pad" style="margin-bottom:16px">'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">Sync options</div>'
+    +'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
+      +'<div style="min-width:200px">'
+        +'<div style="font-size:12px;color:var(--slate);margin-bottom:6px">Competitors to sync</div>'
+        +'<div style="display:flex;flex-direction:column;gap:4px;max-height:110px;overflow-y:auto;padding-right:6px">'
+          +wl.map(function(w){return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px"><input type="checkbox" class="comp-sync-cb" value="'+w.id+'" checked> '+esc(w.name)+'</label>';}).join('')
+        +'</div>'
+      +'</div>'
+      +'<label style="font-size:12px;color:var(--slate)">From<br><input type="date" id="compDateFrom" class="inp" style="margin-top:4px"></label>'
+      +'<label style="font-size:12px;color:var(--slate)">To<br><input type="date" id="compDateTo" class="inp" style="margin-top:4px"></label>'
+      +'<div><div style="font-size:12px;color:var(--slate);margin-bottom:6px">Status</div>'
+        +'<div style="display:flex;gap:10px">'
+          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="all" checked> Both</label>'
+          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="active"> Active</label>'
+          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="inactive"> Inactive</label>'
+        +'</div>'
+      +'</div>'
+      +'<button class="btn btn-primary" id="compSyncSelectedBtn" onclick="compSyncSelected()"><i class="fa-solid fa-rotate"></i> Sync Selected</button>'
+    +'</div>'
+  +'</div>';
+}
 async function compRender(){
   const host=$('compBody'); if(!host)return;
   let wl=[],ads=[];
   try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('created_at',{ascending:false}); wl=data||[]; }catch(e){}
   try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('last_seen_at',{ascending:false}).limit(500); ads=data||[]; }catch(e){}
+  window._compAdsAll=ads;
+  const tb=$('compToolbar'); if(tb)tb.innerHTML=compToolbarHtml(wl);
   if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
   host.innerHTML=wl.map(function(w){
     const wads=ads.filter(function(a){return a.watchlist_id===w.id;});
@@ -8465,25 +8497,60 @@ async function compRender(){
         +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
       +'</div>'
       +(wads.length
-        ?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">'+wads.slice(0,24).map(compAdCard).join('')+'</div>'
+        ?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'+wads.slice(0,24).map(compAdCard).join('')+'</div>'
         :'<div class="empty" style="padding:20px"><i class="fa-regular fa-clock"></i><div>Not synced yet — click Sync</div></div>')
       +'</div>';
   }).join('');
+  compHydrateThumbs();
+}
+function compFirstMedia(a){
+  if(Array.isArray(a.media_items)&&a.media_items.length)return a.media_items[0];
+  if(a.media_s3_path)return {s3_path:a.media_s3_path,media_type:a.media_type||'image'};
+  return null;
+}
+function compPlatformIcons(a){
+  const list=Array.isArray(a.publisher_platforms)?a.publisher_platforms:[];
+  if(!list.length)return '';
+  return list.map(function(p){
+    const icon=COMP_PLATFORM_ICON[p];
+    return icon?'<i class="fa-brands '+icon+'" title="'+esc(p)+'" style="color:var(--slate);font-size:12px"></i>':'<i class="fa-solid fa-share-nodes" title="'+esc(p)+'" style="color:var(--slate);font-size:12px"></i>';
+  }).join(' ');
 }
 function compAdCard(a){
   const stillRunning=!a.ad_delivery_stop_time;
   const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
   const bodyText=bodies.length?String(bodies[0]).slice(0,140):'(no ad text)';
-  const platforms=(Array.isArray(a.publisher_platforms)?a.publisher_platforms:[]).join(', ')||'—';
-  const thumb=a.media_s3_path
-    ?'<div style="height:120px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);cursor:pointer" onclick="s3OpenSigned(\''+esc(a.media_s3_path)+'\')"><i class="fa-regular fa-image" style="font-size:20px"></i></div>'
-    :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" style="height:120px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
-  return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px">'
+  const media=compFirstMedia(a);
+  const thumb=media
+    ?'<div class="comp-thumb" data-key="'+esc(media.s3_path)+'" data-type="'+esc(media.media_type)+'" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+    :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
+  return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer" onclick="compOpenDetail(\''+esc(a.id)+'\')">'
     +thumb
-    +'<div style="font-size:12.5px;margin:8px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
-    +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+' · '+esc(platforms)+'</div>'
-    +'<div style="font-size:11px;color:var(--slate);margin-top:4px">'+(stillRunning?'<span style="color:#16a34a;font-weight:600">Still running</span>':'Ended '+fmtDate(a.ad_delivery_stop_time))+' · since '+fmtDate(a.ad_delivery_start_time)+'</div>'
+    +'<div style="display:flex;align-items:center;gap:6px;margin-top:8px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
+    +'<div style="font-size:12.5px;margin:6px 0 4px;line-height:1.4;max-height:56px;overflow:hidden">'+esc(bodyText)+'</div>'
+    +(a.cta_text?'<div style="margin:4px 0"><span class="tag t-blue">'+esc(a.cta_text)+'</span></div>':'')
+    +'<div style="font-size:11px;color:var(--slate)">'+esc(a.page_name||'')+'</div>'
+    +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Running since '+fmtDate(a.ad_delivery_start_time)+'</div>'
+    +'<div style="font-size:10.5px;color:var(--slate);margin-top:4px;opacity:.7">ID '+esc(a.id)+'</div>'
   +'</div>';
+}
+async function compSignedUrl(key){
+  if(window._compSignCache[key])return window._compSignCache[key];
+  const {data,error}=await s3Sign('get',key.slice(3));
+  if(error||!data)return null;
+  window._compSignCache[key]=data.url;
+  return data.url;
+}
+async function compHydrateThumbs(){
+  const els=Array.from(document.querySelectorAll('.comp-thumb[data-key]'));
+  await Promise.all(els.map(async function(el){
+    const key=el.getAttribute('data-key'),type=el.getAttribute('data-type');
+    const url=await compSignedUrl(key);
+    if(!url||!el.isConnected)return;
+    el.innerHTML=type==='video'
+      ?'<video src="'+url+'" preload="metadata" muted style="width:100%;height:100%;object-fit:cover"></video>'
+      :'<img src="'+url+'" style="width:100%;height:100%;object-fit:cover">';
+  }));
 }
 window.compAddModal=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Competitor</h3><span class="x" onclick="closeModal()">&times;</span></div>'
@@ -8510,35 +8577,96 @@ window.compRemove=async function(id){
   toast('Removed','ok');
   await compRender();
 };
-window.compSync=async function(id,btn){
-  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+async function compRunSync(payload,btn,busyLabel,idleLabel){
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'');}
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({watchlist_id:id})});
+      body:JSON.stringify(payload)});
     const jr=await res.json().catch(function(){return {};});
-    if(jr.error){toast(jr.error,'err');}
-    else toast('Synced — '+(jr.newAds||0)+' new ad(s)','ok');
-  }catch(e){toast('Sync failed','err');}
-  await compRender();
-};
-window.compSyncAll=async function(){
-  const btn=$('compSyncAllBtn');
-  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Syncing…';}
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({})});
-    const jr=await res.json().catch(function(){return {};});
-    if(jr.error){toast(jr.error,'err');}
+    if(jr.error)toast(jr.error,'err');
+    else if(jr.skipped)toast(jr.message||'Sync skipped','err');
     else toast('Synced — '+(jr.newAds||0)+' new ad(s) across '+(jr.synced||0)+' total','ok');
   }catch(e){toast('Sync failed','err');}
-  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> Sync All';}
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
   await compRender();
+}
+window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); };
+window.compSyncAll=function(){ compRunSync({},$('compSyncAllBtn'),'Syncing…','Sync All'); };
+window.compSyncSelected=function(){
+  const ids=Array.from(document.querySelectorAll('.comp-sync-cb:checked')).map(function(cb){return Number(cb.value);});
+  if(!ids.length){toast('Select at least one competitor','err');return;}
+  const dateFrom=($('compDateFrom')&&$('compDateFrom').value)||undefined;
+  const dateTo=($('compDateTo')&&$('compDateTo').value)||undefined;
+  const activeStatusEl=document.querySelector('input[name="compActiveStatus"]:checked');
+  compRunSync({watchlist_ids:ids,active_status:activeStatusEl?activeStatusEl.value:'all',date_from:dateFrom,date_to:dateTo},$('compSyncSelectedBtn'),'Syncing…','Sync Selected');
+};
+window.compOpenDetail=function(id){
+  const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
+  if(!a){toast('Ad not found — try refreshing','err');return;}
+  window._compDetailAd=a;
+  window._compDetailIdx=0;
+  openModal(compDetailHtml(a),'lg');
+  compRenderDetailMedia();
+};
+function compDetailHtml(a){
+  const stillRunning=!a.ad_delivery_stop_time;
+  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
+  const bodyText=bodies.length?String(bodies[0]):'(no ad text)';
+  const extraLinks=Array.isArray(a.extra_links)?a.extra_links:[];
+  const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
+  return '<div class="modal-head"><h3><i class="fa-solid fa-magnifying-glass-chart"></i> '+esc(a.page_name||'Ad detail')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="display:flex;gap:18px;flex-wrap:wrap">'
+      +'<div style="flex:1 1 320px;min-width:280px">'
+        +'<div id="compDetailMedia" style="height:320px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+        +(media.length>1
+          ?'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">'
+            +'<button class="btn btn-sm" onclick="compDetailNav(-1)"><i class="fa-solid fa-chevron-left"></i></button>'
+            +'<span id="compDetailMediaCount" style="font-size:12px;color:var(--slate)">1 / '+media.length+'</span>'
+            +'<button class="btn btn-sm" onclick="compDetailNav(1)"><i class="fa-solid fa-chevron-right"></i></button>'
+          +'</div>'
+          :'')
+      +'</div>'
+      +'<div style="flex:1 1 280px;min-width:260px">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
+        +(a.cta_text?'<div style="margin-bottom:10px">'+(a.redirect_url?'<a href="'+esc(a.redirect_url)+'" target="_blank" rel="noopener" class="btn btn-primary btn-sm">'+esc(a.cta_text)+' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>':'<span class="tag t-blue">'+esc(a.cta_text)+'</span>')+'</div>':'')
+        +'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
+        +(extraLinks.length
+          ?'<div style="margin-top:12px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:4px">Extra links</div>'
+            +extraLinks.map(function(l){const u=l&&(l.url||l);return u?'<div style="margin-bottom:3px"><a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(u)+'</a></div>':'';}).join('')
+          +'</div>'
+          :'')
+        +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--slate);display:flex;flex-direction:column;gap:4px">'
+          +'<div>Running since '+fmtDate(a.ad_delivery_start_time)+(stillRunning?'':' · ended '+fmtDate(a.ad_delivery_stop_time))+'</div>'
+          +'<div>Last seen '+fmtDate(a.last_seen_at)+'</div>'
+          +'<div>Library ID '+esc(a.id)+'</div>'
+          +(a.ad_snapshot_url?'<div><a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener">View on Facebook Ad Library →</a></div>':'')
+        +'</div>'
+      +'</div>'
+    +'</div>';
+}
+async function compRenderDetailMedia(){
+  const a=window._compDetailAd; if(!a)return;
+  const host=$('compDetailMedia'); if(!host)return;
+  const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
+  const item=media[window._compDetailIdx||0];
+  if(!item){ host.innerHTML='<i class="fa-regular fa-image" style="font-size:28px"></i>'; return; }
+  const url=await compSignedUrl(item.s3_path);
+  if(!host.isConnected)return;
+  if(!url){ host.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i>'; return; }
+  host.innerHTML=item.media_type==='video'
+    ?'<video src="'+url+'" controls style="max-width:100%;max-height:100%"></video>'
+    :'<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+}
+window.compDetailNav=function(delta){
+  const a=window._compDetailAd; if(!a)return;
+  const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
+  if(!media.length)return;
+  window._compDetailIdx=((window._compDetailIdx||0)+delta+media.length)%media.length;
+  const counter=$('compDetailMediaCount'); if(counter)counter.textContent=(window._compDetailIdx+1)+' / '+media.length;
+  compRenderDetailMedia();
 };
 
 
