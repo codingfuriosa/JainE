@@ -808,7 +808,18 @@
   // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
   function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'.'+h; }
   function wfCircles(emails,extra){ emails=(emails||[]).filter(Boolean); const max=5, shown=emails.slice(0,max); let h='<span class="wf-circles '+(extra||'')+'">'; shown.forEach(function(e){ h+='<span class="wf-circle" title="'+esc2(wfNm(e))+'" style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; }); if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>'; h+='</span>'; return emails.length?h:'<span class="wf-circle wf-none" title="No members yet">·</span>'; }
-  function wfCanSee(f,ownersByFlow){ const o=(ownersByFlow&&ownersByFlow[f.id])||[]; return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());}); }
+  // My own department(s), from the same people() list already loaded for the person-picker.
+  function wfMyDepts(){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,me());}); return (p&&Array.isArray(p.depts))?p.depts:[]; }
+  function wfInDept(dept){ return wfMyDepts().some(function(d){return eq(d,dept);}); }
+  function wfCanSee(f,ownersByFlow){
+    const o=(ownersByFlow&&ownersByFlow[f.id])||[];
+    return eq(f.created_by||'',me()) || eq(f.trigger_owner||'',me()) || o.some(function(e){return eq(e,me());})
+      // A flow can be opened up to a whole department (e.g. Invoice Processing -> Systems) instead
+      // of just its creator/trigger-owner/step-owners — mirrors the backend's own
+      // acc.wf_can_see_flow RLS check, which is the real enforcement; this is just the matching
+      // client-side filter so the list doesn't have to round-trip a denied row.
+      || (f.visible_department && wfInDept(f.visible_department));
+  }
   function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
 
@@ -840,8 +851,12 @@
         +'<div class="wf-lrow-right">'+wfCircles(owners)+'<span class="wf-lrow-steps">'+n+' step'+(n===1?'':'s')+'</span><i class="fa-solid fa-chevron-right wf-go"></i></div>'
       +'</div>';
     }).join('');
-    const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet — create your first one with the button above.</div>';
-    b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div><button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button></div>'
+    const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet.</div>';
+    // Creating a brand-new workflow (not just viewing one) is restricted to the Systems
+    // department — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which
+    // is the real enforcement; this is just the matching client-side button visibility.
+    const canCreate=wfInDept('Systems');
+    b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div>'+(canCreate?'<button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button>':'')+'</div>'
       +inner;
   }
 
