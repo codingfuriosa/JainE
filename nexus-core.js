@@ -1583,14 +1583,16 @@ window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 /* Hearing-date window. Filters the table by Next Date and is what the causelist export
    uses — the export refuses to run on "All dates", since a causelist is by definition
    for a period. */
+// [value, label, icon] — a native <select> can't carry icons, so this feeds a custom menu.
 const MIS_RANGES=[
-  ['all','All dates'],
-  ['this_month','This Month'],
-  ['next_month','Next Month'],
-  ['next_week','Next Week'],
-  ['next_30','Next 30 Days'],
-  ['custom','Custom']
+  ['all','All dates','fa-infinity'],
+  ['this_month','This Month','fa-calendar-day'],
+  ['next_month','Next Month','fa-calendar-plus'],
+  ['next_week','Next Week','fa-calendar-week'],
+  ['next_30','Next 30 Days','fa-calendar-days'],
+  ['custom','Custom','fa-sliders']
 ];
+function misRangeDef(v){ return MIS_RANGES.filter(function(r){return r[0]===(v||MIS_RANGE);})[0]||MIS_RANGES[0]; }
 let MIS_RANGE='all', MIS_FROM='', MIS_TO='';
 function misDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function misAddDays(d,n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
@@ -1617,6 +1619,20 @@ window.misSetRange=function(v){
   if(v==='custom'&&(!MIS_FROM||!MIS_TO)){ const t=new Date(); MIS_FROM=misDay(t); MIS_TO=misDay(misAddDays(t,30)); }
   legalMIS();
 };
+// Custom date-range menu. Replaces the plain <select> so each period can carry its own icon and
+// the active one can be ticked — neither is possible inside a native dropdown.
+window.misRangeToggle=function(){
+  const w=$('misRangeMenu'); if(!w) return;
+  w.classList.toggle('open');
+  if(w.classList.contains('open') && !window._misRangeWired){
+    window._misRangeWired=true;
+    document.addEventListener('click',function(e){
+      const m=$('misRangeMenu');
+      if(m && !m.contains(e.target)) m.classList.remove('open');
+    });
+  }
+};
+window.misRangePick=function(v){ const m=$('misRangeMenu'); if(m)m.classList.remove('open'); misSetRange(v); };
 // A row's hearing date, preferring the sortable copy and falling back to parsing the text.
 function misRowIso(r){
   if(r.next_date_iso) return String(r.next_date_iso).slice(0,10);
@@ -1869,9 +1885,20 @@ async function legalMIS(){
   const misOrdered=misPinned.concat(misRest);
   body.innerHTML=`
     <style>
-      .mis-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+      .mis-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
       .mis-toolbar .mis-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
       .mis-toolbar .mis-filters{display:flex;gap:8px;align-items:center;margin-left:auto;flex:1 1 260px;flex-wrap:wrap;min-width:0}
+      /* Every control in this strip is the same height and shape, so the row reads as one piece
+         instead of buttons of assorted sizes sitting next to each other. */
+      .mis-toolbar .btn{height:36px;padding:0 13px;display:inline-flex;align-items:center;gap:7px;
+        border-radius:9px;font-size:13px;font-weight:600;line-height:1;white-space:nowrap;border:1px solid var(--line);
+        background:var(--bg-card);color:var(--ink);cursor:pointer;transition:background .12s,border-color .12s,box-shadow .12s}
+      .mis-toolbar .btn i{font-size:12px}
+      .mis-toolbar .btn:not(:disabled):hover{background:var(--bg-subtle,#f8fafc);border-color:var(--slate)}
+      .mis-toolbar .btn:disabled{cursor:not-allowed}
+      .mis-toolbar .btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
+      .mis-toolbar .btn-primary:not(:disabled):hover{filter:brightness(1.08);border-color:var(--brand)}
+      .mis-toolbar .btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--brand-a10)}
       .mis-search-wrap{position:relative;display:flex;align-items:center;flex:1;min-width:0}
       .mis-search-wrap i{position:absolute;left:10px;color:var(--slate);font-size:13px;pointer-events:none}
       .mis-search-wrap input{padding-left:30px;height:36px;width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink)}
@@ -1910,6 +1937,30 @@ async function legalMIS(){
       .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink);min-width:0;flex:1 1 132px}
       .mis-range input[type=date]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
       .mis-range .to{font-size:12px;color:var(--slate);flex:none}
+      /* date-range picker (custom, so each period can carry an icon) */
+      .mis-rangemenu{position:relative;flex:0 0 auto}
+      .mis-range-btn{height:36px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--line);
+        border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;font-family:inherit;
+        cursor:pointer;white-space:nowrap;transition:border-color .12s,box-shadow .12s}
+      .mis-range-btn:hover{border-color:var(--slate)}
+      .mis-range-btn:focus-visible{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      .mis-range-btn > i:first-child{color:var(--brand);font-size:12.5px}
+      .mis-range-txt{min-width:88px;text-align:left}
+      .mis-range-caret{font-size:9px;color:var(--slate);transition:transform .15s}
+      .mis-rangemenu.open .mis-range-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      .mis-rangemenu.open .mis-range-caret{transform:rotate(180deg)}
+      .mis-range-list{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:210px;z-index:80;
+        background:var(--bg-card);border:1px solid var(--line);border-radius:11px;padding:6px;
+        box-shadow:0 14px 34px rgba(15,23,42,.18)}
+      .mis-rangemenu.open .mis-range-list{display:block}
+      .mis-range-opt{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;border-radius:8px;
+        background:transparent;color:var(--ink);font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;text-align:left}
+      .mis-range-opt:hover{background:var(--bg-subtle,#f8fafc)}
+      .mis-range-oi{width:15px;text-align:center;color:var(--slate);font-size:12.5px}
+      .mis-range-tick{margin-left:auto;font-size:11px;color:var(--brand);opacity:0}
+      .mis-range-opt.on{color:var(--brand);font-weight:700;background:var(--brand-a10,#eef2ff)}
+      .mis-range-opt.on .mis-range-oi{color:var(--brand)}
+      .mis-range-opt.on .mis-range-tick{opacity:1}
       select.mis-sel{appearance:none;-webkit-appearance:none;padding-right:30px;font-weight:600;
         background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
         background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
@@ -1929,6 +1980,10 @@ async function legalMIS(){
         .mis-toolbar .mis-actions .btn:first-child{grid-column:1/-1}
         .mis-count{grid-column:1/-1;text-align:center}
         .mis-filters select.mis-sel{flex:1 1 100%;min-width:0}
+        .mis-rangemenu{flex:1 1 100%}
+        .mis-range-btn{width:100%;justify-content:flex-start}
+        .mis-range-caret{margin-left:auto}
+        .mis-range-list{left:0;right:0;min-width:0}
         .mis-filters .mis-search-wrap,.mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
         .mis-filters .btn{flex:1 1 100%;justify-content:center}
         .mis-range{flex:1 1 100%;flex-wrap:nowrap}
@@ -1958,6 +2013,9 @@ async function legalMIS(){
         .mis-search-wrap{width:100%}
         .mis-search-wrap input{min-width:0;width:100%}
         select.mis-sel{min-width:0;width:100%}
+        .mis-rangemenu{width:100%}
+        .mis-range-btn{width:100%;justify-content:flex-start}
+        .mis-range-caret{margin-left:auto}
         #misTbl{min-width:1500px;font-size:12.5px}
         #misTbl thead th,#misTbl tbody td{padding:9px 8px}
       }
@@ -1970,9 +2028,19 @@ async function legalMIS(){
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
-        <select class="mis-sel" id="misRangeSel" onchange="misSetRange(this.value)">
-          ${MIS_RANGES.map(r=>`<option value="${r[0]}"${MIS_RANGE===r[0]?' selected':''}>${esc(r[1])}</option>`).join('')}
-        </select>
+        <div class="mis-rangemenu" id="misRangeMenu">
+          <button type="button" class="mis-range-btn" onclick="misRangeToggle()">
+            <i class="fa-solid ${misRangeDef()[2]}"></i>
+            <span class="mis-range-txt">${esc(misRangeDef()[1])}</span>
+            <i class="fa-solid fa-chevron-down mis-range-caret"></i>
+          </button>
+          <div class="mis-range-list">
+            ${MIS_RANGES.map(r=>`<button type="button" class="mis-range-opt${MIS_RANGE===r[0]?' on':''}" onclick="misRangePick('${r[0]}')">
+              <i class="fa-solid ${r[2]} mis-range-oi"></i><span>${esc(r[1])}</span>
+              <i class="fa-solid fa-check mis-range-tick"></i>
+            </button>`).join('')}
+          </div>
+        </div>
         <span class="mis-range" id="misRangeCustom" style="display:${MIS_RANGE==='custom'?'flex':'none'}">
           <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misFilter()">
           <span class="to">to</span>
@@ -2077,7 +2145,8 @@ window.misExportCauselist=function(){
     toast(MIS_RANGE==='custom'
       ? 'Pick both a From and a To date before exporting the causelist'
       : 'Choose a date range first — a causelist has to cover a period','warn');
-    const sel=$('misRangeSel'); if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
+    const sel=document.querySelector('#misRangeMenu .mis-range-btn');
+    if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
     return;
   }
@@ -2103,32 +2172,42 @@ window.misExportCauselist=function(){
   const cell=function(v){ return esc(String(v==null?'':v).trim()).replace(/\n/g,'<br>'); };
 
   const html='<!doctype html><html><head><meta charset="utf-8"><title>CAUSTLIST</title>'
+   // Portrait A4 with a comfortable margin. Nine columns on a portrait page only work if the
+   // narrow ones are pinned tight and the wide text columns are allowed to wrap, so the widths
+   // below are deliberate rather than even.
    +'<style>'
-   +'@page{size:A4 landscape;margin:10mm}'
+   +'@page{size:A4 portrait;margin:14mm 12mm}'
    +'*{box-sizing:border-box}'
-   +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:9px}'
-   +'.pghead{display:flex;justify-content:space-between;font-size:9px;color:#000;margin-bottom:2px}'
-   +'.pgmeta{font-size:9px;color:#000;margin-bottom:10px}'
-   +'h1{font-size:11px;font-weight:700;margin:0 0 8px;text-align:center}'
+   +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:8px;line-height:1.3}'
+   +'.sheet{max-width:186mm;margin:0 auto;padding:8mm 0}'
+   +'.pghead{display:flex;justify-content:space-between;font-size:8.5px;color:#000;'
+     +'padding-bottom:3px;border-bottom:.5px solid #000;margin-bottom:5px}'
+   +'.pgmeta{font-size:8px;color:#000}'
+   +'.pgmeta.stamp{margin-bottom:12px}'
+   +'h1{font-size:13px;font-weight:700;margin:0 0 10px;text-align:center;letter-spacing:.06em}'
    +'table{width:100%;border-collapse:collapse;table-layout:fixed}'
-   +'th,td{border:1px solid #000;padding:3px 4px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere;line-height:1.25}'
-   +'th{font-weight:700;text-align:center;font-size:9px}'
+   +'th,td{border:.5px solid #000;padding:4px 4px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere;line-height:1.3}'
+   +'th{font-weight:700;text-align:center;font-size:8px;background:#ececec;letter-spacing:.02em}'
+   +'tbody tr:nth-child(even){background:#f7f7f7}'
    +'tr{page-break-inside:avoid}'
    +'thead{display:table-header-group}'
    +'td.sl{text-align:center}'
    +'td.dt{white-space:nowrap;text-align:center}'
-   +'@media print{.noprint{display:none}}'
+   +'@media print{.noprint{display:none}.sheet{max-width:none;padding:0}}'
+   +'@media screen{body{background:#525659;padding:18px 0}'
+     +'.sheet{background:#fff;width:210mm;max-width:96vw;padding:14mm 12mm;box-shadow:0 4px 22px rgba(0,0,0,.4)}}'
    +'</style></head><body>'
+   +'<div class="sheet">'
    +'<div class="noprint" style="margin-bottom:10px">'
    +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
    +'</div>'
    +'<div class="pghead"><span>CAUSTLIST</span><span>'+esc(tabName)+'</span></div>'
    +'<div class="pgmeta">1</div>'
-   +'<div class="pgmeta">'+esc(stamp)+'</div>'
+   +'<div class="pgmeta stamp">'+esc(stamp)+'</div>'
    +'<h1>'+esc(monthName)+' CAUSTLIST</h1>'
    +'<table><colgroup>'
-   +'<col style="width:34px"><col style="width:9%"><col style="width:22%"><col style="width:12%">'
-   +'<col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:14%">'
+   +'<col style="width:5%"><col style="width:9%"><col style="width:21%"><col style="width:11%">'
+   +'<col style="width:8%"><col style="width:11%"><col style="width:11%"><col style="width:12%"><col style="width:12%">'
    +'</colgroup><thead><tr>'
    +'<th>SL NO.</th><th>CASE TYPE</th><th>CASE DETAILS</th><th>CASE NO.</th><th>DATE</th>'
    +'<th>Advocate incharge</th><th>Court Name</th><th>STATUS</th><th>ACTION NEEDED</th>'
@@ -2145,12 +2224,19 @@ window.misExportCauselist=function(){
         +'<td>'+cell(r.action_needed)+'</td></tr>';
     }).join('')
    +'</tbody></table>'
-   +'</body></html>';
+   +'</div></body></html>';
 
-  const w=window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to export the causelist','err'); return; }
-  w.document.write(html); w.document.close();
-  toast('Causelist ready — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+  // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
+  // laid out exactly as here, with a Print / Save as PDF button on it.
+  const name='CAUSTLIST - '+tabName+'.html';
+  try{
+    const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
+    const a=document.createElement('a');
+    a.href=url; a.download=name; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1500);
+  }catch(e){ toast('Could not export the causelist: '+((e&&e.message)||e),'err'); return; }
+  toast('Causelist exported — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
 };
 
 window.misRowCheck=function(cb){
