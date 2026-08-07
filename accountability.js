@@ -271,6 +271,10 @@
     .gcal-mnum{font-size:12.5px;font-weight:600;color:#1f2937;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex:none}
     .gcal-mevents{display:flex;flex-direction:column;gap:3px;overflow:hidden}
     .gcal-mev{font-size:11px;padding:2px 6px;border-radius:5px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;font-weight:600;max-width:100%;min-width:0}
+    .gcal-mev[data-task]{cursor:grab;position:relative;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    .gcal-mev[data-task]::before{content:'';position:absolute;top:-6px;left:-6px;right:-6px;bottom:-6px}
+    .gcal-mev.gcal-dragging{opacity:.35;cursor:grabbing}
+    .gcal-mev.gcal-armed{outline:2px solid rgba(37,99,235,.55);outline-offset:1px}
     .gcal-mcell.gcal-drop-hover,.gcal-allday-col.gcal-drop-hover{outline:2px dashed #2563eb;outline-offset:-2px;background:rgba(37,99,235,.08)}
     .gcal-wrap{display:flex;flex-direction:column;max-height:66vh;overflow:auto}
     .gcal-allday{display:flex;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
@@ -1006,6 +1010,7 @@
       +'</div>'
       +'<div class="wf-step-fields">'
         +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
+        +'<input class="ac-in wf-s-desc" placeholder="Description (optional)" value="'+esc2(step.description||'')+'">'
         +'<div class="wf-step-sub">'
           +wfPersonPickerHtml(step.owner_email)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
@@ -1126,6 +1131,7 @@
     const steps=[]; let bad='';
     rows.forEach(function(r,i){
       const t=((r.querySelector('.wf-s-title')||{}).value||'').trim();
+      const desc=((r.querySelector('.wf-s-desc')||{}).value||'').trim();
       const person=(r.querySelector('.wf-s-person')||{}).value||'';
       const durRaw=(r.querySelector('.wf-s-dur')||{}).value;
       const unit=(r.querySelector('.wf-s-unit')||{}).value||'days';
@@ -1135,7 +1141,7 @@
         else if(!person) bad='Step '+(i+1)+': assign a person.';
         else if(!(dur>=1)) bad='Step '+(i+1)+': set a duration.';
       }
-      steps.push({seq:steps.length+1,title:t,description:null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
+      steps.push({seq:steps.length+1,title:t,description:desc||null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
@@ -1922,7 +1928,7 @@
     .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
     .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
     /* Roughly five messages tall, then it scrolls — the card never keeps growing. */
-    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;margin-bottom:12px;padding-right:4px}
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;margin-bottom:12px;padding-right:4px}
     .wf-upd{display:flex;gap:10px;align-items:flex-start}
     .wf-upd.me{flex-direction:row-reverse}
     .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
@@ -1943,7 +1949,7 @@
     .wf-reject-acts{display:flex;gap:7px;flex:none}
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
-    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;padding-right:4px}
+    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
     /* thin, unobtrusive scrollbars on the message lists */
     .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
     .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}

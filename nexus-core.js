@@ -242,6 +242,9 @@ const NAV=[
     {id:'whatsapp',label:'WhatsApp Bot',icon:'fa-comment-dots'},
     {id:'mail',label:"Naren's Mail",icon:'fa-envelope'},
   ]},
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+  ]},
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
