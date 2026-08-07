@@ -9363,15 +9363,30 @@ async function compSignedUrl(key){
   window._compSignCache[key]=data.url;
   return data.url;
 }
+/* Nearly every competitor ad is an .mp4, and a <video> with no poster paints nothing until it is
+   played — which is why the tiles looked empty. Appending #t=0.1 makes the browser seek to the
+   first tenth of a second and render THAT frame, giving a still to look at. muted + playsinline
+   are required for it to behave on iOS. A failure now shows a message instead of a dead box. */
 async function compHydrateThumbs(){
   const els=Array.from(document.querySelectorAll('.comp-thumb[data-key]'));
   await Promise.all(els.map(async function(el){
     const key=el.getAttribute('data-key'),type=el.getAttribute('data-type');
-    const url=await compSignedUrl(key);
-    if(!url||!el.isConnected)return;
-    el.innerHTML=type==='video'
-      ?'<video src="'+url+'" preload="metadata" muted style="width:100%;height:100%;object-fit:cover"></video>'
-      :'<img src="'+url+'" style="width:100%;height:100%;object-fit:cover">';
+    let url=null;
+    try{ url=await compSignedUrl(key); }catch(_e){}
+    if(!el.isConnected)return;
+    if(!url){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>'; return; }
+    if(type==='video'){
+      el.innerHTML='<video src="'+esc(url)+'#t=0.1" preload="metadata" muted playsinline'
+        +' style="width:100%;height:100%;object-fit:cover;background:#000"></video>'
+        +'<span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.6);color:#fff;'
+        +'border-radius:5px;padding:1px 5px;font-size:10px"><i class="fa-solid fa-play"></i></span>';
+      el.style.position='relative';
+      const v=el.querySelector('video');
+      if(v) v.onerror=function(){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Video unavailable</div>'; };
+    } else {
+      el.innerHTML='<img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover" '
+        +'onerror="this.parentNode.innerHTML=\'<div style=&quot;font-size:11px;padding:8px&quot;>Image unavailable</div>\'">';
+    }
   }));
 }
 /* A keyword search returns anything that merely MENTIONS the competitor - a broker's ad, a news
@@ -9497,23 +9512,49 @@ function compDetailHtml(a){
           +'</div>'
           :'')
       +'</div>'
-      +'<div style="flex:1 1 280px;min-width:260px">'
-        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
-        +(a.cta_text?'<div style="margin-bottom:10px">'+(a.redirect_url?'<a href="'+esc(a.redirect_url)+'" target="_blank" rel="noopener" class="btn btn-primary btn-sm">'+esc(a.cta_text)+' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>':'<span class="tag t-blue">'+esc(a.cta_text)+'</span>')+'</div>':'')
-        +'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
+      // Right-hand column, in the order asked for: dates first (they are what people compare
+      // between ads), then the copy, then the links and the actions.
+      +'<div style="flex:1 1 300px;min-width:270px">'
+        +'<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:14px">'
+          +compDetailRow('Running since', fmtDate(a.ad_delivery_start_time))
+          +compDetailRow('Last seen', fmtDate(a.last_seen_at))
+          +compDetailRow(stillRunning?'Running for':'Ran for', compRunLength(a))
+          +compDetailRow('Library ID', '<span style="font-family:ui-monospace,Menlo,monospace">'+esc(a.id)+'</span>')
+        +'</table>'
+        +'<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Description</div>'
+        +'<div style="font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:230px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
         +(extraLinks.length
-          ?'<div style="margin-top:12px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:4px">Extra links</div>'
-            +extraLinks.map(function(l){const u=l&&(l.url||l);return u?'<div style="margin-bottom:3px"><a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(u)+'</a></div>':'';}).join('')
+          ?'<div style="margin-top:14px"><div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Extra links</div>'
+            +extraLinks.map(function(l){const u=l&&(l.url||l);
+              return u?'<div style="margin-bottom:4px"><a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-size:12px;word-break:break-all">'+esc(u)+'</a></div>':'';}).join('')
           +'</div>'
           :'')
-        +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--slate);display:flex;flex-direction:column;gap:4px">'
-          +'<div>Running since '+fmtDate(a.ad_delivery_start_time)+(stillRunning?'':' · ended '+fmtDate(a.ad_delivery_stop_time))+'</div>'
-          +'<div>Last seen '+fmtDate(a.last_seen_at)+'</div>'
-          +'<div>Library ID '+esc(a.id)+'</div>'
-          +(a.ad_snapshot_url?'<div><a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener">View on Facebook Ad Library →</a></div>':'')
+        +'<div style="margin-top:16px;padding-top:13px;border-top:1px solid var(--line);display:flex;gap:9px;flex-wrap:wrap;align-items:center">'
+          +(a.ad_snapshot_url?('<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" class="btn btn-sm"><i class="fa-brands fa-facebook"></i> View on Facebook Library</a>'):'')
+          +(a.cta_text?(a.redirect_url
+              ?('<a href="'+esc(a.redirect_url)+'" target="_blank" rel="noopener" class="btn btn-primary btn-sm">'+esc(a.cta_text)+' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>')
+              :('<span class="tag t-blue">'+esc(a.cta_text)+'</span>')):'')
+        +'</div>'
+        +'<div style="margin-top:11px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
+          +'<span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'
+          +compPlatformIcons(a)
         +'</div>'
       +'</div>'
     +'</div>';
+}
+function compDetailRow(k,v){
+  return '<tr><td style="padding:6px 0;color:var(--slate);width:112px;vertical-align:top;border-top:1px solid var(--line-2,#eef2f6)">'+esc(k)+'</td>'
+    +'<td style="padding:6px 0;color:var(--ink);font-weight:600;border-top:1px solid var(--line-2,#eef2f6)">'+v+'</td></tr>';
+}
+// How long the ad has been running: start to end, or start to today while it is still live.
+function compRunLength(a){
+  const s=a.ad_delivery_start_time?new Date(a.ad_delivery_start_time):null;
+  if(!s||isNaN(s)) return '—';
+  const e=a.ad_delivery_stop_time?new Date(a.ad_delivery_stop_time):new Date();
+  const days=Math.max(0,Math.round((e-s)/86400000));
+  const months=Math.floor(days/30), rem=days%30;
+  const txt=days<1?'less than a day':(days===1?'1 day':(months?(months+' month'+(months===1?'':'s')+(rem?' '+rem+' day'+(rem===1?'':'s'):'')):days+' days'));
+  return esc(txt)+(a.ad_delivery_stop_time?'':' <span style="font-weight:400;color:var(--slate)">and counting</span>');
 }
 async function compRenderDetailMedia(){
   const a=window._compDetailAd; if(!a)return;
@@ -9521,12 +9562,16 @@ async function compRenderDetailMedia(){
   const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
   const item=media[window._compDetailIdx||0];
   if(!item){ host.innerHTML='<i class="fa-regular fa-image" style="font-size:28px"></i>'; return; }
-  const url=await compSignedUrl(item.s3_path);
+  let url=null;
+  try{ url=await compSignedUrl(item.s3_path); }catch(_e){}
   if(!host.isConnected)return;
-  if(!url){ host.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i>'; return; }
+  if(!url){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; return; }
+  // #t=0.1 so a frame is shown straight away rather than a black rectangle before Play is pressed
   host.innerHTML=item.media_type==='video'
-    ?'<video src="'+url+'" controls style="max-width:100%;max-height:100%"></video>'
-    :'<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+    ?'<video src="'+esc(url)+'#t=0.1" controls preload="metadata" playsinline style="max-width:100%;max-height:100%;background:#000"></video>'
+    :'<img src="'+esc(url)+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+  const el=host.querySelector('video,img');
+  if(el) el.onerror=function(){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; };
 }
 window.compDetailNav=function(delta){
   const a=window._compDetailAd; if(!a)return;
