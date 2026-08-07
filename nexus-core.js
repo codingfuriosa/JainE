@@ -9199,19 +9199,82 @@ function compToolbarHtml(wl){
        :(COMP_F.media==='all'?', all media types':', '+esc((COMP_MEDIA.filter(function(s){return s[0]===COMP_F.media;})[0]||[])[1]||'').toLowerCase()))
     +'.'+(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so it searches by keyword — set one for their ads only.':'')+'</span></div>';
 }
+// The Ad Library address for a competitor, rebuilt from its Page ID rather than stored, so the
+// link can never drift out of step with what the sync actually asks Meta for.
+function compAdLibUrl(w){
+  if(w.page_id) return 'https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=IN'
+    +'&media_type=all&search_type=page&view_all_page_id='+encodeURIComponent(w.page_id);
+  return 'https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=IN'
+    +'&media_type=all&search_type=keyword_unordered&q='+encodeURIComponent(w.search_term||w.name||'');
+}
+/* Every competitor in one table: the page being tracked, its Ad Library link, and whether it is
+   pinned to a Page ID or still guessing by keyword. Shown when no single competitor is selected,
+   so the whole watchlist can be checked at a glance. */
+// The advertiser name Meta shows. Recorded on the watchlist where known; otherwise taken from the
+// competitor's own fetched ads, so it fills in by itself after the first sync.
+function compPageNameOf(w){
+  if(w.page_name) return w.page_name;
+  const a=(window._compAdsAll||[]).filter(function(x){return x.watchlist_id===w.id && x.page_name;})[0];
+  return a?a.page_name:'';
+}
+function compWlTableHtml(wl){
+  const ads=window._compAdsAll||[];
+  const rows=wl.map(function(w){
+    const n=ads.filter(function(a){return a.watchlist_id===w.id;}).length;
+    const pn=compPageNameOf(w);
+    const pinned=!!String(w.page_id||'').trim();
+    return '<tr>'
+      +'<td><b>'+esc(w.name)+'</b>'+(pn&&pn!==w.name?('<div style="font-size:11px;color:var(--slate)">'+esc(pn)+'</div>'):'')+'</td>'
+      +'<td>'+(pinned
+          ?('<span class="tag t-green" title="Only this page\'s own ads"><i class="fa-solid fa-thumbtack"></i> Page ID</span>'
+            +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">'+esc(w.page_id)+'</div>')
+          :('<span class="tag t-amber" title="May return ads by others that mention this name">Keyword</span>'
+            +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">"'+esc(w.search_term||w.name)+'"</div>'))
+      +'</td>'
+      +'<td style="text-align:center">'+n+'</td>'
+      +'<td>'+(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'<span style="color:var(--slate);font-size:12px">—</span>')+'</td>'
+      +'<td style="white-space:nowrap">'
+        +'<a class="btn btn-sm" href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener" title="Open in Meta Ad Library"><i class="fa-solid fa-arrow-up-right-from-square"></i></a> '
+        +'<button class="btn btn-sm" onclick="compSetFilter(\'wl\',\''+w.id+'\')" title="Show only this competitor"><i class="fa-solid fa-filter"></i></button> '
+        +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')" title="Edit"><i class="fa-solid fa-pen"></i></button> '
+        +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
+      +'</td>'
+    +'</tr>';
+  }).join('');
+  const keyword=wl.filter(function(w){return !String(w.page_id||'').trim();}).length;
+  return '<details class="card" id="compWlPanel" style="margin-bottom:14px" '+(keyword?'open':'')+'>'
+    +'<summary style="cursor:pointer;padding:13px 15px;font-weight:700;font-size:13.5px;list-style:none;display:flex;align-items:center;gap:9px">'
+      +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> Competitors <span class="tag t-gray">'+wl.length+'</span>'
+      +(keyword?'<span class="tag t-amber" title="These still search by keyword">'+keyword+' without a Page ID</span>':'<span class="tag t-green">all pinned to a Page ID</span>')
+      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate);font-weight:500">click to open / close</span>'
+    +'</summary>'
+    +'<div style="overflow-x:auto;border-top:1px solid var(--line)">'
+      +'<table class="tbl" style="width:100%;font-size:12.5px">'
+        +'<thead><tr><th>Competitor</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Facebook page</th><th>Actions</th></tr></thead>'
+        +'<tbody>'+rows+'</tbody>'
+      +'</table>'
+    +'</div>'
+  +'</details>';
+}
 // Header strip for a single selected competitor: what it targets, and the row's own controls.
 function compWlCardHtml(w){
   const ads=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;});
   const running=ads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
   return '<div class="card card-pad" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
     +'<div style="flex:1;min-width:0">'
-      +'<div style="font-weight:700;font-size:15px">'+esc(w.name)+'</div>'
+      +'<div style="font-weight:700;font-size:15px">'+esc(w.name)
+        +(function(){const pn=compPageNameOf(w);return (pn&&pn!==w.name)?(' <span style="font-weight:500;font-size:12.5px;color:var(--slate)">— '+esc(pn)+' on Facebook</span>'):'';})()+'</div>'
       +'<div style="color:var(--slate);font-size:12px">'
         +(w.page_id
           ?('<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Targets Page ID <b>'+esc(w.page_id)+'</b> — their own ads only')
           :('<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Keyword search: "'+esc(w.search_term)+'" — may catch anyone mentioning the name'))
         +' · '+ads.length+' ad(s) stored · '+running+' running</div>'
+      +'<div style="margin-top:5px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap">'
+        +'<a href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in Ad Library</a>'
+        +(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener"><i class="fa-brands fa-facebook"></i> '+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'')
+      +'</div>'
     +'</div>'
+    +'<button class="btn btn-sm" onclick="compSetFilter(\'wl\',\'all\')"><i class="fa-solid fa-arrow-left"></i> All</button>'
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> In auto-sync</label>'
     +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')"><i class="fa-solid fa-pen"></i> Edit</button>'
     +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
@@ -9237,7 +9300,7 @@ function compPaint(){
   if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
   const total=(window._compAdsAll||[]).length;
-  host.innerHTML=(cur?compWlCardHtml(cur):'')
+  host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
     +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
       +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
     +'</div>'
