@@ -139,7 +139,11 @@ async function boot(){
     const viaGoogle=!!(state.user&&state.user.app_metadata&&state.user.app_metadata.provider==='google');
     if(viaGoogle) await autoProvisionGoogleProfile();
   }
-  if(!state.super && !(state.profile&&state.profile.onboarded)){ renderOnboarding(); return; }
+  // A brand-new signup who hasn't finished onboarding yet still gets straight into the same
+  // baseline modules an onboarded-but-unassigned user already has (DEFAULT_MODULES) — dashboard,
+  // Accountability, Projects, Settings and Internet Speed — instead of being walled off behind
+  // the profile-setup screen for all of them.
+  if(!state.super && !(state.profile&&state.profile.onboarded) && !DEFAULT_MODULES.includes(PAGE)){ renderOnboarding(); return; }
   $('shell').style.display='block';
   renderPage();
   startSessionGuard();
@@ -241,9 +245,6 @@ const NAV=[
     {id:'supplier',label:'Supplier Portal',icon:'fa-truck'},
     {id:'whatsapp',label:'WhatsApp Bot',icon:'fa-comment-dots'},
     {id:'mail',label:"Naren's Mail",icon:'fa-envelope'},
-  ]},
-  {group:'IT & Support',items:[
-    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
   ]},
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
@@ -4267,17 +4268,33 @@ VIEWS.settings=async function(v){
   const nm=(state.profile&&state.profile.full_name)||state.email.split('@')[0];
   const roles=state.roles||{};
   const modRows=[['doc','Documents'],['acc','Accountability / Tasks'],['crm','CRM'],['hr','HR'],['projects','Projects'],['finance','Finance'],['kraya','Procurement'],['masters','Masters']];
+  const myModRows=modRows.filter(m=>roles[m[0]]);
+  const people=await getPeople();
+  // acc.user_profile.department is an array column (a person can belong to more than one dept) —
+  // not a plain string, so this needs an array membership check, not ===.
+  const rawDept=state.profile&&state.profile.department;
+  const deptArr=Array.isArray(rawDept)?rawDept:(rawDept?[rawDept]:[]);
+  const dept=deptArr.join(', ');
+  // Workspace/connection info: the administrator account (Super Admin) plus every user in the
+  // Systems department — nobody else.
+  const canSeeWorkspace=!!(state.super||deptArr.includes('Systems'));
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-gear" style="color:#475569"></i> Settings</h1><p>Your account, access and workspace preferences</p></div></div>
   <div class="grid grid-2">
     <div class="card card-pad"><div class="sec-title">Account</div>
       <div style="display:flex;align-items:center;gap:14px;margin-top:14px"><span class="avatar-sm" style="width:54px;height:54px;font-size:18px;background:${colorFor(state.email)}">${esc(initials(nm).toUpperCase())}</span><div><div style="font-weight:700;font-size:16px">${esc(nm)}</div><div style="color:var(--slate);font-size:13px">${esc(state.email)}</div>${state.super?'<span class="tag t-purple" style="margin-top:6px"><i class="fa-solid fa-shield-halved"></i> Super Admin</span>':''}</div></div>
-      <div style="margin-top:18px;display:flex;gap:10px"><button class="btn" onclick="navTo('tasks/profile')"><i class="fa-regular fa-user"></i> Edit profile</button></div>
+      <div class="frm" style="margin-top:18px">
+        <label>Full name</label><input id="obName" value="${esc(nm)}">
+        <label>Designation <span style="color:var(--slate);font-weight:400">(optional)</span></label><input id="obDesig" placeholder="e.g. Project Manager" value="${esc((state.profile&&state.profile.designation)||'')}">
+        <label>Department</label><input disabled value="${esc(dept)}" placeholder="Not assigned yet" style="background:#f1f5f9;color:var(--slate);cursor:not-allowed">
+        ${rmPickerHtml(people,(state.profile&&state.profile.reporting_manager)||'')}
+        <div style="margin-top:16px"><button class="btn btn-primary" onclick="setProfileSave()"><i class="fa-solid fa-check"></i> Save changes</button></div>
+      </div>
     </div>
     <div class="card card-pad"><div class="sec-title">Module Access</div><div class="sec-sub">Your role per module (set by an administrator)</div>
-      <table style="margin-top:6px"><tbody>${modRows.map(m=>`<tr><td style="font-weight:500">${m[1]}</td><td style="text-align:right">${roles[m[0]]?'<span class="tag t-green">'+esc(roles[m[0]])+'</span>':'<span class="tag t-gray">No access</span>'}</td></tr>`).join('')}</tbody></table>
+      ${myModRows.length?`<table style="margin-top:6px"><tbody>${myModRows.map(m=>`<tr><td style="font-weight:500">${m[1]}</td><td style="text-align:right"><span class="tag t-green">${esc(roles[m[0]])}</span></td></tr>`).join('')}</tbody></table>`:'<div style="color:var(--slate);font-size:13px;margin-top:12px">No module access assigned yet — ask an administrator.</div>'}
     </div>
   </div>
-  <div class="card card-pad" style="margin-top:16px"><div class="sec-title">Workspace</div><div class="sec-sub">Connection & system information</div>
+  ${canSeeWorkspace?`<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Workspace</div><div class="sec-sub">Connection & system information</div>
     <table style="margin-top:6px"><tbody>
       <tr><td style="color:var(--slate)">Organisation</td><td style="text-align:right"><b>Jain Group</b></td></tr>
       <tr><td style="color:var(--slate)">Database</td><td style="text-align:right"><b>Supabase · ap-south-1</b> <span class="tag t-green">Connected</span></td></tr>
@@ -4286,8 +4303,8 @@ VIEWS.settings=async function(v){
       <tr><td style="color:var(--slate)">Version</td><td style="text-align:right"><b>Nexus-RE v1.0</b></td></tr>
       <tr><td style="color:var(--slate)">This session</td><td style="text-align:right" id="sessInfo">…</td></tr>
     </tbody></table>
-  </div>`;
-  try{
+  </div>`:''}`;
+  if(canSeeWorkspace)try{
     const {data}=await sb.auth.getSession();
     const tok=data&&data.session&&data.session.access_token;
     const el=document.getElementById('sessInfo');
@@ -4296,6 +4313,14 @@ VIEWS.settings=async function(v){
       el.innerHTML='started <b>'+new Date(p.iat*1000).toLocaleTimeString()+'</b> · token …'+esc(tok.slice(-10));
     }
   }catch(e){}
+};
+window.setProfileSave=async function(){
+  const name=$('obName').value.trim();if(!name){toast('Enter your name','err');return;}
+  const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
+  const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
+  if(error){toast(error.message,'err');return;}
+  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;toast('Profile saved','ok');
+  VIEWS.settings($('view'));
 };
 
 
