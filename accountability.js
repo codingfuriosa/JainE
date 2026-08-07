@@ -804,7 +804,21 @@
   function wfDTFull(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
-  function wfCaseNo5(c){ return String((c&&c.case_no)||0).padStart(5,'0'); }
+  // How an instance's number reads on screen. The bill workflow pads to a 5-digit Id (00042),
+  // because that is how the bill register has always numbered them. Every ordinary workflow just
+  // shows a plain No. — 42, not 00042.
+  function wfCaseNoText(c){
+    const n=String((c&&c.case_no)||0);
+    return window._wfIsBill ? n.padStart(5,'0') : n;
+  }
+  // Is this the bill-style workflow (Invoice Processing)? Decided from the workflow's OWN detail
+  // fields — only that one carries a "Unique bill Id" — so nothing here is hard-wired to a
+  // particular workflow row. Everything gated on this stays off ordinary workflows, which keep
+  // the plain "No." column they have always had and never grow a Unique Bill Id column.
+  function wfIsBillFlow(flow){
+    const t=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    return t.some(function(f){ return f && eq((f.label||''),'Unique bill Id'); });
+  }
   // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
   function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'d '+h+'h'; }
   // 2+ people -> the whole group becomes hoverable (desktop) / tappable (mobile), showing the
@@ -943,7 +957,7 @@
   function wfCaseSummaryHtml(c){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
-    const items=[{k:'Id',v:wfCaseNo5(c)}];
+    const items=[{k:'Id',v:wfCaseNoText(c)}];
     WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     if(items.length<=1) return '';
     return '<div class="tp-grid" style="margin-top:10px">'+items.map(function(it){return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';}).join('')+'</div>';
@@ -1015,6 +1029,9 @@
             +'<option value="weeks"'+(unit==='weeks'?' selected':'')+'>Weeks</option>'
           +'</select>'
         +'</div>'
+        // "How" is the tracker's HOW row — the channel the step runs through (Google Form, ERP,
+        // physically, ...). Optional, so leaving it blank changes nothing.
+        +'<input class="ac-in wf-s-method" placeholder="How is it done? (optional — e.g. Google Form, ERP, Physically)" value="'+esc2(step.method||'')+'">'
       +'</div>'
     +'</div>';
   }
@@ -1047,6 +1064,7 @@
             +'<div class="wf-fld">'
               +'<label class="wf-lbl" for="wfTrigger">Triggering event '+tip('What starts this workflow.')+'</label>'
               +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
+              +'<input id="wfTrigMethod" class="ac-in" style="margin-top:8px" placeholder="How does it come in? (optional — e.g. Google Form, email, in person)" value="'+esc2(flow.trigger_method||'')+'">'
             +'</div>'
             +'<div class="wf-fld">'
               +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
@@ -1135,7 +1153,8 @@
         else if(!person) bad='Step '+(i+1)+': assign a person.';
         else if(!(dur>=1)) bad='Step '+(i+1)+': set a duration.';
       }
-      steps.push({seq:steps.length+1,title:t,description:null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit});
+      const method=((r.querySelector('.wf-s-method')||{}).value||'').trim();
+      steps.push({seq:steps.length+1,title:t,description:null,owner_email:person||null,duration_value:(!isNaN(dur)?dur:null),duration_unit:unit,method:method||null});
     });
     if(bad){ toast(bad,'warn'); return; }
     const owner=((document.querySelector('#wfTrigOwner .wf-s-person')||{}).value||'').trim();
@@ -1143,7 +1162,8 @@
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
-      const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null});
+      const trigMethod=(($('wfTrigMethod')||{}).value||'').trim();
+      const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null,p_trigger_method:trigMethod||null});
       if(error)throw error;
       toast('Workflow saved','ok');
       // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
@@ -1196,6 +1216,139 @@
     }).join('');
   }
 
+  /* ----- Tracker tab ------------------------------------------------------------------------
+     A like-for-like rebuild of the bill tracker spreadsheet's header block (its rows 1-7), driven
+     live off the workflow instead of manual typing:
+
+        row 1  o1 · o2 · o3 …   the step code, spanning that step's three columns
+        row 2  WHAT             what happens in the step
+        row 3  WHO              whose step it is
+        row 4  HOW              the channel it runs through (Google Form / ERP / Physically …)
+        row 5  WHEN             how long that step is allowed
+        row 6                   the real column headers
+        row 7+                  one row per instance
+
+     Better than the sheet in three ways: the bill columns come from the workflow's own detail
+     fields, so they can never drift out of step with the form; Planned/Actual/Time Delay are read
+     from what actually happened rather than typed in; and a delay is coloured, not just printed.
+     Tracker lives on bill-style workflows only — ordinary workflows never show this tab. */
+  function wfTrackDT(iso){ if(!iso) return ''; try{ const d=new Date(iso);
+    const p=function(n){return String(n).padStart(2,'0');};
+    return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+  }catch(e){ return String(iso); } }
+  // Overshoot against the planned date, in the sheet's own "Dd Hh" shape. Blank when on time.
+  function wfTrackDelay(planned,actual){
+    if(!planned||!actual) return '';
+    const ms=new Date(actual).getTime()-new Date(planned).getTime();
+    if(!(ms>0)) return '';
+    const h=Math.floor(ms/3600000);
+    return Math.floor(h/24)+'d '+(h%24)+'h';
+  }
+  // Who owns a step, in words. Some steps have no fixed person — they land on whoever the
+  // instance's own answers point to (a "Dept Check" goes to that bill's department, a cheque is
+  // signed by whichever director owns it). Those used to read as a bare dash. Now: a handful of
+  // possible people is named outright ("Shuchandra Das / Shafat Mehar"), and a longer list is
+  // summarised by the field that decides it ("Department wise").
+  function wfStepWhoText(s){
+    if(s && s.owner_email) return wfNm(s.owner_email);
+    const map=(s && s.owner_resolve_map && typeof s.owner_resolve_map==='object') ? s.owner_resolve_map : null;
+    if(map){
+      const seen=[], emails=Object.keys(map).map(function(k){ return map[k]; });
+      emails.forEach(function(e){ const n=wfNm(e); if(n && seen.indexOf(n)===-1) seen.push(n); });
+      if(seen.length && seen.length<=2) return seen.join(' / ');
+      if(s.owner_resolve_field) return String(s.owner_resolve_field)+' wise';
+      if(seen.length) return seen.length+' possible people';
+    }
+    if(s && s.owner_role) return String(s.owner_role);
+    return '—';
+  }
+  function wfTrackerHtml(flow, steps, cases, fcs){
+    if(!steps.length) return '<div class="ac-empty" style="cursor:default">Add steps to this workflow to track them</div>';
+    if(!cases.length) return '<div class="ac-empty" style="cursor:default">Nothing recorded yet</div>';
+    // The bill columns = this workflow's own detail fields, minus the attachment (a file has no
+    // place in a tracking grid). Order follows the form, so the two always read the same way.
+    const tmpl=(Array.isArray(flow.trigger_template)?flow.trigger_template:[])
+      .filter(function(f){ return f && f.label && (f.type||'text')!=='attachment'; });
+    const fixed=[{k:'Id'},{k:'Timestamp'}].concat(tmpl.map(function(f){ return {k:f.label}; }));
+    const F=fixed.length;
+    const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+
+    // The bill columns are not headerless filler — in the sheet they are the workflow's own
+    // opening move ("o0"): the triggering event, who raises it, how, and when. Without this the
+    // whole left-hand block of the header sat empty.
+    const zero={
+      what:(flow.trigger_event||flow.name||''),
+      who:(wfNm(flow.trigger_owner)||''),
+      how:(flow.trigger_method||''),
+      when:'Whenever needed'
+    };
+    // The bill columns get no step code of their own — the sheet doesn't label them either.
+    const codeRow='<tr class="wf-tk-code"><th colspan="'+F+'" class="wf-tk-nocode"></th>'
+      +steps.map(function(s,i){ return '<th colspan="3" class="wf-tk-gap">o'+(i+1)+'</th>'; }).join('')
+      +'<th class="wf-tk-gap"></th></tr>';
+    const bandRow=function(label,zeroVal,pick){
+      return '<tr class="wf-tk-band"><th class="wf-tk-bandlbl">'+label+'</th>'
+        +(F>1?('<th colspan="'+(F-1)+'" title="'+esc2(zeroVal||'')+'">'+esc2(zeroVal||'—')+'</th>'):'')
+        +steps.map(function(s){ const v=pick(s); return '<th colspan="3" class="wf-tk-gap" title="'+esc2(v||'')+'">'+esc2(v||'—')+'</th>'; }).join('')
+        +'<th class="wf-tk-gap"></th></tr>';
+    };
+    const head=codeRow
+      +bandRow('WHAT',zero.what,function(s){ return s.title||('Step '+s.seq); })
+      +bandRow('WHO',zero.who,wfStepWhoText)
+      +bandRow('HOW',zero.how,function(s){ return s.method||''; })
+      +bandRow('WHEN',zero.when,function(s){ const d=wfDurText(s.duration_value,s.duration_unit); return d?('In next '+d):''; })
+      +'<tr class="wf-tk-cols">'+fixed.map(function(f){ return '<th>'+esc2(f.k)+'</th>'; }).join('')
+        +steps.map(function(){ return '<th class="wf-tk-gap">Planned</th><th>Actual</th><th>Time Delay</th>'; }).join('')
+        +'<th class="wf-tk-gap">Current Step</th></tr>';
+
+    const body=cases.map(function(c){
+      const by={}; (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+      const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'
+        +tmpl.map(function(f){ return '<td>'+esc2(by[f.label]||'')+'</td>'; }).join('');
+      const cells=steps.map(function(s){
+        const cs=byCase[c.id]&&byCase[c.id][s.seq];
+        const planned=cs&&cs.due_at, actual=cs&&cs.forwarded_at;
+        const delay=wfTrackDelay(planned,actual);
+        return '<td class="wf-tk-gap">'+esc2(planned?wfTrackDT(planned):'')+'</td>'
+          +'<td>'+esc2(actual?wfTrackDT(actual):'')+'</td>'
+          +'<td class="'+(delay?'wf-tk-late':'')+'">'+esc2(delay)+'</td>';
+      }).join('');
+      let now='Done';
+      if(c.status==='Cancelled') now='Cancelled';
+      else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
+        now=cur?(cur.title||('Step '+cur.seq)):'—'; }
+      return '<tr>'+left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
+    }).join('');
+
+    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+  }
+  // Each header row sticks below the one above it, which needs the real height of every row
+  // before it — guessing a fixed number left a strip of body text showing through between the
+  // bands. Measured here instead, and re-measured whenever the pane is shown or the window
+  // resizes (row heights change when long text re-wraps).
+  window.wfTrackerSticky=function(){
+    const t=document.querySelector('.wf-tktable'); if(!t) return;
+    const rows=[].slice.call(t.querySelectorAll('thead tr'));
+    let top=0;
+    rows.forEach(function(tr){
+      [].slice.call(tr.children).forEach(function(th){ th.style.top=top+'px'; });
+      top+=tr.getBoundingClientRect().height;
+    });
+  };
+  // The two panes of a bill-style workflow. Ordinary workflows have no strip and no Tracker.
+  window.wfTabShow=function(which){
+    ['main','tracker'].forEach(function(k){
+      const p=$('wfPane_'+k), b=$('wfTabBtn_'+k);
+      if(p) p.style.display=(k===which)?'':'none';
+      if(b) b.classList.toggle('on', k===which);
+    });
+    if(which==='tracker') setTimeout(wfTrackerSticky,0);
+  };
+  if(!window._wfTkResizeWired){
+    window._wfTkResizeWired=true;
+    window.addEventListener('resize',function(){ if(document.querySelector('.wf-tktable')) wfTrackerSticky(); });
+  }
+
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -1236,11 +1389,14 @@
     window._wfDefTL='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps'+tip('The steps every '+N.lc+' goes through, in order, with who does each one and how long they have. Click a row in the table below to see how a particular '+N.lc+' is progressing.')+'</div></div>'+defTL;
 
     // Instances table
+    const isBill=wfIsBillFlow(flow); window._wfIsBill=isBill;
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head=(canManage?'<th class="wf-chk-col"></th>':'')+'<th>Id</th><th>Unique Bill Id</th><th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+      const head=(canManage?'<th class="wf-chk-col"></th>':'')
+        +'<th>'+(isBill?'Id':'No.')+'</th>'+(isBill?'<th>Unique Bill Id</th>':'')
+        +'<th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           const cs=(byCase[c.id]||{})[s.seq];
@@ -1256,15 +1412,15 @@
         const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
         const instOver=(c.status==='Done'||c.status==='Cancelled');
         const uniqueBillId=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Unique bill Id');});
-        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNo5(c)+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNo5(c)+'</b></td><td>'+esc2((uniqueBillId&&uniqueBillId.value)||'—')+'</td><td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((uniqueBillId&&uniqueBillId.value)||'—')+'</td>'):'')+'<td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="Search by Id…" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -1289,8 +1445,19 @@
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
         +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
       +'</div>'
-      +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
-      +tableHtml
+      +(isBill?('<div class="wf-tabs">'
+          +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
+          +'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>'
+        +'</div>'):'')
+      +'<div id="wfPane_main">'
+        +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
+        +tableHtml
+      +'</div>'
+      +(isBill?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
+          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
+          +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
+          +wfTrackerHtml(flow,steps,cases,fcs)
+        +'</div></div>'):'')
     +'</div>';
     if(selCaseId){ wfShowCase(selCaseId, null); }
   }
@@ -1386,7 +1553,7 @@
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
     const pinned=wfOriginalAttachmentHtml(c);
-    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNo5(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
+    box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
       +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
@@ -1429,7 +1596,8 @@
       valueHtml='<div class="wf-evt-att">'
         +(has
           ?('<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> Attached <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span>')
-          :('<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)">'))
+          :('<label class="wf-evt-attbox"><i class="fa-solid fa-paperclip"></i> Choose a file'
+             +'<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"></label>'))
         +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
       +'</div>';
     } else {
@@ -1440,24 +1608,31 @@
       valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
     }
     const removeBtn=locked?'':'<button class="ac-btn ic danger" title="Remove" onclick="wfEvtRemove(this)"><i class="fa-solid fa-xmark"></i></button>';
-    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
+    // data-orig remembers what was already saved in this field, so wfEventSave can tell an
+    // untouched legacy value apart from something the person actually typed just now.
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'" data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
   window.wfEvtAttPick=async function(input){
     const file=input.files&&input.files[0]; if(!file)return;
     const wrap=input.closest('.wf-evt-att'); if(!wrap)return;
+    const box=input.closest('.wf-evt-attbox');
     input.disabled=true;
+    if(box){ box.classList.add('busy'); box.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+esc2(file.name); box.appendChild(input); }
     try{
       const evtForm=document.querySelector('.wf-evt-form');
       const key=s3KeyForFlowEvent((evtForm&&evtForm.getAttribute('data-flow'))||'0', file.name);
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> '+esc2(file.name)+' <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
-    }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); input.disabled=false; }
+    }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
-  window.wfEvtAttClear=function(btn){
-    const wrap=btn.closest('.wf-evt-att'); if(!wrap)return;
-    wrap.innerHTML='<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"><input type="hidden" class="wf-evt-value" value="">';
-  };
+  function wfEvtAttReset(wrap){
+    if(!wrap) return;
+    wrap.innerHTML='<label class="wf-evt-attbox"><i class="fa-solid fa-paperclip"></i> Choose a file'
+      +'<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"></label>'
+      +'<input type="hidden" class="wf-evt-value" value="">';
+  }
+  window.wfEvtAttClear=function(btn){ wfEvtAttReset(btn.closest('.wf-evt-att')); };
   window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
 
@@ -1469,7 +1644,7 @@
     try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
     if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
     if(!flow){ toast('Workflow not found','err'); return; }
-    const N=wfNounOf(flow); window._wfNoun=N;
+    const N=wfNounOf(flow); window._wfNoun=N; window._wfIsBill=wfIsBillFlow(flow);
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
@@ -1506,7 +1681,7 @@
     else if(locked){ src=template.map(function(t){ return Object.assign({},t,{value:''}); }); }
     else { src=[]; }
     const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNo5(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
@@ -1525,7 +1700,11 @@
       let value=((r.querySelector('.wf-evt-value')||{}).value||'').trim();
       if(!missing && label && !value && r.getAttribute('data-optional')!=='1') missing=label;
       // Unique bill Id is always "c" + exactly 4 digits (e.g. c2950) — normalize case, then check.
-      if(eq(label,'Unique bill Id') && value){
+      // Only what's typed now is checked: invoices recorded before this rule existed hold ids in
+      // the old style, and blocking those made every one of them impossible to edit at all, even
+      // when the change was to a completely different field. An untouched value passes through.
+      const orig=r.getAttribute('data-orig')||'';
+      if(eq(label,'Unique bill Id') && value && value!==orig){
         if(!/^c\d{4}$/i.test(value)){ if(!badFormat) badFormat=value; }
         else value='c'+value.slice(1);
       }
@@ -1647,7 +1826,7 @@
     const person=fcs.person;
     const wfDetailsArr=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
     const wfInline=wfDetailsInline(wfDetailsArr);
-    const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow?(' #'+wfCaseNo5(caseRow)):'');
+    const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow?(' #'+wfCaseNoText(caseRow)):'');
     const wfStepName=wfTitleCase(fcs.title||'');
     const wfDescFmt=wfDetailsFmt(wfDetailsArr);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
@@ -1886,8 +2065,27 @@
     .wf-evt-row{display:flex;gap:8px;margin-bottom:8px}
     .wf-evt-row .wf-evt-label{flex:0 0 40%;min-width:0}
     .wf-evt-row .wf-evt-value{flex:1;min-width:0}
+    /* Dropdowns in this form matched the plain text inputs, so a field with a list looked no
+       different from one you type into. Now they carry their own caret and hover/focus states. */
+    .wf-evt-row select.wf-evt-value{appearance:none;-webkit-appearance:none;-moz-appearance:none;
+      height:40px;padding:0 34px 0 12px;cursor:pointer;font-weight:500;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23e0121c' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px;
+      transition:border-color .12s,box-shadow .12s}
+    .wf-evt-row select.wf-evt-value:hover{border-color:var(--slate)}
+    .wf-evt-row select.wf-evt-value:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-evt-row select.wf-evt-value optgroup{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate)}
+    .wf-evt-row select.wf-evt-value option{font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);padding:6px 8px}
+    /* File picker: the browser's raw "Choose File" control replaced by a proper dashed drop box
+       with the real input laid invisibly over it, so it still works with one click. */
     .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
-    .wf-evt-att .wf-evt-attinput{flex:1;min-width:0;font-size:13px}
+    .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
+      height:40px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
+      color:var(--slate);font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+    .wf-evt-attbox:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,rgba(224,18,28,.06))}
+    .wf-evt-attbox i{font-size:12px}
+    .wf-evt-att .wf-evt-attinput{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+    .wf-evt-attbox.busy{opacity:.6;pointer-events:none}
     .wf-evt-att-name{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px;width:100%}
     /* instances table */
     .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
@@ -1900,6 +2098,39 @@
     .wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
     .wf-itable tbody tr:last-child td{border-bottom:0}
     .wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+    /* Tracker tab — the strip needs real air above it, otherwise it reads as part of the
+       timeline card that sits directly above. */
+    .wf-tabs{display:flex;gap:4px;margin:26px 0 14px;padding:4px;background:var(--bg-subtle,#f1f5f9);border-radius:11px;overflow-x:auto}
+    .wf-tab{flex:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border:0;border-radius:8px;background:transparent;color:var(--slate);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .14s,color .14s,box-shadow .14s}
+    .wf-tab i{font-size:12px}
+    .wf-tab:hover{color:var(--ink)}
+    .wf-tab.on{background:var(--bg-card,#fff);color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+    .wf-tk-wrap{max-height:72vh;overflow:auto;border-radius:10px}
+    .wf-tktable{min-width:100%;font-size:12px}
+    .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
+    .wf-tktable tbody tr{cursor:default}
+    .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
+    .wf-tktable tbody tr:hover{background:var(--brand-a10,#eef2ff)}
+    /* Each step's three columns are banded together with a heavier divider, so at a glance you
+       can see where one step ends and the next begins across a very wide table. */
+    .wf-tktable th.wf-tk-gap,.wf-tktable td.wf-tk-gap{border-left:2px solid var(--line)}
+    /* The step bands read across, so they get a centred, sentence-case look of their own rather
+       than the uppercase column-header styling. */
+    .wf-tk-code th{text-align:center;background:var(--brand);color:#fff;font-size:11px;font-weight:700;letter-spacing:.08em;padding-top:6px;padding-bottom:6px}
+    .wf-tk-code th.wf-tk-nocode{background:var(--bg-subtle,#f8fafc)}
+    .wf-tk-band th{text-align:center;text-transform:none;letter-spacing:0;font-weight:600;font-size:11px;color:var(--slate);
+      max-width:260px;white-space:normal;line-height:1.45;vertical-align:middle}
+    .wf-tk-band th[colspan]{padding-left:12px;padding-right:12px}
+    .wf-tk-bandlbl{text-align:left !important;color:var(--ink) !important;font-weight:800 !important;letter-spacing:.06em !important;text-transform:uppercase !important;white-space:nowrap !important;font-size:10.5px !important}
+    .wf-tk-cols th{border-bottom:2px solid var(--line);font-size:10.5px}
+    .wf-tk-late{color:#dc2626;font-weight:700}
+    @media(max-width:760px){
+      .wf-tabs{margin-top:20px}
+      .wf-tab{padding:0 12px;font-size:12.5px}
+      .wf-tktable th,.wf-tktable td{padding:7px 8px}
+    }
+    /* the per-row top offset is measured and written in by wfTrackerSticky() */
+    .wf-tktable thead th{position:sticky;top:0;z-index:2;background:var(--bg-subtle,#f8fafc)}
     .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
     .wf-pill.ok{background:#dcfce7;color:#166534}
     .wf-pill.cur{background:#dbeafe;color:#1e40af}
@@ -2909,9 +3140,14 @@
     const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
     let join;
     if(doneToday) join='<button class="mtg-join" disabled title="Already done today">Done</button>';
-    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
-    else if(m.mode==='offline') join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
-    else join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
+    // Online meetings get Join AND Record — recording an online meeting captures the shared meeting
+    // tab's audio as well as the microphone, so it too can be transcribed by Gemini.
+    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>'
+      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
+    // An online meeting with no link yet can still be recorded; Join is what's unavailable.
+    else if(m.mode==='online') join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>'
+      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
+    else join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
     const mine = eq(m.created_by,me());
     const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
     const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
@@ -3269,7 +3505,8 @@
     const invitedNames=(l.attendee_emails||[]).map(function(e){ return nameOf(plist,e)||e; });
     const actualDur=mtgActualDurationText(l);
     let audioSrc=null;
-    if(l.mode==='offline' && l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
+    // Either kind of meeting can now carry a recording, so this no longer checks the mode.
+    if(l.audio_url && isS3Path(l.audio_url)){ try{ const {data}=await s3Sign('get', l.audio_url.slice(3)); if(data&&data.url)audioSrc=data.url; }catch(_e){} }
     const durationHtml = '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgLogTimeLabel(l))
       +(actualDur?(' <span style="color:#166534;font-weight:600;margin-left:6px">'+esc2(actualDur)+' actual</span>'):' <span style="color:var(--slate);font-weight:400;margin-left:6px">(scheduled)</span>')
       +'</div>'
@@ -3313,9 +3550,13 @@
         +'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No attendance data for this meeting — either it wasn\'t actually held, or the organizer wasn\'t connected to Google at the time.</p>';
     }
     const transcriptHtml=mtgTranscriptHtml(l);
-    const recordingHtml = l.mode==='offline'
-      ? (audioSrc?('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>'):'<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.</p>')
-      : '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Recording isn\'t available on your current Google Workspace plan (requires Business Standard or higher).</p>';
+    // Both kinds of meeting can be recorded in the portal now, so the panel is the same for both.
+    // The old message about the Google Workspace plan referred to Google's OWN recording feature,
+    // which we no longer depend on for a transcript.
+    const recordingHtml = audioSrc
+      ? ('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>')
+      : ('<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.'
+         +(l.mode==='online'?' Use the <b>Record</b> button during an online meeting and share the meeting tab\'s audio to capture one.':'')+'</p>');
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
     // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
@@ -3399,6 +3640,12 @@
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
     if(l.transcript_status==='pending') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">Transcript queued&hellip;</p>';
     if(l.transcript_status==='failed') return '<p style="color:#b45309;font-size:13px;margin:6px 0 0">Transcription failed for this recording.</p>';
+    // 'unavailable' was set on online meetings back when a transcript could only come from Google's
+    // own recording. It can now come from a recording made here, so say what to do about it.
+    if(l.transcript_status==='unavailable'||!l.transcript_status){
+      return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript — this meeting wasn\'t recorded'
+        +(l.mode==='online'?' in the portal. Record the next one with the <b>Record</b> button and it will be transcribed automatically.':'.')+'</p>';
+    }
     return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No transcript for this meeting.</p>';
   }
   function mtgInjectRecCss(){
@@ -3437,13 +3684,17 @@
     MTG_REC={meeting:m, rec:null, chunks:[], stream:null, startedAt:null, wakeLock:null, secs:0, timer:null, mime:''};
     const when=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     v.innerHTML='<div class="tp-head">'
-      +'<div><div class="tp-title"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Record — '+esc2(m.title)+'</div><div class="tp-sub">'+esc2(when)+' · Offline</div></div>'
+      +'<div><div class="tp-title"><i class="fa-solid fa-microphone" style="color:#e0121c"></i> Record — '+esc2(m.title)+'</div><div class="tp-sub">'+esc2(when)+' · '+(m.mode==='online'?'Online':'Offline')+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Cancel" onclick="mtgRecCancel()"><i class="fa-solid fa-arrow-left"></i></button></div>'
       +'</div>'
       +'<div class="tp-card mtg-rec-card">'
         +'<div class="mtg-rec-dot" id="mtgRecDot"></div>'
         +'<div class="mtg-rec-timer" id="mtgRecTimer">00:00</div>'
-        +'<div class="mtg-rec-hint" id="mtgRecHint">Tap Start when the meeting begins. Keep this screen open — recording captures this device\'s microphone.</div>'
+        +'<div class="mtg-rec-hint" id="mtgRecHint">'
+          +(m.mode==='online'
+             ? 'Tap Start, then choose the <b>Meet tab</b> and tick <b>Share tab audio</b> — that captures everyone else. Your microphone is recorded too, so both sides are transcribed.'
+             : 'Tap Start when the meeting begins. Keep this screen open — recording captures this device\'s microphone.')
+        +'</div>'
         +'<div class="mtg-rec-btns">'
           +'<button class="ac-btn primary lg" id="mtgRecStart" onclick="mtgRecStart()"><i class="fa-solid fa-microphone"></i> Start recording</button>'
           +'<button class="ac-btn danger lg" id="mtgRecStop" style="display:none" onclick="mtgRecStop()"><i class="fa-solid fa-stop"></i> Stop &amp; finish</button>'
@@ -3453,12 +3704,43 @@
   window.mtgRecStart=async function(){
     const R=MTG_REC; if(!R||!R.meeting)return;
     if(typeof MediaRecorder==='undefined'||!navigator.mediaDevices){ toast('Recording isn\'t supported on this browser.','err'); return; }
-    let stream;
-    try{ stream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){ toast('Microphone permission is needed to record.','err'); return; }
+    // An OFFLINE meeting happens in the room, so the microphone hears everyone.
+    // An ONLINE meeting does not: the other people arrive as sound coming OUT of this device, which
+    // a microphone either misses entirely (headphones) or picks up faintly. So for online meetings
+    // we also ask the browser to share the Meet tab's audio and mix the two together, giving Gemini
+    // one track with both sides of the conversation. If that share is declined we fall back to the
+    // microphone alone rather than failing outright.
+    const isOnline=(R.meeting.mode==='online');
+    let stream, mic=null, tab=null, mixCtx=null;
+    try{ mic=await navigator.mediaDevices.getUserMedia({audio:true}); }
+    catch(e){ toast('Microphone permission is needed to record.','err'); return; }
+    if(isOnline && navigator.mediaDevices.getDisplayMedia){
+      try{
+        tab=await navigator.mediaDevices.getDisplayMedia({audio:true, video:true});
+        // we only want the sound — drop the picture immediately so nothing is captured visually
+        (tab.getVideoTracks()||[]).forEach(function(t){ t.stop(); tab.removeTrack(t); });
+        if(!(tab.getAudioTracks()||[]).length){
+          toast('That share had no sound — tick “Share tab audio” when picking the Meet tab. Recording the microphone only.','warn');
+          try{ (tab.getTracks()||[]).forEach(function(t){t.stop();}); }catch(_e){}
+          tab=null;
+        }
+      }catch(_e){ toast('Recording the microphone only — the meeting tab wasn\'t shared.','warn'); tab=null; }
+    }
+    if(tab){
+      try{
+        const AC=window.AudioContext||window.webkitAudioContext;
+        mixCtx=new AC();
+        const dest=mixCtx.createMediaStreamDestination();
+        mixCtx.createMediaStreamSource(mic).connect(dest);
+        mixCtx.createMediaStreamSource(tab).connect(dest);
+        stream=dest.stream;
+      }catch(_e){ stream=mic; try{ if(mixCtx)mixCtx.close(); }catch(_e2){} mixCtx=null; }
+    } else { stream=mic; }
     let mime='audio/webm';
     if(!MediaRecorder.isTypeSupported(mime)) mime=MediaRecorder.isTypeSupported('audio/mp4')?'audio/mp4':'';
     let rec; try{ rec=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream); }catch(e){ rec=new MediaRecorder(stream); }
     R.stream=stream; R.rec=rec; R.chunks=[]; R.mime=rec.mimeType||mime||'audio/webm';
+    R.extraStreams=[mic,tab].filter(Boolean); R.mixCtx=mixCtx;   // stopped alongside R.stream later
     rec.ondataavailable=function(e){ if(e.data&&e.data.size)R.chunks.push(e.data); };
     rec.start(1000);
     R.startedAt=new Date().toISOString(); R.secs=0;
@@ -3477,6 +3759,9 @@
     const endedAt=new Date().toISOString();
     await new Promise(function(resolve){ try{ R.rec.onstop=resolve; R.rec.stop(); }catch(_e){ resolve(); } });
     try{ (R.stream.getTracks()||[]).forEach(function(t){t.stop();}); }catch(_e){}
+    // the microphone and the shared-tab stream are separate from the mixed one handed to the recorder
+    try{ (R.extraStreams||[]).forEach(function(s){ (s.getTracks()||[]).forEach(function(t){t.stop();}); }); }catch(_e){}
+    try{ if(R.mixCtx){ R.mixCtx.close(); R.mixCtx=null; } }catch(_e){}
     try{ if(R.wakeLock){R.wakeLock.release();R.wakeLock=null;} }catch(_e){}
     const blob=new Blob(R.chunks,{type:R.mime||'audio/webm'});
     const occ=istTodayISO();
@@ -3629,14 +3914,14 @@
       try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
     }finally{ WT_busy=false; wtChip(false); again(3000); }
   }
-  function mtgStartBrowserTranscriber(){
-    if(WT_started) return;
-    if(wtIsMobile()) return;                                   // don't drain phones/tablets
-    if(!(window.AudioContext||window.webkitAudioContext)) return;
-    if(typeof me!=='function' || !me()) return;                // only for a signed-in user
-    WT_started=true;
-    setTimeout(wtTick, 8000);                                  // begin shortly after load
-  }
+  // TURNED OFF. Recordings are transcribed server-side by GEMINI (the transcribe-pending function,
+  // which runs on its own every couple of minutes) — the same engine the Transcription module uses.
+  // Gemini is markedly better on the Bengali/Hindi/English code-switching in these meetings than the
+  // small in-browser Whisper model was, and it doesn't need anyone to leave a desktop browser open.
+  // Both paths claim from the same queue, so leaving this running would race Gemini and sometimes
+  // win with the worse transcript. The worker code above is left in place as a fallback should the
+  // Gemini key ever be withdrawn.
+  function mtgStartBrowserTranscriber(){ return; }
 
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}

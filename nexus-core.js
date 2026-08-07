@@ -1583,14 +1583,16 @@ window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 /* Hearing-date window. Filters the table by Next Date and is what the causelist export
    uses — the export refuses to run on "All dates", since a causelist is by definition
    for a period. */
+// [value, label, icon] — a native <select> can't carry icons, so this feeds a custom menu.
 const MIS_RANGES=[
-  ['all','All dates'],
-  ['this_month','This Month'],
-  ['next_month','Next Month'],
-  ['next_week','Next Week'],
-  ['next_30','Next 30 Days'],
-  ['custom','Custom']
+  ['all','All dates','fa-infinity'],
+  ['this_month','This Month','fa-calendar-day'],
+  ['next_month','Next Month','fa-calendar-plus'],
+  ['next_week','Next Week','fa-calendar-week'],
+  ['next_30','Next 30 Days','fa-calendar-days'],
+  ['custom','Custom','fa-sliders']
 ];
+function misRangeDef(v){ return MIS_RANGES.filter(function(r){return r[0]===(v||MIS_RANGE);})[0]||MIS_RANGES[0]; }
 let MIS_RANGE='all', MIS_FROM='', MIS_TO='';
 function misDay(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function misAddDays(d,n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
@@ -1616,6 +1618,33 @@ window.misSetRange=function(v){
   MIS_RANGE=v;
   if(v==='custom'&&(!MIS_FROM||!MIS_TO)){ const t=new Date(); MIS_FROM=misDay(t); MIS_TO=misDay(misAddDays(t,30)); }
   legalMIS();
+};
+// Custom date-range menu. Replaces the plain <select> so each period can carry its own icon and
+// the active one can be ticked — neither is possible inside a native dropdown.
+window.misRangeToggle=function(){
+  const w=$('misRangeMenu'); if(!w) return;
+  w.classList.toggle('open');
+  if(w.classList.contains('open') && !window._misRangeWired){
+    window._misRangeWired=true;
+    document.addEventListener('click',function(e){
+      const m=$('misRangeMenu');
+      if(m && !m.contains(e.target)) m.classList.remove('open');
+    });
+  }
+};
+window.misRangePick=function(v){ const m=$('misRangeMenu'); if(m)m.classList.remove('open'); misSetRange(v); };
+// To can never be earlier than From. Picking a From date raises To's floor, and clears a To that
+// has just become impossible rather than leaving a backwards range sitting there.
+window.misDateFromChange=function(){
+  const f=$('misFrom'), t=$('misTo'); if(!f||!t) return;
+  t.min=f.value||'';
+  if(f.value && t.value && t.value<f.value){ t.value=''; toast('To date cleared — it was before the From date','warn'); }
+  misFilter();
+};
+window.misDateToChange=function(){
+  const f=$('misFrom'), t=$('misTo'); if(!f||!t) return;
+  if(f.value && t.value && t.value<f.value){ t.value=f.value; toast('To date cannot be before the From date','warn'); }
+  misFilter();
 };
 // A row's hearing date, preferring the sortable copy and falling back to parsing the text.
 function misRowIso(r){
@@ -1651,7 +1680,7 @@ function misLabel(k){const f=MIS_FIELDS.find(x=>x.k===k);return f?f.l:k;}
 /* Fields offering a dropdown of what's already in use while still accepting a new value.
    A <datalist> gives both: pick from the list, or type something new — and because the new
    value is saved onto the row, it is in the list automatically next time. No extra table. */
-const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge','advocate_incharge','court']);
+const MIS_SUGGEST=new Set(['case_type','project_land_name','pc_in_charge']);
 const MIS_PC_DEFAULT='ANKITA BHANDARI';
 function misDistinct(k){
   const seen=new Map();
@@ -1665,25 +1694,65 @@ function misCommonPriority(){
   (window._misRows||[]).forEach(r=>{ const p=String(r.priority||'').trim(); if(c[p]!==undefined)c[p]++; });
   return (c.High>=c.Medium&&c.High>=c.Low)?'High':(c.Medium>=c.Low?'Medium':'Low');
 }
+// Guidance sits in an (i) beside the label rather than as grey text under the field, so the
+// form stays compact and the rows line up.
+function misTip(text){
+  if(!text) return '';
+  return '<span class="mis-tip" tabindex="0" role="button" aria-label="More information" data-tip="'+esc(text)+'">i</span>';
+}
 function misInput(k,vals,opt){
   opt=opt||{};
   const v=(vals||{})[k]||'';
   const ro=opt.readonly?' readonly style="background:var(--bg,#f8fafc);color:var(--slate)"':'';
-  const hint=opt.hint?'<div style="font-size:11px;color:var(--slate);margin-top:3px">'+esc(opt.hint)+'</div>':'';
+  const lab='<label>'+misLabel(k)+misTip(opt.hint)+'</label>';
   if(k==='priority'){
     const cur=v||opt.dflt||'';
-    return '<div><label>'+misLabel(k)+'</label><select id="misF_'+k+'" class="sel">'
+    return '<div>'+lab+'<select id="misF_'+k+'" class="sel">'
       +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
-      +'</select>'+hint+'</div>';
+      +'</select></div>';
   }
   if(MIS_SUGGEST.has(k)){
-    const list='misL_'+k;
-    return '<div><label>'+misLabel(k)+'</label>'
-      +'<input id="misF_'+k+'" class="sel" list="'+list+'" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro+'>'
-      +'<datalist id="'+list+'">'+misDistinct(k).map(x=>'<option value="'+esc(x)+'">').join('')+'</datalist>'
-      +hint+'</div>';
+    // A real dropdown that also accepts a new value: the list opens on click and filters as you
+    // type. A bare <datalist> only opens once you start typing, which hid the existing values.
+    const opts=misDistinct(k);
+    return '<div class="mis-combo" data-k="'+k+'">'+lab
+      +'<div class="mis-combo-wrap">'
+        +'<input id="misF_'+k+'" class="sel" autocomplete="off" value="'+esc(v||opt.dflt||'')+'"'+ro
+          +' onfocus="misComboOpen(this)" oninput="misComboOpen(this)" onclick="misComboOpen(this)">'
+        +'<i class="fa-solid fa-chevron-down mis-combo-caret" onclick="misComboToggle(this)"></i>'
+        +'<div class="mis-combo-list">'+opts.map(x=>'<div class="mis-combo-opt" data-v="'+esc(x)+'" onmousedown="misComboPick(this)">'+esc(x)+'</div>').join('')
+          +(opts.length?'':'<div class="mis-combo-none">Nothing recorded yet — just type</div>')+'</div>'
+      +'</div></div>';
   }
-  return '<div><label>'+misLabel(k)+'</label><input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'>'+hint+'</div>';
+  return '<div>'+lab+'<input id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'></div>';
+}
+window.misComboOpen=function(inp){
+  const box=inp.closest('.mis-combo'); if(!box)return;
+  document.querySelectorAll('.mis-combo.open').forEach(function(x){ if(x!==box) x.classList.remove('open'); });
+  box.classList.add('open');
+  const q=(inp.value||'').toLowerCase();
+  box.querySelectorAll('.mis-combo-opt').forEach(function(o){
+    o.style.display=(!q||o.dataset.v.toLowerCase().includes(q))?'':'none';
+  });
+};
+window.misComboToggle=function(ic){
+  const box=ic.closest('.mis-combo'); if(!box)return;
+  const wasOpen=box.classList.contains('open');
+  document.querySelectorAll('.mis-combo.open').forEach(function(x){x.classList.remove('open');});
+  if(!wasOpen){ box.classList.add('open');
+    box.querySelectorAll('.mis-combo-opt').forEach(function(o){o.style.display='';});
+    const inp=box.querySelector('input'); if(inp) try{inp.focus();}catch(e){} }
+};
+window.misComboPick=function(el){
+  const box=el.closest('.mis-combo'); if(!box)return;
+  const inp=box.querySelector('input'); if(inp) inp.value=el.dataset.v||'';
+  box.classList.remove('open');
+};
+if(!window._misComboWired){ window._misComboWired=true;
+  document.addEventListener('click',function(e){
+    if(!(e.target&&e.target.closest&&e.target.closest('.mis-combo')))
+      document.querySelectorAll('.mis-combo.open').forEach(function(x){x.classList.remove('open');});
+  });
 }
 function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
 const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
@@ -1716,9 +1785,10 @@ function misFormHtml(vals,mode){
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
     if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    // No (i) tooltips on the Add Case form — they only appear when editing.
     if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
-    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:'left blank saves as NA'});
-    if(f.k==='next_date')    return put(f.k,{hint:'dd/mm/yyyy'});
+    if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:isEdit?'left blank saves as NA':''});
+    if(f.k==='next_date')    return put(f.k,{hint:isEdit?'dd/mm/yyyy':''});
     put(f.k);
   });
   flush();
@@ -1736,7 +1806,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:110,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:130};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1829,9 +1899,22 @@ async function legalMIS(){
   const misOrdered=misPinned.concat(misRest);
   body.innerHTML=`
     <style>
-      .mis-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+      .mis-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
       .mis-toolbar .mis-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
       .mis-toolbar .mis-filters{display:flex;gap:8px;align-items:center;margin-left:auto;flex:1 1 260px;flex-wrap:wrap;min-width:0}
+      /* Every control in this strip is the same height and shape, so the row reads as one piece
+         instead of buttons of assorted sizes sitting next to each other. */
+      .mis-toolbar .btn{height:36px;padding:0 13px;display:inline-flex;align-items:center;gap:7px;
+        border-radius:9px;font-size:13px;font-weight:600;line-height:1;white-space:nowrap;border:1px solid var(--line);
+        background:var(--bg-card);color:var(--ink);cursor:pointer;transition:background .12s,border-color .12s,box-shadow .12s}
+      .mis-toolbar .btn i{font-size:12px}
+      .mis-toolbar .btn:not(:disabled):hover{background:var(--bg-subtle,#f8fafc);border-color:var(--slate)}
+      .mis-toolbar .btn:disabled{cursor:not-allowed}
+      .mis-toolbar .btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
+      /* Must restate the background: the generic hover rule above has the same specificity, so
+         without this the primary button went white on hover with only its border left coloured. */
+      .mis-toolbar .btn-primary:not(:disabled):hover{background:var(--brand);border-color:var(--brand);color:#fff;filter:brightness(1.09)}
+      .mis-toolbar .btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--brand-a10)}
       .mis-search-wrap{position:relative;display:flex;align-items:center;flex:1;min-width:0}
       .mis-search-wrap i{position:absolute;left:10px;color:var(--slate);font-size:13px;pointer-events:none}
       .mis-search-wrap input{padding-left:30px;height:36px;width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink)}
@@ -1847,19 +1930,79 @@ async function legalMIS(){
       /* section heading inside the Edit Case form */
       .mis-prio-head{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);padding-bottom:7px;margin-bottom:12px;border-bottom:1px solid var(--line)}
       .mis-prio-head i{color:var(--brand)}
+      /* breathing room above the long text areas in the form */
+      .frm textarea.sel{margin-top:2px}
+      .frm > div[style*="margin-bottom:14px"]{margin-top:14px}
+      /* (i) tooltip beside a field label */
+      .mis-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--slate);color:#fff;font:italic 700 10px/1 Georgia,serif;margin-left:6px;cursor:help;position:relative;vertical-align:middle;text-transform:none;letter-spacing:0}
+      .mis-tip:hover,.mis-tip:focus{background:var(--brand);outline:none}
+      .mis-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:6px 9px;border-radius:6px;font:500 11px/1.45 inherit;white-space:normal;width:max-content;max-width:230px;text-align:center;opacity:0;visibility:hidden;transition:opacity .12s;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.22)}
+      .mis-tip:hover::after,.mis-tip:focus::after{opacity:1;visibility:visible}
+      /* dropdown that also accepts a new value */
+      .mis-combo-wrap{position:relative}
+      .mis-combo-wrap input{padding-right:30px}
+      .mis-combo-caret{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:11px;cursor:pointer;pointer-events:auto}
+      .mis-combo.open .mis-combo-caret{transform:translateY(-50%) rotate(180deg)}
+      .mis-combo-list{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:70;background:var(--bg-card);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 26px rgba(15,23,42,.16);max-height:210px;overflow-y:auto;padding:5px}
+      .mis-combo.open .mis-combo-list{display:block}
+      .mis-combo-opt{padding:7px 9px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .mis-combo-opt:hover{background:var(--brand-a10,#eef2ff);color:var(--brand)}
+      .mis-combo-none{padding:7px 9px;font-size:12px;color:var(--slate)}
       /* date-range filter */
-      .mis-range{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
-      .mis-range .to{font-size:12.5px;color:var(--slate)}
-      .mis-toolbar.has-custom .mis-search-wrap{flex:0 1 190px;min-width:120px}
-      @media(max-width:900px){
-        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%}
-        .mis-toolbar .mis-actions{flex:1 1 100%}
-        .mis-toolbar .mis-actions .btn{flex:1 1 auto;justify-content:center}
-        select.mis-sel{min-width:0;flex:1 1 140px}
-        .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
-        .mis-range{flex:1 1 100%}
-        .mis-range input[type=date]{flex:1 1 40%;min-width:0}
+      .mis-range{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+      .mis-range input[type=date]{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink);min-width:0;flex:1 1 132px}
+      .mis-range input[type=date]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      .mis-range .to{font-size:12px;color:var(--slate);flex:none}
+      /* date-range picker (custom, so each period can carry an icon) */
+      .mis-rangemenu{position:relative;flex:0 0 auto}
+      .mis-range-btn{height:36px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--line);
+        border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;font-family:inherit;
+        cursor:pointer;white-space:nowrap;transition:border-color .12s,box-shadow .12s}
+      .mis-range-btn:hover{border-color:var(--slate)}
+      .mis-range-btn:focus-visible{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      .mis-range-btn > i:first-child{color:var(--brand);font-size:12.5px}
+      .mis-range-txt{min-width:88px;text-align:left}
+      .mis-range-caret{font-size:9px;color:var(--slate);transition:transform .15s}
+      .mis-rangemenu.open .mis-range-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      .mis-rangemenu.open .mis-range-caret{transform:rotate(180deg)}
+      .mis-range-list{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:210px;z-index:80;
+        background:var(--bg-card);border:1px solid var(--line);border-radius:11px;padding:6px;
+        box-shadow:0 14px 34px rgba(15,23,42,.18)}
+      .mis-rangemenu.open .mis-range-list{display:block}
+      .mis-range-opt{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;border-radius:8px;
+        background:transparent;color:var(--ink);font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;text-align:left}
+      .mis-range-opt:hover{background:var(--bg-subtle,#f8fafc)}
+      .mis-range-oi{width:15px;text-align:center;color:var(--slate);font-size:12.5px}
+      .mis-range-tick{margin-left:auto;font-size:11px;color:var(--brand);opacity:0}
+      .mis-range-opt.on{color:var(--brand);font-weight:700;background:var(--brand-a10,#eef2ff)}
+      .mis-range-opt.on .mis-range-oi{color:var(--brand)}
+      .mis-range-opt.on .mis-range-tick{opacity:1}
+      select.mis-sel{appearance:none;-webkit-appearance:none;padding-right:30px;font-weight:600;
+        background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat:no-repeat;background-position:right 10px center;background-size:11px 8px}
+      select.mis-sel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+      /* Custom range needs real room — give the filter row its own line rather than letting
+         the date inputs squeeze the search box into nothing. */
+      .mis-toolbar.has-custom .mis-filters{flex:1 1 100%;margin-left:0;flex-wrap:nowrap}
+      .mis-toolbar.has-custom .mis-search-wrap{flex:1 1 160px;min-width:120px}
+      @media(max-width:1100px){
+        .mis-toolbar .mis-filters{margin-left:0;flex:1 1 100%;flex-wrap:wrap}
+        .mis-toolbar.has-custom .mis-filters{flex-wrap:wrap}
+      }
+      @media(max-width:760px){
+        .mis-toolbar{gap:10px}
+        .mis-toolbar .mis-actions{flex:1 1 100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .mis-toolbar .mis-actions .btn{width:100%;justify-content:center;white-space:nowrap}
+        .mis-toolbar .mis-actions .btn:first-child{grid-column:1/-1}
+        .mis-count{grid-column:1/-1;text-align:center}
+        .mis-filters select.mis-sel{flex:1 1 100%;min-width:0}
+        .mis-rangemenu{flex:1 1 100%}
+        .mis-range-btn{width:100%;justify-content:flex-start}
+        .mis-range-caret{margin-left:auto}
+        .mis-range-list{left:0;right:0;min-width:0}
+        .mis-filters .mis-search-wrap,.mis-toolbar.has-custom .mis-search-wrap{flex:1 1 100%}
+        .mis-filters .btn{flex:1 1 100%;justify-content:center}
+        .mis-range{flex:1 1 100%;flex-wrap:nowrap}
       }
       #misTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:2200px;table-layout:fixed}
       #misTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
@@ -1876,6 +2019,24 @@ async function legalMIS(){
       .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
       #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
+      /* Desktop only — mobile keeps exactly the widths above. A person's name never fills a
+         150px column, while Cause Title and Status are the ones people actually need to read,
+         so the slack is taken off the name/date columns and handed to the text ones.
+         !important is needed because the widths are inline on each <col>. */
+      @media(min-width:769px){
+        #misTbl col:nth-child(3){width:320px !important}   /* Cause Title / Parties */
+        #misTbl col:nth-child(5){width:92px  !important}   /* Previous Date */
+        #misTbl col:nth-child(6){width:92px  !important}   /* Next Date */
+        #misTbl col:nth-child(7){width:92px  !important}   /* Priority */
+        #misTbl col:nth-child(8){width:128px !important}   /* Advocate In-Charge */
+        #misTbl col:nth-child(10){width:260px !important}  /* Status / Purpose */
+        #misTbl col:nth-child(11){width:260px !important}  /* Action Needed */
+        #misTbl col:nth-child(12){width:230px !important}  /* Remarks */
+        #misTbl col:nth-child(14){width:95px  !important}  /* Date of Filing */
+        #misTbl col:nth-child(15){width:108px !important}  /* PC In-Charge */
+        /* the wider columns can afford a third line before they clip */
+        .mis-cell-clamp{-webkit-line-clamp:3}
+      }
       #misTbl td,#misTbl th{overflow:hidden}
       @media(max-width:768px){
         .mis-toolbar{flex-direction:column;align-items:stretch}
@@ -1886,6 +2047,9 @@ async function legalMIS(){
         .mis-search-wrap{width:100%}
         .mis-search-wrap input{min-width:0;width:100%}
         select.mis-sel{min-width:0;width:100%}
+        .mis-rangemenu{width:100%}
+        .mis-range-btn{width:100%;justify-content:flex-start}
+        .mis-range-caret{margin-left:auto}
         #misTbl{min-width:1500px;font-size:12.5px}
         #misTbl thead th,#misTbl tbody td{padding:9px 8px}
       }
@@ -1898,17 +2062,30 @@ async function legalMIS(){
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
-        <select class="mis-sel" id="misRangeSel" onchange="misSetRange(this.value)">
-          ${MIS_RANGES.map(r=>`<option value="${r[0]}"${MIS_RANGE===r[0]?' selected':''}>${esc(r[1])}</option>`).join('')}
-        </select>
+        <div class="mis-rangemenu" id="misRangeMenu">
+          <button type="button" class="mis-range-btn" onclick="misRangeToggle()">
+            <i class="fa-solid ${misRangeDef()[2]}"></i>
+            <span class="mis-range-txt">${esc(misRangeDef()[1])}</span>
+            <i class="fa-solid fa-chevron-down mis-range-caret"></i>
+          </button>
+          <div class="mis-range-list">
+            ${MIS_RANGES.map(r=>`<button type="button" class="mis-range-opt${MIS_RANGE===r[0]?' on':''}" onclick="misRangePick('${r[0]}')">
+              <i class="fa-solid ${r[2]} mis-range-oi"></i><span>${esc(r[1])}</span>
+              <i class="fa-solid fa-check mis-range-tick"></i>
+            </button>`).join('')}
+          </div>
+        </div>
         <span class="mis-range" id="misRangeCustom" style="display:${MIS_RANGE==='custom'?'flex':'none'}">
-          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misFilter()">
+          <input type="date" id="misFrom" value="${esc(MIS_FROM)}" onchange="misDateFromChange()">
           <span class="to">to</span>
-          <input type="date" id="misTo" value="${esc(MIS_TO)}" onchange="misFilter()">
+          <input type="date" id="misTo" min="${esc(MIS_FROM)}" value="${esc(MIS_TO)}" onchange="misDateToChange()">
         </span>
         <div class="mis-search-wrap">
           <i class="fa-solid fa-magnifying-glass"></i>
-          <input id="misSearch" placeholder="Search anything — a value, a column name, or e.g. &quot;priority is empty&quot;" oninput="misFilter()">
+          <input id="misSearch" placeholder="Search anything — or put &quot;quotes&quot; around an exact phrase" oninput="misFilter()"
+                 title="Plain words: rows containing all of them, in any order or field.
+&quot;in quotes&quot;: that exact phrase, word for word.
+priority is empty / court is high court: search one column.">
         </div>
         <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
         <span class="mis-count" id="misAiStatus"></span>
@@ -2005,7 +2182,8 @@ window.misExportCauselist=function(){
     toast(MIS_RANGE==='custom'
       ? 'Pick both a From and a To date before exporting the causelist'
       : 'Choose a date range first — a causelist has to cover a period','warn');
-    const sel=$('misRangeSel'); if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
+    const sel=document.querySelector('#misRangeMenu .mis-range-btn');
+    if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
     return;
   }
@@ -2013,40 +2191,60 @@ window.misExportCauselist=function(){
     .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
 
-  const label=(MIS_RANGES.find(function(r){return r[0]===MIS_RANGE;})||[])[1]||'';
-  const stamp=new Date().toLocaleString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  const dmy=function(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+  // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
+  // out of that file: doc name "CAUSTLIST" top-left, sheet tab name top-right, page number,
+  // an M/D/YYYY H:MM:SS stamp, the "<MONTH> CAUSTLIST" heading, and these nine column labels
+  // with precisely this capitalisation.
+  const now=new Date();
+  const MONTHS=['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+  // the month the listed hearings fall in, taken from the range start
+  const first=new Date(win.from+'T00:00:00');
+  const monthName=MONTHS[first.getMonth()];
+  const tabName=monthName+String(first.getFullYear()).slice(2);   // e.g. AUGUST26, as in the PDF
+  const h24=now.getHours();
+  const stamp=(now.getMonth()+1)+'/'+now.getDate()+'/'+now.getFullYear()+' '
+    +String(h24).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+  const dmy=function(iso){ if(!iso)return ''; const d=new Date(iso+'T00:00:00');
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
-  const cell=function(v){ return esc(String(v==null?'':v).trim()||'—').replace(/\n/g,'<br>'); };
+  const cell=function(v){ return esc(String(v==null?'':v).trim()).replace(/\n/g,'<br>'); };
 
-  const html='<!doctype html><html><head><meta charset="utf-8"><title>Causelist '+esc(label)+'</title>'
+  const html='<!doctype html><html><head><meta charset="utf-8"><title>CAUSTLIST</title>'
+   // Portrait A4 with a comfortable margin. Nine columns on a portrait page only work if the
+   // narrow ones are pinned tight and the wide text columns are allowed to wrap, so the widths
+   // below are deliberate rather than even.
    +'<style>'
-   +'@page{size:A4 landscape;margin:12mm}'
+   +'@page{size:A4 portrait;margin:14mm 12mm}'
    +'*{box-sizing:border-box}'
-   +'body{font-family:Calibri,Arial,sans-serif;color:#111;margin:0;font-size:10.5px}'
-   +'h1{font-size:17px;margin:0 0 2px;letter-spacing:.5px}'
-   +'.sub{font-size:11px;color:#444;margin-bottom:12px}'
+   +'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:8px;line-height:1.3}'
+   +'.sheet{max-width:186mm;margin:0 auto;padding:8mm 0}'
+   +'.pghead{display:flex;justify-content:space-between;font-size:8.5px;color:#000;'
+     +'padding-bottom:3px;border-bottom:.5px solid #000;margin-bottom:5px}'
+   +'.pgmeta{font-size:8px;color:#000}'
+   +'.pgmeta.stamp{margin-bottom:12px}'
+   +'h1{font-size:13px;font-weight:700;margin:0 0 10px;text-align:center;letter-spacing:.06em}'
    +'table{width:100%;border-collapse:collapse;table-layout:fixed}'
-   +'th,td{border:1px solid #999;padding:5px 6px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere}'
-   +'th{background:#dbe5f1;font-weight:700;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em}'
+   +'th,td{border:.5px solid #000;padding:4px 4px;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere;line-height:1.3}'
+   +'th{font-weight:700;text-align:center;font-size:8px;background:#ececec;letter-spacing:.02em}'
+   +'tbody tr:nth-child(even){background:#f7f7f7}'
    +'tr{page-break-inside:avoid}'
    +'thead{display:table-header-group}'
-   +'td.sl{text-align:center;font-weight:700}'
-   +'td.dt{white-space:nowrap;font-weight:600}'
-   +'.foot{margin-top:10px;font-size:10px;color:#555}'
-   +'@media print{.noprint{display:none}}'
+   +'td.sl{text-align:center}'
+   +'td.dt{white-space:nowrap;text-align:center}'
+   +'@media print{.sheet{max-width:none;padding:0}}'
+   +'@media screen{body{background:#525659;padding:18px 0}'
+     +'.sheet{background:#fff;width:210mm;max-width:96vw;padding:14mm 12mm;box-shadow:0 4px 22px rgba(0,0,0,.4)}}'
    +'</style></head><body>'
-   +'<div class="noprint" style="margin-bottom:10px">'
-   +'<button onclick="window.print()" style="padding:8px 16px;font-size:13px;cursor:pointer">Print / Save as PDF</button>'
-   +'</div>'
-   +'<h1>CAUSELIST — '+esc(label.toUpperCase())+'</h1>'
-   +'<div class="sub">'+esc(misRangeLabel())+' &nbsp;·&nbsp; '+rows.length+' matter'+(rows.length===1?'':'s')+' &nbsp;·&nbsp; generated '+esc(stamp)+'</div>'
+   +'<div class="sheet">'
+   +'<div class="pghead"><span>CAUSTLIST</span><span>'+esc(tabName)+'</span></div>'
+   +'<div class="pgmeta">1</div>'
+   +'<div class="pgmeta stamp">'+esc(stamp)+'</div>'
+   +'<h1>'+esc(monthName)+' CAUSTLIST</h1>'
    +'<table><colgroup>'
-   +'<col style="width:34px"><col style="width:9%"><col style="width:22%"><col style="width:12%">'
-   +'<col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:14%">'
+   +'<col style="width:5%"><col style="width:9%"><col style="width:21%"><col style="width:11%">'
+   +'<col style="width:8%"><col style="width:11%"><col style="width:11%"><col style="width:12%"><col style="width:12%">'
    +'</colgroup><thead><tr>'
-   +'<th>SL NO.</th><th>Case Type</th><th>Case Details</th><th>Case No.</th><th>Date</th>'
-   +'<th>Advocate Incharge</th><th>Court Name</th><th>Status</th><th>Action Needed</th>'
+   +'<th>SL NO.</th><th>CASE TYPE</th><th>CASE DETAILS</th><th>CASE NO.</th><th>DATE</th>'
+   +'<th>Advocate incharge</th><th>Court Name</th><th>STATUS</th><th>ACTION NEEDED</th>'
    +'</tr></thead><tbody>'
    +rows.map(function(r,i){
       return '<tr><td class="sl">'+(i+1)+'</td>'
@@ -2060,13 +2258,19 @@ window.misExportCauselist=function(){
         +'<td>'+cell(r.action_needed)+'</td></tr>';
     }).join('')
    +'</tbody></table>'
-   +'<div class="foot">JAIN-E · Legal MIS · '+esc(stamp)+'</div>'
-   +'</body></html>';
+   +'</div></body></html>';
 
-  const w=window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to export the causelist','err'); return; }
-  w.document.write(html); w.document.close();
-  toast('Causelist ready — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+  // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
+  // laid out exactly as here — print it from the browser's own File > Print when needed.
+  const name='CAUSTLIST - '+tabName+'.html';
+  try{
+    const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
+    const a=document.createElement('a');
+    a.href=url; a.download=name; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1500);
+  }catch(e){ toast('Could not export the causelist: '+((e&&e.message)||e),'err'); return; }
+  toast('Causelist exported — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
 };
 
 window.misRowCheck=function(cb){
@@ -2113,8 +2317,28 @@ function misKeywords(q){
   const stop=new Set(['give','giv','show','find','all','the','rows','row','cases','case','which','are','is','where','that','having','with','for','of','a','an','me','list','display','get','or','and','this','these']);
   return q.split(/[^a-z0-9]+/).filter(w=>w&&!stop.has(w));
 }
+/* Anything inside quotes is an exact phrase: "high court" only matches those two words together,
+   in that order, inside one field. Quoting also switches off the smart field parser for that bit,
+   so "priority is empty" in quotes searches for the literal words instead of being read as a
+   condition. Straight and curly quotes both work, since phones insert curly ones. */
+function misSplitPhrases(q){
+  const phrases=[];
+  const rest=String(q||'').replace(/"([^"]*)"|“([^”]*)”/g,function(_m,a,b){
+    const p=String(a!=null?a:(b!=null?b:'')).trim();
+    if(p) phrases.push(p);
+    return ' ';
+  });
+  return {phrases:phrases, rest:rest.replace(/\s+/g,' ').trim()};
+}
 function misParseQuery(raw){
-  const q=(raw||'').toLowerCase().trim();
+  const whole=(raw||'').toLowerCase().trim();
+  const split=misSplitPhrases(whole);
+  if(split.phrases.length){
+    // the unquoted remainder (if any) is still parsed normally and both must match
+    const inner=split.rest?misParseQuery(split.rest):{type:'none'};
+    return Object.assign({}, inner, {phrases:split.phrases});
+  }
+  const q=whole;
   if(!q)return {type:'none'};
   const candidates=[];
   Object.keys(MIS_ALIASES).forEach(k=>{
@@ -2166,6 +2390,7 @@ window.misFilter=function(){
     const row=(window._misRows||[]).find(r=>r.id===id);
     let show;
     if(!raw) show=true;
+    else if(parsed.type==='none') show=true;          // quotes only, handled by the phrase gate below
     else if(parsed.type==='fields'){
       show=!!row&&parsed.conds.every(cond=>{
         const v=row[cond.field];
@@ -2176,6 +2401,11 @@ window.misFilter=function(){
       });
     }
     else { const blob=row?row._blob:''; show=parsed.words&&parsed.words.length?parsed.words.every(w=>blob.indexOf(w)!==-1):(blob.indexOf(q)!==-1); }
+    // every quoted phrase must appear, word for word, in one of the row's fields
+    if(show && parsed.phrases && parsed.phrases.length){
+      const blob=row?row._blob:'';
+      show=parsed.phrases.every(p=>blob.indexOf(p)!==-1);
+    }
     if(show && row && !misInRange(row)) show=false;   // hearing-date window
     tr.style.display=show?'':'none';if(show)vis++;
   });
@@ -4361,56 +4591,186 @@ VIEWS.helpdesk=function(v,seg){
   </div><div id="hdBody"></div>`;
   if(tab==='docs')hdDocs(); else if(tab==='tickets')hdTickets(); else hdAssistant();
 };
+/* The assistant answers in markdown — bold, bullets, and small tables when it lists things — so it
+   needs rendering rather than dumping. Deliberately a small, closed renderer over escaped text:
+   the reply travels through ChatGPT and can quote case titles and document contents, so nothing is
+   ever treated as HTML. Only the handful of shapes the assistant is asked to produce are turned
+   back into tags. */
+function hdMd(src){
+  let s=esc(String(src==null?'':src));
+  // tables first, while the pipe rows are still on their own lines
+  s=s.replace(/(?:^\|.*\|[ \t]*\n)+/gm,function(block){
+    const lines=block.trim().split('\n').map(l=>l.trim()).filter(Boolean);
+    const cells=l=>l.replace(/^\|/,'').replace(/\|$/,'').split('|').map(c=>c.trim());
+    if(lines.length<2||!/^\|[\s:|-]+\|$/.test(lines[1])) return block;
+    const head=cells(lines[0]), body=lines.slice(2).map(cells);
+    return '<table class="hd-tbl"><thead><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'
+      +body.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table>\n';
+  });
+  s=s.replace(/```([\s\S]*?)```/g,(_m,c)=>'<pre class="hd-pre">'+c.replace(/^\n/,'')+'</pre>');
+  s=s.replace(/`([^`\n]+)`/g,'<code class="hd-code">$1</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+  s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g,'$1<i>$2</i>');
+  s=s.replace(/^#{1,4}\s+(.+)$/gm,'<div class="hd-h">$1</div>');
+  // bullet and numbered runs
+  s=s.replace(/(?:^[-*]\s+.+\n?)+/gm,function(b){
+    return '<ul class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^[-*]\s+/,'')+'</li>').join('')+'</ul>';
+  });
+  s=s.replace(/(?:^\d+\.\s+.+\n?)+/gm,function(b){
+    return '<ol class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^\d+\.\s+/,'')+'</li>').join('')+'</ol>';
+  });
+  s=s.replace(/\n{2,}/g,'<br><br>').replace(/\n/g,'<br>');
+  s=s.replace(/<br>\s*(<(?:ul|ol|table|pre|div class="hd-h")\b)/g,'$1');
+  s=s.replace(/(<\/(?:ul|ol|table|pre)>)\s*<br>/g,'$1');
+  return s;
+}
+const HD_SUGGEST=[
+  {g:'My work',   q:['Where do I stand right now?','What have I got overdue?','What am I waiting to approve?','What are my goals at?']},
+  {g:'Legal',     q:['Which hearings are in the next 10 days?','Show me the High priority cases','Any case at the High Court?']},
+  {g:'Workflow',  q:['How many invoices are still in progress?','Which step is each pending invoice sitting at?']},
+  {g:'Around me', q:['Who is in the Legal department?','Who does Ankita report to?','What meetings are coming up?','What did the last meeting cover?']},
+  {g:'How do I',  q:['How do I delegate a task?','How do I upload a document?','How do I record an online meeting?','How do I export a causelist?']},
+  {g:'Modules',   q:['Which modules are actually live?','Is CRM ready yet?','Is the Finance Vault real data?','Can I see competitor ads?']},
+  {g:'Account',   q:['How do I sign in or get an account?','I forgot my password','Why is a module missing from my sidebar?','Where do I change my profile?']},
+  {g:'Problems',  q:['Why am I not getting emails?','The page is showing an error','My transcript is stuck on Transcribing','Which outside services does the portal use?']}
+];
 function hdAssistant(){
   const b=$('hdBody');
-  b.innerHTML=`<div class="card" style="max-width:840px;margin:0 auto">
-    <div id="hdChat" style="padding:18px;height:44vh;min-height:300px;overflow:auto;background:#fafbfd"></div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;border-top:1px solid var(--line)" id="hdChips"></div>
-    <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)">
-      <input id="hdQ" class="sel" style="flex:1;height:42px" placeholder="Ask anything… e.g. How do I upload a document?" onkeydown="if(event.key==='Enter')hdSend()">
-      <button class="btn btn-primary" onclick="hdSend()"><i class="fa-solid fa-paper-plane"></i> Send</button>
-    </div></div>`;
-  const chips=['How do I upload a document?','How do I delegate a task?','How do I create a task?','What is Procurement?','What is in the Legal module?','How does Control Panel work?'];
-  $('hdChips').innerHTML=chips.map(c=>`<div class="chip" onclick="hdAsk(this.textContent)">${esc(c)}</div>`).join('');
-  if(!HD_MSGS.length)HD_MSGS=[{who:'bot',text:`Hi! I'm the <b>JAIN-E</b> assistant. Ask me how to do something in the portal, find a document, or I can raise a ticket for you. Try a suggestion below.`}];
+  b.innerHTML=`<style>
+    .hd-wrap{max-width:900px;margin:0 auto}
+    .hd-shell{border:1px solid var(--line);border-radius:16px;background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+    .hd-top{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f766e,#0d5f59)}
+    .hd-top .ava{width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;flex:none}
+    .hd-top .who{color:#fff;font-size:14px;font-weight:700;line-height:1.25}
+    .hd-top .sub{color:rgba(255,255,255,.72);font-size:11.5px}
+    .hd-top .live{margin-left:auto;display:flex;align-items:center;gap:6px;color:rgba(255,255,255,.85);font-size:11px;font-weight:600}
+    .hd-top .live i{font-size:7px;color:#4ade80}
+    .hd-new{border:1px solid rgba(255,255,255,.28);background:transparent;color:#fff;height:28px;padding:0 10px;border-radius:8px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    .hd-new:hover{background:rgba(255,255,255,.14)}
+    .hd-scroll{padding:18px 16px;height:52vh;min-height:320px;overflow-y:auto;background:var(--bg-subtle,#fafbfd)}
+    .hd-msg{display:flex;gap:11px;margin-bottom:16px;align-items:flex-start}
+    .hd-msg.me{flex-direction:row-reverse}
+    .hd-ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+    .hd-ic.bot{background:#0f766e}
+    .hd-bub{max-width:78%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.62;overflow-wrap:anywhere}
+    .hd-msg.bot .hd-bub{background:var(--bg-card);border:1px solid var(--line);border-top-left-radius:4px;color:var(--ink)}
+    .hd-msg.me  .hd-bub{background:var(--brand);color:#fff;border-top-right-radius:4px}
+    .hd-bub b{font-weight:700}
+    .hd-h{font-weight:700;font-size:13.5px;margin:10px 0 4px}
+    .hd-ul{margin:6px 0 6px 18px;padding:0}
+    .hd-ul li{margin:3px 0}
+    .hd-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin:9px 0;display:block;overflow-x:auto}
+    .hd-tbl th,.hd-tbl td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+    .hd-tbl th{background:var(--bg-subtle,#f8fafc);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap}
+    .hd-pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:8px 0}
+    .hd-code{background:var(--bg-subtle,#f1f5f9);padding:1px 5px;border-radius:4px;font-size:12.5px}
+    .hd-tools{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);color:var(--slate);font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .hd-tools .tp{background:var(--bg-subtle,#f1f5f9);border-radius:5px;padding:1px 6px;font-weight:600}
+    .hd-foot{color:var(--slate);font-size:11.5px;margin-top:8px}
+    .hd-foot a{color:var(--brand);font-weight:600;cursor:pointer}
+    .hd-sug{padding:12px 16px;border-top:1px solid var(--line);background:var(--bg-card)}
+    .hd-sug-g{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+    .hd-sug-g:last-child{margin-bottom:0}
+    .hd-sug-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);flex:0 0 76px}
+    .hd-chip{border:1px solid var(--line);background:var(--bg-card);color:var(--ink);border-radius:20px;padding:5px 12px;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:border-color .12s,color .12s,background .12s}
+    .hd-chip:hover{border-color:#0f766e;color:#0f766e;background:#f0fdfa}
+    .hd-bar{display:flex;gap:9px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end;background:var(--bg-card)}
+    .hd-in{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:13.5px;font-family:inherit;line-height:1.5;max-height:132px;background:var(--bg-card);color:var(--ink)}
+    .hd-in:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.12)}
+    .hd-send{height:42px;width:42px;flex:none;border:0;border-radius:12px;background:#0f766e;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:filter .12s}
+    .hd-send:hover:not(:disabled){filter:brightness(1.12)}
+    .hd-send:disabled{opacity:.5;cursor:not-allowed}
+    .hd-dots span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:var(--slate);animation:hdb 1s infinite}
+    .hd-dots span:nth-child(2){animation-delay:.15s}
+    .hd-dots span:nth-child(3){animation-delay:.3s}
+    @keyframes hdb{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+    .hd-hint{text-align:center;color:var(--slate);font-size:11px;padding:0 16px 11px;background:var(--bg-card)}
+    @media(max-width:760px){
+      .hd-scroll{height:56vh;padding:14px 12px}
+      .hd-bub{max-width:88%}
+      .hd-sug-lbl{flex:1 1 100%}
+      .hd-sug{max-height:132px;overflow-y:auto}
+    }
+  </style>
+  <div class="hd-wrap"><div class="hd-shell">
+    <div class="hd-top">
+      <div class="ava"><i class="fa-solid fa-robot"></i></div>
+      <div><div class="who">JAIN-E Assistant</div><div class="sub">Reads your live portal data · never changes anything</div></div>
+      <span class="live"><i class="fa-solid fa-circle"></i> Online</span>
+      <button class="hd-new" onclick="hdReset()"><i class="fa-solid fa-rotate-left"></i> New chat</button>
+    </div>
+    <div class="hd-scroll" id="hdChat"></div>
+    <div class="hd-sug" id="hdChips"></div>
+    <div class="hd-bar">
+      <textarea id="hdQ" class="hd-in" rows="1" placeholder="Ask anything — your tasks, a hearing date, where an invoice is stuck, how to do something…"
+        oninput="hdGrow(this)" onkeydown="hdKey(event)"></textarea>
+      <button class="hd-send" id="hdSendBtn" onclick="hdSend()" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+    </div>
+    <div class="hd-hint">Enter to send · Shift+Enter for a new line. Answers come from live data — double-check anything you act on.</div>
+  </div></div>`;
+  $('hdChips').innerHTML=HD_SUGGEST.map(g=>'<div class="hd-sug-g"><span class="hd-sug-lbl">'+esc(g.g)+'</span>'
+    +g.q.map(q=>'<button class="hd-chip" onclick="hdAsk(this.textContent)">'+esc(q)+'</button>').join('')+'</div>').join('');
+  if(!HD_MSGS.length) HD_MSGS=[{who:'bot',md:"Ask me anything about your work here — I can read the live data.\n\n- **Your plate** — what's open, overdue, or waiting on you\n- **Legal** — hearings coming up, a case, a court, a priority\n- **Workflow** — where an invoice has got to, and what's still moving\n- **People** — who is in which department, who reports to whom\n- **Meetings, documents, calls, ad spend** — figures and summaries\n- **Any module** — whether it's live yet, and what it does\n- **Signing in, email, settings, errors** — and which outside services we use\n\nI only read — I can't change anything, and I'll tell you plainly when a module hasn't started yet rather than quote its sample figures."}];
   hdRenderChat();
+  setTimeout(()=>{const i=$('hdQ'); if(i)try{i.focus();}catch(_e){}},60);
 }
+window.hdGrow=function(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,132)+'px'; };
+window.hdKey=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); hdSend(); } };
+window.hdReset=function(){ HD_MSGS=[]; hdAssistant(); };
+/* A message carries EITHER .md (markdown from the assistant, rendered through hdMd) or .html (a
+   fixed bit of our own markup, e.g. the typing dots). A person's own message is escaped text. */
 function hdRenderChat(){
   const c=$('hdChat');if(!c)return;
-  c.innerHTML=HD_MSGS.map(m=>m.who==='bot'
-    ?`<div style="display:flex;gap:10px;margin-bottom:14px"><div class="n-ic t-green" style="flex-shrink:0;width:32px;height:32px"><i class="fa-solid fa-robot"></i></div><div style="background:#fff;border:1px solid var(--line);border-radius:2px 12px 12px 12px;padding:11px 14px;font-size:13.5px;max-width:80%;line-height:1.55">${m.text}</div></div>`
-    :`<div style="display:flex;gap:10px;margin-bottom:14px;flex-direction:row-reverse"><div class="avatar-sm" style="flex-shrink:0;background:${colorFor(state.email)}">${esc(initials((state.profile&&state.profile.full_name)||state.email).toUpperCase())}</div><div style="background:var(--brand);color:#fff;border-radius:12px 2px 12px 12px;padding:11px 14px;font-size:13.5px;max-width:80%">${esc(m.text)}</div></div>`).join('');
+  const mine=esc(initials((state.profile&&state.profile.full_name)||state.email).toUpperCase());
+  c.innerHTML=HD_MSGS.map(function(m){
+    if(m.who!=='bot'){
+      return '<div class="hd-msg me"><div class="hd-ic" style="background:'+colorFor(state.email)+'">'+mine+'</div>'
+        +'<div class="hd-bub">'+esc(m.text||'')+'</div></div>';
+    }
+    let body=m.html||hdMd(m.md||'');
+    if(m.tools&&m.tools.length){
+      const seen=[]; m.tools.forEach(function(t){ if(t&&seen.indexOf(t)===-1) seen.push(t); });
+      body+='<div class="hd-tools"><i class="fa-solid fa-database"></i> read '
+        +seen.map(function(t){ return '<span class="tp">'+esc(String(t).replace(/_/g,' '))+'</span>'; }).join(' ')+'</div>';
+    }
+    if(m.offerTicket) body+='<div class="hd-foot">Not what you needed? <a onclick="navTo(\'helpdesk/tickets\')">Raise a ticket</a>.</div>';
+    return '<div class="hd-msg bot"><div class="hd-ic bot"><i class="fa-solid fa-robot"></i></div>'
+      +'<div class="hd-bub">'+body+'</div></div>';
+  }).join('');
   c.scrollTop=c.scrollHeight;
 }
-window.hdAsk=function(q){const i=$('hdQ');if(i){i.value=q;}hdSend();};
+window.hdAsk=function(q){const i=$('hdQ');if(i){i.value=q;hdGrow(i);}hdSend();};
 window.hdSend=async function(){
-  const inp=$('hdQ');const q=(inp.value||'').trim();if(!q)return;inp.value='';inp.disabled=true;
+  const inp=$('hdQ'), btn=$('hdSendBtn');
+  const q=((inp&&inp.value)||'').trim(); if(!q)return;
+  inp.value=''; hdGrow(inp); inp.disabled=true; if(btn)btn.disabled=true;
   HD_MSGS.push({who:'me',text:q});
-  HD_MSGS.push({who:'bot',text:'<span class="hd-typing"><span></span><span></span><span></span></span>',isLoading:true});
+  HD_MSGS.push({who:'bot',html:'<span class="hd-dots"><span></span><span></span><span></span></span>',isLoading:true});
   hdRenderChat();
-  // Call the AI edge function
+  // The last few turns go with the question so follow-ups ("and the one after that?") make sense.
+  const history=HD_MSGS.filter(function(m){ return !m.isLoading && (m.text||m.md); })
+    .slice(-9,-1)
+    .map(function(m){ return {role:(m.who==='bot'?'assistant':'user'), content:(m.md||m.text||'')}; });
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/helpdesk-ai',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({question:q})
+      body:JSON.stringify({question:q, history:history})
     });
-    const {answer}=await res.json();
+    const d=await res.json();
     HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    // If AI not configured yet, fall back to KB silently
-    const finalAns=(answer&&!answer.startsWith('AI assistant is not configured'))
-      ?answer:(hdAnswer(q)||answer||'Sorry, no answer available.');
-    HD_MSGS.push({who:'bot',text:(finalAns||'Sorry, no answer available.')+
-      '<div style="margin-top:8px;color:var(--slate);font-size:12px">Not what you needed? <a style="color:var(--brand);font-weight:600;cursor:pointer" onclick="navTo(`helpdesk/tickets`)">Raise a ticket</a>.</div>'});
+    // hdAnswer() is the old hard-coded answer sheet — still the fallback if the key is missing.
+    const notSetUp=d.answer&&/not configured/i.test(d.answer);
+    const md=notSetUp?(hdAnswer(q)||d.answer):(d.answer||'I could not work that out.');
+    HD_MSGS.push({who:'bot', md:md, tools:d.tools_used||[], offerTicket:true});
   }catch(e){
     HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    // fallback to KB
-    const ans=hdAnswer(q);
-    HD_MSGS.push({who:'bot',text:ans||'Having trouble connecting. Please try again or <a style="color:var(--brand);font-weight:600;cursor:pointer" onclick="navTo(`helpdesk/tickets`)">raise a ticket</a>.'});
+    HD_MSGS.push({who:'bot', md:hdAnswer(q)||'I could not reach the assistant just now. Please try again in a moment.', offerTicket:true});
   }
-  inp.disabled=false;inp.focus();
+  inp.disabled=false; if(btn)btn.disabled=false;
+  try{inp.focus();}catch(_e){}
   hdRenderChat();
 };
 function hdDocs(){
