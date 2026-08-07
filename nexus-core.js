@@ -1689,6 +1689,7 @@ const MIS_FIELDS=[
   {k:'court',l:'Court'},
   {k:'status',l:'Status / Purpose'},
   {k:'action_needed',l:'Action Needed'},
+  {k:'action_date',l:'Action Date'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
   {k:'date_of_filing',l:'Date of Filing'},
@@ -1827,7 +1828,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_date:110,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1930,7 +1931,11 @@ async function legalMIS(){
         background:var(--bg-card);color:var(--ink);cursor:pointer;transition:background .12s,border-color .12s,box-shadow .12s}
       .mis-toolbar .btn i{font-size:12px}
       .mis-toolbar .btn:not(:disabled):hover{background:var(--bg-subtle,#f8fafc);border-color:var(--slate)}
-      .mis-toolbar .btn:disabled{cursor:not-allowed}
+      /* A disabled button that only fades out reads as broken. Keep a dashed outline so it is
+         clearly a button that is waiting for something (a row to be selected). */
+      .mis-toolbar .btn:disabled{cursor:not-allowed;opacity:1;color:var(--slate);
+        background:var(--bg-subtle,#f8fafc);border:1px dashed var(--line)}
+      .mis-toolbar .btn:disabled i{opacity:.65}
       .mis-toolbar .btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
       /* Must restate the background: the generic hover rule above has the same specificity, so
          without this the primary button went white on hover with only its border left coloured. */
@@ -2067,6 +2072,8 @@ async function legalMIS(){
         .mis-toolbar .mis-filters{margin-left:0;width:100%}
         .mis-search-wrap{width:100%}
         .mis-search-wrap input{min-width:0;width:100%}
+        /* the full placeholder sentence overflows a phone-width box - shrink it so it reads */
+        .mis-search-wrap input::placeholder{font-size:11.5px}
         select.mis-sel{min-width:0;width:100%}
         .mis-rangemenu{width:100%}
         .mis-range-btn{width:100%;justify-content:flex-start}
@@ -2078,8 +2085,8 @@ async function legalMIS(){
     <div class="mis-toolbar${MIS_RANGE==='custom'?' has-custom':''}">
       <div class="mis-actions">
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
-        <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn" id="misDelBtn" onclick="misDeleteSel()" disabled style="opacity:.45;color:var(--err);border-color:var(--err)"><i class="fa-solid fa-trash"></i> Delete</button>
+        <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="btn" id="misDelBtn" onclick="misDeleteSel()" disabled><i class="fa-solid fa-trash"></i> Delete</button>
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
@@ -2140,9 +2147,15 @@ priority is empty / court is high court: search one column.">
 // Recording it on the day itself counts as late, not neutral — a case dealt with only when it
 // is already due was not managed ahead of time.
 // No score yet if the "Handled" checkbox in MIS hasn't been ticked for this Next Date.
+/* Scored on the ACTION DATE — the day the team committed to doing the thing written in Action
+   Needed — measured against the day that commitment was recorded. More than a week of runway
+   earns +1, anything shorter but still ahead scores 0, and a date that is today or already gone
+   scores −1. Cases with no action date are simply not scored.
+   (This used to measure the hearing date, which rewarded whatever the court happened to list.) */
 function misScoreOf(r){
-  if(!r.next_date_recorded_at||!r.next_date_iso)return null;
-  const gap=Math.round((new Date(r.next_date_iso+'T00:00:00')-new Date(r.next_date_recorded_at+'T00:00:00'))/86400000);
+  const target=r.action_date_iso||null;
+  if(!target||!r.next_date_recorded_at)return null;
+  const gap=Math.round((new Date(target+'T00:00:00')-new Date(String(r.next_date_recorded_at).slice(0,10)+'T00:00:00'))/86400000);
   if(gap>7)return 1;
   if(gap>0)return 0;
   return -1;
@@ -2314,8 +2327,10 @@ window.misToggleAll=function(master){
 window.misUpdateToolbar=function(){
   const n=window._misSel.size;
   const editBtn=$('misEditBtn'),delBtn=$('misDelBtn');
-  if(editBtn){editBtn.disabled=(n!==1);editBtn.style.opacity=(n===1)?'1':'.45';}
-  if(delBtn){delBtn.disabled=(n===0);delBtn.style.opacity=(n>0)?'1':'.45';}
+  // Enabled/disabled is carried by the stylesheet (a dashed outline while waiting), not by fading
+  // the button until it looks broken.
+  if(editBtn){editBtn.disabled=(n!==1);editBtn.title=(n===1)?'Edit the selected case':'Select one case to edit';}
+  if(delBtn){delBtn.disabled=(n===0);delBtn.title=(n>0)?'Delete the selected case(s)':'Select at least one case to delete';}
 };
 const MIS_ALIASES={
   case_type:['case type','type of case'],
@@ -2509,6 +2524,14 @@ function misCollect(orig){
   else if(row.next_date){ row.next_date_iso=null; }
   const pd=misToIso(row.previous_date);
   if(pd) row.previous_date=misDmy(pd);
+  // Action Date drives the scoreboard, so it is kept in the same dd/mm/yyyy + sortable pair.
+  const ad=misToIso(row.action_date);
+  if(ad){ row.action_date=misDmy(ad); row.action_date_iso=misIsoStr(ad); }
+  else { row.action_date_iso=null; }
+  // Recording an action date is itself the commitment, so that is when the clock starts.
+  if(row.action_date_iso && (!orig || String(orig.action_date||'')!==String(row.action_date||''))){
+    row.next_date_recorded_at=misIsoStr(new Date());
+  }
   // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
   if(orig){
     const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
@@ -2519,9 +2542,21 @@ function misCollect(orig){
   }
   return row;
 }
+function misActionDateMissing(row){
+  // Action Needed without a date is a promise with no deadline - the scoreboard has nothing to
+  // measure. One is required whenever the other is filled in.
+  if(String(row.action_needed||'').trim() && !row.action_date_iso){
+    toast('Add an Action Date — Action Needed has to have a date to work to','warn');
+    const el=$('misF_action_date'); if(el){ try{el.focus();}catch(_e){} el.style.borderColor='var(--err)';
+      setTimeout(function(){ el.style.borderColor=''; },2000); }
+    return true;
+  }
+  return false;
+}
 window.misSave=async function(){
   const row=misCollect();
   if(!row.cause_title&&!row.case_no){toast('Enter at least a Cause Title or Case No.','err');return;}
+  if(misActionDateMissing(row)) return;
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   row.created_by=state.email;
   const {error}=await sb.from('mis_cases').insert(row);
@@ -2554,6 +2589,7 @@ window.misEdit=async function(id){
 };
 window.misUpdate=async function(id){
   const row=misCollect(window._misEditOrig);
+  if(misActionDateMissing(row)) return;
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.from('mis_cases').update(row).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
@@ -4613,14 +4649,17 @@ function hdAnswer(q){
 let HD_MSGS=[];
 VIEWS.helpdesk=function(v,seg){
   setCrumb(['Home','Help Desk']);
-  const tab=(seg[0]||'assistant');
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-headset" style="color:#0f766e"></i> Help Desk</h1><p>Ask a question, find a document, or get help using the portal</p></div></div>
+  // "Find a Document" has been removed: document searching belongs in the Legal module (and the
+  // Document Library), where the folders, filters and permissions live. A second search box here
+  // only split the habit in two. Anyone landing on the old /helpdesk/docs address is sent there.
+  let tab=(seg[0]||'assistant');
+  if(tab==='docs'){ navTo('legal'); return; }
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-headset" style="color:#0f766e"></i> Help Desk</h1><p>Ask a question or get help using the portal</p></div></div>
   <div class="tabs">
     <div class="tab ${tab==='assistant'?'active':''}" onclick="navTo('helpdesk/assistant')"><i class="fa-solid fa-robot"></i> Assistant</div>
-    <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('helpdesk/docs')"><i class="fa-solid fa-folder-open"></i> Find a Document</div>
     <div class="tab ${tab==='tickets'?'active':''}" onclick="navTo('helpdesk/tickets')"><i class="fa-solid fa-ticket"></i> My Tickets</div>
   </div><div id="hdBody"></div>`;
-  if(tab==='docs')hdDocs(); else if(tab==='tickets')hdTickets(); else hdAssistant();
+  if(tab==='tickets')hdTickets(); else hdAssistant();
 };
 /* The assistant answers in markdown — bold, bullets, and small tables when it lists things — so it
    needs rendering rather than dumping. Deliberately a small, closed renderer over escaped text:
@@ -9104,6 +9143,10 @@ const COMP_RANGES=[
 const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
 const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
 let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
+/* Ads are shown only after a fetch in THIS visit. Opening the page shows the competitor list and
+   nothing else, so what is on screen is always the answer to a fetch you just asked for, never a
+   pile of whatever happened to be stored from a different date range weeks ago. */
+window._compFetched=window._compFetched||{};   // watchlist id (or 'all') -> true once fetched here
 function compRangeDates(){
   const d=new Date(); d.setHours(12,0,0,0);
   const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
@@ -9152,6 +9195,13 @@ function compFiltered(){
     return true;
   }).sort(function(x,y){ return String(y.ad_delivery_start_time||'').localeCompare(String(x.ad_delivery_start_time||'')); });
 }
+// Picking a competitor from the table fetches their ads there and then, rather than showing
+// whatever was left over from a previous range.
+window.compShowOnly=function(id){
+  COMP_F.wl=String(id);
+  compPaint();
+  compSyncFiltered();
+};
 window.compSetFilter=function(k,val){
   COMP_F[k]=val;
   if(k==='range'&&val==='custom'&&(!COMP_F.from||!COMP_F.to)){
@@ -9274,7 +9324,7 @@ function compWlTableHtml(wl){
       +'<td>'+(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'<span style="color:var(--slate);font-size:12px">—</span>')+'</td>'
       +'<td style="white-space:nowrap">'
         +'<a class="btn btn-sm" href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener" title="Open in Meta Ad Library"><i class="fa-solid fa-arrow-up-right-from-square"></i></a> '
-        +'<button class="btn btn-sm" onclick="compSetFilter(\'wl\',\''+w.id+'\')" title="Show only this competitor"><i class="fa-solid fa-filter"></i></button> '
+        +'<button class="btn btn-sm" onclick="compShowOnly('+w.id+')" title="Show only this competitor — fetches their ads for the current filters"><i class="fa-solid fa-filter"></i></button> '
         +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')" title="Edit"><i class="fa-solid fa-pen"></i></button> '
         +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
       +'</td>'
@@ -9338,17 +9388,25 @@ function compPaint(){
   const wl=window._compWl||[];
   if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
-  const total=(window._compAdsAll||[]).length;
+  // Ads appear only once a fetch has been made for this selection during this visit.
+  const fetched=!!window._compFetched[String(COMP_F.wl)];
   host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
-    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
-      +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
-    +'</div>'
-    +'<div class="comp-grid" id="compGrid"></div>'
-    +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
-      +'<div>'+(total?'No stored ads match these filters.':'Nothing fetched yet.')+'</div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Press <b>Fetch from Meta</b> to pull this exact slice from the Ad Library.</div>'
-    +'</div>';
-  compPaintGrid();
+    +(fetched
+      ?('<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+          +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
+        +'</div>'
+        +'<div class="comp-grid" id="compGrid"></div>'
+        +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
+          +'<div>Meta returned nothing for these filters.</div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range, or Active &amp; inactive.</div>'
+        +'</div>')
+      :('<div class="empty" style="padding:40px"><i class="fa-solid fa-cloud-arrow-down" style="color:#0369a1"></i>'
+          +'<div style="font-weight:600">'+(cur?esc(cur.name)+' — not fetched yet':'Choose a competitor, or fetch them all')+'</div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px;max-width:430px;margin-left:auto;margin-right:auto;line-height:1.55">'
+            +'Set the date range, status and media above, then press <b>Fetch from Meta</b> — or use the filter button beside a competitor to fetch just that one. '
+            +'Nothing is shown until it has actually been fetched, so what you see always matches the filters you asked for.</div>'
+        +'</div>'));
+  if(fetched) compPaintGrid();
 }
 async function compRender(){
   const host=$('compBody'); if(!host)return;
@@ -9539,8 +9597,16 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
     const jr=await res.json().catch(function(){return {};});
     if(jr.error)toast(jr.error,'err');
     else if(jr.skipped)toast(jr.message||'Sync skipped','err');
-    else toast('Synced — '+(jr.newAds||0)+' new ad(s) across '+(jr.synced||0)+' total','ok');
-  }catch(e){toast('Sync failed','err');}
+    else {
+      // Mark this selection as fetched so the grid is allowed to appear.
+      window._compFetched[String(payload.watchlist_id!=null?payload.watchlist_id:'all')]=true;
+      if(payload.watchlist_id==null) window._compFetched['all']=true;
+      const bits=[(jr.newAds||0)+' new', (jr.synced||0)+' seen'];
+      if(jr.replaced) bits.push(jr.replaced+' replaced');
+      if(jr.skippedWrongPage) bits.push(jr.skippedWrongPage+' from other pages ignored');
+      toast('Fetched — '+bits.join(' · '),'ok');
+    }
+  }catch(e){toast('Fetch failed','err');}
   if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
   await compRender();
 }

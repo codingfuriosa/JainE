@@ -1317,7 +1317,10 @@
       if(c.status==='Cancelled') now='Cancelled';
       else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
         now=cur?(cur.title||('Step '+cur.seq)):'—'; }
-      return '<tr>'+left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
+      // Clicking a tracker row opens that instance's own timeline, same as the Instances table.
+      return '<tr class="wf-tk-row" data-case="'+c.id+'" onclick="wfTrackerOpen('+c.id+')" '
+        +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
+        +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
     }).join('');
 
     return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
@@ -1326,6 +1329,15 @@
   // before it — guessing a fixed number left a strip of body text showing through between the
   // bands. Measured here instead, and re-measured whenever the pane is shown or the window
   // resizes (row heights change when long text re-wraps).
+  // Jump from a Tracker row to that instance's timeline: switch back to the main pane, open the
+  // case, and scroll the timeline into view so the click clearly went somewhere.
+  window.wfTrackerOpen=function(caseId){
+    wfTabShow('main');
+    try{ wfShowCase(caseId, null); }catch(_e){}
+    setTimeout(function(){
+      const tl=$('wfTL'); if(tl&&tl.scrollIntoView) tl.scrollIntoView({behavior:'smooth',block:'center'});
+    },60);
+  };
   window.wfTrackerSticky=function(){
     const t=document.querySelector('.wf-tktable'); if(!t) return;
     const rows=[].slice.call(t.querySelectorAll('thead tr'));
@@ -2211,7 +2223,7 @@
     .wf-tk-wrap{max-height:72vh;overflow:auto;border-radius:10px}
     .wf-tktable{min-width:100%;font-size:12px}
     .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
-    .wf-tktable tbody tr{cursor:default}
+    .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
     .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
     .wf-tktable tbody tr:hover{background:var(--brand-a10,#eef2ff)}
     /* Each step's three columns are banded together with a heavier divider, so at a glance you
