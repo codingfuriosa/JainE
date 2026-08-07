@@ -9195,6 +9195,8 @@ function compToolbarHtml(wl){
     +compSelHtml('compMedia',COMP_MEDIA.map(function(r){return [r[0],r[1]];}),COMP_F.media,'compSetFilter(\'media\',this.value)')
     +'<div class="comp-search"><i class="fa-solid fa-magnifying-glass"></i>'
       +'<input placeholder="Search ad text, headline, page…" value="'+esc(COMP_F.q)+'" oninput="compSearch(this.value)"></div>'
+    // Ads stored before videos carried a poster still have none; this re-downloads their media.
+    +'<button class="btn" id="compPosterBtn" onclick="compRefreshMedia()" title="Re-download media for ads already stored, saving a small preview image for each video so tiles load quickly"><i class="fa-solid fa-image"></i> Rebuild previews</button>'
   +'</div>'
   // Says exactly what pressing Fetch will ask Meta for, so nobody is surprised by what arrives.
   +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta will ask the Ad Library for '
@@ -9340,11 +9342,11 @@ function compPlatformIcons(a){
 }
 function compAdCard(a){
   const stillRunning=!a.ad_delivery_stop_time;
-  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
-  const bodyText=bodies.length?String(bodies[0]).slice(0,140):'(no ad text)';
-  const media=compFirstMedia(a);
-  const thumb=media
-    ?'<div class="comp-thumb" data-key="'+esc(media.s3_path)+'" data-type="'+esc(media.media_type)+'" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+  const t=compAdText(a);
+  const bodyText=t.text?t.text.slice(0,140):(t.dynamic?'Catalogue ad — wording changes per product':'(no ad text)');
+  const th=compThumbFor(a);
+  const thumb=th
+    ?'<div class="comp-thumb" data-key="'+esc(th.key)+'" data-kind="'+esc(th.kind)+'" data-overlay="'+(th.overlay?'1':'0')+'" style="position:relative;height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
     :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
   return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer" onclick="compOpenDetail(\''+esc(a.id)+'\')">'
     +thumb
@@ -9363,31 +9365,65 @@ async function compSignedUrl(key){
   window._compSignCache[key]=data.url;
   return data.url;
 }
-/* Nearly every competitor ad is an .mp4, and a <video> with no poster paints nothing until it is
-   played — which is why the tiles looked empty. Appending #t=0.1 makes the browser seek to the
-   first tenth of a second and render THAT frame, giving a still to look at. muted + playsinline
-   are required for it to behave on iOS. A failure now shows a message instead of a dead box. */
-async function compHydrateThumbs(){
+/* Why the tiles were blank: these ad videos are 5-27 MB each, and the grid was asking the browser
+   to pull two dozen of them at once just to show a still. Nothing was broken - they simply never
+   finished downloading.
+
+   Two fixes. Ads fetched from now on carry a small poster image saved next to the video, which is
+   what the tile shows. For ads captured before that, the video itself is used with #t=0.1 (which
+   makes the browser seek to the first frame and paint it) but ONLY once the tile has actually
+   scrolled into view, so a page of them no longer starts two dozen large downloads at once. */
+function compThumbFor(a){
+  const m=compFirstMedia(a);
+  if(!m) return null;
+  if(m.poster) return {key:m.poster, kind:'image', overlay:true};        // video, with its own still
+  if(m.media_type==='video') return {key:m.s3_path, kind:'video', overlay:true};
+  return {key:m.s3_path, kind:'image', overlay:false};
+}
+async function compFillThumb(el){
+  if(el.dataset.done==='1') return;
+  el.dataset.done='1';
+  const key=el.getAttribute('data-key'), kind=el.getAttribute('data-kind');
+  let url=null;
+  try{ url=await compSignedUrl(key); }catch(_e){}
+  if(!el.isConnected) return;
+  if(!url){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>'; return; }
+  const fail='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>';
+  if(kind==='video'){
+    el.innerHTML='<video src="'+esc(url)+'#t=0.1" preload="metadata" muted playsinline'
+      +' style="width:100%;height:100%;object-fit:cover;background:#000"></video>';
+    const v=el.querySelector('video'); if(v) v.onerror=function(){ el.innerHTML=fail; };
+  } else {
+    el.innerHTML='<img src="'+esc(url)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover">';
+    const i=el.querySelector('img'); if(i) i.onerror=function(){ el.innerHTML=fail; };
+  }
+  if(el.getAttribute('data-overlay')==='1'){
+    el.insertAdjacentHTML('beforeend','<span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.62);'
+      +'color:#fff;border-radius:5px;padding:1px 6px;font-size:10px"><i class="fa-solid fa-play"></i></span>');
+  }
+}
+function compHydrateThumbs(){
   const els=Array.from(document.querySelectorAll('.comp-thumb[data-key]'));
-  await Promise.all(els.map(async function(el){
-    const key=el.getAttribute('data-key'),type=el.getAttribute('data-type');
-    let url=null;
-    try{ url=await compSignedUrl(key); }catch(_e){}
-    if(!el.isConnected)return;
-    if(!url){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>'; return; }
-    if(type==='video'){
-      el.innerHTML='<video src="'+esc(url)+'#t=0.1" preload="metadata" muted playsinline'
-        +' style="width:100%;height:100%;object-fit:cover;background:#000"></video>'
-        +'<span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.6);color:#fff;'
-        +'border-radius:5px;padding:1px 5px;font-size:10px"><i class="fa-solid fa-play"></i></span>';
-      el.style.position='relative';
-      const v=el.querySelector('video');
-      if(v) v.onerror=function(){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Video unavailable</div>'; };
-    } else {
-      el.innerHTML='<img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover" '
-        +'onerror="this.parentNode.innerHTML=\'<div style=&quot;font-size:11px;padding:8px&quot;>Image unavailable</div>\'">';
-    }
-  }));
+  if(!els.length) return;
+  if(!('IntersectionObserver' in window)){ els.forEach(compFillThumb); return; }
+  const io=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){ if(en.isIntersecting){ compFillThumb(en.target); io.unobserve(en.target); } });
+  },{rootMargin:'250px'});
+  els.forEach(function(el){ io.observe(el); });
+}
+/* Catalogue ads (Advantage+ / dynamic product ads) store their text as a TEMPLATE - the real words
+   are filled in per product when the ad is served, which is why the Ad Library shows a normal ad
+   but the stored copy reads "{{product.brand}}". Show the real headline where there is one, and be
+   honest about the rest rather than printing the placeholder. */
+function compIsTemplate(s){ return /\{\{\s*product\.[a-z_]+\s*\}\}/i.test(String(s||'')); }
+function compAdText(a){
+  const raw=(Array.isArray(a.ad_creative_bodies)&&a.ad_creative_bodies.length)?String(a.ad_creative_bodies[0]):'';
+  const stripped=raw.replace(/\{\{\s*product\.[a-z_]+\s*\}\}/gi,'').trim();
+  if(raw && !compIsTemplate(raw)) return {text:raw, dynamic:false};
+  if(stripped) return {text:stripped, dynamic:true};
+  const alt=[a.headline,a.description,(Array.isArray(a.ad_creative_link_titles)?a.ad_creative_link_titles[0]:'')]
+    .map(function(x){return String(x||'').trim();}).filter(function(x){return x && !compIsTemplate(x);})[0];
+  return {text:alt||'', dynamic:true};
 }
 /* A keyword search returns anything that merely MENTIONS the competitor - a broker's ad, a news
    post. Their Page ID pins it to ads that page actually ran. You get the ID by opening the
@@ -9486,6 +9522,15 @@ window.compSyncFiltered=function(){
   if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
   compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta');
 };
+// Same fetch, but it also re-downloads media for ads already held that have no preview image yet.
+window.compRefreshMedia=function(){
+  const win=compRangeDates();
+  const payload={refresh_media:true, active_status:COMP_F.status,
+    media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
+    date_from:win?win.from:undefined, date_to:win?win.to:undefined};
+  if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
+  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews');
+};
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
   if(!a){toast('Ad not found — try refreshing','err');return;}
@@ -9496,8 +9541,13 @@ window.compOpenDetail=function(id){
 };
 function compDetailHtml(a){
   const stillRunning=!a.ad_delivery_stop_time;
-  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
-  const bodyText=bodies.length?String(bodies[0]):'(no ad text)';
+  const t=compAdText(a);
+  const bodyText=t.text||'(no ad text)';
+  const dynamicNote=t.dynamic
+    ?'<div style="margin-bottom:7px;font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:6px;padding:6px 9px;line-height:1.45">'
+      +'<i class="fa-solid fa-circle-info"></i> Catalogue ad — Meta fills the wording in from the product feed as it is served, '
+      +'so the Ad Library only stores the template. What you see on Facebook will differ.</div>'
+    :'';
   const extraLinks=Array.isArray(a.extra_links)?a.extra_links:[];
   const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
   return '<div class="modal-head"><h3><i class="fa-solid fa-magnifying-glass-chart"></i> '+esc(a.page_name||'Ad detail')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
@@ -9522,6 +9572,7 @@ function compDetailHtml(a){
           +compDetailRow('Library ID', '<span style="font-family:ui-monospace,Menlo,monospace">'+esc(a.id)+'</span>')
         +'</table>'
         +'<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Description</div>'
+        +dynamicNote
         +'<div style="font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:230px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
         +(extraLinks.length
           ?'<div style="margin-top:14px"><div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Extra links</div>'
@@ -9566,9 +9617,13 @@ async function compRenderDetailMedia(){
   try{ url=await compSignedUrl(item.s3_path); }catch(_e){}
   if(!host.isConnected)return;
   if(!url){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; return; }
-  // #t=0.1 so a frame is shown straight away rather than a black rectangle before Play is pressed
+  // Show the stored poster frame immediately; the video itself (which can be tens of megabytes)
+  // only downloads when Play is pressed. #t=0.1 covers older ads that have no poster.
+  let posterUrl=null;
+  if(item.media_type==='video' && item.poster){ try{ posterUrl=await compSignedUrl(item.poster); }catch(_e){} }
   host.innerHTML=item.media_type==='video'
-    ?'<video src="'+esc(url)+'#t=0.1" controls preload="metadata" playsinline style="max-width:100%;max-height:100%;background:#000"></video>'
+    ?'<video src="'+esc(url)+(posterUrl?'':'#t=0.1')+'" controls preload="'+(posterUrl?'none':'metadata')+'" playsinline'
+      +(posterUrl?(' poster="'+esc(posterUrl)+'"'):'')+' style="max-width:100%;max-height:100%;background:#000"></video>'
     :'<img src="'+esc(url)+'" style="max-width:100%;max-height:100%;object-fit:contain">';
   const el=host.querySelector('video,img');
   if(el) el.onerror=function(){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; };
