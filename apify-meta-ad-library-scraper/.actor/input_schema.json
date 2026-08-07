@@ -1,0 +1,56 @@
+{
+  "title": "Meta Ad Library Scraper",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "searchTerm": {
+      "title": "Search term",
+      "type": "string",
+      "description": "Advertiser / brand keyword to search in the Ad Library, e.g. \"Godrej Properties\".",
+      "editor": "textfield",
+      "prefill": "Godrej Properties"
+    },
+    "country": {
+      "title": "Country (ISO code)",
+      "type": "string",
+      "description": "Two-letter country the ads reached, e.g. IN.",
+      "editor": "textfield",
+      "default": "IN"
+    },
+    "activeStatus": {
+      "title": "Active status",
+      "type": "string",
+      "description": "Which ads to include.",
+      "editor": "select",
+      "enum": ["all", "active", "inactive"],
+      "enumTitles": ["Both", "Active only", "Inactive only"],
+      "default": "all"
+    },
+    "mediaType": {
+      "title": "Media type",
+      "type": "string",
+      "description": "Meta's media filter. 'meme' is Meta's label for image-with-text creatives.",
+      "editor": "select",
+      "enum": ["all", "image", "video", "meme", "none"],
+      "enumTitles": ["All", "Images", "Videos", "Memes", "No media"],
+      "default": "all"
+    },
+    "resultsLimit": {
+      "title": "Max ads to return",
+      "type": "integer",
+      "description": "Upper bound on ads scraped for this search.",
+      "editor": "number",
+      "default": 20,
+      "minimum": 1,
+      "maximum": 200
+    },
+    "proxyConfiguration": {
+      "title": "Proxy",
+      "type": "object",
+      "description": "Meta blocks most datacenter IPs — RESIDENTIAL proxy is strongly recommended.",
+      "editor": "proxy",
+      "default": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+    }
+  },
+  "required": ["searchTerm"]
+}
