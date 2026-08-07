@@ -1,0 +1,15 @@
+{
+  "name": "meta-ad-library-scraper",
+  "version": "1.0.0",
+  "description": "Scrapes Meta's public Ad Library search results (Playwright) and outputs ad creative in the shape JAIN-E's competitor-ads-sync edge function expects.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "apify": "^3.2.6",
+    "crawlee": "^3.11.5",
+    "playwright": "*"
+  },
+  "scripts": {
+    "start": "node src/main.js"
+  }
+}

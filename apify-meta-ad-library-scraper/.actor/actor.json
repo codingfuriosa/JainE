@@ -1,0 +1,24 @@
+{
+  "actorSpecification": 1,
+  "name": "meta-ad-library-scraper",
+  "title": "Meta Ad Library Scraper",
+  "description": "Scrapes Meta's public Ad Library and returns ad creative for a brand/keyword. Output matches JAIN-E's competitor-ads-sync edge function.",
+  "version": "1.0",
+  "dockerfile": "../Dockerfile",
+  "input": "./input_schema.json",
+  "storages": {
+    "dataset": {
+      "actorSpecification": 1,
+      "title": "Scraped ads",
+      "views": {
+        "overview": {
+          "title": "Overview",
+          "transformation": {
+            "fields": ["library_id", "page_name", "is_active", "started_running_on", "cta_text", "platforms", "ad_snapshot_url"]
+          },
+          "display": { "component": "table" }
+        }
+      }
+    }
+  }
+}
