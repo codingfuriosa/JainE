@@ -9416,10 +9416,16 @@ function compHydrateThumbs(){
    but the stored copy reads "{{product.brand}}". Show the real headline where there is one, and be
    honest about the rest rather than printing the placeholder. */
 function compIsTemplate(s){ return /\{\{\s*product\.[a-z_]+\s*\}\}/i.test(String(s||'')); }
+// Meta labels these display_format:"DCO". Trust that when present, fall back to the text otherwise.
+function compIsCatalogue(a){
+  return String(a&&a.display_format||'')==='DCO'
+    || compIsTemplate((Array.isArray(a&&a.ad_creative_bodies)&&a.ad_creative_bodies[0])||'')
+    || compIsTemplate(a&&a.headline);
+}
 function compAdText(a){
   const raw=(Array.isArray(a.ad_creative_bodies)&&a.ad_creative_bodies.length)?String(a.ad_creative_bodies[0]):'';
   const stripped=raw.replace(/\{\{\s*product\.[a-z_]+\s*\}\}/gi,'').trim();
-  if(raw && !compIsTemplate(raw)) return {text:raw, dynamic:false};
+  if(raw && !compIsTemplate(raw)) return {text:raw, dynamic:compIsCatalogue(a)};
   if(stripped) return {text:stripped, dynamic:true};
   const alt=[a.headline,a.description,(Array.isArray(a.ad_creative_link_titles)?a.ad_creative_link_titles[0]:'')]
     .map(function(x){return String(x||'').trim();}).filter(function(x){return x && !compIsTemplate(x);})[0];
@@ -9617,14 +9623,30 @@ async function compRenderDetailMedia(){
   try{ url=await compSignedUrl(item.s3_path); }catch(_e){}
   if(!host.isConnected)return;
   if(!url){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; return; }
-  // Show the stored poster frame immediately; the video itself (which can be tens of megabytes)
-  // only downloads when Play is pressed. #t=0.1 covers older ads that have no poster.
+  // In the popup the video is the point, so it loads properly here (preload=auto) - unlike the
+  // grid, where only a small poster is fetched. The poster fills the frame while it buffers, and
+  // a spinner sits over it until enough has arrived to play.
   let posterUrl=null;
   if(item.media_type==='video' && item.poster){ try{ posterUrl=await compSignedUrl(item.poster); }catch(_e){} }
-  host.innerHTML=item.media_type==='video'
-    ?'<video src="'+esc(url)+(posterUrl?'':'#t=0.1')+'" controls preload="'+(posterUrl?'none':'metadata')+'" playsinline'
-      +(posterUrl?(' poster="'+esc(posterUrl)+'"'):'')+' style="max-width:100%;max-height:100%;background:#000"></video>'
-    :'<img src="'+esc(url)+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+  if(item.media_type!=='video'){
+    host.innerHTML='<img src="'+esc(url)+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+  } else {
+    host.innerHTML='<video src="'+esc(url)+(posterUrl?'':'#t=0.1')+'" controls autoplay muted playsinline preload="auto"'
+      +(posterUrl?(' poster="'+esc(posterUrl)+'"'):'')
+      +' style="max-width:100%;max-height:100%;background:#000"></video>'
+      +'<div id="compVidWait" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+      +'pointer-events:none;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.7)"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    host.style.position='relative';
+    const v=host.querySelector('video');
+    const hideWait=function(){ const s=document.getElementById('compVidWait'); if(s)s.remove(); };
+    if(v){
+      v.addEventListener('loadeddata',hideWait);
+      v.addEventListener('canplay',hideWait);
+      v.addEventListener('error',function(){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Video could not be loaded</div>'; });
+      // some browsers block even a muted autoplay; the controls still work, so just clear the spinner
+      const p=v.play(); if(p&&p.catch) p.catch(hideWait);
+    }
+  }
   const el=host.querySelector('video,img');
   if(el) el.onerror=function(){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; };
 }
