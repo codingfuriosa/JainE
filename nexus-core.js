@@ -9103,9 +9103,15 @@ function compFiltered(){
     if(COMP_F.status==='active' && !running) return false;
     if(COMP_F.status==='inactive' && running) return false;
     if(COMP_F.media!=='all' && compAdMediaKind(a)!==COMP_F.media) return false;
+    // Match Meta's own meaning. Its filter chip reads "Impressions by date", i.e. ads that were
+    // RUNNING at some point inside the window - not ads that STARTED inside it. An ad that began
+    // in June and is still running today belongs in a July window, and filtering on the start date
+    // alone wrongly dropped it, making our counts disagree with the Ad Library.
     if(win){
       const s=a.ad_delivery_start_time?String(a.ad_delivery_start_time).slice(0,10):'';
-      if(!s || s<win.from || s>win.to) return false;
+      if(!s || s>win.to) return false;                       // began after the window closed
+      const e=a.ad_delivery_stop_time?String(a.ad_delivery_stop_time).slice(0,10):'';
+      if(e && e<win.from) return false;                      // finished before it opened
     }
     if(q){
       const blob=[(Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies.join(' '):''),a.headline,a.description,a.page_name,a.cta_text,a.id]
