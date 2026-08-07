@@ -9057,68 +9057,204 @@ VIEWS.playbook=function(v,seg){
 const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram'};
 window._compAdsAll=window._compAdsAll||[];
 window._compSignCache=window._compSignCache||{};
+/* ---- Competitor Ads -----------------------------------------------------------------------
+   One filter bar drives BOTH what you see and what gets scraped. Picking a competitor, a date
+   range, a status and a media type filters the ads already stored; pressing Sync sends those same
+   four choices to Meta's Ad Library, so you fetch exactly the slice you are looking at instead of
+   pulling everything and sifting afterwards (which is billed per ad).                          */
+const COMP_RANGES=[
+  ['all','All time','fa-infinity'],
+  ['last_7','Last 7 days','fa-calendar-day'],
+  ['last_30','Last 30 days','fa-calendar-week'],
+  ['last_90','Last 90 days','fa-calendar-days'],
+  ['this_year','This year','fa-calendar'],
+  ['custom','Custom range','fa-sliders']
+];
+const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
+const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
+let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
+function compRangeDates(){
+  const d=new Date(); d.setHours(12,0,0,0);
+  const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  const back=n=>{const x=new Date(d.getTime());x.setDate(x.getDate()-n);return x;};
+  switch(COMP_F.range){
+    case 'last_7':    return {from:iso(back(7)),  to:iso(d)};
+    case 'last_30':   return {from:iso(back(30)), to:iso(d)};
+    case 'last_90':   return {from:iso(back(90)), to:iso(d)};
+    case 'this_year': return {from:d.getFullYear()+'-01-01', to:iso(d)};
+    case 'custom':    return (COMP_F.from&&COMP_F.to)?{from:COMP_F.from,to:COMP_F.to}:null;
+    default:          return null;
+  }
+}
+function compAdMediaKind(a){
+  const items=Array.isArray(a.media_items)?a.media_items:[];
+  if(items.length>1) return 'carousel';
+  const t=(items[0]&&items[0].media_type)||a.media_type||'';
+  return t==='video'?'video':(t?'image':'');
+}
+// The ads currently on screen, after every filter in the bar.
+function compFiltered(){
+  const all=window._compAdsAll||[];
+  const win=compRangeDates();
+  const q=(COMP_F.q||'').trim().toLowerCase();
+  return all.filter(function(a){
+    if(COMP_F.wl!=='all' && String(a.watchlist_id)!==String(COMP_F.wl)) return false;
+    const running=!a.ad_delivery_stop_time;
+    if(COMP_F.status==='active' && !running) return false;
+    if(COMP_F.status==='inactive' && running) return false;
+    if(COMP_F.media!=='all' && compAdMediaKind(a)!==COMP_F.media) return false;
+    if(win){
+      const s=a.ad_delivery_start_time?String(a.ad_delivery_start_time).slice(0,10):'';
+      if(!s || s<win.from || s>win.to) return false;
+    }
+    if(q){
+      const blob=[(Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies.join(' '):''),a.headline,a.description,a.page_name,a.cta_text,a.id]
+        .filter(Boolean).join(' ').toLowerCase();
+      if(blob.indexOf(q)===-1) return false;
+    }
+    return true;
+  }).sort(function(x,y){ return String(y.ad_delivery_start_time||'').localeCompare(String(x.ad_delivery_start_time||'')); });
+}
+window.compSetFilter=function(k,val){
+  COMP_F[k]=val;
+  if(k==='range'&&val==='custom'&&(!COMP_F.from||!COMP_F.to)){
+    const w=compRangeDates()||{}; const d=new Date();
+    COMP_F.to=w.to||(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    const b=new Date(); b.setDate(b.getDate()-30);
+    COMP_F.from=w.from||(b.getFullYear()+'-'+String(b.getMonth()+1).padStart(2,'0')+'-'+String(b.getDate()).padStart(2,'0'));
+  }
+  compPaint();
+};
+window.compSetDate=function(which,val){
+  COMP_F[which]=val;
+  // To can never be before From
+  if(COMP_F.from&&COMP_F.to&&COMP_F.to<COMP_F.from){
+    if(which==='from') COMP_F.to=''; else { COMP_F.to=COMP_F.from; toast('To date cannot be before the From date','warn'); }
+  }
+  compPaint();
+};
+window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); };
+
 VIEWS.competitors=async function(v,seg){
   setCrumb(['Growth & Strategy','Competitor Ads']);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
     +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 16px">'
-      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — not spend or reach, which Meta only exposes for political/issue ads.</p>'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran. Meta never publishes spend or reach for ordinary commercial ads.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add Competitor</button>'
-        +'<button class="btn btn-primary" id="compSyncAllBtn" onclick="compSyncAll()"><i class="fa-solid fa-rotate"></i> Sync All</button>'
+        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compSyncFiltered()"><i class="fa-solid fa-rotate"></i> Fetch from Meta</button>'
       +'</div>'
     +'</div>'
     +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
   await compRender();
 };
+function compSelHtml(id,list,cur,onchange){
+  return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
+    +list.map(function(o){ return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')
+  +'</select>';
+}
 function compToolbarHtml(wl){
-  if(!wl.length)return '';
-  return '<div class="card card-pad" style="margin-bottom:16px">'
-    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">Sync options</div>'
-    +'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
-      +'<div style="min-width:200px">'
-        +'<div style="font-size:12px;color:var(--slate);margin-bottom:6px">Competitors to sync</div>'
-        +'<div style="display:flex;flex-direction:column;gap:4px;max-height:110px;overflow-y:auto;padding-right:6px">'
-          +wl.map(function(w){return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px"><input type="checkbox" class="comp-sync-cb" value="'+w.id+'" checked> '+esc(w.name)+'</label>';}).join('')
-        +'</div>'
-      +'</div>'
-      +'<label style="font-size:12px;color:var(--slate)">From<br><input type="date" id="compDateFrom" class="inp" style="margin-top:4px"></label>'
-      +'<label style="font-size:12px;color:var(--slate)">To<br><input type="date" id="compDateTo" class="inp" style="margin-top:4px"></label>'
-      +'<div><div style="font-size:12px;color:var(--slate);margin-bottom:6px">Status</div>'
-        +'<div style="display:flex;gap:10px">'
-          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="all" checked> Both</label>'
-          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="active"> Active</label>'
-          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="inactive"> Inactive</label>'
-        +'</div>'
-      +'</div>'
-      +'<button class="btn btn-primary" id="compSyncSelectedBtn" onclick="compSyncSelected()"><i class="fa-solid fa-rotate"></i> Sync Selected</button>'
+  const win=compRangeDates();
+  const opts=[['all','All competitors ('+wl.length+')']].concat(wl.map(function(w){
+    const n=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;}).length;
+    return [String(w.id), w.name+' ('+n+')'];
+  }));
+  const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
+  return '<style>'
+    +'.comp-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
+    +'.comp-sel{height:36px;padding:0 32px 0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;'
+      +'background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%230369a1\' stroke-width=\'2\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:11px 8px}'
+    +'.comp-sel:hover{border-color:var(--slate)}'
+    +'.comp-sel:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-date{height:36px;border:1px solid var(--line);border-radius:9px;padding:0 9px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
+    +'.comp-date:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-search{position:relative;display:flex;align-items:center;flex:1;min-width:150px}'
+    +'.comp-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}'
+    +'.comp-search input{width:100%;height:36px;padding:0 11px 0 31px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
+    +'.comp-search input:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-note{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--slate);padding:0 2px;margin:-6px 0 14px}'
+    +'.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:13px}'
+    +'@media(max-width:760px){.comp-bar{gap:8px}.comp-sel,.comp-search{flex:1 1 100%}.comp-search{min-width:0}}'
+  +'</style>'
+  +'<div class="comp-bar">'
+    +compSelHtml('compWl',opts,COMP_F.wl,'compSetFilter(\'wl\',this.value)')
+    +compSelHtml('compRange',COMP_RANGES.map(function(r){return [r[0],r[1]];}),COMP_F.range,'compSetFilter(\'range\',this.value)')
+    +(COMP_F.range==='custom'
+      ?('<input type="date" class="comp-date" value="'+esc(COMP_F.from)+'" onchange="compSetDate(\'from\',this.value)">'
+        +'<span style="color:var(--slate);font-size:12px">to</span>'
+        +'<input type="date" class="comp-date" min="'+esc(COMP_F.from)+'" value="'+esc(COMP_F.to)+'" onchange="compSetDate(\'to\',this.value)">')
+      :'')
+    +compSelHtml('compStatus',COMP_STATUS.map(function(r){return [r[0],r[1]];}),COMP_F.status,'compSetFilter(\'status\',this.value)')
+    +compSelHtml('compMedia',COMP_MEDIA.map(function(r){return [r[0],r[1]];}),COMP_F.media,'compSetFilter(\'media\',this.value)')
+    +'<div class="comp-search"><i class="fa-solid fa-magnifying-glass"></i>'
+      +'<input placeholder="Search ad text, headline, page…" value="'+esc(COMP_F.q)+'" oninput="compSearch(this.value)"></div>'
+  +'</div>'
+  // Says exactly what pressing Fetch will ask Meta for, so nobody is surprised by what arrives.
+  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta will ask the Ad Library for '
+    +'<b>'+esc(cur?cur.name:'all '+wl.length+' competitors')+'</b>, '
+    +'<b>'+esc(win?(win.from+' to '+win.to):'any start date')+'</b>, '
+    +'<b>'+esc((COMP_STATUS.filter(function(s){return s[0]===COMP_F.status;})[0]||[])[1]||'')+'</b>'
+    +(COMP_F.media==='carousel'?', all media types (carousel is filtered here, Meta has no carousel filter)'
+       :(COMP_F.media==='all'?', all media types':', '+esc((COMP_MEDIA.filter(function(s){return s[0]===COMP_F.media;})[0]||[])[1]||'').toLowerCase()))
+    +'.'+(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so it searches by keyword — set one for their ads only.':'')+'</span></div>';
+}
+// Header strip for a single selected competitor: what it targets, and the row's own controls.
+function compWlCardHtml(w){
+  const ads=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;});
+  const running=ads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
+  return '<div class="card card-pad" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="font-weight:700;font-size:15px">'+esc(w.name)+'</div>'
+      +'<div style="color:var(--slate);font-size:12px">'
+        +(w.page_id
+          ?('<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Targets Page ID <b>'+esc(w.page_id)+'</b> — their own ads only')
+          :('<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Keyword search: "'+esc(w.search_term)+'" — may catch anyone mentioning the name'))
+        +' · '+ads.length+' ad(s) stored · '+running+' running</div>'
     +'</div>'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> In auto-sync</label>'
+    +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')"><i class="fa-solid fa-pen"></i> Edit</button>'
+    +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
   +'</div>';
+}
+function compPaintGrid(){
+  const host=$('compGrid'); if(!host) return;
+  const rows=compFiltered();
+  const cnt=$('compCount');
+  if(cnt) cnt.textContent=rows.length+' ad'+(rows.length===1?'':'s')
+    +' · '+rows.filter(function(a){return !a.ad_delivery_stop_time;}).length+' running';
+  host.innerHTML=rows.length
+    ? rows.slice(0,200).map(compAdCard).join('')
+    : '';
+  const empty=$('compEmpty');
+  if(empty) empty.style.display=rows.length?'none':'';
+  compHydrateThumbs();
+}
+function compPaint(){
+  const tb=$('compToolbar'); if(tb) tb.innerHTML=compToolbarHtml(window._compWl||[]);
+  const host=$('compBody'); if(!host) return;
+  const wl=window._compWl||[];
+  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
+  const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
+  const total=(window._compAdsAll||[]).length;
+  host.innerHTML=(cur?compWlCardHtml(cur):'')
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+      +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
+    +'</div>'
+    +'<div class="comp-grid" id="compGrid"></div>'
+    +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
+      +'<div>'+(total?'No stored ads match these filters.':'Nothing fetched yet.')+'</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Press <b>Fetch from Meta</b> to pull this exact slice from the Ad Library.</div>'
+    +'</div>';
+  compPaintGrid();
 }
 async function compRender(){
   const host=$('compBody'); if(!host)return;
   let wl=[],ads=[];
-  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('created_at',{ascending:false}); wl=data||[]; }catch(e){}
-  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('last_seen_at',{ascending:false}).limit(500); ads=data||[]; }catch(e){}
-  window._compAdsAll=ads;
-  const tb=$('compToolbar'); if(tb)tb.innerHTML=compToolbarHtml(wl);
-  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
-  host.innerHTML=wl.map(function(w){
-    const wads=ads.filter(function(a){return a.watchlist_id===w.id;});
-    const running=wads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
-    return '<div class="card card-pad" style="margin-bottom:16px">'
-      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
-        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc(w.name)+'</div><div style="color:var(--slate);font-size:12px">Search term: "'+esc(w.search_term)+'" · '+wads.length+' ad(s) seen · '+running+' currently running</div></div>'
-        +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> Active</label>'
-        +'<button class="btn btn-sm" onclick="compSync('+w.id+',this)"><i class="fa-solid fa-rotate"></i> Sync</button>'
-        +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
-      +'</div>'
-      +(wads.length
-        ?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'+wads.slice(0,24).map(compAdCard).join('')+'</div>'
-        :'<div class="empty" style="padding:20px"><i class="fa-regular fa-clock"></i><div>Not synced yet — click Sync</div></div>')
-      +'</div>';
-  }).join('');
-  compHydrateThumbs();
+  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}); wl=data||[]; }catch(e){}
+  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('ad_delivery_start_time',{ascending:false}).limit(1000); ads=data||[]; }catch(e){}
+  window._compWl=wl; window._compAdsAll=ads;
+  compPaint();
 }
 function compFirstMedia(a){
   if(Array.isArray(a.media_items)&&a.media_items.length)return a.media_items[0];
@@ -9169,19 +9305,60 @@ async function compHydrateThumbs(){
       :'<img src="'+url+'" style="width:100%;height:100%;object-fit:cover">';
   }));
 }
+/* A keyword search returns anything that merely MENTIONS the competitor - a broker's ad, a news
+   post. Their Page ID pins it to ads that page actually ran. You get the ID by opening the
+   competitor in Meta's Ad Library and copying the address; the number after view_all_page_id is
+   it, and pasting the whole link here is enough. */
+function compPageIdFrom(text){
+  const s=String(text||'').trim();
+  if(!s) return '';
+  if(/^\d{6,}$/.test(s)) return s;                                  // already just an ID
+  let m=s.match(/[?&]view_all_page_id=(\d+)/i);   if(m) return m[1];
+  m=s.match(/[?&]page_ids?(?:%5B0%5D|\[0\])?=(\d+)/i); if(m) return m[1];
+  m=s.match(/facebook\.com\/(?:profile\.php\?id=)?(\d{6,})/i);      if(m) return m[1];
+  return '';
+}
+function compFormHtml(w){
+  w=w||{};
+  return '<div class="modal-body frm">'
+    +'<label>Display name<input id="compName" value="'+esc(w.name||'')+'" placeholder="e.g. Godrej Properties"></label>'
+    +'<label>Ad Library link or Page ID'
+      +'<input id="compPageId" value="'+esc(w.page_id||'')+'" placeholder="Paste their Ad Library link, or the Page ID">'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px;line-height:1.5">'
+        +'Best option — fetches <b>only that page\'s own ads</b>. Open the competitor in Meta\'s Ad Library, copy the address bar, paste it here; the Page ID is picked out for you.'
+      +'</div>'
+    +'</label>'
+    +'<label>Search term (used only when there is no Page ID)'
+      +'<input id="compSearchTerm" value="'+esc(w.search_term||'')+'" placeholder="Defaults to the name above">'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px">Keyword search also returns ads by other people that mention this name.</div>'
+    +'</label>'
+  +'</div>';
+}
 window.compAddModal=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Competitor</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><label>Display name<input id="compName" placeholder="e.g. Godrej Properties"></label>'
-    +'<label>Search term sent to Meta<input id="compSearchTerm" placeholder="Defaults to the name above"></label></div>'
+    +compFormHtml({})
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
 };
-window.compSave=async function(){
+window.compEditModal=function(id){
+  const w=(window._compWl||[]).filter(function(x){return String(x.id)===String(id);})[0];
+  if(!w){toast('Competitor not found','err');return;}
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit '+esc(w.name)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +compFormHtml(w)
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave('+w.id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+};
+window.compSave=async function(id){
   const name=(($('compName')&&$('compName').value)||'').trim();
   const term=(($('compSearchTerm')&&$('compSearchTerm').value)||'').trim()||name;
+  const raw=(($('compPageId')&&$('compPageId').value)||'').trim();
+  const pageId=compPageIdFrom(raw);
   if(!name){toast('Enter a name','err');return;}
-  const {error}=await sb.schema('camp').from('competitor_watchlist').insert({name:name,search_term:term});
+  if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');return;}
+  const row={name:name,search_term:term,page_id:pageId||null};
+  const {error}=id
+    ? await sb.schema('camp').from('competitor_watchlist').update(row).eq('id',id)
+    : await sb.schema('camp').from('competitor_watchlist').insert(row);
   if(error){toast(error.message,'err');return;}
-  closeModal();toast('Competitor added','ok');
+  closeModal();toast(id?'Competitor updated':'Competitor added','ok');
   await compRender();
 };
 window.compToggleActive=async function(id,active){
@@ -9211,14 +9388,19 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
   await compRender();
 }
 window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); };
-window.compSyncAll=function(){ compRunSync({},$('compSyncAllBtn'),'Syncing…','Sync All'); };
-window.compSyncSelected=function(){
-  const ids=Array.from(document.querySelectorAll('.comp-sync-cb:checked')).map(function(cb){return Number(cb.value);});
-  if(!ids.length){toast('Select at least one competitor','err');return;}
-  const dateFrom=($('compDateFrom')&&$('compDateFrom').value)||undefined;
-  const dateTo=($('compDateTo')&&$('compDateTo').value)||undefined;
-  const activeStatusEl=document.querySelector('input[name="compActiveStatus"]:checked');
-  compRunSync({watchlist_ids:ids,active_status:activeStatusEl?activeStatusEl.value:'all',date_from:dateFrom,date_to:dateTo},$('compSyncSelectedBtn'),'Syncing…','Sync Selected');
+// Fetches exactly the slice the filter bar is showing. Carousel is a local distinction only -
+// Meta has no carousel filter - so it asks for all media and the grid narrows it afterwards.
+window.compSyncFiltered=function(){
+  const win=compRangeDates();
+  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); return; }
+  const payload={
+    active_status:COMP_F.status,
+    media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
+    date_from:win?win.from:undefined,
+    date_to:win?win.to:undefined
+  };
+  if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
+  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta');
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
