@@ -957,7 +957,7 @@
   function wfCaseSummaryHtml(c){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
-    const items=[{k:'Id',v:wfCaseNoText(c)}];
+    const items=[{k:(window._wfIsBill?'Wheredoc Id':'No.'),v:wfCaseNoText(c)}];
     WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     if(items.length<=1) return '';
     return '<div class="tp-grid" style="margin-top:10px">'+items.map(function(it){return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';}).join('')+'</div>';
@@ -1269,7 +1269,7 @@
     // place in a tracking grid). Order follows the form, so the two always read the same way.
     const tmpl=(Array.isArray(flow.trigger_template)?flow.trigger_template:[])
       .filter(function(f){ return f && f.label && (f.type||'text')!=='attachment'; });
-    const fixed=[{k:'Id'},{k:'Timestamp'}].concat(tmpl.map(function(f){ return {k:f.label}; }));
+    const fixed=[{k:'Wheredoc Id'},{k:'Timestamp'}].concat(tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -1335,9 +1335,94 @@
       top+=tr.getBoundingClientRect().height;
     });
   };
-  // The two panes of a bill-style workflow. Ordinary workflows have no strip and no Tracker.
+  /* ----- Forms tab --------------------------------------------------------------------------
+     The Google Forms this workflow actually runs on, and who is expected to fill each one - the
+     same shape as Recruitment > Tests. Held in acc.flow_forms; anyone can read them, only
+     Administration can change them, matching who may edit the workflow itself. */
+  window._wfForms=[];
+  function wfFormsTableHtml(forms, canManage){
+    if(!forms.length){
+      return '<div class="ac-empty" style="cursor:default">'
+        +'No forms added yet.'+(canManage?' Use <b>Add form</b> to record the Google Forms this workflow runs on and who fills them.':'')
+      +'</div>';
+    }
+    const link=function(u,label){
+      if(!u) return '<span style="color:var(--slate)">—</span>';
+      return '<a href="'+esc2(u)+'" target="_blank" rel="noopener">'+esc2(label)+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a>';
+    };
+    return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
+      +'<th style="width:52px">Sl</th><th>Form</th><th>Who fills it</th><th>Step</th><th>Open</th><th>Responses</th>'
+      +(canManage?'<th style="width:92px">Edit</th>':'')
+    +'</tr></thead><tbody>'
+    +forms.map(function(f,i){
+      return '<tr'+(f.active?'':' style="opacity:.5"')+'>'
+        +'<td>'+(f.sl||i+1)+'</td>'
+        +'<td><b>'+esc2(f.name)+'</b>'+(f.notes?('<div style="font-size:11.5px;color:var(--slate);white-space:normal">'+esc2(f.notes)+'</div>'):'')+'</td>'
+        +'<td>'+(f.who_fills?esc2(f.who_fills):'<span style="color:var(--slate)">—</span>')+'</td>'
+        +'<td>'+(f.step_seq?('Step '+f.step_seq):'<span style="color:var(--slate)">—</span>')+'</td>'
+        +'<td>'+link(f.link,'Form')+'</td>'
+        +'<td>'+link(f.response_sheet_url,'Sheet')+'</td>'
+        +(canManage?('<td style="white-space:nowrap">'
+          +'<button class="ac-btn ic" title="Edit" onclick="wfFormEdit('+f.id+')"><i class="fa-solid fa-pen"></i></button> '
+          +'<button class="ac-btn ic danger" title="Remove" onclick="wfFormDelete('+f.id+')"><i class="fa-solid fa-trash"></i></button></td>'):'')
+      +'</tr>';
+    }).join('')
+    +'</tbody></table></div>';
+  }
+  window.wfFormModal=function(id){
+    const f=(window._wfForms||[]).filter(function(x){return String(x.id)===String(id);})[0]||{};
+    const steps=window._wfSteps||[];
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-clipboard-list"></i> '+(id?'Edit form':'Add form')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body wf-form-modal">'
+        +'<label class="wf-lbl" style="margin-top:0">Form name</label>'
+        +'<input id="wfFmName" class="ac-in" value="'+esc2(f.name||'')+'" placeholder="e.g. New Bill Recording">'
+        +'<label class="wf-lbl">Who fills it in</label>'
+        +'<input id="wfFmWho" class="ac-in" value="'+esc2(f.who_fills||'')+'" placeholder="A person, or a role such as “Department person”">'
+        +'<label class="wf-lbl">Form link</label>'
+        +'<input id="wfFmLink" class="ac-in" value="'+esc2(f.link||'')+'" placeholder="https://docs.google.com/forms/…">'
+        +'<label class="wf-lbl">Responses sheet (optional)</label>'
+        +'<input id="wfFmSheet" class="ac-in" value="'+esc2(f.response_sheet_url||'')+'" placeholder="https://docs.google.com/spreadsheets/…">'
+        +'<label class="wf-lbl">Belongs to step (optional)</label>'
+        +'<select id="wfFmStep" class="ac-in"><option value="">— not tied to a step —</option>'
+          +steps.map(function(s){ return '<option value="'+s.seq+'"'+(String(f.step_seq||'')===String(s.seq)?' selected':'')+'>Step '+s.seq+' · '+esc2(s.title||'')+'</option>'; }).join('')
+        +'</select>'
+        +'<label class="wf-lbl">Notes (optional)</label>'
+        +'<input id="wfFmNotes" class="ac-in" value="'+esc2(f.notes||'')+'" placeholder="Anything worth knowing about this form">'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="ac-btn primary" onclick="wfFormSave('+(id||'null')+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+  };
+  window.wfFormEdit=function(id){ wfFormModal(id); };
+  window.wfFormSave=async function(id){
+    const v=function(k){ const el=$(k); return el?String(el.value||'').trim():''; };
+    const name=v('wfFmName');
+    if(!name){ toast('Give the form a name','warn'); return; }
+    const stepRaw=v('wfFmStep');
+    const row={flow_id:window._wfFlowId, name:name, who_fills:v('wfFmWho')||null,
+      link:v('wfFmLink')||null, response_sheet_url:v('wfFmSheet')||null,
+      step_seq:stepRaw?Number(stepRaw):null, notes:v('wfFmNotes')||null, updated_at:new Date().toISOString()};
+    try{
+      if(id){ const {error}=await ACC().from('flow_forms').update(row).eq('id',id); if(error)throw error; }
+      else {
+        row.sl=(window._wfForms||[]).length+1;
+        const {error}=await ACC().from('flow_forms').insert(row); if(error)throw error;
+      }
+    }catch(e){ toast('Could not save: '+((e&&e.message)||e),'err'); return; }
+    try{ closeModal(); }catch(_e){}
+    toast(id?'Form updated':'Form added','ok');
+    renderPage();
+  };
+  window.wfFormDelete=async function(id){
+    const ok=await confirmDialog('Remove this form from the list? The Google Form itself is untouched.',{okLabel:'Remove'});
+    if(!ok) return;
+    try{ const {error}=await ACC().from('flow_forms').delete().eq('id',id); if(error)throw error; }
+    catch(e){ toast('Could not remove: '+((e&&e.message)||e),'err'); return; }
+    toast('Removed','ok'); renderPage();
+  };
+  // The panes of a workflow. Tracker is bill-style only; Forms appears wherever forms exist (and
+  // for an Administration user, so they can add the first one).
   window.wfTabShow=function(which){
-    ['main','tracker'].forEach(function(k){
+    ['main','tracker','forms'].forEach(function(k){
       const p=$('wfPane_'+k), b=$('wfTabBtn_'+k);
       if(p) p.style.display=(k===which)?'':'none';
       if(b) b.classList.toggle('on', k===which);
@@ -1359,6 +1444,9 @@
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
     if(cases.length){ try{ const {data}=await ACC().from('flow_case_steps').select('*').in('case_id',cases.map(function(c){return c.id;})); fcs=data||[]; }catch(e){} }
+    let forms=[];
+    try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
+    window._wfForms=forms; window._wfSteps=steps;
     const mySelf=me();
     const isCreator=eq(flow.created_by||'',mySelf);
     // Matches the backend's own acc.wf_create_instance permission check exactly: the creator can
@@ -1390,12 +1478,17 @@
 
     // Instances table
     const isBill=wfIsBillFlow(flow); window._wfIsBill=isBill;
+    // Forms show wherever any exist; an Administration user always sees the tab so they can add
+    // the first one.
+    const showForms=forms.length>0 || canManage;
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
       const head=(canManage?'<th class="wf-chk-col"></th>':'')
-        +'<th>'+(isBill?'Id':'No.')+'</th>'+(isBill?'<th>Unique Bill Id</th>':'')
+        // On the bill workflow the number IS the Wheredoc Id it was filed under; ordinary
+        // workflows just count their instances.
+        +'<th>'+(isBill?'Wheredoc Id':'No.')+'</th>'+(isBill?'<th>Unique Bill Id</th>':'')
         +'<th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
@@ -1420,7 +1513,7 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by Wheredoc Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -1445,9 +1538,11 @@
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
         +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
       +'</div>'
-      +(isBill?('<div class="wf-tabs">'
+      +((isBill||showForms)?('<div class="wf-tabs">'
           +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
-          +'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>'
+          +(isBill?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
+          +(showForms?('<button class="wf-tab" id="wfTabBtn_forms" onclick="wfTabShow(\'forms\')"><i class="fa-solid fa-clipboard-list"></i> Forms'
+             +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')+'</button>'):'')
         +'</div>'):'')
       +'<div id="wfPane_main">'
         +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
@@ -1457,6 +1552,14 @@
           +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
           +wfTrackerHtml(flow,steps,cases,fcs)
+        +'</div></div>'):'')
+      +(showForms?('<div id="wfPane_forms" style="display:none"><div class="wf-card">'
+          +'<div class="wf-card-hd"><i class="fa-solid fa-clipboard-list"></i> Forms'
+            +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')
+            +tip('The Google Forms this workflow runs on, and who is expected to fill each one. Opening a form or its responses sheet goes straight to Google.')
+            +(canManage?'<span class="wf-inst-tools"><button class="ac-btn primary" onclick="wfFormModal()"><i class="fa-solid fa-plus"></i> Add form</button></span>':'')
+          +'</div>'
+          +wfFormsTableHtml(forms,canManage)
         +'</div></div>'):'')
     +'</div>';
     if(selCaseId){ wfShowCase(selCaseId, null); }

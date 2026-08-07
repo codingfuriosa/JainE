@@ -997,17 +997,38 @@ async function docRenderTable(host,dept){
   }
   const rows=await docFetch({dept:DOC.scope==='legal'?'Legal':dept,cat:DOC.scope==='legal'?null:DOC.cat,folderIds:legalFolderIds,q:DOC.q});
   // toolbar
-  const toolbar=`<div class="toolbar">
-    <div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input id="dtSearch" placeholder="${DOC.scope==='legal'?'Search by name or keyword inside file…':'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
-    <button class="btn" id="dtSearchBtn"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
-    ${DOC.q?`<button class="btn" id="dtClear" onclick="DOC.q='';docRenderTable(document.getElementById('docTableHost'),${dept?("'"+esc(dept)+"'"):'null'})"><i class="fa-solid fa-xmark"></i> Clear</button>`:''}
-    <select class="sel" id="dtSort">
-      <option value="created_at.desc">Newest first</option><option value="created_at.asc">Oldest first</option>
-      <option value="title.asc">Title A–Z</option><option value="title.desc">Title Z–A</option>
-      <option value="file_size.desc">Largest</option></select>
-    <select class="sel" id="dtStatus"><option value="">All status</option>${DOCSTATUS.map(s=>'<option>'+s+'</option>').join('')}</select>
-    <button class="btn" id="dtBulkDl" disabled><i class="fa-solid fa-download"></i> Download</button>
-    <button class="btn btn-danger" id="dtBulkDel" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+  /* The search box gets a line of its own, running the full width, with the buttons and dropdowns
+     below it — searching inside a document is the main thing people come here to do, and it was
+     squeezed into a fraction of the row alongside five other controls. */
+  const toolbar=`<style>
+    .doc-toolbar{margin-bottom:14px}
+    .doc-searchrow{display:flex;align-items:center;position:relative;margin-bottom:9px}
+    .doc-searchrow i.mag{position:absolute;left:13px;color:var(--slate);font-size:14px;pointer-events:none}
+    .doc-searchrow input{width:100%;height:44px;padding:0 14px 0 38px;border:1px solid var(--line);border-radius:11px;
+      font-size:14px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .doc-searchrow input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .doc-btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .doc-btnrow .sel{height:36px}
+    @media(max-width:760px){
+      .doc-searchrow input{height:42px}
+      .doc-btnrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .doc-btnrow .btn,.doc-btnrow .sel{width:100%;justify-content:center}
+    }
+  </style>
+  <div class="doc-toolbar">
+    <div class="doc-searchrow"><i class="fa-solid fa-magnifying-glass mag"></i>
+      <input id="dtSearch" placeholder="${DOC.scope==='legal'?'Search a file name, or any words written inside the documents…':'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
+    <div class="doc-btnrow">
+      <button class="btn btn-primary" id="dtSearchBtn"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+      ${DOC.q?`<button class="btn" id="dtClear" onclick="DOC.q='';docRenderTable(document.getElementById('docTableHost'),${dept?("'"+esc(dept)+"'"):'null'})"><i class="fa-solid fa-xmark"></i> Clear</button>`:''}
+      <select class="sel" id="dtSort">
+        <option value="created_at.desc">Newest first</option><option value="created_at.asc">Oldest first</option>
+        <option value="title.asc">Title A–Z</option><option value="title.desc">Title Z–A</option>
+        <option value="file_size.desc">Largest</option></select>
+      <select class="sel" id="dtStatus"><option value="">All status</option>${DOCSTATUS.map(s=>'<option>'+s+'</option>').join('')}</select>
+      <button class="btn" id="dtBulkDl" disabled><i class="fa-solid fa-download"></i> Download</button>
+      <button class="btn btn-danger" id="dtBulkDel" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+    </div>
   </div>`;
   let filtered=rows;
   const stEl=()=>$('dtStatus')?$('dtStatus').value:'';
@@ -2323,20 +2344,26 @@ function misKeywords(q){
    condition. Straight and curly quotes both work, since phones insert curly ones. */
 function misSplitPhrases(q){
   const phrases=[];
-  const rest=String(q||'').replace(/"([^"]*)"|“([^”]*)”/g,function(_m,a,b){
+  let s=String(q||'');
+  // A quote that hasn't been closed yet is mid-typing. Treating it as a live phrase made the list
+  // jump about on every keystroke — the dangling quote is dropped and the words it holds are used
+  // as ordinary terms until the closing quote arrives.
+  const open=(s.match(/"/g)||[]).length%2===1;
+  if(open) s=s.replace(/"([^"]*)$/,' $1');
+  const rest=s.replace(/"([^"]*)"|“([^”]*)”/g,function(_m,a,b){
     const p=String(a!=null?a:(b!=null?b:'')).trim();
     if(p) phrases.push(p);
     return ' ';
   });
-  return {phrases:phrases, rest:rest.replace(/\s+/g,' ').trim()};
+  return {phrases:phrases, rest:rest.replace(/\s+/g,' ').trim(), openQuote:open};
 }
 function misParseQuery(raw){
   const whole=(raw||'').toLowerCase().trim();
   const split=misSplitPhrases(whole);
-  if(split.phrases.length){
+  if(split.phrases.length||split.openQuote){
     // the unquoted remainder (if any) is still parsed normally and both must match
     const inner=split.rest?misParseQuery(split.rest):{type:'none'};
-    return Object.assign({}, inner, {phrases:split.phrases});
+    return Object.assign({}, inner, {phrases:split.phrases, openQuote:split.openQuote});
   }
   const q=whole;
   if(!q)return {type:'none'};
@@ -2422,7 +2449,11 @@ window.misFilter=function(){
   // rows the fast keyword pass already matched.
   clearTimeout(window._misAiT);
   const qEl=$('misAiStatus'); if(qEl)qEl.textContent='';
-  if(raw&&raw.length>=3) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
+  // Not while a quote is still open (the query isn't finished), and not for a quoted phrase at all
+  // — asking for an exact phrase and then having extra "related" rows appear a moment later is the
+  // other half of what made the list flicker.
+  const skipAi=parsed.openQuote || (parsed.phrases&&parsed.phrases.length);
+  if(raw&&raw.length>=3&&!skipAi) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
 };
 window.misAiSearch=async function(raw){
   const statusEl=$('misAiStatus');
