@@ -4565,7 +4565,7 @@
       <div class="tp-grid">
         <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
-        <div class="tp-f"><div class="k">Created</div><div class="v">${fmtDateY(t.created_at)}</div></div>
+        <div class="tp-f"><div class="k">Created</div><div class="v">${t.created_at?wfDTFull(t.created_at):'—'}</div></div>
         <div class="tp-f"><div class="k">Owner</div><div class="v">${esc2(nameOf(list,t.delegator))}</div></div>
         <div class="tp-f"><div class="k">Status</div><div class="v">${stChip(t.status)}</div></div>
         <div class="tp-f"><div class="k">Members</div><div class="v">${avatars(list,members)} ${(canEdit&&!selfTask)?`<button class="ac-btn ic" style="height:26px;width:26px" onclick="accEditMembers(${tid})" title="Edit"><i class="fa-solid fa-user-pen"></i></button>`:''}</div></div>
