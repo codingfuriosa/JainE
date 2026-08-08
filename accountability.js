@@ -1363,16 +1363,15 @@
       return '<a href="'+esc2(u)+'" target="_blank" rel="noopener">'+esc2(label)+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a>';
     };
     return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
-      +'<th style="width:52px">Sl</th><th>Form</th><th>Who fills it</th><th>Step</th><th>Open</th><th>Responses</th>'
+      +'<th style="width:62px">Step</th><th>Work to be done</th><th>Responsible person</th><th>Link</th><th>Responses</th>'
       +(canManage?'<th style="width:92px">Edit</th>':'')
     +'</tr></thead><tbody>'
     +forms.map(function(f,i){
       return '<tr'+(f.active?'':' style="opacity:.5"')+'>'
-        +'<td>'+(f.sl||i+1)+'</td>'
-        +'<td><b>'+esc2(f.name)+'</b>'+(f.notes?('<div style="font-size:11.5px;color:var(--slate);white-space:normal">'+esc2(f.notes)+'</div>'):'')+'</td>'
-        +'<td>'+(f.who_fills?esc2(f.who_fills):'<span style="color:var(--slate)">—</span>')+'</td>'
-        +'<td>'+(f.step_seq?('Step '+f.step_seq):'<span style="color:var(--slate)">—</span>')+'</td>'
-        +'<td>'+link(f.link,'Form')+'</td>'
+        +'<td><b>'+esc2(f.step_label!=null&&f.step_label!==''?f.step_label:(f.sl||i+1))+'</b></td>'
+        +'<td><b>'+esc2(f.name)+'</b>'+(f.notes?('<div style="font-size:11.5px;color:var(--slate);white-space:normal;line-height:1.45">'+esc2(f.notes)+'</div>'):'')+'</td>'
+        +'<td style="white-space:normal">'+(f.who_fills?esc2(f.who_fills):'<span style="color:var(--slate)">—</span>')+'</td>'
+        +'<td>'+link(f.link,'Open')+'</td>'
         +'<td>'+link(f.response_sheet_url,'Sheet')+'</td>'
         +(canManage?('<td style="white-space:nowrap">'
           +'<button class="ac-btn ic" title="Edit" onclick="wfFormEdit('+f.id+')"><i class="fa-solid fa-pen"></i></button> '
@@ -1386,7 +1385,9 @@
     const steps=window._wfSteps||[];
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-clipboard-list"></i> '+(id?'Edit form':'Add form')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-form-modal">'
-        +'<label class="wf-lbl" style="margin-top:0">Form name</label>'
+        +'<label class="wf-lbl" style="margin-top:0">Step</label>'
+        +'<input id="wfFmStepLabel" class="ac-in" value="'+esc2(f.step_label||'')+'" placeholder="e.g. 4A — exactly as the process sheet writes it">'
+        +'<label class="wf-lbl">Work to be done</label>'
         +'<input id="wfFmName" class="ac-in" value="'+esc2(f.name||'')+'" placeholder="e.g. New Bill Recording">'
         +'<label class="wf-lbl">Who fills it in</label>'
         +'<input id="wfFmWho" class="ac-in" value="'+esc2(f.who_fills||'')+'" placeholder="A person, or a role such as “Department person”">'
@@ -1410,7 +1411,7 @@
     const name=v('wfFmName');
     if(!name){ toast('Give the form a name','warn'); return; }
     const stepRaw=v('wfFmStep');
-    const row={flow_id:window._wfFlowId, name:name, who_fills:v('wfFmWho')||null,
+    const row={flow_id:window._wfFlowId, name:name, step_label:v('wfFmStepLabel')||null, who_fills:v('wfFmWho')||null,
       link:v('wfFmLink')||null, response_sheet_url:v('wfFmSheet')||null,
       step_seq:stepRaw?Number(stepRaw):null, notes:v('wfFmNotes')||null, updated_at:new Date().toISOString()};
     try{

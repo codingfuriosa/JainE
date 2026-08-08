@@ -1534,17 +1534,22 @@ window.docUploadSave=async function(){
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
 VIEWS.legal=async function(v,seg){
-  const tab=(seg[0]==='mis')?'mis':(seg[0]==='scoreboard')?'scoreboard':'docs';
+  const known={mis:1,scoreboard:1,actions:1,advocates:1};
+  const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
     <div class="tabs">
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
+      <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
+      <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
+  else if(tab==='actions') legalActions();
+  else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
 async function legalDocsView(seg){
@@ -1690,6 +1695,7 @@ const MIS_FIELDS=[
   {k:'status',l:'Status / Purpose'},
   {k:'action_needed',l:'Action Needed'},
   {k:'action_date',l:'Action Date'},
+  {k:'action_executed_date',l:'Action Executed'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
   {k:'date_of_filing',l:'Date of Filing'},
@@ -1776,7 +1782,19 @@ if(!window._misComboWired){ window._misComboWired=true;
       document.querySelectorAll('.mis-combo.open').forEach(function(x){x.classList.remove('open');});
   });
 }
-function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
+function misArea(k,vals,rows){
+  // Remarks accumulate. The box is left empty so what you type is ADDED to what is already there
+  // (comma separated); the existing text is shown underneath rather than sitting in the box where
+  // it is easy to overwrite by accident.
+  if(k==='remarks'){
+    const cur=String((vals||{}).remarks||'').trim();
+    return '<div style="margin-bottom:14px"><label>Remarks'+misTip('Whatever you type is added to the existing remarks, separated by a comma. Nothing is replaced.')+'</label>'
+      +'<textarea id="misF_remarks" class="sel" rows="'+(rows||2)+'" placeholder="'+(cur?'Add another remark…':'Add a remark…')+'"></textarea>'
+      +(cur?('<div style="font-size:12px;color:var(--slate);margin-top:6px;line-height:1.5"><b>So far:</b> '+esc(cur)+'</div>'):'')
+    +'</div>';
+  }
+  return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';
+}
 const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
 
 /* mode 'add'  — Previous Date is not shown at all; it only ever comes from a real reschedule.
@@ -1807,6 +1825,8 @@ function misFormHtml(vals,mode){
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
     if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    // The action fields live in their own panel (click a case), not in the case record forms.
+    if(f.k==='action_needed'||f.k==='action_date'||f.k==='action_executed_date') return;
     // No (i) tooltips on the Add Case form — they only appear when editing.
     if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
     if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:isEdit?'left blank saves as NA':''});
@@ -1828,7 +1848,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_date:110,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_date:110,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1850,7 +1870,7 @@ function misRowHtml(r,isPinned){
   // Reuses the app's existing .drag-handle look (accountability task/checklist rows) instead of a
   // one-off style, so spacing/size/touch-target match what's already established elsewhere.
   const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misEdit(${r.id})">
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
@@ -2160,6 +2180,167 @@ function misScoreOf(r){
   if(gap>0)return 0;
   return -1;
 }
+/* ---------- Actions ------------------------------------------------------------------------
+   An action is a thing the team has committed to doing on a case by a date. The case row carries
+   whichever one is open; public.mis_actions keeps every one ever raised, which is what this lists.
+   Executing an action clears the case's Next Date and Action Needed and moves the action date into
+   Previous Date — the hearing has been dealt with, so the case waits for its next listing.        */
+async function legalActions(){
+  setCrumb(['Legal','Actions']);
+  const hAct=$('legalHeadActions'); if(hAct)hAct.innerHTML='';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  let rows=[];
+  try{
+    const {data}=await sb.from('mis_actions').select('*').order('executed_date_iso',{ascending:true,nullsFirst:true}).order('action_date_iso',{ascending:true});
+    rows=data||[];
+  }catch(e){}
+  let cases=[];
+  try{ const {data}=await sb.from('mis_cases').select('id,cause_title,case_no,case_type'); cases=data||[]; }catch(e){}
+  const byCase={}; cases.forEach(c=>{byCase[c.id]=c;});
+  const nameOfCase=id=>{const c=byCase[id];if(!c)return '—';return (c.cause_title||c.case_no||('Case '+id));};
+  window._misActionRows=rows.map(r=>Object.assign({},r,{_case:nameOfCase(r.case_id)}));
+  const open=rows.filter(r=>!r.executed_date_iso).length;
+  body.innerHTML=`<style>
+    .act-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+    .act-search{position:relative;flex:1;min-width:180px;display:flex;align-items:center}
+    .act-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
+    .act-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .act-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    #actTbl{width:100%;border-collapse:collapse;font-size:13px}
+    #actTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #actTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    @media(max-width:760px){#actTbl{min-width:640px}}
+  </style>
+  <div class="act-bar">
+    <div class="act-search"><i class="fa-solid fa-magnifying-glass"></i><input id="actQ" placeholder="Search action, case or date…" oninput="legalActionsFilter()"></div>
+    <select class="mis-sel" id="actState" onchange="legalActionsFilter()">
+      <option value="open">Still open (${open})</option>
+      <option value="done">Executed</option>
+      <option value="all">All (${rows.length})</option>
+    </select>
+  </div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="actTbl"><thead><tr>
+      <th>Action</th><th>Action Date</th><th>Executed Date</th><th>Case</th><th>Remarks</th>
+    </tr></thead><tbody id="actBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="actEmpty" style="padding:34px;display:none"><i class="fa-regular fa-square-check"></i><div>Nothing here.</div>
+    <div style="font-size:12.5px;color:var(--slate);margin-top:6px">Actions are raised from the MIS tab — click a case to add one.</div></div>`;
+  legalActionsFilter();
+}
+window.legalActionsFilter=function(){
+  const rows=window._misActionRows||[];
+  const q=(($('actQ')||{}).value||'').trim().toLowerCase();
+  const st=(($('actState')||{}).value)||'open';
+  const list=rows.filter(r=>{
+    if(st==='open'&&r.executed_date_iso) return false;
+    if(st==='done'&&!r.executed_date_iso) return false;
+    if(!q) return true;
+    return [r.action_needed,r.action_date,r.executed_date,r._case,r.remarks].filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1;
+  });
+  const tb=$('actBody'); if(!tb)return;
+  tb.innerHTML=list.map(r=>'<tr>'
+    +'<td><b>'+esc(r.action_needed||'—')+'</b></td>'
+    +'<td style="white-space:nowrap">'+esc(r.action_date||'—')+'</td>'
+    +'<td style="white-space:nowrap">'+(r.executed_date
+        ?('<span class="mis-ptag mis-ptag--green">'+esc(r.executed_date)+'</span>')
+        :'<span class="mis-ptag mis-ptag--amber">Open</span>')+'</td>'
+    +'<td>'+esc(r._case||'—')+'</td>'
+    +'<td style="color:var(--slate)">'+esc(r.remarks||'')+'</td>'
+  +'</tr>').join('');
+  const em=$('actEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+
+/* ---------- Advocates ----------------------------------------------------------------------- */
+async function legalAdvocates(){
+  setCrumb(['Legal','Advocates']);
+  const hAct=$('legalHeadActions');
+  if(hAct)hAct.innerHTML='<button class="btn btn-primary" onclick="advModal()"><i class="fa-solid fa-plus"></i> Add Advocate</button>';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  let rows=[];
+  try{ const {data}=await sb.from('legal_advocates').select('*').order('case_type',{ascending:true,nullsFirst:false}).order('advocate_name',{ascending:true}); rows=data||[]; }catch(e){}
+  window._advRows=rows;
+  body.innerHTML=`<style>
+    .adv-search{position:relative;display:flex;align-items:center;margin-bottom:13px}
+    .adv-search i{position:absolute;left:12px;color:var(--slate);font-size:13px;pointer-events:none}
+    .adv-search input{width:100%;height:40px;padding:0 13px 0 34px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .adv-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    #advTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:940px}
+    #advTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #advTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    #advTbl tbody tr:hover{background:var(--bg-subtle,#f8fafc)}
+    .adv-ph{white-space:nowrap;font-variant-numeric:tabular-nums}
+  </style>
+  <div class="adv-search"><i class="fa-solid fa-magnifying-glass"></i>
+    <input id="advQ" placeholder="Search by advocate, court, case type or place…" oninput="advFilter()"></div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="advTbl"><thead><tr>
+      <th>Case Type</th><th>Court</th><th>State / District</th><th>Advocate</th><th>Phone</th>
+      <th>Chamber</th><th>Additional contact</th><th style="width:86px">Edit</th>
+    </tr></thead><tbody id="advBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="advEmpty" style="padding:34px;display:none"><i class="fa-regular fa-address-book"></i><div>No advocates match.</div></div>`;
+  advFilter();
+}
+window.advFilter=function(){
+  const q=(($('advQ')||{}).value||'').trim().toLowerCase();
+  const list=(window._advRows||[]).filter(r=>!q||[r.case_type,r.court,r.state_dist,r.advocate_name,r.phone,r.chamber,r.extra_contact]
+    .filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1);
+  const tb=$('advBody'); if(!tb)return;
+  const tel=p=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
+    .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'">'+esc(x)+'</a>').join('<br>');
+  tb.innerHTML=list.map(r=>'<tr>'
+    +'<td>'+esc(r.case_type||'—')+'</td>'
+    +'<td>'+esc(r.court||'—')+'</td>'
+    +'<td>'+esc(r.state_dist||'—')+'</td>'
+    +'<td><b>'+esc(r.advocate_name||'')+'</b></td>'
+    +'<td class="adv-ph">'+(r.phone?tel(r.phone):'—')+'</td>'
+    +'<td style="color:var(--slate);max-width:260px">'+esc(r.chamber||'—')+'</td>'
+    +'<td style="color:var(--slate)">'+esc(r.extra_contact||'—')+'</td>'
+    +'<td style="white-space:nowrap">'
+      +'<button class="btn btn-sm" onclick="advModal('+r.id+')" title="Edit"><i class="fa-solid fa-pen"></i></button> '
+      +'<button class="btn btn-sm btn-danger" onclick="advDelete('+r.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
+    +'</td>'
+  +'</tr>').join('');
+  const em=$('advEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+window.advModal=function(id){
+  const r=(window._advRows||[]).filter(x=>String(x.id)===String(id))[0]||{};
+  const f=(k,label,ph)=>'<label>'+label+'<input id="advF_'+k+'" value="'+esc(r[k]||'')+'" placeholder="'+esc(ph||'')+'"></label>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-tie"></i> '+(id?'Edit advocate':'Add advocate')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +f('advocate_name','Advocate name','e.g. Sanjay Bhattacharya')
+      +'<div class="two">'+f('case_type','Case type','e.g. Consumer Cases')+f('court','Court','e.g. Kolkata District Commission')+'</div>'
+      +'<div class="two">'+f('state_dist','State / District','e.g. West Bengal, Kolkata')+f('phone','Phone','9830000000 / 9007000000')+'</div>'
+      +f('chamber','Chamber details','Where their chamber is')
+      +f('extra_contact','Additional contact','e.g. clerk - 9830957371')
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-primary" onclick="advSave('+(id||'null')+')"><i class="fa-solid fa-check"></i> '+(id?'Update':'Add')+'</button></div>','md');
+};
+window.advSave=async function(id){
+  const g=k=>{const el=$('advF_'+k);return el?(el.value||'').trim()||null:null;};
+  const name=g('advocate_name');
+  if(!name){toast('Enter the advocate\'s name','err');return;}
+  const row={advocate_name:name,case_type:g('case_type'),court:g('court'),state_dist:g('state_dist'),
+    phone:g('phone'),chamber:g('chamber'),extra_contact:g('extra_contact'),updated_at:new Date().toISOString()};
+  const {error}=id?await sb.from('legal_advocates').update(row).eq('id',id)
+                  :await sb.from('legal_advocates').insert(row);
+  if(error){toast(error.message,'err');return;}
+  closeModal();toast(id?'Advocate updated':'Advocate added','ok');
+  legalAdvocates();
+};
+window.advDelete=async function(id){
+  const r=(window._advRows||[]).filter(x=>String(x.id)===String(id))[0]||{};
+  const ok=await confirmDialog('Remove <b>'+esc(r.advocate_name||'this advocate')+'</b> from the panel? This cannot be undone.',{okLabel:'Remove'});
+  if(!ok)return;
+  const {error}=await sb.from('legal_advocates').delete().eq('id',id);
+  if(error){toast(error.message,'err');return;}
+  toast('Removed','ok'); legalAdvocates();
+};
+
 function misScoreTag(s){
   if(s===null)return '<span class="mis-ptag mis-ptag--gray">Pending</span>';
   if(s===1)return '<span class="mis-ptag mis-ptag--green">+1</span>';
@@ -2524,6 +2705,11 @@ function misCollect(orig){
   else if(row.next_date){ row.next_date_iso=null; }
   const pd=misToIso(row.previous_date);
   if(pd) row.previous_date=misDmy(pd);
+  // Remarks are cumulative in every form: what is typed is appended to what is already there,
+  // comma separated, so an earlier note is never quietly wiped by a later edit.
+  if(row.remarks!=null || orig){
+    row.remarks = misRemarksMerge(orig?orig.remarks:null, row.remarks);
+  }
   // Action Date drives the scoreboard, so it is kept in the same dd/mm/yyyy + sortable pair.
   const ad=misToIso(row.action_date);
   if(ad){ row.action_date=misDmy(ad); row.action_date_iso=misIsoStr(ad); }
@@ -2542,6 +2728,108 @@ function misCollect(orig){
   }
   return row;
 }
+/* Clicking a case opens its ACTION panel — what has to be done, by when, and when it was done —
+   plus Remarks. The full case details are edited from the toolbar's Edit button instead, so the
+   two jobs stay apart: the everyday one (chasing an action) and the occasional one (correcting the
+   case record). */
+window.misActionPanel=function(id){
+  const r=(window._misRows||[]).find(x=>x.id===id); if(!r){toast('Case not found','err');return;}
+  window._misActionCase=r;
+  const openAction=String(r.action_needed||'').trim();
+  const title=r.cause_title||r.case_no||('Case '+id);
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-list-check"></i> Action — '+esc(String(title).replace(/\s+/g,' ').slice(0,58))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +'<div style="font-size:12px;color:var(--slate);margin-bottom:12px;line-height:1.5">'
+        +esc(r.case_type||'')+(r.case_no?(' · '+esc(r.case_no)):'')+(r.court?(' · '+esc(r.court)):'')
+        +'<br>Next Date <b>'+esc(r.next_date||'—')+'</b> · Previous Date '+esc(r.previous_date||'—')
+      +'</div>'
+      +'<label>Action Needed<textarea id="misA_needed" class="sel" rows="2">'+esc(openAction)+'</textarea></label>'
+      +'<div class="two">'
+        +'<label>Action Date'+misTip('Defaults to the Next Date — the hearing the action is working towards.')
+          +'<input id="misA_date" value="'+esc(r.action_date||r.next_date||'')+'" placeholder="dd/mm/yyyy"></label>'
+        +'<label>Action Execution Date'+misTip('Fill this in when the action is actually done. Saving with a date here closes the action.')
+          +'<input id="misA_exec" value="'+esc(r.action_executed_date||'')+'" placeholder="dd/mm/yyyy"></label>'
+      +'</div>'
+      +'<label>Remarks'+misTip('Added to whatever is already there, separated by a comma — nothing is overwritten.')
+        +'<textarea id="misA_remarks" class="sel" rows="2" placeholder="Anything to add"></textarea></label>'
+      +(r.remarks?('<div style="font-size:12px;color:var(--slate);margin:-6px 0 12px;line-height:1.5"><b>So far:</b> '+esc(r.remarks)+'</div>'):'')
+    +'</div>'
+    +'<div class="modal-foot">'
+      +'<button class="btn" onclick="closeModal()">Cancel</button>'
+      +(openAction?'<button class="btn" onclick="misActionExecute('+id+')" title="Marks it done today"><i class="fa-solid fa-check-double"></i> Mark executed today</button>':'')
+      +'<button class="btn btn-primary" id="misSaveBtn" onclick="misActionSave('+id+')"><i class="fa-solid fa-check"></i> Save</button>'
+    +'</div>','md');
+};
+// Adds to remarks rather than replacing them, comma separated.
+function misRemarksMerge(existing,added){
+  const a=String(existing||'').trim(), b=String(added||'').trim();
+  if(!b) return a||null;
+  if(!a) return b;
+  if(a.toLowerCase().indexOf(b.toLowerCase())!==-1) return a;   // already said
+  return a.replace(/[,\s]+$/,'')+', '+b;
+}
+window.misActionExecute=function(id){
+  const el=$('misA_exec');
+  if(el&&!el.value.trim()){ const d=new Date();
+    el.value=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+  misActionSave(id);
+};
+window.misActionSave=async function(id){
+  const r=window._misActionCase||{};
+  const g=k=>{const el=$('misA_'+k);return el?(el.value||'').trim():'';};
+  const needed=g('needed'), dateRaw=g('date'), execRaw=g('exec'), newRemark=g('remarks');
+  if(needed && !dateRaw){ toast('Add an Action Date — an action needs a date to work to','warn'); return; }
+  const dIso=dateRaw?misToIso(dateRaw):null;
+  const eIso=execRaw?misToIso(execRaw):null;
+  if(dateRaw&&!dIso){ toast('Action Date should look like dd/mm/yyyy','warn'); return; }
+  if(execRaw&&!eIso){ toast('Action Execution Date should look like dd/mm/yyyy','warn'); return; }
+  const btn=$('misSaveBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+
+  const remarks=misRemarksMerge(r.remarks,newRemark);
+  const upd={remarks:remarks};
+  if(eIso){
+    /* Executed. The hearing this action was working towards is done with, so the Next Date and the
+       Action Needed are cleared and the action's date becomes the Previous Date — the case now
+       waits to be listed again. */
+    upd.action_needed=null;
+    upd.action_date=null; upd.action_date_iso=null;
+    upd.action_executed_date=misDmy(eIso); upd.action_executed_date_iso=misIsoStr(eIso);
+    upd.previous_date=dIso?misDmy(dIso):(r.next_date||r.previous_date||null);
+    upd.next_date=null; upd.next_date_iso=null;
+  } else {
+    upd.action_needed=needed||null;
+    upd.action_date=dIso?misDmy(dIso):null;
+    upd.action_date_iso=dIso?misIsoStr(dIso):null;
+    upd.action_executed_date=null; upd.action_executed_date_iso=null;
+    // recording the commitment is what starts the scoreboard clock
+    if(dIso && String(r.action_date||'')!==misDmy(dIso)) upd.next_date_recorded_at=misIsoStr(new Date());
+  }
+  const {error}=await sb.from('mis_cases').update(upd).eq('id',id);
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
+
+  // Keep the Actions log in step: close the open one, or record/refresh it.
+  try{
+    const {data:existing}=await sb.from('mis_actions').select('id').eq('case_id',id).is('executed_date_iso',null).limit(1);
+    const openId=(existing&&existing[0])?existing[0].id:null;
+    if(eIso){
+      const row={executed_date:misDmy(eIso),executed_date_iso:misIsoStr(eIso),remarks:remarks,updated_at:new Date().toISOString()};
+      if(openId) await sb.from('mis_actions').update(row).eq('id',openId);
+      else if(needed||r.action_needed) await sb.from('mis_actions').insert(Object.assign({case_id:id,
+        action_needed:needed||r.action_needed,action_date:dIso?misDmy(dIso):null,action_date_iso:dIso?misIsoStr(dIso):null,
+        created_by:state.email},row));
+    } else if(needed){
+      const row={case_id:id,action_needed:needed,action_date:dIso?misDmy(dIso):null,
+        action_date_iso:dIso?misIsoStr(dIso):null,remarks:remarks,created_by:state.email,updated_at:new Date().toISOString()};
+      if(openId) await sb.from('mis_actions').update(row).eq('id',openId);
+      else await sb.from('mis_actions').insert(row);
+    }
+  }catch(_e){}
+
+  closeModal();
+  toast(eIso?'Action executed — Next Date cleared':'Action saved','ok');
+  legalMIS();
+};
+
 function misActionDateMissing(row){
   // Action Needed without a date is a promise with no deadline - the scoreboard has nothing to
   // measure. One is required whenever the other is filled in.
