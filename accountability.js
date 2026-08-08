@@ -2438,11 +2438,17 @@
        control above it. */
     .wf-tmpl-block{margin-top:6px}
     .wf-tmpl-block > .wf-lbl{margin-top:4px !important}
-    #wfTmplRows{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg-card)}
+    /* No overflow:hidden here — it clipped the type menu when it opened inside a row. The corners
+       are rounded on the first and last rows instead, which looks the same and clips nothing. */
+    #wfTmplRows{border:1px solid var(--line);border-radius:11px;background:var(--bg-card)}
     #wfTmplRows:empty{display:none}
     .wf-tmpl-row{display:flex;gap:10px;align-items:center;padding:9px 11px;border-top:1px solid var(--line)}
-    .wf-tmpl-row:first-child{border-top:0}
+    .wf-tmpl-row:first-child{border-top:0;border-radius:11px 11px 0 0}
+    .wf-tmpl-row:last-child{border-radius:0 0 11px 11px}
+    .wf-tmpl-row:only-child{border-radius:11px}
     .wf-tmpl-row:hover{background:var(--bg-subtle,#fafbfc)}
+    /* the row holding an open menu sits above its neighbours so the panel is not covered */
+    .wf-tmpl-row:has(.wf-tmenu.open){position:relative;z-index:5}
     .wf-tmpl-row .wf-t-label{flex:1 1 auto;min-width:0}
     .wf-tmpl-row .wf-tmenu{flex:0 0 158px;position:relative}
     .wf-tmenu-btn{width:100%;display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;font-weight:500}
