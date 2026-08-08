@@ -760,7 +760,7 @@
      raises an instance nominates its members at that moment. */
   // Sentinel stored in place of an email when a step has no fixed owner.
   const WF_TRIGGER_OWNER_KEY='__TRIGGER_OWNER__';
-  function wfPersonPickerHtml(sel, multi, allowTrigger){
+  function wfPersonPickerHtml(sel, multi, allowTrigger, extraClass){
     const pid='wfpp'+(++WF_PID);
     const chosen=Array.isArray(sel)?sel.filter(Boolean):(sel?[sel]:[]);
     const fromTrigger=chosen.length===1&&chosen[0]===WF_TRIGGER_OWNER_KEY;
@@ -786,7 +786,7 @@
     }
     order.forEach(function(d){ listHtml+='<div class="ms-dept">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ const on=isOn(pp.email); listHtml+='<div class="ms-opt'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)">'+avOf(pp.name)+'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc2(pp.name)+'</span>'+(on?'<i class="fa-solid fa-check" style="color:var(--brand)"></i>':'')+'</div>'; }); });
     return '<div class="wf-pp'+(multi?' multi':'')+'" id="'+pid+'">'
-      +'<input type="hidden" class="wf-s-person" value="'+esc2(chosen.join(','))+'">'
+      +'<input type="hidden" class="wf-s-person'+(extraClass?(' '+extraClass):'')+'" value="'+esc2(chosen.join(','))+'">'
       +'<button type="button" class="ac-in wf-pp-btn" onclick="wfPersonToggle(this)">'+trig+'<i class="fa-solid fa-chevron-down wf-pp-caret"></i></button>'
       +'<div class="wf-pp-panel"><input class="ac-in ms-search" placeholder="Search people…" oninput="wfPersonFilter(this)"><div class="ms-list">'+listHtml+'</div></div>'
     +'</div>';
@@ -1116,6 +1116,10 @@
             +'<div class="wf-fld">'
               +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
               +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
+            +'</div>'
+            // The field builder is a list, not a form control, so it takes the full width of the
+            // grid rather than sharing a column with a single input.
+            +'<div class="wf-fld wf-fld-wide wf-tmpl-block">'
               +'<label class="wf-lbl">Triggering event fields '
                 +tip('What is asked for when somebody starts one. Set here once — on the New form these are filled in, never renamed or removed.')+'</label>'
               +'<div id="wfTmplRows">'
@@ -1166,7 +1170,7 @@
      The questions asked when somebody starts an instance are DEFINED here, in the workflow, not
      invented on the first run. Once set they are fixed: the New <Var> form only fills in values -
      the labels cannot be renamed, added or removed from there. */
-  const WF_FIELD_TYPES=[['text','Text'],['number','Number'],['date','Date'],['attachment','Attachment']];
+  const WF_FIELD_TYPES=[['text','Text'],['number','Number'],['date','Date'],['people','People'],['attachment','Attachment']];
   function wfTmplRowHtml(f){
     f=f||{};
     const t=f.type||'text';
@@ -1860,6 +1864,11 @@
         return g?('<optgroup label="'+esc2(g)+'">'+inner+'</optgroup>'):inner;
       }).join('');
       valueHtml='<select class="ac-in wf-evt-value">'+(f.optional?'<option value="">—</option>':'<option value="" disabled'+(value?'':' selected')+'>Select…</option>')+optHtml+'</select>';
+    } else if(type==='people'){
+      /* A People field is answered by picking from the staff list rather than typing a name, so
+         what is stored is a real person - the value is the picker's own hidden input. */
+      const picked=String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+      valueHtml='<div class="wf-evt-people">'+wfPersonPickerHtml(picked, true, false, 'wf-evt-value')+'</div>';
     } else if(type==='attachment'){
       const has=value && String(value).indexOf('s3:')===0;
       valueHtml='<div class="wf-evt-att">'
@@ -2378,12 +2387,23 @@
        with the real input laid invisibly over it, so it still works with one click. */
     /* The member picker was squeezed into the narrow value column; here the label takes a fixed
        share and the picker gets the rest, and the panel overlays instead of pushing the form. */
-    .wf-tmpl-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    /* The field list reads as one block: a bordered panel, rows separated by a hairline, and the
+       label given the same breathing room as any other section rather than butting against the
+       control above it. */
+    .wf-tmpl-block{margin-top:6px}
+    .wf-tmpl-block > .wf-lbl{margin-top:4px !important}
+    #wfTmplRows{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg-card)}
+    #wfTmplRows:empty{display:none}
+    .wf-tmpl-row{display:flex;gap:10px;align-items:center;padding:9px 11px;border-top:1px solid var(--line)}
+    .wf-tmpl-row:first-child{border-top:0}
+    .wf-tmpl-row:hover{background:var(--bg-subtle,#fafbfc)}
     .wf-tmpl-row .wf-t-label{flex:1 1 auto;min-width:0}
-    .wf-tmpl-row .wf-t-type{flex:0 0 128px}
-    .wf-tmpl-row .wf-t-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);white-space:nowrap}
-    @media(max-width:560px){
-      .wf-tmpl-row{flex-wrap:wrap}
+    .wf-tmpl-row .wf-t-type{flex:0 0 150px}
+    .wf-tmpl-row .wf-t-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);white-space:nowrap;cursor:pointer;user-select:none}
+    .wf-tmpl-row .wf-t-optional{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
+    .wf-tmpl-block .wf-addstep-ghost{margin-top:9px}
+    @media(max-width:640px){
+      .wf-tmpl-row{flex-wrap:wrap;gap:8px}
       .wf-tmpl-row .wf-t-label{flex:1 1 100%}
       .wf-tmpl-row .wf-t-type{flex:1 1 auto}
     }
@@ -2396,6 +2416,9 @@
       .wf-mem-row{flex-wrap:wrap}
       .wf-mem-row .wf-mem-lbl,.wf-mem-row .wf-pp{flex:1 1 100%}
     }
+    .wf-evt-people{flex:1;min-width:0}
+    .wf-evt-people .wf-pp{width:100%}
+    .wf-evt-people .wf-pp-btn{width:100%}
     .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
     .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
       height:40px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
