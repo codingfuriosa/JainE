@@ -1688,13 +1688,12 @@ const MIS_FIELDS=[
   {k:'cause_title',l:'Cause Title / Parties'},
   {k:'case_no',l:'Case No.'},
   {k:'previous_date',l:'Previous Date'},
-  {k:'next_date',l:'Next Date'},
+  {k:'next_date',l:'Action Date'},
   {k:'priority',l:'Priority'},
   {k:'advocate_incharge',l:'Advocate In-Charge'},
   {k:'court',l:'Court'},
   {k:'status',l:'Status / Purpose'},
   {k:'action_needed',l:'Action Needed'},
-  {k:'action_date',l:'Action Date'},
   {k:'action_executed_date',l:'Action Executed'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
@@ -1848,7 +1847,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_date:110,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1908,6 +1907,13 @@ window.misSwipeToggle=async function(id){
   const row=(window._misRows||[]).find(r=>r.id===id);
   if(!row)return;
   const nowHandled=!row.next_date_recorded_at;
+  // A case with an action still open is not finished, whatever the slide says. Executing the
+  // action (click the case) is what clears the way.
+  if(nowHandled && String(row.action_needed||'').trim()){
+    toast('This case still has an action open — "'+String(row.action_needed).slice(0,44)
+      +'". Record its Action Execution Date first, then complete the case.','warn');
+    return;
+  }
   const {error}=await sb.from('mis_cases').update({next_date_recorded_at:nowHandled?todayStr():null}).eq('id',id);
   if(error){toast('Could not update: '+error.message,'err');return;}
   row.next_date_recorded_at=nowHandled?todayStr():null;
@@ -2173,9 +2179,10 @@ priority is empty / court is high court: search one column.">
    scores −1. Cases with no action date are simply not scored.
    (This used to measure the hearing date, which rewarded whatever the court happened to list.) */
 function misScoreOf(r){
-  const target=r.action_date_iso||null;
-  if(!target||!r.next_date_recorded_at)return null;
-  const gap=Math.round((new Date(target+'T00:00:00')-new Date(String(r.next_date_recorded_at).slice(0,10)+'T00:00:00'))/86400000);
+  const target=r.action_date_iso||r.next_date_iso||null;
+  const from=r.action_recorded_at||r.next_date_recorded_at||null;
+  if(!target||!from)return null;
+  const gap=Math.round((new Date(target+'T00:00:00')-new Date(String(from).slice(0,10)+'T00:00:00'))/86400000);
   if(gap>7)return 1;
   if(gap>0)return 0;
   return -1;
@@ -2207,6 +2214,14 @@ async function legalActions(){
     .act-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
     .act-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
     .act-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .act-sel{height:38px;padding:0 34px 0 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;
+      font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;
+      appearance:none;-webkit-appearance:none;transition:border-color .12s,box-shadow .12s;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231e3a8a' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px}
+    .act-sel:hover{border-color:var(--slate)}
+    .act-sel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    @media(max-width:760px){.act-search,.act-sel{flex:1 1 100%}}
     #actTbl{width:100%;border-collapse:collapse;font-size:13px}
     #actTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
     #actTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
@@ -2214,7 +2229,7 @@ async function legalActions(){
   </style>
   <div class="act-bar">
     <div class="act-search"><i class="fa-solid fa-magnifying-glass"></i><input id="actQ" placeholder="Search action, case or date…" oninput="legalActionsFilter()"></div>
-    <select class="mis-sel" id="actState" onchange="legalActionsFilter()">
+    <select class="act-sel" id="actState" onchange="legalActionsFilter()">
       <option value="open">Still open (${open})</option>
       <option value="done">Executed</option>
       <option value="all">All (${rows.length})</option>
@@ -2270,7 +2285,10 @@ async function legalAdvocates(){
     #advTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:940px}
     #advTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
     #advTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    #advTbl tbody tr{cursor:pointer}
     #advTbl tbody tr:hover{background:var(--bg-subtle,#f8fafc)}
+    /* long chambers and contacts are trimmed to two lines rather than stretching the row */
+    .adv-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
     .adv-ph{white-space:nowrap;font-variant-numeric:tabular-nums}
   </style>
   <div class="adv-search"><i class="fa-solid fa-magnifying-glass"></i>
@@ -2278,7 +2296,7 @@ async function legalAdvocates(){
   <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
     <table id="advTbl"><thead><tr>
       <th>Case Type</th><th>Court</th><th>State / District</th><th>Advocate</th><th>Phone</th>
-      <th>Chamber</th><th>Additional contact</th><th style="width:86px">Edit</th>
+      <th>Chamber</th><th>Additional contact</th><th style="width:52px"></th>
     </tr></thead><tbody id="advBody"></tbody></table>
   </div></div>
   <div class="empty" id="advEmpty" style="padding:34px;display:none"><i class="fa-regular fa-address-book"></i><div>No advocates match.</div></div>`;
@@ -2291,16 +2309,18 @@ window.advFilter=function(){
   const tb=$('advBody'); if(!tb)return;
   const tel=p=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
     .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'">'+esc(x)+'</a>').join('<br>');
-  tb.innerHTML=list.map(r=>'<tr>'
-    +'<td>'+esc(r.case_type||'—')+'</td>'
-    +'<td>'+esc(r.court||'—')+'</td>'
-    +'<td>'+esc(r.state_dist||'—')+'</td>'
+  // The whole row opens the edit form - no separate Edit button. Only Remove stays, because it
+  // must not be reachable by a stray click.
+  const cl=(v,w)=>'<td'+(w?(' style="max-width:'+w+'px"'):'')+'><div class="adv-clamp" title="'+esc(v||'')+'">'+esc(v||'—')+'</div></td>';
+  tb.innerHTML=list.map(r=>'<tr onclick="advModal('+r.id+')" title="Click to edit">'
+    +cl(r.case_type,150)
+    +cl(r.court,200)
+    +cl(r.state_dist,150)
     +'<td><b>'+esc(r.advocate_name||'')+'</b></td>'
     +'<td class="adv-ph">'+(r.phone?tel(r.phone):'—')+'</td>'
-    +'<td style="color:var(--slate);max-width:260px">'+esc(r.chamber||'—')+'</td>'
-    +'<td style="color:var(--slate)">'+esc(r.extra_contact||'—')+'</td>'
-    +'<td style="white-space:nowrap">'
-      +'<button class="btn btn-sm" onclick="advModal('+r.id+')" title="Edit"><i class="fa-solid fa-pen"></i></button> '
+    +cl(r.chamber,240)
+    +cl(r.extra_contact,170)
+    +'<td onclick="event.stopPropagation()" style="white-space:nowrap">'
       +'<button class="btn btn-sm btn-danger" onclick="advDelete('+r.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
     +'</td>'
   +'</tr>').join('');
@@ -2392,11 +2412,9 @@ async function legalScoreboard(){
    STATUS | ACTION NEEDED.
    A causelist covers a period, so it refuses to run until a date range is chosen. */
 window.misExportCauselist=function(){
-  const win=misRangeDates();
-  if(!win){
-    toast(MIS_RANGE==='custom'
-      ? 'Pick both a From and a To date before exporting the causelist'
-      : 'Choose a date range first — a causelist has to cover a period','warn');
+  let win=misRangeDates();
+  if(!win && MIS_RANGE==='custom'){
+    toast('Pick both a From and a To date before exporting the causelist','warn');
     const sel=document.querySelector('#misRangeMenu .mis-range-btn');
     if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
@@ -2413,6 +2431,12 @@ window.misExportCauselist=function(){
   const now=new Date();
   const MONTHS=['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
   // the month the listed hearings fall in, taken from the range start
+  // On "All dates" the causelist still needs a month to head itself with - take it from the
+  // earliest hearing actually listed.
+  if(!win){
+    const ds=rows.map(misRowIso).filter(Boolean).sort();
+    win={from:ds[0]||todayStr(), to:ds[ds.length-1]||todayStr()};
+  }
   const first=new Date(win.from+'T00:00:00');
   const monthName=MONTHS[first.getMonth()];
   const tabName=monthName+String(first.getFullYear()).slice(2);   // e.g. AUGUST26, as in the PDF
@@ -2783,34 +2807,44 @@ window.misActionSave=async function(id){
   const eIso=execRaw?misToIso(execRaw):null;
   if(dateRaw&&!dIso){ toast('Action Date should look like dd/mm/yyyy','warn'); return; }
   if(execRaw&&!eIso){ toast('Action Execution Date should look like dd/mm/yyyy','warn'); return; }
+  // You cannot have carried something out before the day it was due to be carried out.
+  if(dIso&&eIso&&misIsoStr(eIso)<misIsoStr(dIso)){
+    toast('The Action Execution Date cannot be before the Action Date','warn'); return;
+  }
   const btn=$('misSaveBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
 
   const remarks=misRemarksMerge(r.remarks,newRemark);
   const upd={remarks:remarks};
   if(eIso){
-    /* Executed. The hearing this action was working towards is done with, so the Next Date and the
-       Action Needed are cleared and the action's date becomes the Previous Date — the case now
-       waits to be listed again. */
+    /* Executed. The action's date moves into Previous Date and both the action and the date are
+       cleared, so the case is waiting for its next action - it is NOT completed. Completing a case
+       is a separate, deliberate act (slide the row left). */
     upd.action_needed=null;
     upd.action_date=null; upd.action_date_iso=null;
     upd.action_executed_date=misDmy(eIso); upd.action_executed_date_iso=misIsoStr(eIso);
     upd.previous_date=dIso?misDmy(dIso):(r.next_date||r.previous_date||null);
     upd.next_date=null; upd.next_date_iso=null;
+    upd.next_date_recorded_at=null;      // not handled - it is simply between actions
+    upd.action_recorded_at=null;
   } else {
+    /* The Action Date IS the case's Next Date - there is only ever one date being worked to. */
     upd.action_needed=needed||null;
-    upd.action_date=dIso?misDmy(dIso):null;
-    upd.action_date_iso=dIso?misIsoStr(dIso):null;
+    upd.next_date=dIso?misDmy(dIso):null;
+    upd.next_date_iso=dIso?misIsoStr(dIso):null;
+    upd.action_date=upd.next_date; upd.action_date_iso=upd.next_date_iso;
     upd.action_executed_date=null; upd.action_executed_date_iso=null;
-    // recording the commitment is what starts the scoreboard clock
-    if(dIso && String(r.action_date||'')!==misDmy(dIso)) upd.next_date_recorded_at=misIsoStr(new Date());
+    // Recording the commitment starts the scoreboard clock, on its OWN stamp: writing to
+    // next_date_recorded_at would mark the case handled and make it look completed.
+    if(dIso && String(r.next_date||'')!==misDmy(dIso)) upd.action_recorded_at=misIsoStr(new Date());
   }
   const {error}=await sb.from('mis_cases').update(upd).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
 
   // Keep the Actions log in step: close the open one, or record/refresh it.
   try{
-    const {data:existing}=await sb.from('mis_actions').select('id').eq('case_id',id).is('executed_date_iso',null).limit(1);
-    const openId=(existing&&existing[0])?existing[0].id:null;
+    const {data:existing}=await sb.from('mis_actions').select('id,action_needed').eq('case_id',id).is('executed_date_iso',null).order('id',{ascending:false}).limit(1);
+    const openRow=(existing&&existing[0])||null;
+    const openId=openRow?openRow.id:null;
     if(eIso){
       const row={executed_date:misDmy(eIso),executed_date_iso:misIsoStr(eIso),remarks:remarks,updated_at:new Date().toISOString()};
       if(openId) await sb.from('mis_actions').update(row).eq('id',openId);
@@ -2820,7 +2854,10 @@ window.misActionSave=async function(id){
     } else if(needed){
       const row={case_id:id,action_needed:needed,action_date:dIso?misDmy(dIso):null,
         action_date_iso:dIso?misIsoStr(dIso):null,remarks:remarks,created_by:state.email,updated_at:new Date().toISOString()};
-      if(openId) await sb.from('mis_actions').update(row).eq('id',openId);
+      // Every action raised is recorded in its own right. The open row is only edited when it is
+      // literally the same action being corrected; a different wording is a new action.
+      const sameAsOpen = openId && String(openRow&&openRow.action_needed||'').trim()===needed;
+      if(sameAsOpen) await sb.from('mis_actions').update(row).eq('id',openId);
       else await sb.from('mis_actions').insert(row);
     }
   }catch(_e){}

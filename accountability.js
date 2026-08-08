@@ -1283,13 +1283,14 @@
       when:'Whenever needed'
     };
     // The bill columns get no step code of their own — the sheet doesn't label them either.
+    const span=function(s){ return s.is_manual_date?1:3; };   // manual-date steps are one column
     const codeRow='<tr class="wf-tk-code"><th colspan="'+F+'" class="wf-tk-nocode"></th>'
-      +steps.map(function(s,i){ return '<th colspan="3" class="wf-tk-gap">o'+(i+1)+'</th>'; }).join('')
+      +steps.map(function(s,i){ return '<th colspan="'+span(s)+'" class="wf-tk-gap">o'+(i+1)+'</th>'; }).join('')
       +'<th class="wf-tk-gap"></th></tr>';
     const bandRow=function(label,zeroVal,pick){
       return '<tr class="wf-tk-band"><th class="wf-tk-bandlbl">'+label+'</th>'
         +(F>1?('<th colspan="'+(F-1)+'" title="'+esc2(zeroVal||'')+'">'+esc2(zeroVal||'—')+'</th>'):'')
-        +steps.map(function(s){ const v=pick(s); return '<th colspan="3" class="wf-tk-gap" title="'+esc2(v||'')+'">'+esc2(v||'—')+'</th>'; }).join('')
+        +steps.map(function(s){ const v=pick(s); return '<th colspan="'+span(s)+'" class="wf-tk-gap" title="'+esc2(v||'')+'">'+esc2(v||'—')+'</th>'; }).join('')
         +'<th class="wf-tk-gap"></th></tr>';
     };
     const head=codeRow
@@ -1298,7 +1299,9 @@
       +bandRow('HOW',zero.how,function(s){ return s.method||''; })
       +bandRow('WHEN',zero.when,function(s){ const d=wfDurText(s.duration_value,s.duration_unit); return d?('In next '+d):''; })
       +'<tr class="wf-tk-cols">'+fixed.map(function(f){ return '<th>'+esc2(f.k)+'</th>'; }).join('')
-        +steps.map(function(){ return '<th class="wf-tk-gap">Planned</th><th>Actual</th><th>Time Delay</th>'; }).join('')
+        +steps.map(function(s){ return s.is_manual_date
+            ? '<th class="wf-tk-gap">Date</th>'
+            : '<th class="wf-tk-gap">Planned</th><th>Actual</th><th>Time Delay</th>'; }).join('')
         +'<th class="wf-tk-gap">Current Step</th></tr>';
 
     const body=cases.map(function(c){
@@ -1307,6 +1310,17 @@
         +tmpl.map(function(f){ return '<td>'+esc2(by[f.label]||'')+'</td>'; }).join('');
       const cells=steps.map(function(s){
         const cs=byCase[c.id]&&byCase[c.id][s.seq];
+        if(s.is_manual_date){
+          /* This step is a date somebody schedules, not one that gets forwarded on. Only the step's
+             own owner or Administration may set it; everyone else sees it read-only. */
+          const val=cs&&cs.manual_date?String(cs.manual_date).slice(0,10):'';
+          const mayEdit=!!cs && (wfInDept('Administration') || eq(s.owner_email||'', me()));
+          if(!cs) return '<td class="wf-tk-gap" style="color:var(--slate)">·</td>';
+          if(!mayEdit) return '<td class="wf-tk-gap">'+esc2(val?wfTrackDT(val):'—')+'</td>';
+          return '<td class="wf-tk-gap" onclick="event.stopPropagation()">'
+            +'<input type="date" class="wf-tk-date" value="'+esc2(val)+'" onchange="wfSetManualDate('+cs.id+',this)">'
+          +'</td>';
+        }
         const planned=cs&&cs.due_at, actual=cs&&cs.forwarded_at;
         const delay=wfTrackDelay(planned,actual);
         return '<td class="wf-tk-gap">'+esc2(planned?wfTrackDT(planned):'')+'</td>'
@@ -1329,6 +1343,21 @@
   // before it — guessing a fixed number left a strip of body text showing through between the
   // bands. Measured here instead, and re-measured whenever the pane is shown or the window
   // resizes (row heights change when long text re-wraps).
+  // Saving a scheduled date. The rule about who may set it lives in acc.wf_set_manual_date, not
+  // here — hiding the input is a convenience, the database is what actually enforces it.
+  window.wfSetManualDate=async function(caseStepId, el){
+    const val=(el&&el.value)||null;
+    el.disabled=true;
+    try{
+      const {error}=await ACC().rpc('wf_set_manual_date',{p_case_step_id:caseStepId, p_date:val||null});
+      if(error) throw error;
+      toast(val?'Date saved':'Date cleared','ok');
+    }catch(e){
+      toast('Could not save that date: '+((e&&e.message)||e),'err');
+      renderPage(); return;
+    }
+    el.disabled=false;
+  };
   // Jump from a Tracker row to that instance's timeline: switch back to the main pane, open the
   // case, and scroll the timeline into view so the click clearly went somewhere.
   window.wfTrackerOpen=function(caseId){
@@ -1493,7 +1522,7 @@
     const isBill=wfIsBillFlow(flow); window._wfIsBill=isBill;
     // Forms show wherever any exist; an Administration user always sees the tab so they can add
     // the first one.
-    const showForms=forms.length>0 || canManage;
+    const showForms=isBill && (forms.length>0 || canManage);
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
@@ -2240,6 +2269,10 @@
     .wf-tk-bandlbl{text-align:left !important;color:var(--ink) !important;font-weight:800 !important;letter-spacing:.06em !important;text-transform:uppercase !important;white-space:nowrap !important;font-size:10.5px !important}
     .wf-tk-cols th{border-bottom:2px solid var(--line);font-size:10.5px}
     .wf-tk-late{color:#dc2626;font-weight:700}
+    .wf-tk-date{height:28px;border:1px solid var(--line);border-radius:6px;padding:0 6px;font-size:11.5px;
+      font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer}
+    .wf-tk-date:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-tk-date:disabled{opacity:.6}
     @media(max-width:760px){
       .wf-tabs{margin-top:20px}
       .wf-tab{padding:0 12px;font-size:12.5px}
