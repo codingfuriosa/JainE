@@ -1235,10 +1235,22 @@
   function wfTimelineHtml(steps,opt){
     opt=opt||{};
     return steps.map(function(s,i){
-      const person=s.owner_email||s.person;
-      const who=person
-        ?('<span class="wf-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span><span class="wf-who-nm">'+esc2(wfNm(person))+'</span></span>')
-        :'<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
+      /* A shared step shows every person it is offered to, so the card matches what the Tracker's
+         WHO row says. Once somebody claims it, s.person is set and only they are shown. */
+      const shared=(!s.person && Array.isArray(s.owner_emails))?s.owner_emails.filter(Boolean):[];
+      const person=s.person||s.owner_email;
+      const av=function(e){ return '<span class="wf-av" style="background:'+colorFor(e)+'" title="'+esc2(wfNm(e))+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; };
+      let who;
+      if(shared.length>1){
+        who='<span class="wf-who">'+shared.map(av).join('')
+          +'<span class="wf-who-nm">'+esc2(shared.map(wfNm).join(' / '))+'</span></span>';
+      } else if(person){
+        who='<span class="wf-who">'+av(person)+'<span class="wf-who-nm">'+esc2(wfNm(person))+'</span></span>';
+      } else if(s.owner_from_trigger){
+        who='<span class="wf-who-nm" style="color:var(--slate)"><i class="fa-solid fa-bolt"></i> Named when started</span>';
+      } else {
+        who='<span class="wf-who-nm" style="color:var(--slate)">Unassigned</span>';
+      }
       const dur=wfDurText(s.duration_value,s.duration_unit); const durHtml=dur?('<span class="wf-dur"><i class="fa-regular fa-clock"></i> '+esc2(dur)+'</span>'):'';
       let badge='', cls='', whenHtml='';
       if(opt.live){
@@ -1305,6 +1317,16 @@
   // possible people is named outright ("Shuchandra Das / Shafat Mehar"), and a longer list is
   // summarised by the field that decides it ("Department wise").
   function wfStepWhoText(s){
+    // A step shared between people names them all — reading owner_email alone showed only the
+    // first, so "Shuchandra Das / Shafat Mehar" appeared as just Shuchandra Das.
+    const many=Array.isArray(s&&s.owner_emails)?s.owner_emails.filter(Boolean):[];
+    if(many.length>1){
+      const names=[]; many.forEach(function(e){ const n=wfNm(e); if(n&&names.indexOf(n)===-1) names.push(n); });
+      if(names.length>1) return names.join(' / ');
+      if(names.length===1) return names[0];
+    }
+    if(s && s.owner_from_trigger) return 'Named when the '+String((window._wfNoun&&window._wfNoun.lc)||'instance')+' is started';
+    if(many.length===1) return wfNm(many[0]);
     if(s && s.owner_email) return wfNm(s.owner_email);
     const map=(s && s.owner_resolve_map && typeof s.owner_resolve_map==='object') ? s.owner_resolve_map : null;
     if(map){
