@@ -1077,9 +1077,9 @@
             +'<option value="weeks"'+(unit==='weeks'?' selected':'')+'>Weeks</option>'
           +'</select>'
         +'</div>'
-        // "How" is the tracker's HOW row — the channel the step runs through (Google Form, ERP,
-        // physically, ...). Optional, so leaving it blank changes nothing.
-        +'<input class="ac-in wf-s-method" placeholder="How is it done? (optional — e.g. Google Form, ERP, Physically)" value="'+esc2(step.method||'')+'">'
+        // The Tracker's HOW row is kept, but it is not something to fill in on every step here —
+        // the value rides along hidden so editing a workflow never wipes it.
+        +'<input type="hidden" class="wf-s-method" value="'+esc2(step.method||'')+'">'
       +'</div>'
     +'</div>';
   }
@@ -1112,11 +1112,18 @@
             +'<div class="wf-fld">'
               +'<label class="wf-lbl" for="wfTrigger">Triggering event '+tip('What starts this workflow.')+'</label>'
               +'<input id="wfTrigger" class="ac-in" placeholder="e.g. Receiving an invoice" value="'+esc2(flow.trigger_event||'')+'">'
-              +'<input id="wfTrigMethod" class="ac-in" style="margin-top:8px" placeholder="How does it come in? (optional — e.g. Google Form, email, in person)" value="'+esc2(flow.trigger_method||'')+'">'
             +'</div>'
             +'<div class="wf-fld">'
               +'<label class="wf-lbl">Triggering event owner <span id="wfOwnerTip">'+tip('Required. Only this person can start a new '+wfNounOf(flow).lc+'.')+'</span></label>'
               +'<div id="wfTrigOwner" class="wf-owner-pick">'+wfPersonPickerHtml(flow.trigger_owner||'')+'</div>'
+              +'<label class="wf-lbl">Triggering event fields '
+                +tip('What is asked for when somebody starts one. Set here once — on the New form these are filled in, never renamed or removed.')+'</label>'
+              +'<div id="wfTmplRows">'
+                +(Array.isArray(flow.trigger_template)&&flow.trigger_template.length
+                   ? flow.trigger_template.map(wfTmplRowHtml).join('')
+                   : wfTmplRowHtml({}))
+              +'</div>'
+              +'<div class="wf-addstep-ghost" onclick="wfTmplAdd()"><i class="fa-solid fa-plus"></i> Add field</div>'
             +'</div>'
             +'<div class="wf-fld">'
               +'<label class="wf-lbl" for="wfDesc">Description '+tip('Optional.')+'</label>'
@@ -1152,6 +1159,44 @@
       else if(e.key==='Enter'&&!inSearch&&!inPanel&&e.target.tagName!=='SELECT'){ e.preventDefault(); wfSave(); }
     }); }
     const nm=$('wfName'); if(nm){ try{nm.focus();}catch(_){} }
+  }
+
+
+  /* ----- Triggering event fields ------------------------------------------------------------
+     The questions asked when somebody starts an instance are DEFINED here, in the workflow, not
+     invented on the first run. Once set they are fixed: the New <Var> form only fills in values -
+     the labels cannot be renamed, added or removed from there. */
+  const WF_FIELD_TYPES=[['text','Text'],['number','Number'],['date','Date'],['attachment','Attachment']];
+  function wfTmplRowHtml(f){
+    f=f||{};
+    const t=f.type||'text';
+    return '<div class="wf-tmpl-row">'
+      +'<input class="ac-in wf-t-label" placeholder="Field name (e.g. Bill No.)" value="'+esc2(f.label||'')+'">'
+      +'<select class="ac-in wf-t-type">'
+        +WF_FIELD_TYPES.map(function(o){ return '<option value="'+o[0]+'"'+(t===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')
+      +'</select>'
+      +'<label class="wf-t-opt"><input type="checkbox" class="wf-t-optional"'+(f.optional?' checked':'')+'> Optional</label>'
+      +'<button class="ac-btn ic danger" title="Remove field" onclick="wfTmplRemove(this)"><i class="fa-solid fa-xmark"></i></button>'
+    +'</div>';
+  }
+  window.wfTmplAdd=function(){
+    const w=$('wfTmplRows'); if(!w) return;
+    w.insertAdjacentHTML('beforeend', wfTmplRowHtml({}));
+    const rows=w.querySelectorAll('.wf-t-label'); const last=rows[rows.length-1];
+    if(last) try{ last.focus(); }catch(_e){}
+  };
+  window.wfTmplRemove=function(btn){ const r=btn.closest('.wf-tmpl-row'); if(r) r.remove(); };
+  function wfTmplCollect(){
+    return [].slice.call(document.querySelectorAll('#wfTmplRows .wf-tmpl-row')).map(function(r){
+      const label=((r.querySelector('.wf-t-label')||{}).value||'').trim();
+      if(!label) return null;
+      const type=((r.querySelector('.wf-t-type')||{}).value||'text');
+      const opt=!!(r.querySelector('.wf-t-optional')||{}).checked;
+      const f={label:label,type:type};
+      // an attachment is never compulsory, whatever the box says
+      if(opt||type==='attachment') f.optional=true;
+      return f;
+    }).filter(Boolean);
   }
 
   window.wfAddStep=function(){
@@ -1217,9 +1262,13 @@
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
-      const trigMethod=(($('wfTrigMethod')||{}).value||'').trim();
+      const trigMethod=String(flow&&flow.trigger_method||'').trim();   // kept, no longer edited here
       const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null,p_trigger_method:trigMethod||null});
       if(error)throw error;
+      // The fields are stored separately, and only when some have been defined - saving an empty
+      // list would wipe a template that is already in use.
+      const tmpl=wfTmplCollect();
+      if(tmpl.length){ try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:tmpl}); }catch(_e){} }
       toast('Workflow saved','ok');
       // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
       // opening the detail page, so the buttons already read correctly
@@ -2329,6 +2378,15 @@
        with the real input laid invisibly over it, so it still works with one click. */
     /* The member picker was squeezed into the narrow value column; here the label takes a fixed
        share and the picker gets the rest, and the panel overlays instead of pushing the form. */
+    .wf-tmpl-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    .wf-tmpl-row .wf-t-label{flex:1 1 auto;min-width:0}
+    .wf-tmpl-row .wf-t-type{flex:0 0 128px}
+    .wf-tmpl-row .wf-t-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);white-space:nowrap}
+    @media(max-width:560px){
+      .wf-tmpl-row{flex-wrap:wrap}
+      .wf-tmpl-row .wf-t-label{flex:1 1 100%}
+      .wf-tmpl-row .wf-t-type{flex:1 1 auto}
+    }
     .wf-mem-row{gap:8px}
     .wf-mem-row .wf-mem-lbl{flex:0 0 44%;min-width:0}
     .wf-mem-row .wf-pp{flex:1 1 auto;min-width:0}
