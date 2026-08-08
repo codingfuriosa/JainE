@@ -1001,17 +1001,38 @@ async function docRenderTable(host,dept){
   }
   const rows=await docFetch({dept:DOC.scope==='legal'?'Legal':dept,cat:DOC.scope==='legal'?null:DOC.cat,folderIds:legalFolderIds,q:DOC.q});
   // toolbar
-  const toolbar=`<div class="toolbar">
-    <div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input id="dtSearch" placeholder="${DOC.scope==='legal'?'Search by name or keyword inside file…':'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
-    <button class="btn" id="dtSearchBtn"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
-    ${DOC.q?`<button class="btn" id="dtClear" onclick="DOC.q='';docRenderTable(document.getElementById('docTableHost'),${dept?("'"+esc(dept)+"'"):'null'})"><i class="fa-solid fa-xmark"></i> Clear</button>`:''}
-    <select class="sel" id="dtSort">
-      <option value="created_at.desc">Newest first</option><option value="created_at.asc">Oldest first</option>
-      <option value="title.asc">Title A–Z</option><option value="title.desc">Title Z–A</option>
-      <option value="file_size.desc">Largest</option></select>
-    <select class="sel" id="dtStatus"><option value="">All status</option>${DOCSTATUS.map(s=>'<option>'+s+'</option>').join('')}</select>
-    <button class="btn" id="dtBulkDl" disabled><i class="fa-solid fa-download"></i> Download</button>
-    <button class="btn btn-danger" id="dtBulkDel" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+  /* The search box gets a line of its own, running the full width, with the buttons and dropdowns
+     below it — searching inside a document is the main thing people come here to do, and it was
+     squeezed into a fraction of the row alongside five other controls. */
+  const toolbar=`<style>
+    .doc-toolbar{margin-bottom:14px}
+    .doc-searchrow{display:flex;align-items:center;position:relative;margin-bottom:9px}
+    .doc-searchrow i.mag{position:absolute;left:13px;color:var(--slate);font-size:14px;pointer-events:none}
+    .doc-searchrow input{width:100%;height:44px;padding:0 14px 0 38px;border:1px solid var(--line);border-radius:11px;
+      font-size:14px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .doc-searchrow input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .doc-btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .doc-btnrow .sel{height:36px}
+    @media(max-width:760px){
+      .doc-searchrow input{height:42px}
+      .doc-btnrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .doc-btnrow .btn,.doc-btnrow .sel{width:100%;justify-content:center}
+    }
+  </style>
+  <div class="doc-toolbar">
+    <div class="doc-searchrow"><i class="fa-solid fa-magnifying-glass mag"></i>
+      <input id="dtSearch" placeholder="${DOC.scope==='legal'?'Search a file name, or any words written inside the documents…':'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
+    <div class="doc-btnrow">
+      <button class="btn btn-primary" id="dtSearchBtn"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
+      ${DOC.q?`<button class="btn" id="dtClear" onclick="DOC.q='';docRenderTable(document.getElementById('docTableHost'),${dept?("'"+esc(dept)+"'"):'null'})"><i class="fa-solid fa-xmark"></i> Clear</button>`:''}
+      <select class="sel" id="dtSort">
+        <option value="created_at.desc">Newest first</option><option value="created_at.asc">Oldest first</option>
+        <option value="title.asc">Title A–Z</option><option value="title.desc">Title Z–A</option>
+        <option value="file_size.desc">Largest</option></select>
+      <select class="sel" id="dtStatus"><option value="">All status</option>${DOCSTATUS.map(s=>'<option>'+s+'</option>').join('')}</select>
+      <button class="btn" id="dtBulkDl" disabled><i class="fa-solid fa-download"></i> Download</button>
+      <button class="btn btn-danger" id="dtBulkDel" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+    </div>
   </div>`;
   let filtered=rows;
   const stEl=()=>$('dtStatus')?$('dtStatus').value:'';
@@ -1517,17 +1538,22 @@ window.docUploadSave=async function(){
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
 VIEWS.legal=async function(v,seg){
-  const tab=(seg[0]==='mis')?'mis':(seg[0]==='scoreboard')?'scoreboard':'docs';
+  const known={mis:1,scoreboard:1,actions:1,advocates:1};
+  const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
     <div class="tabs">
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
+      <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
+      <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
+  else if(tab==='actions') legalActions();
+  else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
 async function legalDocsView(seg){
@@ -1657,8 +1683,17 @@ function misRowIso(r){
 }
 function misInRange(r){
   const w=misRangeDates(); if(!w) return true;
-  const iso=misRowIso(r); if(!iso) return false;
+  const iso=misRowIso(r);
+  // A case with no date is BETWEEN actions — the last one was executed and the next has not been
+  // set yet. It has to stay on screen, otherwise executing an action makes the case disappear and
+  // there is no way back to it to add the next one. Only the causelist wants dated cases only.
+  if(!iso) return true;
   return iso>=w.from && iso<=w.to;
+}
+// The causelist is a list of hearings, so it does want a real date on every row.
+function misInRangeDated(r){
+  const iso=misRowIso(r); if(!iso) return false;
+  return misInRange(r);
 }
 
 const MIS_FIELDS=[
@@ -1666,12 +1701,13 @@ const MIS_FIELDS=[
   {k:'cause_title',l:'Cause Title / Parties'},
   {k:'case_no',l:'Case No.'},
   {k:'previous_date',l:'Previous Date'},
-  {k:'next_date',l:'Next Date'},
+  {k:'next_date',l:'Action Date'},
   {k:'priority',l:'Priority'},
   {k:'advocate_incharge',l:'Advocate In-Charge'},
   {k:'court',l:'Court'},
   {k:'status',l:'Status / Purpose'},
   {k:'action_needed',l:'Action Needed'},
+  {k:'action_executed_date',l:'Action Executed'},
   {k:'remarks',l:'Remarks'},
   {k:'project_land_name',l:'Project / Land'},
   {k:'date_of_filing',l:'Date of Filing'},
@@ -1758,7 +1794,19 @@ if(!window._misComboWired){ window._misComboWired=true;
       document.querySelectorAll('.mis-combo.open').forEach(function(x){x.classList.remove('open');});
   });
 }
-function misArea(k,vals,rows){return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';}
+function misArea(k,vals,rows){
+  // Remarks accumulate. The box is left empty so what you type is ADDED to what is already there
+  // (comma separated); the existing text is shown underneath rather than sitting in the box where
+  // it is easy to overwrite by accident.
+  if(k==='remarks'){
+    const cur=String((vals||{}).remarks||'').trim();
+    return '<div style="margin-bottom:14px"><label>Remarks'+misTip('Whatever you type is added to the existing remarks, separated by a comma. Nothing is replaced.')+'</label>'
+      +'<textarea id="misF_remarks" class="sel" rows="'+(rows||2)+'" placeholder="'+(cur?'Add another remark…':'Add a remark…')+'"></textarea>'
+      +(cur?('<div style="font-size:12px;color:var(--slate);margin-top:6px;line-height:1.5"><b>So far:</b> '+esc(cur)+'</div>'):'')
+    +'</div>';
+  }
+  return '<div style="margin-bottom:14px"><label>'+misLabel(k)+'</label><textarea id="misF_'+k+'" class="sel" rows="'+(rows||3)+'">'+esc((vals||{})[k]||'')+'</textarea></div>';
+}
 const MIS_AREA_FIELDS=new Set(['cause_title','status','remarks','action_needed']);
 
 /* mode 'add'  — Previous Date is not shown at all; it only ever comes from a real reschedule.
@@ -1778,21 +1826,25 @@ function misFormHtml(vals,mode){
   }
   const done=new Set();
   if(isEdit){
+    // The three things that actually change on an open case. The Action Date and Previous Date are
+    // not here at all — they are moved by executing an action, not by hand.
     html+='<div class="mis-prio-head"><i class="fa-solid fa-bolt"></i> Usually updated</div>';
+    put('priority',{dflt:misCommonPriority()});       done.add('priority');
     put('status');                                    done.add('status');
-    put('next_date',{hint:'dd/mm/yyyy — changing this moves the old date into Previous Date'});
-    put('previous_date',{readonly:true,hint:'set automatically from the previous Next Date'});
-    done.add('next_date'); done.add('previous_date');
     flush();
+    put('remarks');                                   done.add('remarks');
     html+='<div class="mis-prio-head" style="margin-top:6px"><i class="fa-solid fa-list"></i> Case details</div>';
   }
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
-    if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    /* Dates are never typed into these forms. A new case has no action yet, so no Action Date and
+       therefore no Previous Date either; on an existing case both are moved by the action panel. */
+    if(f.k==='next_date'||f.k==='previous_date') return;
+    // The action fields live in their own panel (click a case), not in the case record forms.
+    if(f.k==='action_needed'||f.k==='action_date'||f.k==='action_executed_date') return;
     // No (i) tooltips on the Add Case form — they only appear when editing.
     if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
     if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:isEdit?'left blank saves as NA':''});
-    if(f.k==='next_date')    return put(f.k,{hint:isEdit?'dd/mm/yyyy':''});
     put(f.k);
   });
   flush();
@@ -1810,7 +1862,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -1832,7 +1884,7 @@ function misRowHtml(r,isPinned){
   // Reuses the app's existing .drag-handle look (accountability task/checklist rows) instead of a
   // one-off style, so spacing/size/touch-target match what's already established elsewhere.
   const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misEdit(${r.id})">
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
@@ -1870,6 +1922,13 @@ window.misSwipeToggle=async function(id){
   const row=(window._misRows||[]).find(r=>r.id===id);
   if(!row)return;
   const nowHandled=!row.next_date_recorded_at;
+  // A case with an action still open is not finished, whatever the slide says. Executing the
+  // action (click the case) is what clears the way.
+  if(nowHandled && String(row.action_needed||'').trim()){
+    toast('This case still has an action open — "'+String(row.action_needed).slice(0,44)
+      +'". Record its Action Execution Date first, then complete the case.','warn');
+    return;
+  }
   const {error}=await sb.from('mis_cases').update({next_date_recorded_at:nowHandled?todayStr():null}).eq('id',id);
   if(error){toast('Could not update: '+error.message,'err');return;}
   row.next_date_recorded_at=nowHandled?todayStr():null;
@@ -1913,7 +1972,11 @@ async function legalMIS(){
         background:var(--bg-card);color:var(--ink);cursor:pointer;transition:background .12s,border-color .12s,box-shadow .12s}
       .mis-toolbar .btn i{font-size:12px}
       .mis-toolbar .btn:not(:disabled):hover{background:var(--bg-subtle,#f8fafc);border-color:var(--slate)}
-      .mis-toolbar .btn:disabled{cursor:not-allowed}
+      /* A disabled button that only fades out reads as broken. Keep a dashed outline so it is
+         clearly a button that is waiting for something (a row to be selected). */
+      .mis-toolbar .btn:disabled{cursor:not-allowed;opacity:1;color:var(--slate);
+        background:var(--bg-subtle,#f8fafc);border:1px dashed var(--line)}
+      .mis-toolbar .btn:disabled i{opacity:.65}
       .mis-toolbar .btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
       /* Must restate the background: the generic hover rule above has the same specificity, so
          without this the primary button went white on hover with only its border left coloured. */
@@ -2050,6 +2113,8 @@ async function legalMIS(){
         .mis-toolbar .mis-filters{margin-left:0;width:100%}
         .mis-search-wrap{width:100%}
         .mis-search-wrap input{min-width:0;width:100%}
+        /* the full placeholder sentence overflows a phone-width box - shrink it so it reads */
+        .mis-search-wrap input::placeholder{font-size:11.5px}
         select.mis-sel{min-width:0;width:100%}
         .mis-rangemenu{width:100%}
         .mis-range-btn{width:100%;justify-content:flex-start}
@@ -2061,8 +2126,8 @@ async function legalMIS(){
     <div class="mis-toolbar${MIS_RANGE==='custom'?' has-custom':''}">
       <div class="mis-actions">
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
-        <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn" id="misDelBtn" onclick="misDeleteSel()" disabled style="opacity:.45;color:var(--err);border-color:var(--err)"><i class="fa-solid fa-trash"></i> Delete</button>
+        <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="btn" id="misDelBtn" onclick="misDeleteSel()" disabled><i class="fa-solid fa-trash"></i> Delete</button>
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
@@ -2123,13 +2188,194 @@ priority is empty / court is high court: search one column.">
 // Recording it on the day itself counts as late, not neutral — a case dealt with only when it
 // is already due was not managed ahead of time.
 // No score yet if the "Handled" checkbox in MIS hasn't been ticked for this Next Date.
+/* Scored on the ACTION DATE — the day the team committed to doing the thing written in Action
+   Needed — measured against the day that commitment was recorded. More than a week of runway
+   earns +1, anything shorter but still ahead scores 0, and a date that is today or already gone
+   scores −1. Cases with no action date are simply not scored.
+   (This used to measure the hearing date, which rewarded whatever the court happened to list.) */
 function misScoreOf(r){
-  if(!r.next_date_recorded_at||!r.next_date_iso)return null;
-  const gap=Math.round((new Date(r.next_date_iso+'T00:00:00')-new Date(r.next_date_recorded_at+'T00:00:00'))/86400000);
+  const target=r.action_date_iso||r.next_date_iso||null;
+  const from=r.action_recorded_at||r.next_date_recorded_at||null;
+  if(!target||!from)return null;
+  const gap=Math.round((new Date(target+'T00:00:00')-new Date(String(from).slice(0,10)+'T00:00:00'))/86400000);
   if(gap>7)return 1;
   if(gap>0)return 0;
   return -1;
 }
+/* ---------- Actions ------------------------------------------------------------------------
+   An action is a thing the team has committed to doing on a case by a date. The case row carries
+   whichever one is open; public.mis_actions keeps every one ever raised, which is what this lists.
+   Executing an action clears the case's Next Date and Action Needed and moves the action date into
+   Previous Date — the hearing has been dealt with, so the case waits for its next listing.        */
+async function legalActions(){
+  setCrumb(['Legal','Actions']);
+  const hAct=$('legalHeadActions'); if(hAct)hAct.innerHTML='';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  let rows=[];
+  try{
+    const {data}=await sb.from('mis_actions').select('*').order('executed_date_iso',{ascending:true,nullsFirst:true}).order('action_date_iso',{ascending:true});
+    rows=data||[];
+  }catch(e){}
+  let cases=[];
+  try{ const {data}=await sb.from('mis_cases').select('id,cause_title,case_no,case_type'); cases=data||[]; }catch(e){}
+  const byCase={}; cases.forEach(c=>{byCase[c.id]=c;});
+  const nameOfCase=id=>{const c=byCase[id];if(!c)return '—';return (c.cause_title||c.case_no||('Case '+id));};
+  window._misActionRows=rows.map(r=>Object.assign({},r,{_case:nameOfCase(r.case_id)}));
+  const open=rows.filter(r=>!r.executed_date_iso).length;
+  body.innerHTML=`<style>
+    .act-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+    .act-search{position:relative;flex:1;min-width:180px;display:flex;align-items:center}
+    .act-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
+    .act-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .act-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .act-sel{height:38px;padding:0 34px 0 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;
+      font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;
+      appearance:none;-webkit-appearance:none;transition:border-color .12s,box-shadow .12s;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231e3a8a' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px}
+    .act-sel:hover{border-color:var(--slate)}
+    .act-sel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    @media(max-width:760px){.act-search,.act-sel{flex:1 1 100%}}
+    #actTbl{width:100%;border-collapse:collapse;font-size:13px}
+    #actTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #actTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    @media(max-width:760px){#actTbl{min-width:640px}}
+  </style>
+  <div class="act-bar">
+    <div class="act-search"><i class="fa-solid fa-magnifying-glass"></i><input id="actQ" placeholder="Search action, case or date…" oninput="legalActionsFilter()"></div>
+    <select class="act-sel" id="actState" onchange="legalActionsFilter()">
+      <option value="all">All actions (${rows.length})</option>
+      <option value="open">Still open (${open})</option>
+      <option value="done">Executed (${rows.length-open})</option>
+    </select>
+  </div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="actTbl"><thead><tr>
+      <th>Action</th><th>Action Date</th><th>Executed Date</th><th>Case</th><th>Remarks</th>
+    </tr></thead><tbody id="actBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="actEmpty" style="padding:34px;display:none"><i class="fa-regular fa-square-check"></i><div>Nothing here.</div>
+    <div style="font-size:12.5px;color:var(--slate);margin-top:6px">Actions are raised from the MIS tab — click a case to add one.</div></div>`;
+  legalActionsFilter();
+}
+window.legalActionsFilter=function(){
+  const rows=window._misActionRows||[];
+  const q=(($('actQ')||{}).value||'').trim().toLowerCase();
+  const st=(($('actState')||{}).value)||'all';
+  const list=rows.filter(r=>{
+    if(st==='open'&&r.executed_date_iso) return false;
+    if(st==='done'&&!r.executed_date_iso) return false;
+    if(!q) return true;
+    return [r.action_needed,r.action_date,r.executed_date,r._case,r.remarks].filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1;
+  });
+  const tb=$('actBody'); if(!tb)return;
+  tb.innerHTML=list.map(r=>'<tr>'
+    +'<td><b>'+esc(r.action_needed||'—')+'</b></td>'
+    +'<td style="white-space:nowrap">'+esc(r.action_date||'—')+'</td>'
+    +'<td style="white-space:nowrap">'+(r.executed_date
+        ?('<span class="mis-ptag mis-ptag--green">'+esc(r.executed_date)+'</span>')
+        :'<span class="mis-ptag mis-ptag--amber">Open</span>')+'</td>'
+    +'<td>'+esc(r._case||'—')+'</td>'
+    +'<td style="color:var(--slate)">'+esc(r.remarks||'')+'</td>'
+  +'</tr>').join('');
+  const em=$('actEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+
+/* ---------- Advocates ----------------------------------------------------------------------- */
+async function legalAdvocates(){
+  setCrumb(['Legal','Advocates']);
+  const hAct=$('legalHeadActions');
+  if(hAct)hAct.innerHTML='<button class="btn btn-primary" onclick="advModal()"><i class="fa-solid fa-plus"></i> Add Advocate</button>';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  let rows=[];
+  try{ const {data}=await sb.from('legal_advocates').select('*').order('case_type',{ascending:true,nullsFirst:false}).order('advocate_name',{ascending:true}); rows=data||[]; }catch(e){}
+  window._advRows=rows;
+  body.innerHTML=`<style>
+    .adv-search{position:relative;display:flex;align-items:center;margin-bottom:13px}
+    .adv-search i{position:absolute;left:12px;color:var(--slate);font-size:13px;pointer-events:none}
+    .adv-search input{width:100%;height:40px;padding:0 13px 0 34px;border:1px solid var(--line);border-radius:10px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .adv-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    #advTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:940px}
+    #advTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #advTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    #advTbl tbody tr{cursor:pointer}
+    #advTbl tbody tr:hover{background:var(--bg-subtle,#f8fafc)}
+    /* long chambers and contacts are trimmed to two lines rather than stretching the row */
+    .adv-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+    .adv-ph{white-space:nowrap;font-variant-numeric:tabular-nums}
+  </style>
+  <div class="adv-search"><i class="fa-solid fa-magnifying-glass"></i>
+    <input id="advQ" placeholder="Search by advocate, court, case type or place…" oninput="advFilter()"></div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="advTbl"><thead><tr>
+      <th>Case Type</th><th>Court</th><th>State / District</th><th>Advocate</th><th>Phone</th>
+      <th>Chamber</th><th>Additional contact</th><th style="width:52px"></th>
+    </tr></thead><tbody id="advBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="advEmpty" style="padding:34px;display:none"><i class="fa-regular fa-address-book"></i><div>No advocates match.</div></div>`;
+  advFilter();
+}
+window.advFilter=function(){
+  const q=(($('advQ')||{}).value||'').trim().toLowerCase();
+  const list=(window._advRows||[]).filter(r=>!q||[r.case_type,r.court,r.state_dist,r.advocate_name,r.phone,r.chamber,r.extra_contact]
+    .filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1);
+  const tb=$('advBody'); if(!tb)return;
+  const tel=p=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
+    .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'">'+esc(x)+'</a>').join('<br>');
+  // The whole row opens the edit form - no separate Edit button. Only Remove stays, because it
+  // must not be reachable by a stray click.
+  const cl=(v,w)=>'<td'+(w?(' style="max-width:'+w+'px"'):'')+'><div class="adv-clamp" title="'+esc(v||'')+'">'+esc(v||'—')+'</div></td>';
+  tb.innerHTML=list.map(r=>'<tr onclick="advModal('+r.id+')" title="Click to edit">'
+    +cl(r.case_type,150)
+    +cl(r.court,200)
+    +cl(r.state_dist,150)
+    +'<td><b>'+esc(r.advocate_name||'')+'</b></td>'
+    +'<td class="adv-ph">'+(r.phone?tel(r.phone):'—')+'</td>'
+    +cl(r.chamber,240)
+    +cl(r.extra_contact,170)
+    +'<td onclick="event.stopPropagation()" style="white-space:nowrap">'
+      +'<button class="btn btn-sm btn-danger" onclick="advDelete('+r.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
+    +'</td>'
+  +'</tr>').join('');
+  const em=$('advEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+window.advModal=function(id){
+  const r=(window._advRows||[]).filter(x=>String(x.id)===String(id))[0]||{};
+  const f=(k,label,ph)=>'<label>'+label+'<input id="advF_'+k+'" value="'+esc(r[k]||'')+'" placeholder="'+esc(ph||'')+'"></label>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-tie"></i> '+(id?'Edit advocate':'Add advocate')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +f('advocate_name','Advocate name','e.g. Sanjay Bhattacharya')
+      +'<div class="two">'+f('case_type','Case type','e.g. Consumer Cases')+f('court','Court','e.g. Kolkata District Commission')+'</div>'
+      +'<div class="two">'+f('state_dist','State / District','e.g. West Bengal, Kolkata')+f('phone','Phone','9830000000 / 9007000000')+'</div>'
+      +f('chamber','Chamber details','Where their chamber is')
+      +f('extra_contact','Additional contact','e.g. clerk - 9830957371')
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-primary" onclick="advSave('+(id||'null')+')"><i class="fa-solid fa-check"></i> '+(id?'Update':'Add')+'</button></div>','md');
+};
+window.advSave=async function(id){
+  const g=k=>{const el=$('advF_'+k);return el?(el.value||'').trim()||null:null;};
+  const name=g('advocate_name');
+  if(!name){toast('Enter the advocate\'s name','err');return;}
+  const row={advocate_name:name,case_type:g('case_type'),court:g('court'),state_dist:g('state_dist'),
+    phone:g('phone'),chamber:g('chamber'),extra_contact:g('extra_contact'),updated_at:new Date().toISOString()};
+  const {error}=id?await sb.from('legal_advocates').update(row).eq('id',id)
+                  :await sb.from('legal_advocates').insert(row);
+  if(error){toast(error.message,'err');return;}
+  closeModal();toast(id?'Advocate updated':'Advocate added','ok');
+  legalAdvocates();
+};
+window.advDelete=async function(id){
+  const r=(window._advRows||[]).filter(x=>String(x.id)===String(id))[0]||{};
+  const ok=await confirmDialog('Remove <b>'+esc(r.advocate_name||'this advocate')+'</b> from the panel? This cannot be undone.',{okLabel:'Remove'});
+  if(!ok)return;
+  const {error}=await sb.from('legal_advocates').delete().eq('id',id);
+  if(error){toast(error.message,'err');return;}
+  toast('Removed','ok'); legalAdvocates();
+};
+
 function misScoreTag(s){
   if(s===null)return '<span class="mis-ptag mis-ptag--gray">Pending</span>';
   if(s===1)return '<span class="mis-ptag mis-ptag--green">+1</span>';
@@ -2181,17 +2427,15 @@ async function legalScoreboard(){
    STATUS | ACTION NEEDED.
    A causelist covers a period, so it refuses to run until a date range is chosen. */
 window.misExportCauselist=function(){
-  const win=misRangeDates();
-  if(!win){
-    toast(MIS_RANGE==='custom'
-      ? 'Pick both a From and a To date before exporting the causelist'
-      : 'Choose a date range first — a causelist has to cover a period','warn');
+  let win=misRangeDates();
+  if(!win && MIS_RANGE==='custom'){
+    toast('Pick both a From and a To date before exporting the causelist','warn');
     const sel=document.querySelector('#misRangeMenu .mis-range-btn');
     if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
     return;
   }
-  const rows=(window._misRows||[]).filter(misInRange)
+  const rows=(window._misRows||[]).filter(misInRangeDated)
     .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
 
@@ -2202,6 +2446,12 @@ window.misExportCauselist=function(){
   const now=new Date();
   const MONTHS=['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
   // the month the listed hearings fall in, taken from the range start
+  // On "All dates" the causelist still needs a month to head itself with - take it from the
+  // earliest hearing actually listed.
+  if(!win){
+    const ds=rows.map(misRowIso).filter(Boolean).sort();
+    win={from:ds[0]||todayStr(), to:ds[ds.length-1]||todayStr()};
+  }
   const first=new Date(win.from+'T00:00:00');
   const monthName=MONTHS[first.getMonth()];
   const tabName=monthName+String(first.getFullYear()).slice(2);   // e.g. AUGUST26, as in the PDF
@@ -2297,8 +2547,10 @@ window.misToggleAll=function(master){
 window.misUpdateToolbar=function(){
   const n=window._misSel.size;
   const editBtn=$('misEditBtn'),delBtn=$('misDelBtn');
-  if(editBtn){editBtn.disabled=(n!==1);editBtn.style.opacity=(n===1)?'1':'.45';}
-  if(delBtn){delBtn.disabled=(n===0);delBtn.style.opacity=(n>0)?'1':'.45';}
+  // Enabled/disabled is carried by the stylesheet (a dashed outline while waiting), not by fading
+  // the button until it looks broken.
+  if(editBtn){editBtn.disabled=(n!==1);editBtn.title=(n===1)?'Edit the selected case':'Select one case to edit';}
+  if(delBtn){delBtn.disabled=(n===0);delBtn.title=(n>0)?'Delete the selected case(s)':'Select at least one case to delete';}
 };
 const MIS_ALIASES={
   case_type:['case type','type of case'],
@@ -2327,20 +2579,26 @@ function misKeywords(q){
    condition. Straight and curly quotes both work, since phones insert curly ones. */
 function misSplitPhrases(q){
   const phrases=[];
-  const rest=String(q||'').replace(/"([^"]*)"|“([^”]*)”/g,function(_m,a,b){
+  let s=String(q||'');
+  // A quote that hasn't been closed yet is mid-typing. Treating it as a live phrase made the list
+  // jump about on every keystroke — the dangling quote is dropped and the words it holds are used
+  // as ordinary terms until the closing quote arrives.
+  const open=(s.match(/"/g)||[]).length%2===1;
+  if(open) s=s.replace(/"([^"]*)$/,' $1');
+  const rest=s.replace(/"([^"]*)"|“([^”]*)”/g,function(_m,a,b){
     const p=String(a!=null?a:(b!=null?b:'')).trim();
     if(p) phrases.push(p);
     return ' ';
   });
-  return {phrases:phrases, rest:rest.replace(/\s+/g,' ').trim()};
+  return {phrases:phrases, rest:rest.replace(/\s+/g,' ').trim(), openQuote:open};
 }
 function misParseQuery(raw){
   const whole=(raw||'').toLowerCase().trim();
   const split=misSplitPhrases(whole);
-  if(split.phrases.length){
+  if(split.phrases.length||split.openQuote){
     // the unquoted remainder (if any) is still parsed normally and both must match
     const inner=split.rest?misParseQuery(split.rest):{type:'none'};
-    return Object.assign({}, inner, {phrases:split.phrases});
+    return Object.assign({}, inner, {phrases:split.phrases, openQuote:split.openQuote});
   }
   const q=whole;
   if(!q)return {type:'none'};
@@ -2426,7 +2684,11 @@ window.misFilter=function(){
   // rows the fast keyword pass already matched.
   clearTimeout(window._misAiT);
   const qEl=$('misAiStatus'); if(qEl)qEl.textContent='';
-  if(raw&&raw.length>=3) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
+  // Not while a quote is still open (the query isn't finished), and not for a quoted phrase at all
+  // — asking for an exact phrase and then having extra "related" rows appear a moment later is the
+  // other half of what made the list flicker.
+  const skipAi=parsed.openQuote || (parsed.phrases&&parsed.phrases.length);
+  if(raw&&raw.length>=3&&!skipAi) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
 };
 window.misAiSearch=async function(raw){
   const statusEl=$('misAiStatus');
@@ -2482,6 +2744,19 @@ function misCollect(orig){
   else if(row.next_date){ row.next_date_iso=null; }
   const pd=misToIso(row.previous_date);
   if(pd) row.previous_date=misDmy(pd);
+  // Remarks are cumulative in every form: what is typed is appended to what is already there,
+  // comma separated, so an earlier note is never quietly wiped by a later edit.
+  if(row.remarks!=null || orig){
+    row.remarks = misRemarksMerge(orig?orig.remarks:null, row.remarks);
+  }
+  // Action Date drives the scoreboard, so it is kept in the same dd/mm/yyyy + sortable pair.
+  const ad=misToIso(row.action_date);
+  if(ad){ row.action_date=misDmy(ad); row.action_date_iso=misIsoStr(ad); }
+  else { row.action_date_iso=null; }
+  // Recording an action date is itself the commitment, so that is when the clock starts.
+  if(row.action_date_iso && (!orig || String(orig.action_date||'')!==String(row.action_date||''))){
+    row.next_date_recorded_at=misIsoStr(new Date());
+  }
   // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
   if(orig){
     const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
@@ -2492,9 +2767,135 @@ function misCollect(orig){
   }
   return row;
 }
+/* Clicking a case opens its ACTION panel — what has to be done, by when, and when it was done —
+   plus Remarks. The full case details are edited from the toolbar's Edit button instead, so the
+   two jobs stay apart: the everyday one (chasing an action) and the occasional one (correcting the
+   case record). */
+window.misActionPanel=function(id){
+  const r=(window._misRows||[]).find(x=>x.id===id); if(!r){toast('Case not found','err');return;}
+  window._misActionCase=r;
+  const openAction=String(r.action_needed||'').trim();
+  const title=r.cause_title||r.case_no||('Case '+id);
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-list-check"></i> Action — '+esc(String(title).replace(/\s+/g,' ').slice(0,58))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +'<div style="font-size:12px;color:var(--slate);margin-bottom:12px;line-height:1.5">'
+        +esc(r.case_type||'')+(r.case_no?(' · '+esc(r.case_no)):'')+(r.court?(' · '+esc(r.court)):'')
+        +'<br>Next Date <b>'+esc(r.next_date||'—')+'</b> · Previous Date '+esc(r.previous_date||'—')
+      +'</div>'
+      +'<label>Action Needed<textarea id="misA_needed" class="sel" rows="2">'+esc(openAction)+'</textarea></label>'
+      +'<div class="two">'
+        +'<label>Action Date'+misTip('Defaults to the Next Date — the hearing the action is working towards.')
+          +'<input id="misA_date" value="'+esc(r.action_date||r.next_date||'')+'" placeholder="dd/mm/yyyy"></label>'
+        +'<label>Action Execution Date'+misTip('Fill this in when the action is actually done. Saving with a date here closes the action.')
+          +'<input id="misA_exec" value="'+esc(r.action_executed_date||'')+'" placeholder="dd/mm/yyyy"></label>'
+      +'</div>'
+      +'<label>Remarks'+misTip('Added to whatever is already there, separated by a comma — nothing is overwritten.')
+        +'<textarea id="misA_remarks" class="sel" rows="2" placeholder="Anything to add"></textarea></label>'
+    +'</div>'
+    +'<div class="modal-foot">'
+      +'<button class="btn" onclick="closeModal()">Cancel</button>'
+      +(openAction?'<button class="btn" onclick="misActionExecute('+id+')" title="Marks it done today"><i class="fa-solid fa-check-double"></i> Mark executed today</button>':'')
+      +'<button class="btn btn-primary" id="misSaveBtn" onclick="misActionSave('+id+')"><i class="fa-solid fa-check"></i> Save</button>'
+    +'</div>','md');
+};
+// Adds to remarks rather than replacing them, comma separated.
+function misRemarksMerge(existing,added){
+  const a=String(existing||'').trim(), b=String(added||'').trim();
+  if(!b) return a||null;
+  if(!a) return b;
+  if(a.toLowerCase().indexOf(b.toLowerCase())!==-1) return a;   // already said
+  return a.replace(/[,\s]+$/,'')+', '+b;
+}
+window.misActionExecute=function(id){
+  const el=$('misA_exec');
+  if(el&&!el.value.trim()){ const d=new Date();
+    el.value=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+  misActionSave(id);
+};
+window.misActionSave=async function(id){
+  const r=window._misActionCase||{};
+  const g=k=>{const el=$('misA_'+k);return el?(el.value||'').trim():'';};
+  const needed=g('needed'), dateRaw=g('date'), execRaw=g('exec'), newRemark=g('remarks');
+  if(needed && !dateRaw){ toast('Add an Action Date — an action needs a date to work to','warn'); return; }
+  const dIso=dateRaw?misToIso(dateRaw):null;
+  const eIso=execRaw?misToIso(execRaw):null;
+  if(dateRaw&&!dIso){ toast('Action Date should look like dd/mm/yyyy','warn'); return; }
+  if(execRaw&&!eIso){ toast('Action Execution Date should look like dd/mm/yyyy','warn'); return; }
+  // You cannot have carried something out before the day it was due to be carried out.
+  if(dIso&&eIso&&misIsoStr(eIso)<misIsoStr(dIso)){
+    toast('The Action Execution Date cannot be before the Action Date','warn'); return;
+  }
+  const btn=$('misSaveBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+
+  const remarks=misRemarksMerge(r.remarks,newRemark);
+  const upd={remarks:remarks};
+  if(eIso){
+    /* Executed. The action's date moves into Previous Date and both the action and the date are
+       cleared, so the case is waiting for its next action - it is NOT completed. Completing a case
+       is a separate, deliberate act (slide the row left). */
+    upd.action_needed=null;
+    upd.action_date=null; upd.action_date_iso=null;
+    upd.action_executed_date=misDmy(eIso); upd.action_executed_date_iso=misIsoStr(eIso);
+    upd.previous_date=dIso?misDmy(dIso):(r.next_date||r.previous_date||null);
+    upd.next_date=null; upd.next_date_iso=null;
+    upd.next_date_recorded_at=null;      // not handled - it is simply between actions
+    upd.action_recorded_at=null;
+  } else {
+    /* The Action Date IS the case's Next Date - there is only ever one date being worked to. */
+    upd.action_needed=needed||null;
+    upd.next_date=dIso?misDmy(dIso):null;
+    upd.next_date_iso=dIso?misIsoStr(dIso):null;
+    upd.action_date=upd.next_date; upd.action_date_iso=upd.next_date_iso;
+    upd.action_executed_date=null; upd.action_executed_date_iso=null;
+    // Recording the commitment starts the scoreboard clock, on its OWN stamp: writing to
+    // next_date_recorded_at would mark the case handled and make it look completed.
+    if(dIso && String(r.next_date||'')!==misDmy(dIso)) upd.action_recorded_at=misIsoStr(new Date());
+  }
+  const {error}=await sb.from('mis_cases').update(upd).eq('id',id);
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
+
+  // Keep the Actions log in step: close the open one, or record/refresh it.
+  try{
+    const {data:existing}=await sb.from('mis_actions').select('id,action_needed').eq('case_id',id).is('executed_date_iso',null).order('id',{ascending:false}).limit(1);
+    const openRow=(existing&&existing[0])||null;
+    const openId=openRow?openRow.id:null;
+    if(eIso){
+      const row={executed_date:misDmy(eIso),executed_date_iso:misIsoStr(eIso),remarks:remarks,updated_at:new Date().toISOString()};
+      if(openId) await sb.from('mis_actions').update(row).eq('id',openId);
+      else if(needed||r.action_needed) await sb.from('mis_actions').insert(Object.assign({case_id:id,
+        action_needed:needed||r.action_needed,action_date:dIso?misDmy(dIso):null,action_date_iso:dIso?misIsoStr(dIso):null,
+        created_by:state.email},row));
+    } else if(needed){
+      const row={case_id:id,action_needed:needed,action_date:dIso?misDmy(dIso):null,
+        action_date_iso:dIso?misIsoStr(dIso):null,remarks:remarks,created_by:state.email,updated_at:new Date().toISOString()};
+      // Every action raised is recorded in its own right. The open row is only edited when it is
+      // literally the same action being corrected; a different wording is a new action.
+      const sameAsOpen = openId && String(openRow&&openRow.action_needed||'').trim()===needed;
+      if(sameAsOpen) await sb.from('mis_actions').update(row).eq('id',openId);
+      else await sb.from('mis_actions').insert(row);
+    }
+  }catch(e){ toast('The case saved, but the Actions log could not be updated: '+((e&&e.message)||e),'err'); }
+
+  closeModal();
+  toast(eIso?'Action executed — the case stays open for its next action':'Action saved','ok');
+  legalMIS();
+};
+
+function misActionDateMissing(row){
+  // Action Needed without a date is a promise with no deadline - the scoreboard has nothing to
+  // measure. One is required whenever the other is filled in.
+  if(String(row.action_needed||'').trim() && !row.action_date_iso){
+    toast('Add an Action Date — Action Needed has to have a date to work to','warn');
+    const el=$('misF_action_date'); if(el){ try{el.focus();}catch(_e){} el.style.borderColor='var(--err)';
+      setTimeout(function(){ el.style.borderColor=''; },2000); }
+    return true;
+  }
+  return false;
+}
 window.misSave=async function(){
   const row=misCollect();
   if(!row.cause_title&&!row.case_no){toast('Enter at least a Cause Title or Case No.','err');return;}
+  if(misActionDateMissing(row)) return;
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   row.created_by=state.email;
   const {error}=await sb.from('mis_cases').insert(row);
@@ -2527,6 +2928,7 @@ window.misEdit=async function(id){
 };
 window.misUpdate=async function(id){
   const row=misCollect(window._misEditOrig);
+  if(misActionDateMissing(row)) return;
   const btn=$('misSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.from('mis_cases').update(row).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
@@ -4610,14 +5012,17 @@ function hdAnswer(q){
 let HD_MSGS=[];
 VIEWS.helpdesk=function(v,seg){
   setCrumb(['Home','Help Desk']);
-  const tab=(seg[0]||'assistant');
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-headset" style="color:#0f766e"></i> Help Desk</h1><p>Ask a question, find a document, or get help using the portal</p></div></div>
+  // "Find a Document" has been removed: document searching belongs in the Legal module (and the
+  // Document Library), where the folders, filters and permissions live. A second search box here
+  // only split the habit in two. Anyone landing on the old /helpdesk/docs address is sent there.
+  let tab=(seg[0]||'assistant');
+  if(tab==='docs'){ navTo('legal'); return; }
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-headset" style="color:#0f766e"></i> Help Desk</h1><p>Ask a question or get help using the portal</p></div></div>
   <div class="tabs">
     <div class="tab ${tab==='assistant'?'active':''}" onclick="navTo('helpdesk/assistant')"><i class="fa-solid fa-robot"></i> Assistant</div>
-    <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('helpdesk/docs')"><i class="fa-solid fa-folder-open"></i> Find a Document</div>
     <div class="tab ${tab==='tickets'?'active':''}" onclick="navTo('helpdesk/tickets')"><i class="fa-solid fa-ticket"></i> My Tickets</div>
   </div><div id="hdBody"></div>`;
-  if(tab==='docs')hdDocs(); else if(tab==='tickets')hdTickets(); else hdAssistant();
+  if(tab==='tickets')hdTickets(); else hdAssistant();
 };
 /* The assistant answers in markdown — bold, bullets, and small tables when it lists things — so it
    needs rendering rather than dumping. Deliberately a small, closed renderer over escaped text:
@@ -9085,68 +9490,294 @@ VIEWS.playbook=function(v,seg){
 const COMP_PLATFORM_ICON={FACEBOOK:'fa-facebook',INSTAGRAM:'fa-instagram'};
 window._compAdsAll=window._compAdsAll||[];
 window._compSignCache=window._compSignCache||{};
+/* ---- Competitor Ads -----------------------------------------------------------------------
+   One filter bar drives BOTH what you see and what gets scraped. Picking a competitor, a date
+   range, a status and a media type filters the ads already stored; pressing Sync sends those same
+   four choices to Meta's Ad Library, so you fetch exactly the slice you are looking at instead of
+   pulling everything and sifting afterwards (which is billed per ad).                          */
+const COMP_RANGES=[
+  ['all','All time','fa-infinity'],
+  ['last_7','Last 7 days','fa-calendar-day'],
+  ['last_30','Last 30 days','fa-calendar-week'],
+  ['last_90','Last 90 days','fa-calendar-days'],
+  ['this_year','This year','fa-calendar'],
+  ['custom','Custom range','fa-sliders']
+];
+const COMP_MEDIA=[['all','All media','fa-shapes'],['image','Images','fa-image'],['video','Videos','fa-video'],['carousel','Carousels','fa-images']];
+const COMP_STATUS=[['all','Active & inactive','fa-layer-group'],['active','Active only','fa-circle-play'],['inactive','Inactive only','fa-circle-stop']];
+let COMP_F={wl:'all',range:'last_30',from:'',to:'',status:'all',media:'all',q:''};
+/* Ads are shown only after a fetch in THIS visit. Opening the page shows the competitor list and
+   nothing else, so what is on screen is always the answer to a fetch you just asked for, never a
+   pile of whatever happened to be stored from a different date range weeks ago. */
+window._compFetched=window._compFetched||{};   // watchlist id (or 'all') -> true once fetched here
+function compRangeDates(){
+  const d=new Date(); d.setHours(12,0,0,0);
+  const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  const back=n=>{const x=new Date(d.getTime());x.setDate(x.getDate()-n);return x;};
+  switch(COMP_F.range){
+    case 'last_7':    return {from:iso(back(7)),  to:iso(d)};
+    case 'last_30':   return {from:iso(back(30)), to:iso(d)};
+    case 'last_90':   return {from:iso(back(90)), to:iso(d)};
+    case 'this_year': return {from:d.getFullYear()+'-01-01', to:iso(d)};
+    case 'custom':    return (COMP_F.from&&COMP_F.to)?{from:COMP_F.from,to:COMP_F.to}:null;
+    default:          return null;
+  }
+}
+function compAdMediaKind(a){
+  const items=Array.isArray(a.media_items)?a.media_items:[];
+  if(items.length>1) return 'carousel';
+  const t=(items[0]&&items[0].media_type)||a.media_type||'';
+  return t==='video'?'video':(t?'image':'');
+}
+// The ads currently on screen, after every filter in the bar.
+function compFiltered(){
+  const all=window._compAdsAll||[];
+  const win=compRangeDates();
+  const q=(COMP_F.q||'').trim().toLowerCase();
+  return all.filter(function(a){
+    if(COMP_F.wl!=='all' && String(a.watchlist_id)!==String(COMP_F.wl)) return false;
+    const running=!a.ad_delivery_stop_time;
+    if(COMP_F.status==='active' && !running) return false;
+    if(COMP_F.status==='inactive' && running) return false;
+    if(COMP_F.media!=='all' && compAdMediaKind(a)!==COMP_F.media) return false;
+    // Match Meta's own meaning. Its filter chip reads "Impressions by date", i.e. ads that were
+    // RUNNING at some point inside the window - not ads that STARTED inside it. An ad that began
+    // in June and is still running today belongs in a July window, and filtering on the start date
+    // alone wrongly dropped it, making our counts disagree with the Ad Library.
+    if(win){
+      const s=a.ad_delivery_start_time?String(a.ad_delivery_start_time).slice(0,10):'';
+      if(!s || s>win.to) return false;                       // began after the window closed
+      const e=a.ad_delivery_stop_time?String(a.ad_delivery_stop_time).slice(0,10):'';
+      if(e && e<win.from) return false;                      // finished before it opened
+    }
+    if(q){
+      const blob=[(Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies.join(' '):''),a.headline,a.description,a.page_name,a.cta_text,a.id]
+        .filter(Boolean).join(' ').toLowerCase();
+      if(blob.indexOf(q)===-1) return false;
+    }
+    return true;
+  }).sort(function(x,y){ return String(y.ad_delivery_start_time||'').localeCompare(String(x.ad_delivery_start_time||'')); });
+}
+// Picking a competitor from the table fetches their ads there and then, rather than showing
+// whatever was left over from a previous range.
+window.compShowOnly=function(id){
+  COMP_F.wl=String(id);
+  compPaint();
+  compSyncFiltered();
+};
+window.compSetFilter=function(k,val){
+  COMP_F[k]=val;
+  if(k==='range'&&val==='custom'&&(!COMP_F.from||!COMP_F.to)){
+    const w=compRangeDates()||{}; const d=new Date();
+    COMP_F.to=w.to||(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    const b=new Date(); b.setDate(b.getDate()-30);
+    COMP_F.from=w.from||(b.getFullYear()+'-'+String(b.getMonth()+1).padStart(2,'0')+'-'+String(b.getDate()).padStart(2,'0'));
+  }
+  compPaint();
+};
+window.compSetDate=function(which,val){
+  COMP_F[which]=val;
+  // To can never be before From
+  if(COMP_F.from&&COMP_F.to&&COMP_F.to<COMP_F.from){
+    if(which==='from') COMP_F.to=''; else { COMP_F.to=COMP_F.from; toast('To date cannot be before the From date','warn'); }
+  }
+  compPaint();
+};
+window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); };
+
 VIEWS.competitors=async function(v,seg){
   setCrumb(['Growth & Strategy','Competitor Ads']);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
     +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 16px">'
-      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — not spend or reach, which Meta only exposes for political/issue ads.</p>'
+      +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran. Meta never publishes spend or reach for ordinary commercial ads.</p>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add Competitor</button>'
-        +'<button class="btn btn-primary" id="compSyncAllBtn" onclick="compSyncAll()"><i class="fa-solid fa-rotate"></i> Sync All</button>'
+        +'<button class="btn btn-primary" id="compSyncBtn" onclick="compSyncFiltered()"><i class="fa-solid fa-rotate"></i> Fetch from Meta</button>'
       +'</div>'
     +'</div>'
     +'<div id="compToolbar"></div>'
     +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
   await compRender();
 };
+function compSelHtml(id,list,cur,onchange){
+  return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
+    +list.map(function(o){ return '<option value="'+o[0]+'"'+(String(cur)===String(o[0])?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')
+  +'</select>';
+}
 function compToolbarHtml(wl){
-  if(!wl.length)return '';
-  return '<div class="card card-pad" style="margin-bottom:16px">'
-    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">Sync options</div>'
-    +'<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">'
-      +'<div style="min-width:200px">'
-        +'<div style="font-size:12px;color:var(--slate);margin-bottom:6px">Competitors to sync</div>'
-        +'<div style="display:flex;flex-direction:column;gap:4px;max-height:110px;overflow-y:auto;padding-right:6px">'
-          +wl.map(function(w){return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px"><input type="checkbox" class="comp-sync-cb" value="'+w.id+'" checked> '+esc(w.name)+'</label>';}).join('')
-        +'</div>'
-      +'</div>'
-      +'<label style="font-size:12px;color:var(--slate)">From<br><input type="date" id="compDateFrom" class="inp" style="margin-top:4px"></label>'
-      +'<label style="font-size:12px;color:var(--slate)">To<br><input type="date" id="compDateTo" class="inp" style="margin-top:4px"></label>'
-      +'<div><div style="font-size:12px;color:var(--slate);margin-bottom:6px">Status</div>'
-        +'<div style="display:flex;gap:10px">'
-          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="all" checked> Both</label>'
-          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="active"> Active</label>'
-          +'<label style="font-size:12.5px;display:flex;align-items:center;gap:4px"><input type="radio" name="compActiveStatus" value="inactive"> Inactive</label>'
-        +'</div>'
-      +'</div>'
-      +'<button class="btn btn-primary" id="compSyncSelectedBtn" onclick="compSyncSelected()"><i class="fa-solid fa-rotate"></i> Sync Selected</button>'
+  const win=compRangeDates();
+  const opts=[['all','All competitors ('+wl.length+')']].concat(wl.map(function(w){
+    const n=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;}).length;
+    return [String(w.id), w.name+' ('+n+')'];
+  }));
+  const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
+  return '<style>'
+    +'.comp-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
+    +'.comp-sel{height:36px;padding:0 32px 0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;'
+      +'background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%230369a1\' stroke-width=\'2\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:11px 8px}'
+    +'.comp-sel:hover{border-color:var(--slate)}'
+    +'.comp-sel:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-date{height:36px;border:1px solid var(--line);border-radius:9px;padding:0 9px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
+    +'.comp-date:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-search{position:relative;display:flex;align-items:center;flex:1;min-width:150px}'
+    +'.comp-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}'
+    +'.comp-search input{width:100%;height:36px;padding:0 11px 0 31px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
+    +'.comp-search input:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-note{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--slate);padding:0 2px;margin:-6px 0 14px}'
+    +'.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:13px}'
+    +'@media(max-width:760px){.comp-bar{gap:8px}.comp-sel,.comp-search{flex:1 1 100%}.comp-search{min-width:0}}'
+  +'</style>'
+  +'<div class="comp-bar">'
+    +compSelHtml('compWl',opts,COMP_F.wl,'compSetFilter(\'wl\',this.value)')
+    +compSelHtml('compRange',COMP_RANGES.map(function(r){return [r[0],r[1]];}),COMP_F.range,'compSetFilter(\'range\',this.value)')
+    +(COMP_F.range==='custom'
+      ?('<input type="date" class="comp-date" value="'+esc(COMP_F.from)+'" onchange="compSetDate(\'from\',this.value)">'
+        +'<span style="color:var(--slate);font-size:12px">to</span>'
+        +'<input type="date" class="comp-date" min="'+esc(COMP_F.from)+'" value="'+esc(COMP_F.to)+'" onchange="compSetDate(\'to\',this.value)">')
+      :'')
+    +compSelHtml('compStatus',COMP_STATUS.map(function(r){return [r[0],r[1]];}),COMP_F.status,'compSetFilter(\'status\',this.value)')
+    +compSelHtml('compMedia',COMP_MEDIA.map(function(r){return [r[0],r[1]];}),COMP_F.media,'compSetFilter(\'media\',this.value)')
+    +'<div class="comp-search"><i class="fa-solid fa-magnifying-glass"></i>'
+      +'<input placeholder="Search ad text, headline, page…" value="'+esc(COMP_F.q)+'" oninput="compSearch(this.value)"></div>'
+    // Ads stored before videos carried a poster still have none; this re-downloads their media.
+    +'<button class="btn" id="compPosterBtn" onclick="compRefreshMedia()" title="Re-download media for ads already stored, saving a small preview image for each video so tiles load quickly"><i class="fa-solid fa-image"></i> Rebuild previews</button>'
+  +'</div>'
+  // Says exactly what pressing Fetch will ask Meta for, so nobody is surprised by what arrives.
+  +'<div class="comp-note"><i class="fa-solid fa-circle-info"></i><span>Fetch from Meta will ask the Ad Library for '
+    +'<b>'+esc(cur?cur.name:'all '+wl.length+' competitors')+'</b>, '
+    +'<b>'+esc(win?(win.from+' to '+win.to):'any start date')+'</b>, '
+    +'<b>'+esc((COMP_STATUS.filter(function(s){return s[0]===COMP_F.status;})[0]||[])[1]||'')+'</b>'
+    +(COMP_F.media==='carousel'?', all media types (carousel is filtered here, Meta has no carousel filter)'
+       :(COMP_F.media==='all'?', all media types':', '+esc((COMP_MEDIA.filter(function(s){return s[0]===COMP_F.media;})[0]||[])[1]||'').toLowerCase()))
+    +'.'+(cur&&!cur.page_id?' <b>'+esc(cur.name)+'</b> has no Page ID yet, so it searches by keyword — set one for their ads only.':'')+'</span></div>';
+}
+// The Ad Library address for a competitor, rebuilt from its Page ID rather than stored, so the
+// link can never drift out of step with what the sync actually asks Meta for.
+function compAdLibUrl(w){
+  if(w.page_id) return 'https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=IN'
+    +'&media_type=all&search_type=page&view_all_page_id='+encodeURIComponent(w.page_id);
+  return 'https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=IN'
+    +'&media_type=all&search_type=keyword_unordered&q='+encodeURIComponent(w.search_term||w.name||'');
+}
+/* Every competitor in one table: the page being tracked, its Ad Library link, and whether it is
+   pinned to a Page ID or still guessing by keyword. Shown when no single competitor is selected,
+   so the whole watchlist can be checked at a glance. */
+// The advertiser name Meta shows. Recorded on the watchlist where known; otherwise taken from the
+// competitor's own fetched ads, so it fills in by itself after the first sync.
+function compPageNameOf(w){
+  if(w.page_name) return w.page_name;
+  const a=(window._compAdsAll||[]).filter(function(x){return x.watchlist_id===w.id && x.page_name;})[0];
+  return a?a.page_name:'';
+}
+function compWlTableHtml(wl){
+  const ads=window._compAdsAll||[];
+  const rows=wl.map(function(w){
+    const n=ads.filter(function(a){return a.watchlist_id===w.id;}).length;
+    const pn=compPageNameOf(w);
+    const pinned=!!String(w.page_id||'').trim();
+    return '<tr>'
+      +'<td><b>'+esc(w.name)+'</b>'+(pn&&pn!==w.name?('<div style="font-size:11px;color:var(--slate)">'+esc(pn)+'</div>'):'')+'</td>'
+      +'<td>'+(pinned
+          ?('<span class="tag t-green" title="Only this page\'s own ads"><i class="fa-solid fa-thumbtack"></i> Page ID</span>'
+            +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">'+esc(w.page_id)+'</div>')
+          :('<span class="tag t-amber" title="May return ads by others that mention this name">Keyword</span>'
+            +'<div style="font-size:10.5px;color:var(--slate);margin-top:3px">"'+esc(w.search_term||w.name)+'"</div>'))
+      +'</td>'
+      +'<td style="text-align:center">'+n+'</td>'
+      +'<td>'+(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'<span style="color:var(--slate);font-size:12px">—</span>')+'</td>'
+      +'<td style="white-space:nowrap">'
+        +'<a class="btn btn-sm" href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener" title="Open in Meta Ad Library"><i class="fa-solid fa-arrow-up-right-from-square"></i></a> '
+        +'<button class="btn btn-sm" onclick="compShowOnly('+w.id+')" title="Show only this competitor — fetches their ads for the current filters"><i class="fa-solid fa-filter"></i></button> '
+        +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')" title="Edit"><i class="fa-solid fa-pen"></i></button> '
+        +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')" title="Remove"><i class="fa-solid fa-trash"></i></button>'
+      +'</td>'
+    +'</tr>';
+  }).join('');
+  const keyword=wl.filter(function(w){return !String(w.page_id||'').trim();}).length;
+  return '<details class="card" id="compWlPanel" style="margin-bottom:14px" '+(keyword?'open':'')+'>'
+    +'<summary style="cursor:pointer;padding:13px 15px;font-weight:700;font-size:13.5px;list-style:none;display:flex;align-items:center;gap:9px">'
+      +'<i class="fa-solid fa-list-check" style="color:#0369a1"></i> Competitors <span class="tag t-gray">'+wl.length+'</span>'
+      +(keyword?'<span class="tag t-amber" title="These still search by keyword">'+keyword+' without a Page ID</span>':'<span class="tag t-green">all pinned to a Page ID</span>')
+      +'<span style="margin-left:auto;font-size:11.5px;color:var(--slate);font-weight:500">click to open / close</span>'
+    +'</summary>'
+    +'<div style="overflow-x:auto;border-top:1px solid var(--line)">'
+      +'<table class="tbl" style="width:100%;font-size:12.5px">'
+        +'<thead><tr><th>Competitor</th><th>Targeting</th><th style="text-align:center">Ads</th><th>Facebook page</th><th>Actions</th></tr></thead>'
+        +'<tbody>'+rows+'</tbody>'
+      +'</table>'
     +'</div>'
+  +'</details>';
+}
+// Header strip for a single selected competitor: what it targets, and the row's own controls.
+function compWlCardHtml(w){
+  const ads=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;});
+  const running=ads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
+  return '<div class="card card-pad" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="font-weight:700;font-size:15px">'+esc(w.name)
+        +(function(){const pn=compPageNameOf(w);return (pn&&pn!==w.name)?(' <span style="font-weight:500;font-size:12.5px;color:var(--slate)">— '+esc(pn)+' on Facebook</span>'):'';})()+'</div>'
+      +'<div style="color:var(--slate);font-size:12px">'
+        +(w.page_id
+          ?('<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Targets Page ID <b>'+esc(w.page_id)+'</b> — their own ads only')
+          :('<i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Keyword search: "'+esc(w.search_term)+'" — may catch anyone mentioning the name'))
+        +' · '+ads.length+' ad(s) stored · '+running+' running</div>'
+      +'<div style="margin-top:5px;font-size:12px;display:flex;gap:12px;flex-wrap:wrap">'
+        +'<a href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in Ad Library</a>'
+        +(w.page_url?('<a href="'+esc(w.page_url)+'" target="_blank" rel="noopener"><i class="fa-brands fa-facebook"></i> '+esc(String(w.page_url).replace(/^https?:\/\/(www\.)?facebook\.com\//,'').replace(/\/$/,''))+'</a>'):'')
+      +'</div>'
+    +'</div>'
+    +'<button class="btn btn-sm" onclick="compSetFilter(\'wl\',\'all\')"><i class="fa-solid fa-arrow-left"></i> All</button>'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> In auto-sync</label>'
+    +'<button class="btn btn-sm" onclick="compEditModal('+w.id+')"><i class="fa-solid fa-pen"></i> Edit</button>'
+    +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
   +'</div>';
+}
+function compPaintGrid(){
+  const host=$('compGrid'); if(!host) return;
+  const rows=compFiltered();
+  const cnt=$('compCount');
+  if(cnt) cnt.textContent=rows.length+' ad'+(rows.length===1?'':'s')
+    +' · '+rows.filter(function(a){return !a.ad_delivery_stop_time;}).length+' running';
+  host.innerHTML=rows.length
+    ? rows.slice(0,200).map(compAdCard).join('')
+    : '';
+  const empty=$('compEmpty');
+  if(empty) empty.style.display=rows.length?'none':'';
+  compHydrateThumbs();
+}
+function compPaint(){
+  const tb=$('compToolbar'); if(tb) tb.innerHTML=compToolbarHtml(window._compWl||[]);
+  const host=$('compBody'); if(!host) return;
+  const wl=window._compWl||[];
+  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
+  const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
+  // Ads appear only once a fetch has been made for this selection during this visit.
+  const fetched=!!window._compFetched[String(COMP_F.wl)];
+  host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
+    +(fetched
+      ?('<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+          +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
+        +'</div>'
+        +'<div class="comp-grid" id="compGrid"></div>'
+        +'<div class="empty" id="compEmpty" style="padding:36px;display:none"><i class="fa-regular fa-folder-open"></i>'
+          +'<div>Meta returned nothing for these filters.</div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px">Try a wider date range, or Active &amp; inactive.</div>'
+        +'</div>')
+      :('<div class="empty" style="padding:40px"><i class="fa-solid fa-cloud-arrow-down" style="color:#0369a1"></i>'
+          +'<div style="font-weight:600">'+(cur?esc(cur.name)+' — not fetched yet':'Choose a competitor, or fetch them all')+'</div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:6px;max-width:430px;margin-left:auto;margin-right:auto;line-height:1.55">'
+            +'Set the date range, status and media above, then press <b>Fetch from Meta</b> — or use the filter button beside a competitor to fetch just that one. '
+            +'Nothing is shown until it has actually been fetched, so what you see always matches the filters you asked for.</div>'
+        +'</div>'));
+  if(fetched) compPaintGrid();
 }
 async function compRender(){
   const host=$('compBody'); if(!host)return;
   let wl=[],ads=[];
-  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('created_at',{ascending:false}); wl=data||[]; }catch(e){}
-  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('last_seen_at',{ascending:false}).limit(500); ads=data||[]; }catch(e){}
-  window._compAdsAll=ads;
-  const tb=$('compToolbar'); if(tb)tb.innerHTML=compToolbarHtml(wl);
-  if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
-  host.innerHTML=wl.map(function(w){
-    const wads=ads.filter(function(a){return a.watchlist_id===w.id;});
-    const running=wads.filter(function(a){return !a.ad_delivery_stop_time;}).length;
-    return '<div class="card card-pad" style="margin-bottom:16px">'
-      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
-        +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:15px">'+esc(w.name)+'</div><div style="color:var(--slate);font-size:12px">Search term: "'+esc(w.search_term)+'" · '+wads.length+' ad(s) seen · '+running+' currently running</div></div>'
-        +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate)"><input type="checkbox" '+(w.active?'checked':'')+' onchange="compToggleActive('+w.id+',this.checked)"> Active</label>'
-        +'<button class="btn btn-sm" onclick="compSync('+w.id+',this)"><i class="fa-solid fa-rotate"></i> Sync</button>'
-        +'<button class="btn btn-sm btn-danger" onclick="compRemove('+w.id+')"><i class="fa-solid fa-trash"></i></button>'
-      +'</div>'
-      +(wads.length
-        ?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">'+wads.slice(0,24).map(compAdCard).join('')+'</div>'
-        :'<div class="empty" style="padding:20px"><i class="fa-regular fa-clock"></i><div>Not synced yet — click Sync</div></div>')
-      +'</div>';
-  }).join('');
-  compHydrateThumbs();
+  try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}); wl=data||[]; }catch(e){}
+  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('ad_delivery_start_time',{ascending:false}).limit(1000); ads=data||[]; }catch(e){}
+  window._compWl=wl; window._compAdsAll=ads;
+  compPaint();
 }
 function compFirstMedia(a){
   if(Array.isArray(a.media_items)&&a.media_items.length)return a.media_items[0];
@@ -9163,11 +9794,11 @@ function compPlatformIcons(a){
 }
 function compAdCard(a){
   const stillRunning=!a.ad_delivery_stop_time;
-  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
-  const bodyText=bodies.length?String(bodies[0]).slice(0,140):'(no ad text)';
-  const media=compFirstMedia(a);
-  const thumb=media
-    ?'<div class="comp-thumb" data-key="'+esc(media.s3_path)+'" data-type="'+esc(media.media_type)+'" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+  const t=compAdText(a);
+  const bodyText=t.text?t.text.slice(0,140):(t.dynamic?'Catalogue ad — wording changes per product':'(no ad text)');
+  const th=compThumbFor(a);
+  const thumb=th
+    ?'<div class="comp-thumb" data-key="'+esc(th.key)+'" data-kind="'+esc(th.kind)+'" data-overlay="'+(th.overlay?'1':'0')+'" style="position:relative;height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);overflow:hidden"><i class="fa-solid fa-spinner fa-spin"></i></div>'
     :(a.ad_snapshot_url?'<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="height:140px;background:var(--bg,#f1f5f9);border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--slate);font-size:12px;text-decoration:none">View on Facebook →</a>':'');
   return '<div style="border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer" onclick="compOpenDetail(\''+esc(a.id)+'\')">'
     +thumb
@@ -9186,30 +9817,126 @@ async function compSignedUrl(key){
   window._compSignCache[key]=data.url;
   return data.url;
 }
-async function compHydrateThumbs(){
+/* Why the tiles were blank: these ad videos are 5-27 MB each, and the grid was asking the browser
+   to pull two dozen of them at once just to show a still. Nothing was broken - they simply never
+   finished downloading.
+
+   Two fixes. Ads fetched from now on carry a small poster image saved next to the video, which is
+   what the tile shows. For ads captured before that, the video itself is used with #t=0.1 (which
+   makes the browser seek to the first frame and paint it) but ONLY once the tile has actually
+   scrolled into view, so a page of them no longer starts two dozen large downloads at once. */
+function compThumbFor(a){
+  const m=compFirstMedia(a);
+  if(!m) return null;
+  if(m.poster) return {key:m.poster, kind:'image', overlay:true};        // video, with its own still
+  if(m.media_type==='video') return {key:m.s3_path, kind:'video', overlay:true};
+  return {key:m.s3_path, kind:'image', overlay:false};
+}
+async function compFillThumb(el){
+  if(el.dataset.done==='1') return;
+  el.dataset.done='1';
+  const key=el.getAttribute('data-key'), kind=el.getAttribute('data-kind');
+  let url=null;
+  try{ url=await compSignedUrl(key); }catch(_e){}
+  if(!el.isConnected) return;
+  if(!url){ el.innerHTML='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>'; return; }
+  const fail='<div style="font-size:11px;text-align:center;padding:8px">Media unavailable</div>';
+  if(kind==='video'){
+    el.innerHTML='<video src="'+esc(url)+'#t=0.1" preload="metadata" muted playsinline'
+      +' style="width:100%;height:100%;object-fit:cover;background:#000"></video>';
+    const v=el.querySelector('video'); if(v) v.onerror=function(){ el.innerHTML=fail; };
+  } else {
+    el.innerHTML='<img src="'+esc(url)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover">';
+    const i=el.querySelector('img'); if(i) i.onerror=function(){ el.innerHTML=fail; };
+  }
+  if(el.getAttribute('data-overlay')==='1'){
+    el.insertAdjacentHTML('beforeend','<span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.62);'
+      +'color:#fff;border-radius:5px;padding:1px 6px;font-size:10px"><i class="fa-solid fa-play"></i></span>');
+  }
+}
+function compHydrateThumbs(){
   const els=Array.from(document.querySelectorAll('.comp-thumb[data-key]'));
-  await Promise.all(els.map(async function(el){
-    const key=el.getAttribute('data-key'),type=el.getAttribute('data-type');
-    const url=await compSignedUrl(key);
-    if(!url||!el.isConnected)return;
-    el.innerHTML=type==='video'
-      ?'<video src="'+url+'" preload="metadata" muted style="width:100%;height:100%;object-fit:cover"></video>'
-      :'<img src="'+url+'" style="width:100%;height:100%;object-fit:cover">';
-  }));
+  if(!els.length) return;
+  if(!('IntersectionObserver' in window)){ els.forEach(compFillThumb); return; }
+  const io=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){ if(en.isIntersecting){ compFillThumb(en.target); io.unobserve(en.target); } });
+  },{rootMargin:'250px'});
+  els.forEach(function(el){ io.observe(el); });
+}
+/* Catalogue ads (Advantage+ / dynamic product ads) store their text as a TEMPLATE - the real words
+   are filled in per product when the ad is served, which is why the Ad Library shows a normal ad
+   but the stored copy reads "{{product.brand}}". Show the real headline where there is one, and be
+   honest about the rest rather than printing the placeholder. */
+function compIsTemplate(s){ return /\{\{\s*product\.[a-z_]+\s*\}\}/i.test(String(s||'')); }
+// Meta labels these display_format:"DCO". Trust that when present, fall back to the text otherwise.
+function compIsCatalogue(a){
+  return String(a&&a.display_format||'')==='DCO'
+    || compIsTemplate((Array.isArray(a&&a.ad_creative_bodies)&&a.ad_creative_bodies[0])||'')
+    || compIsTemplate(a&&a.headline);
+}
+function compAdText(a){
+  const raw=(Array.isArray(a.ad_creative_bodies)&&a.ad_creative_bodies.length)?String(a.ad_creative_bodies[0]):'';
+  const stripped=raw.replace(/\{\{\s*product\.[a-z_]+\s*\}\}/gi,'').trim();
+  if(raw && !compIsTemplate(raw)) return {text:raw, dynamic:compIsCatalogue(a)};
+  if(stripped) return {text:stripped, dynamic:true};
+  const alt=[a.headline,a.description,(Array.isArray(a.ad_creative_link_titles)?a.ad_creative_link_titles[0]:'')]
+    .map(function(x){return String(x||'').trim();}).filter(function(x){return x && !compIsTemplate(x);})[0];
+  return {text:alt||'', dynamic:true};
+}
+/* A keyword search returns anything that merely MENTIONS the competitor - a broker's ad, a news
+   post. Their Page ID pins it to ads that page actually ran. You get the ID by opening the
+   competitor in Meta's Ad Library and copying the address; the number after view_all_page_id is
+   it, and pasting the whole link here is enough. */
+function compPageIdFrom(text){
+  const s=String(text||'').trim();
+  if(!s) return '';
+  if(/^\d{6,}$/.test(s)) return s;                                  // already just an ID
+  let m=s.match(/[?&]view_all_page_id=(\d+)/i);   if(m) return m[1];
+  m=s.match(/[?&]page_ids?(?:%5B0%5D|\[0\])?=(\d+)/i); if(m) return m[1];
+  m=s.match(/facebook\.com\/(?:profile\.php\?id=)?(\d{6,})/i);      if(m) return m[1];
+  return '';
+}
+function compFormHtml(w){
+  w=w||{};
+  return '<div class="modal-body frm">'
+    +'<label>Display name<input id="compName" value="'+esc(w.name||'')+'" placeholder="e.g. Godrej Properties"></label>'
+    +'<label>Ad Library link or Page ID'
+      +'<input id="compPageId" value="'+esc(w.page_id||'')+'" placeholder="Paste their Ad Library link, or the Page ID">'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px;line-height:1.5">'
+        +'Best option — fetches <b>only that page\'s own ads</b>. Open the competitor in Meta\'s Ad Library, copy the address bar, paste it here; the Page ID is picked out for you.'
+      +'</div>'
+    +'</label>'
+    +'<label>Search term (used only when there is no Page ID)'
+      +'<input id="compSearchTerm" value="'+esc(w.search_term||'')+'" placeholder="Defaults to the name above">'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:5px">Keyword search also returns ads by other people that mention this name.</div>'
+    +'</label>'
+  +'</div>';
 }
 window.compAddModal=function(){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Competitor</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm"><label>Display name<input id="compName" placeholder="e.g. Godrej Properties"></label>'
-    +'<label>Search term sent to Meta<input id="compSearchTerm" placeholder="Defaults to the name above"></label></div>'
+    +compFormHtml({})
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave()"><i class="fa-solid fa-check"></i> Add</button></div>','md');
 };
-window.compSave=async function(){
+window.compEditModal=function(id){
+  const w=(window._compWl||[]).filter(function(x){return String(x.id)===String(id);})[0];
+  if(!w){toast('Competitor not found','err');return;}
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit '+esc(w.name)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +compFormHtml(w)
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave('+w.id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
+};
+window.compSave=async function(id){
   const name=(($('compName')&&$('compName').value)||'').trim();
   const term=(($('compSearchTerm')&&$('compSearchTerm').value)||'').trim()||name;
+  const raw=(($('compPageId')&&$('compPageId').value)||'').trim();
+  const pageId=compPageIdFrom(raw);
   if(!name){toast('Enter a name','err');return;}
-  const {error}=await sb.schema('camp').from('competitor_watchlist').insert({name:name,search_term:term});
+  if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');return;}
+  const row={name:name,search_term:term,page_id:pageId||null};
+  const {error}=id
+    ? await sb.schema('camp').from('competitor_watchlist').update(row).eq('id',id)
+    : await sb.schema('camp').from('competitor_watchlist').insert(row);
   if(error){toast(error.message,'err');return;}
-  closeModal();toast('Competitor added','ok');
+  closeModal();toast(id?'Competitor updated':'Competitor added','ok');
   await compRender();
 };
 window.compToggleActive=async function(id,active){
@@ -9233,20 +9960,42 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
     const jr=await res.json().catch(function(){return {};});
     if(jr.error)toast(jr.error,'err');
     else if(jr.skipped)toast(jr.message||'Sync skipped','err');
-    else toast('Synced — '+(jr.newAds||0)+' new ad(s) across '+(jr.synced||0)+' total','ok');
-  }catch(e){toast('Sync failed','err');}
+    else {
+      // Mark this selection as fetched so the grid is allowed to appear.
+      window._compFetched[String(payload.watchlist_id!=null?payload.watchlist_id:'all')]=true;
+      if(payload.watchlist_id==null) window._compFetched['all']=true;
+      const bits=[(jr.newAds||0)+' new', (jr.synced||0)+' seen'];
+      if(jr.replaced) bits.push(jr.replaced+' replaced');
+      if(jr.skippedWrongPage) bits.push(jr.skippedWrongPage+' from other pages ignored');
+      toast('Fetched — '+bits.join(' · '),'ok');
+    }
+  }catch(e){toast('Fetch failed','err');}
   if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
   await compRender();
 }
 window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); };
-window.compSyncAll=function(){ compRunSync({},$('compSyncAllBtn'),'Syncing…','Sync All'); };
-window.compSyncSelected=function(){
-  const ids=Array.from(document.querySelectorAll('.comp-sync-cb:checked')).map(function(cb){return Number(cb.value);});
-  if(!ids.length){toast('Select at least one competitor','err');return;}
-  const dateFrom=($('compDateFrom')&&$('compDateFrom').value)||undefined;
-  const dateTo=($('compDateTo')&&$('compDateTo').value)||undefined;
-  const activeStatusEl=document.querySelector('input[name="compActiveStatus"]:checked');
-  compRunSync({watchlist_ids:ids,active_status:activeStatusEl?activeStatusEl.value:'all',date_from:dateFrom,date_to:dateTo},$('compSyncSelectedBtn'),'Syncing…','Sync Selected');
+// Fetches exactly the slice the filter bar is showing. Carousel is a local distinction only -
+// Meta has no carousel filter - so it asks for all media and the grid narrows it afterwards.
+window.compSyncFiltered=function(){
+  const win=compRangeDates();
+  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); return; }
+  const payload={
+    active_status:COMP_F.status,
+    media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
+    date_from:win?win.from:undefined,
+    date_to:win?win.to:undefined
+  };
+  if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
+  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta');
+};
+// Same fetch, but it also re-downloads media for ads already held that have no preview image yet.
+window.compRefreshMedia=function(){
+  const win=compRangeDates();
+  const payload={refresh_media:true, active_status:COMP_F.status,
+    media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
+    date_from:win?win.from:undefined, date_to:win?win.to:undefined};
+  if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
+  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews');
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
@@ -9258,8 +10007,13 @@ window.compOpenDetail=function(id){
 };
 function compDetailHtml(a){
   const stillRunning=!a.ad_delivery_stop_time;
-  const bodies=Array.isArray(a.ad_creative_bodies)?a.ad_creative_bodies:[];
-  const bodyText=bodies.length?String(bodies[0]):'(no ad text)';
+  const t=compAdText(a);
+  const bodyText=t.text||'(no ad text)';
+  const dynamicNote=t.dynamic
+    ?'<div style="margin-bottom:7px;font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:6px;padding:6px 9px;line-height:1.45">'
+      +'<i class="fa-solid fa-circle-info"></i> Catalogue ad — Meta fills the wording in from the product feed as it is served, '
+      +'so the Ad Library only stores the template. What you see on Facebook will differ.</div>'
+    :'';
   const extraLinks=Array.isArray(a.extra_links)?a.extra_links:[];
   const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
   return '<div class="modal-head"><h3><i class="fa-solid fa-magnifying-glass-chart"></i> '+esc(a.page_name||'Ad detail')+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
@@ -9274,23 +10028,50 @@ function compDetailHtml(a){
           +'</div>'
           :'')
       +'</div>'
-      +'<div style="flex:1 1 280px;min-width:260px">'
-        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'+compPlatformIcons(a)+'</div>'
-        +(a.cta_text?'<div style="margin-bottom:10px">'+(a.redirect_url?'<a href="'+esc(a.redirect_url)+'" target="_blank" rel="noopener" class="btn btn-primary btn-sm">'+esc(a.cta_text)+' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>':'<span class="tag t-blue">'+esc(a.cta_text)+'</span>')+'</div>':'')
-        +'<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:220px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
+      // Right-hand column, in the order asked for: dates first (they are what people compare
+      // between ads), then the copy, then the links and the actions.
+      +'<div style="flex:1 1 300px;min-width:270px">'
+        +'<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:14px">'
+          +compDetailRow('Running since', fmtDate(a.ad_delivery_start_time))
+          +compDetailRow('Last seen', fmtDate(a.last_seen_at))
+          +compDetailRow(stillRunning?'Running for':'Ran for', compRunLength(a))
+          +compDetailRow('Library ID', '<span style="font-family:ui-monospace,Menlo,monospace">'+esc(a.id)+'</span>')
+        +'</table>'
+        +'<div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Description</div>'
+        +dynamicNote
+        +'<div style="font-size:13px;line-height:1.55;white-space:pre-wrap;max-height:230px;overflow-y:auto;padding-right:4px">'+esc(bodyText)+'</div>'
         +(extraLinks.length
-          ?'<div style="margin-top:12px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:4px">Extra links</div>'
-            +extraLinks.map(function(l){const u=l&&(l.url||l);return u?'<div style="margin-bottom:3px"><a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-size:12px">'+esc(u)+'</a></div>':'';}).join('')
+          ?'<div style="margin-top:14px"><div style="font-size:11.5px;color:var(--slate);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Extra links</div>'
+            +extraLinks.map(function(l){const u=l&&(l.url||l);
+              return u?'<div style="margin-bottom:4px"><a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-size:12px;word-break:break-all">'+esc(u)+'</a></div>':'';}).join('')
           +'</div>'
           :'')
-        +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--slate);display:flex;flex-direction:column;gap:4px">'
-          +'<div>Running since '+fmtDate(a.ad_delivery_start_time)+(stillRunning?'':' · ended '+fmtDate(a.ad_delivery_stop_time))+'</div>'
-          +'<div>Last seen '+fmtDate(a.last_seen_at)+'</div>'
-          +'<div>Library ID '+esc(a.id)+'</div>'
-          +(a.ad_snapshot_url?'<div><a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener">View on Facebook Ad Library →</a></div>':'')
+        +'<div style="margin-top:16px;padding-top:13px;border-top:1px solid var(--line);display:flex;gap:9px;flex-wrap:wrap;align-items:center">'
+          +(a.ad_snapshot_url?('<a href="'+esc(a.ad_snapshot_url)+'" target="_blank" rel="noopener" class="btn btn-sm"><i class="fa-brands fa-facebook"></i> View on Facebook Library</a>'):'')
+          +(a.cta_text?(a.redirect_url
+              ?('<a href="'+esc(a.redirect_url)+'" target="_blank" rel="noopener" class="btn btn-primary btn-sm">'+esc(a.cta_text)+' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>')
+              :('<span class="tag t-blue">'+esc(a.cta_text)+'</span>')):'')
+        +'</div>'
+        +'<div style="margin-top:11px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
+          +'<span class="tag '+(stillRunning?'t-green':'t-gray')+'">'+(stillRunning?'Active':'Inactive')+'</span>'
+          +compPlatformIcons(a)
         +'</div>'
       +'</div>'
     +'</div>';
+}
+function compDetailRow(k,v){
+  return '<tr><td style="padding:6px 0;color:var(--slate);width:112px;vertical-align:top;border-top:1px solid var(--line-2,#eef2f6)">'+esc(k)+'</td>'
+    +'<td style="padding:6px 0;color:var(--ink);font-weight:600;border-top:1px solid var(--line-2,#eef2f6)">'+v+'</td></tr>';
+}
+// How long the ad has been running: start to end, or start to today while it is still live.
+function compRunLength(a){
+  const s=a.ad_delivery_start_time?new Date(a.ad_delivery_start_time):null;
+  if(!s||isNaN(s)) return '—';
+  const e=a.ad_delivery_stop_time?new Date(a.ad_delivery_stop_time):new Date();
+  const days=Math.max(0,Math.round((e-s)/86400000));
+  const months=Math.floor(days/30), rem=days%30;
+  const txt=days<1?'less than a day':(days===1?'1 day':(months?(months+' month'+(months===1?'':'s')+(rem?' '+rem+' day'+(rem===1?'':'s'):'')):days+' days'));
+  return esc(txt)+(a.ad_delivery_stop_time?'':' <span style="font-weight:400;color:var(--slate)">and counting</span>');
 }
 async function compRenderDetailMedia(){
   const a=window._compDetailAd; if(!a)return;
@@ -9298,12 +10079,36 @@ async function compRenderDetailMedia(){
   const media=Array.isArray(a.media_items)&&a.media_items.length?a.media_items:(compFirstMedia(a)?[compFirstMedia(a)]:[]);
   const item=media[window._compDetailIdx||0];
   if(!item){ host.innerHTML='<i class="fa-regular fa-image" style="font-size:28px"></i>'; return; }
-  const url=await compSignedUrl(item.s3_path);
+  let url=null;
+  try{ url=await compSignedUrl(item.s3_path); }catch(_e){}
   if(!host.isConnected)return;
-  if(!url){ host.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i>'; return; }
-  host.innerHTML=item.media_type==='video'
-    ?'<video src="'+url+'" controls style="max-width:100%;max-height:100%"></video>'
-    :'<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+  if(!url){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; return; }
+  // In the popup the video is the point, so it loads properly here (preload=auto) - unlike the
+  // grid, where only a small poster is fetched. The poster fills the frame while it buffers, and
+  // a spinner sits over it until enough has arrived to play.
+  let posterUrl=null;
+  if(item.media_type==='video' && item.poster){ try{ posterUrl=await compSignedUrl(item.poster); }catch(_e){} }
+  if(item.media_type!=='video'){
+    host.innerHTML='<img src="'+esc(url)+'" style="max-width:100%;max-height:100%;object-fit:contain">';
+  } else {
+    host.innerHTML='<video src="'+esc(url)+(posterUrl?'':'#t=0.1')+'" controls autoplay muted playsinline preload="auto"'
+      +(posterUrl?(' poster="'+esc(posterUrl)+'"'):'')
+      +' style="max-width:100%;max-height:100%;background:#000"></video>'
+      +'<div id="compVidWait" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+      +'pointer-events:none;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.7)"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    host.style.position='relative';
+    const v=host.querySelector('video');
+    const hideWait=function(){ const s=document.getElementById('compVidWait'); if(s)s.remove(); };
+    if(v){
+      v.addEventListener('loadeddata',hideWait);
+      v.addEventListener('canplay',hideWait);
+      v.addEventListener('error',function(){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Video could not be loaded</div>'; });
+      // some browsers block even a muted autoplay; the controls still work, so just clear the spinner
+      const p=v.play(); if(p&&p.catch) p.catch(hideWait);
+    }
+  }
+  const el=host.querySelector('video,img');
+  if(el) el.onerror=function(){ host.innerHTML='<div style="font-size:12.5px;text-align:center;padding:14px">Media could not be loaded</div>'; };
 }
 window.compDetailNav=function(delta){
   const a=window._compDetailAd; if(!a)return;
