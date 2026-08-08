@@ -760,7 +760,7 @@
      raises an instance nominates its members at that moment. */
   // Sentinel stored in place of an email when a step has no fixed owner.
   const WF_TRIGGER_OWNER_KEY='__TRIGGER_OWNER__';
-  function wfPersonPickerHtml(sel, multi){
+  function wfPersonPickerHtml(sel, multi, allowTrigger){
     const pid='wfpp'+(++WF_PID);
     const chosen=Array.isArray(sel)?sel.filter(Boolean):(sel?[sel]:[]);
     const fromTrigger=chosen.length===1&&chosen[0]===WF_TRIGGER_OWNER_KEY;
@@ -777,7 +777,7 @@
     let listHtml='';
     const avOf=function(nm){ try{ return (typeof avatar==='function')?avatar(nm):('<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'); }catch(e){ return '<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'; } };
     const isOn=function(em){ return chosen.some(function(c){ return eq(c,em); }); };
-    if(multi){
+    if(multi && allowTrigger){
       listHtml+='<div class="ms-dept">Decided per instance</div>'
         +'<div class="ms-opt'+(fromTrigger?' on':'')+'" data-n="trigger event owner starter" data-email="'+WF_TRIGGER_OWNER_KEY+'" data-name="Triggering Event Owner" onclick="wfPersonPick(this)">'
         +'<span class="avatar avatar-sm" style="background:var(--brand)"><i class="fa-solid fa-bolt" style="color:#fff;font-size:10px"></i></span>'
@@ -1069,7 +1069,7 @@
       +'<div class="wf-step-fields">'
         +'<input class="ac-in wf-s-title" placeholder="What happens in this step?" value="'+esc2(step.title||'')+'">'
         +'<div class="wf-step-sub">'
-          +wfPersonPickerHtml(step.owner_from_trigger?[WF_TRIGGER_OWNER_KEY]:(step.owner_emails&&step.owner_emails.length?step.owner_emails:step.owner_email), true)
+          +wfPersonPickerHtml(step.owner_from_trigger?[WF_TRIGGER_OWNER_KEY]:(step.owner_emails&&step.owner_emails.length?step.owner_emails:step.owner_email), true, true)
           +'<input class="ac-in wf-s-dur" type="number" min="1" placeholder="Duration" value="'+(step.duration_value!=null?step.duration_value:'')+'">'
           +'<select class="ac-in wf-s-unit">'
             +'<option value="hours"'+(unit==='hours'?' selected':'')+'>Hours</option>'
@@ -1469,7 +1469,7 @@
       return '<a href="'+esc2(u)+'" target="_blank" rel="noopener">'+esc2(label)+' <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px"></i></a>';
     };
     return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
-      +'<th style="width:62px">Step</th><th>Work to be done</th><th>Responsible person</th><th>Link</th><th>Responses</th>'
+      +'<th style="width:62px">Step</th><th>Work to be done</th><th>Responsible person</th><th>Link</th>'
       +(canManage?'<th style="width:92px">Edit</th>':'')
     +'</tr></thead><tbody>'
     +forms.map(function(f,i){
@@ -1478,7 +1478,6 @@
         +'<td><b>'+esc2(f.name)+'</b>'+(f.notes?('<div style="font-size:11.5px;color:var(--slate);white-space:normal;line-height:1.45">'+esc2(f.notes)+'</div>'):'')+'</td>'
         +'<td style="white-space:normal">'+(f.who_fills?esc2(f.who_fills):'<span style="color:var(--slate)">—</span>')+'</td>'
         +'<td>'+link(f.link,'Open')+'</td>'
-        +'<td>'+link(f.response_sheet_url,'Sheet')+'</td>'
         +(canManage?('<td style="white-space:nowrap">'
           +'<button class="ac-btn ic" title="Edit" onclick="wfFormEdit('+f.id+')"><i class="fa-solid fa-pen"></i></button> '
           +'<button class="ac-btn ic danger" title="Remove" onclick="wfFormDelete('+f.id+')"><i class="fa-solid fa-trash"></i></button></td>'):'')
@@ -1920,11 +1919,11 @@
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does these steps? '+tip('These steps have no fixed owner. Name one or more people for each — they all receive it, and the first to accept it keeps it.')+'</label>'
         +'<div id="wfEvtMembers">'+openSteps.map(function(st){
-            return '<div class="wf-evt-row" data-seq="'+st.seq+'">'
-              +'<div class="ac-in wf-evt-labelro" style="flex:1;min-width:0;background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden">'
+            return '<div class="wf-evt-row wf-mem-row" data-seq="'+st.seq+'">'
+              +'<div class="ac-in wf-evt-labelro wf-mem-lbl" style="background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden">'
                 +'<i class="fa-solid fa-user-plus" style="font-size:10px;color:var(--slate);flex:none"></i>'
                 +'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Step '+st.seq+' · '+esc2(st.title||'')+'</span></div>'
-              +wfPersonPickerHtml([], true)
+              +wfPersonPickerHtml([], true, false)
             +'</div>';
           }).join('')+'</div>'
       : '';
@@ -1932,10 +1931,10 @@
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
         +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
         +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
+        +membersHtml
         +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +'<div id="wfEvtDetails">'+rowsHtml+'</div>'
         +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>')
-        +membersHtml
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','md');
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
@@ -2328,6 +2327,17 @@
     .wf-evt-row select.wf-evt-value option{font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);padding:6px 8px}
     /* File picker: the browser's raw "Choose File" control replaced by a proper dashed drop box
        with the real input laid invisibly over it, so it still works with one click. */
+    /* The member picker was squeezed into the narrow value column; here the label takes a fixed
+       share and the picker gets the rest, and the panel overlays instead of pushing the form. */
+    .wf-mem-row{gap:8px}
+    .wf-mem-row .wf-mem-lbl{flex:0 0 44%;min-width:0}
+    .wf-mem-row .wf-pp{flex:1 1 auto;min-width:0}
+    .wf-mem-row .wf-pp-btn{width:100%}
+    .wf-mem-row .wf-pp-panel{min-width:270px}
+    @media(max-width:560px){
+      .wf-mem-row{flex-wrap:wrap}
+      .wf-mem-row .wf-mem-lbl,.wf-mem-row .wf-pp{flex:1 1 100%}
+    }
     .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
     .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
       height:40px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
