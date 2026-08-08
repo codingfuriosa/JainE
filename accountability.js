@@ -1170,15 +1170,61 @@
      The questions asked when somebody starts an instance are DEFINED here, in the workflow, not
      invented on the first run. Once set they are fixed: the New <Var> form only fills in values -
      the labels cannot be renamed, added or removed from there. */
-  const WF_FIELD_TYPES=[['text','Text'],['number','Number'],['date','Date'],['people','People'],['attachment','Attachment']];
+  // [value, label, icon] — a native <select> cannot carry icons, so the type is chosen from a real
+  // menu built below; the hidden .wf-t-type input keeps the value where wfTmplCollect expects it.
+  const WF_FIELD_TYPES=[
+    ['text','Text','fa-font'],
+    ['number','Number','fa-hashtag'],
+    ['date','Date','fa-calendar-day'],
+    ['people','People','fa-user-group'],
+    ['attachment','Attachment','fa-paperclip']
+  ];
+  function wfTypeDef(v){ return WF_FIELD_TYPES.filter(function(t){return t[0]===v;})[0]||WF_FIELD_TYPES[0]; }
+  function wfTypeMenuHtml(cur){
+    const d=wfTypeDef(cur||'text');
+    return '<div class="wf-tmenu">'
+      +'<input type="hidden" class="wf-t-type" value="'+esc2(d[0])+'">'
+      +'<button type="button" class="ac-in wf-tmenu-btn" onclick="wfTypeToggle(this)">'
+        +'<i class="fa-solid '+d[2]+' wf-tmenu-ic"></i><span class="wf-tmenu-nm">'+esc2(d[1])+'</span>'
+        +'<i class="fa-solid fa-chevron-down wf-tmenu-caret"></i>'
+      +'</button>'
+      +'<div class="wf-tmenu-panel">'
+        +WF_FIELD_TYPES.map(function(t){
+          return '<button type="button" class="wf-tmenu-opt'+(t[0]===d[0]?' on':'')+'" data-v="'+t[0]+'" data-l="'+esc2(t[1])+'" data-i="'+t[2]+'" onclick="wfTypePick(this)">'
+            +'<i class="fa-solid '+t[2]+'"></i><span>'+esc2(t[1])+'</span>'
+            +'<i class="fa-solid fa-check wf-tmenu-tick"></i></button>';
+        }).join('')
+      +'</div>'
+    +'</div>';
+  }
+  window.wfTypeToggle=function(btn){
+    const m=btn.closest('.wf-tmenu'); if(!m)return;
+    const open=m.classList.contains('open');
+    document.querySelectorAll('.wf-tmenu.open').forEach(function(x){x.classList.remove('open');});
+    if(!open){ m.classList.add('open');
+      if(!window._wfTypeWired){ window._wfTypeWired=true;
+        document.addEventListener('click',function(e){
+          if(!e.target||!e.target.closest||!e.target.closest('.wf-tmenu'))
+            document.querySelectorAll('.wf-tmenu.open').forEach(function(x){x.classList.remove('open');});
+        });
+      }
+    }
+  };
+  window.wfTypePick=function(opt){
+    const m=opt.closest('.wf-tmenu'); if(!m)return;
+    const v=opt.getAttribute('data-v'), l=opt.getAttribute('data-l'), ic=opt.getAttribute('data-i');
+    const hid=m.querySelector('.wf-t-type'); if(hid)hid.value=v;
+    const btn=m.querySelector('.wf-tmenu-btn');
+    if(btn)btn.innerHTML='<i class="fa-solid '+ic+' wf-tmenu-ic"></i><span class="wf-tmenu-nm">'+esc2(l)+'</span><i class="fa-solid fa-chevron-down wf-tmenu-caret"></i>';
+    m.querySelectorAll('.wf-tmenu-opt').forEach(function(o){ o.classList.toggle('on', o===opt); });
+    m.classList.remove('open');
+  };
   function wfTmplRowHtml(f){
     f=f||{};
     const t=f.type||'text';
     return '<div class="wf-tmpl-row">'
       +'<input class="ac-in wf-t-label" placeholder="Field name (e.g. Bill No.)" value="'+esc2(f.label||'')+'">'
-      +'<select class="ac-in wf-t-type">'
-        +WF_FIELD_TYPES.map(function(o){ return '<option value="'+o[0]+'"'+(t===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')
-      +'</select>'
+      +wfTypeMenuHtml(t)
       +'<label class="wf-t-opt"><input type="checkbox" class="wf-t-optional"'+(f.optional?' checked':'')+'> Optional</label>'
       +'<button class="ac-btn ic danger" title="Remove field" onclick="wfTmplRemove(this)"><i class="fa-solid fa-xmark"></i></button>'
     +'</div>';
@@ -2398,14 +2444,34 @@
     .wf-tmpl-row:first-child{border-top:0}
     .wf-tmpl-row:hover{background:var(--bg-subtle,#fafbfc)}
     .wf-tmpl-row .wf-t-label{flex:1 1 auto;min-width:0}
-    .wf-tmpl-row .wf-t-type{flex:0 0 150px}
+    .wf-tmpl-row .wf-tmenu{flex:0 0 158px;position:relative}
+    .wf-tmenu-btn{width:100%;display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;font-weight:500}
+    .wf-tmenu-btn:hover{border-color:var(--slate)}
+    .wf-tmenu-ic{color:var(--brand);font-size:12px;width:14px;text-align:center;flex:none}
+    .wf-tmenu-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-tmenu-caret{font-size:9px;color:var(--slate);transition:transform .15s;flex:none}
+    .wf-tmenu.open .wf-tmenu-btn{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,rgba(224,18,28,.12))}
+    .wf-tmenu.open .wf-tmenu-caret{transform:rotate(180deg)}
+    .wf-tmenu-panel{display:none;position:absolute;top:calc(100% + 5px);left:0;right:0;min-width:172px;z-index:90;
+      background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:5px;
+      box-shadow:0 12px 30px rgba(15,23,42,.17)}
+    .wf-tmenu.open .wf-tmenu-panel{display:block}
+    .wf-tmenu-opt{width:100%;display:flex;align-items:center;gap:9px;padding:7px 9px;border:0;border-radius:7px;
+      background:transparent;color:var(--ink);font-size:13px;font-family:inherit;cursor:pointer;text-align:left}
+    .wf-tmenu-opt:hover{background:var(--bg-subtle,#f8fafc)}
+    .wf-tmenu-opt > i:first-child{width:14px;text-align:center;color:var(--slate);font-size:12px}
+    .wf-tmenu-opt span{flex:1;min-width:0}
+    .wf-tmenu-tick{font-size:11px;color:var(--brand);opacity:0}
+    .wf-tmenu-opt.on{background:var(--brand-a10,rgba(224,18,28,.08));color:var(--brand);font-weight:600}
+    .wf-tmenu-opt.on > i:first-child{color:var(--brand)}
+    .wf-tmenu-opt.on .wf-tmenu-tick{opacity:1}
     .wf-tmpl-row .wf-t-opt{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);white-space:nowrap;cursor:pointer;user-select:none}
     .wf-tmpl-row .wf-t-optional{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
     .wf-tmpl-block .wf-addstep-ghost{margin-top:9px}
     @media(max-width:640px){
       .wf-tmpl-row{flex-wrap:wrap;gap:8px}
       .wf-tmpl-row .wf-t-label{flex:1 1 100%}
-      .wf-tmpl-row .wf-t-type{flex:1 1 auto}
+      .wf-tmpl-row .wf-tmenu{flex:1 1 auto}
     }
     .wf-mem-row{gap:8px}
     .wf-mem-row .wf-mem-lbl{flex:0 0 44%;min-width:0}
