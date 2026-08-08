@@ -1679,8 +1679,17 @@ function misRowIso(r){
 }
 function misInRange(r){
   const w=misRangeDates(); if(!w) return true;
-  const iso=misRowIso(r); if(!iso) return false;
+  const iso=misRowIso(r);
+  // A case with no date is BETWEEN actions — the last one was executed and the next has not been
+  // set yet. It has to stay on screen, otherwise executing an action makes the case disappear and
+  // there is no way back to it to add the next one. Only the causelist wants dated cases only.
+  if(!iso) return true;
   return iso>=w.from && iso<=w.to;
+}
+// The causelist is a list of hearings, so it does want a real date on every row.
+function misInRangeDated(r){
+  const iso=misRowIso(r); if(!iso) return false;
+  return misInRange(r);
 }
 
 const MIS_FIELDS=[
@@ -1813,23 +1822,25 @@ function misFormHtml(vals,mode){
   }
   const done=new Set();
   if(isEdit){
+    // The three things that actually change on an open case. The Action Date and Previous Date are
+    // not here at all — they are moved by executing an action, not by hand.
     html+='<div class="mis-prio-head"><i class="fa-solid fa-bolt"></i> Usually updated</div>';
+    put('priority',{dflt:misCommonPriority()});       done.add('priority');
     put('status');                                    done.add('status');
-    put('next_date',{hint:'dd/mm/yyyy — changing this moves the old date into Previous Date'});
-    put('previous_date',{readonly:true,hint:'set automatically from the previous Next Date'});
-    done.add('next_date'); done.add('previous_date');
     flush();
+    put('remarks');                                   done.add('remarks');
     html+='<div class="mis-prio-head" style="margin-top:6px"><i class="fa-solid fa-list"></i> Case details</div>';
   }
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
-    if(!isEdit && f.k==='previous_date') return;      // never on a new case
+    /* Dates are never typed into these forms. A new case has no action yet, so no Action Date and
+       therefore no Previous Date either; on an existing case both are moved by the action panel. */
+    if(f.k==='next_date'||f.k==='previous_date') return;
     // The action fields live in their own panel (click a case), not in the case record forms.
     if(f.k==='action_needed'||f.k==='action_date'||f.k==='action_executed_date') return;
     // No (i) tooltips on the Add Case form — they only appear when editing.
     if(f.k==='priority')     return put(f.k,{dflt:misCommonPriority()});
     if(f.k==='pc_in_charge') return put(f.k,{dflt:isEdit?'':MIS_PC_DEFAULT,hint:isEdit?'left blank saves as NA':''});
-    if(f.k==='next_date')    return put(f.k,{hint:isEdit?'dd/mm/yyyy':''});
     put(f.k);
   });
   flush();
@@ -2230,9 +2241,9 @@ async function legalActions(){
   <div class="act-bar">
     <div class="act-search"><i class="fa-solid fa-magnifying-glass"></i><input id="actQ" placeholder="Search action, case or date…" oninput="legalActionsFilter()"></div>
     <select class="act-sel" id="actState" onchange="legalActionsFilter()">
+      <option value="all">All actions (${rows.length})</option>
       <option value="open">Still open (${open})</option>
-      <option value="done">Executed</option>
-      <option value="all">All (${rows.length})</option>
+      <option value="done">Executed (${rows.length-open})</option>
     </select>
   </div>
   <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
@@ -2247,7 +2258,7 @@ async function legalActions(){
 window.legalActionsFilter=function(){
   const rows=window._misActionRows||[];
   const q=(($('actQ')||{}).value||'').trim().toLowerCase();
-  const st=(($('actState')||{}).value)||'open';
+  const st=(($('actState')||{}).value)||'all';
   const list=rows.filter(r=>{
     if(st==='open'&&r.executed_date_iso) return false;
     if(st==='done'&&!r.executed_date_iso) return false;
@@ -2420,7 +2431,7 @@ window.misExportCauselist=function(){
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
     return;
   }
-  const rows=(window._misRows||[]).filter(misInRange)
+  const rows=(window._misRows||[]).filter(misInRangeDated)
     .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
 
@@ -2776,7 +2787,6 @@ window.misActionPanel=function(id){
       +'</div>'
       +'<label>Remarks'+misTip('Added to whatever is already there, separated by a comma — nothing is overwritten.')
         +'<textarea id="misA_remarks" class="sel" rows="2" placeholder="Anything to add"></textarea></label>'
-      +(r.remarks?('<div style="font-size:12px;color:var(--slate);margin:-6px 0 12px;line-height:1.5"><b>So far:</b> '+esc(r.remarks)+'</div>'):'')
     +'</div>'
     +'<div class="modal-foot">'
       +'<button class="btn" onclick="closeModal()">Cancel</button>'
@@ -2860,10 +2870,10 @@ window.misActionSave=async function(id){
       if(sameAsOpen) await sb.from('mis_actions').update(row).eq('id',openId);
       else await sb.from('mis_actions').insert(row);
     }
-  }catch(_e){}
+  }catch(e){ toast('The case saved, but the Actions log could not be updated: '+((e&&e.message)||e),'err'); }
 
   closeModal();
-  toast(eIso?'Action executed — Next Date cleared':'Action saved','ok');
+  toast(eIso?'Action executed — the case stays open for its next action':'Action saved','ok');
   legalMIS();
 };
 
