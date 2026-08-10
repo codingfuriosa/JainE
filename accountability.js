@@ -83,6 +83,9 @@
     @media(hover:none){ .grip{font-size:16px;padding:13px 10px} }
     .ac-row .ti{flex:1;min-width:0}
     .ac-row .ti .t{font-weight:700;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* Awaiting Approval + Completed This Week rows: keep the title on ONE line with an ellipsis (no
+       wrapping to two lines). The full title is shown on hover via the row's title attribute. */
+    .ac-row.ac-row-full .ti .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .ac-row .ti .m{font-size:11.5px;color:var(--slate);display:flex;gap:10px;align-items:center;margin-top:3px;flex-wrap:wrap}
     .ac-avs{display:flex;flex:none}
     .ac-av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;margin-left:-6px;border:2px solid var(--bg-card)}
@@ -728,7 +731,14 @@
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    return `<div class="ac-row" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t">${wfIcon}${esc2(t.title)}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
+    // Workflow rows show the full concatenated title (step + filled-in details), same as taskRow, and
+    // in Completed This Week (showDoneDate) the title wraps in full instead of clipping.
+    const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
+    const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
+    const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
+    const wfCombined=[wfStepNm,wfDet].filter(Boolean).join(' - ');
+    const titleHtml=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
@@ -872,7 +882,7 @@
     return t.some(function(f){ return f && eq((f.label||''),'Wheredoc Id'); });
   }
   // "D.H" duration text per the user's requested format (e.g. "1.2" = 1 day 2 hours).
-  function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalH=Math.floor(ms/3600000); const d=Math.floor(totalH/24), h=totalH%24; return d+'d '+h+'h'; }
+  function wfDaysHoursText(ms){ if(ms==null||isNaN(ms)||ms<0)return ''; const totalM=Math.floor(ms/60000); const d=Math.floor(totalM/1440), h=Math.floor((totalM%1440)/60), m=totalM%60; const parts=[]; if(d)parts.push(d+'d'); if(h)parts.push(h+'h'); if(m||!parts.length)parts.push(m+'m'); return parts.join(' '); }
   // 2+ people -> the whole group becomes hoverable (desktop) / tappable (mobile), showing the
   // full name list via the existing .wf-poptip/.wf-tip-txt tooltip layer (same one the "i" hints
   // and status pills already use) instead of relying on each tiny circle's own native title,
@@ -916,12 +926,21 @@
 
   async function wfRenderList(){
     const b=$('acBody'); if(!b)return;
-    let flows=[], stepCounts={}, ownersByFlow={};
+    let flows=[], stepCounts={}, ownersByFlow={}, myFlowIds={};
     try{ const {data}=await ACC().from('flows').select('*').order('id',{ascending:false}); flows=data||[]; }
     catch(e){ toast('Could not load workflows: '+((e&&e.message)||e),'err'); }
     try{ const {data}=await ACC().from('flow_steps').select('flow_id,owner_email'); (data||[]).forEach(function(s){ stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1; if(s.owner_email){ (ownersByFlow[s.flow_id]=ownersByFlow[s.flow_id]||[]); if(!ownersByFlow[s.flow_id].some(function(e){return eq(e,s.owner_email);}))ownersByFlow[s.flow_id].push(s.owner_email); } }); }catch(e){}
-    // Member-only visibility: you see a workflow only if you created it or you own a step in it.
-    flows=flows.filter(function(f){ return wfCanSee(f,ownersByFlow); });
+    // Workflows where I'm assigned an instance (a step in one of its cases) — so a person nominated by
+    // the triggering-event owner sees the workflow even without owning a fixed step. The instance list
+    // inside is limited to their own instances by row-level security.
+    try{
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id').ilike('person',me());
+      const caseIds=Array.from(new Set((mine||[]).map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
+      if(caseIds.length){ const {data:cs}=await ACC().from('flow_cases').select('flow_id').in('id',caseIds); (cs||[]).forEach(function(c){ myFlowIds[c.flow_id]=true; }); }
+    }catch(e){}
+    // You see a workflow if you created it / own a step / it's shared with your department, OR you have
+    // an instance of it assigned to you.
+    flows=flows.filter(function(f){ return wfCanSee(f,ownersByFlow) || myFlowIds[f.id]; });
     const rows=flows.map(function(f){
       const n=stepCounts[f.id]||0;
       const owners=(ownersByFlow[f.id]||[]).slice();
@@ -998,8 +1017,13 @@
   }
   window.wfPopToggle=function(el){ var was=el.classList.contains('show'); document.querySelectorAll('.wf-poptip.show').forEach(function(x){ if(x!==el) x.classList.remove('show'); }); el.classList.toggle('show', !was); if(was){ window._wfTipAnchor=null; wfTipHide(); } else { window._wfTipAnchor=el; wfTipShow(el); } };
   // Workflow instance detail formatters (used for task Title / Description).
-  function wfDetailsInline(details){ return (details||[]).map(function(d){ return ((d&&d.label)?String(d.label)+': ':'')+((d&&d.value)||''); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
-  function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(l).trim()&&!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(v); }).filter(Boolean).join('<br>'); }
+  // A field with no value is left out of the concatenated title/description entirely. This covers an
+  // un-uploaded attachment WHATEVER it is named (the saved details only carry label+value, not the
+  // field type) as well as any blank optional field — so there is never a dangling "Label:" with
+  // nothing after it. An uploaded file shows as "file attached" rather than its raw storage path.
+  function wfDetailDisp(v){ v=(v==null?'':String(v)); return v.indexOf('s3:')===0?'file attached':v; }
+  function wfDetailsInline(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?String(l)+': ':'')+wfDetailDisp(v); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
+  function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(wfDetailDisp(v)); }).filter(Boolean).join('<br>'); }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
   // Curated instance summary — Wheredoc Id/Bill No./Bill Date/Company/Amount (+ the instance No.),
   // explicitly WITHOUT User. Falls back to null (caller shows
@@ -1107,7 +1131,7 @@
     v.innerHTML='<div class="wf-page">'
       +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+(id?'Edit workflow':'New workflow')+'</h1></div>'
       +'<div class="wf-card">'
-      +'<div class="wf-form" data-id="'+(id||'')+'">'
+      +'<div class="wf-form" data-id="'+(id||'')+'" data-trigger-method="'+esc2(flow.trigger_method||'')+'">'
         // Section 1 — what the workflow is. Paired fields sit side by side on a wide screen.
         +'<div class="wf-fsec">'
           +'<div class="wf-fsec-h"><i class="fa-solid fa-circle-info"></i> Basics</div>'
@@ -1320,7 +1344,10 @@
     const form=document.querySelector('.wf-form');
     const editId=(form&&form.getAttribute('data-id'))?Number(form.getAttribute('data-id')):null;
     try{
-      const trigMethod=String(flow&&flow.trigger_method||'').trim();   // kept, no longer edited here
+      // trigger_method is no longer edited on this form; it rides along hidden on the form element
+      // so an edit preserves whatever was already stored instead of wiping it. (Previously this
+      // referenced an undefined `flow`, which threw "flow is not defined" and blocked every save.)
+      const trigMethod=String((form&&form.getAttribute('data-trigger-method'))||'').trim();
       const {data:flowId,error}=await ACC().rpc('wf_save_flow',{p_id:editId,p_name:name,p_desc:desc||null,p_trigger:trigger,p_steps:steps,p_trigger_owner:owner||null,p_trigger_method:trigMethod||null});
       if(error)throw error;
       // The fields are stored separately, and only when some have been defined - saving an empty
@@ -1328,10 +1355,11 @@
       const tmpl=wfTmplCollect();
       if(tmpl.length){ try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:tmpl}); }catch(_e){} }
       toast('Workflow saved','ok');
-      // work out the word for one item of this workflow ("Invoice", "Leave Request", ...) before
-      // opening the detail page, so the buttons already read correctly
-      try{ await wfNounLearn(flowId,name,trigger); }catch(_e){}
+      // Redirect to the new workflow immediately. The noun lookup ("Invoice", "Leave Request", …)
+      // used to be awaited here, which held the form open while it ran; now it happens in the
+      // background and the detail page picks it up once it resolves.
       navTo('tasks/workflow/'+flowId);
+      Promise.resolve().then(function(){ return wfNounLearn(flowId,name,trigger); }).catch(function(){});
     }catch(e){ toast('Could not save workflow: '+((e&&e.message)||e),'err'); }
   };
 
@@ -1344,11 +1372,14 @@
     return steps.map(function(s,i){
       /* A shared step shows every person it is offered to, so the card matches what the Tracker's
          WHO row says. Once somebody claims it, s.person is set and only they are shown. */
-      const shared=(!s.person && Array.isArray(s.owner_emails))?s.owner_emails.filter(Boolean):[];
+      // An instance step keeps its possible people in `candidates`; the flow definition uses
+      // `owner_emails`. Read candidates first so a shared (2+ people) step shows EVERYONE with their
+      // names, instead of "Unassigned" or just one circle.
+      const shared=(!s.person)?((Array.isArray(s.candidates)&&s.candidates.length?s.candidates:(Array.isArray(s.owner_emails)?s.owner_emails:[])).filter(Boolean)):[];
       const person=s.person||s.owner_email;
       const av=function(e){ return '<span class="wf-av" style="background:'+colorFor(e)+'" title="'+esc2(wfNm(e))+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; };
       let who;
-      if(shared.length>1){
+      if(shared.length>=1){
         who='<span class="wf-who">'+shared.map(av).join('')
           +'<span class="wf-who-nm">'+esc2(shared.map(wfNm).join(' / '))+'</span></span>';
       } else if(person){
@@ -1426,7 +1457,7 @@
   function wfStepWhoText(s){
     // A step shared between people names them all — reading owner_email alone showed only the
     // first, so "Shuchandra Das / Shafat Mehar" appeared as just Shuchandra Das.
-    const many=Array.isArray(s&&s.owner_emails)?s.owner_emails.filter(Boolean):[];
+    const many=((Array.isArray(s&&s.candidates)&&s.candidates.length)?s.candidates:(Array.isArray(s&&s.owner_emails)?s.owner_emails:[])).filter(Boolean);
     if(many.length>1){
       const names=[]; many.forEach(function(e){ const n=wfNm(e); if(n&&names.indexOf(n)===-1) names.push(n); });
       if(names.length>1) return names.join(' / ');
@@ -1902,6 +1933,8 @@
   // entry can now optionally carry a `type` ('text'|'date'|'number'|'select'|'attachment') and,
   // for 'select', an `options:[{label,group?}]` list — absent `type` still means 'text', so every
   // pre-existing workflow's plain-text fields render exactly as before.
+  // Keeps a Number field to digits and a single decimal point (no letters, sign or exponent).
+  window.wfNumOnly=function(el){ if(!el)return; el.value=String(el.value).replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1'); };
   function wfEvtRowHtml(field,value,locked){
     const f=(typeof field==='string')?{label:field}:(field||{});
     const label=f.label||'', type=f.type||'text';
@@ -1933,10 +1966,17 @@
         +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
       +'</div>';
     } else {
-      const inputType=type==='date'?'date':(type==='number'?'number':'text');
       const placeholder=eq(label,'Wheredoc Id')?'The Wheredoc reference this bill was filed under'
         :(f.optional?'Optional':'Detail');
-      valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
+      if(type==='number'){
+        // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
+        valueHtml='<input class="ac-in wf-evt-value" type="text" inputmode="decimal" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" oninput="wfNumOnly(this)">';
+      } else {
+        // Text and Date. Text accepts letters and numbers (a plain text box already does);
+        // Date uses the native date control.
+        const inputType=type==='date'?'date':'text';
+        valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
+      }
     }
     // Locked templates cannot be reshaped, except that the optional Attachment may be removed.
     const removable=!locked || (type==='attachment');
@@ -4802,12 +4842,24 @@
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
     const wfReceived=wfInfo&&!!wfInfo.received_at;
     const wfNeedsReceive=wfInfo&&!wfReceived;
+    // Workflow steps use explicit Receive / Reject / Forward / Done buttons (below), never a checkbox.
     const chk=opt.checkable?(t.flow_case_step_id!=null
-      ? (wfNeedsReceive ? ''
-         : `<input type="checkbox" class="ac-rowchk" title="Forward to the next person" onclick="event.stopPropagation()" onchange="wfRowForward(${t.flow_case_step_id},this)">`)
+      ? ''
       : `<input type="checkbox" class="ac-rowchk" title="${opt.owner?'Mark complete':'Mark done — send for approval'}" onclick="event.stopPropagation()" onchange="accRowCheck(${t.id},${!!opt.owner},this)">`):'';
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
-    const wfRR=(opt.checkable&&wfNeedsReceive)?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`}</div>`:'';
+    const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
+    let wfRR='';
+    if(opt.checkable&&wfInfo){
+      if(wfNeedsReceive){
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`}</div>`;
+      } else if(wfReceived){
+        // Received: a Forward button (or Done on the last step) in the exterior list — the same
+        // actions the detail page offers, so a step can be moved on without opening it.
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfIsLastStep
+          ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
+          : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Forward to the next person" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
+      }
+    }
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
     const grip=opt.noDrag?'<span class="grip-sp"></span>':'<i class="fa-solid fa-grip-vertical grip" onclick="event.stopPropagation()"></i>';
     const letterHtml='';
@@ -4831,7 +4883,7 @@
     const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
     const wfCombined=[wfStepNm,wfDet].filter(Boolean).join(' - ');
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
-    return `<div class="ac-row" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
@@ -5035,11 +5087,23 @@
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); }
   };
   window.accFileDelete=function(tid,fid,path,fname){
-    accConfirm('Delete this attachment?', async function(){
+    accConfirm('Delete this attachment? It is removed everywhere it appears on this task.', async function(){
       try{
-        const {data:others}=await ACC().from('ptask_files').select('id').eq('storage_path',path).neq('id',fid);
-        if(!others||!others.length) await s3Delete(path);
+        // Remove the file everywhere it is referenced on this task: the Attachments list row AND any
+        // comment that carried it (a comment that was ONLY the file is removed; a comment with text
+        // keeps its text and just loses the attachment). This prevents an orphaned comment chip
+        // pointing at a file that no longer exists.
         await ACC().from('ptask_files').delete().eq('id',fid);
+        const {data:cmts}=await ACC().from('ptask_comments').select('id,body').eq('task_id',tid).eq('attach_path',path);
+        for(const c of (cmts||[])){
+          if(c.body && String(c.body).trim()) await ACC().from('ptask_comments').update({attach_path:null,attach_name:null}).eq('id',c.id);
+          else await ACC().from('ptask_comments').delete().eq('id',c.id);
+        }
+        // Delete the underlying S3 object only once NOTHING else points at it — delegated copies share
+        // the same storage_path, and a comment could too.
+        const {data:othersF}=await ACC().from('ptask_files').select('id').eq('storage_path',path).limit(1);
+        const {data:othersC}=await ACC().from('ptask_comments').select('id').eq('attach_path',path).limit(1);
+        if((!othersF||!othersF.length)&&(!othersC||!othersC.length)) await s3Delete(path);
         await ACC().from('ptask_activity').insert({task_id:tid,action:'deleted attachment',detail:'Deleted '+(fname||'an attachment')});
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');
@@ -5184,6 +5248,9 @@
   window.accEditProject=async function(tid){
     const [tR,pR]=await Promise.all([ACC().from('ptasks').select('project_id').eq('id',tid).single(),ACC().from('projects').select('id,name,department,created_by,owner').order('name')]);
     const t=tR.data;
+    // The task can vanish between the list loading and this click (deleted elsewhere / another tab).
+    // Bail out with a clear message instead of throwing on t.project_id.
+    if(!t){ toast('This task no longer exists — refresh the list.','err'); return; }
     const projects=(pR.data||[]).filter(tagVisible); window._projMap={}; projects.forEach(x=>{window._projMap[x.id]=x.name;});
     openModal(`<div class="modal-head"><h3>Tag</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)">
       ${projListWidget(projects,t.project_id)}

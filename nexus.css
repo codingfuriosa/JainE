@@ -231,10 +231,16 @@ tbody tr.clk:hover{background:#f1f5fb}
 .sn-tree-node{min-width:0}
 .sn-tree-node .sn-item{white-space:nowrap}
 .sn-tree-node .sn-item span:first-child{overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;min-width:0}
-.sn-caret{font-size:10px;color:#94a3b8;width:12px;text-align:center;flex-shrink:0;cursor:pointer;padding:4px;margin:-4px;border-radius:5px}
+/* A proper square hit-target for the expand/collapse chevron, clearly separated from the folder
+   name (the parent span's gap) so a near-miss expands the folder instead of selecting it and
+   triggering a load. */
+.sn-caret{font-size:11px;color:#94a3b8;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;border-radius:6px;margin-right:2px}
 .sn-caret:hover{background:#e7ecf5;color:#475569}
-.sn-caret-spacer{font-size:11px;color:#94a3b8;width:12px;text-align:center;flex-shrink:0}
+.sn-caret-spacer{font-size:11px;color:#94a3b8;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .sn-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* Long text in Legal (Actions, MIS cells, panels) is trimmed to two lines with an ellipsis; the
+   full text is available on hover via the element's title attribute. */
+.lg-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;max-width:100%}
 .sn-add{font-size:10.5px;color:#94a3b8;width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
 .sn-add:hover{background:var(--brand-50);color:var(--brand)}
 .sn-children{overflow:hidden}

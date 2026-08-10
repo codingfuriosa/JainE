@@ -1573,10 +1573,18 @@ async function legalDocsView(seg){
   legalNav();
   docRenderTable($('docTableHost'),'Legal');
 }
-async function legalNav(){
-  const all=await docFetch({dept:'Legal'});
+async function legalNav(reuse){
+  // Counts + folder list used to be re-fetched (all ~hundreds of Legal docs) on EVERY expand/collapse
+  // — that was the slow part. Cache them and reuse on toggle; a full navigation to the page (or an
+  // upload/move/delete, which re-routes) refetches fresh.
+  if(!(reuse && window._legalNavData)){
+    const allF=await docFetch({dept:'Legal'});
+    const listF=await legalFolderTree();
+    window._legalNavData={all:allF,list:listF};
+  }
+  const all=window._legalNavData.all;
   const counts={};all.forEach(d=>{if(d.folder_id)counts[d.folder_id]=(counts[d.folder_id]||0)+1;});
-  const list=await legalFolderTree();
+  const list=window._legalNavData.list;
   const {roots,byId}=buildFolderTree(list);
   // Totals = own direct document count + every descendant's count, recomputed on
   // every render so parent folders ("Projects", "Dream Apartment", etc.) show the
@@ -1606,7 +1614,7 @@ async function legalNav(){
     `<div class="sn-tree">${roots.map(r=>renderNode(r,0)).join('')}</div>`+
     `<div class="sn-item" style="color:var(--brand)" onclick="docNewFolder('Legal',null,null)"><span><i class="fa-solid fa-plus"></i> Add main folder</span></div>`;
 }
-window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpanded.delete(id);else DOC.legalExpanded.add(id);legalNav();};
+window.legalToggleExpand=function(id){if(DOC.legalExpanded.has(id))DOC.legalExpanded.delete(id);else DOC.legalExpanded.add(id);legalNav(true);};
 window.legalSelectCat=function(id){location.hash='#/legal/cat/'+id;};
 
 /* ============================ LEGAL MIS ============================ */
@@ -1867,8 +1875,8 @@ function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
   if(f.k==='case_type')return '<td style="font-weight:600;white-space:nowrap">'+esc(v||'—')+'</td>';
-  if(MIS_CLAMP.has(f.k))return '<td><div class="mis-cell-clamp">'+esc(v||'—')+'</div></td>';
-  if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)">'+esc(misTrunc(v,26)||'—')+'</td>';
+  if(MIS_CLAMP.has(f.k))return '<td><div class="mis-cell-clamp" title="'+esc(v||'')+'">'+esc(v||'—')+'</div></td>';
+  if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)" title="'+esc(v||'')+'">'+esc(misTrunc(v,26)||'—')+'</td>';
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
 }
 // "Pinned" rows (a parsed, non-past next_date_iso — i.e. currently showing on the Calendar) get a
@@ -1878,13 +1886,14 @@ function misCellHtml(f,r){
 // the row is excluded from the Edit/Delete selection count; a normally-checked row still counts as
 // one selected row same as always.
 function misRowHtml(r,isPinned){
-  const handled=isPinned&&r.next_date_recorded_at;
-  const cbAttrs=handled?'checked disabled':'';
-  const cbCls='mis-cb mis-row-cb'+(handled?' mis-handled':'');
-  // Reuses the app's existing .drag-handle look (accountability task/checklist rows) instead of a
-  // one-off style, so spacing/size/touch-target match what's already established elsewhere.
-  const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this Next Date handled"></i>`:'';
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
+  // Sliding the 6-dot handle left marks the whole CASE complete. The handle is shown ONLY on pinned
+  // rows (a case with an upcoming Action Date). Completing drops the case from the Calendar pins, but
+  // it STAYS on the Scoreboard with its accumulated action scores.
+  const completed=!!r.completed_at;
+  const cbAttrs=completed?'checked disabled':'';
+  const cbCls='mis-cb mis-row-cb'+(completed?' mis-handled':'');
+  const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this case complete"></i>`:'';
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
@@ -1921,27 +1930,20 @@ function misWireSwipe(){
 window.misSwipeToggle=async function(id){
   const row=(window._misRows||[]).find(r=>r.id===id);
   if(!row)return;
-  const nowHandled=!row.next_date_recorded_at;
-  // A case with an action still open is not finished, whatever the slide says. Executing the
-  // action (click the case) is what clears the way.
-  if(nowHandled && String(row.action_needed||'').trim()){
+  const nowCompleted=!row.completed_at;
+  // A case with an action still open is not finished. Execute (record its Execution Date) or clear
+  // that action first — then the case can be completed.
+  if(nowCompleted && String(row.action_needed||'').trim()){
     toast('This case still has an action open — "'+String(row.action_needed).slice(0,44)
       +'". Record its Action Execution Date first, then complete the case.','warn');
     return;
   }
-  const {error}=await sb.from('mis_cases').update({next_date_recorded_at:nowHandled?todayStr():null}).eq('id',id);
+  const {error}=await sb.from('mis_cases').update({completed_at:nowCompleted?todayStr():null}).eq('id',id);
   if(error){toast('Could not update: '+error.message,'err');return;}
-  row.next_date_recorded_at=nowHandled?todayStr():null;
-  const cb=document.querySelector('#misTbody tr[data-id="'+id+'"] .mis-row-cb');
-  if(cb){
-    cb.checked=nowHandled; cb.disabled=nowHandled; cb.classList.toggle('mis-handled',nowHandled);
-    // Going grey always drops it from the bulk-selection set — "handled" and "selected" are
-    // mutually exclusive states for this checkbox.
-    if(nowHandled&&window._misSel.has(id)){
-      window._misSel.delete(id); const tr=cb.closest('tr'); if(tr)tr.classList.remove('mis-selected'); misUpdateToolbar();
-    }
-  }
-  toast(nowHandled?'Marked handled — recorded today':'Unmarked','ok');
+  row.completed_at=nowCompleted?todayStr():null;
+  toast(nowCompleted?'Case completed — off the Calendar and Scoreboard':'Case reopened','ok');
+  // Completing changes whether the row is pinned and scored, so re-render the list.
+  legalMIS();
 };
 async function legalMIS(){
   setCrumb(['Legal','MIS']);
@@ -1957,8 +1959,9 @@ async function legalMIS(){
   // "Pinned" = currently showing on the Calendar (next_date_iso parsed and not in the past) — not a
   // stored flag, so it can never drift out of sync with what the Calendar actually shows.
   const todayS=todayStr();
-  const misPinned=rows.filter(r=>r.next_date_iso&&r.next_date_iso>=todayS).sort((a,b)=>String(a.next_date_iso).localeCompare(String(b.next_date_iso)));
-  const misRest=rows.filter(r=>!(r.next_date_iso&&r.next_date_iso>=todayS));
+  const isPinnedRow=r=>r.next_date_iso&&r.next_date_iso>=todayS&&!r.completed_at;
+  const misPinned=rows.filter(isPinnedRow).sort((a,b)=>String(a.next_date_iso).localeCompare(String(b.next_date_iso)));
+  const misRest=rows.filter(r=>!isPinnedRow(r));
   const misOrdered=misPinned.concat(misRest);
   body.innerHTML=`
     <style>
@@ -2271,13 +2274,13 @@ window.legalActionsFilter=function(){
   });
   const tb=$('actBody'); if(!tb)return;
   tb.innerHTML=list.map(r=>'<tr>'
-    +'<td><b>'+esc(r.action_needed||'—')+'</b></td>'
+    +'<td><b class="lg-clamp" title="'+esc(r.action_needed||'')+'">'+esc(r.action_needed||'—')+'</b></td>'
     +'<td style="white-space:nowrap">'+esc(r.action_date||'—')+'</td>'
     +'<td style="white-space:nowrap">'+(r.executed_date
         ?('<span class="mis-ptag mis-ptag--green">'+esc(r.executed_date)+'</span>')
         :'<span class="mis-ptag mis-ptag--amber">Open</span>')+'</td>'
-    +'<td>'+esc(r._case||'—')+'</td>'
-    +'<td style="color:var(--slate)">'+esc(r.remarks||'')+'</td>'
+    +'<td><span class="lg-clamp" title="'+esc(r._case||'')+'">'+esc(r._case||'—')+'</span></td>'
+    +'<td style="color:var(--slate)"><span class="lg-clamp" title="'+esc(r.remarks||'')+'">'+esc(r.remarks||'')+'</span></td>'
   +'</tr>').join('');
   const em=$('actEmpty'); if(em)em.style.display=list.length?'none':'';
 };
@@ -2382,42 +2385,56 @@ function misScoreTag(s){
   if(s===0)return '<span class="mis-ptag mis-ptag--amber">0</span>';
   return '<span class="mis-ptag mis-ptag--red">−1</span>';
 }
+// Each ACTION is scored on how far ahead of its Action Date it was actually executed:
+//   executed 8+ days early -> +1,  1..7 days early -> 0,  on the day / late / not yet executed -> -1/none.
+// A case's score is the SUM of its actions' scores, so a case can carry several. Completing a case
+// (slide-left in MIS) drops it from the Scoreboard entirely.
+function misActionScore(a){
+  if(!a||!a.action_date_iso||!a.executed_date_iso)return null;
+  const gap=Math.round((new Date(String(a.action_date_iso).slice(0,10)+'T00:00:00')-new Date(String(a.executed_date_iso).slice(0,10)+'T00:00:00'))/86400000);
+  if(gap>7)return 1;
+  if(gap>0)return 0;
+  return -1;
+}
 async function legalScoreboard(){
   setCrumb(['Legal','Scoreboard']);
   const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
   const body=$('legalBody');if(!body)return;
   loader(body);
-  let rows=[];
+  let cases=[], actions=[];
   try{
-    const todayS=todayStr();
-    const {data,error}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,next_date_recorded_at').gte('next_date_iso',todayS).order('next_date_iso',{ascending:true});
-    if(error)throw error; rows=data||[];
+    const {data:cd,error:ce}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,completed_at'); if(ce)throw ce; cases=cd||[];
+    const {data:ad}=await sb.from('mis_actions').select('case_id,action_date_iso,executed_date_iso'); actions=ad||[];
   }catch(e){toast((e&&e.message)||'Could not load Scoreboard','err');}
-  // Total only sums cases that actually have a score yet (checkbox ticked) — "Pending" ones
-  // shouldn't silently count as 0 and dilute the total for cases nobody has acted on yet.
-  const scored=rows.map(misScoreOf).filter(s=>s!==null);
-  const scoreTotal=scored.reduce((a,s)=>a+s,0);
+  // Every case with actions is scored (completed cases stay on the Scoreboard, keeping their score);
+  // each case aggregates the scores of its executed actions.
+  const byCase={};
+  cases.forEach(c=>{ byCase[c.id]={c:c,total:0,scored:0,count:0}; });
+  actions.forEach(a=>{ const g=byCase[a.case_id]; if(!g)return; g.count++; const s=misActionScore(a); if(s!==null){ g.total+=s; g.scored++; } });
+  const list=Object.values(byCase).filter(g=>g.count>0).sort((a,b)=>(b.total-a.total)||(b.scored-a.scored));
+  const grand=list.reduce((a,g)=>a+g.total,0);
+  const totalScored=list.reduce((a,g)=>a+g.scored,0);
+  const scoreCell=n=>{const col=n>0?'#16a34a':(n<0?'#dc2626':'#64748b');return `<span style="font-weight:800;color:${col}">${n>0?'+':''}${n}</span>`;};
   body.innerHTML=`<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="background:var(--bg-subtle,#f8fafc)">
-      ${['Case Type','Cause Title / Parties','Case No.','Priority','Next Date','Recorded Date','Score'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:2px solid var(--line)">${esc(l)}</th>`).join('')}
+      ${['Case Type','Cause Title / Parties','Case No.','Priority','Actions','Score'].map(l=>`<th style="padding:10px 12px;text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);border-bottom:2px solid var(--line)">${esc(l)}</th>`).join('')}
     </tr></thead>
     <tbody>
-      ${rows.length?rows.map(r=>{
-        const score=misScoreOf(r);
+      ${list.length?list.map(g=>{
+        const r=g.c;
         return `<tr style="border-bottom:1px solid var(--line-2)">
           <td style="padding:11px 12px;font-weight:600">${esc(r.case_type||'—')}</td>
-          <td style="padding:11px 12px">${esc(r.cause_title||'—')}</td>
+          <td style="padding:11px 12px">${esc(r.cause_title||'—')}${r.completed_at?' <span style="font-size:10px;font-weight:700;color:#16a34a;background:#dcfce7;padding:2px 7px;border-radius:99px;white-space:nowrap">✓ Completed</span>':''}</td>
           <td style="padding:11px 12px;color:var(--slate)">${esc(r.case_no||'—')}</td>
           <td style="padding:11px 12px">${misPriorityTag(r.priority)}</td>
-          <td style="padding:11px 12px;color:var(--slate)">${fmtDate(r.next_date_iso)}</td>
-          <td style="padding:11px 12px;color:var(--slate)">${r.next_date_recorded_at?fmtDate(r.next_date_recorded_at):'—'}</td>
-          <td style="padding:11px 12px">${misScoreTag(score)}</td>
+          <td style="padding:11px 12px;color:var(--slate)">${g.scored} of ${g.count} scored</td>
+          <td style="padding:11px 12px">${scoreCell(g.total)}</td>
         </tr>`;
-      }).join(''):`<tr><td colspan="7"><div class="empty" style="padding:30px"><i class="fa-regular fa-calendar-check"></i><div>No cases currently pinned to the Calendar (need a parseable, upcoming Next Date in MIS)</div></div></td></tr>`}
+      }).join(''):`<tr><td colspan="6"><div class="empty" style="padding:30px"><i class="fa-regular fa-calendar-check"></i><div>No scored cases yet — score comes from executed actions (Action Date vs Execution Date).</div></div></td></tr>`}
     </tbody>
-    ${rows.length?`<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">
-      <td colspan="6" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">Total (${scored.length} scored of ${rows.length})</td>
-      <td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">${scoreTotal>0?'+':''}${scoreTotal}</td>
+    ${list.length?`<tfoot><tr style="background:var(--bg-subtle,#f8fafc)">
+      <td colspan="5" style="padding:11px 12px;text-align:right;font-weight:700;border-top:2px solid var(--line)">Total (${totalScored} action${totalScored===1?'':'s'} scored across ${list.length} case${list.length===1?'':'s'})</td>
+      <td style="padding:11px 12px;font-weight:800;border-top:2px solid var(--line)">${scoreCell(grand)}</td>
     </tr></tfoot>`:''}
   </table></div></div>`;
 }
@@ -2780,16 +2797,18 @@ window.misActionPanel=function(id){
     +'<div class="modal-body frm">'
       +'<div style="font-size:12px;color:var(--slate);margin-bottom:12px;line-height:1.5">'
         +esc(r.case_type||'')+(r.case_no?(' · '+esc(r.case_no)):'')+(r.court?(' · '+esc(r.court)):'')
-        +'<br>Next Date <b>'+esc(r.next_date||'—')+'</b> · Previous Date '+esc(r.previous_date||'—')
+        +'<br>Action Date <b>'+esc(r.next_date||'—')+'</b> · Previous Date '+esc(r.previous_date||'—')
       +'</div>'
       +'<label>Action Needed<textarea id="misA_needed" class="sel" rows="2">'+esc(openAction)+'</textarea></label>'
       +'<div class="two">'
-        +'<label>Action Date'+misTip('Defaults to the Next Date — the hearing the action is working towards.')
+        +'<label>Action Date'
           +'<input id="misA_date" value="'+esc(r.action_date||r.next_date||'')+'" placeholder="dd/mm/yyyy"></label>'
-        +'<label>Action Execution Date'+misTip('Fill this in when the action is actually done. Saving with a date here closes the action.')
-          +'<input id="misA_exec" value="'+esc(r.action_executed_date||'')+'" placeholder="dd/mm/yyyy"></label>'
+        // Execution Date is only for closing an action that already exists. While a brand-new action
+        // is being added (no open action yet), it is disabled — you record the execution later.
+        +'<label>Action Execution Date'
+          +'<input id="misA_exec" value="'+esc(r.action_executed_date||'')+'" placeholder="dd/mm/yyyy"'+(openAction?'':' disabled title="Add the action first — record its execution date later"')+'></label>'
       +'</div>'
-      +'<label>Remarks'+misTip('Added to whatever is already there, separated by a comma — nothing is overwritten.')
+      +'<label>Remarks'
         +'<textarea id="misA_remarks" class="sel" rows="2" placeholder="Anything to add"></textarea></label>'
     +'</div>'
     +'<div class="modal-foot">'
@@ -2821,10 +2840,8 @@ window.misActionSave=async function(id){
   const eIso=execRaw?misToIso(execRaw):null;
   if(dateRaw&&!dIso){ toast('Action Date should look like dd/mm/yyyy','warn'); return; }
   if(execRaw&&!eIso){ toast('Action Execution Date should look like dd/mm/yyyy','warn'); return; }
-  // You cannot have carried something out before the day it was due to be carried out.
-  if(dIso&&eIso&&misIsoStr(eIso)<misIsoStr(dIso)){
-    toast('The Action Execution Date cannot be before the Action Date','warn'); return;
-  }
+  // The Execution Date is allowed to fall before the Action Date (an action can be carried out
+  // ahead of the date it was working towards), so no ordering check here.
   const btn=$('misSaveBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
 
   const remarks=misRemarksMerge(r.remarks,newRemark);
