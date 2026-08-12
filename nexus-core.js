@@ -1896,12 +1896,14 @@ function misRowHtml(r,isPinned){
   // A live case with no Action Date is between actions — say so rather than leaving it looking blank.
   const awaiting=isPinned&&!completed&&!r.next_date_iso;
   const openAct=isPinned&&!completed&&!!String(r.action_needed||'').trim();
-  // ONE edge colour, and only on pinned rows: the blue bar means pinned, nothing else. Amber and
-  // green stripes for "awaiting" and "action open" made the left margin a colour code nobody asked
-  // for - what those states mean is already in the row's own columns.
+  /* One blue bar, and it marks a date still ahead of us - the cases actually coming up.
+     Drawing it on everything pinned put it on all 179 rows, because a case is pinned until it is
+     deliberately completed and none had been yet, so the bar carried no information at all.
+     No date, or a date already gone by, means no bar. */
+  const upcoming=isPinned&&!completed&&!!r.next_date_iso&&String(r.next_date_iso).slice(0,10)>=misIsoStr(new Date());
   const tip=awaiting?'Waiting for its next action — click to add one'
     :(openAct?'Action open: '+String(r.action_needed).slice(0,60):'');
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}" title="${esc(tip)}" style="${isPinned?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}" title="${esc(tip)}" style="${upcoming?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
