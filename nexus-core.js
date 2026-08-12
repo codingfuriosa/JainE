@@ -1969,25 +1969,32 @@ async function legalMIS(){
      pinned list the moment its action was executed, losing its handle and reading as finished.
      A case leaves the pinned list one way only: somebody slides the 6-dot handle left.
 
-     Ordering, top to bottom:
-       1. cases with an action OPEN, soonest date first — live commitments somebody has promised;
-       2. cases waiting for their next action — nothing is running, so they need a decision;
-       3. everything else, by date.
-     Open actions have to lead. Sorting purely on date buried a case the moment an action was put
-     on it: 73 dateless cases and 56 older dates sat above it, so a brand-new action landed around
-     row 130 and read as though the case had been unpinned. */
+     Ordering, top to bottom — what is coming up leads, always:
+       1. an action OPEN, soonest date first — a live commitment with a deadline;
+       2. a date today or later, soonest first — the hearings actually approaching;
+       3. no date at all — waiting for a decision, but nothing is running;
+       4. a date already gone by, most recent first — dormant.
+     Dates have to beat datelessness. Ranking "no date" above upcoming dates pushed all 73 dateless
+     cases on top of the 50 approaching hearings, so this week's dates sat below 73 rows of nothing
+     and the list read as if the wrong cases were pinned. */
   const todayS=todayStr();
+  const misIsoToday=misIsoStr(new Date());
   const isPinnedRow=r=>!r.completed_at;
   const misOpenAction=r=>!!String(r.action_needed||'').trim();
-  const misPinRank=r=>misOpenAction(r)?0:(r.next_date_iso?2:1);
+  const misPinRank=r=>{
+    if(misOpenAction(r)) return 0;
+    if(!r.next_date_iso) return 2;                                  // no date — needs a decision
+    return String(r.next_date_iso).slice(0,10)>=misIsoToday?1:3;    // upcoming beats gone-by
+  };
   const misPinned=rows.filter(isPinnedRow).sort((x,y)=>{
     const rx=misPinRank(x), ry=misPinRank(y);
     if(rx!==ry) return rx-ry;
-    const dx=x.next_date_iso||'', dy=y.next_date_iso||'';
+    const dx=String(x.next_date_iso||'').slice(0,10), dy=String(y.next_date_iso||'').slice(0,10);
     if(!dx&&!dy) return 0;
     if(!dx) return -1;
     if(!dy) return 1;
-    return dx.localeCompare(dy);
+    // Gone-by dates read newest first — the most recently lapsed matters most.
+    return rx===3?dy.localeCompare(dx):dx.localeCompare(dy);
   });
   const misRest=rows.filter(r=>!isPinnedRow(r));
   const misOrdered=misPinned.concat(misRest);
