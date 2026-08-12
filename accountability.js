@@ -1414,12 +1414,58 @@
           if(rt) whenHtml+='<span class="wf-tl-when'+(s.forwarded_at?' done':'')+'"><b>Retention</b> '+esc2(rt)+(s.forwarded_at?'':' · running')+'</span>';
         }
       }
-      return '<div class="wf-tl-item '+cls+'"><div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
+      /* On a phone every step printed its four timestamps underneath, so a ten-step instance was a
+         wall of dates you had to scroll past. The times now live in a collapsed half that opens on
+         tap, one step at a time (wfTlTap). On a desktop nothing is hidden — the CSS only collapses
+         under 760px. The chevron is drawn by CSS, not markup, so the desktop layout is untouched. */
+      return '<div class="wf-tl-item '+cls+(whenHtml?' wf-tl-tappable':'')+'" onclick="wfTlTap(this)">'
+        +'<div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
         +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
         +'<div class="wf-tl-times">'+whenHtml+'</div>'
       +'</div></div>';
     }).join('');
   }
+  /* "Forward to Suchandra Das" instead of "Forward to the next person". A step shared between two
+     people names both; a step whose owner is only decided when the instance starts says so; and if
+     there is genuinely nobody yet, it falls back to the old wording rather than "Forward to". */
+  function wfForwardLabel(info){
+    const who=String((info&&info.nextWho)||'').trim();
+    if(!who || who==='—' || /^named when/i.test(who)) return 'Forward to the next person';
+    return 'Forward to '+who;
+  }
+  window.wfForwardLabel=wfForwardLabel;
+  /* Who holds a LIVE step. wfStepWhoText was written for the flow definition and reads
+     owner_emails / owner_email, never `person` - so a step somebody had already claimed came back
+     as "—". Once claimed the claimer is the answer; before that, fall back to the definition text. */
+  function wfWhoOfStep(s){
+    if(s&&s.person) return wfNm(s.person);
+    return wfStepWhoText(s);
+  }
+  /* A step offered to two people showed only `person`, which stays empty until somebody claims it -
+     so a step sitting with Vicky Mallick AND Isha Maji read as "-", and it looked as though only one
+     of them had ever been given it. Until it is claimed, name everybody it is waiting on; once it is
+     claimed, name the one who took it. */
+  function wfAssignedToHtml(fcs){
+    const chip=function(e){ return '<span class="wf-inline-who"><span class="wf-av" style="background:'+colorFor(e)+'">'
+      +esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'+esc2(wfNm(e))+'</span>'; };
+    if(fcs&&fcs.person) return chip(fcs.person);
+    const many=(Array.isArray(fcs&&fcs.candidates)?fcs.candidates:[]).filter(Boolean);
+    if(many.length>1) return many.map(chip).join('<span style="color:var(--slate);padding:0 6px">/</span>')
+      +'<div style="color:var(--slate);font-size:12px;margin-top:4px">Whoever receives it first takes the step.</div>';
+    if(many.length===1) return chip(many[0]);
+    if(fcs&&fcs.owner_from_trigger) return '<span style="color:var(--slate)">Named when the instance is started</span>';
+    return '—';
+  }
+  /* Tapping a step opens it and closes whichever one was open — only ever one at a time, so the
+     phone screen holds a readable list of step names instead of everybody's timestamps at once. */
+  window.wfTlTap=function(el){
+    if(!el||!el.classList.contains('wf-tl-tappable'))return;
+    if(window.matchMedia&&!window.matchMedia('(max-width:760px)').matches)return;  // desktop shows everything already
+    const open=el.classList.contains('wf-tl-open');
+    const box=el.parentNode;
+    if(box) [].slice.call(box.querySelectorAll('.wf-tl-open')).forEach(function(o){ o.classList.remove('wf-tl-open'); });
+    if(!open) el.classList.add('wf-tl-open');
+  };
 
   /* ----- Tracker tab ------------------------------------------------------------------------
      A like-for-like rebuild of the bill tracker spreadsheet's header block (its rows 1-7), driven
@@ -2218,7 +2264,11 @@
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
-        else A+='<button class="ac-btn primary" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> Forward</button>';
+        else{
+          // The button says where it is going, and so does its hover — no guessing who is next.
+          const fwd=wfForwardLabel({nextWho:allSteps[idx+1]?wfWhoOfStep(allSteps[idx+1]):''});
+          A+='<button class="ac-btn primary" title="'+esc2(fwd)+'" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd)+'</button>';
+        }
       }
     }
     const dueTxt=fcs.due_at?wfDT(fcs.due_at):(t.due_date?fmtDateY(t.due_date):'—');
@@ -2240,7 +2290,7 @@
         +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
         +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
         +'<div class="tp-f"><div class="k">Status</div><div class="v">'+statusChip+'</div></div>'
-        +'<div class="tp-f"><div class="k">Assigned to</div><div class="v">'+(person?('<span class="wf-inline-who"><span class="wf-av" style="background:'+colorFor(person)+'">'+esc2(iniOf(wfNm(person)).toUpperCase())+'</span>'+esc2(wfNm(person))+'</span>'):'—')+'</div></div>'
+        +'<div class="tp-f"><div class="k">Assigned to</div><div class="v">'+wfAssignedToHtml(fcs)+'</div></div>'
         +'<div class="tp-f"><div class="k">Allotted</div><div class="v">'+esc2(wfDurText(fcs.duration_value,fcs.duration_unit)||'—')+'</div></div>'
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
@@ -2448,6 +2498,17 @@
     .wf-tl-desc{font-size:12.5px;color:var(--slate);margin-top:4px;line-height:1.5}
     .wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
     .wf-tl-when{font-size:11.5px;color:var(--slate);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+    /* PHONE: a step is just its name and who has it. Received / Done / Transition / Retention are
+       folded away until the step is tapped, and only one step is open at a time — ten steps used to
+       print forty timestamps down the screen. Desktop is unaffected. */
+    @media (max-width:760px){
+      .wf-tl-tappable{cursor:pointer}
+      .wf-tl-tappable .wf-tl-times{display:none}
+      .wf-tl-tappable.wf-tl-open .wf-tl-times{display:flex}
+      .wf-tl-tappable .wf-tl-title::after{content:'\\f078';font-family:'Font Awesome 6 Free';font-weight:900;
+        font-size:9px;color:var(--slate);margin-left:auto;padding-left:8px;transition:transform .15s}
+      .wf-tl-tappable.wf-tl-open .wf-tl-title::after{transform:rotate(180deg)}
+    }
     .wf-tl-when b{font-weight:700;color:var(--ink);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
     .wf-tl-when.done b{color:#16a34a}
     .wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
@@ -2619,7 +2680,10 @@
     .wf-ownerchip{display:inline-flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;font-size:11px;font-weight:800;letter-spacing:.04em;padding:3px 10px;border-radius:20px}
     .wf-inline-who{display:inline-flex;align-items:center;gap:7px}
     /* Roughly five messages tall, then it scrolls — the card never keeps growing. */
-    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;margin-bottom:12px;padding-right:4px}
+    /* overscroll-behavior was "contain", which swallowed the wheel once this list hit its own end -
+       rest the cursor anywhere over Updates and the page underneath simply would not move. "auto"
+       lets the scroll carry on to the page as soon as the list has nothing left to give. */
+    .wf-updlist{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;margin-bottom:12px;padding-right:4px}
     .wf-upd{display:flex;gap:10px;align-items:flex-start}
     .wf-upd.me{flex-direction:row-reverse}
     .wf-upd-av{width:30px;height:30px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none}
@@ -2640,7 +2704,7 @@
     .wf-reject-acts{display:flex;gap:7px;flex:none}
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
-    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
+    .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;padding-right:4px}
     /* thin, unobtrusive scrollbars on the message lists */
     .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
     .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
@@ -4462,7 +4526,9 @@
       if(wfIds.length){
         const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at,forwarded_at,title').in('id',wfIds);
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
-        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        // person/candidates/owner_from_trigger come along so the Forward button can name who the
+        // step is about to go to, rather than saying "the next person".
+        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title').in('case_id',caseIds); allc=(r&&r.data)||[]; }
         let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
@@ -4474,7 +4540,7 @@
           const bb=bounds[s.case_id]||{min:s.seq,max:s.seq};
           const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
           const nextStep=(bySeq[s.case_id]||{})[s.seq+1]||null;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:!!nextStep};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:!!nextStep,nextWho:nextStep?wfWhoOfStep(nextStep):''};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -4855,9 +4921,12 @@
       } else if(wfReceived){
         // Received: a Forward button (or Done on the last step) in the exterior list — the same
         // actions the detail page offers, so a step can be moved on without opening it.
+        // Hovering names the person it is going to, so you know who you are handing it to before
+        // you press it — "Forward to the next person" told you nothing.
+        const fwdTip=wfForwardLabel(wfInfo);
         wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
-          : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Forward to the next person" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
+          : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
       }
     }
     const hover=opt.approve?` onmouseenter="pendHover(${t.id})" onmouseleave="pendUnhover(${t.id})"`:'';
