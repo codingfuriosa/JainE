@@ -1893,7 +1893,9 @@ function misRowHtml(r,isPinned){
   const cbAttrs=completed?'checked disabled':'';
   const cbCls='mis-cb mis-row-cb'+(completed?' mis-handled':'');
   const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this case complete"></i>`:'';
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}" style="${isPinned?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
+  // A live case with no Action Date is between actions — say so rather than leaving it looking blank.
+  const awaiting=isPinned&&!completed&&!r.next_date_iso;
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}" title="${awaiting?'Waiting for its next action — click to add one':''}" style="${isPinned?'border-left:3px solid '+(awaiting?'#d97706':'#1e3a8a'):''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
@@ -1956,11 +1958,21 @@ async function legalMIS(){
   window._misSel=new Set();
   const searchKeys=MIS_FIELDS.map(f=>f.k);
   rows.forEach(r=>{ r._blob=searchKeys.map(k=>String(r[k]||'')).join(' ␟ ').toLowerCase(); });
-  // "Pinned" = currently showing on the Calendar (next_date_iso parsed and not in the past) — not a
-  // stored flag, so it can never drift out of sync with what the Calendar actually shows.
+  /* "Pinned" means the case is still live — it is NOT tied to having a date. Executing an action
+     clears the Action Date, and while pinning depended on that date the case dropped out of the
+     pinned list the moment its action was executed, losing its handle and reading as finished.
+     A case leaves the pinned list one way only: somebody slides the 6-dot handle left.
+     Ordering: cases waiting for their next action come first (they need a decision), then the
+     scheduled ones by date. */
   const todayS=todayStr();
-  const isPinnedRow=r=>r.next_date_iso&&r.next_date_iso>=todayS&&!r.completed_at;
-  const misPinned=rows.filter(isPinnedRow).sort((a,b)=>String(a.next_date_iso).localeCompare(String(b.next_date_iso)));
+  const isPinnedRow=r=>!r.completed_at;
+  const misPinned=rows.filter(isPinnedRow).sort((x,y)=>{
+    const dx=x.next_date_iso||'', dy=y.next_date_iso||'';
+    if(!dx&&!dy) return 0;
+    if(!dx) return -1;                 // awaiting a new action — needs attention first
+    if(!dy) return 1;
+    return dx.localeCompare(dy);
+  });
   const misRest=rows.filter(r=>!isPinnedRow(r));
   const misOrdered=misPinned.concat(misRest);
   body.innerHTML=`
