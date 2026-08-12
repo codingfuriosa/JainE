@@ -1895,7 +1895,13 @@ function misRowHtml(r,isPinned){
   const handle=isPinned?`<i class="fa-solid fa-grip-vertical drag-handle mis-handle" data-id="${r.id}" title="Slide left to mark this case complete"></i>`:'';
   // A live case with no Action Date is between actions — say so rather than leaving it looking blank.
   const awaiting=isPinned&&!completed&&!r.next_date_iso;
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}" title="${awaiting?'Waiting for its next action — click to add one':''}" style="${isPinned?'border-left:3px solid '+(awaiting?'#d97706':'#1e3a8a'):''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
+  // An action actually running gets its own green edge, so the row is recognisable at a glance
+  // after it moves to the top of the list.
+  const openAct=isPinned&&!completed&&!!String(r.action_needed||'').trim();
+  const edge=awaiting?'#d97706':(openAct?'#059669':'#1e3a8a');
+  const tip=awaiting?'Waiting for its next action — click to add one'
+    :(openAct?'Action open: '+String(r.action_needed).slice(0,60):'');
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}" title="${esc(tip)}" style="${isPinned?'border-left:3px solid '+edge:''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
@@ -1962,14 +1968,24 @@ async function legalMIS(){
      clears the Action Date, and while pinning depended on that date the case dropped out of the
      pinned list the moment its action was executed, losing its handle and reading as finished.
      A case leaves the pinned list one way only: somebody slides the 6-dot handle left.
-     Ordering: cases waiting for their next action come first (they need a decision), then the
-     scheduled ones by date. */
+
+     Ordering, top to bottom:
+       1. cases with an action OPEN, soonest date first — live commitments somebody has promised;
+       2. cases waiting for their next action — nothing is running, so they need a decision;
+       3. everything else, by date.
+     Open actions have to lead. Sorting purely on date buried a case the moment an action was put
+     on it: 73 dateless cases and 56 older dates sat above it, so a brand-new action landed around
+     row 130 and read as though the case had been unpinned. */
   const todayS=todayStr();
   const isPinnedRow=r=>!r.completed_at;
+  const misOpenAction=r=>!!String(r.action_needed||'').trim();
+  const misPinRank=r=>misOpenAction(r)?0:(r.next_date_iso?2:1);
   const misPinned=rows.filter(isPinnedRow).sort((x,y)=>{
+    const rx=misPinRank(x), ry=misPinRank(y);
+    if(rx!==ry) return rx-ry;
     const dx=x.next_date_iso||'', dy=y.next_date_iso||'';
     if(!dx&&!dy) return 0;
-    if(!dx) return -1;                 // awaiting a new action — needs attention first
+    if(!dx) return -1;
     if(!dy) return 1;
     return dx.localeCompare(dy);
   });
