@@ -1875,6 +1875,11 @@ function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
   if(f.k==='case_type')return '<td style="font-weight:600;white-space:nowrap">'+esc(v||'—')+'</td>';
+  // An action that is open is the one thing on the row somebody has to act on, so it is the one
+  // thing written in full colour rather than the same grey as everything else.
+  if(f.k==='action_needed'&&String(v||'').trim())
+    return '<td><div class="mis-cell-clamp mis-action-live" title="'+esc(v)+'">'
+      +'<i class="fa-solid fa-bolt"></i> '+esc(v)+'</div></td>';
   if(MIS_CLAMP.has(f.k))return '<td><div class="mis-cell-clamp" title="'+esc(v||'')+'">'+esc(v||'—')+'</div></td>';
   if(MIS_NOWRAP_TRUNC.has(f.k))return '<td style="white-space:nowrap;color:var(--slate)" title="'+esc(v||'')+'">'+esc(misTrunc(v,26)||'—')+'</td>';
   return '<td style="white-space:nowrap;color:var(--slate)">'+esc(v||'—')+'</td>';
@@ -1901,9 +1906,16 @@ function misRowHtml(r,isPinned){
      deliberately completed and none had been yet, so the bar carried no information at all.
      No date, or a date already gone by, means no bar. */
   const upcoming=isPinned&&!completed&&!!r.next_date_iso&&String(r.next_date_iso).slice(0,10)>=misIsoStr(new Date());
-  const tip=awaiting?'Waiting for its next action — click to add one'
-    :(openAct?'Action open: '+String(r.action_needed).slice(0,60):'');
-  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}" title="${esc(tip)}" style="${upcoming?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
+  /* A case carrying an open action is highlighted outright - a tinted row, not a stripe in the
+     margin. Executing an action clears both the action and its date, so the row loses the blue
+     bar and goes quiet; that is correct, there is genuinely nothing scheduled any more, but it
+     must not sink out of sight. Just-executed cases are lifted to the top of the list instead
+     (see the ordering in legalMIS) so the next action can be written straight away. */
+  const justDone=isPinned&&!completed&&!openAct&&!!String(r.action_executed_date||'').trim();
+  const tip=openAct?'Action open: '+String(r.action_needed).slice(0,60)
+    :(justDone?'Action executed '+r.action_executed_date+' — click to write the next one'
+    :(awaiting?'Waiting for its next action — click to add one':''));
+  return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}${justDone?' mis-just-done':''}" title="${esc(tip)}" style="${upcoming?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
   </tr>`;
@@ -1971,32 +1983,44 @@ async function legalMIS(){
      pinned list the moment its action was executed, losing its handle and reading as finished.
      A case leaves the pinned list one way only: somebody slides the 6-dot handle left.
 
-     Ordering, top to bottom — what is coming up leads, always:
+     Ordering, top to bottom — live work first, then what is coming up:
        1. an action OPEN, soonest date first — a live commitment with a deadline;
-       2. a date today or later, soonest first — the hearings actually approaching;
-       3. no date at all — waiting for a decision, but nothing is running;
-       4. a date already gone by, most recent first — dormant.
-     Dates have to beat datelessness. Ranking "no date" above upcoming dates pushed all 73 dateless
-     cases on top of the 50 approaching hearings, so this week's dates sat below 73 rows of nothing
-     and the list read as if the wrong cases were pinned. */
+       2. just executed, most recent first — the action is done and its date cleared, so this case
+          is waiting for somebody to decide the next one. It is the freshest work on the list;
+       3. a date today or later, soonest first — the hearings actually approaching;
+       4. never actioned, no date — quiet, nothing is running;
+       5. a date already gone by, most recent first — dormant.
+     Rank 2 exists because executing an action clears the action AND its date, which dropped the
+     case straight out of the dated block and left it sitting among 73 dateless rows in the middle
+     of the list — handled, and immediately lost. Dates still have to beat plain datelessness, which
+     is why rank 4 sits below rank 3: ranking every dateless case above the upcoming ones buried
+     this week's hearings under 73 rows of nothing. */
   const todayS=todayStr();
   const misIsoToday=misIsoStr(new Date());
   const isPinnedRow=r=>!r.completed_at;
   const misOpenAction=r=>!!String(r.action_needed||'').trim();
+  const misJustDone=r=>!misOpenAction(r)&&!!String(r.action_executed_date||'').trim();
   const misPinRank=r=>{
     if(misOpenAction(r)) return 0;
-    if(!r.next_date_iso) return 2;                                  // no date — needs a decision
-    return String(r.next_date_iso).slice(0,10)>=misIsoToday?1:3;    // upcoming beats gone-by
+    if(misJustDone(r)) return 1;                                    // awaiting its next action
+    if(!r.next_date_iso) return 3;                                  // never actioned, no date
+    return String(r.next_date_iso).slice(0,10)>=misIsoToday?2:4;    // upcoming beats gone-by
   };
   const misPinned=rows.filter(isPinnedRow).sort((x,y)=>{
     const rx=misPinRank(x), ry=misPinRank(y);
     if(rx!==ry) return rx-ry;
+    // Just-executed cases order on when they were executed, newest first — they have no next date.
+    if(rx===1){
+      const ex=misToIso(x.action_executed_date), ey=misToIso(y.action_executed_date);
+      const sx=ex?misIsoStr(ex):'', sy=ey?misIsoStr(ey):'';
+      return sy.localeCompare(sx);
+    }
     const dx=String(x.next_date_iso||'').slice(0,10), dy=String(y.next_date_iso||'').slice(0,10);
     if(!dx&&!dy) return 0;
     if(!dx) return -1;
     if(!dy) return 1;
     // Gone-by dates read newest first — the most recently lapsed matters most.
-    return rx===3?dy.localeCompare(dx):dx.localeCompare(dy);
+    return rx===4?dy.localeCompare(dx):dx.localeCompare(dy);
   });
   const misRest=rows.filter(r=>!isPinnedRow(r));
   const misOrdered=misPinned.concat(misRest);
@@ -2126,6 +2150,15 @@ async function legalMIS(){
       .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
       #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
+      /* A case with an action open is the work in hand — the whole row is tinted so it is picked
+         out at a glance, and the action itself is the only text on the row in full colour. */
+      #misTbody tr.mis-open-action{background:#fffbeb}
+      #misTbody tr.mis-open-action:hover{background:#fef3c7}
+      .mis-action-live{font-weight:650;color:#b45309}
+      .mis-action-live i{font-size:10px;margin-right:3px;opacity:.8}
+      /* Just executed: nothing is scheduled yet, so it stays quiet — a thin amber edge only,
+         enough to find it while its next action is being decided. */
+      #misTbody tr.mis-just-done{box-shadow:inset 3px 0 0 #fbbf24}
       /* Desktop only — mobile keeps exactly the widths above. A person's name never fills a
          150px column, while Cause Title and Status are the ones people actually need to read,
          so the slack is taken off the name/date columns and handed to the text ones.
