@@ -2408,10 +2408,26 @@ function misActionScore(a){
   if(gap>0)return 0;
   return -1;
 }
+/* The Scoreboard is paused while the action cycle beds in: it scored off action dates, and those
+   have just been cleared for a fresh start, so any figure it showed now would be meaningless.
+   The workings below are left intact - flip SCOREBOARD_LIVE back to true to bring it back. */
+const SCOREBOARD_LIVE=false;
 async function legalScoreboard(){
   setCrumb(['Legal','Scoreboard']);
   const hAct=$('legalHeadActions');if(hAct)hAct.innerHTML='';
   const body=$('legalBody');if(!body)return;
+  if(!SCOREBOARD_LIVE){
+    body.innerHTML='<div class="card card-pad" style="max-width:620px;margin:26px auto;text-align:center">'
+      +'<div style="font-size:34px;color:#1e3a8a;margin-bottom:12px"><i class="fa-solid fa-ranking-star"></i></div>'
+      +'<div style="font-weight:700;font-size:17px;margin-bottom:8px">Scoreboard — coming soon</div>'
+      +'<p style="color:var(--slate);font-size:13.5px;line-height:1.6;margin:0">'
+      +'It scores each case on how much notice an action was given before its date. The action log has '
+      +'just been cleared for a fresh start, so there is nothing meaningful to score yet — it will come '
+      +'back once actions have been running for a while.</p>'
+      +'<div style="margin-top:16px"><button class="btn" onclick="navTo(\'legal/mis\')"><i class="fa-solid fa-gavel"></i> Go to MIS</button></div>'
+    +'</div>';
+    return;
+  }
   loader(body);
   let cases=[], actions=[];
   try{
@@ -2814,11 +2830,13 @@ window.misActionPanel=function(id){
       +'<label>Action Needed<textarea id="misA_needed" class="sel" rows="2">'+esc(openAction)+'</textarea></label>'
       +'<div class="two">'
         +'<label>Action Date'
-          +'<input id="misA_date" value="'+esc(r.action_date||r.next_date||'')+'" placeholder="dd/mm/yyyy"></label>'
-        // Execution Date is only for closing an action that already exists. While a brand-new action
-        // is being added (no open action yet), it is disabled — you record the execution later.
+          +'<input id="misA_date" value="'+esc(openAction?(r.action_date||r.next_date||''):'')+'" placeholder="dd/mm/yyyy"></label>'
+        /* Execution Date belongs to the action that is currently open. With no open action this is
+           a NEW action being written, so the box starts empty — it used to be pre-filled with the
+           PREVIOUS action's execution date, and since a disabled input still hands back its value,
+           saving the new action was read as an execution and wiped it on the spot. */
         +'<label>Action Execution Date'
-          +'<input id="misA_exec" value="'+esc(r.action_executed_date||'')+'" placeholder="dd/mm/yyyy"'+(openAction?'':' disabled title="Add the action first — record its execution date later"')+'></label>'
+          +'<input id="misA_exec" value="'+esc(openAction?(r.action_executed_date||''):'')+'" placeholder="dd/mm/yyyy"'+(openAction?'':' disabled title="Add the action first — record its execution date later"')+'></label>'
       +'</div>'
       +'<label>Remarks'
         +'<textarea id="misA_remarks" class="sel" rows="2" placeholder="Anything to add"></textarea></label>'
@@ -2849,7 +2867,10 @@ window.misActionSave=async function(id){
   const needed=g('needed'), dateRaw=g('date'), execRaw=g('exec'), newRemark=g('remarks');
   if(needed && !dateRaw){ toast('Add an Action Date — an action needs a date to work to','warn'); return; }
   const dIso=dateRaw?misToIso(dateRaw):null;
-  const eIso=execRaw?misToIso(execRaw):null;
+  // An execution can only close an action that is actually open. Without one, anything in the
+  // execution box is a leftover and is ignored - what is being written is the NEXT action.
+  const hadOpen=String((r&&r.action_needed)||'').trim();
+  const eIso=(execRaw&&hadOpen)?misToIso(execRaw):null;
   if(dateRaw&&!dIso){ toast('Action Date should look like dd/mm/yyyy','warn'); return; }
   if(execRaw&&!eIso){ toast('Action Execution Date should look like dd/mm/yyyy','warn'); return; }
   // The Execution Date is allowed to fall before the Action Date (an action can be carried out
