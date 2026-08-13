@@ -1800,9 +1800,17 @@
     if(!flow.instance_noun){ wfNounLearn(id,flow.name,flow.trigger_event).then(function(r){
       if(r&&r.noun&&r.noun!==N.one&&ROUTE&&ROUTE.tab==='workflow') renderPage();
     }); }
+    /* The People circles read every owner of every step. Reading owner_email alone showed only the
+       FIRST person on a step shared between two - the second had no circle here at all, however
+       correctly they were stored. owner_emails holds the full list; owner_email is just the first
+       of them, kept for older single-owner steps. */
     const members=[];
-    if(flow.trigger_owner && !members.some(function(e){return eq(e,flow.trigger_owner);})) members.push(flow.trigger_owner);
-    steps.forEach(function(s){ if(s.owner_email&&!members.some(function(e){return eq(e,s.owner_email);}))members.push(s.owner_email); });
+    const addMember=function(e){ if(e&&!members.some(function(x){return eq(x,e);})) members.push(e); };
+    addMember(flow.trigger_owner);
+    steps.forEach(function(s){
+      const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
+      owners.forEach(addMember);
+    });
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
