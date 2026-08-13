@@ -1943,21 +1943,24 @@
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
         +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
       +'</div>'
-      +((isBill||showForms)?('<div class="wf-tabs">'
+      /* Every workflow gets a Tracker tab. It was gated behind the Invoice Processing flow, but all
+         it reports is each instance against each step — due date, actual date, delay — which is
+         true of any workflow that has steps. Forms stay restricted to the bill flow. */
+      +('<div class="wf-tabs">'
           +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
-          +(isBill?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
+          +'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>'
           +(showForms?('<button class="wf-tab" id="wfTabBtn_forms" onclick="wfTabShow(\'forms\')"><i class="fa-solid fa-clipboard-list"></i> Forms'
              +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')+'</button>'):'')
-        +'</div>'):'')
+        +'</div>')
       +'<div id="wfPane_main">'
         +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
         +tableHtml
       +'</div>'
-      +(isBill?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
+      +('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
           +wfTrackerHtml(flow,steps,cases,fcs)
-        +'</div></div>'):'')
+        +'</div></div>')
       +(showForms?('<div id="wfPane_forms" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-clipboard-list"></i> Forms'
             +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')
@@ -2248,16 +2251,24 @@
         wfRegulars=seen;
       }catch(_e){}
     }
+    /* ONE picker for every step left open to the triggering event owner, not one each. Whoever is
+       named here does all of them. Asking the same question once per step made the form long and
+       invited answering it differently for steps that are meant to be handled by the same person. */
     const membersHtml=openSteps.length
-      ? '<label class="wf-lbl">Who does these steps? '+tip('These steps have no fixed owner. Name one or more people for each — they all receive it, and the first to accept it keeps it.')+'</label>'
-        +'<div id="wfEvtMembers">'+openSteps.map(function(st){
-            return '<div class="wf-evt-row wf-mem-row" data-seq="'+st.seq+'">'
-              +'<div class="ac-in wf-evt-labelro wf-mem-lbl" style="background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden">'
-                +'<i class="fa-solid fa-user-plus" style="font-size:10px;color:var(--slate);flex:none"></i>'
-                +'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Step '+st.seq+' · '+esc2(st.title||'')+'</span></div>'
-              +wfPersonPickerHtml([], true, false, '', wfRegulars)
-            +'</div>';
-          }).join('')+'</div>'
+      ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
+          +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
+        +'<div id="wfEvtMembers">'
+          +'<div class="wf-evt-row wf-mem-row" data-seq="'+openSteps.map(function(s){return s.seq;}).join(',')+'">'
+            +'<div class="ac-in wf-evt-labelro wf-mem-lbl" style="background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden" title="'+esc2(openSteps.map(function(s){return 'Step '+s.seq+' · '+(s.title||'');}).join('\n'))+'">'
+              +'<i class="fa-solid fa-user-plus" style="font-size:10px;color:var(--slate);flex:none"></i>'
+              +'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+                +(openSteps.length===1
+                    ? ('Step '+openSteps[0].seq+' · '+esc2(openSteps[0].title||''))
+                    : (openSteps.length+' steps · '+esc2(openSteps.map(function(s){return s.title||('Step '+s.seq);}).join(', '))))
+              +'</span></div>'
+            +wfPersonPickerHtml([], true, false, '', wfRegulars)
+          +'</div>'
+        +'</div>'
       : '';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" style="min-width:min(94vw,520px)">'
@@ -2292,12 +2303,13 @@
         toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
-        // {seq: [emails]} for the steps whose members were just nominated
+        /* {seq: [emails]} for the steps just nominated. The row carries every open step's number,
+           because one picker now answers for all of them — the same people go to each. */
         const members={};
         [].slice.call(document.querySelectorAll('#wfEvtMembers .wf-evt-row')).forEach(function(r){
-          const seq=r.getAttribute('data-seq');
+          const seqs=String(r.getAttribute('data-seq')||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
           const v=((r.querySelector('.wf-s-person')||{}).value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-          if(seq&&v.length) members[seq]=v;
+          if(v.length) seqs.forEach(function(sq){ members[sq]=v.slice(); });
         });
         const {error}=await ACC().rpc('wf_create_instance',
           {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
