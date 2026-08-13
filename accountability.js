@@ -1385,18 +1385,26 @@
   function wfTimelineHtml(steps,opt){
     opt=opt||{};
     return steps.map(function(s,i){
-      /* A shared step shows every person it is offered to, so the card matches what the Tracker's
-         WHO row says. Once somebody claims it, s.person is set and only they are shown. */
-      // An instance step keeps its possible people in `candidates`; the flow definition uses
-      // `owner_emails`. Read candidates first so a shared (2+ people) step shows EVERYONE with their
-      // names, instead of "Unassigned" or just one circle.
-      const shared=(!s.person)?((Array.isArray(s.candidates)&&s.candidates.length?s.candidates:(Array.isArray(s.owner_emails)?s.owner_emails:[])).filter(Boolean)):[];
+      /* A shared step shows every person it belongs to - ALWAYS, claimed or not. Hiding the others
+         the moment somebody claimed it meant a step set up for two people showed only one, and
+         there was no way to tell from the card that it had ever been shared. Whoever is actually
+         holding it is marked instead.
+         An instance step keeps its people in `candidates`; the flow definition uses `owner_emails`. */
+      const shared=((Array.isArray(s.candidates)&&s.candidates.length?s.candidates:(Array.isArray(s.owner_emails)?s.owner_emails:[])).filter(Boolean));
       const person=s.person||s.owner_email;
       const av=function(e){ return '<span class="wf-av" style="background:'+colorFor(e)+'" title="'+esc2(wfNm(e))+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; };
       let who;
-      if(shared.length>=1){
-        who='<span class="wf-who">'+shared.map(av).join('')
-          +'<span class="wf-who-nm">'+esc2(shared.map(wfNm).join(' / '))+'</span></span>';
+      if(shared.length>1){
+        // the holder reads first and is named as such; the rest are who else it could have gone to
+        const holder=s.person&&shared.filter(function(e){return eq(e,s.person);})[0];
+        const rest=shared.filter(function(e){ return !holder||!eq(e,holder); });
+        const order=holder?[holder].concat(rest):shared;
+        who='<span class="wf-who">'+order.map(av).join('')
+          +'<span class="wf-who-nm">'+esc2(order.map(wfNm).join(' / '))
+          +(holder?' <span style="color:var(--slate);font-weight:400">· '+esc2(wfNm(holder))+' took it</span>':'')
+          +'</span></span>';
+      } else if(shared.length===1&&!person){
+        who='<span class="wf-who">'+av(shared[0])+'<span class="wf-who-nm">'+esc2(wfNm(shared[0]))+'</span></span>';
       } else if(person){
         who='<span class="wf-who">'+av(person)+'<span class="wf-who-nm">'+esc2(wfNm(person))+'</span></span>';
       } else if(s.owner_from_trigger){
@@ -1463,10 +1471,18 @@
   function wfAssignedToHtml(fcs){
     const chip=function(e){ return '<span class="wf-inline-who"><span class="wf-av" style="background:'+colorFor(e)+'">'
       +esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'+esc2(wfNm(e))+'</span>'; };
-    if(fcs&&fcs.person) return chip(fcs.person);
     const many=(Array.isArray(fcs&&fcs.candidates)?fcs.candidates:[]).filter(Boolean);
-    if(many.length>1) return many.map(chip).join('<span style="color:var(--slate);padding:0 6px">/</span>')
-      +'<div style="color:var(--slate);font-size:12px;margin-top:4px">Whoever receives it first takes the step.</div>';
+    // A shared step names everyone even after it is claimed - who else it could have gone to is
+    // part of what the step IS, and dropping them made a two-person step look like a one-person one.
+    if(many.length>1){
+      const holder=fcs&&fcs.person&&many.filter(function(e){return eq(e,fcs.person);})[0];
+      const order=holder?[holder].concat(many.filter(function(e){return !eq(e,holder);})):many;
+      return order.map(chip).join('<span style="color:var(--slate);padding:0 6px">/</span>')
+        +'<div style="color:var(--slate);font-size:12px;margin-top:4px">'
+        +(holder?esc2(wfNm(holder))+' received it first and holds the step.'
+                :'Whoever receives it first takes the step.')+'</div>';
+    }
+    if(fcs&&fcs.person) return chip(fcs.person);
     if(many.length===1) return chip(many[0]);
     if(fcs&&fcs.owner_from_trigger) return '<span style="color:var(--slate)">Named when the instance is started</span>';
     return '—';
