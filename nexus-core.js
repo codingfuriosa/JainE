@@ -10318,9 +10318,28 @@ function trQualTag(r){
   return '<span class="tag t-gray">—</span>';
 }
 
+/* Every call, fetched a page at a time.
+   This used to stop at the 200 most recent, and the KPI cards are counted from whatever was
+   loaded - so Calls stuck at 200 while the real figure climbed past 500, and the window slid as
+   new calls arrived: an older Qualified call dropped off the bottom for each new one at the top,
+   so Qualified went DOWN while qualified calls were being added. Not Qualified read low for the
+   same reason, and the three cards never summed to the total. */
 async function trFetch(force){
   if(TR_ROWS&&!force)return TR_ROWS;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').is('deleted_at',null).order('created_at',{ascending:false}).limit(200);TR_ROWS=data||[];}catch(e){TR_ROWS=[];}
+  const PAGE=1000; let out=[], from=0;
+  try{
+    for(;;){
+      const {data,error}=await sb.schema('acc').from('transcriptions').select('*')
+        .is('deleted_at',null).order('created_at',{ascending:false}).range(from,from+PAGE-1);
+      if(error)throw error;
+      const batch=data||[];
+      out=out.concat(batch);
+      if(batch.length<PAGE)break;          // last page
+      from+=PAGE;
+      if(from>50000)break;                 // backstop, never a real workload
+    }
+    TR_ROWS=out;
+  }catch(e){ TR_ROWS=out.length?out:[]; }
   return TR_ROWS;
 }
 async function trFetchDeleted(force){

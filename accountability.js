@@ -1458,19 +1458,18 @@
          there was no way to tell from the card that it had ever been shared. Whoever is actually
          holding it is marked instead.
          An instance step keeps its people in `candidates`; the flow definition uses `owner_emails`. */
-      const shared=((Array.isArray(s.candidates)&&s.candidates.length?s.candidates:(Array.isArray(s.owner_emails)?s.owner_emails:[])).filter(Boolean));
+      const allOwners=((Array.isArray(s.candidates)&&s.candidates.length?s.candidates:(Array.isArray(s.owner_emails)?s.owner_emails:[])).filter(Boolean));
       const person=s.person||s.owner_email;
+      /* On a LIVE instance, once somebody has taken a shared step it is theirs and theirs alone —
+         the card names just them, because that is who is actually doing it. Everyone it could have
+         gone to still shows while it is unclaimed, and the workflow's own step list (not live)
+         always names them all, since that is the setup rather than a running job. */
+      const shared=(opt.live&&s.person)?[]:allOwners;
       const av=function(e){ return '<span class="wf-av" style="background:'+colorFor(e)+'" title="'+esc2(wfNm(e))+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; };
       let who;
       if(shared.length>1){
-        // the holder reads first and is named as such; the rest are who else it could have gone to
-        const holder=s.person&&shared.filter(function(e){return eq(e,s.person);})[0];
-        const rest=shared.filter(function(e){ return !holder||!eq(e,holder); });
-        const order=holder?[holder].concat(rest):shared;
-        who='<span class="wf-who">'+order.map(av).join('')
-          +'<span class="wf-who-nm">'+esc2(order.map(wfNm).join(' / '))
-          +(holder?' <span style="color:var(--slate);font-weight:400">· '+esc2(wfNm(holder))+' took it</span>':'')
-          +'</span></span>';
+        who='<span class="wf-who">'+shared.map(av).join('')
+          +'<span class="wf-who-nm">'+esc2(shared.map(wfNm).join(' / '))+'</span></span>';
       } else if(shared.length===1&&!person){
         who='<span class="wf-who">'+av(shared[0])+'<span class="wf-who-nm">'+esc2(wfNm(shared[0]))+'</span></span>';
       } else if(person){
@@ -1509,7 +1508,10 @@
          wall of dates you had to scroll past. The times now live in a collapsed half that opens on
          tap, one step at a time (wfTlTap). On a desktop nothing is hidden — the CSS only collapses
          under 760px. The chevron is drawn by CSS, not markup, so the desktop layout is untouched. */
-      return '<div class="wf-tl-item '+cls+(whenHtml?' wf-tl-tappable':'')+'" onclick="wfTlTap(this)">'
+      // The step the instance is actually sitting on opens by itself — that is the one somebody
+      // opening an instance wants to read. Tapping any other step closes it and opens that one.
+      const openByDefault=(cls==='wf-tl-cur')&&!!whenHtml;
+      return '<div class="wf-tl-item '+cls+(whenHtml?' wf-tl-tappable':'')+(openByDefault?' wf-tl-open':'')+'" onclick="wfTlTap(this)">'
         +'<div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
         +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
         +'<div class="wf-tl-times">'+whenHtml+'</div>'
@@ -1539,18 +1541,12 @@
   function wfAssignedToHtml(fcs){
     const chip=function(e){ return '<span class="wf-inline-who"><span class="wf-av" style="background:'+colorFor(e)+'">'
       +esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'+esc2(wfNm(e))+'</span>'; };
-    const many=(Array.isArray(fcs&&fcs.candidates)?fcs.candidates:[]).filter(Boolean);
-    // A shared step names everyone even after it is claimed - who else it could have gone to is
-    // part of what the step IS, and dropping them made a two-person step look like a one-person one.
-    if(many.length>1){
-      const holder=fcs&&fcs.person&&many.filter(function(e){return eq(e,fcs.person);})[0];
-      const order=holder?[holder].concat(many.filter(function(e){return !eq(e,holder);})):many;
-      return order.map(chip).join('<span style="color:var(--slate);padding:0 6px">/</span>')
-        +'<div style="color:var(--slate);font-size:12px;margin-top:4px">'
-        +(holder?esc2(wfNm(holder))+' received it first and holds the step.'
-                :'Whoever receives it first takes the step.')+'</div>';
-    }
+    // Once somebody has taken a shared step it belongs to them — name just them. Everyone it is
+    // offered to shows only while it is still up for grabs.
     if(fcs&&fcs.person) return chip(fcs.person);
+    const many=(Array.isArray(fcs&&fcs.candidates)?fcs.candidates:[]).filter(Boolean);
+    if(many.length>1) return many.map(chip).join('<span style="color:var(--slate);padding:0 6px">/</span>')
+      +'<div style="color:var(--slate);font-size:12px;margin-top:4px">Whoever receives it first takes the step.</div>';
     if(many.length===1) return chip(many[0]);
     if(fcs&&fcs.owner_from_trigger) return '<span style="color:var(--slate)">Named when the instance is started</span>';
     return '—';
@@ -2133,8 +2129,11 @@
         +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
       +'</div>';
     } else {
-      const placeholder=eq(label,'Wheredoc Id')?'The Wheredoc reference this bill was filed under'
-        :(f.optional?'Optional':'Detail');
+      /* The box says what KIND of answer it wants — "Text", "Number", "Date". It used to say
+         "Detail", which told you nothing about what belongs in it, and the field's type is the one
+         thing the row does not otherwise show once the form is locked. */
+      const typeName=wfTypeDef(type)[1]||'Text';
+      const placeholder=typeName+(f.optional?' (optional)':'');
       if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
         valueHtml='<input class="ac-in wf-evt-value" type="text" inputmode="decimal" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" oninput="wfNumOnly(this)">';
@@ -2402,11 +2401,18 @@
         A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
       }
     } else if(amAssignee && caseActive){
+      /* Reject stays available until the step is forwarded on — a step can only be sent back by
+         whoever holds it, and on a step shared between people nobody holds it until somebody
+         Receives. So Reject was unreachable there: refused before receiving, hidden after. It now
+         shows once the step is yours, whether that was by being its owner or by receiving it.
+         The very first step has nobody to go back to, so it is never rejectable. */
+      const iHoldIt=eq(fcs.person,me());
+      const rejectBtn=isFirst?'':'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
-         +(isFirst?'':'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>');
+         +(iHoldIt?rejectBtn:'');
       } else {
-        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
+        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
@@ -4700,9 +4706,12 @@
            not see simply was not there, so a middle step looked like the end of the line and got
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
-        const maxSeqByFlow={};
+        const maxSeqByFlow={}, minSeqByFlow={};
         if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq').in('flow_id',flowIds);
-          (((r&&r.data)||[])).forEach(function(s){ if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq; }); }catch(_e){} }
+          (((r&&r.data)||[])).forEach(function(s){
+            if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
+            if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
+          }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
         /* The next step is the LOWEST sequence above this one, not seq+1. Sequences are not always
@@ -4723,7 +4732,13 @@
           // step among the rows we loaded is not proof there isn't one.
           const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
           const moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
+          /* Same for the FIRST step, which is what decides whether Reject is offered - only the
+             very first step of a workflow cannot be rejected, because there is nobody to send it
+             back to. Taken from the rows we could read, a step whose predecessors were invisible
+             looked like the first one, so Reject vanished from the outside list. */
+          const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
+          const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -5098,16 +5113,21 @@
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
     const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
     let wfRR='';
+    // Same rule as the step's own page: a step can only be sent back by whoever holds it, and a
+    // shared step is held by nobody until somebody Receives — so Reject belongs on the received
+    // side too, or it can never be reached on a shared step.
+    const wfIHoldIt=wfInfo&&eq(wfInfo.person,me());
+    const wfRejectBtn=wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo&&wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`;
     if(opt.checkable&&wfInfo){
       if(wfNeedsReceive){
-        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`}</div>`;
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIHoldIt?wfRejectBtn:''}</div>`;
       } else if(wfReceived){
         // Received: a Forward button (or Done on the last step) in the exterior list — the same
         // actions the detail page offers, so a step can be moved on without opening it.
         // Hovering names the person it is going to, so you know who you are handing it to before
         // you press it — "Forward to the next person" told you nothing.
         const fwdTip=wfForwardLabel(wfInfo);
-        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfIsLastStep
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfRejectBtn}${wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
       }
