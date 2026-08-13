@@ -517,8 +517,19 @@
     document.head.appendChild(s);
   }
 
-  let PPL=null;
-  async function people(){ if(PPL)return PPL; try{ const {data}=await sb.schema('acc').rpc('people'); if(data&&data.length){PPL=data.map(p=>({email:p.email,name:p.full_name||p.email,depts:Array.isArray(p.department)?p.department:[]}));return PPL;} }catch(e){} try{ if(typeof getPeople==='function'){const g=await getPeople(); PPL=(g||[]).map(p=>({email:p.email,name:p.name||p.email,depts:Array.isArray(p.depts)?p.depts:(Array.isArray(p.department)?p.department:[])}));return PPL;} }catch(e){} PPL=[]; return PPL; }
+  /* The people list is fetched once and kept. That is fine for a short visit, but a tab left open
+     across a day never sees somebody who joined, or a change of department - the list simply stays
+     as it was when the page loaded, and a person who is plainly in the system does not appear in a
+     picker. Cache for a few minutes rather than forever, and let a caller force a re-read. */
+  let PPL=null, PPL_AT=0;
+  const PPL_TTL=180000;
+  async function people(force){
+    if(PPL && !force && (Date.now()-PPL_AT)<PPL_TTL) return PPL;
+    try{ const {data}=await sb.schema('acc').rpc('people'); if(data&&data.length){PPL=data.map(p=>({email:p.email,name:p.full_name||p.email,depts:Array.isArray(p.department)?p.department:[]}));PPL_AT=Date.now();return PPL;} }catch(e){}
+    try{ if(typeof getPeople==='function'){const g=await getPeople(); PPL=(g||[]).map(p=>({email:p.email,name:p.name||p.email,depts:Array.isArray(p.depts)?p.depts:(Array.isArray(p.department)?p.department:[])}));PPL_AT=Date.now();return PPL;} }catch(e){}
+    if(PPL) return PPL;            // a failed refresh keeps the last good list rather than emptying it
+    PPL=[]; PPL_AT=0; return PPL;
+  }
   const nameOf=(l,e)=>{const p=(l||[]).find(x=>eq(x.email,e));return p?p.name:e;};
   const iniOf=(n)=> (typeof initials==='function'?initials(n):(String(n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('')))||'?';
   function avatars(list,emails){ emails=emails||[]; return '<div class="ac-avs">'+emails.slice(0,4).map(e=>`<span class="ac-av" style="background:${colorFor(e)}" title="${esc2(nameOf(list,e))}">${esc2(iniOf(nameOf(list,e)).toUpperCase())}</span>`).join('')+(emails.length>4?`<span class="ac-av" style="background:#94a3b8" title="${esc2(emails.slice(4).map(e=>nameOf(list,e)).join(', '))}">+${emails.length-4}</span>`:'')+'</div>'; }
@@ -784,7 +795,11 @@
       ? '<span class="wf-pp-nm"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> Decided when an instance is started</span>'
       : (people.length
           ? people.slice(0,3).map(function(p){ return '<span class="wf-pp-av" style="background:'+colorFor(p.email)+'">'+esc2(iniOf(p.name).toUpperCase())+'</span>'; }).join('')
-            +'<span class="wf-pp-nm">'+esc2(people.length===1?people[0].name:(people.length+' people'))+'</span>'
+            /* Name them. "2 people" meant you had to open the dropdown to find out whether the
+               second person you picked actually stuck - the one thing the button should tell you. */
+            +'<span class="wf-pp-nm" title="'+esc2(people.map(function(p){return p.name;}).join(' / '))+'">'
+              +esc2(people.length<=2?people.map(function(p){return p.name;}).join(' / ')
+                    :(people[0].name+' + '+(people.length-1)+' more'))+'</span>'
           : '<span class="wf-pp-ph">Assign person…</span>');
     const groups={}; (WF_PEOPLE||[]).forEach(function(pp){ const ds=(Array.isArray(pp.depts)?pp.depts:[]).map(function(d){return String(d||'').trim();}).filter(Boolean); const key=ds.length?ds.slice().sort().join(', '):'Unassigned'; (groups[key]=groups[key]||[]).push(pp); });
     const order=Object.keys(groups).sort(function(a,b){ return a==='Unassigned'?1:(b==='Unassigned'?-1:a.localeCompare(b)); });
@@ -1119,7 +1134,7 @@
     wfInjectCss(); window._wfDelId=null;
     setCrumb(['Accountability','Workflow', id?'Edit':'New']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-    if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+    try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     if(!window._wfPpWired){ document.addEventListener('click',function(e){ if(!e.target||!e.target.closest||!e.target.closest('.wf-pp')) document.querySelectorAll('.wf-pp.open').forEach(function(x){x.classList.remove('open');}); }); window._wfPpWired=true; }
     let flow={name:'',description:'',trigger_event:''}, steps=[];
     if(id){
@@ -1738,7 +1753,7 @@
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-    if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+    try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     let flow=null, steps=[], cases=[], fcs=[];
     try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); flow=data; }catch(e){}
     try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
@@ -2059,7 +2074,7 @@
 
   window.wfEventOpen=async function(flowId, caseId){
     wfInjectCss();
-    if(!WF_PEOPLE){ try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=[]; } }
+    try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     let flow=null, steps=[], caseRow=null;
     try{ const {data}=await ACC().from('flows').select('*').eq('id',flowId).maybeSingle(); flow=data; }catch(e){}
     try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
@@ -2230,7 +2245,7 @@
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
   async function wfTaskPage(v, t, members, list, ro){
     wfInjectCss(); window._wfDelId=null; setCrumb(['Accountability','Workflow','Task']);
-    if(!WF_PEOPLE){ try{ WF_PEOPLE=list||await people(); }catch(e){ WF_PEOPLE=list||[]; } }
+    try{ WF_PEOPLE=list||await people(); }catch(e){ WF_PEOPLE=list||WF_PEOPLE||[]; }
     let fcs=null;
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('id',t.flow_case_step_id).maybeSingle(); fcs=data; }catch(e){}
     if(!fcs){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">This workflow step no longer exists.</div></div>'; return; }
@@ -2242,7 +2257,16 @@
     let atts=[]; if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
     const attsByUpdate={}; atts.forEach(function(a){ (attsByUpdate[a.update_id]=attsByUpdate[a.update_id]||[]).push(a); });
     const idx=allSteps.findIndex(function(s){return s.id===fcs.id;});
-    const isFirst=idx<=0, isLast=idx===(allSteps.length-1);
+    /* Work out first/last from the SEQUENCE, the same way the outside list and the database do.
+       Position in the array agreed with them only as long as this step was actually found in it -
+       if the lookup missed, idx came back -1 and the page called a step "not last" and offered to
+       forward it to whoever happened to be first in the list. Falling back to fcs.seq keeps the
+       two views saying the same thing. */
+    const mySeq=(idx>=0?allSteps[idx].seq:fcs.seq);
+    const nextStep=allSteps.filter(function(s){ return s.seq>mySeq; })
+      .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
+    const prevExists=allSteps.some(function(s){ return s.seq<mySeq; });
+    const isFirst=!prevExists, isLast=!nextStep;
     const amAssignee=(members||[]).some(function(e){return eq(e,me());});
     const received=!!fcs.received_at, forwarded=!!fcs.forwarded_at;
     const caseActive=caseRow && caseRow.status!=='Done';
@@ -2266,7 +2290,7 @@
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
-          const fwd=wfForwardLabel({nextWho:allSteps[idx+1]?wfWhoOfStep(allSteps[idx+1]):''});
+          const fwd=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
           A+='<button class="ac-btn primary" title="'+esc2(fwd)+'" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd)+'</button>';
         }
       }
@@ -4534,12 +4558,22 @@
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
-        const bounds={}, bySeq={};
-        allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (bySeq[s.case_id]=bySeq[s.case_id]||{})[s.seq]=s; });
+        const bounds={}, byCase={};
+        allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
+        /* The next step is the LOWEST sequence above this one, not seq+1. Sequences are not always
+           contiguous - delete a step from a workflow and the numbering leaves a hole - and looking
+           for seq+1 across that hole found nothing, so the exterior list called a middle step the
+           last one and offered Done while the step's own page correctly offered Forward. This is
+           the same "next" the database itself uses when forwarding. */
+        function wfNextOf(caseId, seq){
+          const list=(byCase[caseId]||[]).filter(function(x){ return x.seq>seq; });
+          if(!list.length) return null;
+          return list.reduce(function(a,b){ return b.seq<a.seq?b:a; });
+        }
         (steps||[]).forEach(function(s){
           const bb=bounds[s.case_id]||{min:s.seq,max:s.seq};
           const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
-          const nextStep=(bySeq[s.case_id]||{})[s.seq+1]||null;
+          const nextStep=wfNextOf(s.case_id,s.seq);
           window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:!!nextStep,nextWho:nextStep?wfWhoOfStep(nextStep):''};
         });
       }
