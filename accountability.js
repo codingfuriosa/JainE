@@ -944,13 +944,30 @@
     let flows=[], stepCounts={}, ownersByFlow={}, myFlowIds={};
     try{ const {data}=await ACC().from('flows').select('*').order('id',{ascending:false}); flows=data||[]; }
     catch(e){ toast('Could not load workflows: '+((e&&e.message)||e),'err'); }
-    try{ const {data}=await ACC().from('flow_steps').select('flow_id,owner_email'); (data||[]).forEach(function(s){ stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1; if(s.owner_email){ (ownersByFlow[s.flow_id]=ownersByFlow[s.flow_id]||[]); if(!ownersByFlow[s.flow_id].some(function(e){return eq(e,s.owner_email);}))ownersByFlow[s.flow_id].push(s.owner_email); } }); }catch(e){}
+    /* Every owner of every step, not just the first. owner_email holds only the first person on a
+       step; owner_emails holds them all. Reading owner_email alone left a second owner without a
+       circle here - and worse, this same list decides who SEES a workflow at all, so somebody added
+       as a second owner could be missing the workflow from their list entirely. */
+    try{ const {data}=await ACC().from('flow_steps').select('flow_id,owner_email,owner_emails');
+      (data||[]).forEach(function(s){
+        stepCounts[s.flow_id]=(stepCounts[s.flow_id]||0)+1;
+        const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
+        owners.filter(Boolean).forEach(function(e){
+          const l=(ownersByFlow[s.flow_id]=ownersByFlow[s.flow_id]||[]);
+          if(!l.some(function(x){return eq(x,e);})) l.push(e);
+        });
+      }); }catch(e){}
     // Workflows where I'm assigned an instance (a step in one of its cases) — so a person nominated by
     // the triggering-event owner sees the workflow even without owning a fixed step. The instance list
     // inside is limited to their own instances by row-level security.
     try{
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id').ilike('person',me());
-      const caseIds=Array.from(new Set((mine||[]).map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
+      // Being OFFERED a step counts too, not just having claimed one. A step shared between people
+      // has nobody in `person` until somebody takes it, so matching on person alone hid the
+      // workflow from everybody it was waiting on.
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,person,candidates');
+      const caseIds=Array.from(new Set((mine||[])
+        .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
+        .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
       if(caseIds.length){ const {data:cs}=await ACC().from('flow_cases').select('flow_id').in('id',caseIds); (cs||[]).forEach(function(c){ myFlowIds[c.flow_id]=true; }); }
     }catch(e){}
     // You see a workflow if you created it / own a step / it's shared with your department, OR you have
@@ -4582,6 +4599,15 @@
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
+        /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
+           step?" out purely from the instance's own steps meant it depended on being able to READ
+           them - and a step belonging to somebody else is not always readable. Any step we could
+           not see simply was not there, so a middle step looked like the end of the line and got
+           the Done flag while its own page correctly offered Forward. The definition is readable
+           to anyone who can see the workflow, so it settles the question either way. */
+        const maxSeqByFlow={};
+        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq').in('flow_id',flowIds);
+          (((r&&r.data)||[])).forEach(function(s){ if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq; }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
         /* The next step is the LOWEST sequence above this one, not seq+1. Sequences are not always
@@ -4598,7 +4624,11 @@
           const bb=bounds[s.case_id]||{min:s.seq,max:s.seq};
           const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
           const nextStep=wfNextOf(s.case_id,s.seq);
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:!!nextStep,nextWho:nextStep?wfWhoOfStep(nextStep):''};
+          // A step is the last one only if the WORKFLOW says nothing follows it. Seeing no next
+          // step among the rows we loaded is not proof there isn't one.
+          const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
+          const moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
