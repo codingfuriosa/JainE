@@ -1509,7 +1509,10 @@
          wall of dates you had to scroll past. The times now live in a collapsed half that opens on
          tap, one step at a time (wfTlTap). On a desktop nothing is hidden — the CSS only collapses
          under 760px. The chevron is drawn by CSS, not markup, so the desktop layout is untouched. */
-      return '<div class="wf-tl-item '+cls+(whenHtml?' wf-tl-tappable':'')+'" onclick="wfTlTap(this)">'
+      // The step the instance is actually sitting on opens by itself — that is the one somebody
+      // opening an instance wants to read. Tapping any other step closes it and opens that one.
+      const openByDefault=(cls==='wf-tl-cur')&&!!whenHtml;
+      return '<div class="wf-tl-item '+cls+(whenHtml?' wf-tl-tappable':'')+(openByDefault?' wf-tl-open':'')+'" onclick="wfTlTap(this)">'
         +'<div class="wf-tl-num">'+(i+1)+'</div><div class="wf-tl-body">'
         +'<div class="wf-tl-row"><div class="wf-tl-title">'+esc2(s.title||'')+' '+badge+'</div><div class="wf-tl-meta">'+who+durHtml+'</div></div>'
         +'<div class="wf-tl-times">'+whenHtml+'</div>'
@@ -2133,8 +2136,11 @@
         +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
       +'</div>';
     } else {
-      const placeholder=eq(label,'Wheredoc Id')?'The Wheredoc reference this bill was filed under'
-        :(f.optional?'Optional':'Detail');
+      /* The box says what KIND of answer it wants — "Text", "Number", "Date". It used to say
+         "Detail", which told you nothing about what belongs in it, and the field's type is the one
+         thing the row does not otherwise show once the form is locked. */
+      const typeName=wfTypeDef(type)[1]||'Text';
+      const placeholder=typeName+(f.optional?' (optional)':'');
       if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
         valueHtml='<input class="ac-in wf-evt-value" type="text" inputmode="decimal" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" oninput="wfNumOnly(this)">';
@@ -4700,9 +4706,12 @@
            not see simply was not there, so a middle step looked like the end of the line and got
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
-        const maxSeqByFlow={};
+        const maxSeqByFlow={}, minSeqByFlow={};
         if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq').in('flow_id',flowIds);
-          (((r&&r.data)||[])).forEach(function(s){ if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq; }); }catch(_e){} }
+          (((r&&r.data)||[])).forEach(function(s){
+            if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
+            if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
+          }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
         /* The next step is the LOWEST sequence above this one, not seq+1. Sequences are not always
@@ -4723,7 +4732,13 @@
           // step among the rows we loaded is not proof there isn't one.
           const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
           const moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:bb.min,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
+          /* Same for the FIRST step, which is what decides whether Reject is offered - only the
+             very first step of a workflow cannot be rejected, because there is nobody to send it
+             back to. Taken from the rows we could read, a step whose predecessors were invisible
+             looked like the first one, so Reject vanished from the outside list. */
+          const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
+          const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
