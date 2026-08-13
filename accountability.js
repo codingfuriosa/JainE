@@ -2401,18 +2401,16 @@
         A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
       }
     } else if(amAssignee && caseActive){
-      /* Reject stays available until the step is forwarded on — a step can only be sent back by
-         whoever holds it, and on a step shared between people nobody holds it until somebody
-         Receives. So Reject was unreachable there: refused before receiving, hidden after. It now
-         shows once the step is yours, whether that was by being its owner or by receiving it.
-         The very first step has nobody to go back to, so it is never rejectable. */
-      const iHoldIt=eq(fcs.person,me());
+      /* Reject sits beside Receive — on arrival the choice is take it or send it back. Once
+         received it is yours and the way on is Forward. A step shared between people is held by
+         nobody until somebody Receives, and wf_reject now accepts anyone it was offered to, so it
+         no longer has to be claimed before it can be declined. The very first step has nobody to
+         go back to, so it is never rejectable. */
       const rejectBtn=isFirst?'':'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
       if(!received){
-        A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'
-         +(iHoldIt?rejectBtn:'');
+        A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
-        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
+        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
@@ -5113,21 +5111,20 @@
     const wfIsFirst=wfInfo&&wfInfo.minSeq!=null&&wfInfo.seq===wfInfo.minSeq;
     const wfIsLastStep=wfInfo&&!wfInfo.nextExists;
     let wfRR='';
-    // Same rule as the step's own page: a step can only be sent back by whoever holds it, and a
-    // shared step is held by nobody until somebody Receives — so Reject belongs on the received
-    // side too, or it can never be reached on a shared step.
-    const wfIHoldIt=wfInfo&&eq(wfInfo.person,me());
+    // Reject sits beside Receive: the choice on arrival is take it or send it back. Once received
+    // it is yours, and the way on is Forward. (Being offered a shared step is enough to reject it
+    // — wf_reject accepts a candidate, so it no longer has to be claimed first.)
     const wfRejectBtn=wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo&&wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`;
     if(opt.checkable&&wfInfo){
       if(wfNeedsReceive){
-        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfIHoldIt?wfRejectBtn:''}</div>`;
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfRejectBtn}</div>`;
       } else if(wfReceived){
         // Received: a Forward button (or Done on the last step) in the exterior list — the same
         // actions the detail page offers, so a step can be moved on without opening it.
         // Hovering names the person it is going to, so you know who you are handing it to before
         // you press it — "Forward to the next person" told you nothing.
         const fwdTip=wfForwardLabel(wfInfo);
-        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfRejectBtn}${wfIsLastStep
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
       }
