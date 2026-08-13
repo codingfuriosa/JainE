@@ -557,8 +557,42 @@
 
   /* ---------- notifications ---------- */
   let NOTIFS=[], URGENT=[];
+  /* A notification is a nudge about something needing attention, so it should not outlive the
+     thing it is nudging about. Once the task has been opened, finished or approved there is
+     nothing left to do, and leaving the notice sitting in the bell just buries the ones that do
+     still matter. Anything about a settled task is marked read and dropped from the list.
+     Approval notices are left alone - they ARE the piece of work, not a nudge about one. */
+  function notifTaskSettled(t){
+    if(!t) return true;                                    // task is gone
+    const s=String(t.status||'').toLowerCase();
+    const a=String(t.approval_state||'').toLowerCase();
+    return s==='completed' || s==='done' || a==='approved' || !!t.completed_at;
+  }
+  async function notifClearForTask(tid){
+    if(tid==null) return;
+    let touched=false;
+    NOTIFS.forEach(function(n){ if(n.task_id===tid && !n.read && n.kind!=='approval'){ n.read=true; touched=true; } });
+    if(touched) notifPaint();
+    try{ await ACC().from('notifications').update({read:true})
+      .eq('recipient',me()).eq('task_id',tid).eq('read',false).neq('kind','approval'); }catch(e){}
+  }
   async function notifLoad(){
     try{ const {data}=await ACC().from('notifications').select('*').eq('recipient',me()).order('created_at',{ascending:false}).limit(50); NOTIFS=data||[]; }catch(e){ NOTIFS=[]; }
+    // Drop anything whose task has already been dealt with, in one pass rather than per row.
+    try{
+      const ids=Array.from(new Set(NOTIFS.filter(function(n){ return !n.read && n.kind!=='approval' && n.task_id!=null; })
+                                        .map(function(n){ return n.task_id; })));
+      if(ids.length){
+        const {data:ts}=await ACC().from('ptasks').select('id,status,approval_state,completed_at').in('id',ids);
+        const byId={}; (ts||[]).forEach(function(t){ byId[t.id]=t; });
+        const stale=ids.filter(function(id){ return notifTaskSettled(byId[id]); });
+        if(stale.length){
+          NOTIFS.forEach(function(n){ if(n.task_id!=null && stale.indexOf(n.task_id)!==-1 && n.kind!=='approval') n.read=true; });
+          await ACC().from('notifications').update({read:true})
+            .eq('recipient',me()).eq('read',false).neq('kind','approval').in('task_id',stale);
+        }
+      }
+    }catch(e){}
     notifPaint();
   }
   function paintBell(){
@@ -785,7 +819,11 @@
      raises an instance nominates its members at that moment. */
   // Sentinel stored in place of an email when a step has no fixed owner.
   const WF_TRIGGER_OWNER_KEY='__TRIGGER_OWNER__';
-  function wfPersonPickerHtml(sel, multi, allowTrigger, extraClass){
+  /* `pinned` — people the workflow already runs through. They are repeated in a short group at the
+     top so the obvious choices are reachable without hunting through 79 names, and they still
+     appear in their own department below, because that is where somebody scanning by department
+     will look for them. */
+  function wfPersonPickerHtml(sel, multi, allowTrigger, extraClass, pinned){
     const pid='wfpp'+(++WF_PID);
     const chosen=Array.isArray(sel)?sel.filter(Boolean):(sel?[sel]:[]);
     const fromTrigger=chosen.length===1&&chosen[0]===WF_TRIGGER_OWNER_KEY;
@@ -813,7 +851,20 @@
         +'<span style="flex:1;min-width:0">Triggering Event Owner<div style="font-size:11px;color:var(--slate)">Whoever starts an instance nominates who does this step</div></span>'
         +(fromTrigger?'<i class="fa-solid fa-check" style="color:var(--brand)"></i>':'')+'</div>';
     }
-    order.forEach(function(d){ listHtml+='<div class="ms-dept">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ const on=isOn(pp.email); listHtml+='<div class="ms-opt'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)">'+avOf(pp.name)+'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc2(pp.name)+'</span>'+(on?'<i class="fa-solid fa-check" style="color:var(--brand)"></i>':'')+'</div>'; }); });
+    const optHtml=function(pp){
+      const on=isOn(pp.email);
+      return '<div class="ms-opt'+(on?' on':'')+'" data-n="'+esc2((String(pp.name||'')+' '+String(pp.email||'')).toLowerCase())+'" data-email="'+esc2(pp.email)+'" data-name="'+esc2(pp.name)+'" onclick="wfPersonPick(this)">'+avOf(pp.name)+'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc2(pp.name)+'</span>'+(on?'<i class="fa-solid fa-check" style="color:var(--brand)"></i>':'')+'</div>';
+    };
+    // Already in this workflow — repeated at the top, and left in their department below too.
+    const pinList=(Array.isArray(pinned)?pinned:[]).filter(Boolean)
+      .filter(function(e){ return e!==WF_TRIGGER_OWNER_KEY; })
+      .map(function(e){ return (WF_PEOPLE||[]).find(function(x){return eq(x.email,e);})||{email:e,name:e,depts:[]}; })
+      .filter(function(pp,i,arr){ return arr.findIndex(function(y){return eq(y.email,pp.email);})===i; });
+    if(pinList.length){
+      listHtml+='<div class="ms-dept"><i class="fa-solid fa-thumbtack" style="font-size:9px;opacity:.7"></i> Already in this workflow</div>'
+        +pinList.map(optHtml).join('');
+    }
+    order.forEach(function(d){ listHtml+='<div class="ms-dept">'+esc2(d)+'</div>'; groups[d].forEach(function(pp){ listHtml+=optHtml(pp); }); });
     return '<div class="wf-pp'+(multi?' multi':'')+'" id="'+pid+'">'
       +'<input type="hidden" class="wf-s-person'+(extraClass?(' '+extraClass):'')+'" value="'+esc2(chosen.join(','))+'">'
       +'<button type="button" class="ac-in wf-pp-btn" onclick="wfPersonToggle(this)">'+trig+'<i class="fa-solid fa-chevron-down wf-pp-caret"></i></button>'
@@ -2018,6 +2069,20 @@
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
       +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
     wfHydrateAttThumbs();
+    /* Bring the panel into view. Clicking a row far down a long table used to load the instance
+       somewhere off-screen - most obviously on a phone, where the panel sits below the whole
+       table - so it looked as though nothing had happened. Only scrolls when the top of the panel
+       is not already showing, so clicking through rows with it in view does not jump about. */
+    setTimeout(function(){
+      try{
+        const r=box.getBoundingClientRect();
+        const hdr=document.querySelector('.ac-head'), off=(hdr?hdr.getBoundingClientRect().height:0)+12;
+        if(r.top<off || r.top>window.innerHeight*0.6){
+          const y=r.top+window.pageYOffset-off;
+          window.scrollTo({top:Math.max(0,y), behavior:'smooth'});
+        }
+      }catch(_e){}
+    },40);
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
@@ -2166,9 +2231,23 @@
        instance says who should do them. More than one person can be named for each; they all get
        the task and the first to Receive it takes it. */
     let openSteps=[];
+    let wfRegulars=[];
     if(!editing){
-      try{ const {data}=await ACC().from('flow_steps').select('seq,title,owner_from_trigger')
-        .eq('flow_id',flowId).eq('owner_from_trigger',true).order('seq',{ascending:true}); openSteps=data||[]; }catch(_e){}
+      try{ const {data}=await ACC().from('flow_steps').select('seq,title,owner_from_trigger,owner_email,owner_emails')
+        .eq('flow_id',flowId).order('seq',{ascending:true});
+        const all=data||[];
+        openSteps=all.filter(function(s){ return s.owner_from_trigger; });
+        /* Whoever the workflow already runs through. Nominating somebody for an open step is
+           nearly always one of them, so they are pinned to the top of the picker rather than
+           having to be found among everyone in the company. */
+        const seen=[];
+        if(flow.trigger_owner) seen.push(flow.trigger_owner);
+        all.forEach(function(s){
+          const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
+          owners.filter(Boolean).forEach(function(e){ if(!seen.some(function(x){return eq(x,e);})) seen.push(e); });
+        });
+        wfRegulars=seen;
+      }catch(_e){}
     }
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does these steps? '+tip('These steps have no fixed owner. Name one or more people for each — they all receive it, and the first to accept it keeps it.')+'</label>'
@@ -2177,7 +2256,7 @@
               +'<div class="ac-in wf-evt-labelro wf-mem-lbl" style="background:#f8fafc;color:var(--ink);display:flex;align-items:center;gap:7px;overflow:hidden">'
                 +'<i class="fa-solid fa-user-plus" style="font-size:10px;color:var(--slate);flex:none"></i>'
                 +'<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Step '+st.seq+' · '+esc2(st.title||'')+'</span></div>'
-              +wfPersonPickerHtml([], true, false)
+              +wfPersonPickerHtml([], true, false, '', wfRegulars)
             +'</div>';
           }).join('')+'</div>'
       : '';
@@ -2504,6 +2583,22 @@
     .wf-inst-filterbar .wf-lbl .ac-in{min-width:140px}
     .wf-daterange-sep{color:var(--slate);font-size:12px;margin:0 -2px 9px}
     .wf-inst-filter-dates .ac-btn.primary{height:38px}
+    /* On a phone the strip wrapped wherever it happened to run out of room: the two date boxes
+       split across lines, the arrow between them stranded, and Update landing on its own row at a
+       different height from everything else. Laid out deliberately instead — search across the
+       top, the two dates sharing a row underneath, then the buttons. */
+    @media (max-width:640px){
+      .wf-inst-filterbar{gap:10px;padding:10px}
+      .wf-inst-filter-search{flex:1 1 100%;min-width:0}
+      .wf-inst-filter-dates{flex:1 1 100%;display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end}
+      .wf-inst-filterbar .wf-lbl{min-width:0}
+      .wf-inst-filterbar .wf-lbl .ac-in{min-width:0;width:100%;box-sizing:border-box}
+      .wf-daterange-sep{display:none}                 /* From/To already say which is which */
+      .wf-inst-filter-dates .ac-btn.primary{grid-column:1;justify-content:center}
+      /* the clear button fills its half rather than sitting as a lone 38px square beside a
+         full-width Update, which read as a mistake */
+      .wf-inst-filter-dates .ac-btn.ic{grid-column:2;justify-content:center;height:38px;width:auto}
+    }
     .wf-card-hint{font-weight:500;text-transform:none;letter-spacing:0;color:var(--slate);font-size:12px}
     /* list header + full-width rows */
     /* Workflow task Details: always two columns of three, never one long list */
@@ -5140,6 +5235,7 @@
   /* ---------- TASK PAGE ---------- */
   async function taskPage(v, tid, ro){
     injectCss(); tid=Number(tid); setCrumb(['Accountability','Task']);
+    notifClearForTask(tid);   // opening the task IS seeing it — its notifications go
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
     const [tR,aR,sR,cR,actR,list,dR,fR]=await Promise.all([
       ACC().from('ptasks').select('*').eq('id',tid).single(),
