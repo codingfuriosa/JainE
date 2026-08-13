@@ -9438,12 +9438,13 @@ function trDateRangeHtml(){
   const active=!!(TR_DATE_FROM||TR_DATE_TO);
   return '<div style="position:relative;display:inline-block">'
     +'<button class="btn btn-sm'+(active?' btn-primary':'')+'" id="trDateBtn" onclick="event.stopPropagation();trToggleDateDd()"><i class="fa-solid fa-calendar-days"></i> <span id="trDateBtnLabel">'+esc(trDateLabelText())+'</span> <i class="fa-solid fa-chevron-down" style="font-size:9px;margin-left:2px"></i></button>'
-    +'<div class="dropdown" id="trDateDd" style="top:38px;left:0;right:auto;width:250px;padding:14px" onclick="event.stopPropagation()">'
-      +'<label style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px">From</label>'
-      +'<input type="date" id="trDateFrom" value="'+esc(TR_DATE_FROM||'')+'" style="width:100%;margin:4px 0 10px;box-sizing:border-box">'
-      +'<label style="font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.4px">To</label>'
-      +'<input type="date" id="trDateTo" value="'+esc(TR_DATE_TO||'')+'" style="width:100%;margin:4px 0 12px;box-sizing:border-box">'
-      +'<div style="display:flex;justify-content:flex-end;gap:8px">'
+    +'<div class="dropdown" id="trDateDd" style="top:38px;left:0;right:auto;width:272px;padding:16px" onclick="event.stopPropagation()">'
+      +'<div style="font-size:13px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Filter by date</div>'
+      +'<div class="frm" style="margin-top:2px">'
+        +'<label style="margin-top:10px">From</label><input type="date" id="trDateFrom" value="'+esc(TR_DATE_FROM||'')+'">'
+        +'<label>To</label><input type="date" id="trDateTo" value="'+esc(TR_DATE_TO||'')+'">'
+      +'</div>'
+      +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">'
         +'<button class="btn btn-sm" onclick="trClearDateRange()">Clear</button>'
         +'<button class="btn btn-sm btn-primary" onclick="trApplyDateRange()">Apply</button>'
       +'</div>'
@@ -10044,12 +10045,6 @@ window.trPinSelected=async function(pin){
   toast(pin?'Pinned':'Unpinned','ok');
   try{await Promise.all(ids.map(function(id){const r=(TR_ROWS||[]).find(function(x){return x.id===id;});return sb.schema('acc').from('transcriptions').update({pinned:pin,pin_rank:r?r.pin_rank:null}).eq('id',id);}));}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
 };
-window.trTogglePin=async function(id,pin){
-  const r=(TR_ROWS||[]).find(function(x){return x.id===id;});
-  if(r){r.pinned=pin;r.pin_rank=pin?trNextPinRank():null;}
-  trRenderList();trRenderFolderRows();
-  try{await sb.schema('acc').from('transcriptions').update({pinned:pin,pin_rank:r?r.pin_rank:null}).eq('id',id);}catch(e){}
-};
 // Reorder pinned calls by drag-and-drop — mirrors the existing checklist drag pattern
 // (clReorderDrop) but persists order as a pin_rank float on the transcription itself.
 window.trPinReorderDrop=async function(e,row){
@@ -10109,7 +10104,7 @@ function trRowHtml(r,mode){
   const checkTd=mode==='list'?('<td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox"'+(TR_SELECTED.has(r.id)?' checked':'')+' onchange="trToggleSelect('+r.id+',this.checked)"></td>'):'';
   // Pinned rows are draggable from anywhere on the row (no separate grip icon needed — that
   // used to widen this cell just for pinned rows and forced the table into horizontal scroll).
-  const pinIcon=r.pinned?('<i class="fa-solid fa-thumbtack" style="color:#d97706;font-size:12px;cursor:pointer;flex-shrink:0" title="Drag row to reorder · click to unpin" onclick="event.stopPropagation();trTogglePin('+r.id+',false)"></i>'):'';
+  const pinIcon=r.pinned?('<i class="fa-solid fa-thumbtack" style="color:#d97706;font-size:12px;flex-shrink:0" title="Pinned — drag row to reorder" onclick="event.stopPropagation()"></i>'):'';
   return '<tr'+rowClass+openAttrs+dragAttrs+'>'
     +checkTd
     +'<td><div style="display:flex;align-items:center;gap:8px;max-width:280px">'+pinIcon+'<i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px;flex-shrink:0"></i><div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
@@ -10566,8 +10561,8 @@ async function trDetail(v,id){
     +'</div>'
     +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>'
     +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-comments" style="color:#0d9488"></i> Remarks</div>'
-      +'<div class="chat-wrap" id="trCmWrap">'+(comments.length?comments.map(trCmItem).join(''):'<div style="color:var(--slate);font-size:13px;text-align:center;padding:10px">No remarks yet — anyone on the team can add one.</div>')+'</div>'
-      +'<div style="display:flex;gap:8px;margin-top:12px"><input id="trCmNew" placeholder="Add a remark…" style="flex:1" onkeydown="if(event.key===\'Enter\')trCmAdd('+r.id+')"><button class="btn btn-primary" onclick="trCmAdd('+r.id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+      +'<div class="chat-wrap" id="trCmWrap">'+(comments.length?comments.map(trCmItem).join(''):'<div class="empty" style="padding:26px 10px"><i class="fa-solid fa-comment-slash"></i><div style="font-size:13px">No remarks yet — anyone on the team can add one</div></div>')+'</div>'
+      +'<div class="tr-cm-composer"><input id="trCmNew" placeholder="Add a remark…" onkeydown="if(event.key===\'Enter\')trCmAdd('+r.id+')"><button class="tr-cm-send" onclick="trCmAdd('+r.id+')" title="Post remark"><i class="fa-solid fa-paper-plane"></i></button></div>'
     +'</div>';
   TR_DETAIL_ROW=r;
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
@@ -10582,7 +10577,7 @@ function trCmItem(c){
   return '<div class="chat-msg'+(mine?' mine':'')+'">'
     +(mine?'':avatar(nameOf(c.author)))
     +'<div style="min-width:0">'
-      +'<div class="chat-meta"><b>'+esc(mine?'You':nameOf(c.author))+'</b><span>'+relTime(c.created_at)+'</span><i class="fa-solid fa-trash" style="cursor:pointer;opacity:.55;font-size:10px" title="Delete remark" onclick="trCmDelete('+c.id+')"></i></div>'
+      +'<div class="chat-meta"><b>'+esc(mine?'You':nameOf(c.author))+'</b><span>'+relTime(c.created_at)+'</span><i class="fa-solid fa-trash tr-cm-del" title="Delete remark" onclick="trCmDelete('+c.id+')"></i></div>'
       +'<div class="chat-bubble">'+esc(c.body)+'</div>'
     +'</div>'
   +'</div>';
