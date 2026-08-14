@@ -1918,8 +1918,113 @@ function misRowHtml(r,isPinned){
   return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}${justDone?' mis-just-done':''}" title="${esc(tip)}" style="${upcoming?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
+    <td onclick="event.stopPropagation()" class="mis-up-cell">${misUploadBtnHtml(r)}</td>
   </tr>`;
 }
+/* ---------- Legal documents: the papers filed against a case ----------
+   They live in S3 under legal/<SUB-CATEGORY>/<CASE FOLDER>/..., the same Legal Vault root the
+   rest of the app uses, and are indexed by mis_case_folders / mis_case_files. The row button
+   opens the case's folder to add to it; the toolbar's Documents button opens it to read. */
+function misUploadBtnHtml(r){
+  const n=(window._misDocCounts||{})[r.id]||0;
+  return '<button class="btn btn-sm mis-upbtn'+(n?' has':'')+'" title="'+(n?(n+' document'+(n===1?'':'s')+' — click to open or add'):'No documents yet — click to upload')
+    +'" onclick="event.stopPropagation();misDocsOpen('+r.id+')"><i class="fa-solid fa-'+(n?'folder-open':'cloud-arrow-up')+'"></i>'
+    +(n?('<span class="mis-upn">'+n+'</span>'):'')+'</button>';
+}
+window.misDocsSel=function(){ let id=null; window._misSel.forEach(function(x){ id=x; }); if(id!=null) misDocsOpen(id); };
+
+// The closest case type already on the case — the folder's category defaults to it rather than
+// making somebody choose from a list they have to think about.
+const MIS_DOC_CATS=['CIVIL CASE MATTERS','CONSUMER MATTERS','CRIMINAL MATTERS','HIGH COURT MATTERS','RERA CASE MATTER','DISPOSED'];
+function misGuessCat(caseType){
+  const t=String(caseType||'').toLowerCase();
+  if(!t) return MIS_DOC_CATS[0];
+  let best=MIS_DOC_CATS[0], score=-1;
+  MIS_DOC_CATS.forEach(function(c){
+    const words=c.toLowerCase().replace(/\s*matters?\s*$/,'').split(/\s+/).filter(Boolean);
+    const s=words.reduce(function(a,w){ return a+(t.indexOf(w)!==-1?w.length:0); },0);
+    if(s>score){ score=s; best=c; }
+  });
+  return score>0?best:MIS_DOC_CATS[0];
+}
+window.misDocsOpen=async function(caseId){
+  const row=(window._misRows||[]).find(function(r){ return r.id===caseId; })||{};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-folder-open"></i> Documents</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div></div>','md');
+  let folder=null, files=[];
+  try{
+    const {data:fo}=await sb.from('mis_case_folders').select('*').eq('case_id',caseId).maybeSingle(); folder=fo||null;
+    if(folder){ const {data:fi}=await sb.from('mis_case_files').select('*').eq('folder_id',folder.id).order('file_name',{ascending:true}); files=fi||[]; }
+  }catch(e){ toast('Could not load documents: '+((e&&e.message)||e),'err'); }
+  const body=document.querySelector('.modal-body'); if(!body)return;
+  const title=String(row.cause_title||('Case '+caseId)).replace(/\s+/g,' ').trim();
+  const cat=folder?folder.sub_category:misGuessCat(row.case_type);
+  const name=folder?folder.folder_name:title;
+  /* Existing papers are listed but never removable here — a filed document is part of the record.
+     Adding more is always allowed. */
+  const listHtml=files.length
+    ? '<div class="mis-doclist">'+files.map(function(f){
+        const up=!!f.uploaded_at;
+        return '<div class="mis-docrow"'+(up?(' onclick="s3OpenSigned(\'s3:'+esc(f.storage_key)+'\',\''+esc(String(f.file_name).split("/").pop().replace(/'/g,""))+'\')"'):'')+'>'
+          +'<i class="fa-solid fa-'+(/\.pdf$/i.test(f.file_name)?'file-pdf':'file')+'"></i>'
+          +'<span class="mis-docname" title="'+esc(f.file_name)+'">'+esc(f.file_name)+'</span>'
+          +'<span class="mis-docsz">'+(f.size_bytes?misBytes(f.size_bytes):'')+'</span>'
+          +(up?'<i class="fa-solid fa-arrow-up-right-from-square mis-docgo"></i>':'<span class="mis-docpend">not uploaded</span>')
+        +'</div>';
+      }).join('')+'</div>'
+    : '<div class="empty" style="padding:22px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);text-align:center">No documents filed yet</div>';
+  body.innerHTML=
+     '<label class="lbl">Case</label><div class="mis-ro">'+esc(title)+'</div>'
+    +'<label class="lbl">Category</label>'
+    +'<select class="inp" id="misDocCat"'+(folder?' disabled':'')+'>'
+      +MIS_DOC_CATS.map(function(c){ return '<option value="'+esc(c)+'"'+(c===cat?' selected':'')+'>'+esc(c)+'</option>'; }).join('')
+    +'</select>'
+    +(folder?'<div class="mis-hint">Set when the folder was created — it cannot be moved from here.</div>':'')
+    +'<label class="lbl">Folder name</label>'
+    +'<input class="inp" id="misDocName" value="'+esc(name)+'"'+(folder?'':' placeholder="Defaults to the case name"')+'>'
+    +'<label class="lbl" style="margin-top:14px">Documents'+(files.length?(' <span class="mis-count">'+files.length+'</span>'):'')+'</label>'
+    +listHtml
+    +'<label class="mis-drop" id="misDocDrop"><i class="fa-solid fa-cloud-arrow-up"></i> <span>Choose files to add</span>'
+      +'<input type="file" multiple id="misDocInput" style="display:none" onchange="misDocsPick(this,'+caseId+')"></label>'
+    +'<div id="misDocProg" class="mis-hint" style="display:none"></div>';
+};
+function misBytes(n){ n=Number(n)||0; return n>1048576?((n/1048576).toFixed(1)+' MB'):(n>1024?Math.round(n/1024)+' KB':n+' B'); }
+window.misDocsPick=async function(input,caseId){
+  const picked=[].slice.call(input.files||[]); if(!picked.length)return;
+  const cat=($('misDocCat')||{}).value||misGuessCat(''), nm=(($('misDocName')||{}).value||'').trim();
+  if(!nm){ toast('Give the folder a name','err'); return; }
+  const prog=$('misDocProg'); if(prog){ prog.style.display='block'; }
+  input.disabled=true;
+  const seg=function(s){ return String(s||'').replace(/[^\w.\- ]/g,'-').replace(/\s+/g,'-').replace(/-{2,}/g,'-').replace(/^[-.]+|[-.]+$/g,'')||'x'; };
+  const prefix='legal/'+seg(cat)+'/'+seg(nm);
+  let folderId=null;
+  try{
+    const {data:ex}=await sb.from('mis_case_folders').select('id').eq('case_id',caseId).maybeSingle();
+    if(ex) folderId=ex.id;
+    else{
+      const {data:ins,error}=await sb.from('mis_case_folders')
+        .insert({case_id:caseId,sub_category:cat,folder_name:nm,storage_prefix:prefix,created_by:state.email})
+        .select('id').single();
+      if(error) throw error; folderId=ins.id;
+    }
+    let done=0;
+    for(const f of picked){
+      if(prog) prog.textContent='Uploading '+(done+1)+' of '+picked.length+' — '+f.name;
+      const key=prefix+'/'+seg(f.name);
+      const {data,error}=await uploadFileToS3(key,f);
+      if(error) throw error;
+      await sb.from('mis_case_files').insert({folder_id:folderId,file_name:f.name,
+        storage_key:String(data.path||('s3:'+key)).replace(/^s3:/,''),store:'s3',
+        size_bytes:f.size,content_type:f.type||'application/octet-stream',
+        uploaded_at:new Date().toISOString(),created_by:state.email});
+      done++;
+    }
+    toast(done+' document'+(done===1?'':'s')+' added','ok');
+    window._misDocCounts[caseId]=(window._misDocCounts[caseId]||0)+done;
+    closeModal(); legalMIS();
+  }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); input.disabled=false; if(prog)prog.style.display='none'; }
+};
+
 // Sliding the grip handle left toggles next_date_recorded_at (today's date, or cleared) — feeds
 // the Scoreboard score. Mouse AND touch both use pointer events. Scoped to the handle icon only —
 // dragging elsewhere on the row does nothing, so a plain click anywhere else still opens Edit.
@@ -1976,6 +2081,17 @@ async function legalMIS(){
   try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
+  /* How many papers are filed against each case, so the Documents button knows whether it has
+     anything to open and the row can say so at a glance. One small query for the whole table. */
+  window._misDocCounts={};
+  try{
+    const {data:fo}=await sb.from('mis_case_folders').select('id,case_id');
+    const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; });
+    if((fo||[]).length){
+      const {data:fi}=await sb.from('mis_case_files').select('folder_id');
+      (fi||[]).forEach(function(x){ const cid=byFolder[x.folder_id]; if(cid!=null) window._misDocCounts[cid]=(window._misDocCounts[cid]||0)+1; });
+    }
+  }catch(e){}
   const searchKeys=MIS_FIELDS.map(f=>f.k);
   rows.forEach(r=>{ r._blob=searchKeys.map(k=>String(r[k]||'')).join(' ␟ ').toLowerCase(); });
   /* "Pinned" means the case is still live — it is NOT tied to having a date. Executing an action
@@ -2150,6 +2266,26 @@ async function legalMIS(){
       .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
       #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
+      /* Documents column: a folder if papers are filed, an upload cloud if not. */
+      .mis-up-cell{text-align:center;white-space:nowrap}
+      .mis-upbtn{height:28px;min-width:28px;padding:0 7px;display:inline-flex;align-items:center;gap:4px;justify-content:center;
+        border:1px dashed var(--line);border-radius:7px;background:var(--bg-card);color:var(--slate);cursor:pointer}
+      .mis-upbtn.has{border-style:solid;border-color:#c7d2fe;background:#eef2ff;color:#1e3a8a;font-weight:700}
+      .mis-upbtn:hover{border-color:#1e3a8a;color:#1e3a8a}
+      .mis-upn{font-size:11px}
+      .mis-doclist{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+      .mis-docrow{display:flex;align-items:center;gap:9px;padding:8px 11px;border-top:1px solid var(--line);font-size:13px;cursor:pointer}
+      .mis-docrow:first-child{border-top:0}
+      .mis-docrow:hover{background:var(--bg-subtle,#f8fafc)}
+      .mis-docname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .mis-docsz{color:var(--slate);font-size:11.5px;white-space:nowrap}
+      .mis-docgo{color:var(--slate);font-size:10px}
+      .mis-docpend{color:#b45309;font-size:11px;white-space:nowrap}
+      .mis-drop{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;padding:16px;
+        border:1.5px dashed var(--line);border-radius:10px;color:var(--slate);cursor:pointer;font-size:13.5px}
+      .mis-drop:hover{border-color:#1e3a8a;color:#1e3a8a;background:#f8faff}
+      .mis-ro{padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-subtle,#f8fafc);font-size:13.5px}
+      .mis-hint{font-size:11.5px;color:var(--slate);margin-top:4px}
       /* A case with an action open is the work in hand — the whole row is tinted so it is picked
          out at a glance, and the action itself is the only text on the row in full colour. */
       #misTbody tr.mis-open-action{background:#fffbeb}
@@ -2201,6 +2337,7 @@ async function legalMIS(){
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
         <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled><i class="fa-solid fa-pen"></i> Edit</button>
         <button class="btn" id="misDelBtn" onclick="misDeleteSel()" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+        <button class="btn" id="misDocsBtn" onclick="misDocsSel()" disabled><i class="fa-solid fa-folder-open"></i> Documents</button>
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
@@ -2240,10 +2377,11 @@ priority is empty / court is high court: search one column.">
         <thead><tr>
           <th style="width:60px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
+          <th style="width:44px;text-align:center">Docs</th>
         </tr></thead>
         <tbody id="misTbody">
           ${misPinned.map(r=>misRowHtml(r,true)).join('')}
-          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+1}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
+          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+2}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
           ${misRest.map(r=>misRowHtml(r,false)).join('')}
         </tbody>
       </table>
@@ -2649,11 +2787,22 @@ window.misToggleAll=function(master){
 };
 window.misUpdateToolbar=function(){
   const n=window._misSel.size;
-  const editBtn=$('misEditBtn'),delBtn=$('misDelBtn');
+  const editBtn=$('misEditBtn'),delBtn=$('misDelBtn'),docsBtn=$('misDocsBtn');
   // Enabled/disabled is carried by the stylesheet (a dashed outline while waiting), not by fading
   // the button until it looks broken.
   if(editBtn){editBtn.disabled=(n!==1);editBtn.title=(n===1)?'Edit the selected case':'Select one case to edit';}
   if(delBtn){delBtn.disabled=(n===0);delBtn.title=(n>0)?'Delete the selected case(s)':'Select at least one case to delete';}
+  /* Documents opens ONE case's folder, so it is off unless exactly one case is picked, and off
+     again when that case has no papers filed against it. */
+  if(docsBtn){
+    let id=null; window._misSel.forEach(function(x){ id=x; });
+    const has=(n===1)&&!!(window._misDocCounts||{})[id];
+    docsBtn.disabled=!has;
+    docsBtn.title=(n===0)?'Select a case to see its documents'
+      :(n>1?'Documents opens one case at a time — select just one'
+      :(has?('Open the documents filed for this case ('+window._misDocCounts[id]+')')
+           :'No documents have been filed for this case yet'));
+  }
 };
 const MIS_ALIASES={
   case_type:['case type','type of case'],
