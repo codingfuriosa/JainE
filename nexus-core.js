@@ -2004,26 +2004,42 @@ window.misDocsOpen=async function(caseId){
         +'</div>';
       }).join('')+'</div>'
     : '<div class="empty" style="padding:22px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);text-align:center">No documents filed yet</div>';
+  const totalMb=files.reduce(function(a,f){ return a+(Number(f.size_bytes)||0); },0);
   body.innerHTML=
-     '<div class="dropzone" onclick="document.getElementById(\'misDocInput\').click()">'
-       +'<i class="fa-solid fa-cloud-arrow-up"></i><div id="misDocDrop">Click to choose files</div>'
-       +'<div style="font-size:12px;margin-top:4px">PDF, Word, images — several at once. They are filed under this case in Legal Documents.</div></div>'
+    // where these papers are going, stated once at the top
+     '<div class="mis-doc-head">'
+      +'<div class="mis-doc-case" title="'+esc(title)+'">'+esc(title)+'</div>'
+      +'<div class="mis-doc-path"><i class="fa-solid fa-folder-tree"></i> Legal Documents · Litigation · '
+        +'<b id="misDocPathCat">'+esc(cat)+'</b> · <b id="misDocPathName">'+esc(name)+'</b></div>'
+     +'</div>'
+    +'<div class="dropzone" onclick="document.getElementById(\'misDocInput\').click()">'
+      +'<i class="fa-solid fa-cloud-arrow-up"></i><div>Click to choose files</div>'
+      +'<div style="font-size:12px;margin-top:4px">PDF, Word, images — several at once</div></div>'
     +'<input type="file" id="misDocInput" class="hidden" multiple onchange="misDocsPick(this,'+caseId+')">'
-    +'<div id="misDocProg" class="mis-hint" style="display:none"></div>'
-    +'<label>Case</label><div class="mis-ro">'+esc(title)+'</div>'
-    +'<div class="two">'
-      +'<div><label>Category</label><select id="misDocCat"'+(folder?' disabled':'')+'>'
+    +'<div id="misDocProg" class="mis-doc-prog" style="display:none"></div>'
+    +'<div class="two" style="margin-top:14px">'
+      +'<div><label>Category</label><select id="misDocCat"'+(folder?' disabled':'')+' onchange="misDocPathSync()">'
         +MIS_DOC_CATS.map(function(c){ return '<option value="'+esc(c)+'"'+(c===cat?' selected':'')+'>'+esc(c)+'</option>'; }).join('')
       +'</select></div>'
-      +'<div><label>Folder name</label><input id="misDocName" value="'+esc(name)+'"'+(folder?'':' placeholder="Defaults to the case name"')+'></div>'
+      +'<div><label>Folder name</label><input id="misDocName" value="'+esc(name)+'"'+(folder?'':' placeholder="Defaults to the case name"')+' oninput="misDocPathSync()"></div>'
     +'</div>'
-    +(folder?'<div class="mis-hint">Set when the folder was created — the files already filed stay where they are.</div>':'')
-    +'<label style="margin-top:12px">Already filed'+(files.length?(' <span class="mis-count">'+files.length+'</span>'):'')+'</label>'
+    +(folder?'<div class="mis-hint">Fixed once the folder exists — everything already filed stays where it is.</div>':'')
+    +'<div class="mis-doc-sec"><span>Already filed</span>'
+      +(files.length?('<span class="mis-doc-meta">'+files.length+' file'+(files.length===1?'':'s')+' · '+misBytes(totalMb)+'</span>'):'')+'</div>'
     +listHtml
-    +(folder?('<div class="mis-hint">Open one to read it. Filed documents are part of the record and are not removed from here.</div>'
-             +'<div style="margin-top:12px"><button class="btn" onclick="closeModal();misOpenDocsFolder('+caseId+')"><i class="fa-solid fa-folder-open"></i> Open the full folder in Documents</button></div>'):'');
+    +(folder?('<div class="mis-doc-foot">'
+        +'<span class="mis-hint">Filed papers are part of the record — open to read, not removed here.</span>'
+        +'<button class="btn" onclick="closeModal();misOpenDocsFolder('+caseId+')"><i class="fa-solid fa-folder-open"></i> Open in Documents</button>'
+      +'</div>'):'');
 };
 function misBytes(n){ n=Number(n)||0; return n>1048576?((n/1048576).toFixed(1)+' MB'):(n>1024?Math.round(n/1024)+' KB':n+' B'); }
+// The path line at the top follows the two fields as they are typed, so where the papers will land
+// is visible before anything is uploaded.
+window.misDocPathSync=function(){
+  const c=$('misDocPathCat'), n=$('misDocPathName');
+  if(c&&$('misDocCat')) c.textContent=$('misDocCat').value||'';
+  if(n&&$('misDocName')) n.textContent=($('misDocName').value||'').trim()||'—';
+};
 window.misOpenDocsFolder=function(caseId){
   const fid=(window._misDocFolders||{})[caseId];
   if(fid) navTo('legal/cat/'+fid); else navTo('legal');
@@ -2334,7 +2350,10 @@ async function legalMIS(){
       /* The Docs column is pinned to the right-hand edge. The table is 2200px wide and this is its
          last column, so it sat off-screen until you scrolled the whole way across — the button was
          mostly cut off. Pinned, it is reachable from any scroll position. */
-      #misTbl thead th:last-child,#misTbl td.mis-up-cell{position:sticky;right:0;z-index:2;width:56px;
+      /* Every cell in this table is overflow:hidden, which was shaving the button off inside its own
+         56px column once the count was there too. This one gets room and is allowed to show it. */
+      #misTbl thead th:last-child,#misTbl td.mis-up-cell{position:sticky;right:0;z-index:2;width:78px;
+        min-width:78px;max-width:78px;padding-left:6px;padding-right:10px;overflow:visible;
         box-shadow:-7px 0 9px -7px rgba(15,23,42,.18)}
       #misTbl thead th:last-child{z-index:3;background:var(--bg-subtle,#f8fafc)}
       #misTbl td.mis-up-cell{background:var(--bg-card,#fff)}
@@ -2347,13 +2366,30 @@ async function legalMIS(){
       .mis-upbtn.has{border-style:solid;border-color:#c7d2fe;background:#eef2ff;color:#1e3a8a;font-weight:700}
       .mis-upbtn:hover{border-color:#1e3a8a;color:#1e3a8a}
       .mis-upn{font-size:11px}
-      .mis-doclist{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:10px}
-      .mis-docrow{display:flex;align-items:center;gap:9px;padding:8px 11px;border-top:1px solid var(--line);font-size:13px;cursor:pointer}
+      /* Upload panel: where it is going, then the drop area, then what is already there. */
+      .mis-doc-head{padding:11px 13px;border:1px solid var(--line);border-left:3px solid #1e3a8a;
+        border-radius:9px;background:var(--bg-subtle,#f8fafc);margin-bottom:14px}
+      .mis-doc-case{font-weight:700;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+      .mis-doc-path{font-size:11.5px;color:var(--slate);margin-top:5px;overflow-wrap:anywhere}
+      .mis-doc-path b{color:#1e3a8a;font-weight:650}
+      .mis-doc-path i{margin-right:4px;opacity:.75}
+      .mis-doc-sec{display:flex;align-items:baseline;gap:9px;margin:16px 0 7px;font-size:11.5px;
+        font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate)}
+      .mis-doc-meta{font-weight:400;text-transform:none;letter-spacing:0;font-size:11.5px;margin-left:auto}
+      .mis-doc-prog{margin-top:10px;padding:9px 12px;border-radius:8px;background:#eef2ff;color:#1e3a8a;
+        font-size:12.5px;font-weight:600}
+      .mis-doc-foot{display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
+      .mis-doc-foot .mis-hint{flex:1;min-width:180px;margin:0}
+      .mis-doclist{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+      .mis-docrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line);font-size:13px;cursor:pointer}
       .mis-docrow:first-child{border-top:0}
-      .mis-docrow:hover{background:var(--bg-subtle,#f8fafc)}
+      .mis-docrow:hover{background:#f5f8ff}
+      .mis-docrow>i:first-child{color:#dc2626;font-size:14px;flex:none;width:15px;text-align:center}
       .mis-docname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .mis-docsz{color:var(--slate);font-size:11.5px;white-space:nowrap}
-      .mis-docgo{color:var(--slate);font-size:10px}
+      .mis-docgo{color:var(--slate);font-size:10px;opacity:0;transition:opacity .12s}
+      .mis-docrow:hover .mis-docgo{opacity:1}
       .mis-docpend{color:#b45309;font-size:11px;white-space:nowrap}
       .mis-ro{padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-subtle,#f8fafc);font-size:13.5px}
       .mis-hint{font-size:11.5px;color:var(--slate);margin-top:4px}
@@ -2448,7 +2484,7 @@ priority is empty / court is high court: search one column.">
         <thead><tr>
           <th style="width:60px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
-          <th style="width:56px;text-align:center">Docs</th>
+          <th style="width:78px;text-align:center">Docs</th>
         </tr></thead>
         <tbody id="misTbody">
           ${misPinned.map(r=>misRowHtml(r,true)).join('')}
