@@ -1925,13 +1925,23 @@ function misRowHtml(r,isPinned){
    They live in S3 under legal/<SUB-CATEGORY>/<CASE FOLDER>/..., the same Legal Vault root the
    rest of the app uses, and are indexed by mis_case_folders / mis_case_files. The row button
    opens the case's folder to add to it; the toolbar's Documents button opens it to read. */
+/* The row button is UPLOAD — it opens the form. The toolbar's Documents button is a different
+   thing: it walks you to that case's folder in the Legal Documents tab, where the files actually
+   live, rather than showing them in a box of their own. */
 function misUploadBtnHtml(r){
   const n=(window._misDocCounts||{})[r.id]||0;
-  return '<button class="btn btn-sm mis-upbtn'+(n?' has':'')+'" title="'+(n?(n+' document'+(n===1?'':'s')+' — click to open or add'):'No documents yet — click to upload')
-    +'" onclick="event.stopPropagation();misDocsOpen('+r.id+')"><i class="fa-solid fa-'+(n?'folder-open':'cloud-arrow-up')+'"></i>'
+  return '<button class="btn btn-sm mis-upbtn'+(n?' has':'')+'" title="'
+    +(n?('Add to the '+n+' document'+(n===1?'':'s')+' filed for this case'):'Upload documents for this case')
+    +'" onclick="event.stopPropagation();misDocsOpen('+r.id+')"><i class="fa-solid fa-cloud-arrow-up"></i>'
     +(n?('<span class="mis-upn">'+n+'</span>'):'')+'</button>';
 }
-window.misDocsSel=function(){ let id=null; window._misSel.forEach(function(x){ id=x; }); if(id!=null) misDocsOpen(id); };
+// Documents: straight to the folder in the Legal vault.
+window.misDocsSel=function(){
+  let id=null; window._misSel.forEach(function(x){ id=x; });
+  const fid=(window._misDocFolders||{})[id];
+  if(fid) navTo('legal/cat/'+fid);
+  else toast('No documents folder for this case yet — use the upload button on its row','warn');
+};
 
 // The closest case type already on the case — the folder's category defaults to it rather than
 // making somebody choose from a list they have to think about.
@@ -1949,8 +1959,9 @@ function misGuessCat(caseType){
 }
 window.misDocsOpen=async function(caseId){
   const row=(window._misRows||[]).find(function(r){ return r.id===caseId; })||{};
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-folder-open"></i> Documents</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div></div>','md');
+  // `frm` is what styles labels and fields in every other modal — without it the form renders bare.
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload documents</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div></div>','md');
   let folder=null, files=[];
   try{
     const {data:fo}=await sb.from('mis_case_folders').select('*').eq('case_id',caseId).maybeSingle(); folder=fo||null;
@@ -1974,21 +1985,29 @@ window.misDocsOpen=async function(caseId){
       }).join('')+'</div>'
     : '<div class="empty" style="padding:22px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);text-align:center">No documents filed yet</div>';
   body.innerHTML=
-     '<label class="lbl">Case</label><div class="mis-ro">'+esc(title)+'</div>'
-    +'<label class="lbl">Category</label>'
-    +'<select class="inp" id="misDocCat"'+(folder?' disabled':'')+'>'
-      +MIS_DOC_CATS.map(function(c){ return '<option value="'+esc(c)+'"'+(c===cat?' selected':'')+'>'+esc(c)+'</option>'; }).join('')
-    +'</select>'
-    +(folder?'<div class="mis-hint">Set when the folder was created — it cannot be moved from here.</div>':'')
-    +'<label class="lbl">Folder name</label>'
-    +'<input class="inp" id="misDocName" value="'+esc(name)+'"'+(folder?'':' placeholder="Defaults to the case name"')+'>'
-    +'<label class="lbl" style="margin-top:14px">Documents'+(files.length?(' <span class="mis-count">'+files.length+'</span>'):'')+'</label>'
+     '<div class="dropzone" onclick="document.getElementById(\'misDocInput\').click()">'
+       +'<i class="fa-solid fa-cloud-arrow-up"></i><div id="misDocDrop">Click to choose files</div>'
+       +'<div style="font-size:12px;margin-top:4px">PDF, Word, images — several at once. They are filed under this case in Legal Documents.</div></div>'
+    +'<input type="file" id="misDocInput" class="hidden" multiple onchange="misDocsPick(this,'+caseId+')">'
+    +'<div id="misDocProg" class="mis-hint" style="display:none"></div>'
+    +'<label>Case</label><div class="mis-ro">'+esc(title)+'</div>'
+    +'<div class="two">'
+      +'<div><label>Category</label><select id="misDocCat"'+(folder?' disabled':'')+'>'
+        +MIS_DOC_CATS.map(function(c){ return '<option value="'+esc(c)+'"'+(c===cat?' selected':'')+'>'+esc(c)+'</option>'; }).join('')
+      +'</select></div>'
+      +'<div><label>Folder name</label><input id="misDocName" value="'+esc(name)+'"'+(folder?'':' placeholder="Defaults to the case name"')+'></div>'
+    +'</div>'
+    +(folder?'<div class="mis-hint">Set when the folder was created — the files already filed stay where they are.</div>':'')
+    +'<label style="margin-top:12px">Already filed'+(files.length?(' <span class="mis-count">'+files.length+'</span>'):'')+'</label>'
     +listHtml
-    +'<label class="mis-drop" id="misDocDrop"><i class="fa-solid fa-cloud-arrow-up"></i> <span>Choose files to add</span>'
-      +'<input type="file" multiple id="misDocInput" style="display:none" onchange="misDocsPick(this,'+caseId+')"></label>'
-    +'<div id="misDocProg" class="mis-hint" style="display:none"></div>';
+    +(folder?('<div class="mis-hint">Open one to read it. Filed documents are part of the record and are not removed from here.</div>'
+             +'<div style="margin-top:12px"><button class="btn" onclick="closeModal();misOpenDocsFolder('+caseId+')"><i class="fa-solid fa-folder-open"></i> Open the full folder in Documents</button></div>'):'');
 };
 function misBytes(n){ n=Number(n)||0; return n>1048576?((n/1048576).toFixed(1)+' MB'):(n>1024?Math.round(n/1024)+' KB':n+' B'); }
+window.misOpenDocsFolder=function(caseId){
+  const fid=(window._misDocFolders||{})[caseId];
+  if(fid) navTo('legal/cat/'+fid); else navTo('legal');
+};
 window.misDocsPick=async function(input,caseId){
   const picked=[].slice.call(input.files||[]); if(!picked.length)return;
   const cat=($('misDocCat')||{}).value||misGuessCat(''), nm=(($('misDocName')||{}).value||'').trim();
@@ -1997,15 +2016,34 @@ window.misDocsPick=async function(input,caseId){
   input.disabled=true;
   const seg=function(s){ return String(s||'').replace(/[^\w.\- ]/g,'-').replace(/\s+/g,'-').replace(/-{2,}/g,'-').replace(/^[-.]+|[-.]+$/g,'')||'x'; };
   const prefix='legal/'+seg(cat)+'/'+seg(nm);
-  let folderId=null;
+  let folderId=null, docFolderId=null;
   try{
-    const {data:ex}=await sb.from('mis_case_folders').select('id').eq('case_id',caseId).maybeSingle();
-    if(ex) folderId=ex.id;
+    const {data:ex}=await sb.from('mis_case_folders').select('id,doc_folder_id').eq('case_id',caseId).maybeSingle();
+    if(ex){ folderId=ex.id; docFolderId=ex.doc_folder_id||null; }
     else{
       const {data:ins,error}=await sb.from('mis_case_folders')
         .insert({case_id:caseId,sub_category:cat,folder_name:nm,storage_prefix:prefix,created_by:state.email})
         .select('id').single();
       if(error) throw error; folderId=ins.id;
+    }
+    /* The file has to land in the Legal vault's folder tree as well, or it sits in S3 unseen —
+       the Documents tab lists doc.documents, not our index. Build Litigation > category > case
+       on the way in if this case has never been filed before. */
+    if(!docFolderId){
+      const D=()=>sb.schema('doc');
+      const findOrAdd=async function(name,parent){
+        let q=D().from('folders').select('id').eq('department','Legal').eq('name',name);
+        q=(parent==null)?q.is('parent_id',null):q.eq('parent_id',parent);
+        const {data:hit}=await q.maybeSingle();
+        if(hit) return hit.id;
+        const {data:mk,error}=await D().from('folders')
+          .insert({department:'Legal',name:name,parent_id:parent,created_by:state.email}).select('id').single();
+        if(error) throw error; return mk.id;
+      };
+      const rootId=await findOrAdd('Litigation',null);
+      const catId=await findOrAdd(cat,rootId);
+      docFolderId=await findOrAdd(nm,catId);
+      await sb.from('mis_case_folders').update({doc_folder_id:docFolderId}).eq('id',folderId);
     }
     let done=0;
     for(const f of picked){
@@ -2013,12 +2051,19 @@ window.misDocsPick=async function(input,caseId){
       const key=prefix+'/'+seg(f.name);
       const {data,error}=await uploadFileToS3(key,f);
       if(error) throw error;
+      const storedPath=String(data.path||('s3:'+key));
       await sb.from('mis_case_files').insert({folder_id:folderId,file_name:f.name,
-        storage_key:String(data.path||('s3:'+key)).replace(/^s3:/,''),store:'s3',
+        storage_key:storedPath.replace(/^s3:/,''),store:'s3',
         size_bytes:f.size,content_type:f.type||'application/octet-stream',
         uploaded_at:new Date().toISOString(),created_by:state.email});
+      await sb.schema('doc').from('documents').insert({title:f.name,department:'Legal',
+        category:'Litigation / '+cat+' / '+nm, folder_id:docFolderId,
+        storage_path:storedPath.indexOf('s3:')===0?storedPath:('s3:'+key),
+        file_name:f.name,file_size:f.size,file_type:f.type||'application/octet-stream',
+        status:'Active',visibility:'Internal',uploaded_by:state.email});
       done++;
     }
+    window._misDocFolders[caseId]=docFolderId;
     toast(done+' document'+(done===1?'':'s')+' added','ok');
     window._misDocCounts[caseId]=(window._misDocCounts[caseId]||0)+done;
     closeModal(); legalMIS();
@@ -2083,10 +2128,10 @@ async function legalMIS(){
   window._misSel=new Set();
   /* How many papers are filed against each case, so the Documents button knows whether it has
      anything to open and the row can say so at a glance. One small query for the whole table. */
-  window._misDocCounts={};
+  window._misDocCounts={}; window._misDocFolders={};
   try{
-    const {data:fo}=await sb.from('mis_case_folders').select('id,case_id');
-    const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; });
+    const {data:fo}=await sb.from('mis_case_folders').select('id,case_id,doc_folder_id');
+    const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; if(f.doc_folder_id) window._misDocFolders[f.case_id]=f.doc_folder_id; });
     if((fo||[]).length){
       const {data:fi}=await sb.from('mis_case_files').select('folder_id');
       (fi||[]).forEach(function(x){ const cid=byFolder[x.folder_id]; if(cid!=null) window._misDocCounts[cid]=(window._misDocCounts[cid]||0)+1; });
@@ -2281,9 +2326,6 @@ async function legalMIS(){
       .mis-docsz{color:var(--slate);font-size:11.5px;white-space:nowrap}
       .mis-docgo{color:var(--slate);font-size:10px}
       .mis-docpend{color:#b45309;font-size:11px;white-space:nowrap}
-      .mis-drop{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;padding:16px;
-        border:1.5px dashed var(--line);border-radius:10px;color:var(--slate);cursor:pointer;font-size:13.5px}
-      .mis-drop:hover{border-color:#1e3a8a;color:#1e3a8a;background:#f8faff}
       .mis-ro{padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-subtle,#f8fafc);font-size:13.5px}
       .mis-hint{font-size:11.5px;color:var(--slate);margin-top:4px}
       /* A case with an action open is the work in hand — the whole row is tinted so it is picked
@@ -2796,11 +2838,11 @@ window.misUpdateToolbar=function(){
      again when that case has no papers filed against it. */
   if(docsBtn){
     let id=null; window._misSel.forEach(function(x){ id=x; });
-    const has=(n===1)&&!!(window._misDocCounts||{})[id];
+    const has=(n===1)&&!!(window._misDocFolders||{})[id];
     docsBtn.disabled=!has;
-    docsBtn.title=(n===0)?'Select a case to see its documents'
+    docsBtn.title=(n===0)?'Select a case to open its documents folder'
       :(n>1?'Documents opens one case at a time — select just one'
-      :(has?('Open the documents filed for this case ('+window._misDocCounts[id]+')')
+      :(has?('Open this case’s folder in Legal Documents ('+((window._misDocCounts||{})[id]||0)+' files)')
            :'No documents have been filed for this case yet'));
   }
 };
