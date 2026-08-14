@@ -1559,6 +1559,11 @@ VIEWS.legal=async function(v,seg){
 async function legalDocsView(seg){
   DOC.scope='legal';DOC.dept='Legal';DOC.sel.clear();
   DOC.cat=(seg[0]==='cat')?decodeURIComponent(seg[1]):null;
+  /* Opening the Documents tab itself shows the tree closed. Which branches were expanded is
+     remembered for the life of the page, so after visiting a category — or being sent to one by
+     the Documents button in MIS — coming back to the tab left it hanging open with no way to
+     collapse it, since the tree only reopens the path to whatever is selected. */
+  if(!DOC.cat) DOC.legalExpanded.clear();
   let crumbTail='All Documents';
   if(DOC.cat){
     const list=await legalFolderTree();const {byId}=buildFolderTree(list);
@@ -1945,7 +1950,21 @@ window.misDocsSel=function(){
 
 // The closest case type already on the case — the folder's category defaults to it rather than
 // making somebody choose from a list they have to think about.
-const MIS_DOC_CATS=['CIVIL CASE MATTERS','CONSUMER MATTERS','CRIMINAL MATTERS','HIGH COURT MATTERS','RERA CASE MATTER','DISPOSED'];
+/* The categories are whatever sits under Litigation in the Legal vault, read fresh — a second
+   hardcoded list would drift from the tree and start creating near-duplicate folders, which is
+   exactly how the upper-case twins appeared. The list below is only a fallback. */
+let MIS_DOC_CATS=['Civil Case Matters','Consumer Matters','Criminal Matters','High Court Matters','RERA Case Matter'];
+async function misLoadDocCats(){
+  try{
+    const {data:root}=await sb.schema('doc').from('folders').select('id')
+      .eq('department','Legal').eq('name','Litigation').is('parent_id',null).maybeSingle();
+    if(!root) return MIS_DOC_CATS;
+    const {data:kids}=await sb.schema('doc').from('folders').select('name')
+      .eq('department','Legal').eq('parent_id',root.id).order('name',{ascending:true});
+    if(kids&&kids.length) MIS_DOC_CATS=kids.map(function(k){ return k.name; });
+  }catch(e){}
+  return MIS_DOC_CATS;
+}
 function misGuessCat(caseType){
   const t=String(caseType||'').toLowerCase();
   if(!t) return MIS_DOC_CATS[0];
@@ -1963,6 +1982,7 @@ window.misDocsOpen=async function(caseId){
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload documents</h3><span class="x" onclick="closeModal()">&times;</span></div>'
     +'<div class="modal-body frm" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div></div>','md');
   let folder=null, files=[];
+  await misLoadDocCats();
   try{
     const {data:fo}=await sb.from('mis_case_folders').select('*').eq('case_id',caseId).maybeSingle(); folder=fo||null;
     if(folder){ const {data:fi}=await sb.from('mis_case_files').select('*').eq('folder_id',folder.id).order('file_name',{ascending:true}); files=fi||[]; }
@@ -2311,7 +2331,16 @@ async function legalMIS(){
       .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
       #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
-      /* Documents column: a folder if papers are filed, an upload cloud if not. */
+      /* The Docs column is pinned to the right-hand edge. The table is 2200px wide and this is its
+         last column, so it sat off-screen until you scrolled the whole way across — the button was
+         mostly cut off. Pinned, it is reachable from any scroll position. */
+      #misTbl thead th:last-child,#misTbl td.mis-up-cell{position:sticky;right:0;z-index:2;width:56px;
+        box-shadow:-7px 0 9px -7px rgba(15,23,42,.18)}
+      #misTbl thead th:last-child{z-index:3;background:var(--bg-subtle,#f8fafc)}
+      #misTbl td.mis-up-cell{background:var(--bg-card,#fff)}
+      #misTbl tbody tr:hover td.mis-up-cell{background:var(--bg-hover,#f8fafc)}
+      #misTbl tbody tr.mis-open-action td.mis-up-cell{background:#fffbeb}
+      #misTbl tbody tr.mis-open-action:hover td.mis-up-cell{background:#fef3c7}
       .mis-up-cell{text-align:center;white-space:nowrap}
       .mis-upbtn{height:28px;min-width:28px;padding:0 7px;display:inline-flex;align-items:center;gap:4px;justify-content:center;
         border:1px dashed var(--line);border-radius:7px;background:var(--bg-card);color:var(--slate);cursor:pointer}
@@ -2419,7 +2448,7 @@ priority is empty / court is high court: search one column.">
         <thead><tr>
           <th style="width:60px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
-          <th style="width:44px;text-align:center">Docs</th>
+          <th style="width:56px;text-align:center">Docs</th>
         </tr></thead>
         <tbody id="misTbody">
           ${misPinned.map(r=>misRowHtml(r,true)).join('')}
