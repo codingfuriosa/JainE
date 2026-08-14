@@ -1598,8 +1598,16 @@ async function legalNav(reuse){
   const totals={};
   const sumNode=node=>{let n=counts[node.id]||0;node.children.forEach(c=>{n+=sumNode(c);});totals[node.id]=n;return n;};
   roots.forEach(sumNode);
-  // auto-expand the path down to whichever category is currently selected
-  if(DOC.cat){let cur=byId[Number(DOC.cat)];while(cur&&cur.parent_id){DOC.legalExpanded.add(cur.parent_id);cur=byId[cur.parent_id];}}
+  /* Open the path down to whichever category is selected — but only when arriving at it, never on
+     a redraw. Doing it every time meant a selected category's parents were forced back open the
+     instant you collapsed them: the caret worked, the tree redrew, and the auto-expand put them
+     straight back. Now the path opens once per selection and stays under your control after that. */
+  if(DOC.cat && !reuse && window._legalOpenedFor!==String(DOC.cat)){
+    window._legalOpenedFor=String(DOC.cat);
+    let cur=byId[Number(DOC.cat)];
+    while(cur&&cur.parent_id){DOC.legalExpanded.add(cur.parent_id);cur=byId[cur.parent_id];}
+  }
+  if(!DOC.cat) window._legalOpenedFor=null;
   const renderNode=(node,depth)=>{
     const hasKids=node.children.length>0;
     const expanded=DOC.legalExpanded.has(node.id);
@@ -1979,8 +1987,11 @@ function misGuessCat(caseType){
 window.misDocsOpen=async function(caseId){
   const row=(window._misRows||[]).find(function(r){ return r.id===caseId; })||{};
   // `frm` is what styles labels and fields in every other modal — without it the form renders bare.
+  /* width, not min-width: min-width sets a floor the panel can be pushed past, so a long file name
+     or folder name widened it and the whole panel scrolled sideways. A fixed width with everything
+     inside it boxed to 100% keeps it still. */
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload documents</h3><span class="x" onclick="closeModal()">&times;</span></div>'
-    +'<div class="modal-body frm" style="min-width:min(94vw,640px)"><div class="loader"><div class="spin"></div></div></div>','md');
+    +'<div class="modal-body frm mis-doc-modal"><div class="loader"><div class="spin"></div></div></div>','md');
   let folder=null, files=[];
   await misLoadDocCats();
   try{
@@ -2366,7 +2377,15 @@ async function legalMIS(){
       .mis-upbtn.has{border-style:solid;border-color:#c7d2fe;background:#eef2ff;color:#1e3a8a;font-weight:700}
       .mis-upbtn:hover{border-color:#1e3a8a;color:#1e3a8a}
       .mis-upn{font-size:11px}
-      /* Upload panel: where it is going, then the drop area, then what is already there. */
+      /* Upload panel: where it is going, then the drop area, then what is already there.
+         It never scrolls sideways — the panel is a fixed width and everything in it is boxed to
+         that width, so long file names and folder names ellipsis or wrap instead of stretching it. */
+      .mis-doc-modal{width:min(94vw,620px);max-width:100%;overflow-x:hidden;box-sizing:border-box}
+      .mis-doc-modal *{max-width:100%;box-sizing:border-box}
+      .mis-doc-modal .two{grid-template-columns:1fr 1fr;gap:12px}
+      .mis-doc-modal .two>div{min-width:0}
+      .mis-doc-modal select,.mis-doc-modal input[type=text],.mis-doc-modal input:not([type]){width:100%}
+      @media(max-width:520px){ .mis-doc-modal .two{grid-template-columns:1fr} }
       .mis-doc-head{padding:11px 13px;border:1px solid var(--line);border-left:3px solid #1e3a8a;
         border-radius:9px;background:var(--bg-subtle,#f8fafc);margin-bottom:14px}
       .mis-doc-case{font-weight:700;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;
@@ -2377,8 +2396,10 @@ async function legalMIS(){
       .mis-doc-sec{display:flex;align-items:baseline;gap:9px;margin:16px 0 7px;font-size:11.5px;
         font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate)}
       .mis-doc-meta{font-weight:400;text-transform:none;letter-spacing:0;font-size:11.5px;margin-left:auto}
+      /* A file name is one unbroken word and will not wrap on its own — it pushed the panel wider
+         than itself, which is where the sideways scroll came from. */
       .mis-doc-prog{margin-top:10px;padding:9px 12px;border-radius:8px;background:#eef2ff;color:#1e3a8a;
-        font-size:12.5px;font-weight:600}
+        font-size:12.5px;font-weight:600;overflow-wrap:anywhere;word-break:break-word}
       .mis-doc-foot{display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
       .mis-doc-foot .mis-hint{flex:1;min-width:180px;margin:0}
       .mis-doclist{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px}
