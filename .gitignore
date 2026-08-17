@@ -12,3 +12,6 @@ node_modules/
 
 # Local Claude Code settings — not meant for version control
 .claude/
+
+# Local-only snapshot of live Supabase state (schema, migrations, edge functions) — not meant for version control
+/data/
