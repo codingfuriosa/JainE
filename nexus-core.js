@@ -8049,10 +8049,10 @@ VIEWS.network=async function(v,seg){
   // The "Live check" bar sits OUTSIDE #netBody so a tab switch or a data reload
   // doesn't wipe the progress message of a refresh that is still running.
   v.innerHTML=mHead('fa-wifi','#0ea5e9','Internet Speed Monitor')+mTabs('network',tabs,ti)
-    +'<div class="card card-pad" style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      +'<div><div class="sec-title" style="margin:0">Live check</div>'
+    +'<div class="card card-pad net-livebar" style="margin-top:16px">'
+      +'<div class="net-livebar-txt"><div class="sec-title" style="margin:0">Live check</div>'
       +'<div class="sec-sub" id="netPoolMsg" style="margin:0">Runs a speed test on the office line right now and stores the reading</div></div>'
-      +'<button class="btn btn-primary" id="netRefreshBtn" style="margin-left:auto" onclick="netRefresh()">'
+      +'<button class="btn btn-primary" id="netRefreshBtn" onclick="netRefresh()">'
       +'<i class="fa-solid fa-arrows-rotate"></i> Refresh now</button>'
       +'<div id="netRefreshMsg" style="flex-basis:100%;font-size:13px"></div>'
     +'</div>'
@@ -8119,10 +8119,10 @@ VIEWS.network=async function(v,seg){
         ['Upload threshold',(settings.upload_threshold||'—')+' Mbps'],
         ['Ping threshold',(settings.ping_threshold||'—')+' ms']];
       const rangeLabel=(NET_RANGES.find(r=>r[0]===NET_RANGE)||NET_RANGES[0])[1];
-      const rangeSel='<select class="sel" id="netRangeSel" style="margin-left:auto" onchange="netRangeChange(this.value)">'
+      const rangeSel='<select class="sel net-range-sel" id="netRangeSel" onchange="netRangeChange(this.value)">'
         +NET_RANGES.map(r=>'<option value="'+r[0]+'"'+(r[0]===NET_RANGE?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
       host.innerHTML=mKpis(kpis)
-        +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div><div class="sec-title">Speed over time</div><div class="sec-sub">Download vs upload · '+esc(rangeLabel)+' · red dashed line = alert threshold</div></div>'+rangeSel+'</div><canvas id="chNet" height="110"></canvas></div>'
+        +'<div class="card card-pad net-chart-card" style="margin-top:16px"><div class="net-chart-head"><div><div class="sec-title">Speed over time</div><div class="sec-sub">Download vs upload · '+esc(rangeLabel)+' · red dashed line = alert threshold</div></div>'+rangeSel+'</div><div class="net-chart-wrap"><canvas id="chNet"></canvas></div></div>'
         +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Monitoring settings</div><div class="sec-sub">Shared configuration · change in the net_settings table</div>'
           +'<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:8px">'
           +metaCells.map(x=>'<div><div style="color:var(--slate);font-size:12px">'+esc(x[0])+'</div><div style="font-weight:700;font-size:15px;margin-top:2px">'+esc(x[1])+'</div></div>').join('')
@@ -8153,7 +8153,7 @@ VIEWS.network=async function(v,seg){
       ];
       if(bad.some(x=>x!==null))ds.unshift({type:'bar',label:'Bad reading',data:bad,backgroundColor:'rgba(220,38,38,.16)',borderColor:'rgba(220,38,38,.35)',borderWidth:0,barPercentage:1,categoryPercentage:1,order:5});
       if(thr>0)ds.push({label:'Threshold',data:labels.map(()=>thr),borderColor:'#dc2626',borderDash:[5,4],borderWidth:1.5,pointRadius:0,fill:false,order:0});
-      new Chart($('chNet'),{type:'line',data:{labels,datasets:ds},options:{plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:12}}}},scales:{y:{min:0,max:400,ticks:{stepSize:50},grid:{color:'#eef1f6'},border:{display:false},title:{display:true,text:'Mbps'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+      new Chart($('chNet'),{type:'line',data:{labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:12}}}},scales:{y:{min:0,max:400,ticks:{stepSize:50},grid:{color:'#eef1f6'},border:{display:false},title:{display:true,text:'Mbps'}},x:{grid:{display:false},ticks:{maxTicksLimit:8,autoSkip:true}}}}});
       return;
     }
 
@@ -8189,9 +8189,9 @@ VIEWS.network=async function(v,seg){
           t.isp||'—',
         ];
       });
-      const rangeSel='<select class="sel" id="netRangeSel" style="margin-left:auto" onchange="netRangeChange(this.value)">'
+      const rangeSel='<select class="sel net-range-sel" id="netRangeSel" onchange="netRangeChange(this.value)">'
         +NET_RANGES.map(r=>'<option value="'+r[0]+'"'+(r[0]===NET_RANGE?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
-      host.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+      host.innerHTML='<div class="net-readings-head">'
         +'<div class="sec-sub" style="margin:0">Showing '+rows.length+' reading'+(rows.length===1?'':'s')+(lowCount?' · <span style="color:#c83232">'+lowCount+' low</span>':'')+'</div>'
         +rangeSel+'</div>'
         +(rows.length?mTable(['Time','Status','↓ Mbps','↑ Mbps','Ping','ISP'],rows):'<div class="card card-pad empty">No readings in this range</div>');
