@@ -2994,8 +2994,15 @@
        shrink) sizes each card to exactly its natural content width and wraps the row when full —
        no ambiguity in how the browser computes it. */
     .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:14px 30px}
-    .wf-tlcard .tp-f{flex:0 0 auto}
-    .wf-tlcard .tp-f-wide{flex:0 0 100%;width:100%}
+    /* Never GROW (that is the whole point — a short value like "1" must not stretch into a column
+       as wide as its neighbour), but it must still be allowed to SHRINK. flex:0 0 auto refused
+       both, so a long value — a project name, a joined list of dates — sized the card past the
+       panel and the text was cut off at the edge. 0 1 auto keeps the natural width whenever it
+       fits and only gives way when the row cannot hold it; min-width:0 is what actually lets the
+       text inside wrap rather than pushing the box wider. */
+    .wf-tlcard .tp-f{flex:0 1 auto;min-width:0;max-width:100%}
+    .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word}
+    .wf-tlcard .tp-f-wide{flex:0 0 100%;width:100%;min-width:0}
     .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
     .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
     .wf-remark-entry:first-child{padding-top:0}
