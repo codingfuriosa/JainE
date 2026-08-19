@@ -2994,13 +2994,14 @@
        shrink) sizes each card to exactly its natural content width and wraps the row when full —
        no ambiguity in how the browser computes it. */
     .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
-    /* Never GROW (that is the whole point — a short value like "1" must not stretch into a column
-       as wide as its neighbour), but it must still be allowed to SHRINK. flex:0 0 auto refused
-       both, so a long value — a project name, a joined list of dates — sized the card past the
-       panel and the text was cut off at the edge. 0 1 auto keeps the natural width whenever it
-       fits and only gives way when the row cannot hold it; min-width:0 is what actually lets the
-       text inside wrap rather than pushing the box wider. */
-    .wf-tlcard .tp-f{flex:0 1 auto;min-width:0;max-width:100%;
+    /* The cards fill the width of the panel. Packing each one to its own content left the whole
+       right-hand half of the row empty while the details huddled on the left — the panel is wide,
+       so use it. flex-grow shares the spare width out, and because the basis is auto it is shared
+       ON TOP of each card's natural size, so a long value like a list of dates still ends up wider
+       than a bare number rather than every card being forced to an identical column.
+       They may shrink too: without that a long value sized its card past the panel and the text
+       was cut off at the edge. min-width sets the floor and lets the text wrap instead. */
+    .wf-tlcard .tp-f{flex:1 1 auto;min-width:150px;max-width:100%;
       /* They are called cards, so they look like cards. As bare label-over-value text with only a
          gap between them, a value that itself contains commas ("Auto, Bus", "Breakfast, Lunch")
          gave no clue where one detail ended and the next began. */
