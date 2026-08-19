@@ -1190,7 +1190,7 @@
   /* The one-line summary beside a task. On a day-wise instance the full detail list is far too much
      for a title — every day of every field. It carries the dates, what was claimed for, the total
      and where the money goes, and nothing else. Days read comma-separated here, as asked. */
-  var WF_TITLE_FIELDS=['Date','Conveyance','Food','Amount','UPI Id'];
+  var WF_TITLE_FIELDS=['Date','Transport','Food','Amount','UPI Id'];
   function wfDetailsInline(details,flow){
     const det=details||[];
     if(wfIsDaywise(flow,det)){
@@ -1220,7 +1220,10 @@
      entirely rather than sitting there blank.
      On a phone a six-column table cannot work, so each day becomes its own labelled block. Same
      data, same order, just stacked. */
-  const WF_DAY_COLS=['Date','Conveyance','Food','Remarks','Amount'];
+  /* One row per ENTRY, not per day: several entries can share a date, because an entry is a
+     single journey and Remarks says where it went from and to. UPI Id is per row as well — it can
+     differ between entries — so nothing is treated as common to the whole instance any more. */
+  const WF_DAY_COLS=['Date','UPI Id','Remarks','Transport','Food','Amount'];
   function wfIsDaywise(flow,details){
     if(!Array.isArray(details)||!details.length) return false;
     const by={}; details.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
@@ -1292,25 +1295,9 @@
           return '<td>'+(i===0?'<b>Total</b>':'')+'</td>'; }).join('')
       +(d.anyAtt?'<td></td>':'')+'</tr></tfoot>';
     t+='</table></div>';
-    // ---- stacked (phone) ----
-    let m='<div class="wf-dw-list">';
-    d.rows.forEach(function(r,i){
-      m+='<div class="wf-dw-card"><div class="wf-dw-card-h">'
-        +'<span class="wf-dw-card-n">Day '+(i+1)+'</span>'
-        +(String(r['Date']||'').trim()?('<span class="wf-dw-card-d">'+esc2(r['Date'])+'</span>'):'')
-        +(d.cols.indexOf(sumField)!==-1&&String(r[sumField]||'').trim()?('<span class="wf-dw-card-a">'+money(r[sumField])+'</span>'):'')
-      +'</div>';
-      d.cols.forEach(function(c){
-        if(c==='Date'||c===sumField) return;
-        const val=String(r[c]||'').trim(); if(!val) return;
-        m+='<div class="wf-dw-kv"><span class="wf-dw-k">'+esc2(c)+'</span><span class="wf-dw-v">'+esc2(val).replace(/\n/g,'<br>')+'</span></div>';
-      });
-      if(String(r.__att||'').trim()) m+='<div class="wf-dw-kv"><span class="wf-dw-k">Attachment</span><span class="wf-dw-v">'+wfDayAttHtml(r.__att)+'</span></div>';
-      m+='</div>';
-    });
-    if(total) m+='<div class="wf-dw-total"><span>Total</span><b>'+wfMoney(total)+'</b></div>';
-    m+='</div>';
-    return '<div class="wf-dw">'+head+t+m+'</div>';
+    // On a phone the table scrolls sideways rather than turning into a list - a row per
+    // entry is the point, and stacking it loses the comparison down each column.
+    return '<div class="wf-dw">'+head+t+'</div>';
   }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
   // Curated instance summary — Wheredoc Id/Bill No./Bill Date/Company/Amount (+ the instance No.),
@@ -1340,6 +1327,10 @@
     } else {
       WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     }
+    /* An entry-wise flow (Reimbursement) shows its entries as a TABLE here too, not as detail
+       cards — the cards could only ever print "Transport: Auto, Bus, Cab" with no way to tell which
+       journey each belonged to. Everything else keeps the cards. */
+    if(wfIsDaywise(flow,det)) return wfDaywiseHtml(det,flow);
     if(items.length<=1 && !wideField) return '';
     /* Each detail is its own card, packed to its content width (see .wf-tlcard .tp-grid) rather
        than stretched to an equal share of the row — a short value like "1" should not occupy as
@@ -1361,7 +1352,7 @@
   function wfMultiValHtml(v,flow){
     const raw=String(v||'');
     if(!(flow&&flow.multiple_fields)) return esc2(raw);
-    const parts=raw.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    const parts=wfSplitSets(raw).filter(Boolean);
     if(parts.length<=1) return esc2(raw);
     const label=(flow.multi_entry_label||'Set');
     return parts.map(function(s,i){
@@ -2433,7 +2424,7 @@
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
-    const pinned=wfOriginalAttachmentHtml(c);
+    const pinned=wfOriginalAttachmentHtml(c,flow);
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
@@ -2481,7 +2472,8 @@
   window.wfNumOnly=function(el){ if(!el)return; el.value=String(el.value).replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1'); };
   function wfEvtSelBtnLabel(v,optional){
     if(v) return esc2(v);
-    if(optional) return '—';
+    // Optional fields used to show a bare "—", which reads as a value already chosen rather than
+    // as an invitation. Both cases now say the same thing.
     return '<span class="wf-evt-selph">Select…</span>';
   }
   // Custom dropdown for a 'select' detail field — a native <select>'s open popup is mostly
@@ -2491,6 +2483,38 @@
   /* A field marked multi accepts several options at once — Conveyance is often Auto AND Bus for the
      same day, Food both Breakfast and Lunch. The chosen options are stored comma-separated, which
      is why the SETS (days) are separated by WF_SET_SEP instead: a comma now belongs to the value. */
+  /* Load this person's remembered UPI ids and offer them on every UPI field in the open form.
+     The most-used one is pre-filled when the box is still empty; they can always type another. */
+  let WF_UPI_CACHE=null;
+  async function wfUpiList(force){
+    if(WF_UPI_CACHE && !force) return WF_UPI_CACHE;
+    try{
+      const {data}=await ACC().from('user_upi').select('upi,uses,last_used')
+        .eq('email',String(me()||'').toLowerCase())
+        .order('uses',{ascending:false}).order('last_used',{ascending:false});
+      WF_UPI_CACHE=(data||[]).map(function(r){ return r.upi; }).filter(Boolean);
+    }catch(e){ WF_UPI_CACHE=[]; }
+    return WF_UPI_CACHE;
+  }
+  async function wfUpiHydrate(){
+    const boxes=[].slice.call(document.querySelectorAll('.wf-evt-upi'));
+    if(!boxes.length) return;
+    const list=await wfUpiList();
+    boxes.forEach(function(inp){
+      const dl=document.getElementById(inp.getAttribute('list'));
+      if(dl) dl.innerHTML=list.map(function(u){ return '<option value="'+esc2(u)+'"></option>'; }).join('');
+      if(!inp.value && list.length) inp.value=list[0];    // the one used most, as the default
+    });
+  }
+  async function wfUpiRemember(vals){
+    const seen={};
+    (vals||[]).forEach(function(v){ String(v||'').split(',').forEach(function(x){
+      const t=x.trim(); if(t && !seen[t]){ seen[t]=1; } }); });
+    const list=Object.keys(seen);
+    if(!list.length) return;
+    for(const u of list){ try{ await ACC().rpc('upi_remember',{p_upi:u}); }catch(e){} }
+    WF_UPI_CACHE=null;   // re-read next time so the ordering reflects the new counts
+  }
   function wfEvtSelValues(value){ return String(value||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
   function wfEvtSelectHtml(f,value){
     const opts=Array.isArray(f.options)?f.options:[];
@@ -2502,12 +2526,15 @@
     let listHtml='';
     // "—" clears the whole field. On a multi field that means clearing every choice, so it is only
     // ticked when nothing at all is chosen.
-    if(f.optional) listHtml+='<div class="wf-evt-selopt'+((multi?!chosen.length:value==='')?' on':'')+'" data-v="" onclick="wfEvtSelPick(this)">—'+((multi?!chosen.length:value==='')?'<i class="fa-solid fa-check"></i>':'')+'</div>';
+    if(f.optional) listHtml+='<div class="wf-evt-selopt'+((multi?!chosen.length:value==='')?' on':'')+'" data-v="" onclick="wfEvtSelPick(this)"><i class="fa-solid fa-ban wf-evt-selic"></i><span class="wf-evt-seltxt">None</span>'+((multi?!chosen.length:value==='')?'<i class="fa-solid fa-check"></i>':'')+'</div>';
     order.forEach(function(g){
       if(g) listHtml+='<div class="ms-dept">'+esc2(g)+'</div>';
       groups[g].forEach(function(o){
         const on=isOn(o.label);
-        listHtml+='<div class="wf-evt-selopt'+(on?' on':'')+'" data-v="'+esc2(o.label)+'" onclick="wfEvtSelPick(this)">'+esc2(o.label)+(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
+        // Each option carries its own icon (set on the field's options), so the menu reads at a
+        // glance — a bus beside Bus, a plate beside Lunch — instead of a column of bare words.
+        const ic=o.icon?('<i class="fa-solid '+esc2(o.icon)+' wf-evt-selic"></i>'):'<i class="wf-evt-selic-sp"></i>';
+        listHtml+='<div class="wf-evt-selopt'+(on?' on':'')+'" data-v="'+esc2(o.label)+'" data-ic="'+esc2(o.icon||'')+'" onclick="wfEvtSelPick(this)">'+ic+'<span class="wf-evt-seltxt">'+esc2(o.label)+'</span>'+(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
       });
     });
     return '<div class="wf-evt-selbox'+(multi?' multi':'')+'" data-optional="'+(f.optional?'1':'0')+'" data-multi="'+(multi?'1':'0')+'">'
@@ -2574,6 +2601,15 @@
       // especially cannot be restyled with CSS at all) - built as a custom dropdown instead, same
       // pattern as the builder's own field-type picker, so it actually matches the app's design.
       valueHtml=wfEvtSelectHtml(f,value);
+    } else if(f.upiMemory){
+      /* The UPI id somebody was paid to last time, offered back to them. Every id they have ever
+         used stays on the list with the most-used first, and anything they type joins the list for
+         next time — so it keeps learning instead of being a fixed list someone has to maintain.
+         A datalist, not a dropdown, precisely because it must stay freely editable. */
+      const dl='wfupi'+(++WF_PID);
+      valueHtml='<input class="ac-in wf-evt-value wf-evt-upi" list="'+dl+'" value="'+esc2(value||'')+'" '
+        +'placeholder="name@bank" autocomplete="off">'
+        +'<datalist id="'+dl+'"></datalist>';
     } else if(type==='people'){
       /* A People field is answered by picking from the staff list rather than typing a name, so
          what is stored is a real person - the value is the picker's own hidden input. */
@@ -2664,6 +2700,7 @@
     const label=esc2(window._wfEvtGroupLabel||'Set')+' '+idx;
     const groupHtml='<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+label+'</span><button type="button" class="ac-btn ic danger" title="Remove this set" onclick="wfEvtRemoveGroup(this)"><i class="fa-solid fa-xmark"></i></button></div>'+rowsHtml+'</div>';
     w.insertAdjacentHTML('beforeend', groupHtml);
+    wfUpiHydrate();
   };
   window.wfEvtRemoveGroup=function(btn){
     const g=btn.closest('.wf-evt-group'); const w=g&&g.closest('#wfEvtDetails'); if(g) g.remove();
@@ -2804,6 +2841,7 @@
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','md');
+    wfUpiHydrate();
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
   };
 
@@ -2844,6 +2882,9 @@
       // entry per label either way, so nothing downstream (Tracker, timeline) needs to change.
       // Not a comma: a multi-select day is itself comma-separated ("Auto, Bus").
       order.forEach(function(label){ details.push({label:label, value:wfJoinSets(byLabel[label])}); });
+      // Anything typed into a UPI field joins that person's own list for next time.
+      const upiLabel=Object.keys(byLabel).filter(function(l){ return /upi/i.test(l); })[0];
+      if(upiLabel) wfUpiRemember(byLabel[upiLabel]);
     }
     if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
     const N=wfN();
@@ -2913,10 +2954,13 @@
   }
   // The case's own trigger-event Attachment field (if any) — a read-only "original attachment"
   // pinned above the Updates thread, distinct from anything added afterward in Updates & Feedback.
-  function wfOriginalAttachmentHtml(c){
+  function wfOriginalAttachmentHtml(c,flow){
     const det=Array.isArray(c&&c.trigger_details)?c.trigger_details:[];
     const f=det.find(function(d){ return d&&eq(d.label,'Attachment')&&d.value; });
     if(!f) return '';
+    // An entry-wise instance holds one attachment PER ENTRY in this field, and the table already
+    // gives each row its own. Pinning the joined value here would render one broken chip.
+    if(wfIsDaywise(flow,det) || wfSplitSets(f.value).length>1) return '';
     // A multi-entry (repeated-set) workflow can have one attachment per set, comma-joined like any
     // other multi-entry field — split back out into one chip per file.
     const paths=String(f.value).split(',').map(function(s){return s.trim();}).filter(function(s){return s.indexOf('s3:')===0;});
@@ -3017,7 +3061,7 @@
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
       +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfNounOf(flow).lc+' as it moves to the next person, and rejection reasons appear here too.')+'</h3>'
-        +wfOriginalAttachmentHtml(caseRow)
+        +wfOriginalAttachmentHtml(caseRow,flow)
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
@@ -3180,6 +3224,12 @@
     .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
     .wf-tlcard .tp-f-wide{flex:1 1 100%;width:100%;min-width:0}
     /* ---- day-wise instance: table on a wide screen, stacked blocks on a phone ---- */
+    .wf-evt-selopt{display:flex;align-items:center;gap:9px}
+    .wf-evt-selic{width:15px;text-align:center;font-size:11.5px;color:var(--slate);flex:none}
+    .wf-evt-selopt.on .wf-evt-selic{color:var(--brand)}
+    .wf-evt-selic-sp{width:15px;flex:none}
+    .wf-evt-seltxt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-evt-upi{width:100%}
     .wf-dw{margin-top:10px}
     .wf-dw-common{display:flex;flex-wrap:wrap;gap:6px 20px;margin-bottom:10px;font-size:13px;color:var(--ink)}
     .wf-dw-common b{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);margin-right:5px}
@@ -3200,21 +3250,15 @@
       color:var(--brand);cursor:pointer;background:var(--brand-a10,rgba(224,18,28,.07));
       border-radius:7px;padding:3px 8px}
     .wf-dw-att:hover{text-decoration:underline}
-    .wf-dw-list{display:none}
-    .wf-dw-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--bg-card)}
-    .wf-dw-card-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:6px}
-    .wf-dw-card-n{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand)}
-    .wf-dw-card-d{font-size:13px;font-weight:600;color:var(--ink)}
-    .wf-dw-card-a{margin-left:auto;font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap}
-    .wf-dw-kv{display:flex;gap:10px;padding:4px 0;font-size:12.5px}
-    .wf-dw-k{flex:0 0 88px;color:var(--slate);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding-top:2px}
-    .wf-dw-v{flex:1;min-width:0;color:var(--ink);overflow-wrap:anywhere}
-    .wf-dw-total{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;
-      border:1px solid var(--line);border-radius:10px;background:var(--bg,#f8fafc);font-size:13px}
+    /* On a phone this stays a TABLE and scrolls sideways — a row per entry is the whole point, and
+       stacking each entry into a block loses the ability to read down a column and compare. */
     @media(max-width:760px){
-      .wf-dw-tablewrap{display:none}
-      .wf-dw-list{display:block}
+      .wf-dw-table{min-width:660px}
+      .wf-dw-tablewrap{-webkit-overflow-scrolling:touch}
       .wf-dw-common{flex-direction:column;gap:4px}
+      .wf-dw-table th,.wf-dw-table td{padding:7px 9px}
+      .wf-dw-table .wf-dw-rem{min-width:150px}
+    }
     }
     .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
     .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
