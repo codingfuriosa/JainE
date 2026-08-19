@@ -1202,14 +1202,14 @@
       WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     }
     if(items.length<=1 && !wideField) return '';
-    // This grid packs each card to its own content width (see .wf-tlcard .tp-grid) rather than
-    // grid-stretching every column to an equal share of the row — a short value like "1" no
-    // longer sits alone in a column as wide as "2026-08-20, 2026-08-21". The Total Amount (or any
-    // trailing item on its own, when the count is odd) still gets its own full-width row via
-    // .tp-f-wide so it doesn't just tack onto the end of the packed row.
-    const gridItems=items.map(function(it,i){
-      const isLastOdd=(i===items.length-1)&&(items.length%2===1)&&items.length>1;
-      return '<div class="tp-f'+(isLastOdd?' tp-f-wide':'')+'"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
+    /* Each detail is its own card, packed to its content width (see .wf-tlcard .tp-grid) rather
+       than stretched to an equal share of the row — a short value like "1" should not occupy as
+       much space as "2026-08-20, 2026-08-21".
+       Nothing is widened just for being last: an odd count used to push the final item — usually
+       Total Amount — onto a stretched row of its own, which read as a mistake rather than as
+       emphasis. Only a field the flow actually declares wide (Remarks) spans the row. */
+    const gridItems=items.map(function(it){
+      return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
     }).join('')
       +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v,flow)+'</div></div>'):'');
     return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
@@ -2993,16 +2993,20 @@
        collapsed everything into one column.) Plain flex with flex:0 0 auto (never grow, never
        shrink) sizes each card to exactly its natural content width and wraps the row when full —
        no ambiguity in how the browser computes it. */
-    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:14px 30px}
+    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
     /* Never GROW (that is the whole point — a short value like "1" must not stretch into a column
        as wide as its neighbour), but it must still be allowed to SHRINK. flex:0 0 auto refused
        both, so a long value — a project name, a joined list of dates — sized the card past the
        panel and the text was cut off at the edge. 0 1 auto keeps the natural width whenever it
        fits and only gives way when the row cannot hold it; min-width:0 is what actually lets the
        text inside wrap rather than pushing the box wider. */
-    .wf-tlcard .tp-f{flex:0 1 auto;min-width:0;max-width:100%}
-    .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word}
-    .wf-tlcard .tp-f-wide{flex:0 0 100%;width:100%;min-width:0}
+    .wf-tlcard .tp-f{flex:0 1 auto;min-width:0;max-width:100%;
+      /* They are called cards, so they look like cards. As bare label-over-value text with only a
+         gap between them, a value that itself contains commas ("Auto, Bus", "Breakfast, Lunch")
+         gave no clue where one detail ended and the next began. */
+      background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px}
+    .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
+    .wf-tlcard .tp-f-wide{flex:1 1 100%;width:100%;min-width:0}
     .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
     .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
     .wf-remark-entry:first-child{padding-top:0}
