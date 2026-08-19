@@ -998,7 +998,33 @@
       // the matching client-side filter so the list doesn't have to round-trip a denied row.
       || wfInAnyDept(f.visible_departments);
   }
-  function wfTrigShort(c){ const base=c.title||''; const det=Array.isArray(c.trigger_details)?c.trigger_details:[]; const vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean); let s=base+(vals.length?(' : '+vals.join(', ')):''); if(s.length>30)s=s.slice(0,29)+'…'; return s; }
+  // A flow can curate which detail fields summarize an instance (flow.card_fields, e.g.
+  // Reimbursement -> Date/Conveyance/Food, then Total Amount) instead of showing every field it has.
+  // Sums a comma-joined multi-entry value (e.g. "500, 300, 200") into a single number.
+  function wfSumField(v){ return String(v||'').split(',').map(function(x){return parseFloat(x.trim());})
+    .filter(function(n){return !isNaN(n);}).reduce(function(a,b){return a+b;},0); }
+  function wfMoney(n){ return '₹'+Number(n||0).toLocaleString('en-IN'); }
+  // Returns {short, full} — short is what's shown (clipped with an ellipsis), full is the complete
+  // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
+  // with no way to read the rest.
+  function wfTrigShort(c,flow){
+    const base=c.title||'';
+    const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
+    const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
+    const sumField=(flow&&flow.tracker_sum_field||'').trim();
+    let vals;
+    if(cardFields){
+      const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
+      vals=cardFields.map(function(l){ return byLabel[l]||''; }).filter(Boolean);
+      if(sumField){ const total=wfSumField(byLabel[sumField]); if(total) vals.push(wfMoney(total)); }
+    } else {
+      vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean);
+    }
+    const full=base+(vals.length?(' : '+vals.join(', ')):'');
+    let short=full;
+    if(short.length>30)short=short.slice(0,29)+'…';
+    return {short:short, full:full};
+  }
   function wfTitleCase(s){ return String(s==null?'':s).replace(/\S+/g,function(w){ return w.charAt(0).toUpperCase()+w.slice(1); }); }
 
   async function workflowTab(){
@@ -1138,13 +1164,32 @@
   // the generic full detail list instead) for any workflow that doesn't have these field labels,
   // so other workflows (Leave approval, etc.) are unaffected.
   var WF_SUMMARY_FIELDS=['Wheredoc Id','Bill No.','Bill Date','Company','Amount'];
-  function wfCaseSummaryHtml(c){
+  function wfCaseSummaryHtml(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
     const items=[{k:'No.',v:wfCaseNoText(c)}];
-    WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
-    if(items.length<=1) return '';
-    return '<div class="tp-grid" style="margin-top:10px">'+items.map(function(it){return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';}).join('')+'</div>';
+    // A flow that curates its own summary fields (flow.card_fields, e.g. Reimbursement's
+    // Date/Conveyance/Food + Total Amount) uses those instead of the Invoice-Processing-specific
+    // WF_SUMMARY_FIELDS list — that list was being applied to every workflow regardless, so any
+    // other flow with a field that happened to share a name (e.g. "Amount") showed just that one
+    // field instead of its own real summary.
+    const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
+    // An optional wide card (flow.card_wide_field, e.g. Reimbursement's Remarks) spans the full
+    // row instead of sitting in its own narrow cell, with its own scrollable box if it runs long.
+    let wideField=null;
+    if(cardFields){
+      cardFields.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
+      const sumField=(flow&&flow.tracker_sum_field||'').trim();
+      if(sumField){ const total=wfSumField(by[sumField]); if(total) items.push({k:'Total Amount',v:wfMoney(total)}); }
+      const wideKey=(flow&&flow.card_wide_field||'').trim();
+      if(wideKey && by[wideKey]!=null && String(by[wideKey]).trim()) wideField={k:wideKey,v:by[wideKey]};
+    } else {
+      WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
+    }
+    if(items.length<=1 && !wideField) return '';
+    const gridItems=items.map(function(it){return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';}).join('')
+      +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+esc2(wideField.v)+'</div></div>'):'');
+    return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
   }
 
   /* ----- What does this workflow actually process? -----------------------------------------
@@ -1308,7 +1353,7 @@
       const inSearch=e.target&&e.target.classList&&e.target.classList.contains('ms-search');
       const inPanel=e.target&&e.target.closest&&e.target.closest('.wf-pp-panel');
       if(e.key==='Escape'){ e.preventDefault(); wfCancel(); }
-      else if(e.key==='Enter'&&!inSearch&&!inPanel&&e.target.tagName!=='SELECT'){ e.preventDefault(); wfSave(); }
+      else if(e.key==='Enter'&&!e.shiftKey&&!inSearch&&!inPanel&&e.target.tagName!=='SELECT'&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfSave(); }
     }); }
     const nm=$('wfName'); if(nm){ try{nm.focus();}catch(_){} }
   }
@@ -1376,6 +1421,9 @@
   window.wfOptTagKey=function(e,input){
     if(e.key!=='Enter') return;
     e.preventDefault();
+    // Without this, Enter also bubbles up to the builder page's own keydown handler, which
+    // treats a bare Enter as "save the whole workflow" — adding an option silently saved too.
+    e.stopPropagation();
     const v=(input.value||'').trim();
     if(!v) return;
     const tag=document.createElement('span');
@@ -1393,7 +1441,9 @@
       const lbl=(o&&o.label)||''; if(!lbl) return '';
       return '<span class="wf-t-opttag" data-v="'+esc2(lbl)+'">'+esc2(lbl)+'<i class="fa-solid fa-xmark" onclick="wfOptTagRemove(this)"></i></span>';
     }).join('');
-    return '<div class="wf-tmpl-row">'
+    // Stash the field as-loaded so wfTmplCollect can carry forward properties the builder UI has
+    // no control for (multiline, a custom placeholder) instead of silently dropping them on save.
+    return '<div class="wf-tmpl-row" data-orig="'+esc2(JSON.stringify(f))+'">'
       +'<input class="ac-in wf-t-label" placeholder="Field name (e.g. Bill No.)" value="'+esc2(f.label||'')+'">'
       +'<div class="wf-t-optswrap" style="'+(t==='select'?'':'display:none')+'">'
         +optTags
@@ -1417,7 +1467,12 @@
       if(!label) return null;
       const type=((r.querySelector('.wf-t-type')||{}).value||'text');
       const opt=!!(r.querySelector('.wf-t-optional')||{}).checked;
+      let orig={}; try{ orig=JSON.parse(r.getAttribute('data-orig')||'{}')||{}; }catch(_e){}
       const f={label:label,type:type};
+      // Carry forward properties the builder UI doesn't expose a control for — a custom
+      // placeholder, or multiline (an exceptional case, set directly rather than via a checkbox).
+      if(orig.placeholder) f.placeholder=orig.placeholder;
+      if(type==='text' && orig.multiline) f.multiline=true;
       // an attachment is never compulsory, whatever the box says
       if(opt||type==='attachment') f.optional=true;
       if(type==='select'){
@@ -1717,11 +1772,10 @@
     // Flows that opt in (flow.tracker_sum_field, e.g. Reimbursement's "Amount") get two extra
     // summary columns right after Timestamp: who actually triggered each instance, and the total
     // of that field's (possibly comma-joined, multi-entry) value.
+    // A flow that opts into a sum field gets the SIMPLIFIED tracker: just Owner + Total Amount,
+    // not every individual detail field as well (those already show inside each instance itself).
     const sumField=(flow.tracker_sum_field||'').trim();
-    const extraCols=sumField?[{k:'Owner'},{k:'Total Amount'}]:[];
-    const sumOf=function(v){ return String(v||'').split(',').map(function(x){return parseFloat(x.trim());})
-      .filter(function(n){return !isNaN(n);}).reduce(function(a,b){return a+b;},0); };
-    const fixed=[{k:'No.'},{k:'Timestamp'}].concat(extraCols).concat(tmpl.map(function(f){ return {k:f.label}; }));
+    const fixed=[{k:'No.'},{k:'Timestamp'}].concat(sumField?[{k:'Owner'},{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -1768,10 +1822,9 @@
     const body=cases.map(function(c){
       const by={}; (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
       const extraTds=sumField
-        ? '<td>'+esc2(wfNm(c.created_by)||'')+'</td><td><b>'+esc2(sumOf(by[sumField]).toLocaleString('en-IN'))+'</b></td>'
-        : '';
-      const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds
-        +tmpl.map(function(f){ return '<td title="'+esc2(by[f.label]||'')+'">'+cellText(by[f.label])+'</td>'; }).join('');
+        ? '<td>'+esc2(wfNm(c.created_by)||'')+'</td><td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
+        : tmpl.map(function(f){ return '<td title="'+esc2(by[f.label]||'')+'">'+cellText(by[f.label])+'</td>'; }).join('');
+      const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
         const cs=byCase[c.id]&&byCase[c.id][s.seq];
         if(s.is_manual_date){
@@ -1966,10 +2019,13 @@
     const trigList=(flow.trigger_owner||'').split(',').map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
     const trigOk = flow.trigger_owner==='__ALL__' || trigList.indexOf(String(mySelf||'').toLowerCase())!==-1;
     const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || wfInAnyDept(WF_CREATE_DEPTS);
-    // Editing/deleting the workflow itself (and, further down, its instances) is Administration-
-    // department only — mirrors acc.wf_is_admin_dept(), the real server-side enforcement.
-    const canManage = wfInDept('Administration');
-    window._wfFlowId=id; window._wfDelId = canManage ? id : null; wfWireDeleteKey();
+    // Editing/deleting the workflow itself (and, further down, its instances) is the Administrator
+    // account, plus this specific flow's own extra_admins (if any) — mirrors
+    // acc.wf_is_admin_dept(flow_id), the real server-side enforcement. Not the whole Administration
+    // department.
+    const canManage = eq(mySelf,'ayushruia1@gmail.com')
+      || (Array.isArray(flow.extra_admins) && flow.extra_admins.some(function(e){return eq(e,mySelf);}));
+    window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
     // older workflows saved before this feature have no word yet — learn it once, quietly
@@ -2025,9 +2081,9 @@
         const instOver=(c.status==='Done'||c.status==='Cancelled');
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
-        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell">'+esc2(wfTrigShort(c))+'</td>'+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
@@ -2098,11 +2154,13 @@
     const from=window._wfInstDateFilter.from, to=window._wfInstDateFilter.to;
     const rows=[].slice.call(document.querySelectorAll('.wf-itable tbody tr'));
     let shown=0;
+    const qLower=q.toLowerCase();
     rows.forEach(function(r){
       const id5=r.getAttribute('data-caseno5')||'';
+      const wheredoc=r.getAttribute('data-wheredoc')||'';
       const created=r.getAttribute('data-created')||'';
       let ok=true;
-      if(q && id5.indexOf(q)===-1) ok=false;
+      if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
       if(ok && to && created && created>to) ok=false;
       r.style.display=ok?'':'none';
@@ -2167,8 +2225,9 @@
     const box=$('wfTL'); if(box) box.innerHTML='<div class="loader"><div class="spin"></div></div>';
     document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');});
     const tr=rowEl||document.querySelector('.wf-itable tbody tr[data-case="'+caseId+'"]'); if(tr)tr.classList.add('sel');
-    let c=null,fcs=[],updates=[],atts=[];
+    let c=null,fcs=[],updates=[],atts=[],flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
+    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('card_fields,tracker_sum_field,card_wide_field').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
@@ -2176,7 +2235,7 @@
     if(!box)return;
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
     const pinned=wfOriginalAttachmentHtml(c);
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div><button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
@@ -2199,7 +2258,14 @@
     },40);
   };
 
-  function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){ if(e.key!=='Delete')return; if(!window._wfDelId)return; const ae=document.activeElement, tag=(ae&&ae.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return; window.wfDelete(window._wfDelId); }); }
+  function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
+    const ae=document.activeElement, tag=(ae&&ae.tagName)||'';
+    if(/INPUT|TEXTAREA|SELECT/.test(tag)||(ae&&ae.isContentEditable))return;
+    if(e.key==='Delete'){ if(!window._wfDelId)return; window.wfDelete(window._wfDelId); }
+    // N = start a new instance of the workflow currently open, same as clicking "New <Noun>" —
+    // only when this account is actually allowed to (mirrors the button's own canEvent gate).
+    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfEventOpen(window._wfFlowId); }
+  }); }
 
   window.wfDelete=function(id){
     wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its '+wfN().lcMany+' and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
@@ -2309,6 +2375,16 @@
       if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
         valueHtml='<input class="ac-in wf-evt-value" type="text" inputmode="decimal" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" oninput="wfNumOnly(this)">';
+      } else if(type==='text'&&f.multiline){
+        // A field like Remarks can opt into a real textarea so Shift+Enter genuinely inserts a
+        // line break instead of doing nothing (a single-line input can't wrap at all).
+        valueHtml='<textarea class="ac-in wf-evt-value" placeholder="'+esc2(placeholder)+'">'+esc2(value||'')+'</textarea>';
+      } else if(type==='text'&&Array.isArray(f.autocompleteValues)&&f.autocompleteValues.length){
+        // Grows from real usage (see wfEventOpen) — a native datalist lets someone pick a company
+        // already used before, or just type a genuinely new one; either way it's plain text.
+        const dlid='wfdl'+(++WF_PID);
+        valueHtml='<input class="ac-in wf-evt-value" type="text" list="'+dlid+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" autocomplete="off">'
+          +'<datalist id="'+dlid+'">'+f.autocompleteValues.map(function(v){return '<option value="'+esc2(v)+'">';}).join('')+'</datalist>';
       } else {
         // Text and Date. Text accepts letters and numbers (a plain text box already does);
         // Date uses the native date control.
@@ -2424,6 +2500,25 @@
     }
     else if(locked){ src=template.map(function(t){ return Object.assign({},t,{value:''}); }); }
     else { src=[]; }
+    // A text field can opt into a growing autocomplete list (flow.autocomplete_fields, e.g.
+    // Invoice Processing's Company) drawn from every value ever entered for it on this flow's own
+    // past instances — no separate admin-maintained list, it just learns from real usage.
+    const autoFields=(Array.isArray(flow.autocomplete_fields)?flow.autocomplete_fields:[]).filter(Boolean);
+    if(autoFields.length && !editing && src.length){
+      try{
+        const {data:pastCases}=await ACC().from('flow_cases').select('trigger_details').eq('flow_id',flowId);
+        const valuesByLabel={};
+        (pastCases||[]).forEach(function(pc){
+          (Array.isArray(pc.trigger_details)?pc.trigger_details:[]).forEach(function(d){
+            if(d&&d.label&&autoFields.indexOf(d.label)!==-1&&d.value&&String(d.value).trim()){
+              const set=(valuesByLabel[d.label]=valuesByLabel[d.label]||[]);
+              if(set.indexOf(d.value)===-1) set.push(d.value);
+            }
+          });
+        });
+        src=src.map(function(t){ return (t&&t.label&&valuesByLabel[t.label]) ? Object.assign({},t,{autocompleteValues:valuesByLabel[t.label]}) : t; });
+      }catch(_e){}
+    }
     const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     // Multi-entry workflows (flow.multiple_fields) let someone fill the same fixed detail fields
     // several times in one go (e.g. several conveyance/food lines) — only meaningful when the
@@ -2455,8 +2550,9 @@
       }catch(_e){}
     }
     /* ONE picker for every step left open to the triggering event owner, not one each. Whoever is
-       named here does all of them. Asking the same question once per step made the form long and
-       invited answering it differently for steps that are meant to be handled by the same person. */
+       named here does all of them and it's required — can't leave a step silently unassigned.
+       Asking the same question once per step made the form long and invited answering it
+       differently for steps that are meant to be handled by the same person. */
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
           +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
@@ -2486,10 +2582,21 @@
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','md');
-    setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
+    setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
   };
 
   window.wfEventSave=async function(flowId, caseId){
+    // A fast double-click (or a click landing right as Enter also fires) could send this twice
+    // before the modal closed, creating two real instances a few dozen milliseconds apart for the
+    // same bill — guard against re-entry for the lifetime of one call.
+    if(window._wfSaving) return;
+    window._wfSaving=true;
+    const saveBtn=document.querySelector('.modal-foot .ac-btn.primary'); if(saveBtn) saveBtn.disabled=true;
+    try{
+    return await wfEventSaveInner(flowId, caseId);
+    } finally { window._wfSaving=false; if(saveBtn) saveBtn.disabled=false; }
+  };
+  async function wfEventSaveInner(flowId, caseId){
     const wrap=$('wfEvtDetails'); const details=[]; let missing='';
     if(wrap){
       // Multi-entry workflows wrap each filled-in set in its own .wf-evt-group; a normal
@@ -2525,13 +2632,16 @@
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
         /* {seq: [emails]} for the steps just nominated. The row carries every open step's number,
-           because one picker now answers for all of them — the same people go to each. */
+           because one picker now answers for all of them — the same people go to each. Required —
+           can't leave a step silently unassigned. */
         const members={};
-        [].slice.call(document.querySelectorAll('#wfEvtMembers .wf-evt-row')).forEach(function(r){
-          const seqs=String(r.getAttribute('data-seq')||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-          const v=((r.querySelector('.wf-s-person')||{}).value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-          if(v.length) seqs.forEach(function(sq){ members[sq]=v.slice(); });
-        });
+        const memRow=document.querySelector('#wfEvtMembers .wf-evt-row');
+        if(memRow){
+          const seqs=String(memRow.getAttribute('data-seq')||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+          const v=((memRow.querySelector('.wf-s-person')||{}).value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+          if(!v.length){ toast('Please choose who does '+(seqs.length>1?'these steps':'this step'),'warn'); return; }
+          seqs.forEach(function(sq){ members[sq]=v.slice(); });
+        }
         const {error}=await ACC().rpc('wf_create_instance',
           {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
         if(error)throw error;
@@ -2926,6 +3036,7 @@
     .wf-evt-row{display:flex;gap:8px;margin-bottom:8px}
     .wf-evt-row .wf-evt-label{flex:0 0 40%;min-width:0}
     .wf-evt-row .wf-evt-value{flex:1;min-width:0}
+    .wf-evt-row textarea.wf-evt-value{height:auto;min-height:70px;padding-top:10px;resize:vertical;line-height:1.4}
     /* Dropdowns in this form matched the plain text inputs, so a field with a list looked no
        different from one you type into. Now they carry their own caret and hover/focus states. */
     .wf-evt-row select.wf-evt-value{appearance:none;-webkit-appearance:none;-moz-appearance:none;
@@ -2937,6 +3048,12 @@
     .wf-evt-row select.wf-evt-value:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10,rgba(224,18,28,.12))}
     .wf-evt-row select.wf-evt-value optgroup{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--slate)}
     .wf-evt-row select.wf-evt-value option{font-size:13.5px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink);padding:6px 8px}
+    /* A wide summary card (e.g. Reimbursement's Remarks) spans the whole row instead of one cell;
+       long text scrolls inside its own box rather than stretching the card indefinitely. */
+    .tp-f-wide{grid-column:1/-1}
+    .tp-f-wide .v.tp-f-scroll{display:block;max-height:110px;overflow-y:auto;white-space:pre-wrap;
+      font-weight:500;line-height:1.6;color:var(--ink);margin-top:5px;padding:10px 12px;
+      background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:9px}
     /* Custom dropdown for a select-type detail field — replaces the native <select> so the open
        menu is actually styleable (a native popup's hover highlight follows the OS accent color
        and can't be overridden with CSS in any browser). */
