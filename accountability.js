@@ -3139,7 +3139,11 @@
     /* A wide summary card (e.g. Reimbursement's Remarks) spans the whole row instead of one cell;
        long text scrolls inside its own box rather than stretching the card indefinitely. */
     .tp-f-wide{grid-column:1/-1}
-    .tp-f-wide .v.tp-f-scroll{display:block;max-height:110px;overflow-y:auto;overflow-x:hidden;white-space:pre-wrap;
+    /* Remarks show in full. This was capped at 110px with an inner scrollbar, which cut the list
+       off part-way through a day's entries — the box looked broken rather than scrollable, and the
+       days below it were simply invisible. The panel it sits in scrolls perfectly well on its own,
+       so there is nothing to gain by clipping here. */
+    .tp-f-wide .v.tp-f-scroll{display:block;overflow:visible;white-space:pre-wrap;
       overflow-wrap:anywhere;word-break:break-word;
       font-weight:500;line-height:1.6;color:var(--ink);margin-top:5px;padding:10px 12px;
       background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:9px}
