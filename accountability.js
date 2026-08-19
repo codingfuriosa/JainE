@@ -975,7 +975,7 @@
     emails=(emails||[]).filter(Boolean);
     if(!emails.length) return '<span class="wf-circle wf-none" title="No members yet">·</span>';
     const max=5, shown=emails.slice(0,max), multi=emails.length>=2;
-    const wr=function(e){ const c=counts&&counts[e]; return c&&(c.waiting||c.received)?(' — Waiting '+c.waiting+', Received '+c.received):''; };
+    const wr=function(e){ const c=counts&&counts[e]; return c?(' — Waiting '+c.waiting+', Received '+c.received):''; };
     let h='<span class="wf-circles'+(multi?' wf-poptip':'')+' '+(extra||'')+'"'+(multi?' tabindex="0" role="button" aria-label="Show all people" onclick="event.stopPropagation();wfPopToggle(this)"':'')+'>';
     shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e)+wr(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
     if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>';
@@ -2053,18 +2053,23 @@
        of them, kept for older single-owner steps. trigger_owner may also be '__ALL__' or a
        comma-list, not just one email - pushing it raw produced a garbled "avatar". */
     const members=[];
+    const stepOwnerEmails=[];
     const addMember=function(e){ if(e&&!members.some(function(x){return eq(x,e);})) members.push(e); };
     if(flow.trigger_owner && flow.trigger_owner!=='__ALL__'){
       flow.trigger_owner.split(',').map(function(x){return x.trim();}).filter(Boolean).forEach(addMember);
     }
     steps.forEach(function(s){
       const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
-      owners.forEach(addMember);
+      owners.forEach(function(e){ addMember(e); if(e&&!stepOwnerEmails.some(function(x){return eq(x,e);})) stepOwnerEmails.push(e); });
     });
     // Per-person Waiting (it's their turn on a live instance, not yet picked up) / Received
     // (picked up, not yet forwarded) counts across this workflow — shown on hover in the People
-    // row, from the same cases/fcs already fetched above, no extra query needed.
+    // row, from the same cases/fcs already fetched above, no extra query needed. Every actual step
+    // owner gets a count even if it's 0 (so the tooltip always shows it, not just when they're
+    // currently busy) — but someone who only appears here as the trigger owner (e.g. Uma, who
+    // starts instances but never actually works a step) doesn't get a fake "0/0" count.
     const wrByEmail={};
+    stepOwnerEmails.forEach(function(e){ wrByEmail[e]={waiting:0,received:0}; });
     const casesById={}; cases.forEach(function(cc){ casesById[cc.id]=cc; });
     fcs.forEach(function(x){
       const cc=casesById[x.case_id];
