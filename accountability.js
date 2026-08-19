@@ -1202,23 +1202,32 @@
       WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     }
     if(items.length<=1 && !wideField) return '';
-    // The card grid is fixed at 2 columns (see .wf-tp .tp-grid) — an odd item count otherwise
-    // leaves the last row's lone card sitting under column 1 with a ragged gap where column 2
-    // would be. Reusing .tp-f-wide (grid-column:1/-1) on just that last card makes it span the
-    // full row instead, so every row is visually complete.
+    // This grid packs each card to its own content width (see .wf-tlcard .tp-grid) rather than
+    // grid-stretching every column to an equal share of the row — a short value like "1" no
+    // longer sits alone in a column as wide as "2026-08-20, 2026-08-21". The Total Amount (or any
+    // trailing item on its own, when the count is odd) still gets its own full-width row via
+    // .tp-f-wide so it doesn't just tack onto the end of the packed row.
     const gridItems=items.map(function(it,i){
       const isLastOdd=(i===items.length-1)&&(items.length%2===1)&&items.length>1;
       return '<div class="tp-f'+(isLastOdd?' tp-f-wide':'')+'"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
     }).join('')
-      +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v)+'</div></div>'):'');
+      +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v,flow)+'</div></div>'):'');
     return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
   }
   // A repeated-set (multi-entry) field's value is stored as one comma-joined string, one segment
-  // per set — shown as its own line rather than one run-on sentence, so e.g. each "Day"'s Remarks
-  // stays legible instead of blurring into the next.
-  function wfMultiValHtml(v){
-    return String(v||'').split(',').map(function(s){return s.trim();}).filter(Boolean)
-      .map(function(s){return esc2(s);}).join('<br><br>');
+  // per set. Only actually split & labeled per-set when this flow IS multi-entry
+  // (flow.multiple_fields) — otherwise a value that just happens to contain a comma (e.g. someone
+  // typed "Lunch, dinner and snacks" as one Remark) would get wrongly sliced into fake "Day 1"/
+  // "Day 2" entries.
+  function wfMultiValHtml(v,flow){
+    const raw=String(v||'');
+    if(!(flow&&flow.multiple_fields)) return esc2(raw);
+    const parts=raw.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    if(parts.length<=1) return esc2(raw);
+    const label=(flow.multi_entry_label||'Set');
+    return parts.map(function(s,i){
+      return '<div class="wf-remark-entry"><div class="wf-remark-day">'+esc2(label)+' '+(i+1)+'</div><div class="wf-remark-txt">'+esc2(s)+'</div></div>';
+    }).join('');
   }
 
   /* ----- What does this workflow actually process? -----------------------------------------
@@ -2276,7 +2285,7 @@
     const tr=rowEl||document.querySelector('.wf-itable tbody tr[data-case="'+caseId+'"]'); if(tr)tr.classList.add('sel');
     let c=null,fcs=[],updates=[],atts=[],flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('card_fields,tracker_sum_field,card_wide_field').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
+    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('card_fields,tracker_sum_field,card_wide_field,multiple_fields,multi_entry_label').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
@@ -2977,6 +2986,17 @@
     .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
     .wf-card.wf-meta{padding:14px 18px}
     .wf-card.wf-tlcard{padding:16px 18px}
+    /* The instance-detail card grid (wfCaseSummaryHtml): grid-stretch made a short value like "1"
+       occupy a column as wide as "2026-08-20, 2026-08-21" sitting next to it. Flex-wrap instead
+       sizes each card to its own content and just packs them left-to-right. */
+    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:16px 32px}
+    .wf-tlcard .tp-f{flex:0 1 auto;min-width:70px}
+    .wf-tlcard .tp-f-wide{flex:0 0 100%;width:100%}
+    .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
+    .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
+    .wf-remark-entry:first-child{padding-top:0}
+    .wf-remark-day{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand);margin-bottom:3px}
+    .wf-remark-txt{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
     .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
     .wf-card-hd i{color:var(--slate);font-size:13px}
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
