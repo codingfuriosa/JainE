@@ -967,19 +967,14 @@
   // full name list via the existing .wf-poptip/.wf-tip-txt tooltip layer (same one the "i" hints
   // and status pills already use) instead of relying on each tiny circle's own native title,
   // which never worked for the "+N" overflow circle and only ever showed one name at a time.
-  // counts, when passed, is {email: {waiting, received}} — how many of this workflow's live
-  // instances are currently sitting at a step this person hasn't picked up yet (waiting) vs.
-  // has picked up but not yet forwarded (received). Appended to the existing hover-name tooltip
-  // rather than a new UI surface, since that's the only place this info can attach per-person.
-  function wfCircles(emails,extra,counts){
+  function wfCircles(emails,extra){
     emails=(emails||[]).filter(Boolean);
     if(!emails.length) return '<span class="wf-circle wf-none" title="No members yet">·</span>';
     const max=5, shown=emails.slice(0,max), multi=emails.length>=2;
-    const wr=function(e){ const c=counts&&counts[e]; return c?(' — Waiting '+c.waiting+', Received '+c.received):''; };
     let h='<span class="wf-circles'+(multi?' wf-poptip':'')+' '+(extra||'')+'"'+(multi?' tabindex="0" role="button" aria-label="Show all people" onclick="event.stopPropagation();wfPopToggle(this)"':'')+'>';
-    shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e)+wr(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
+    shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
     if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>';
-    if(multi)h+='<span class="wf-tip-txt">'+emails.map(function(e){return esc2(wfNm(e)+wr(e));}).join('<br>')+'</span>';
+    if(multi)h+='<span class="wf-tip-txt">'+emails.map(function(e){return esc2(wfNm(e));}).join('<br>')+'</span>';
     h+='</span>';
     return h;
   }
@@ -2053,30 +2048,26 @@
        of them, kept for older single-owner steps. trigger_owner may also be '__ALL__' or a
        comma-list, not just one email - pushing it raw produced a garbled "avatar". */
     const members=[];
-    const stepOwnerEmails=[];
     const addMember=function(e){ if(e&&!members.some(function(x){return eq(x,e);})) members.push(e); };
     if(flow.trigger_owner && flow.trigger_owner!=='__ALL__'){
       flow.trigger_owner.split(',').map(function(x){return x.trim();}).filter(Boolean).forEach(addMember);
     }
     steps.forEach(function(s){
       const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
-      owners.forEach(function(e){ addMember(e); if(e&&!stepOwnerEmails.some(function(x){return eq(x,e);})) stepOwnerEmails.push(e); });
+      owners.forEach(addMember);
     });
-    // Per-person Waiting (it's their turn on a live instance, not yet picked up) / Received
-    // (picked up, not yet forwarded) counts across this workflow — shown on hover in the People
-    // row, from the same cases/fcs already fetched above, no extra query needed. Every actual step
-    // owner gets a count even if it's 0 (so the tooltip always shows it, not just when they're
-    // currently busy) — but someone who only appears here as the trigger owner (e.g. Uma, who
-    // starts instances but never actually works a step) doesn't get a fake "0/0" count.
-    const wrByEmail={};
-    stepOwnerEmails.forEach(function(e){ wrByEmail[e]={waiting:0,received:0}; });
-    const casesById={}; cases.forEach(function(cc){ casesById[cc.id]=cc; });
-    fcs.forEach(function(x){
-      const cc=casesById[x.case_id];
-      if(!cc||cc.status!=='Pending'||cc.current_step!==x.seq) return;
-      const cands=(Array.isArray(x.candidates)&&x.candidates.length)?x.candidates:(x.person?[x.person]:[]);
-      if(x.received_at){ if(x.person){ wrByEmail[x.person]=wrByEmail[x.person]||{waiting:0,received:0}; wrByEmail[x.person].received++; } }
-      else { cands.forEach(function(e){ wrByEmail[e]=wrByEmail[e]||{waiting:0,received:0}; wrByEmail[e].waiting++; }); }
+    // Your own Waiting (it's your turn on a live instance, not yet picked up) / Received (you've
+    // picked it up, not yet forwarded) count for this workflow — deliberately never computed or
+    // shown for anyone but the viewer themselves. How backlogged a specific colleague is isn't
+    // meant to be visible to other people, only to that person.
+    let myWait=0, myRecv=0;
+    cases.forEach(function(cc){
+      if(cc.status!=='Pending') return;
+      const cs=fcs.find(function(x){return x.case_id===cc.id&&x.seq===cc.current_step;});
+      if(!cs) return;
+      const cands=(Array.isArray(cs.candidates)&&cs.candidates.length)?cs.candidates:(cs.person?[cs.person]:[]);
+      if(cs.received_at){ if(eq(cs.person,mySelf)) myRecv++; }
+      else if(cands.some(function(e){return eq(e,mySelf);})) myWait++;
     });
 
     // Default timeline panel = the workflow's step definition
@@ -2134,6 +2125,7 @@
     }
 
     const headActs='<div class="wf-head-acts">'
+      +'<span class="wf-my-wr" title="Your own count for this workflow — only you can see this"><i class="fa-solid fa-hourglass-half"></i> Waiting '+myWait+' <i class="fa-solid fa-inbox"></i> Received '+myRecv+'</span>'
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
@@ -2144,7 +2136,7 @@
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members,'',wrByEmail)+'</div>'
+        +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
       +'</div>'
       /* Every workflow gets a Tracker tab. It was gated behind the Invoice Processing flow, but all
          it reports is each instance against each step — due date, actual date, delay — which is
@@ -2949,6 +2941,8 @@
     .wf-page-head h1{font-size:18px;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:9px;flex:1;min-width:0;letter-spacing:-.01em}
     .wf-page-head h1 i{color:var(--brand);font-size:16px}
     .wf-head-acts{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+    .wf-my-wr{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--slate);background:#f1f5f9;border-radius:20px;padding:6px 12px;white-space:nowrap}
+    .wf-my-wr i{font-size:10.5px;color:var(--brand)}
     .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
     .wf-card.wf-meta{padding:14px 18px}
     .wf-card.wf-tlcard{padding:16px 18px}
