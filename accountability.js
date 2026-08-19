@@ -2496,14 +2496,32 @@
     }catch(e){ WF_UPI_CACHE=[]; }
     return WF_UPI_CACHE;
   }
+  /* One UPI id for the whole claim. It is stored per entry — so the table has its own column and a
+     row could in principle differ — but nobody is paid into five different accounts for one
+     reimbursement, so filling it once fills it everywhere: typing it in the first entry carries it
+     into every other, and any entry added afterwards arrives already holding it. */
+  function wfUpiCurrent(){
+    const boxes=[].slice.call(document.querySelectorAll('.wf-evt-upi'));
+    for(let i=0;i<boxes.length;i++){ const v=(boxes[i].value||'').trim(); if(v) return v; }
+    return '';
+  }
+  window.wfUpiSync=function(src){
+    const v=(src&&src.value||'').trim();
+    [].slice.call(document.querySelectorAll('.wf-evt-upi')).forEach(function(inp){
+      if(inp!==src) inp.value=v;
+    });
+  };
   async function wfUpiHydrate(){
     const boxes=[].slice.call(document.querySelectorAll('.wf-evt-upi'));
     if(!boxes.length) return;
     const list=await wfUpiList();
+    // whatever is already typed in this form wins over the remembered default — a new entry must
+    // not arrive holding an old id when the person has just typed a different one
+    const current=wfUpiCurrent() || (list.length?list[0]:'');
     boxes.forEach(function(inp){
       const dl=document.getElementById(inp.getAttribute('list'));
       if(dl) dl.innerHTML=list.map(function(u){ return '<option value="'+esc2(u)+'"></option>'; }).join('');
-      if(!inp.value && list.length) inp.value=list[0];    // the one used most, as the default
+      if(!inp.value && current) inp.value=current;
     });
   }
   async function wfUpiRemember(vals){
@@ -2608,7 +2626,7 @@
          A datalist, not a dropdown, precisely because it must stay freely editable. */
       const dl='wfupi'+(++WF_PID);
       valueHtml='<input class="ac-in wf-evt-value wf-evt-upi" list="'+dl+'" value="'+esc2(value||'')+'" '
-        +'placeholder="name@bank" autocomplete="off">'
+        +'placeholder="name@bank" autocomplete="off" oninput="wfUpiSync(this)" onchange="wfUpiSync(this)">'
         +'<datalist id="'+dl+'"></datalist>';
     } else if(type==='people'){
       /* A People field is answered by picking from the staff list rather than typing a name, so
