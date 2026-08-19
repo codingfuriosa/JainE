@@ -1001,8 +1001,24 @@
   // A flow can curate which detail fields summarize an instance (flow.card_fields, e.g.
   // Reimbursement -> Date/Conveyance/Food, then Total Amount) instead of showing every field it has.
   // Sums a comma-joined multi-entry value (e.g. "500, 300, 200") into a single number.
-  function wfSumField(v){ return String(v||'').split(',').map(function(x){return parseFloat(x.trim());})
-    .filter(function(n){return !isNaN(n);}).reduce(function(a,b){return a+b;},0); }
+  /* ---- days (sets) vs values within a day ----------------------------------------------------
+     A day-wise instance keeps one detail entry per label, with the days packed into it. Commas used
+     to separate the days, but a multi-select field puts commas INSIDE a day's own value ("Auto,
+     Bus"), which made "Auto, Bus, Train" impossible to read back — two days or three?
+     Days are separated by WF_SET_SEP now. Anything saved before this still splits on commas, since
+     back then a day could only ever hold one value, so old instances read exactly as they did. */
+  const WF_SET_SEP=' | ';
+  function wfSplitSets(v){
+    const s=String(v==null?'':v);
+    if(s.indexOf('|')!==-1) return s.split('|').map(function(x){return x.trim();});
+    return s.split(',').map(function(x){return x.trim();});
+  }
+  function wfJoinSets(arr){ return (arr||[]).join(WF_SET_SEP); }
+  function wfSumField(v){ return wfSplitSets(v).map(function(x){
+      // a day's own value may itself be a list; every number in it counts toward the total
+      return String(x).split(',').map(function(y){return parseFloat(y.trim());})
+        .filter(function(n){return !isNaN(n);}).reduce(function(a,b){return a+b;},0); })
+    .reduce(function(a,b){return a+b;},0); }
   function wfMoney(n){ return '₹'+Number(n||0).toLocaleString('en-IN'); }
   // Returns {short, full} — short is what's shown (clipped with an ellipsis), full is the complete
   // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
@@ -1171,8 +1187,131 @@
     const n=v.split(',').filter(function(s){return s.trim().indexOf('s3:')===0;}).length;
     return n>1?(n+' files attached'):'file attached';
   }
-  function wfDetailsInline(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?String(l)+': ':'')+wfDetailDisp(v); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
+  /* The one-line summary beside a task. On a day-wise instance the full detail list is far too much
+     for a title — every day of every field. It carries the dates, what was claimed for, the total
+     and where the money goes, and nothing else. Days read comma-separated here, as asked. */
+  var WF_TITLE_FIELDS=['Date','Conveyance','Food','Amount','UPI Id'];
+  function wfDetailsInline(details,flow){
+    const det=details||[];
+    if(wfIsDaywise(flow,det)){
+      const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+      const sumField=(flow&&flow.tracker_sum_field||'Amount');
+      const out=[];
+      WF_TITLE_FIELDS.forEach(function(k){
+        const raw=by[k]; if(raw==null||!String(raw).trim()) return;   // Food is often absent — skipped
+        if(k===sumField){ const t=wfSumField(raw); if(t) out.push('Total '+wfMoney(t)); return; }
+        // the days, and any multi-select values inside them, all read as one comma-separated list
+        const flat=[]; wfSplitSets(raw).forEach(function(s){
+          String(s).split(',').forEach(function(x){ const v=x.trim(); if(v&&flat.indexOf(v)===-1) flat.push(v); }); });
+        if(flat.length) out.push(flat.join(', '));
+      });
+      return out.join(' · ');
+    }
+    return det.map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?String(l)+': ':'')+wfDetailDisp(v); }).filter(function(x){ return String(x).trim(); }).join(' · ');
+  }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(wfDetailDisp(v)); }).filter(Boolean).join('<br>'); }
+
+  /* ---- a day-wise instance, read as a table ---------------------------------------------------
+     A reimbursement covers several days, and the details arrive as one entry per label with the
+     days packed inside. Printed as "Label: value, value, value" that is unreadable — you cannot
+     tell which conveyance belongs to which date, or which amount to which remark.
+     So: the fields that are the same for every day (UPI Id) are stated once above, and the rest
+     become a row per day. A column whose field is empty on every day — Food usually — is left out
+     entirely rather than sitting there blank.
+     On a phone a six-column table cannot work, so each day becomes its own labelled block. Same
+     data, same order, just stacked. */
+  const WF_DAY_COLS=['Date','Conveyance','Food','Remarks','Amount'];
+  function wfIsDaywise(flow,details){
+    if(!Array.isArray(details)||!details.length) return false;
+    const by={}; details.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    // treated as day-wise when it has a Date and at least one other per-day column
+    if(!(by['Date']!=null)) return false;
+    return WF_DAY_COLS.some(function(c){ return c!=='Date' && by[c]!=null && String(by[c]).trim(); });
+  }
+  function wfDayRows(details){
+    const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    const cols=WF_DAY_COLS.filter(function(c){ return by[c]!=null && String(by[c]).trim(); });
+    const per={}; let n=0;
+    cols.concat(['Attachment']).forEach(function(c){
+      if(by[c]==null||!String(by[c]).trim()) return;
+      per[c]=wfSplitSets(by[c]); if(per[c].length>n) n=per[c].length;
+    });
+    const rows=[];
+    for(let i=0;i<n;i++){
+      const row={};
+      cols.forEach(function(c){ row[c]=(per[c]&&per[c][i])||''; });
+      row.__att=(per['Attachment']&&per['Attachment'][i])||'';
+      rows.push(row);
+    }
+    // a column that turned out empty on every single day is dropped
+    const used=cols.filter(function(c){ return rows.some(function(r){ return String(r[c]||'').trim(); }); });
+    const anyAtt=rows.some(function(r){ return String(r.__att||'').trim(); });
+    return {cols:used, rows:rows, anyAtt:anyAtt,
+            common:Object.keys(by).filter(function(k){ return WF_DAY_COLS.indexOf(k)===-1 && k!=='Attachment' && String(by[k]||'').trim(); })
+                     .map(function(k){ return {k:k,v:by[k]}; })};
+  }
+  function wfDayAttHtml(v){
+    const p=String(v||'').trim(); if(!p) return '<span class="wf-dw-none">—</span>';
+    const name=p.split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
+    return '<span class="wf-dw-att" title="'+esc2(name)+'" onclick="event.stopPropagation();wfAttOpen(\''+esc2(p)+'\',\''+esc2(name).replace(/'/g,'')+'\')">'
+      +'<i class="fa-solid fa-paperclip"></i> Open</span>';
+  }
+  function wfDaywiseHtml(details,flow){
+    const d=wfDayRows(details);
+    if(!d.rows.length) return '';
+    const money=function(x){ const n=parseFloat(String(x).replace(/[^0-9.]/g,'')); return isNaN(n)?esc2(x):wfMoney(n); };
+    const sumField=(flow&&flow.tracker_sum_field||'Amount');
+    const total=d.cols.indexOf(sumField)!==-1
+      ? d.rows.reduce(function(a,r){ const n=parseFloat(String(r[sumField]).replace(/[^0-9.]/g,'')); return a+(isNaN(n)?0:n); },0) : 0;
+    const head=d.common.length
+      ? '<div class="wf-dw-common">'+d.common.map(function(c){
+          return '<span><b>'+esc2(c.k)+'</b> '+esc2(c.v)+'</span>'; }).join('')+'</div>'
+      : '';
+    // ---- table (wide) ----
+    let t='<div class="wf-dw-tablewrap"><table class="wf-dw-table"><thead><tr>'
+      +'<th class="wf-dw-n">#</th>'
+      +d.cols.map(function(c){ return '<th'+(c===sumField?' class="wf-dw-amt"':'')+'>'+esc2(c)+'</th>'; }).join('')
+      +(d.anyAtt?'<th class="wf-dw-attcol">Attachment</th>':'')
+      +'</tr></thead><tbody>';
+    d.rows.forEach(function(r,i){
+      t+='<tr><td class="wf-dw-n">'+(i+1)+'</td>'
+        +d.cols.map(function(c){
+            const val=String(r[c]||'').trim();
+            if(!val) return '<td><span class="wf-dw-none">—</span></td>';
+            if(c===sumField) return '<td class="wf-dw-amt">'+money(val)+'</td>';
+            if(c==='Remarks') return '<td class="wf-dw-rem">'+esc2(val).replace(/\n/g,'<br>')+'</td>';
+            return '<td>'+esc2(val)+'</td>';
+          }).join('')
+        +(d.anyAtt?('<td class="wf-dw-attcol">'+wfDayAttHtml(r.__att)+'</td>'):'')
+      +'</tr>';
+    });
+    t+='</tbody>';
+    if(total) t+='<tfoot><tr><td class="wf-dw-n"></td>'
+      +d.cols.map(function(c,i){
+          if(c===sumField) return '<td class="wf-dw-amt"><b>'+wfMoney(total)+'</b></td>';
+          return '<td>'+(i===0?'<b>Total</b>':'')+'</td>'; }).join('')
+      +(d.anyAtt?'<td></td>':'')+'</tr></tfoot>';
+    t+='</table></div>';
+    // ---- stacked (phone) ----
+    let m='<div class="wf-dw-list">';
+    d.rows.forEach(function(r,i){
+      m+='<div class="wf-dw-card"><div class="wf-dw-card-h">'
+        +'<span class="wf-dw-card-n">Day '+(i+1)+'</span>'
+        +(String(r['Date']||'').trim()?('<span class="wf-dw-card-d">'+esc2(r['Date'])+'</span>'):'')
+        +(d.cols.indexOf(sumField)!==-1&&String(r[sumField]||'').trim()?('<span class="wf-dw-card-a">'+money(r[sumField])+'</span>'):'')
+      +'</div>';
+      d.cols.forEach(function(c){
+        if(c==='Date'||c===sumField) return;
+        const val=String(r[c]||'').trim(); if(!val) return;
+        m+='<div class="wf-dw-kv"><span class="wf-dw-k">'+esc2(c)+'</span><span class="wf-dw-v">'+esc2(val).replace(/\n/g,'<br>')+'</span></div>';
+      });
+      if(String(r.__att||'').trim()) m+='<div class="wf-dw-kv"><span class="wf-dw-k">Attachment</span><span class="wf-dw-v">'+wfDayAttHtml(r.__att)+'</span></div>';
+      m+='</div>';
+    });
+    if(total) m+='<div class="wf-dw-total"><span>Total</span><b>'+wfMoney(total)+'</b></div>';
+    m+='</div>';
+    return '<div class="wf-dw">'+head+t+m+'</div>';
+  }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
   // Curated instance summary — Wheredoc Id/Bill No./Bill Date/Company/Amount (+ the instance No.),
   // explicitly WITHOUT User. Falls back to null (caller shows
@@ -2349,20 +2488,29 @@
   // OS/browser chrome (the hover highlight especially follows the system accent color and can't
   // be restyled with CSS in any browser), so this is built the same way as the builder's own
   // field-type picker instead, giving full control over how it looks.
+  /* A field marked multi accepts several options at once — Conveyance is often Auto AND Bus for the
+     same day, Food both Breakfast and Lunch. The chosen options are stored comma-separated, which
+     is why the SETS (days) are separated by WF_SET_SEP instead: a comma now belongs to the value. */
+  function wfEvtSelValues(value){ return String(value||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
   function wfEvtSelectHtml(f,value){
     const opts=Array.isArray(f.options)?f.options:[];
+    const multi=!!f.multi;
+    const chosen=multi?wfEvtSelValues(value):[];
+    const isOn=function(l){ return multi?chosen.some(function(c){return eq(c,l);}):eq(l,value); };
     const groups={}, order=[];
     opts.forEach(function(o){ const g=(o&&o.group)||''; if(!groups[g]){groups[g]=[];order.push(g);} groups[g].push(o); });
     let listHtml='';
-    if(f.optional) listHtml+='<div class="wf-evt-selopt'+(value===''?' on':'')+'" data-v="" onclick="wfEvtSelPick(this)">—'+(value===''?'<i class="fa-solid fa-check"></i>':'')+'</div>';
+    // "—" clears the whole field. On a multi field that means clearing every choice, so it is only
+    // ticked when nothing at all is chosen.
+    if(f.optional) listHtml+='<div class="wf-evt-selopt'+((multi?!chosen.length:value==='')?' on':'')+'" data-v="" onclick="wfEvtSelPick(this)">—'+((multi?!chosen.length:value==='')?'<i class="fa-solid fa-check"></i>':'')+'</div>';
     order.forEach(function(g){
       if(g) listHtml+='<div class="ms-dept">'+esc2(g)+'</div>';
       groups[g].forEach(function(o){
-        const on=eq(o.label,value);
+        const on=isOn(o.label);
         listHtml+='<div class="wf-evt-selopt'+(on?' on':'')+'" data-v="'+esc2(o.label)+'" onclick="wfEvtSelPick(this)">'+esc2(o.label)+(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
       });
     });
-    return '<div class="wf-evt-selbox" data-optional="'+(f.optional?'1':'0')+'">'
+    return '<div class="wf-evt-selbox'+(multi?' multi':'')+'" data-optional="'+(f.optional?'1':'0')+'" data-multi="'+(multi?'1':'0')+'">'
       +'<input type="hidden" class="wf-evt-value" value="'+esc2(value||'')+'">'
       +'<button type="button" class="ac-in wf-evt-selbtn" onclick="wfEvtSelToggle(this)">'+wfEvtSelBtnLabel(value,f.optional)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i></button>'
       +'<div class="wf-evt-selpanel">'+listHtml+'</div>'
@@ -2385,15 +2533,33 @@
     const box=opt.closest('.wf-evt-selbox'); if(!box) return;
     const v=opt.getAttribute('data-v')||'';
     const optional=box.getAttribute('data-optional')==='1';
-    const hid=box.querySelector('.wf-evt-value'); if(hid) hid.value=v;
+    const multi=box.getAttribute('data-multi')==='1';
+    const hid=box.querySelector('.wf-evt-value');
+    let newVal=v;
+    if(multi){
+      // Tick and untick freely; "—" (empty) clears the lot. The panel stays open so several can be
+      // picked in one go — closing after each choice would make a multi field tedious.
+      const cur=wfEvtSelValues(hid?hid.value:'');
+      if(!v) newVal='';
+      else{
+        const at=cur.findIndex(function(c){ return eq(c,v); });
+        if(at>=0) cur.splice(at,1); else cur.push(v);
+        newVal=cur.join(', ');
+      }
+    }
+    if(hid) hid.value=newVal;
     const btn=box.querySelector('.wf-evt-selbtn');
-    if(btn) btn.innerHTML=wfEvtSelBtnLabel(v,optional)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
+    if(btn) btn.innerHTML=wfEvtSelBtnLabel(newVal,optional)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
+    const chosen=multi?wfEvtSelValues(newVal):null;
     box.querySelectorAll('.wf-evt-selopt').forEach(function(o){
-      const on=(o.getAttribute('data-v')||'')===v; o.classList.toggle('on',on);
+      const ov=o.getAttribute('data-v')||'';
+      const on=multi?(ov?chosen.some(function(c){return eq(c,ov);}):!chosen.length):(ov===newVal);
+      o.classList.toggle('on',on);
       const tick=o.querySelector('.fa-check');
       if(on&&!tick) o.insertAdjacentHTML('beforeend','<i class="fa-solid fa-check"></i>');
       if(!on&&tick) tick.remove();
     });
+    if(multi) return;   // leave the panel open on a multi field
     box.classList.remove('open');
   };
   function wfEvtRowHtml(field,value,locked){
@@ -2674,9 +2840,10 @@
           if(value) byLabel[label].push(value);
         });
       });
-      // Each set's value for a field is combined into one, comma-separated — one detail entry
-      // per label either way, so nothing downstream (Tracker, timeline) needs to change.
-      order.forEach(function(label){ details.push({label:label, value:byLabel[label].join(', ')}); });
+      // Each day's value for a field is packed into one entry, separated by WF_SET_SEP — one detail
+      // entry per label either way, so nothing downstream (Tracker, timeline) needs to change.
+      // Not a comma: a multi-select day is itself comma-separated ("Auto, Bus").
+      order.forEach(function(label){ details.push({label:label, value:wfJoinSets(byLabel[label])}); });
     }
     if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
     const N=wfN();
@@ -2827,16 +2994,20 @@
     let takenTxt='—'; if(fcs.received_at&&fcs.forwarded_at) takenTxt=wfHms(new Date(fcs.forwarded_at)-new Date(fcs.received_at)); else if(fcs.received_at) takenTxt='running · '+wfHms(Date.now()-new Date(fcs.received_at));
     const person=fcs.person;
     const wfDetailsArr=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
-    const wfInline=wfDetailsInline(wfDetailsArr);
+    const wfInline=wfDetailsInline(wfDetailsArr,flow);
     const wfInst=((flow&&(flow.trigger_event||flow.name))||'Workflow')+(caseRow?(' #'+wfCaseNoText(caseRow)):'');
     const wfStepName=wfTitleCase(fcs.title||'');
-    const wfDescFmt=wfDetailsFmt(wfDetailsArr);
+    /* A day-wise instance reads as a table (a row per day) rather than a run of
+       "Label: value, value, value" lines, where nothing tells you which amount belongs to which
+       date. Everything else keeps the plain list. */
+    const wfDayTable=wfIsDaywise(flow,wfDetailsArr)?wfDaywiseHtml(wfDetailsArr,flow):'';
+    const wfDescFmt=wfDayTable?'':wfDetailsFmt(wfDetailsArr);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':'')+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDayTable?wfDayTable:(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':''))+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
         +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
         +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
@@ -3008,6 +3179,43 @@
       background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px}
     .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
     .wf-tlcard .tp-f-wide{flex:1 1 100%;width:100%;min-width:0}
+    /* ---- day-wise instance: table on a wide screen, stacked blocks on a phone ---- */
+    .wf-dw{margin-top:10px}
+    .wf-dw-common{display:flex;flex-wrap:wrap;gap:6px 20px;margin-bottom:10px;font-size:13px;color:var(--ink)}
+    .wf-dw-common b{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);margin-right:5px}
+    .wf-dw-tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+    .wf-dw-table{width:100%;border-collapse:collapse;font-size:13px}
+    .wf-dw-table th{background:var(--bg,#f8fafc);text-align:left;font-size:10.5px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em;color:var(--slate);padding:8px 11px;
+      border-bottom:1px solid var(--line);white-space:nowrap}
+    .wf-dw-table td{padding:8px 11px;border-top:1px solid var(--line);vertical-align:top;color:var(--ink)}
+    .wf-dw-table tbody tr:first-child td{border-top:0}
+    .wf-dw-table .wf-dw-n{width:34px;color:var(--slate);text-align:center;white-space:nowrap}
+    .wf-dw-table .wf-dw-amt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+    .wf-dw-table .wf-dw-rem{min-width:170px;overflow-wrap:anywhere}
+    .wf-dw-table .wf-dw-attcol{white-space:nowrap}
+    .wf-dw-table tfoot td{border-top:2px solid var(--line);background:var(--bg,#f8fafc);padding:8px 11px}
+    .wf-dw-none{color:var(--slate)}
+    .wf-dw-att{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+      color:var(--brand);cursor:pointer;background:var(--brand-a10,rgba(224,18,28,.07));
+      border-radius:7px;padding:3px 8px}
+    .wf-dw-att:hover{text-decoration:underline}
+    .wf-dw-list{display:none}
+    .wf-dw-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--bg-card)}
+    .wf-dw-card-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:6px}
+    .wf-dw-card-n{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand)}
+    .wf-dw-card-d{font-size:13px;font-weight:600;color:var(--ink)}
+    .wf-dw-card-a{margin-left:auto;font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap}
+    .wf-dw-kv{display:flex;gap:10px;padding:4px 0;font-size:12.5px}
+    .wf-dw-k{flex:0 0 88px;color:var(--slate);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding-top:2px}
+    .wf-dw-v{flex:1;min-width:0;color:var(--ink);overflow-wrap:anywhere}
+    .wf-dw-total{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;
+      border:1px solid var(--line);border-radius:10px;background:var(--bg,#f8fafc);font-size:13px}
+    @media(max-width:760px){
+      .wf-dw-tablewrap{display:none}
+      .wf-dw-list{display:block}
+      .wf-dw-common{flex-direction:column;gap:4px}
+    }
     .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
     .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
     .wf-remark-entry:first-child{padding-top:0}
