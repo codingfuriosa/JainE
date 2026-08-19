@@ -2021,14 +2021,17 @@
     // the previous `!flow.trigger_owner || ...` showed this button to everyone whenever
     // trigger_owner happened to be unset); when there's no trigger_owner, any step owner can.
     const isStepOwner = steps.some(function(s){ return eq(s.owner_email||'', mySelf); });
-    // Starting a new instance ("New <Noun>") is additionally open to everyone in Systems or
-    // Administration, on top of the creator/trigger-owner/step-owner paths — mirrors
-    // acc.wf_create_instance's own OR acc.wf_can_create_flow() check server-side.
     // Mirrors the server's v_trig_ok in acc.wf_create_instance exactly: '__ALL__' means everyone,
     // otherwise trigger_owner may be a comma-separated list, not just one email.
     const trigList=(flow.trigger_owner||'').split(',').map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
     const trigOk = flow.trigger_owner==='__ALL__' || trigList.indexOf(String(mySelf||'').toLowerCase())!==-1;
-    const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || wfInAnyDept(WF_CREATE_DEPTS);
+    // Starting a new instance used to also open up to every Systems/Administration department
+    // member (acc.wf_can_create_flow()'s own broad rule, meant for "who can design a brand new
+    // workflow"), which silently let anyone in that department bypass a flow's own trigger_owner —
+    // e.g. any Administration staffer could start a new Invoice Processing bill even though only
+    // Uma Chatterjee is supposed to be able to. Instance-creation now only bypasses trigger_owner
+    // for the true superadmin account, matching the server-side fix below exactly.
+    const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || eq(mySelf,'ayushruia1@gmail.com');
     // Editing/deleting the workflow itself (and, further down, its instances) is the Administrator
     // account, plus this specific flow's own extra_admins (if any) — mirrors
     // acc.wf_is_admin_dept(flow_id), the real server-side enforcement. Not the whole Administration
@@ -2125,7 +2128,10 @@
     }
 
     const headActs='<div class="wf-head-acts">'
-      +'<span class="wf-my-wr" title="Your own count for this workflow — only you can see this"><i class="fa-solid fa-hourglass-half"></i> Waiting '+myWait+' <i class="fa-solid fa-inbox"></i> Received '+myRecv+'</span>'
+      +'<span class="wf-my-wr" title="Your own count for this workflow — only you can see this">'
+        +'<span class="wf-wr-seg wf-wr-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting <b>'+myWait+'</b></span>'
+        +'<span class="wf-wr-seg wf-wr-recv"><i class="fa-solid fa-inbox"></i> Received <b>'+myRecv+'</b></span>'
+      +'</span>'
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
@@ -2941,8 +2947,12 @@
     .wf-page-head h1{font-size:18px;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:9px;flex:1;min-width:0;letter-spacing:-.01em}
     .wf-page-head h1 i{color:var(--brand);font-size:16px}
     .wf-head-acts{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
-    .wf-my-wr{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--slate);background:#f1f5f9;border-radius:20px;padding:6px 12px;white-space:nowrap}
-    .wf-my-wr i{font-size:10.5px;color:var(--brand)}
+    .wf-my-wr{display:flex;align-items:stretch;font-size:11.5px;font-weight:700;border-radius:20px;overflow:hidden;white-space:nowrap}
+    .wf-wr-seg{display:flex;align-items:center;gap:5px;padding:6px 12px}
+    .wf-wr-seg b{font-weight:800;font-size:12.5px}
+    .wf-wr-seg i{font-size:10.5px}
+    .wf-wr-wait{background:#fef3c7;color:#92400e}
+    .wf-wr-recv{background:#dbeafe;color:#1e40af}
     .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
     .wf-card.wf-meta{padding:14px 18px}
     .wf-card.wf-tlcard{padding:16px 18px}
