@@ -3378,6 +3378,39 @@
       .wf-tp .tp-acts{flex-wrap:wrap;width:100%}
       .wf-tp .tp-acts .ac-btn{flex:1 1 auto;justify-content:center}
       .wf-tp .wf-updbar .ac-in{min-width:0}
+
+      /* A placeholder written for a desktop box ("Search by No. or Wheredoc Id…") is longer than a
+         phone is wide, so it ran under the edge and the box looked broken. Smaller here, and the
+         search field is given the whole row rather than sharing it. */
+      .wf-inst-filterbar .ac-in::placeholder,
+      .wf-inst-filter-search input::placeholder{font-size:11.5px}
+      .wf-inst-filter-search{flex:1 1 100%;min-width:0}
+
+      /* Date boxes take the room they need without pushing the row out. The TEXT inside stays at
+         16px on purpose — there is a deliberate 16px !important on inputs under (hover:none)
+         elsewhere in the app, because anything smaller makes iOS zoom the whole page the moment a
+         field is tapped. So the bulk comes off the padding and the fixed width instead: the
+         control shrinks to its column rather than sizing the column to itself. */
+      .wf-inst-filterbar input[type=date],
+      .wf-evt-form input[type=date],
+      .wf-tp input[type=date],
+      .ac-in[type=date]{padding-left:8px;padding-right:6px;min-width:0;width:100%;box-sizing:border-box}
+
+      /* An attachment's file name is one unbroken run of characters and was setting the width of
+         everything around it. It gets the leftover space and ellipsises; the paperclip and the
+         remove button keep their size. */
+      .wf-evt-att,.wf-evt-att-name{max-width:100%;min-width:0}
+      .wf-evt-att-name{font-size:12.5px;padding:7px 9px;gap:6px}
+      .wf-evt-att-fname{flex:1 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      /* The chip in Updates carries the whole file name. Ellipsis needs a width to ellipsise
+         against and an inline-flex chip sizes itself to its text, so it just grew — 514px inside a
+         363px card, which stretched the page. Letting the name wrap cannot overflow whatever the
+         name is. */
+      .wf-att-row{flex-wrap:wrap;gap:7px;min-width:0;max-width:100%}
+      .wf-att-file,.wf-att-thumb{max-width:100%;min-width:0}
+      .wf-att-file{display:flex;align-items:flex-start;gap:6px;font-size:12.5px;line-height:1.45;
+        white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+      .wf-att-file i{flex:none;margin-top:2px}
     }
     `;
     document.head.appendChild(s);
