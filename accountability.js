@@ -1165,7 +1165,12 @@
   // un-uploaded attachment WHATEVER it is named (the saved details only carry label+value, not the
   // field type) as well as any blank optional field — so there is never a dangling "Label:" with
   // nothing after it. An uploaded file shows as "file attached" rather than its raw storage path.
-  function wfDetailDisp(v){ v=(v==null?'':String(v)); return v.indexOf('s3:')===0?'file attached':v; }
+  function wfDetailDisp(v){
+    v=(v==null?'':String(v));
+    if(v.indexOf('s3:')!==0) return v;
+    const n=v.split(',').filter(function(s){return s.trim().indexOf('s3:')===0;}).length;
+    return n>1?(n+' files attached'):'file attached';
+  }
   function wfDetailsInline(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?String(l)+': ':'')+wfDetailDisp(v); }).filter(function(x){ return String(x).trim(); }).join(' · '); }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(wfDetailDisp(v)); }).filter(Boolean).join('<br>'); }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
@@ -1197,9 +1202,23 @@
       WF_SUMMARY_FIELDS.forEach(function(k){ if(by[k]!=null && String(by[k]).trim()) items.push({k:k,v:by[k]}); });
     }
     if(items.length<=1 && !wideField) return '';
-    const gridItems=items.map(function(it){return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';}).join('')
-      +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+esc2(wideField.v)+'</div></div>'):'');
+    // The card grid is fixed at 2 columns (see .wf-tp .tp-grid) — an odd item count otherwise
+    // leaves the last row's lone card sitting under column 1 with a ragged gap where column 2
+    // would be. Reusing .tp-f-wide (grid-column:1/-1) on just that last card makes it span the
+    // full row instead, so every row is visually complete.
+    const gridItems=items.map(function(it,i){
+      const isLastOdd=(i===items.length-1)&&(items.length%2===1)&&items.length>1;
+      return '<div class="tp-f'+(isLastOdd?' tp-f-wide':'')+'"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
+    }).join('')
+      +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v)+'</div></div>'):'');
     return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
+  }
+  // A repeated-set (multi-entry) field's value is stored as one comma-joined string, one segment
+  // per set — shown as its own line rather than one run-on sentence, so e.g. each "Day"'s Remarks
+  // stays legible instead of blurring into the next.
+  function wfMultiValHtml(v){
+    return String(v||'').split(',').map(function(s){return s.trim();}).filter(Boolean)
+      .map(function(s){return esc2(s);}).join('<br><br>');
   }
 
   /* ----- What does this workflow actually process? -----------------------------------------
@@ -2445,7 +2464,7 @@
       const key=prevKey || s3KeyForFlowEvent((evtForm&&evtForm.getAttribute('data-flow'))||'0', file.name);
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
-      wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> '+esc2(file.name)+' <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
+      wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(file.name)+'">'+esc2(file.name)+'</span> <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
   function wfEvtAttReset(wrap){
@@ -2462,11 +2481,9 @@
   window.wfEvtAttClear=function(btn){ wfEvtAttReset(btn.closest('.wf-evt-att')); };
   window.wfEvtAdd=function(){ const w=$('wfEvtDetails'); if(w){ w.insertAdjacentHTML('beforeend', wfEvtRowHtml('','')); const rows=w.querySelectorAll('.wf-evt-value'); const last=rows[rows.length-1]; if(last)try{last.focus();}catch(_){} } };
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
-  // A repeated set skips the Attachment field — a file can't be usefully combined with commas, so
-  // only the first set keeps it.
   window.wfEvtAddGroup=function(){
     const w=$('wfEvtDetails'); if(!w) return;
-    const tmpl=(window._wfEvtTemplate||[]).filter(function(t){ return !(t&&t.type==='attachment'); });
+    const tmpl=(window._wfEvtTemplate||[]);
     const rowsHtml=tmpl.map(function(t){ return wfEvtRowHtml(Object.assign({},t,{value:''}), '', true); }).join('');
     const idx=w.querySelectorAll('.wf-evt-group').length+1;
     const label=esc2(window._wfEvtGroupLabel||'Set')+' '+idx;
@@ -2724,7 +2741,11 @@
     const det=Array.isArray(c&&c.trigger_details)?c.trigger_details:[];
     const f=det.find(function(d){ return d&&eq(d.label,'Attachment')&&d.value; });
     if(!f) return '';
-    return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment</div>'+wfAttachmentHtml({storage_path:f.value})+'</div>';
+    // A multi-entry (repeated-set) workflow can have one attachment per set, comma-joined like any
+    // other multi-entry field — split back out into one chip per file.
+    const paths=String(f.value).split(',').map(function(s){return s.trim();}).filter(function(s){return s.indexOf('s3:')===0;});
+    if(!paths.length) return '';
+    return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment'+(paths.length>1?'s':'')+'</div>'+wfAttachmentsRowHtml(paths.map(function(p){return {storage_path:p};}))+'</div>';
   }
 
   function wfUpdateHtml(u,atts){
@@ -3087,7 +3108,8 @@
     /* A wide summary card (e.g. Reimbursement's Remarks) spans the whole row instead of one cell;
        long text scrolls inside its own box rather than stretching the card indefinitely. */
     .tp-f-wide{grid-column:1/-1}
-    .tp-f-wide .v.tp-f-scroll{display:block;max-height:110px;overflow-y:auto;white-space:pre-wrap;
+    .tp-f-wide .v.tp-f-scroll{display:block;max-height:110px;overflow-y:auto;overflow-x:hidden;white-space:pre-wrap;
+      overflow-wrap:anywhere;word-break:break-word;
       font-weight:500;line-height:1.6;color:var(--ink);margin-top:5px;padding:10px 12px;
       background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:9px}
     /* Custom dropdown for a select-type detail field — replaces the native <select> so the open
@@ -3190,7 +3212,10 @@
     .wf-evt-attbox i{font-size:12px}
     .wf-evt-att .wf-evt-attinput{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
     .wf-evt-attbox.busy{opacity:.6;pointer-events:none}
-    .wf-evt-att-name{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px;width:100%}
+    .wf-evt-att-name{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:9px;padding:8px 12px;width:100%;min-width:0}
+    .wf-evt-att-name i{flex:none}
+    .wf-evt-att-name .ac-btn{flex:none;margin-left:auto}
+    .wf-evt-att-fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     /* instances table */
     .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
     .wf-itable{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
