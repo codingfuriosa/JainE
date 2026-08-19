@@ -11,6 +11,10 @@
   --sb-red:#e0121c; --sb-red-dim:rgba(224,18,28,.16);
 }
 *{box-sizing:border-box;margin:0;padding:0}
+/* Without this, mobile Safari auto-inflates small text for readability — placeholders (and any
+   other small type) render noticeably bigger than their actual font-size on a phone than the
+   same CSS produces on desktop. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cdd5e1;border-radius:8px}::-webkit-scrollbar-track{background:transparent}

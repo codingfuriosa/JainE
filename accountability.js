@@ -967,14 +967,19 @@
   // full name list via the existing .wf-poptip/.wf-tip-txt tooltip layer (same one the "i" hints
   // and status pills already use) instead of relying on each tiny circle's own native title,
   // which never worked for the "+N" overflow circle and only ever showed one name at a time.
-  function wfCircles(emails,extra){
+  // counts, when passed, is {email: {waiting, received}} — how many of this workflow's live
+  // instances are currently sitting at a step this person hasn't picked up yet (waiting) vs.
+  // has picked up but not yet forwarded (received). Appended to the existing hover-name tooltip
+  // rather than a new UI surface, since that's the only place this info can attach per-person.
+  function wfCircles(emails,extra,counts){
     emails=(emails||[]).filter(Boolean);
     if(!emails.length) return '<span class="wf-circle wf-none" title="No members yet">·</span>';
     const max=5, shown=emails.slice(0,max), multi=emails.length>=2;
+    const wr=function(e){ const c=counts&&counts[e]; return c&&(c.waiting||c.received)?(' — Waiting '+c.waiting+', Received '+c.received):''; };
     let h='<span class="wf-circles'+(multi?' wf-poptip':'')+' '+(extra||'')+'"'+(multi?' tabindex="0" role="button" aria-label="Show all people" onclick="event.stopPropagation();wfPopToggle(this)"':'')+'>';
-    shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
+    shown.forEach(function(e){ h+='<span class="wf-circle"'+(multi?'':' title="'+esc2(wfNm(e)+wr(e))+'"')+' style="background:'+colorFor(e)+'">'+esc2(iniOf(wfNm(e)).toUpperCase())+'</span>'; });
     if(emails.length>max)h+='<span class="wf-circle wf-more">+'+(emails.length-max)+'</span>';
-    if(multi)h+='<span class="wf-tip-txt">'+emails.map(function(e){return esc2(wfNm(e));}).join('<br>')+'</span>';
+    if(multi)h+='<span class="wf-tip-txt">'+emails.map(function(e){return esc2(wfNm(e)+wr(e));}).join('<br>')+'</span>';
     h+='</span>';
     return h;
   }
@@ -1008,19 +1013,29 @@
   // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
   // with no way to read the rest.
   function wfTrigShort(c,flow){
-    const base=c.title||'';
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
+    const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
+    // A flow can curate the Instances-table summary text on its own (flow.list_fields, e.g.
+    // Invoice Processing -> just Company), dropping both the generic trigger-event title AND any
+    // field that already has its own dedicated column (e.g. Wheredoc Id) — separate from
+    // card_fields, which still governs the case-detail panel and shouldn't lose Wheredoc Id there.
+    const listFields=Array.isArray(flow&&flow.list_fields)&&flow.list_fields.length?flow.list_fields:null;
     const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
     const sumField=(flow&&flow.tracker_sum_field||'').trim();
-    let vals;
-    if(cardFields){
-      const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
-      vals=cardFields.map(function(l){ return byLabel[l]||''; }).filter(Boolean);
-      if(sumField){ const total=wfSumField(byLabel[sumField]); if(total) vals.push(wfMoney(total)); }
+    let full;
+    if(listFields){
+      full=listFields.map(function(l){ return byLabel[l]||''; }).filter(Boolean).join(', ');
     } else {
-      vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean);
+      const base=c.title||'';
+      let vals;
+      if(cardFields){
+        vals=cardFields.map(function(l){ return byLabel[l]||''; }).filter(Boolean);
+        if(sumField){ const total=wfSumField(byLabel[sumField]); if(total) vals.push(wfMoney(total)); }
+      } else {
+        vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean);
+      }
+      full=base+(vals.length?(' : '+vals.join(', ')):'');
     }
-    const full=base+(vals.length?(' : '+vals.join(', ')):'');
     let short=full;
     if(short.length>30)short=short.slice(0,29)+'…';
     return {short:short, full:full};
@@ -2046,6 +2061,18 @@
       const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
       owners.forEach(addMember);
     });
+    // Per-person Waiting (it's their turn on a live instance, not yet picked up) / Received
+    // (picked up, not yet forwarded) counts across this workflow — shown on hover in the People
+    // row, from the same cases/fcs already fetched above, no extra query needed.
+    const wrByEmail={};
+    const casesById={}; cases.forEach(function(cc){ casesById[cc.id]=cc; });
+    fcs.forEach(function(x){
+      const cc=casesById[x.case_id];
+      if(!cc||cc.status!=='Pending'||cc.current_step!==x.seq) return;
+      const cands=(Array.isArray(x.candidates)&&x.candidates.length)?x.candidates:(x.person?[x.person]:[]);
+      if(x.received_at){ if(x.person){ wrByEmail[x.person]=wrByEmail[x.person]||{waiting:0,received:0}; wrByEmail[x.person].received++; } }
+      else { cands.forEach(function(e){ wrByEmail[e]=wrByEmail[e]||{waiting:0,received:0}; wrByEmail[e].waiting++; }); }
+    });
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
@@ -2112,7 +2139,7 @@
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
+        +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members,'',wrByEmail)+'</div>'
       +'</div>'
       /* Every workflow gets a Tracker tab. It was gated behind the Invoice Processing flow, but all
          it reports is each instance against each step — due date, actual date, delay — which is
