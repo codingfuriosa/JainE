@@ -2986,11 +2986,15 @@
     .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
     .wf-card.wf-meta{padding:14px 18px}
     .wf-card.wf-tlcard{padding:16px 18px}
-    /* The instance-detail card grid (wfCaseSummaryHtml): grid-stretch made a short value like "1"
-       occupy a column as wide as "2026-08-20, 2026-08-21" sitting next to it. Flex-wrap instead
-       sizes each card to its own content and just packs them left-to-right. */
-    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:16px 32px}
-    .wf-tlcard .tp-f{flex:0 1 auto;min-width:70px}
+    /* The instance-detail card grid (wfCaseSummaryHtml): the default 1fr-column grid stretched a
+       short value like "1" into a column as wide as "2026-08-20, 2026-08-21" sitting next to it.
+       (CSS Grid's auto-fit+minmax(min-content,max-content) was tried here first and rejected —
+       intrinsic-size keywords inside auto-fit's column-count math don't behave predictably and
+       collapsed everything into one column.) Plain flex with flex:0 0 auto (never grow, never
+       shrink) sizes each card to exactly its natural content width and wraps the row when full —
+       no ambiguity in how the browser computes it. */
+    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:14px 30px}
+    .wf-tlcard .tp-f{flex:0 0 auto}
     .wf-tlcard .tp-f-wide{flex:0 0 100%;width:100%}
     .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
     .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
