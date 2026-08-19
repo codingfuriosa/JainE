@@ -2986,16 +2986,11 @@
     .wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
     .wf-card.wf-meta{padding:14px 18px}
     .wf-card.wf-tlcard{padding:16px 18px}
-    /* The instance-detail card grid (wfCaseSummaryHtml): the default 1fr-column grid stretched a
-       short value like "1" into a column as wide as "2026-08-20, 2026-08-21" sitting next to it.
-       (CSS Grid's auto-fit+minmax(min-content,max-content) was tried here first and rejected —
-       intrinsic-size keywords inside auto-fit's column-count math don't behave predictably and
-       collapsed everything into one column.) Plain flex with flex:0 0 auto (never grow, never
-       shrink) sizes each card to exactly its natural content width and wraps the row when full —
-       no ambiguity in how the browser computes it. */
-    .wf-tlcard .tp-grid{display:flex;flex-wrap:wrap;gap:14px 30px}
-    .wf-tlcard .tp-f{flex:0 0 auto}
-    .wf-tlcard .tp-f-wide{flex:0 0 100%;width:100%}
+    /* Reverted the .wf-tlcard-scoped grid/flex override attempted here — verified (by measuring
+       real element positions, twice, with two different approaches) that it made the layout look
+       worse, not better. Back to the plain original global .tp-grid rule (line ~476) for this
+       card; the only thing kept from that attempt is the isLastOdd class in wfCaseSummaryHtml,
+       which still works fine against the original grid. */
     .wf-remark-entry{padding:7px 0;border-bottom:1px dashed var(--line)}
     .wf-remark-entry:last-child{border-bottom:none;padding-bottom:0}
     .wf-remark-entry:first-child{padding-top:0}
