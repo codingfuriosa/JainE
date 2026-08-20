@@ -1017,6 +1017,13 @@
      Days are separated by WF_SET_SEP now. Anything saved before this still splits on commas, since
      back then a day could only ever hold one value, so old instances read exactly as they did. */
   const WF_SET_SEP=' | ';
+  /* Several files on ONE entry. Deliberately not a comma: an entry's own value can already be
+     comma-separated ("Auto, Bus"), and wfSplitSets treats commas as entry separators when there is
+     no pipe - so a comma here would read two files on one entry as two entries. */
+  const WF_ATT_SEP=' ; ';
+  function wfAttList(v){
+    return String(v==null?'':v).split(';').map(function(x){ return x.trim(); }).filter(Boolean);
+  }
   function wfSplitSets(v){
     const s=String(v==null?'':v);
     if(s.indexOf('|')!==-1) return s.split('|').map(function(x){return x.trim();});
@@ -1297,11 +1304,14 @@
             common:Object.keys(by).filter(function(k){ return WF_DAY_COLS.indexOf(k)===-1 && k!=='Attachment' && String(by[k]||'').trim(); })
                      .map(function(k){ return {k:k,v:by[k]}; })};
   }
+  // An entry can carry several files, so the cell lists them all rather than only the first.
   function wfDayAttHtml(v){
-    const p=String(v||'').trim(); if(!p) return '<span class="wf-dw-none">—</span>';
-    const name=p.split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
-    return '<span class="wf-dw-att" title="'+esc2(name)+'" onclick="event.stopPropagation();wfAttOpen(\''+esc2(p)+'\',\''+esc2(name).replace(/'/g,'')+'\')">'
-      +'<i class="fa-solid fa-paperclip"></i> Open</span>';
+    const paths=wfAttList(v); if(!paths.length) return '<span class="wf-dw-none">—</span>';
+    return paths.map(function(p,i){
+      const name=p.split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
+      return '<span class="wf-dw-att" title="'+esc2(name)+'" onclick="event.stopPropagation();wfAttOpen(\''+esc2(p)+'\',\''+esc2(name).replace(/'/g,'')+'\')">'
+        +'<i class="fa-solid fa-paperclip"></i> '+(paths.length>1?('Open '+(i+1)):'Open')+'</span>';
+    }).join(' ');
   }
   function wfDaywiseHtml(details,flow){
     const d=wfDayRows(details);
@@ -2512,9 +2522,9 @@
       (cs||[]).forEach(function(c){
         (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){
           // a Multiple-entry instance keeps one entry per separator segment, and each entry can
-          // carry its own file, so every segment has to be looked at - not just the whole value
-          wfSplitSets(String((d&&d.value)||'')).forEach(function(x){
-            if(x.indexOf('s3:')===0) paths.push(x);
+          // carry SEVERAL files, so every file of every segment has to be looked at
+          wfSplitSets(String((d&&d.value)||'')).forEach(function(seg){
+            wfAttList(seg).forEach(function(x){ if(x.indexOf('s3:')===0) paths.push(x); });
           });
         });
       });
@@ -2927,6 +2937,19 @@
       const picked=String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
       valueHtml='<div class="wf-evt-people">'+wfPersonPickerHtml(picked, true, false, 'wf-evt-value')+'</div>';
     } else if(type==='attachment'){
+      /* A field marked `multi` holds several files on the one entry - a claim for a day out is
+         rarely one receipt. Each file gets its own removable chip and the box stays available
+         underneath; a single-file field behaves exactly as before. */
+      if(f.multi){
+        const files=wfAttList(value);
+        valueHtml='<div class="wf-evt-att wf-evt-att-multi">'
+          +'<div class="wf-evt-attlist">'+files.map(wfAttChipHtml).join('')+'</div>'
+          +'<label class="wf-evt-attbox"><i class="fa-solid fa-paperclip"></i> '
+            +(files.length?'Add another file':'Choose a file')
+            +'<input type="file" class="wf-evt-attinput" multiple onchange="wfEvtAttPick(this)"></label>'
+          +'<input type="hidden" class="wf-evt-value" value="'+esc2(files.join(WF_ATT_SEP))+'">'
+        +'</div>';
+      } else {
       const has=value && String(value).indexOf('s3:')===0;
       valueHtml='<div class="wf-evt-att">'
         +(has
@@ -2935,6 +2958,7 @@
              +'<input type="file" class="wf-evt-attinput" onchange="wfEvtAttPick(this)"></label>'))
         +'<input type="hidden" class="wf-evt-value" value="'+esc2(has?value:'')+'">'
       +'</div>';
+      }
     } else {
       /* The box says what KIND of answer it wants — "Text", "Number", "Date" — instead of the old
          generic "Detail", which told you nothing about what belongs in it. A field can still
@@ -2988,7 +3012,54 @@
     // untouched legacy value apart from something the person actually typed just now.
     return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'" data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
+  // One attached file on a multi-file field. The stored path is kept on the chip so the hidden
+  // value can be rebuilt from whatever chips are left after a removal.
+  function wfAttChipHtml(path){
+    const name=String(path||'').split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
+    return '<span class="wf-evt-att-name" data-path="'+esc2(path)+'">'
+      +'<i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(name)+'">'+esc2(name)+'</span> '
+      +'<button type="button" class="ac-btn ic" onclick="wfEvtAttDrop(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span>';
+  }
+  // Rewrites the hidden value from the chips actually present, and keeps the box's wording honest.
+  function wfEvtAttSync(wrap){
+    if(!wrap) return;
+    const paths=[].slice.call(wrap.querySelectorAll('.wf-evt-att-name[data-path]'))
+      .map(function(el){ return el.getAttribute('data-path'); }).filter(Boolean);
+    const hid=wrap.querySelector('.wf-evt-value'); if(hid) hid.value=paths.join(WF_ATT_SEP);
+    const box=wrap.querySelector('.wf-evt-attbox');
+    if(box){ const t=box.childNodes[1]; if(t&&t.nodeType===3) t.nodeValue=' '+(paths.length?'Add another file':'Choose a file'); }
+  }
+  window.wfEvtAttDrop=function(btn){
+    const chip=btn.closest('.wf-evt-att-name'), wrap=btn.closest('.wf-evt-att');
+    if(chip) chip.remove();
+    wfEvtAttSync(wrap);
+  };
   window.wfEvtAttPick=async function(input){
+    const wrapM=input.closest('.wf-evt-att-multi');
+    if(wrapM){
+      /* Several files can be chosen at once, and the box can be used again afterwards, so they are
+         uploaded one after another and each appends its own chip. One failure is reported and the
+         rest still go - losing four good receipts because the fifth timed out would be worse. */
+      const chosen=[].slice.call(input.files||[]); if(!chosen.length) return;
+      const box=input.closest('.wf-evt-attbox');
+      const list=wrapM.querySelector('.wf-evt-attlist');
+      const evtForm=document.querySelector('.wf-evt-form');
+      const flowIdAttr=(evtForm&&evtForm.getAttribute('data-flow'))||'0';
+      input.disabled=true; if(box) box.classList.add('busy');
+      for(const file of chosen){
+        if(box){ const t=box.childNodes[1]; if(t&&t.nodeType===3) t.nodeValue=' Uploading '+file.name+'…'; }
+        try{
+          const key=s3KeyForFlowEvent(flowIdAttr, file.name);
+          const {data,error}=await uploadFileToS3(key,file);
+          if(error) throw error;
+          if(list) list.insertAdjacentHTML('beforeend', wfAttChipHtml(data.path));
+        }catch(e){ toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err'); }
+      }
+      input.disabled=false; if(box) box.classList.remove('busy');
+      input.value='';
+      wfEvtAttSync(wrapM);
+      return;
+    }
     const file=input.files&&input.files[0]; if(!file)return;
     const wrap=input.closest('.wf-evt-att'); if(!wrap)return;
     const box=input.closest('.wf-evt-attbox');
@@ -3310,10 +3381,15 @@
         // behind as an orphan. Deleting only AFTER the save succeeds means a cancelled edit, or one
         // that fails to save, never loses the file the instance still points to.
         const replacedAtts=[];
+        // Compared file by file, not value against value: on a multi-file field the value is a
+        // list, so adding a second receipt changes the string without replacing the first file.
+        // Only files that are genuinely no longer referenced are counted as replaced.
         if(wrap){ [].slice.call(wrap.querySelectorAll('.wf-evt-row[data-type="attachment"]')).forEach(function(r){
-          const orig=r.getAttribute('data-orig')||'';
-          const now=((r.querySelector('.wf-evt-value')||{}).value||'').trim();
-          if(orig && orig!==now && orig.indexOf('s3:')===0) replacedAtts.push(orig);
+          const before=wfAttList(r.getAttribute('data-orig')||'');
+          const after=wfAttList(((r.querySelector('.wf-evt-value')||{}).value||'').trim());
+          before.forEach(function(o){
+            if(o.indexOf('s3:')===0 && after.indexOf(o)===-1) replacedAtts.push(o);
+          });
         }); }
         const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
         for(const oldPath of replacedAtts){ try{ await s3Delete(oldPath); }catch(_e){} }
@@ -3860,6 +3936,9 @@
     /* meta card */
     .wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
     .wf-evt-common{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+    .wf-evt-att-multi{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
+    .wf-evt-attlist{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
+    .wf-evt-att-multi .wf-evt-att-name{max-width:100%}
     .wf-trig-box{background:linear-gradient(0deg,var(--brand-a10,#eef2ff),var(--brand-a10,#eef2ff));border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--ink)}
     .wf-trig-box i{color:var(--brand)}
     .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
