@@ -1021,6 +1021,9 @@
     if(s.indexOf('|')!==-1) return s.split('|').map(function(x){return x.trim();});
     return s.split(',').map(function(x){return x.trim();});
   }
+  // Packs each entry's value for a field into the one stored value. Lost in a merge while the call
+  // in the save survived, which is why saving died with "wfJoinSets is not defined".
+  function wfJoinSets(arr){ return (arr||[]).join(WF_SET_SEP); }
   /* How many entries an instance has is a property of the WHOLE instance, not of one field.
      Deciding per field went wrong the moment a field legitimately held commas: one entry claiming
      "20, 40, 60, 80" was read as four entries and the table grew four rows out of one journey.
