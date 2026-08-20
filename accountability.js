@@ -940,6 +940,7 @@
 
   /* small workflow helpers */
   // trigger_owner is stored as '' / an email / a comma-list of emails / the '__ALL__' sentinel.
+  const WF_TRIGGER_ALL_KEY='__ALL__';
   function wfOwnerIsAll(raw){ return String(raw||'').trim()===WF_TRIGGER_ALL_KEY; }
   function wfOwnerEmails(raw){ return wfOwnerIsAll(raw)?[]:String(raw||'').split(',').map(function(x){return x.trim();}).filter(Boolean); }
   function wfOwnerDisplay(raw){
