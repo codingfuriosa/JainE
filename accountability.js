@@ -2105,13 +2105,37 @@
       else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
         now=cur?(cur.title||('Step '+cur.seq)):'—'; }
       // Clicking a tracker row opens that instance's own timeline, same as the Instances table.
-      return '<tr class="wf-tk-row" data-case="'+c.id+'" onclick="wfTrackerOpen('+c.id+')" '
+      const tkKey=(wfCaseNoText(c)+' '+(wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
+      return '<tr class="wf-tk-row" data-case="'+c.id+'" data-find="'+esc2(tkKey)+'" onclick="wfTrackerOpen('+c.id+')" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
         +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
     }).join('');
 
-    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+    /* One row per instance and potentially hundreds of them, so the Tracker gets the same way in
+       as the Instances table: the instance number, or whose it is. Shown only where the owner is
+       actually a column of this tracker (a flow with a sum field), since otherwise there is no
+       owner on screen to search for. */
+    const findBar=sumField
+      ? '<div class="wf-tk-find"><i class="fa-solid fa-magnifying-glass"></i>'
+          +'<input class="ac-in" id="wfTkSearch" placeholder="Search by No. or owner…" oninput="wfTrackerFilter()">'
+          +'<button class="ac-btn ic" title="Clear" onclick="wfTrackerFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
+        +'</div>'
+      : '';
+    return findBar+'<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+      +'<div id="wfTkNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div>';
   }
+  window.wfTrackerFilter=function(){
+    const q=((($('wfTkSearch')||{}).value)||'').trim().toLowerCase();
+    const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr'));
+    let shown=0;
+    rows.forEach(function(r){
+      const ok=!q || (r.getAttribute('data-find')||'').indexOf(q)!==-1;
+      r.style.display=ok?'':'none';
+      if(ok) shown++;
+    });
+    const nm=$('wfTkNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
+  };
+  window.wfTrackerFilterClear=function(){ const b=$('wfTkSearch'); if(b) b.value=''; wfTrackerFilter(); };
   // Each header row sticks below the one above it, which needs the real height of every row
   // before it — guessing a fixed number left a strip of body text showing through between the
   // bands. Measured here instead, and re-measured whenever the pane is shown or the window
@@ -2370,7 +2394,10 @@
         const instOver=(c.status==='Done'||c.status==='Cancelled');
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
-        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        // Searchable by whose instance it is - the name shown everywhere else, and the address,
+        // since half the people here are known to each other by one and half by the other.
+        const ownerKey=((wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
+        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
@@ -2378,7 +2405,7 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No. or Wheredoc Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id or owner…':'Search by No. or owner…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -2451,9 +2478,10 @@
     rows.forEach(function(r){
       const id5=r.getAttribute('data-caseno5')||'';
       const wheredoc=r.getAttribute('data-wheredoc')||'';
+      const owner=r.getAttribute('data-owner')||'';
       const created=r.getAttribute('data-created')||'';
       let ok=true;
-      if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1) ok=false;
+      if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1 && owner.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
       if(ok && to && created && created>to) ok=false;
       r.style.display=ok?'':'none';
@@ -3936,6 +3964,9 @@
     /* meta card */
     .wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
     .wf-evt-common{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+    .wf-tk-find{display:flex;align-items:center;gap:8px;margin:0 0 10px;position:relative}
+    .wf-tk-find>i{position:absolute;left:11px;font-size:12px;color:var(--slate);pointer-events:none}
+    .wf-tk-find .ac-in{padding-left:31px;max-width:320px}
     .wf-evt-att-multi{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
     .wf-evt-attlist{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
     .wf-evt-att-multi .wf-evt-att-name{max-width:100%}
