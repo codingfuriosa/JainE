@@ -2612,16 +2612,25 @@
      own figure with it rather than shifting everyone else's along.
      The stored value stays the plain comma list the table prints and the totals sum, in slot order,
      so nothing downstream changes. */
+  /* A short list, one line per thing claimed for: what it is on the left, its amount on the right.
+     Squeezing several labelled boxes inside one bordered field was cramped and hard to read — this
+     is the shape the information actually has. Nothing chosen yet means a single plain box, exactly
+     as any other amount field. */
   function wfAmtSlots(pairs){
     const list=(pairs&&pairs.length)?pairs:[{k:'',v:''}];
-    return list.map(function(p,i){
-      return (i?'<span class="wf-amt-op">+</span>':'')
-        +'<label class="wf-amt-slot">'
-          +(p.k?('<span class="wf-amt-for">'+esc2(p.k)+'</span>'):'')
-          +'<input class="wf-amt-seg" type="text" inputmode="decimal" data-k="'+esc2(p.k||'')+'" '
-            +'value="'+esc2(p.v||'')+'" placeholder="0" oninput="wfAmtSeg(this)">'
-        +'</label>';
-    }).join('');
+    const labelled=list.some(function(p){ return !!p.k; });
+    if(!labelled){
+      return '<div class="wf-amt-plain"><input class="wf-amt-seg" type="text" inputmode="decimal" data-k="" '
+        +'value="'+esc2((list[0]&&list[0].v)||'')+'" placeholder="0" oninput="wfAmtSeg(this)"></div>';
+    }
+    return '<div class="wf-amt-list">'+list.map(function(p){
+      return '<label class="wf-amt-line">'
+        +'<span class="wf-amt-for">'+esc2(p.k)+'</span>'
+        +'<span class="wf-amt-cur">₹</span>'
+        +'<input class="wf-amt-seg" type="text" inputmode="decimal" data-k="'+esc2(p.k)+'" '
+          +'value="'+esc2(p.v||'')+'" placeholder="0" oninput="wfAmtSeg(this)">'
+      +'</label>';
+    }).join('')+'</div>';
   }
   window.wfAmtSeg=function(el){
     if(el){ const clean=(el.value||'').replace(/[^0-9.]/g,''); if(clean!==el.value){ const at=el.selectionStart; el.value=clean; try{el.setSelectionRange(at,at);}catch(_){} } }
@@ -2633,12 +2642,13 @@
     const hid=wrap.querySelector('.wf-evt-value');
     if(hid) hid.value=vals.filter(function(v){ return v!==''; }).join(', ');
     const nums=vals.map(parseFloat).filter(function(n){ return !isNaN(n); });
-    let t=wrap.querySelector('.wf-amt-total');
+    const labelled=segs.some(function(i){ return !!i.getAttribute('data-k'); });
     const missing=segs.filter(function(i){ return i.getAttribute('data-k') && !(i.value||'').trim(); }).length;
-    if(nums.length>1 || missing){
+    let t=wrap.querySelector('.wf-amt-total');
+    if(labelled){
       if(!t){ t=document.createElement('div'); t.className='wf-amt-total'; wrap.appendChild(t); }
-      t.innerHTML=(nums.length?(nums.length+' of '+segs.length+' filled &middot; '+wfMoney(nums.reduce(function(a,b){return a+b;},0))):'')
-        +(missing?('<span class="wf-amt-miss">'+(nums.length?' &middot; ':'')+missing+' still to fill</span>'):'');
+      t.innerHTML='<span>Total</span><b>'+wfMoney(nums.reduce(function(a,b){return a+b;},0))+'</b>'
+        +(missing?('<span class="wf-amt-miss">'+missing+' still to fill</span>'):'');
     } else if(t){ t.remove(); }
   }
   /* Rebuild the slots from everything chosen in this entry: every option ticked in any of its
@@ -2803,7 +2813,7 @@
         valueHtml='<div class="wf-amt" data-ph="'+esc2(placeholder)+'">'
           +'<div class="wf-amt-box">'+wfAmtSlots(parts.length?parts:[''])+'</div>'
           +'<input type="hidden" class="wf-evt-value" value="'+esc2(parts.join(', '))+'">'
-          +'<div class="wf-amt-hint">A slot appears for each transport and meal chosen</div>'
+          +'<div class="wf-amt-hint">A line appears for each transport and meal chosen</div>'
         +'</div>';
       } else if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
@@ -3500,20 +3510,26 @@
     /* UPI field: a typed box with a real dropdown of everything saved. Opening the list always
        shows every id — what is typed is not a filter, they are there to be picked. */
     .wf-evt-upi.wf-bad{border-color:#dc2626;background:#fef2f2}
-    /* Amount: ONE field, a labelled slot per thing claimed for, + between them. */
+    /* Amount: a line per thing claimed for — what it is, then what it cost. */
     .wf-amt{flex:1;min-width:0}
-    .wf-amt-box{display:flex;align-items:flex-end;gap:7px;flex-wrap:wrap;
-      border:1px solid var(--line);border-radius:9px;background:var(--bg-card,#fff);padding:6px 9px;min-height:38px}
-    .wf-amt-box:focus-within{border-color:var(--brand)}
-    .wf-amt-slot{flex:1 1 74px;min-width:62px;display:flex;flex-direction:column;gap:1px;cursor:text}
-    .wf-amt-for{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
-      color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .wf-amt-seg{width:100%;border:0;background:transparent;color:var(--ink);font:inherit;
-      padding:2px 0;outline:none;text-align:right}
-    .wf-amt-op{color:var(--slate);font-weight:700;flex:none;font-size:13px;padding-bottom:3px}
+    .wf-amt-plain .wf-amt-seg{width:100%;height:38px;border:1px solid var(--line);border-radius:9px;
+      background:var(--bg-card,#fff);color:var(--ink);font:inherit;padding:0 11px;outline:none}
+    .wf-amt-plain .wf-amt-seg:focus{border-color:var(--brand)}
+    .wf-amt-list{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--bg-card,#fff)}
+    .wf-amt-line{display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid var(--line);cursor:text}
+    .wf-amt-line:first-child{border-top:0}
+    .wf-amt-line:focus-within{background:#f8faff}
+    .wf-amt-for{flex:1;min-width:0;font-size:12.5px;color:var(--ink);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-amt-cur{color:var(--slate);font-size:12px;flex:none}
+    .wf-amt-seg{flex:0 0 96px;width:96px;border:0;background:transparent;color:var(--ink);font:inherit;
+      padding:2px 0;outline:none;text-align:right;font-variant-numeric:tabular-nums}
     .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
-    .wf-amt-total{margin-top:5px;font-size:12.5px;font-weight:700;color:var(--ink)}
-    .wf-amt-miss{color:#b45309;font-weight:600}
+    .wf-amt-total{display:flex;align-items:baseline;gap:9px;margin-top:6px;padding:0 2px;font-size:12.5px}
+    .wf-amt-total>span:first-child{color:var(--slate);font-size:10.5px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em}
+    .wf-amt-total b{color:var(--ink);font-size:13.5px}
+    .wf-amt-miss{margin-left:auto;color:#b45309;font-weight:600;font-size:11.5px}
     .wf-rej-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
       background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:13px;line-height:1.55}
     .wf-rej-warn i{margin-top:2px}
