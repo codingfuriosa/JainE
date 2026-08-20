@@ -1266,7 +1266,7 @@
   /* One row per ENTRY, not per day: several entries can share a date, because an entry is a
      single journey and Remarks says where it went from and to. UPI Id is per row as well — it can
      differ between entries — so nothing is treated as common to the whole instance any more. */
-  const WF_DAY_COLS=['Date','UPI Id','Remarks','Transport','Food','Amount'];
+  const WF_DAY_COLS=['Date','Transport','Food','Description of Expense','Amount'];
   function wfIsDaywise(flow,details){
     if(!Array.isArray(details)||!details.length) return false;
     const by={}; details.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
@@ -1322,9 +1322,19 @@
     const sumField=(flow&&flow.tracker_sum_field||'Amount');
     const total=d.cols.indexOf(sumField)!==-1
       ? d.rows.reduce(function(a,r){ return a+cellSum(r[sumField]); },0) : 0;
+    /* Fields that belong to the whole claim rather than to one entry - UPI Id - sit above the
+       table instead of repeating down a column of their own. Claims filed before UPI Id became a
+       single common field stored it once per entry ("x@ok | x@ok | x@ok"); printing that verbatim
+       repeats the same id three times, so identical entries collapse back to the one answer.
+       Genuinely different values are all kept - that is real information, not noise. */
+    const oneLine=function(v){
+      const parts=wfSplitSets(v).map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+      const uniq=parts.filter(function(x,i){ return parts.indexOf(x)===i; });
+      return uniq.length?uniq.join(', '):String(v||'');
+    };
     const head=d.common.length
       ? '<div class="wf-dw-common">'+d.common.map(function(c){
-          return '<span><b>'+esc2(c.k)+'</b> '+esc2(c.v)+'</span>'; }).join('')+'</div>'
+          return '<span><b>'+esc2(c.k)+'</b> '+esc2(oneLine(c.v))+'</span>'; }).join('')+'</div>'
       : '';
     // ---- table (wide) ----
     let t='<div class="wf-dw-tablewrap"><table class="wf-dw-table"><thead><tr>'
@@ -1338,7 +1348,9 @@
             const val=String(r[c]||'').trim();
             if(!val) return '<td><span class="wf-dw-none">—</span></td>';
             if(c===sumField) return '<td class="wf-dw-amt">'+money(val)+'</td>';
-            if(c==='Remarks') return '<td class="wf-dw-rem">'+esc2(val).replace(/\n/g,'<br>')+'</td>';
+            // the free-text column gets the wider, wrapping cell - it is the one that holds
+            // sentences rather than a word or a figure
+            if(c==='Description of Expense'||c==='Remarks') return '<td class="wf-dw-rem">'+esc2(val).replace(/\n/g,'<br>')+'</td>';
             return '<td>'+esc2(val)+'</td>';
           }).join('')
         +(d.anyAtt?('<td class="wf-dw-attcol">'+wfDayAttHtml(r.__att)+'</td>'):'')
@@ -2579,7 +2591,7 @@
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
-      +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(c.title||'')+'</div>'+detHtml
+      +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'+detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
       +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
     wfHydrateAttThumbs();
@@ -2876,6 +2888,12 @@
     if(multi){ try{ wfAmtMatch(box); }catch(_){} return; }   // and the panel stays open
     box.classList.remove('open');
   };
+  // Today in the viewer's OWN timezone. toISOString() converts to UTC first, which in India
+  // reads as yesterday for the whole evening - the very time an expense claim gets filled in.
+  function wfTodayISO(){
+    const d=new Date();
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
   function wfEvtRowHtml(field,value,locked){
     const f=(typeof field==='string')?{label:field}:(field||{});
     const label=f.label||'', type=f.type||'text';
@@ -2953,7 +2971,12 @@
         // Text and Date. Text accepts letters and numbers (a plain text box already does);
         // Date uses the native date control.
         const inputType=type==='date'?'date':'text';
-        valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'">';
+        /* A date field can ask to start on today (template flag `today`) - the common case is
+           filing an expense the day it happened, so typing the date in every time is pure friction.
+           Only when nothing is filled in already, so editing an existing instance never silently
+           moves its date to today. */
+        const shown=(value||'')||((type==='date'&&f.today)?wfTodayISO():'');
+        valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(shown)+'">';
       }
     }
     // Locked templates cannot be reshaped, except that the optional Attachment may be removed.
@@ -3167,8 +3190,6 @@
       : '';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" data-multiple="'+(allowMultiple?'1':'0')+'" style="min-width:min(94vw,520px)">'
-        +'<label class="wf-lbl" style="margin-top:0">Workflow</label><div class="wf-ro">'+esc2(flow.name||'')+'</div>'
-        +'<label class="wf-lbl">Triggering event</label><div class="wf-ro"><i class="fa-solid fa-bolt" style="color:var(--brand)"></i> '+esc2(flow.trigger_event||'—')+'</div>'
         +membersHtml
         +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +(allowMulti
