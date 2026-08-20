@@ -2604,14 +2604,23 @@
     for(const u of list){ try{ await ACC().rpc('upi_remember',{p_upi:u}); }catch(e){} }
     WF_UPI_CACHE=null;   // re-read next time so the ordering reflects the new counts
   }
-  /* Amount, as one field divided into slots — a fare per transport, + between them.
-     The slot count follows the Transport picker in the same entry: pick three modes and three
-     places to type appear. Whatever is entered is stored as "20, 30, 40". */
-  function wfAmtSlots(vals){
-    return (vals&&vals.length?vals:['']).map(function(v,i){
+  /* Amount, as one field with a slot per thing being claimed for.
+     Four anonymous boxes would be worse than one: with three transports and a meal you could not
+     tell which box was the food. So every slot is LABELLED with what it is for — Auto, Bus, Train,
+     Lunch — and there is exactly one per option chosen anywhere in the entry's multi-select fields.
+     Tick another mode and a slot appears named after it; untick one and its slot goes, taking its
+     own figure with it rather than shifting everyone else's along.
+     The stored value stays the plain comma list the table prints and the totals sum, in slot order,
+     so nothing downstream changes. */
+  function wfAmtSlots(pairs){
+    const list=(pairs&&pairs.length)?pairs:[{k:'',v:''}];
+    return list.map(function(p,i){
       return (i?'<span class="wf-amt-op">+</span>':'')
-        +'<input class="wf-amt-seg" type="text" inputmode="decimal" value="'+esc2(v||'')+'" '
-        +'placeholder="0" oninput="wfAmtSeg(this)">';
+        +'<label class="wf-amt-slot">'
+          +(p.k?('<span class="wf-amt-for">'+esc2(p.k)+'</span>'):'')
+          +'<input class="wf-amt-seg" type="text" inputmode="decimal" data-k="'+esc2(p.k||'')+'" '
+            +'value="'+esc2(p.v||'')+'" placeholder="0" oninput="wfAmtSeg(this)">'
+        +'</label>';
     }).join('');
   }
   window.wfAmtSeg=function(el){
@@ -2619,30 +2628,42 @@
     const wrap=el&&el.closest('.wf-amt'); if(wrap) wfAmtCollect(wrap);
   };
   function wfAmtCollect(wrap){
-    const vals=[].slice.call(wrap.querySelectorAll('.wf-amt-seg'))
-      .map(function(i){ return (i.value||'').trim(); });
+    const segs=[].slice.call(wrap.querySelectorAll('.wf-amt-seg'));
+    const vals=segs.map(function(i){ return (i.value||'').trim(); });
     const hid=wrap.querySelector('.wf-evt-value');
     if(hid) hid.value=vals.filter(function(v){ return v!==''; }).join(', ');
     const nums=vals.map(parseFloat).filter(function(n){ return !isNaN(n); });
     let t=wrap.querySelector('.wf-amt-total');
-    if(nums.length>1){
+    const missing=segs.filter(function(i){ return i.getAttribute('data-k') && !(i.value||'').trim(); }).length;
+    if(nums.length>1 || missing){
       if(!t){ t=document.createElement('div'); t.className='wf-amt-total'; wrap.appendChild(t); }
-      t.textContent=nums.length+' amounts = '+wfMoney(nums.reduce(function(a,b){return a+b;},0));
+      t.innerHTML=(nums.length?(nums.length+' of '+segs.length+' filled &middot; '+wfMoney(nums.reduce(function(a,b){return a+b;},0))):'')
+        +(missing?('<span class="wf-amt-miss">'+(nums.length?' &middot; ':'')+missing+' still to fill</span>'):'');
     } else if(t){ t.remove(); }
   }
-  /* Called when a Transport choice changes: give the Amount field in the SAME entry one slot per
-     mode chosen, keeping whatever has already been typed. */
+  /* Rebuild the slots from everything chosen in this entry: every option ticked in any of its
+     multi-select fields, in the order those fields appear. Amounts already typed are kept by WHAT
+     they were for, not by position. */
   window.wfAmtMatch=function(fromBox){
     const scope=(fromBox&&(fromBox.closest('.wf-evt-group')||fromBox.closest('#wfEvtDetails')));
     if(!scope) return;
     const amt=scope.querySelector('.wf-amt'); if(!amt) return;
-    const hid=fromBox.querySelector('.wf-evt-value');
-    const n=Math.max(1, String((hid&&hid.value)||'').split(',').map(function(x){return x.trim();}).filter(Boolean).length);
+    const keys=[];
+    [].slice.call(scope.querySelectorAll('.wf-evt-selbox[data-multi="1"]')).forEach(function(box){
+      const hid=box.querySelector('.wf-evt-value');
+      String((hid&&hid.value)||'').split(',').map(function(x){return x.trim();})
+        .filter(Boolean).forEach(function(k){ keys.push(k); });
+    });
+    const had={}, spare=[];
+    [].slice.call(amt.querySelectorAll('.wf-amt-seg')).forEach(function(i){
+      const k=i.getAttribute('data-k')||'', v=(i.value||'').trim();
+      if(k) had[k]=v; else if(v) spare.push(v);
+    });
+    const pairs=keys.length
+      ? keys.map(function(k,i){ return {k:k, v:(had[k]!=null?had[k]:(spare[i]||''))}; })
+      : [{k:'', v:(spare[0]||'')}];
     const box=amt.querySelector('.wf-amt-box'); if(!box) return;
-    const have=[].slice.call(box.querySelectorAll('.wf-amt-seg')).map(function(i){ return i.value||''; });
-    if(have.length===n) return;
-    const next=[]; for(let k=0;k<n;k++) next.push(have[k]!=null?have[k]:'');
-    box.innerHTML=wfAmtSlots(next);
+    box.innerHTML=wfAmtSlots(pairs);
     wfAmtCollect(amt);
   };
   function wfEvtSelValues(value){ return String(value||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
@@ -2782,7 +2803,7 @@
         valueHtml='<div class="wf-amt" data-ph="'+esc2(placeholder)+'">'
           +'<div class="wf-amt-box">'+wfAmtSlots(parts.length?parts:[''])+'</div>'
           +'<input type="hidden" class="wf-evt-value" value="'+esc2(parts.join(', '))+'">'
-          +'<div class="wf-amt-hint">One amount per transport</div>'
+          +'<div class="wf-amt-hint">A slot appears for each transport and meal chosen</div>'
         +'</div>';
       } else if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
@@ -3479,16 +3500,20 @@
     /* UPI field: a typed box with a real dropdown of everything saved. Opening the list always
        shows every id — what is typed is not a filter, they are there to be picked. */
     .wf-evt-upi.wf-bad{border-color:#dc2626;background:#fef2f2}
-    /* Amount: ONE field with a slot per transport inside it, + between them. */
+    /* Amount: ONE field, a labelled slot per thing claimed for, + between them. */
     .wf-amt{flex:1;min-width:0}
-    .wf-amt-box{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
-      border:1px solid var(--line);border-radius:9px;background:var(--bg-card,#fff);padding:5px 8px;min-height:38px}
+    .wf-amt-box{display:flex;align-items:flex-end;gap:7px;flex-wrap:wrap;
+      border:1px solid var(--line);border-radius:9px;background:var(--bg-card,#fff);padding:6px 9px;min-height:38px}
     .wf-amt-box:focus-within{border-color:var(--brand)}
-    .wf-amt-seg{flex:1 1 64px;min-width:52px;border:0;background:transparent;color:var(--ink);
-      font:inherit;padding:4px 2px;outline:none;text-align:right}
-    .wf-amt-op{color:var(--slate);font-weight:700;flex:none;font-size:13px}
+    .wf-amt-slot{flex:1 1 74px;min-width:62px;display:flex;flex-direction:column;gap:1px;cursor:text}
+    .wf-amt-for{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .wf-amt-seg{width:100%;border:0;background:transparent;color:var(--ink);font:inherit;
+      padding:2px 0;outline:none;text-align:right}
+    .wf-amt-op{color:var(--slate);font-weight:700;flex:none;font-size:13px;padding-bottom:3px}
     .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
     .wf-amt-total{margin-top:5px;font-size:12.5px;font-weight:700;color:var(--ink)}
+    .wf-amt-miss{color:#b45309;font-weight:600}
     .wf-rej-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
       background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:13px;line-height:1.55}
     .wf-rej-warn i{margin-top:2px}
