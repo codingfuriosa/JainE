@@ -1559,6 +1559,11 @@ VIEWS.legal=async function(v,seg){
 async function legalDocsView(seg){
   DOC.scope='legal';DOC.dept='Legal';DOC.sel.clear();
   DOC.cat=(seg[0]==='cat')?decodeURIComponent(seg[1]):null;
+  /* Opening the Documents tab itself shows the tree closed. Which branches were expanded is
+     remembered for the life of the page, so after visiting a category — or being sent to one by
+     the Documents button in MIS — coming back to the tab left it hanging open with no way to
+     collapse it, since the tree only reopens the path to whatever is selected. */
+  if(!DOC.cat) DOC.legalExpanded.clear();
   let crumbTail='All Documents';
   if(DOC.cat){
     const list=await legalFolderTree();const {byId}=buildFolderTree(list);
@@ -1593,8 +1598,16 @@ async function legalNav(reuse){
   const totals={};
   const sumNode=node=>{let n=counts[node.id]||0;node.children.forEach(c=>{n+=sumNode(c);});totals[node.id]=n;return n;};
   roots.forEach(sumNode);
-  // auto-expand the path down to whichever category is currently selected
-  if(DOC.cat){let cur=byId[Number(DOC.cat)];while(cur&&cur.parent_id){DOC.legalExpanded.add(cur.parent_id);cur=byId[cur.parent_id];}}
+  /* Open the path down to whichever category is selected — but only when arriving at it, never on
+     a redraw. Doing it every time meant a selected category's parents were forced back open the
+     instant you collapsed them: the caret worked, the tree redrew, and the auto-expand put them
+     straight back. Now the path opens once per selection and stays under your control after that. */
+  if(DOC.cat && !reuse && window._legalOpenedFor!==String(DOC.cat)){
+    window._legalOpenedFor=String(DOC.cat);
+    let cur=byId[Number(DOC.cat)];
+    while(cur&&cur.parent_id){DOC.legalExpanded.add(cur.parent_id);cur=byId[cur.parent_id];}
+  }
+  if(!DOC.cat) window._legalOpenedFor=null;
   const renderNode=(node,depth)=>{
     const hasKids=node.children.length>0;
     const expanded=DOC.legalExpanded.has(node.id);
@@ -1918,8 +1931,192 @@ function misRowHtml(r,isPinned){
   return `<tr data-id="${r.id}" class="${isPinned?'mis-pinned':''}${completed?' mis-completed':''}${awaiting?' mis-awaiting':''}${openAct?' mis-open-action':''}${justDone?' mis-just-done':''}" title="${esc(tip)}" style="${upcoming?'border-left:3px solid #1e3a8a':''}${completed?'opacity:.55':''}" onclick="if(!event.target.closest('.mis-cb')&&!event.target.closest('.mis-handle'))misActionPanel(${r.id})">
     <td onclick="event.stopPropagation()" class="mis-cb-cell"><input type="checkbox" class="${cbCls}" data-id="${r.id}" ${cbAttrs} onchange="misRowCheck(this)">${handle}</td>
     ${MIS_FIELDS.map(f=>misCellHtml(f,r)).join('')}
+    <td onclick="event.stopPropagation()" class="mis-up-cell">${misUploadBtnHtml(r)}</td>
   </tr>`;
 }
+/* ---------- Legal documents: the papers filed against a case ----------
+   They live in S3 under legal/<SUB-CATEGORY>/<CASE FOLDER>/..., the same Legal Vault root the
+   rest of the app uses, and are indexed by mis_case_folders / mis_case_files. The row button
+   opens the case's folder to add to it; the toolbar's Documents button opens it to read. */
+/* The row button is UPLOAD — it opens the form. The toolbar's Documents button is a different
+   thing: it walks you to that case's folder in the Legal Documents tab, where the files actually
+   live, rather than showing them in a box of their own. */
+function misUploadBtnHtml(r){
+  const n=(window._misDocCounts||{})[r.id]||0;
+  return '<button class="btn btn-sm mis-upbtn'+(n?' has':'')+'" title="'
+    +(n?('Add to the '+n+' document'+(n===1?'':'s')+' filed for this case'):'Upload documents for this case')
+    +'" onclick="event.stopPropagation();misDocsOpen('+r.id+')"><i class="fa-solid fa-cloud-arrow-up"></i>'
+    +(n?('<span class="mis-upn">'+n+'</span>'):'')+'</button>';
+}
+// Documents: straight to the folder in the Legal vault.
+window.misDocsSel=function(){
+  let id=null; window._misSel.forEach(function(x){ id=x; });
+  const fid=(window._misDocFolders||{})[id];
+  if(fid) navTo('legal/cat/'+fid);
+  else toast('No documents folder for this case yet — use the upload button on its row','warn');
+};
+
+// The closest case type already on the case — the folder's category defaults to it rather than
+// making somebody choose from a list they have to think about.
+/* The categories are whatever sits under Litigation in the Legal vault, read fresh — a second
+   hardcoded list would drift from the tree and start creating near-duplicate folders, which is
+   exactly how the upper-case twins appeared. The list below is only a fallback. */
+let MIS_DOC_CATS=['Civil Case Matters','Consumer Matters','Criminal Matters','High Court Matters','RERA Case Matter'];
+async function misLoadDocCats(){
+  try{
+    const {data:root}=await sb.schema('doc').from('folders').select('id')
+      .eq('department','Legal').eq('name','Litigation').is('parent_id',null).maybeSingle();
+    if(!root) return MIS_DOC_CATS;
+    const {data:kids}=await sb.schema('doc').from('folders').select('name')
+      .eq('department','Legal').eq('parent_id',root.id).order('name',{ascending:true});
+    if(kids&&kids.length) MIS_DOC_CATS=kids.map(function(k){ return k.name; });
+  }catch(e){}
+  return MIS_DOC_CATS;
+}
+function misGuessCat(caseType){
+  const t=String(caseType||'').toLowerCase();
+  if(!t) return MIS_DOC_CATS[0];
+  let best=MIS_DOC_CATS[0], score=-1;
+  MIS_DOC_CATS.forEach(function(c){
+    const words=c.toLowerCase().replace(/\s*matters?\s*$/,'').split(/\s+/).filter(Boolean);
+    const s=words.reduce(function(a,w){ return a+(t.indexOf(w)!==-1?w.length:0); },0);
+    if(s>score){ score=s; best=c; }
+  });
+  return score>0?best:MIS_DOC_CATS[0];
+}
+window.misDocsOpen=async function(caseId){
+  const row=(window._misRows||[]).find(function(r){ return r.id===caseId; })||{};
+  // `frm` is what styles labels and fields in every other modal — without it the form renders bare.
+  /* width, not min-width: min-width sets a floor the panel can be pushed past, so a long file name
+     or folder name widened it and the whole panel scrolled sideways. A fixed width with everything
+     inside it boxed to 100% keeps it still. */
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-cloud-arrow-up"></i> Upload documents</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm mis-doc-modal"><div class="loader"><div class="spin"></div></div></div>','md');
+  let folder=null, files=[];
+  await misLoadDocCats();
+  try{
+    const {data:fo}=await sb.from('mis_case_folders').select('*').eq('case_id',caseId).maybeSingle(); folder=fo||null;
+    if(folder){ const {data:fi}=await sb.from('mis_case_files').select('*').eq('folder_id',folder.id).order('file_name',{ascending:true}); files=fi||[]; }
+  }catch(e){ toast('Could not load documents: '+((e&&e.message)||e),'err'); }
+  const body=document.querySelector('.modal-body'); if(!body)return;
+  const title=String(row.cause_title||('Case '+caseId)).replace(/\s+/g,' ').trim();
+  const cat=folder?folder.sub_category:misGuessCat(row.case_type);
+  const name=folder?folder.folder_name:title;
+  /* Existing papers are listed but never removable here — a filed document is part of the record.
+     Adding more is always allowed. */
+  const listHtml=files.length
+    ? '<div class="mis-doclist">'+files.map(function(f){
+        const up=!!f.uploaded_at;
+        return '<div class="mis-docrow"'+(up?(' onclick="s3OpenSigned(\'s3:'+esc(f.storage_key)+'\',\''+esc(String(f.file_name).split("/").pop().replace(/'/g,""))+'\')"'):'')+'>'
+          +'<i class="fa-solid fa-'+(/\.pdf$/i.test(f.file_name)?'file-pdf':'file')+'"></i>'
+          +'<span class="mis-docname" title="'+esc(f.file_name)+'">'+esc(f.file_name)+'</span>'
+          +'<span class="mis-docsz">'+(f.size_bytes?misBytes(f.size_bytes):'')+'</span>'
+          +(up?'<i class="fa-solid fa-arrow-up-right-from-square mis-docgo"></i>':'<span class="mis-docpend">not uploaded</span>')
+        +'</div>';
+      }).join('')+'</div>'
+    : '<div class="empty" style="padding:22px;border:1px dashed var(--line);border-radius:10px;color:var(--slate);text-align:center">No documents filed yet</div>';
+  const totalMb=files.reduce(function(a,f){ return a+(Number(f.size_bytes)||0); },0);
+  body.innerHTML=
+    // where these papers are going, stated once at the top
+     '<div class="mis-doc-head">'
+      +'<div class="mis-doc-case" title="'+esc(title)+'">'+esc(title)+'</div>'
+      +'<div class="mis-doc-path"><i class="fa-solid fa-folder-tree"></i> Legal Documents · Litigation · '
+        +'<b id="misDocPathCat">'+esc(cat)+'</b> · <b id="misDocPathName">'+esc(name)+'</b></div>'
+     +'</div>'
+    +'<div class="dropzone" onclick="document.getElementById(\'misDocInput\').click()">'
+      +'<i class="fa-solid fa-cloud-arrow-up"></i><div>Click to choose files</div>'
+      +'<div style="font-size:12px;margin-top:4px">PDF, Word, images — several at once</div></div>'
+    +'<input type="file" id="misDocInput" class="hidden" multiple onchange="misDocsPick(this,'+caseId+')">'
+    +'<div id="misDocProg" class="mis-doc-prog" style="display:none"></div>'
+    +'<div class="two" style="margin-top:14px">'
+      +'<div><label>Category</label><select id="misDocCat"'+(folder?' disabled':'')+' onchange="misDocPathSync()">'
+        +MIS_DOC_CATS.map(function(c){ return '<option value="'+esc(c)+'"'+(c===cat?' selected':'')+'>'+esc(c)+'</option>'; }).join('')
+      +'</select></div>'
+      +'<div><label>Folder name</label><input id="misDocName" value="'+esc(name)+'"'+(folder?'':' placeholder="Defaults to the case name"')+' oninput="misDocPathSync()"></div>'
+    +'</div>'
+    +(folder?'<div class="mis-hint">Fixed once the folder exists — everything already filed stays where it is.</div>':'')
+    +'<div class="mis-doc-sec"><span>Already filed</span>'
+      +(files.length?('<span class="mis-doc-meta">'+files.length+' file'+(files.length===1?'':'s')+' · '+misBytes(totalMb)+'</span>'):'')+'</div>'
+    +listHtml
+    +(folder?('<div class="mis-doc-foot">'
+        +'<span class="mis-hint">Filed papers are part of the record — open to read, not removed here.</span>'
+        +'<button class="btn" onclick="closeModal();misOpenDocsFolder('+caseId+')"><i class="fa-solid fa-folder-open"></i> Open in Documents</button>'
+      +'</div>'):'');
+};
+function misBytes(n){ n=Number(n)||0; return n>1048576?((n/1048576).toFixed(1)+' MB'):(n>1024?Math.round(n/1024)+' KB':n+' B'); }
+// The path line at the top follows the two fields as they are typed, so where the papers will land
+// is visible before anything is uploaded.
+window.misDocPathSync=function(){
+  const c=$('misDocPathCat'), n=$('misDocPathName');
+  if(c&&$('misDocCat')) c.textContent=$('misDocCat').value||'';
+  if(n&&$('misDocName')) n.textContent=($('misDocName').value||'').trim()||'—';
+};
+window.misOpenDocsFolder=function(caseId){
+  const fid=(window._misDocFolders||{})[caseId];
+  if(fid) navTo('legal/cat/'+fid); else navTo('legal');
+};
+window.misDocsPick=async function(input,caseId){
+  const picked=[].slice.call(input.files||[]); if(!picked.length)return;
+  const cat=($('misDocCat')||{}).value||misGuessCat(''), nm=(($('misDocName')||{}).value||'').trim();
+  if(!nm){ toast('Give the folder a name','err'); return; }
+  const prog=$('misDocProg'); if(prog){ prog.style.display='block'; }
+  input.disabled=true;
+  const seg=function(s){ return String(s||'').replace(/[^\w.\- ]/g,'-').replace(/\s+/g,'-').replace(/-{2,}/g,'-').replace(/^[-.]+|[-.]+$/g,'')||'x'; };
+  const prefix='legal/'+seg(cat)+'/'+seg(nm);
+  let folderId=null, docFolderId=null;
+  try{
+    const {data:ex}=await sb.from('mis_case_folders').select('id,doc_folder_id').eq('case_id',caseId).maybeSingle();
+    if(ex){ folderId=ex.id; docFolderId=ex.doc_folder_id||null; }
+    else{
+      const {data:ins,error}=await sb.from('mis_case_folders')
+        .insert({case_id:caseId,sub_category:cat,folder_name:nm,storage_prefix:prefix,created_by:state.email})
+        .select('id').single();
+      if(error) throw error; folderId=ins.id;
+    }
+    /* The file has to land in the Legal vault's folder tree as well, or it sits in S3 unseen —
+       the Documents tab lists doc.documents, not our index. Build Litigation > category > case
+       on the way in if this case has never been filed before. */
+    if(!docFolderId){
+      const D=()=>sb.schema('doc');
+      const findOrAdd=async function(name,parent){
+        let q=D().from('folders').select('id').eq('department','Legal').eq('name',name);
+        q=(parent==null)?q.is('parent_id',null):q.eq('parent_id',parent);
+        const {data:hit}=await q.maybeSingle();
+        if(hit) return hit.id;
+        const {data:mk,error}=await D().from('folders')
+          .insert({department:'Legal',name:name,parent_id:parent,created_by:state.email}).select('id').single();
+        if(error) throw error; return mk.id;
+      };
+      const rootId=await findOrAdd('Litigation',null);
+      const catId=await findOrAdd(cat,rootId);
+      docFolderId=await findOrAdd(nm,catId);
+      await sb.from('mis_case_folders').update({doc_folder_id:docFolderId}).eq('id',folderId);
+    }
+    let done=0;
+    for(const f of picked){
+      if(prog) prog.textContent='Uploading '+(done+1)+' of '+picked.length+' — '+f.name;
+      const key=prefix+'/'+seg(f.name);
+      const {data,error}=await uploadFileToS3(key,f);
+      if(error) throw error;
+      const storedPath=String(data.path||('s3:'+key));
+      await sb.from('mis_case_files').insert({folder_id:folderId,file_name:f.name,
+        storage_key:storedPath.replace(/^s3:/,''),store:'s3',
+        size_bytes:f.size,content_type:f.type||'application/octet-stream',
+        uploaded_at:new Date().toISOString(),created_by:state.email});
+      await sb.schema('doc').from('documents').insert({title:f.name,department:'Legal',
+        category:'Litigation / '+cat+' / '+nm, folder_id:docFolderId,
+        storage_path:storedPath.indexOf('s3:')===0?storedPath:('s3:'+key),
+        file_name:f.name,file_size:f.size,file_type:f.type||'application/octet-stream',
+        status:'Active',visibility:'Internal',uploaded_by:state.email});
+      done++;
+    }
+    window._misDocFolders[caseId]=docFolderId;
+    toast(done+' document'+(done===1?'':'s')+' added','ok');
+    window._misDocCounts[caseId]=(window._misDocCounts[caseId]||0)+done;
+    closeModal(); legalMIS();
+  }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); input.disabled=false; if(prog)prog.style.display='none'; }
+};
+
 // Sliding the grip handle left toggles next_date_recorded_at (today's date, or cleared) — feeds
 // the Scoreboard score. Mouse AND touch both use pointer events. Scoped to the handle icon only —
 // dragging elsewhere on the row does nothing, so a plain click anywhere else still opens Edit.
@@ -1976,6 +2173,17 @@ async function legalMIS(){
   try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
+  /* How many papers are filed against each case, so the Documents button knows whether it has
+     anything to open and the row can say so at a glance. One small query for the whole table. */
+  window._misDocCounts={}; window._misDocFolders={};
+  try{
+    const {data:fo}=await sb.from('mis_case_folders').select('id,case_id,doc_folder_id');
+    const byFolder={}; (fo||[]).forEach(function(f){ byFolder[f.id]=f.case_id; if(f.doc_folder_id) window._misDocFolders[f.case_id]=f.doc_folder_id; });
+    if((fo||[]).length){
+      const {data:fi}=await sb.from('mis_case_files').select('folder_id');
+      (fi||[]).forEach(function(x){ const cid=byFolder[x.folder_id]; if(cid!=null) window._misDocCounts[cid]=(window._misDocCounts[cid]||0)+1; });
+    }
+  }catch(e){}
   const searchKeys=MIS_FIELDS.map(f=>f.k);
   rows.forEach(r=>{ r._blob=searchKeys.map(k=>String(r[k]||'')).join(' ␟ ').toLowerCase(); });
   /* "Pinned" means the case is still live — it is NOT tied to having a date. Executing an action
@@ -2150,6 +2358,62 @@ async function legalMIS(){
       .mis-handle{touch-action:pan-y;-webkit-user-select:none;user-select:none}
       #misTbl tbody tr.mis-swiping{background:#eef2ff;-webkit-user-select:none;user-select:none}
       .mis-cell-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;width:100%}
+      /* The Docs column is pinned to the right-hand edge. The table is 2200px wide and this is its
+         last column, so it sat off-screen until you scrolled the whole way across — the button was
+         mostly cut off. Pinned, it is reachable from any scroll position. */
+      /* Every cell in this table is overflow:hidden, which was shaving the button off inside its own
+         56px column once the count was there too. This one gets room and is allowed to show it. */
+      #misTbl thead th:last-child,#misTbl td.mis-up-cell{position:sticky;right:0;z-index:2;width:78px;
+        min-width:78px;max-width:78px;padding-left:6px;padding-right:10px;overflow:visible;
+        box-shadow:-7px 0 9px -7px rgba(15,23,42,.18)}
+      #misTbl thead th:last-child{z-index:3;background:var(--bg-subtle,#f8fafc)}
+      #misTbl td.mis-up-cell{background:var(--bg-card,#fff)}
+      #misTbl tbody tr:hover td.mis-up-cell{background:var(--bg-hover,#f8fafc)}
+      #misTbl tbody tr.mis-open-action td.mis-up-cell{background:#fffbeb}
+      #misTbl tbody tr.mis-open-action:hover td.mis-up-cell{background:#fef3c7}
+      .mis-up-cell{text-align:center;white-space:nowrap}
+      .mis-upbtn{height:28px;min-width:28px;padding:0 7px;display:inline-flex;align-items:center;gap:4px;justify-content:center;
+        border:1px dashed var(--line);border-radius:7px;background:var(--bg-card);color:var(--slate);cursor:pointer}
+      .mis-upbtn.has{border-style:solid;border-color:#c7d2fe;background:#eef2ff;color:#1e3a8a;font-weight:700}
+      .mis-upbtn:hover{border-color:#1e3a8a;color:#1e3a8a}
+      .mis-upn{font-size:11px}
+      /* Upload panel: where it is going, then the drop area, then what is already there.
+         It never scrolls sideways — the panel is a fixed width and everything in it is boxed to
+         that width, so long file names and folder names ellipsis or wrap instead of stretching it. */
+      .mis-doc-modal{width:min(94vw,620px);max-width:100%;overflow-x:hidden;box-sizing:border-box}
+      .mis-doc-modal *{max-width:100%;box-sizing:border-box}
+      .mis-doc-modal .two{grid-template-columns:1fr 1fr;gap:12px}
+      .mis-doc-modal .two>div{min-width:0}
+      .mis-doc-modal select,.mis-doc-modal input[type=text],.mis-doc-modal input:not([type]){width:100%}
+      @media(max-width:520px){ .mis-doc-modal .two{grid-template-columns:1fr} }
+      .mis-doc-head{padding:11px 13px;border:1px solid var(--line);border-left:3px solid #1e3a8a;
+        border-radius:9px;background:var(--bg-subtle,#f8fafc);margin-bottom:14px}
+      .mis-doc-case{font-weight:700;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+      .mis-doc-path{font-size:11.5px;color:var(--slate);margin-top:5px;overflow-wrap:anywhere}
+      .mis-doc-path b{color:#1e3a8a;font-weight:650}
+      .mis-doc-path i{margin-right:4px;opacity:.75}
+      .mis-doc-sec{display:flex;align-items:baseline;gap:9px;margin:16px 0 7px;font-size:11.5px;
+        font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate)}
+      .mis-doc-meta{font-weight:400;text-transform:none;letter-spacing:0;font-size:11.5px;margin-left:auto}
+      /* A file name is one unbroken word and will not wrap on its own — it pushed the panel wider
+         than itself, which is where the sideways scroll came from. */
+      .mis-doc-prog{margin-top:10px;padding:9px 12px;border-radius:8px;background:#eef2ff;color:#1e3a8a;
+        font-size:12.5px;font-weight:600;overflow-wrap:anywhere;word-break:break-word}
+      .mis-doc-foot{display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
+      .mis-doc-foot .mis-hint{flex:1;min-width:180px;margin:0}
+      .mis-doclist{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+      .mis-docrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid var(--line);font-size:13px;cursor:pointer}
+      .mis-docrow:first-child{border-top:0}
+      .mis-docrow:hover{background:#f5f8ff}
+      .mis-docrow>i:first-child{color:#dc2626;font-size:14px;flex:none;width:15px;text-align:center}
+      .mis-docname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .mis-docsz{color:var(--slate);font-size:11.5px;white-space:nowrap}
+      .mis-docgo{color:var(--slate);font-size:10px;opacity:0;transition:opacity .12s}
+      .mis-docrow:hover .mis-docgo{opacity:1}
+      .mis-docpend{color:#b45309;font-size:11px;white-space:nowrap}
+      .mis-ro{padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-subtle,#f8fafc);font-size:13.5px}
+      .mis-hint{font-size:11.5px;color:var(--slate);margin-top:4px}
       /* A case with an action open is the work in hand — the whole row is tinted so it is picked
          out at a glance, and the action itself is the only text on the row in full colour. */
       #misTbody tr.mis-open-action{background:#fffbeb}
@@ -2201,6 +2465,7 @@ async function legalMIS(){
         <button class="btn btn-primary" onclick="misCreate()"><i class="fa-solid fa-plus"></i> Add Case</button>
         <button class="btn" id="misEditBtn" onclick="misEditSel()" disabled><i class="fa-solid fa-pen"></i> Edit</button>
         <button class="btn" id="misDelBtn" onclick="misDeleteSel()" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+        <button class="btn" id="misDocsBtn" onclick="misDocsSel()" disabled><i class="fa-solid fa-folder-open"></i> Documents</button>
         <span class="mis-count" id="misCount">${rows.length} cases</span>
       </div>
       <div class="mis-filters">
@@ -2240,10 +2505,11 @@ priority is empty / court is high court: search one column.">
         <thead><tr>
           <th style="width:60px"><input type="checkbox" class="mis-cb" id="misChkAll" onchange="misToggleAll(this)"></th>
           ${MIS_FIELDS.map(f=>`<th>${esc(f.l)}</th>`).join('')}
+          <th style="width:78px;text-align:center">Docs</th>
         </tr></thead>
         <tbody id="misTbody">
           ${misPinned.map(r=>misRowHtml(r,true)).join('')}
-          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+1}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
+          ${misPinned.length&&misRest.length?`<tr class="mis-spacer" style="cursor:default"><td colspan="${MIS_FIELDS.length+2}" style="height:18px;background:var(--bg-subtle,#f8fafc);border-bottom:2px solid var(--line)"></td></tr>`:''}
           ${misRest.map(r=>misRowHtml(r,false)).join('')}
         </tbody>
       </table>
@@ -2649,11 +2915,22 @@ window.misToggleAll=function(master){
 };
 window.misUpdateToolbar=function(){
   const n=window._misSel.size;
-  const editBtn=$('misEditBtn'),delBtn=$('misDelBtn');
+  const editBtn=$('misEditBtn'),delBtn=$('misDelBtn'),docsBtn=$('misDocsBtn');
   // Enabled/disabled is carried by the stylesheet (a dashed outline while waiting), not by fading
   // the button until it looks broken.
   if(editBtn){editBtn.disabled=(n!==1);editBtn.title=(n===1)?'Edit the selected case':'Select one case to edit';}
   if(delBtn){delBtn.disabled=(n===0);delBtn.title=(n>0)?'Delete the selected case(s)':'Select at least one case to delete';}
+  /* Documents opens ONE case's folder, so it is off unless exactly one case is picked, and off
+     again when that case has no papers filed against it. */
+  if(docsBtn){
+    let id=null; window._misSel.forEach(function(x){ id=x; });
+    const has=(n===1)&&!!(window._misDocFolders||{})[id];
+    docsBtn.disabled=!has;
+    docsBtn.title=(n===0)?'Select a case to open its documents folder'
+      :(n>1?'Documents opens one case at a time — select just one'
+      :(has?('Open this case’s folder in Legal Documents ('+((window._misDocCounts||{})[id]||0)+' files)')
+           :'No documents have been filed for this case yet'));
+  }
 };
 const MIS_ALIASES={
   case_type:['case type','type of case'],
@@ -6829,7 +7106,7 @@ async function secUserDetail(v,email){
         ${u.super_admin?'<span style="font-size:12px;color:var(--slate)">Full access — Administrator</span>':'<div style="display:flex;gap:6px"><button type="button" class="btn btn-sm" onclick="secAllTabs(true)">Select all</button><button type="button" class="btn btn-sm" onclick="secAllTabs(false)">Clear all</button></div>'}
       </div>
       <div style="padding:14px 16px 16px">
-        <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.map(m=>'<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+(mods.includes(m.id)?'checked':'')+' '+(u.super_admin?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>')];}).join('')}</div>
+        <div class="tab-grid">${NAV.flatMap(g=>{const gi=g.items.filter(m=>MODSET.has(m.id));if(!gi.length)return[];return['<div class="tab-grid-head">'+esc(g.group)+'</div>',...gi.map(m=>'<label class="chk-tile"><input type="checkbox" class="secMod" value="'+m.id+'" '+((m.id==='network'||mods.includes(m.id))?'checked':'')+' '+((u.super_admin||m.id==='network')?'disabled':'')+'><i class="fa-solid '+m.icon+' tile-ic"></i>'+esc(m.label)+'</label>')];}).join('')}</div>
       </div>
     </div>
     ${u.super_admin?'<p style="color:var(--slate);font-size:13px;margin-top:12px">This person is an administrator and always has full access.</p>':`<div style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px"><button class="btn" onclick="navTo('security')">Cancel</button><button class="btn btn-primary" id="secSaveBtn" onclick="secSave('${esc(email)}')"><i class="fa-solid fa-check"></i> Save access</button></div>`}
@@ -7772,10 +8049,10 @@ VIEWS.network=async function(v,seg){
   // The "Live check" bar sits OUTSIDE #netBody so a tab switch or a data reload
   // doesn't wipe the progress message of a refresh that is still running.
   v.innerHTML=mHead('fa-wifi','#0ea5e9','Internet Speed Monitor')+mTabs('network',tabs,ti)
-    +'<div class="card card-pad" style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      +'<div><div class="sec-title" style="margin:0">Live check</div>'
+    +'<div class="card card-pad net-livebar" style="margin-top:16px">'
+      +'<div class="net-livebar-txt"><div class="sec-title" style="margin:0">Live check</div>'
       +'<div class="sec-sub" id="netPoolMsg" style="margin:0">Runs a speed test on the office line right now and stores the reading</div></div>'
-      +'<button class="btn btn-primary" id="netRefreshBtn" style="margin-left:auto" onclick="netRefresh()">'
+      +'<button class="btn btn-primary" id="netRefreshBtn" onclick="netRefresh()">'
       +'<i class="fa-solid fa-arrows-rotate"></i> Refresh now</button>'
       +'<div id="netRefreshMsg" style="flex-basis:100%;font-size:13px"></div>'
     +'</div>'
@@ -7842,10 +8119,10 @@ VIEWS.network=async function(v,seg){
         ['Upload threshold',(settings.upload_threshold||'—')+' Mbps'],
         ['Ping threshold',(settings.ping_threshold||'—')+' ms']];
       const rangeLabel=(NET_RANGES.find(r=>r[0]===NET_RANGE)||NET_RANGES[0])[1];
-      const rangeSel='<select class="sel" id="netRangeSel" style="margin-left:auto" onchange="netRangeChange(this.value)">'
+      const rangeSel='<select class="sel net-range-sel" id="netRangeSel" onchange="netRangeChange(this.value)">'
         +NET_RANGES.map(r=>'<option value="'+r[0]+'"'+(r[0]===NET_RANGE?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
       host.innerHTML=mKpis(kpis)
-        +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div><div class="sec-title">Speed over time</div><div class="sec-sub">Download vs upload · '+esc(rangeLabel)+' · red dashed line = alert threshold</div></div>'+rangeSel+'</div><canvas id="chNet" height="110"></canvas></div>'
+        +'<div class="card card-pad net-chart-card" style="margin-top:16px"><div class="net-chart-head"><div><div class="sec-title">Speed over time</div><div class="sec-sub">Download vs upload · '+esc(rangeLabel)+' · red dashed line = alert threshold</div></div>'+rangeSel+'</div><div class="net-chart-wrap"><canvas id="chNet"></canvas></div></div>'
         +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title">Monitoring settings</div><div class="sec-sub">Shared configuration · change in the net_settings table</div>'
           +'<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:8px">'
           +metaCells.map(x=>'<div><div style="color:var(--slate);font-size:12px">'+esc(x[0])+'</div><div style="font-weight:700;font-size:15px;margin-top:2px">'+esc(x[1])+'</div></div>').join('')
@@ -7876,7 +8153,7 @@ VIEWS.network=async function(v,seg){
       ];
       if(bad.some(x=>x!==null))ds.unshift({type:'bar',label:'Bad reading',data:bad,backgroundColor:'rgba(220,38,38,.16)',borderColor:'rgba(220,38,38,.35)',borderWidth:0,barPercentage:1,categoryPercentage:1,order:5});
       if(thr>0)ds.push({label:'Threshold',data:labels.map(()=>thr),borderColor:'#dc2626',borderDash:[5,4],borderWidth:1.5,pointRadius:0,fill:false,order:0});
-      new Chart($('chNet'),{type:'line',data:{labels,datasets:ds},options:{plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:12}}}},scales:{y:{min:0,max:400,ticks:{stepSize:50},grid:{color:'#eef1f6'},border:{display:false},title:{display:true,text:'Mbps'}},x:{grid:{display:false},ticks:{maxTicksLimit:8}}}}});
+      new Chart($('chNet'),{type:'line',data:{labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:7,font:{size:12}}}},scales:{y:{min:0,max:400,ticks:{stepSize:50},grid:{color:'#eef1f6'},border:{display:false},title:{display:true,text:'Mbps'}},x:{grid:{display:false},ticks:{maxTicksLimit:8,autoSkip:true}}}}});
       return;
     }
 
@@ -7912,9 +8189,9 @@ VIEWS.network=async function(v,seg){
           t.isp||'—',
         ];
       });
-      const rangeSel='<select class="sel" id="netRangeSel" style="margin-left:auto" onchange="netRangeChange(this.value)">'
+      const rangeSel='<select class="sel net-range-sel" id="netRangeSel" onchange="netRangeChange(this.value)">'
         +NET_RANGES.map(r=>'<option value="'+r[0]+'"'+(r[0]===NET_RANGE?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
-      host.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+      host.innerHTML='<div class="net-readings-head">'
         +'<div class="sec-sub" style="margin:0">Showing '+rows.length+' reading'+(rows.length===1?'':'s')+(lowCount?' · <span style="color:#c83232">'+lowCount+' low</span>':'')+'</div>'
         +rangeSel+'</div>'
         +(rows.length?mTable(['Time','Status','↓ Mbps','↑ Mbps','Ping','ISP'],rows):'<div class="card card-pad empty">No readings in this range</div>');
@@ -10318,9 +10595,28 @@ function trQualTag(r){
   return '<span class="tag t-gray">—</span>';
 }
 
+/* Every call, fetched a page at a time.
+   This used to stop at the 200 most recent, and the KPI cards are counted from whatever was
+   loaded - so Calls stuck at 200 while the real figure climbed past 500, and the window slid as
+   new calls arrived: an older Qualified call dropped off the bottom for each new one at the top,
+   so Qualified went DOWN while qualified calls were being added. Not Qualified read low for the
+   same reason, and the three cards never summed to the total. */
 async function trFetch(force){
   if(TR_ROWS&&!force)return TR_ROWS;
-  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').is('deleted_at',null).order('created_at',{ascending:false}).limit(200);TR_ROWS=data||[];}catch(e){TR_ROWS=[];}
+  const PAGE=1000; let out=[], from=0;
+  try{
+    for(;;){
+      const {data,error}=await sb.schema('acc').from('transcriptions').select('*')
+        .is('deleted_at',null).order('created_at',{ascending:false}).range(from,from+PAGE-1);
+      if(error)throw error;
+      const batch=data||[];
+      out=out.concat(batch);
+      if(batch.length<PAGE)break;          // last page
+      from+=PAGE;
+      if(from>50000)break;                 // backstop, never a real workload
+    }
+    TR_ROWS=out;
+  }catch(e){ TR_ROWS=out.length?out:[]; }
   return TR_ROWS;
 }
 async function trFetchDeleted(force){

@@ -11,6 +11,10 @@
   --sb-red:#e0121c; --sb-red-dim:rgba(224,18,28,.16);
 }
 *{box-sizing:border-box;margin:0;padding:0}
+/* Without this, mobile Safari auto-inflates small text for readability — placeholders (and any
+   other small type) render noticeably bigger than their actual font-size on a phone than the
+   same CSS produces on desktop. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cdd5e1;border-radius:8px}::-webkit-scrollbar-track{background:transparent}
@@ -862,4 +866,25 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   .psa-tbl th:nth-child(2),.psa-tbl td:nth-child(2){display:none}
   .psa-tbl th:nth-child(4),.psa-tbl td:nth-child(4){display:none}
   .psa-fname{max-width:150px}
+}
+
+/* ===== Internet Speed Monitor — responsive layout ===== */
+.net-livebar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.net-livebar-txt{flex:1;min-width:200px}
+#netRefreshBtn{margin-left:auto}
+.net-chart-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.net-range-sel{margin-left:auto}
+.net-chart-wrap{position:relative;width:100%;height:260px;margin-top:8px}
+.net-chart-wrap canvas{width:100%!important;height:100%!important}
+.net-readings-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+@media(max-width:760px){
+  .net-livebar{flex-direction:column;align-items:stretch}
+  .net-livebar-txt{min-width:0}
+  #netRefreshBtn{margin-left:0;width:100%;justify-content:center}
+  .net-chart-wrap{height:220px}
+  .net-range-sel{margin-left:0;width:100%}
+  .net-readings-head{align-items:stretch}
+}
+@media(max-width:560px){
+  .net-chart-wrap{height:190px}
 }
