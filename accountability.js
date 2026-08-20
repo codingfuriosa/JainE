@@ -2604,21 +2604,46 @@
     for(const u of list){ try{ await ACC().rpc('upi_remember',{p_upi:u}); }catch(e){} }
     WF_UPI_CACHE=null;   // re-read next time so the ordering reflects the new counts
   }
-  /* Amount typed as "20 + 30 + 40" in a single box. Only digits, dots and plus survive; the value
-     stored is the comma form the table and the totals already understand, and a running total shows
-     once there is more than one figure so several fares can be checked at a glance. */
-  window.wfAmtOne=function(el){
-    const wrap=el&&el.closest('.wf-amt'); if(!wrap) return;
-    let t=(el.value||'').replace(/[^0-9.+\s]/g,'').replace(/\s*\+\s*/g,' + ').replace(/\s{2,}/g,' ');
-    if(t!==el.value){ const at=el.selectionStart; el.value=t; try{ el.setSelectionRange(at,at); }catch(_){} }
-    const parts=t.split('+').map(function(x){return x.trim();}).filter(function(x){return x!=='';});
-    const hid=wrap.querySelector('.wf-evt-value'); if(hid) hid.value=parts.join(', ');
-    const tot=parts.reduce(function(a,v){ const n=parseFloat(v); return a+(isNaN(n)?0:n); },0);
-    let tt=wrap.querySelector('.wf-amt-total');
-    if(parts.length>1){
-      if(!tt){ tt=document.createElement('div'); tt.className='wf-amt-total'; wrap.appendChild(tt); }
-      tt.textContent=parts.length+' amounts = '+wfMoney(tot);
-    } else if(tt){ tt.remove(); }
+  /* Amount, as one field divided into slots — a fare per transport, + between them.
+     The slot count follows the Transport picker in the same entry: pick three modes and three
+     places to type appear. Whatever is entered is stored as "20, 30, 40". */
+  function wfAmtSlots(vals){
+    return (vals&&vals.length?vals:['']).map(function(v,i){
+      return (i?'<span class="wf-amt-op">+</span>':'')
+        +'<input class="wf-amt-seg" type="text" inputmode="decimal" value="'+esc2(v||'')+'" '
+        +'placeholder="0" oninput="wfAmtSeg(this)">';
+    }).join('');
+  }
+  window.wfAmtSeg=function(el){
+    if(el){ const clean=(el.value||'').replace(/[^0-9.]/g,''); if(clean!==el.value){ const at=el.selectionStart; el.value=clean; try{el.setSelectionRange(at,at);}catch(_){} } }
+    const wrap=el&&el.closest('.wf-amt'); if(wrap) wfAmtCollect(wrap);
+  };
+  function wfAmtCollect(wrap){
+    const vals=[].slice.call(wrap.querySelectorAll('.wf-amt-seg'))
+      .map(function(i){ return (i.value||'').trim(); });
+    const hid=wrap.querySelector('.wf-evt-value');
+    if(hid) hid.value=vals.filter(function(v){ return v!==''; }).join(', ');
+    const nums=vals.map(parseFloat).filter(function(n){ return !isNaN(n); });
+    let t=wrap.querySelector('.wf-amt-total');
+    if(nums.length>1){
+      if(!t){ t=document.createElement('div'); t.className='wf-amt-total'; wrap.appendChild(t); }
+      t.textContent=nums.length+' amounts = '+wfMoney(nums.reduce(function(a,b){return a+b;},0));
+    } else if(t){ t.remove(); }
+  }
+  /* Called when a Transport choice changes: give the Amount field in the SAME entry one slot per
+     mode chosen, keeping whatever has already been typed. */
+  window.wfAmtMatch=function(fromBox){
+    const scope=(fromBox&&(fromBox.closest('.wf-evt-group')||fromBox.closest('#wfEvtDetails')));
+    if(!scope) return;
+    const amt=scope.querySelector('.wf-amt'); if(!amt) return;
+    const hid=fromBox.querySelector('.wf-evt-value');
+    const n=Math.max(1, String((hid&&hid.value)||'').split(',').map(function(x){return x.trim();}).filter(Boolean).length);
+    const box=amt.querySelector('.wf-amt-box'); if(!box) return;
+    const have=[].slice.call(box.querySelectorAll('.wf-amt-seg')).map(function(i){ return i.value||''; });
+    if(have.length===n) return;
+    const next=[]; for(let k=0;k<n;k++) next.push(have[k]!=null?have[k]:'');
+    box.innerHTML=wfAmtSlots(next);
+    wfAmtCollect(amt);
   };
   function wfEvtSelValues(value){ return String(value||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
   function wfEvtSelectHtml(f,value){
@@ -2695,7 +2720,8 @@
       if(on&&!tick) o.insertAdjacentHTML('beforeend','<i class="fa-solid fa-check"></i>');
       if(!on&&tick) tick.remove();
     });
-    if(multi) return;   // leave the panel open on a multi field
+    // a multi field that drives the amount slots (Transport) resizes them as modes are ticked
+    if(multi){ try{ wfAmtMatch(box); }catch(_){} return; }   // and the panel stays open
     box.classList.remove('open');
   };
   function wfEvtRowHtml(field,value,locked){
@@ -2748,15 +2774,15 @@
       const placeholder=f.placeholder||(eq(label,'Wheredoc Id')?'The Wheredoc reference this bill was filed under'
         :(typeName+(f.optional?' (optional)':'')));
       if(type==='number' && f.parts){
-        /* ONE box, with the amounts added inside it: "20 + 30 + 40" — one figure per transport, so
-           the count matches however many modes were picked. Digits, dots and plus only. It is kept
-           as "20, 30, 40", which the table prints and the total sums. */
-        const shown=String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean).join(' + ');
-        valueHtml='<div class="wf-amt">'
-          +'<input class="ac-in wf-amt-one" type="text" inputmode="decimal" value="'+esc2(shown)+'" '
-            +'placeholder="20 + 30 + 40" oninput="wfAmtOne(this)">'
-          +'<input type="hidden" class="wf-evt-value" value="'+esc2(String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean).join(', '))+'">'
-          +'<div class="wf-amt-hint">One amount per transport — separate them with +</div>'
+        /* One field, divided into a slot per transport with a + between them. Two modes for one
+           journey means two fares, so the field itself shows two places to type rather than leaving
+           it to be remembered. The slots follow the Transport picker; the value stored is the
+           comma form the table prints and the totals sum. */
+        const parts=String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+        valueHtml='<div class="wf-amt" data-ph="'+esc2(placeholder)+'">'
+          +'<div class="wf-amt-box">'+wfAmtSlots(parts.length?parts:[''])+'</div>'
+          +'<input type="hidden" class="wf-evt-value" value="'+esc2(parts.join(', '))+'">'
+          +'<div class="wf-amt-hint">One amount per transport</div>'
         +'</div>';
       } else if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
@@ -3005,6 +3031,11 @@
     const saveBtn=document.querySelector('.modal-foot .ac-btn.primary'); if(saveBtn) saveBtn.disabled=true;
     try{
     return await wfEventSaveInner(flowId, caseId);
+    }catch(e){
+      // Without this the form just refused to submit and said nothing — an error in here has to be
+      // visible, not swallowed by the guard that stops double-submits.
+      toast('Could not save: '+((e&&e.message)||e),'err');
+      try{ console.error('wfEventSave',e); }catch(_){}
     } finally { window._wfSaving=false; if(saveBtn) saveBtn.disabled=false; }
   };
   async function wfEventSaveInner(flowId, caseId){
@@ -3036,7 +3067,10 @@
       /* A UPI id has to be the real shape — ten digits, @, then letters (1234567890@abc) — or the
          payment simply fails later, by which time the claim has been through two approvals. Checked
          here, against the pattern the field itself declares, so no other workflow is affected. */
-      const upiField=(template||[]).filter(function(t){ return t&&t.pattern && /upi/i.test(t.label||''); })[0];
+      // `template` is a local of wfEventOpen and is NOT in scope here — referencing it threw, and
+      // because the whole save is wrapped in a try the form simply refused to submit with no
+      // message at all. The template is published on window for exactly this reason.
+      const upiField=((window._wfEvtTemplate)||[]).filter(function(t){ return t&&t.pattern && /upi/i.test(t.label||''); })[0];
       if(upiField){
         const re=new RegExp(upiField.pattern);
         const bad=(byLabel[upiField.label]||[]).filter(function(v){ const t=String(v||'').trim(); return t && !re.test(t); });
@@ -3445,9 +3479,14 @@
     /* UPI field: a typed box with a real dropdown of everything saved. Opening the list always
        shows every id — what is typed is not a filter, they are there to be picked. */
     .wf-evt-upi.wf-bad{border-color:#dc2626;background:#fef2f2}
-    /* Amount: one box, the figures added inside it with +. */
+    /* Amount: ONE field with a slot per transport inside it, + between them. */
     .wf-amt{flex:1;min-width:0}
-    .wf-amt-one{width:100%}
+    .wf-amt-box{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+      border:1px solid var(--line);border-radius:9px;background:var(--bg-card,#fff);padding:5px 8px;min-height:38px}
+    .wf-amt-box:focus-within{border-color:var(--brand)}
+    .wf-amt-seg{flex:1 1 64px;min-width:52px;border:0;background:transparent;color:var(--ink);
+      font:inherit;padding:4px 2px;outline:none;text-align:right}
+    .wf-amt-op{color:var(--slate);font-weight:700;flex:none;font-size:13px}
     .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
     .wf-amt-total{margin-top:5px;font-size:12.5px;font-weight:700;color:var(--ink)}
     .wf-rej-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
