@@ -3519,11 +3519,14 @@
     .wf-amt-line{display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid var(--line);cursor:text}
     .wf-amt-line:first-child{border-top:0}
     .wf-amt-line:focus-within{background:#f8faff}
-    .wf-amt-for{flex:1;min-width:0;font-size:12.5px;color:var(--ink);
+    /* The label sizes to its own word instead of stretching across the row — as flex:1 it took all
+       the spare width and the left half of every line read as a heavy empty block. Lighter weight
+       and colour too, so the figure is what the eye lands on. */
+    .wf-amt-for{flex:0 1 auto;max-width:52%;font-size:12px;font-weight:600;color:var(--slate);
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .wf-amt-cur{color:var(--slate);font-size:12px;flex:none}
-    .wf-amt-seg{flex:0 0 96px;width:96px;border:0;background:transparent;color:var(--ink);font:inherit;
-      padding:2px 0;outline:none;text-align:right;font-variant-numeric:tabular-nums}
+    .wf-amt-cur{color:var(--slate);font-size:12px;flex:none;margin-left:auto}
+    .wf-amt-seg{flex:0 1 92px;width:92px;min-width:56px;border:0;background:transparent;color:var(--ink);
+      font:inherit;font-weight:600;padding:2px 0;outline:none;text-align:right;font-variant-numeric:tabular-nums}
     .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
     .wf-amt-total{display:flex;align-items:baseline;gap:9px;margin-top:6px;padding:0 2px;font-size:12.5px}
     .wf-amt-total>span:first-child{color:var(--slate);font-size:10.5px;font-weight:700;
