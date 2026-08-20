@@ -3021,7 +3021,7 @@
   window.wfEvtRemove=function(btn){ const r=btn.closest('.wf-evt-row'); if(r)r.remove(); };
   window.wfEvtAddGroup=function(){
     const w=$('wfEvtDetails'); if(!w) return;
-    const tmpl=(window._wfEvtTemplate||[]);
+    const tmpl=(window._wfEvtEntryTemplate||window._wfEvtTemplate||[]);
     const rowsHtml=tmpl.map(function(t){ return wfEvtRowHtml(Object.assign({},t,{value:''}), '', true); }).join('');
     const idx=w.querySelectorAll('.wf-evt-group').length+1;
     const label=esc2(window._wfEvtGroupLabel||'Set')+' '+idx;
@@ -3082,6 +3082,14 @@
     // Grouping saved values by `d.group` (missing group = 0) also reads legacy single-group data
     // exactly as before, so this is one code path for both.
     const allowMultiple=!!flow.multiple_fields;
+    /* `src` is the list of fields this form draws. It was never declared - the two branches below
+       simply assigned to a bare name, which in a non-strict script writes a GLOBAL - and the
+       editing branch never assigned it at all, filling groupsSrc instead. So opening an instance
+       for editing read whatever the last "New" form had left lying in that global: nothing at all
+       on a fresh page (ReferenceError, and the Edit button appeared to do nothing), or the blank
+       template if a New form had been opened since, which showed every field empty. Declared
+       properly, and the editing branch now feeds it. */
+    let src=[];
     let groupsSrc;
     if(editing){
       const savedDetails=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
@@ -3094,6 +3102,9 @@
           return template.map(function(t){ return Object.assign({},t,{value:byLabel[(t&&t.label)||'']||''}); });
         });
       } else { groupsSrc=[savedDetails]; }
+      // The first group carries every label with its full stored value; the per-entry unpacking
+      // below splits those values back out into one section each.
+      src=(groupsSrc&&groupsSrc[0])||[];
     }
     else if(locked){ src=template.map(function(t){ return Object.assign({},t,{value:''}); }); }
     else { src=[]; }
@@ -3116,7 +3127,7 @@
         src=src.map(function(t){ return (t&&t.label&&valuesByLabel[t.label]) ? Object.assign({},t,{autocompleteValues:valuesByLabel[t.label]}) : t; });
       }catch(_e){}
     }
-    const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
+    let rowsHtml='';  // built after the common fields are separated out, below
     /* Multi-entry workflows (flow.multiple_fields) let the same fixed fields be filled several
        times in one go. Editing is allowed to do this too: a four-entry claim opened for editing
        used to collapse into ONE section, every field showing the whole packed value
@@ -3124,6 +3135,13 @@
        and saving flattened four of them into one. Each stored entry is unpacked back into its own
        section, so all of them show and any of them can be changed. */
     const allowMulti=!!(flow.multiple_fields && locked);
+    /* A field marked `common` in the template is one answer for the whole instance, not one per
+       entry - UPI Id being the case that prompted it. Repeating it in every entry invited three
+       different ids for a single payment, and stored the same value over and over. Only meaningful
+       when the entries actually repeat, so on a single-entry workflow it is left where it is. */
+    const commonFields=allowMulti?src.filter(function(t){ return t&&t.common; }):[];
+    if(commonFields.length) src=src.filter(function(t){ return !(t&&t.common); });
+    rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     let editGroupsHtml='';
     if(allowMulti && editing && src.length){
       const setsFor={}; let nSets=1;
@@ -3143,7 +3161,17 @@
           +'</div>'+rows+'</div>';
       }
     }
+    /* An instance filed before UPI Id became common stored it once per entry
+       ("x@ok | x@ok | x@ok"); the answer is the first non-empty one, not the packed string. */
+    const commonHtml=commonFields.length
+      ? '<div id="wfEvtCommon" class="wf-evt-common">'+commonFields.map(function(t){
+          const parts=wfSplitSets((t&&t.value)||'').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+          return wfEvtRowHtml(t, parts.length?parts[0]:'', locked);
+        }).join('')+'</div>'
+      : '';
     window._wfEvtTemplate=template;
+    // Adding another entry must not add another copy of a common field to it.
+    window._wfEvtEntryTemplate=allowMulti?template.filter(function(t){ return !(t&&t.common); }):template;
     window._wfEvtAllowMulti=allowMulti;
     window._wfEvtGroupLabel=flow.multi_entry_label||'Set';
     /* Steps set to "Triggering Event Owner" have nobody attached until now — whoever starts this
@@ -3197,7 +3225,8 @@
               +(editGroupsHtml
                  || '<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+esc2(window._wfEvtGroupLabel)+' 1</span></div>'+rowsHtml+'</div>')
             +'</div>'
-            +'<div class="wf-addstep-ghost" onclick="wfEvtAddGroup()"><i class="fa-solid fa-plus"></i> Add another set</div>'
+            +'<div class="wf-addstep-ghost" onclick="wfEvtAddGroup()"><i class="fa-solid fa-plus"></i> Add another '+esc2(String(window._wfEvtGroupLabel||'set').toLowerCase())+'</div>'
+            +commonHtml
           : '<div id="wfEvtDetails">'+rowsHtml+'</div>'
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
       +'</div>'
@@ -3230,6 +3259,11 @@
       const groups=[].slice.call(wrap.querySelectorAll('.wf-evt-group'));
       const rowSets=groups.length ? groups.map(function(g){ return [].slice.call(g.querySelectorAll('.wf-evt-row')); })
                                    : [[].slice.call(wrap.querySelectorAll('.wf-evt-row'))];
+      /* Fields marked `common` live outside the entry groups and are read once, so they are stored
+         as a single value rather than the same answer repeated per entry. Read LAST so the entry
+         fields keep their template order ahead of them. */
+      const commonBox=$('wfEvtCommon');
+      if(commonBox) rowSets.push([].slice.call(commonBox.querySelectorAll('.wf-evt-row')));
       const byLabel={}; const order=[];
       rowSets.forEach(function(rows){
         rows.forEach(function(r){
@@ -3825,6 +3859,7 @@
     .wf-circle.wf-none{background:#eef2f6;color:#94a3b8;border-style:dashed}
     /* meta card */
     .wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
+    .wf-evt-common{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
     .wf-trig-box{background:linear-gradient(0deg,var(--brand-a10,#eef2ff),var(--brand-a10,#eef2ff));border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;padding:10px 13px;font-size:13px;color:var(--ink)}
     .wf-trig-box i{color:var(--brand)}
     .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
