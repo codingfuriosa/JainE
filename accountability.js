@@ -2240,11 +2240,28 @@
     // Forms show wherever any exist; an Administration user always sees the tab so they can add
     // the first one.
     const showForms=isBill && (forms.length>0 || canManage);
+    /* Who may do what, per instance:
+         EDIT   — the Administrator on any instance, or whoever started this one. Deliberately not
+                  step members: changing the details changes what everyone downstream is acting on.
+         DELETE — the Administrator, or anybody this instance runs through (holding or offered any
+                  of its steps), since they are the ones who spot a duplicate or mistaken one.
+       Both are re-checked in the database, so the buttons only mirror what will actually be
+       allowed rather than being the thing that decides it. */
+    const canEditCase=function(c){ return canManage || eq(c&&c.created_by, mySelf); };
+    const canDeleteCase=function(c){
+      if(canManage) return true;
+      return fcs.some(function(x){
+        if(x.case_id!==(c&&c.id)) return false;
+        if(eq(x.person||'', mySelf)) return true;
+        return Array.isArray(x.candidates) && x.candidates.some(function(e){ return eq(e, mySelf); });
+      });
+    };
+    const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head=(canManage?'<th class="wf-chk-col"></th>':'')
+      const head=(anyActionable?'<th class="wf-chk-col"></th>':'')
         // On the bill workflow the number IS the Wheredoc Id it was filed under; ordinary
         // workflows just count their instances.
         +'<th>No.</th>'+(isBill?'<th>Wheredoc Id</th>':'')
@@ -2266,12 +2283,12 @@
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
-          +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
+          +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
-        +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
+        +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
           +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No. or Wheredoc Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
@@ -2379,13 +2396,28 @@
     const oneSel = checks.length===1;
     const editBlocked = oneSel && checks[0].getAttribute('data-inst-over')==='1';
     const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
-    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? ('Can’t edit — this '+N.lc+' is already over (completed)') : ('Edit selected '+N.lc); }
-    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)') : 'Delete selected'; }
+    // rights carried on the row itself — editing is the Administrator's or the starter's, deleting
+    // is also open to anyone the instance runs through
+    const mayEdit = oneSel && checks[0].getAttribute('data-can-edit')==='1';
+    const mayDel  = checks.length>0 && checks.every(function(c){ return c.getAttribute('data-can-del')==='1'; });
+    if(eb){
+      eb.disabled = !oneSel || editBlocked || !mayEdit;
+      eb.title = !oneSel ? ('Select one '+N.lc+' to edit')
+        : (editBlocked ? ('Can’t edit — this '+N.lc+' is already over (completed)')
+        : (!mayEdit ? ('Only the Administrator, or whoever started this '+N.lc+', can edit it')
+        : ('Edit selected '+N.lc)));
+    }
+    if(db){
+      db.disabled = checks.length<1 || delBlocked || !mayDel;
+      db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)')
+        : (!mayDel ? ('You can only delete a '+N.lc+' you are part of') : 'Delete selected');
+    }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
     if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this '+wfN().lc+' is already over','err'); return; }
+    if(checks[0].getAttribute('data-can-edit')!=='1'){ toast('Only the Administrator, or whoever started this '+wfN().lc+', can edit it','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
   window.wfInstDelSel=function(){
@@ -2505,24 +2537,55 @@
     for(let i=0;i<boxes.length;i++){ const v=(boxes[i].value||'').trim(); if(v) return v; }
     return '';
   }
-  window.wfUpiSync=function(src){
+  /* One UPI id across a claim, until an entry is given its own.
+     Typing an id fills every entry that is still EMPTY — nobody is paid into five accounts for one
+     claim, so it should only be typed once. An entry that already holds an id is left alone, which
+     is what makes the exception work: put a different id on entry three and the rest keep theirs,
+     because theirs are already set. Adding an entry later fills it the same way. */
+  window.wfUpiTyped=function(src){ wfUpiSpread(src); };
+  function wfUpiSpread(src){
     const v=(src&&src.value||'').trim();
+    if(!v) return;                                        // clearing one does not blank the others
     [].slice.call(document.querySelectorAll('.wf-evt-upi')).forEach(function(inp){
-      if(inp!==src) inp.value=v;
+      if(inp===src) return;
+      if((inp.value||'').trim()) return;                  // already has one — leave it be
+      inp.value=v;
     });
+  }
+  window.wfUpiSync=function(src){ wfUpiTyped(src); };    // kept: older markup calls this
+  window.wfUpiToggle=function(btn){
+    const wrap=btn&&btn.closest('.wf-upi-wrap'); if(!wrap) return;
+    const open=wrap.classList.contains('open');
+    document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){ w.classList.remove('open'); });
+    if(!open){ wrap.classList.add('open'); wfUpiFillPanel(wrap); }
   };
+  window.wfUpiPick=function(el){
+    const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
+    const inp=wrap.querySelector('.wf-evt-upi');
+    if(inp){ inp.value=el.getAttribute('data-v')||''; wfUpiTyped(inp); }
+    wrap.classList.remove('open');
+  };
+  function wfUpiFillPanel(wrap){
+    const panel=wrap.querySelector('.wf-upi-panel'); if(!panel) return;
+    const list=WF_UPI_CACHE||[];
+    const cur=(wrap.querySelector('.wf-evt-upi')||{}).value||'';
+    // every saved id, always — what is typed is not a filter
+    panel.innerHTML=list.length
+      ? list.map(function(u){
+          const on=String(u).toLowerCase()===String(cur).trim().toLowerCase();
+          return '<div class="wf-upi-opt'+(on?' on':'')+'" data-v="'+esc2(u)+'" onclick="wfUpiPick(this)">'
+            +'<i class="fa-solid fa-indian-rupee-sign wf-upi-ic"></i><span>'+esc2(u)+'</span>'
+            +(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
+        }).join('')
+      : '<div class="wf-upi-empty">No saved UPI ids yet — type one and it is kept for next time</div>';
+  }
   async function wfUpiHydrate(){
     const boxes=[].slice.call(document.querySelectorAll('.wf-evt-upi'));
     if(!boxes.length) return;
-    const list=await wfUpiList();
-    // whatever is already typed in this form wins over the remembered default — a new entry must
-    // not arrive holding an old id when the person has just typed a different one
-    const current=wfUpiCurrent() || (list.length?list[0]:'');
-    boxes.forEach(function(inp){
-      const dl=document.getElementById(inp.getAttribute('list'));
-      if(dl) dl.innerHTML=list.map(function(u){ return '<option value="'+esc2(u)+'"></option>'; }).join('');
-      if(!inp.value && current) inp.value=current;
-    });
+    await wfUpiList();
+    // whatever is already typed in this form wins over the remembered default
+    const current=wfUpiCurrent() || ((WF_UPI_CACHE&&WF_UPI_CACHE.length)?WF_UPI_CACHE[0]:'');
+    boxes.forEach(function(inp){ if(!inp.value && current) inp.value=current; });
   }
   async function wfUpiRemember(vals){
     const seen={};
@@ -2561,6 +2624,10 @@
       +'<div class="wf-evt-selpanel">'+listHtml+'</div>'
     +'</div>';
   }
+  document.addEventListener('click',function(e){
+    if(e.target.closest && e.target.closest('.wf-upi-wrap')) return;
+    document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){ w.classList.remove('open'); });
+  });
   window.wfEvtSelToggle=function(btn){
     const box=btn.closest('.wf-evt-selbox'); if(!box) return;
     const open=box.classList.contains('open');
@@ -2620,14 +2687,19 @@
       // pattern as the builder's own field-type picker, so it actually matches the app's design.
       valueHtml=wfEvtSelectHtml(f,value);
     } else if(f.upiMemory){
-      /* The UPI id somebody was paid to last time, offered back to them. Every id they have ever
-         used stays on the list with the most-used first, and anything they type joins the list for
-         next time — so it keeps learning instead of being a fixed list someone has to maintain.
-         A datalist, not a dropdown, precisely because it must stay freely editable. */
-      const dl='wfupi'+(++WF_PID);
-      valueHtml='<input class="ac-in wf-evt-value wf-evt-upi" list="'+dl+'" value="'+esc2(value||'')+'" '
-        +'placeholder="name@bank" autocomplete="off" oninput="wfUpiSync(this)" onchange="wfUpiSync(this)">'
-        +'<datalist id="'+dl+'"></datalist>';
+      /* A typed box with a real dropdown beside it. A datalist was wrong: it treats what you have
+         typed as a filter and hides everything that does not match, so once you had typed anything
+         the saved ids disappeared — and they are there to be PICKED, not matched against. Opening
+         the list always shows every id, whatever is in the box.
+         Still freely typed: whatever is entered is used and joins the list for next time. */
+      const pid='wfupi'+(++WF_PID);
+      valueHtml='<div class="wf-upi-wrap" id="'+pid+'">'
+        +'<input class="ac-in wf-evt-value wf-evt-upi" value="'+esc2(value||'')+'" placeholder="name@bank" '
+          +'autocomplete="off" oninput="wfUpiTyped(this)" onchange="wfUpiTyped(this)">'
+        +'<button type="button" class="wf-upi-caret" title="Saved UPI ids" onclick="wfUpiToggle(this)">'
+          +'<i class="fa-solid fa-chevron-down"></i></button>'
+        +'<div class="wf-upi-panel"></div>'
+      +'</div>';
     } else if(type==='people'){
       /* A People field is answered by picking from the staff list rather than typing a name, so
          what is stored is a real person - the value is the picker's own hidden input. */
@@ -3267,6 +3339,26 @@
     .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
     .wf-tlcard .tp-f-wide{flex:1 1 100%;width:100%;min-width:0}
     /* ---- day-wise instance: table on a wide screen, stacked blocks on a phone ---- */
+    /* UPI field: a typed box with a real dropdown of everything saved. Opening the list always
+       shows every id — what is typed is not a filter, they are there to be picked. */
+    .wf-upi-wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center}
+    .wf-upi-wrap .wf-evt-upi{width:100%;padding-right:32px}
+    .wf-upi-caret{position:absolute;right:4px;top:50%;transform:translateY(-50%);height:26px;width:26px;
+      display:flex;align-items:center;justify-content:center;border:0;background:transparent;
+      color:var(--slate);cursor:pointer;border-radius:6px;font-size:11px}
+    .wf-upi-caret:hover{background:var(--bg,#f1f5f9);color:var(--ink)}
+    .wf-upi-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;
+      background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:9px;
+      box-shadow:0 12px 28px rgba(15,23,42,.14);max-height:210px;overflow-y:auto;padding:4px}
+    .wf-upi-wrap.open .wf-upi-panel{display:block}
+    .wf-upi-opt{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;
+      font-size:13px;color:var(--ink);cursor:pointer}
+    .wf-upi-opt:hover{background:var(--bg,#f1f5f9)}
+    .wf-upi-opt.on{color:var(--brand);font-weight:650}
+    .wf-upi-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-upi-ic{font-size:10px;color:var(--slate);width:13px;text-align:center;flex:none}
+    .wf-upi-opt.on .wf-upi-ic{color:var(--brand)}
+    .wf-upi-empty{padding:9px 10px;font-size:12px;color:var(--slate);line-height:1.5}
     .wf-evt-selopt{display:flex;align-items:center;gap:9px}
     .wf-evt-selic{width:15px;text-align:center;font-size:11.5px;color:var(--slate);flex:none}
     .wf-evt-selopt.on .wf-evt-selic{color:var(--brand)}
