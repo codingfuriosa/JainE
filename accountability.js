@@ -2797,10 +2797,32 @@
       }catch(_e){}
     }
     const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
-    // Multi-entry workflows (flow.multiple_fields) let someone fill the same fixed detail fields
-    // several times in one go (e.g. several conveyance/food lines) — only meaningful when the
-    // template is locked and this is a fresh instance, not an edit of an existing one.
-    const allowMulti=!!(flow.multiple_fields && locked && !editing);
+    /* Multi-entry workflows (flow.multiple_fields) let the same fixed fields be filled several
+       times in one go. Editing is allowed to do this too: a four-entry claim opened for editing
+       used to collapse into ONE section, every field showing the whole packed value
+       ("Auto | Bus | Train | Cab") in a single box — so the entries could not be edited at all,
+       and saving flattened four of them into one. Each stored entry is unpacked back into its own
+       section, so all of them show and any of them can be changed. */
+    const allowMulti=!!(flow.multiple_fields && locked);
+    let editGroupsHtml='';
+    if(allowMulti && editing && src.length){
+      const setsFor={}; let nSets=1;
+      src.forEach(function(t){
+        const parts=wfSplitSets((t&&t.value)||'');
+        setsFor[t.label]=parts;
+        if(parts.length>nSets) nSets=parts.length;
+      });
+      for(let gi=0; gi<nSets; gi++){
+        const rows=src.map(function(t){
+          const arr=setsFor[t.label]||[];
+          return wfEvtRowHtml(t, (arr[gi]!=null?arr[gi]:''), locked);
+        }).join('');
+        editGroupsHtml+='<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'
+          +esc2(flow.multi_entry_label||'Set')+' '+(gi+1)+'</span>'
+          +(nSets>1?'<button type="button" class="ac-btn ic danger" title="Remove this set" onclick="wfEvtRemoveGroup(this)"><i class="fa-solid fa-xmark"></i></button>':'')
+          +'</div>'+rows+'</div>';
+      }
+    }
     window._wfEvtTemplate=template;
     window._wfEvtAllowMulti=allowMulti;
     window._wfEvtGroupLabel=flow.multi_entry_label||'Set';
@@ -2853,7 +2875,10 @@
         +membersHtml
         +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +(allowMulti
-          ? '<div id="wfEvtDetails"><div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+esc2(window._wfEvtGroupLabel)+' 1</span></div>'+rowsHtml+'</div></div>'
+          ? '<div id="wfEvtDetails">'
+              +(editGroupsHtml
+                 || '<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+esc2(window._wfEvtGroupLabel)+' 1</span></div>'+rowsHtml+'</div>')
+            +'</div>'
             +'<div class="wf-addstep-ghost" onclick="wfEvtAddGroup()"><i class="fa-solid fa-plus"></i> Add another set</div>'
           : '<div id="wfEvtDetails">'+rowsHtml+'</div>'
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
