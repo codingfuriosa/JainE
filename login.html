@@ -160,9 +160,26 @@ $('forgot').addEventListener('click',async function(){
   if(!email){msg('Enter your email first, then click Forgot password.','err');return;}
   hideMsg();
   const btn=$('forgot');btn.disabled=true;
-  let onboarded=false;
-  try{ const {data}=await sb.schema('acc').rpc('check_onboarded',{p_email:email}); onboarded=!!data; }catch(e){}
-  if(!onboarded){ btn.disabled=false; msg('There\u2019s no JAIN-E account for '+email+' yet. Use "Create an account" below instead.','err'); return; }
+  /* This used to ask "is there a completed profile?" and, if not, claim there was no account at
+     all \u2014 so anyone who had signed up but not finished onboarding was told to create an account
+     they already had, and could not, because the address was taken. And it could not spot the one
+     case that really matters: an account created through Google has no password, so a reset email
+     is useless to them. Ask what is actually true and say the right thing. */
+  let st={exists:false,has_password:false,providers:[]};
+  try{ const {data}=await sb.schema('acc').rpc('account_status',{p_email:email}); if(data) st=data; }catch(e){}
+  if(!st.exists){
+    btn.disabled=false;
+    msg('There\u2019s no JAIN-E account for '+email+' yet. Use "Create an account" below instead.','err');
+    return;
+  }
+  if(!st.has_password){
+    btn.disabled=false;
+    const viaGoogle=(st.providers||[]).indexOf('google')!==-1;
+    msg(viaGoogle
+      ? 'This account signs in with Google, so it has no password to reset. Use the "Continue with Google" button above.'
+      : 'This account has no password set. Ask your administrator to set one for you.','err');
+    return;
+  }
   let resp,j;
   try{
     resp=await fetch(SUPABASE_URL+'/functions/v1/password-reset-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
