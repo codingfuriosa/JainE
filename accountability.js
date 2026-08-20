@@ -2486,6 +2486,51 @@
     if(checks[0].getAttribute('data-can-edit')!=='1'){ toast('Only the Administrator, or whoever started this '+wfN().lc+', can edit it','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
+  /* Deleting an instance removed its records but left its uploaded files behind in S3 with
+     nothing pointing at them any more - invisible in the app, still stored, still paid for.
+     These two collect the paths BEFORE the records go (afterwards there is nothing left to read
+     them from) and remove the files only AFTER the delete is confirmed, so a delete that fails
+     never costs a file the instance still needs. Same order the Tasks delete already uses. */
+  async function wfCaseFilePaths(ids){
+    const paths=[];
+    if(!ids||!ids.length) return paths;
+    try{
+      // the pinned trigger-event Attachment fields, stored inline on the instance as 's3:...'
+      const {data:cs}=await ACC().from('flow_cases').select('trigger_details').in('id',ids);
+      (cs||[]).forEach(function(c){
+        (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){
+          // a Multiple-entry instance keeps one entry per separator segment, and each entry can
+          // carry its own file, so every segment has to be looked at - not just the whole value
+          wfSplitSets(String((d&&d.value)||'')).forEach(function(x){
+            if(x.indexOf('s3:')===0) paths.push(x);
+          });
+        });
+      });
+    }catch(e){}
+    try{
+      // anything attached to an Update / Feedback post on those instances
+      const {data:ups}=await ACC().from('flow_updates').select('id').in('case_id',ids);
+      const uids=(ups||[]).map(function(u){ return u.id; });
+      if(uids.length){
+        const {data:ats}=await ACC().from('flow_update_attachments').select('storage_path').in('update_id',uids);
+        (ats||[]).forEach(function(a){ if(a&&a.storage_path) paths.push(a.storage_path); });
+      }
+    }catch(e){}
+    return paths.filter(function(x,i){ return x && paths.indexOf(x)===i; });
+  }
+  /* Each file goes only once acc.wf_file_referenced() confirms nothing anywhere still points at
+     it - the same file can be shared, e.g. an instance attachment that was also posted as an
+     Update. Failures are swallowed on purpose: the records are already gone, and a file left
+     behind is not worth showing the user an error they can do nothing about. */
+  async function wfPurgeCaseFiles(paths){
+    for(const path of (paths||[])){
+      try{
+        const {data:used}=await ACC().rpc('wf_file_referenced',{p_path:path});
+        if(!used) await s3Delete(path);
+      }catch(e){}
+    }
+  }
+
   window.wfInstDelSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(!checks.length) return;
@@ -2494,7 +2539,9 @@
     const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
     const word=(ids.length===1?N.lc:N.lcMany);
     wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      const doomed=await wfCaseFilePaths(ids);
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+      await wfPurgeCaseFiles(doomed);
       toast('Deleted','ok'); renderPage();
     }});
   };
@@ -3501,12 +3548,20 @@
       return;
     }
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    /* A rejection that ends the instance deletes it outright, so its files need collecting
+       here too - once wf_reject() has run there is no instance left to read them from. */
+    let doomed=[];
+    if(ends){ try{
+      const {data:cs}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      if(cs&&cs.case_id) doomed=await wfCaseFilePaths([cs.case_id]);
+    }catch(e){} }
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
       if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-ban"></i> Reject'; }
       toast('Could not reject: '+((e&&e.message)||e),'err'); return;
     }
     closeModal();
+    await wfPurgeCaseFiles(doomed);
     toast(ends?'Rejected — deleted, and an email has gone out':'Step rejected — sent back to the previous person','ok');
     navTo('tasks/work');
   };
