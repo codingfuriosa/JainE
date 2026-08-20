@@ -1013,7 +1013,38 @@
     if(s.indexOf('|')!==-1) return s.split('|').map(function(x){return x.trim();});
     return s.split(',').map(function(x){return x.trim();});
   }
-  function wfJoinSets(arr){ return (arr||[]).join(WF_SET_SEP); }
+  /* How many entries an instance has is a property of the WHOLE instance, not of one field.
+     Deciding per field went wrong the moment a field legitimately held commas: one entry claiming
+     "20, 40, 60, 80" was read as four entries and the table grew four rows out of one journey.
+     Two rules, in order:
+       - if any field uses the entry separator, every field is split on that alone. A field without
+         one is a single entry. This is what everything saved now looks like.
+       - otherwise the count comes from the DATE, which holds exactly one value per entry and never
+         a list of its own. Fields are split on commas only if they yield that same count; anything
+         else is one entry's own list, commas and all. */
+  function wfSetSplitter(details){
+    const det=details||[];
+    const anyPipe=det.some(function(d){ return String((d&&d.value)||'').indexOf('|')!==-1; });
+    if(anyPipe){
+      return function(v){
+        const s=String(v==null?'':v);
+        return s.indexOf('|')!==-1 ? s.split('|').map(function(x){return x.trim();}) : [s.trim()];
+      };
+    }
+    let n=1;
+    det.forEach(function(d){
+      if(d && /^date$/i.test(String(d.label||''))){
+        const parts=String(d.value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+        if(parts.length) n=parts.length;
+      }
+    });
+    return function(v){
+      const s=String(v==null?'':v);
+      if(n<=1) return [s.trim()];                       // one entry — its commas are its own
+      const parts=s.split(',').map(function(x){return x.trim();});
+      return parts.length===n ? parts : [s.trim()];
+    };
+  }
   function wfSumField(v){ return wfSplitSets(v).map(function(x){
       // a day's own value may itself be a list; every number in it counts toward the total
       return String(x).split(',').map(function(y){return parseFloat(y.trim());})
@@ -1234,10 +1265,11 @@
   function wfDayRows(details){
     const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
     const cols=WF_DAY_COLS.filter(function(c){ return by[c]!=null && String(by[c]).trim(); });
+    const split=wfSetSplitter(details);
     const per={}; let n=0;
     cols.concat(['Attachment']).forEach(function(c){
       if(by[c]==null||!String(by[c]).trim()) return;
-      per[c]=wfSplitSets(by[c]); if(per[c].length>n) n=per[c].length;
+      per[c]=split(by[c]); if(per[c].length>n) n=per[c].length;
     });
     const rows=[];
     for(let i=0;i<n;i++){
@@ -1262,10 +1294,22 @@
   function wfDaywiseHtml(details,flow){
     const d=wfDayRows(details);
     if(!d.rows.length) return '';
-    const money=function(x){ const n=parseFloat(String(x).replace(/[^0-9.]/g,'')); return isNaN(n)?esc2(x):wfMoney(n); };
+    /* An entry can claim several fares at once — "20, 40, 60, 80". Stripping the punctuation out of
+       that and formatting the result turned four amounts into the single number ₹2,04,06,080. Each
+       figure is formatted on its own and they stay comma-separated. */
+    const money=function(x){
+      const parts=String(x==null?'':x).split(',').map(function(p){return p.trim();}).filter(Boolean);
+      if(!parts.length) return esc2(x);
+      const out=parts.map(function(p){ const n=parseFloat(p.replace(/[^0-9.]/g,'')); return isNaN(n)?esc2(p):wfMoney(n); });
+      return out.join(', ');
+    };
+    const cellSum=function(x){
+      return String(x==null?'':x).split(',').map(function(p){ return parseFloat(String(p).replace(/[^0-9.]/g,'')); })
+        .filter(function(n){ return !isNaN(n); }).reduce(function(a,b){ return a+b; },0);
+    };
     const sumField=(flow&&flow.tracker_sum_field||'Amount');
     const total=d.cols.indexOf(sumField)!==-1
-      ? d.rows.reduce(function(a,r){ const n=parseFloat(String(r[sumField]).replace(/[^0-9.]/g,'')); return a+(isNaN(n)?0:n); },0) : 0;
+      ? d.rows.reduce(function(a,r){ return a+cellSum(r[sumField]); },0) : 0;
     const head=d.common.length
       ? '<div class="wf-dw-common">'+d.common.map(function(c){
           return '<span><b>'+esc2(c.k)+'</b> '+esc2(c.v)+'</span>'; }).join('')+'</div>'
