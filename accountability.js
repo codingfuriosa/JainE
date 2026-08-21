@@ -1018,30 +1018,6 @@
      comma-separated ("Auto, Bus"), and wfSplitSets treats commas as entry separators when there is
      no pipe - so a comma here would read two files on one entry as two entries. */
   const WF_ATT_SEP=' ; ';
-  /* A per-option field's value, labelled so it survives prose. Only the lines actually filled in
-     are stored, so a transport-only expense reads "Auto: Home to DWC" and nothing more. */
-  function wfPartsJoin(pairs){
-    return (pairs||[]).filter(function(p){ return String(p.v||'').trim(); })
-      .map(function(p){ return p.k?(p.k+': '+String(p.v).trim()):String(p.v).trim(); }).join(' ; ');
-  }
-  /* Back into a line per key. Chunks are matched on the labels the dropdown says to expect; a chunk
-     that matches none of them (an older value, or one where the choice has since changed) goes into
-     the first line still empty, so text is never silently dropped. */
-  function wfPartsSplit(value, keys){
-    const out=(keys||[]).map(function(){ return ''; });
-    const chunks=String(value==null?'':value).split(' ; ').map(function(x){ return x.trim(); }).filter(Boolean);
-    const spare=[];
-    chunks.forEach(function(chunk){
-      let hit=-1;
-      (keys||[]).forEach(function(k,i){
-        if(hit===-1 && k && chunk.toLowerCase().indexOf(String(k).toLowerCase()+':')===0) hit=i;
-      });
-      if(hit>=0 && !out[hit]) out[hit]=chunk.slice(String(keys[hit]).length+1).trim();
-      else spare.push(chunk);
-    });
-    spare.forEach(function(v){ const at=out.findIndex(function(x){ return !x; }); if(at>=0) out[at]=v; });
-    return out;
-  }
   function wfAttList(v){
     return String(v==null?'':v).split(';').map(function(x){ return x.trim(); }).filter(Boolean);
   }
@@ -2897,35 +2873,6 @@
      Squeezing several labelled boxes inside one bordered field was cramped and hard to read — this
      is the shape the information actually has. Nothing chosen yet means a single plain box, exactly
      as any other amount field. */
-  /* The text equivalent of wfAmtSlots: a labelled line per chosen option. The first line can be
-     marked required (data-req) so the save can name exactly which one is missing. */
-  function wfPartsSlots(pairs, reqFirst, placeholder){
-    const list=(pairs&&pairs.length)?pairs:[{k:'',v:''}];
-    const labelled=list.some(function(p){ return !!p.k; });
-    if(!labelled){
-      return '<div class="wf-parts-plain"><textarea class="wf-parts-seg" data-k="" rows="2" placeholder="'
-        +esc2(placeholder||'')+'" oninput="wfPartsTyped(this)">'+esc2((list[0]&&list[0].v)||'')+'</textarea></div>';
-    }
-    return '<div class="wf-parts-list">'+list.map(function(p,i){
-      const req=(reqFirst&&i===0);
-      return '<label class="wf-parts-line">'
-        +'<span class="wf-parts-for">'+esc2(p.k)+(req?'':' <span class="wf-parts-opt">(optional)</span>')+'</span>'
-        +'<textarea class="wf-parts-seg" data-k="'+esc2(p.k)+'"'+(req?' data-req="1"':'')+' rows="2" '
-          +'placeholder="'+esc2(req?'What this was for':'Optional')+'" oninput="wfPartsTyped(this)">'+esc2(p.v||'')+'</textarea>'
-      +'</label>';
-    }).join('')+'</div>';
-  }
-  window.wfPartsTyped=function(el){
-    const wrap=el&&el.closest('.wf-parts'); if(!wrap) return;
-    wfPartsCollect(wrap);
-  };
-  function wfPartsCollect(wrap){
-    if(!wrap) return;
-    const segs=[].slice.call(wrap.querySelectorAll('.wf-parts-seg'));
-    const pairs=segs.map(function(i){ return {k:i.getAttribute('data-k')||'', v:(i.value||'').trim()}; });
-    const hid=wrap.querySelector('.wf-evt-value');
-    if(hid) hid.value=wfPartsJoin(pairs);
-  }
   function wfAmtSlots(pairs){
     const list=(pairs&&pairs.length)?pairs:[{k:'',v:''}];
     const labelled=list.some(function(p){ return !!p.k; });
@@ -3012,25 +2959,6 @@
     const box=amt.querySelector('.wf-amt-box'); if(!box) return;
     box.innerHTML=wfAmtSlots(pairs);
     wfAmtCollect(amt);
-    /* Any per-option TEXT field in the same expense follows the same keys - Description of Expense.
-       Its lines are rebuilt from the stored labelled value, so changing the meal keeps the meal's
-       text against the new label rather than losing it. */
-    [].slice.call(scope.querySelectorAll('.wf-parts')).forEach(function(pw){
-      const hid=pw.querySelector('.wf-evt-value');
-      const segs=[].slice.call(pw.querySelectorAll('.wf-parts-seg'));
-      // what is on screen wins over what was stored - it may have been typed since
-      const typed={}; const orderedTyped=[];
-      segs.forEach(function(i){ const k=i.getAttribute('data-k')||''; const v=(i.value||'').trim();
-        orderedTyped.push(v); if(k) typed[k]=v; });
-      const stored=wfPartsSplit((hid&&hid.value)||'', keys);
-      const reqFirst=pw.getAttribute('data-req-first')==='1';
-      const ph=(pw.getAttribute('data-ph')||'');
-      const next=keys.length
-        ? keys.map(function(k,i){ return {k:k, v:(typed[k]!=null?typed[k]:(orderedTyped[i]||stored[i]||''))}; })
-        : [{k:'', v:(orderedTyped[0]||stored[0]||'')}];
-      const pbox=pw.querySelector('.wf-parts-box');
-      if(pbox){ pbox.innerHTML=wfPartsSlots(next, reqFirst, ph); wfPartsCollect(pw); }
-    });
     wfAmtGate(scope);
   };
   /* Amount stays shut until the description is filled in: a figure with nothing saying what it was
@@ -3048,12 +2976,7 @@
     const need=amtRow.getAttribute('data-requires')||'';
     if(!need) return;
     const src=find(need);
-    /* When the field it depends on has a required line of its own (the transport's description),
-       that line is what counts - a meal description alone should not unlock the amounts. */
-    const reqSeg=src&&src.querySelector('[data-req="1"]');
-    const filled=reqSeg
-      ? !!String(reqSeg.value||'').trim()
-      : !!String(((src&&src.querySelector('.wf-evt-value'))||{}).value||'').trim();
+    const filled=!!String(((src&&src.querySelector('.wf-evt-value'))||{}).value||'').trim();
     /* Greyed out and not typeable is enough on its own - the field above it is plainly empty, so a
        line spelling that out was just another thing to read. The reason still reaches anyone who
        needs it: the field's own title, for a hover or a screen reader. */
@@ -3084,6 +3007,10 @@
     a=String(a||'').trim(); b=String(b||'').trim();
     return b?(a+' / '+b):a;
   }
+  /* Exclusive fields hold ONE answer drawn from either section - a fare or a meal, not both. Two
+     fares and a meal on the same day are three expenses under that date, which is what "Add
+     expense" is for, and it keeps one description and one amount per expense meaningful. */
+  function wfDuoIsExclusive(f){ return !!(f&&f.exclusive); }
   function wfDuoBtnLabel(v){
     const parts=wfDuoParts(v);
     if(!parts.a && !parts.b) return '<span class="wf-evt-selph">Select</span>';
@@ -3091,13 +3018,17 @@
   }
   function wfDuoHtml(f,value){
     const secs=Array.isArray(f.sections)?f.sections:[];
+    const excl=wfDuoIsExclusive(f);
     const cur=wfDuoParts(value);
-    const picked=[cur.a,cur.b];
+    // one answer either way when exclusive, so the ticked option is whichever section holds it
+    const picked=excl?[cur.a||cur.b,cur.a||cur.b]:[cur.a,cur.b];
     let listHtml='';
     secs.forEach(function(sec,si){
-      listHtml+='<div class="ms-dept">'+esc2(sec.name||'')+(sec.required?'':' <span class="wf-duo-opt">(optional)</span>')+'</div>';
-      // Clearing is only offered where the section is genuinely optional - Transport must be answered
-      if(!sec.required){
+      // The section headings are grouping, not separate questions, once the field is exclusive -
+      // so neither of them is labelled optional; the field as a whole has to be answered.
+      listHtml+='<div class="ms-dept">'+esc2(sec.name||'')
+        +((!excl&&!sec.required)?' <span class="wf-duo-opt">(optional)</span>':'')+'</div>';
+      if(!excl && !sec.required){
         listHtml+='<div class="wf-evt-selopt'+(picked[si]?'':' on')+'" data-sec="'+si+'" data-v="" onclick="wfDuoPick(this)">'
           +'<span class="wf-evt-seltxt">None</span>'+(picked[si]?'':'<i class="fa-solid fa-check"></i>')+'</div>';
       }
@@ -3108,7 +3039,7 @@
           +'<span class="wf-evt-seltxt">'+esc2(lbl)+'</span>'+(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
       });
     });
-    return '<div class="wf-evt-selbox wf-duo" data-optional="'+(f.optional?'1':'0')+'">'
+    return '<div class="wf-evt-selbox wf-duo" data-exclusive="'+(excl?'1':'0')+'" data-optional="'+(f.optional?'1':'0')+'">'
       +'<input type="hidden" class="wf-evt-value" value="'+esc2(value||'')+'">'
       +'<button type="button" class="ac-in wf-evt-selbtn" onclick="wfEvtSelToggle(this)">'+wfDuoBtnLabel(value)
         +'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i></button>'
@@ -3119,13 +3050,18 @@
      sections. The panel stays open so both can be answered in one go. */
   window.wfDuoPick=function(el){
     const box=el.closest('.wf-duo'); if(!box) return;
+    const excl=box.getAttribute('data-exclusive')==='1';
     const si=String(el.getAttribute('data-sec')||'0');
     const val=el.getAttribute('data-v')||'';
     const hid=box.querySelector('.wf-evt-value');
     const cur=wfDuoParts(hid?hid.value:'');
-    const next=(si==='0')?wfDuoJoin(val,cur.b):wfDuoJoin(cur.a,val);
+    // exclusive: the pick REPLACES whatever was there, whichever section it came from
+    const next=excl ? String(val||'').trim()
+                    : ((si==='0')?wfDuoJoin(val,cur.b):wfDuoJoin(cur.a,val));
     if(hid) hid.value=next;
-    [].slice.call(box.querySelectorAll('.wf-evt-selopt[data-sec="'+si+'"]')).forEach(function(o){
+    // and the tick has to be cleared across every section, not just the one just clicked
+    const scopeSel=excl?'.wf-evt-selopt':'.wf-evt-selopt[data-sec="'+si+'"]';
+    [].slice.call(box.querySelectorAll(scopeSel)).forEach(function(o){
       const on=(o.getAttribute('data-v')||'')===val;
       o.classList.toggle('on',on);
       const tick=o.querySelector('.fa-check'); if(tick) tick.remove();
@@ -3134,7 +3070,8 @@
     const btn=box.querySelector('.wf-evt-selbtn');
     if(btn) btn.innerHTML=wfDuoBtnLabel(next)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
     // the panel stays open for the second section, so keep it against the field
-    if(btn) wfPinPanel(btn, box.querySelector('.wf-evt-selpanel'));
+    if(excl){ box.classList.remove('open'); wfUnpinPanel(box.querySelector('.wf-evt-selpanel')); }
+    else if(btn) wfPinPanel(btn, box.querySelector('.wf-evt-selpanel'));
     wfShowWhenSync(box.closest('.wf-evt-exp')||box.closest('.wf-evt-group')||document);
     // the Amount boxes are named after what was just chosen, so they are rebuilt with it
     wfAmtMatch(box);
@@ -3386,14 +3323,6 @@
       } else if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
         valueHtml='<input class="ac-in wf-evt-value" type="text" inputmode="decimal" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" oninput="wfNumOnly(this)">';
-      } else if(type==='text'&&f.parts){
-        /* One box per thing chosen, matching Amount's shape - the transport's line is required, a
-           meal's is not, because the meal is itself optional. Rebuilt by wfAmtMatch whenever the
-           dropdown changes, which is also where the labels come from. */
-        valueHtml='<div class="wf-parts" data-req-first="'+(f.partsRequiredFirst?'1':'0')+'" data-ph="'+esc2(placeholder)+'">'
-          +'<div class="wf-parts-box">'+wfPartsSlots([{k:'',v:value||''}], !!f.partsRequiredFirst, placeholder)+'</div>'
-          +'<input type="hidden" class="wf-evt-value" value="'+esc2(value||'')+'">'
-        +'</div>';
       } else if(type==='text'&&f.multiline){
         // A field like Remarks can opt into a real textarea so Shift+Enter genuinely inserts a
         // line break instead of doing nothing (a single-line input can't wrap at all).
@@ -3927,13 +3856,6 @@
           // apply: never required, and it contributes an empty slot rather than nothing at all
           const hidden=r.getAttribute('data-hidden')==='1';
           if(!hidden){
-            // a per-option field can be partly filled, so the empty REQUIRED line is what is named
-            const emptyReq=[].slice.call(r.querySelectorAll('[data-req="1"]'))
-              .filter(function(i){ return !String(i.value||'').trim(); });
-            if(!missing && emptyReq.length){
-              const k=emptyReq[0].getAttribute('data-k')||'';
-              missing=label+(k?(' for '+k):'');
-            }
             if(!missing && label && !value && r.getAttribute('data-optional')!=='1') missing=label;
             // Wheredoc Id is the reference the bill was filed under - it is typed in, not generated,
             // and an instance without one cannot be traced back to the paperwork.
@@ -4548,21 +4470,9 @@
     .wf-circle.wf-none{background:#eef2f6;color:#94a3b8;border-style:dashed}
     /* meta card */
     .wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
-    /* Two levels of nesting and a line per chosen option need more width than the default 560px.
-       The mobile rules already force 94vw with !important, so this only affects desktop. */
+    /* Two levels of nesting need more width than the default 560px. The mobile rules already
+       force 94vw with !important, so this only affects desktop. */
     .modal.wf-evt-modal{max-width:700px}
-    .wf-parts{flex:1;min-width:0}
-    .wf-parts-plain .wf-parts-seg{width:100%;border:1px solid var(--line);border-radius:9px;
-      background:var(--bg-card,#fff);color:var(--ink);font:inherit;padding:8px 11px;outline:none;resize:vertical}
-    .wf-parts-plain .wf-parts-seg:focus{border-color:var(--brand)}
-    .wf-parts-list{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--bg-card,#fff)}
-    .wf-parts-line{display:flex;flex-direction:column;gap:3px;padding:7px 11px;border-top:1px solid var(--line);cursor:text}
-    .wf-parts-line:first-child{border-top:0}
-    .wf-parts-line:focus-within{background:#f8faff}
-    .wf-parts-for{font-size:11px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.04em}
-    .wf-parts-opt{font-weight:400;text-transform:none;letter-spacing:0}
-    .wf-parts-seg{width:100%;border:0;background:transparent;color:var(--ink);font:inherit;
-      padding:1px 0;outline:none;resize:vertical;min-height:34px}
     .wf-evt-common{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
     .wf-evt-dgroup{border:1px solid var(--line);border-radius:10px;padding:10px 11px 11px;margin-bottom:12px;background:var(--card,#fff)}
     .wf-evt-dgroup>.wf-evt-group-hd{margin:-2px 0 8px}
