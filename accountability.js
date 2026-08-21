@@ -779,9 +779,7 @@
     // Workflow rows show the full concatenated title (step + filled-in details), same as taskRow, and
     // in Completed This Week (showDoneDate) the title wraps in full instead of clipping.
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
-    const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
-    const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
-    const wfCombined=[wfStepNm,wfDet].filter(Boolean).join(' - ');
+    const wfCombined=wfRowTitle(wfInfo,list);
     const titleHtml=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
@@ -1392,6 +1390,26 @@
     // On a phone the table scrolls sideways rather than turning into a list - a row per
     // entry is the point, and stacking it loses the comparison down each column.
     return '<div class="wf-dw">'+head+t+'</div>';
+  }
+  /* What a workflow task is CALLED in a list. On a flow that names its tasks after the instance
+     (one with a sum field, i.e. Reimbursement) that is the owner, the total, the date and the UPI id
+     - and deliberately not the step name: which step it is sitting at is the one thing the person
+     opening it already knows, since it is in their list because it is their step. Every other
+     workflow keeps step-name-first, as before. */
+  function wfRowTitle(wfInfo,list){
+    if(!wfInfo) return '';
+    const det=Array.isArray(wfInfo.details)?wfInfo.details:[];
+    const line=wfDetailsInline(det);
+    if(wfInfo.sumNamed){
+      /* The task lists load the staff list into their own `list` and never populate WF_PEOPLE, so
+         wfNm alone would fall back to the raw address here. Given the list, the real name is used. */
+      const owner=wfInfo.owner
+        ? ((list?nameOf(list,wfInfo.owner):'')||wfNm(wfInfo.owner)||wfInfo.owner)
+        : '';
+      return [owner,line].filter(Boolean).join(' \u00b7 ');
+    }
+    const step=wfInfo.stepTitle?wfTitleCase(wfInfo.stepTitle):'';
+    return [step,line].filter(Boolean).join(' - ');
   }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
   // Curated instance summary — Wheredoc Id/Bill No./Bill Date/Company/Amount (+ the instance No.),
@@ -2939,14 +2957,13 @@
     if(!need) return;
     const src=find(need);
     const filled=!!String(((src&&src.querySelector('.wf-evt-value'))||{}).value||'').trim();
+    /* Greyed out and not typeable is enough on its own - the field above it is plainly empty, so a
+       line spelling that out was just another thing to read. The reason still reaches anyone who
+       needs it: the field's own title, for a hover or a screen reader. */
     const amt=amtRow.querySelector('.wf-amt');
     amt.classList.toggle('locked', !filled);
+    amt.title=filled?'':('Fill in "'+need+'" first');
     [].slice.call(amt.querySelectorAll('.wf-amt-seg')).forEach(function(i){ i.disabled=!filled; });
-    let note=amt.querySelector('.wf-amt-lock');
-    if(!filled){
-      if(!note){ note=document.createElement('div'); note.className='wf-amt-lock'; amt.appendChild(note); }
-      note.innerHTML='<i class="fa-solid fa-lock"></i> Fill in "'+esc2(need)+'" first';
-    } else if(note){ note.remove(); }
   }
   // Every expense on the form, after a render or any typing.
   window.wfAmtSyncAll=function(){
@@ -3217,7 +3234,6 @@
         valueHtml='<div class="wf-amt" data-ph="'+esc2(placeholder)+'">'
           +'<div class="wf-amt-box">'+wfAmtSlots(parts.length?parts:[''])+'</div>'
           +'<input type="hidden" class="wf-evt-value" value="'+esc2(parts.join(', '))+'">'
-          +'<div class="wf-amt-hint">A line appears for each transport and meal chosen</div>'
         +'</div>';
         }
       } else if(type==='number'){
@@ -3969,7 +3985,11 @@
        date. Everything else keeps the plain list. */
     const wfDayTable=wfIsDaywise(flow,wfDetailsArr)?wfDaywiseHtml(wfDetailsArr,flow):'';
     const wfDescFmt=wfDayTable?'':wfDetailsFmt(wfDetailsArr);
-    v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title)+'</div>'
+    // Same on the task itself. The step is still named right below it, in "Step 1 of 2 - HR Review".
+    const wfHeadTitle=(flow&&flow.tracker_sum_field)
+      ? (wfInline||t.title)
+      : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
+    v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfHeadTitle)+'</div>'
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
@@ -4226,7 +4246,6 @@
     .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
     .wf-amt.locked .wf-amt-list,.wf-amt.locked .wf-amt-plain{opacity:.55;background:var(--bg,#f8fafc)}
     .wf-amt.locked .wf-amt-seg{cursor:not-allowed}
-    .wf-amt-lock{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:11.5px;color:#b45309}
     .wf-amt-total{display:flex;align-items:baseline;gap:9px;margin-top:6px;padding:0 2px;font-size:12.5px}
     .wf-amt-total>span:first-child{color:var(--slate);font-size:10.5px;font-weight:700;
       text-transform:uppercase;letter-spacing:.04em}
@@ -4479,6 +4498,14 @@
     .wf-evt-selpanel{display:none;position:absolute;top:calc(100% + 5px);left:0;right:0;z-index:90;max-height:260px;overflow:auto;
       background:var(--bg-card);border:1px solid var(--line);border-radius:10px;padding:5px;box-shadow:0 12px 30px rgba(15,23,42,.17)}
     .wf-evt-selbox.open .wf-evt-selpanel{display:block}
+    /* An open dropdown has to win against the modal's own button strip, which is position:sticky at
+       the bottom of the scrolling body and so paints over anything that reaches it. Raising the
+       panel alone is not enough - a z-index only competes within its own stacking context, so the
+       BOX it sits in has to be lifted too. Applied only while open, otherwise every closed field
+       would sit above the buttons for no reason. */
+    .wf-evt-selbox.open,.wf-upi-wrap.open{position:relative;z-index:220}
+    .wf-evt-selbox.open .wf-evt-selpanel,.wf-upi-wrap.open .wf-upi-panel{z-index:221}
+    .modal-foot{z-index:5}
     .wf-evt-selopt{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:7px;
       font-size:13.5px;color:var(--ink);cursor:pointer}
     .wf-evt-selopt:hover{background:var(--bg-subtle,#f8fafc)}
@@ -6546,7 +6573,7 @@
         let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -6586,7 +6613,7 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -6999,9 +7026,7 @@
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    const wfDet=(wfInfo&&wfInfo.details)?wfDetailsInline(wfInfo.details):'';
-    const wfStepNm=(wfInfo&&wfInfo.stepTitle)?wfTitleCase(wfInfo.stepTitle):'';
-    const wfCombined=[wfStepNm,wfDet].filter(Boolean).join(' - ');
+    const wfCombined=wfRowTitle(wfInfo,list);
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
