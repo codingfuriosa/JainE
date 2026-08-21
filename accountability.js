@@ -3328,7 +3328,11 @@
            Only when nothing is filled in already, so editing an existing instance never silently
            moves its date to today. */
         const shown=(value||'')||((type==='date'&&f.today)?wfTodayISO():'');
-        valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'" placeholder="'+esc2(placeholder)+'" value="'+esc2(shown)+'">';
+        /* An expense cannot have happened yet, so the picker will not offer a later day (maxToday).
+           The browser's own cap is only the first line - it greys out later dates in the calendar
+           but does not stop a typed one - so the save checks it as well. */
+        const maxAttr=(type==='date'&&f.maxToday)?(' max="'+esc2(wfTodayISO())+'"'):'';
+        valueHtml='<input class="ac-in wf-evt-value" type="'+inputType+'"'+maxAttr+' placeholder="'+esc2(placeholder)+'" value="'+esc2(shown)+'">';
       }
     }
     // Locked templates cannot be reshaped, except that the optional Attachment may be removed.
@@ -3338,7 +3342,11 @@
       : '';
     // data-orig remembers what was already saved in this field, so wfEventSave can tell an
     // untouched legacy value apart from something the person actually typed just now.
-    const showWhen=f.showWhen?(' data-showwhen="'+esc2(JSON.stringify(f.showWhen))+'"'):'';
+    /* A conditional field is rendered hidden and marked so, then wfShowWhenSync decides. Starting
+       from "hidden" rather than from nothing matters now that Km is required: if the sync had not run
+       for any reason, an unmarked row counts as visible, and the form would refuse to save for want
+       of a Km on a bus journey. */
+    const showWhen=f.showWhen?(' data-showwhen="'+esc2(JSON.stringify(f.showWhen))+'" data-hidden="1" style="display:none"'):'';
     const requires=f.requires?(' data-requires="'+esc2(f.requires)+'"'):'';
     return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
@@ -3803,6 +3811,10 @@
           const dRow=g.querySelector('.wf-evt-daterow .wf-evt-row');
           const dVal=((dRow&&dRow.querySelector('.wf-evt-value'))||{}).value||'';
           if(!String(dVal).trim()){ toast('Please pick a date for every date section','warn'); return; }
+          // typed dates get past the picker's own cap, so the rule is enforced here too
+          if((window._wfEvtDateField||{}).maxToday && String(dVal) > wfTodayISO()){
+            toast(dVal+' is in the future — an expense can only be claimed once it has happened','warn'); return;
+          }
           // Two containers for the same day would split one day's expenses in two and read as
           // duplicates further down the line, so the second one is refused rather than merged.
           if(seenDates.indexOf(dVal)!==-1){ toast('The date '+dVal+' is used twice — put those expenses in the same date section','warn'); return; }
@@ -4678,7 +4690,7 @@
     .wf-evt-people .wf-pp-btn{width:100%}
     .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
     .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
-      height:40px;padding:0 14px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
+      height:40px;padding:0 22px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
       color:var(--slate);font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
     .wf-evt-attbox:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,rgba(224,18,28,.06))}
     .wf-evt-attbox i{font-size:12px}
