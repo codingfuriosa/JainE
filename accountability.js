@@ -2704,10 +2704,26 @@
       /* A returned instance is stopped and waiting on its owner, which is not something the timeline
          shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
       +(c.returned_at
-        ? '<div class="wf-returned"><div class="wf-returned-h"><i class="fa-solid fa-rotate-left"></i> Sent back for correction</div>'
-          +'<div class="wf-returned-b">'+esc2(wfNm(c.returned_by)||c.returned_by||'Someone')+' sent this back at "'+esc2(c.returned_step||'a step')+'"'
-            +(c.returned_reason?(' — <b>'+esc2(c.returned_reason)+'</b>'):'')+'.<br>'
-            +'It is on hold until '+esc2(wfNm(c.created_by)||c.created_by||'whoever raised it')+' edits it, and then it starts again from the first step.</div></div>'
+        ? (function(){
+            /* Who it actually went to. A flow with reject_to_seq set (Invoice Processing) sends it
+               back to that step's owner as a live task; everything else sends it to whoever raised
+               it, to edit. Saying "on hold until the raiser edits it" regardless was wrong for the
+               first kind - it pointed the whole team at the front office while the work was sitting
+               with a department. */
+            const toList=String(c.returned_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+            const toNames=toList.length
+              ? toList.map(function(e){return wfNm(e)||e;}).join(' or ')
+              : (wfNm(c.created_by)||c.created_by||'whoever raised it');
+            const toRaiser=!toList.length
+              || (toList.length===1 && String(toList[0]).toLowerCase()===String(c.created_by||'').toLowerCase());
+            return '<div class="wf-returned"><div class="wf-returned-h"><i class="fa-solid fa-rotate-left"></i> Sent back for correction</div>'
+              +'<div class="wf-returned-b">'+esc2(wfNm(c.returned_by)||c.returned_by||'Someone')+' sent this back at "'+esc2(c.returned_step||'a step')+'"'
+                +(c.returned_reason?(' — <b>'+esc2(c.returned_reason)+'</b>'):'')+'.<br>'
+                +(toRaiser
+                  ? ('It is on hold until '+esc2(toNames)+' edits it, and then it starts again from the first step.')
+                  : ('It is now with <b>'+esc2(toNames)+'</b> to correct, and carries on from there.'))
+              +'</div></div>';
+          })()
         : '')
       +detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
