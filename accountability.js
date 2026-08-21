@@ -3397,6 +3397,28 @@
     if(chip) chip.remove();
     wfEvtAttSync(wrap);
   };
+  /* Everything this form session has put into S3. An upload happens on choosing the file, long
+     before Create is pressed, so the form owes the bucket a tidy-up on every way out. */
+  function wfEvtTrackUpload(path){
+    if(!path) return;
+    window._wfEvtUploads=window._wfEvtUploads||[];
+    if(window._wfEvtUploads.indexOf(path)===-1) window._wfEvtUploads.push(path);
+  }
+  /* Removes tracked files that nothing points at, `keep` being whatever the save has just written.
+     wfPurgeCaseFiles does the reference check, so a path that is genuinely in use survives. */
+  async function wfEvtSweepUploads(keep){
+    const list=(window._wfEvtUploads||[]).slice();
+    window._wfEvtUploads=[];
+    if(!list.length) return;
+    const kept=(keep||[]).join(' ');
+    const gone=list.filter(function(p){ return kept.indexOf(p)===-1; });
+    if(gone.length) await wfPurgeCaseFiles(gone);
+  }
+  window.wfEventCancel=function(){
+    // fire and forget: closing must not wait on the bucket
+    try{ wfEvtSweepUploads([]); }catch(_e){}
+    try{ closeModal(); }catch(_e){}
+  };
   window.wfEvtAttPick=async function(input){
     const wrapM=input.closest('.wf-evt-att-multi');
     if(wrapM){
@@ -3415,6 +3437,7 @@
           const key=s3KeyForFlowEvent(flowIdAttr, file.name);
           const {data,error}=await uploadFileToS3(key,file);
           if(error) throw error;
+          wfEvtTrackUpload(data.path);
           if(list) list.insertAdjacentHTML('beforeend', wfAttChipHtml(data.path));
         }catch(e){ toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err'); }
       }
@@ -3436,6 +3459,7 @@
       const key=prevKey || s3KeyForFlowEvent((evtForm&&evtForm.getAttribute('data-flow'))||'0', file.name);
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
+      wfEvtTrackUpload(data.path);
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(file.name)+'">'+esc2(file.name)+'</span> <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
@@ -3563,6 +3587,10 @@
   }
   window.wfEventOpen=async function(flowId, caseId){
     wfInjectCss();
+    /* Anything left over from a previous session that was closed without Cancel - the overlay,
+       Escape, navigating away - is swept now. Doing it on the way IN covers every exit, without
+       having to hook the shared closeModal that the whole app uses. */
+    try{ await wfEvtSweepUploads([]); }catch(_e){}
     try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     let flow=null, steps=[], caseRow=null;
     try{ const {data}=await ACC().from('flows').select('*').eq('id',flowId).maybeSingle(); flow=data; }catch(e){}
@@ -3768,7 +3796,7 @@
           +'</div>'
         +'</div>'
       : '';
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="wfEventCancel()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" data-multiple="'+(allowMultiple?'1':'0')+'" style="min-width:min(94vw,660px)">'
         +membersHtml
         +(dateMode?commonHtml:'')
@@ -3786,7 +3814,7 @@
           : '<div id="wfEvtDetails">'+rowsHtml+'</div>'
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
       +'</div>'
-      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<div class="modal-foot"><button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfShowWhenSyncAll();
     /* Draw the Amount boxes from what is already chosen, and shut them if the description is still
@@ -3930,6 +3958,8 @@
         }); }
         const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
         for(const oldPath of replacedAtts){ try{ await s3Delete(oldPath); }catch(_e){} }
+        // a file uploaded during this edit and then taken off again before saving
+        try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
         toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
@@ -3948,6 +3978,8 @@
         const {error}=await ACC().rpc('wf_create_instance',
           {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
         if(error)throw error;
+        // same on creation: attached, thought better of it, then created
+        try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
         toast(N.one+' created — first step assigned','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
