@@ -1021,7 +1021,41 @@
     if(s.indexOf('|')!==-1) return s.split('|').map(function(x){return x.trim();});
     return s.split(',').map(function(x){return x.trim();});
   }
+  // Packs each entry's value for a field into the one stored value. Lost in a merge while the call
+  // in the save survived, which is why saving died with "wfJoinSets is not defined".
   function wfJoinSets(arr){ return (arr||[]).join(WF_SET_SEP); }
+  /* How many entries an instance has is a property of the WHOLE instance, not of one field.
+     Deciding per field went wrong the moment a field legitimately held commas: one entry claiming
+     "20, 40, 60, 80" was read as four entries and the table grew four rows out of one journey.
+     Two rules, in order:
+       - if any field uses the entry separator, every field is split on that alone. A field without
+         one is a single entry. This is what everything saved now looks like.
+       - otherwise the count comes from the DATE, which holds exactly one value per entry and never
+         a list of its own. Fields are split on commas only if they yield that same count; anything
+         else is one entry's own list, commas and all. */
+  function wfSetSplitter(details){
+    const det=details||[];
+    const anyPipe=det.some(function(d){ return String((d&&d.value)||'').indexOf('|')!==-1; });
+    if(anyPipe){
+      return function(v){
+        const s=String(v==null?'':v);
+        return s.indexOf('|')!==-1 ? s.split('|').map(function(x){return x.trim();}) : [s.trim()];
+      };
+    }
+    let n=1;
+    det.forEach(function(d){
+      if(d && /^date$/i.test(String(d.label||''))){
+        const parts=String(d.value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+        if(parts.length) n=parts.length;
+      }
+    });
+    return function(v){
+      const s=String(v==null?'':v);
+      if(n<=1) return [s.trim()];                       // one entry — its commas are its own
+      const parts=s.split(',').map(function(x){return x.trim();});
+      return parts.length===n ? parts : [s.trim()];
+    };
+  }
   function wfSumField(v){ return wfSplitSets(v).map(function(x){
       // a day's own value may itself be a list; every number in it counts toward the total
       return String(x).split(',').map(function(y){return parseFloat(y.trim());})
@@ -1242,10 +1276,11 @@
   function wfDayRows(details){
     const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
     const cols=WF_DAY_COLS.filter(function(c){ return by[c]!=null && String(by[c]).trim(); });
+    const split=wfSetSplitter(details);
     const per={}; let n=0;
     cols.concat(['Attachment']).forEach(function(c){
       if(by[c]==null||!String(by[c]).trim()) return;
-      per[c]=wfSplitSets(by[c]); if(per[c].length>n) n=per[c].length;
+      per[c]=split(by[c]); if(per[c].length>n) n=per[c].length;
     });
     const rows=[];
     for(let i=0;i<n;i++){
@@ -1270,10 +1305,22 @@
   function wfDaywiseHtml(details,flow){
     const d=wfDayRows(details);
     if(!d.rows.length) return '';
-    const money=function(x){ const n=parseFloat(String(x).replace(/[^0-9.]/g,'')); return isNaN(n)?esc2(x):wfMoney(n); };
+    /* An entry can claim several fares at once — "20, 40, 60, 80". Stripping the punctuation out of
+       that and formatting the result turned four amounts into the single number ₹2,04,06,080. Each
+       figure is formatted on its own and they stay comma-separated. */
+    const money=function(x){
+      const parts=String(x==null?'':x).split(',').map(function(p){return p.trim();}).filter(Boolean);
+      if(!parts.length) return esc2(x);
+      const out=parts.map(function(p){ const n=parseFloat(p.replace(/[^0-9.]/g,'')); return isNaN(n)?esc2(p):wfMoney(n); });
+      return out.join(', ');
+    };
+    const cellSum=function(x){
+      return String(x==null?'':x).split(',').map(function(p){ return parseFloat(String(p).replace(/[^0-9.]/g,'')); })
+        .filter(function(n){ return !isNaN(n); }).reduce(function(a,b){ return a+b; },0);
+    };
     const sumField=(flow&&flow.tracker_sum_field||'Amount');
     const total=d.cols.indexOf(sumField)!==-1
-      ? d.rows.reduce(function(a,r){ const n=parseFloat(String(r[sumField]).replace(/[^0-9.]/g,'')); return a+(isNaN(n)?0:n); },0) : 0;
+      ? d.rows.reduce(function(a,r){ return a+cellSum(r[sumField]); },0) : 0;
     const head=d.common.length
       ? '<div class="wf-dw-common">'+d.common.map(function(c){
           return '<span><b>'+esc2(c.k)+'</b> '+esc2(c.v)+'</span>'; }).join('')+'</div>'
@@ -2282,11 +2329,28 @@
     // Forms show wherever any exist; an Administration user always sees the tab so they can add
     // the first one.
     const showForms=isBill && (forms.length>0 || canManage);
+    /* Who may do what, per instance:
+         EDIT   — the Administrator on any instance, or whoever started this one. Deliberately not
+                  step members: changing the details changes what everyone downstream is acting on.
+         DELETE — the Administrator, or anybody this instance runs through (holding or offered any
+                  of its steps), since they are the ones who spot a duplicate or mistaken one.
+       Both are re-checked in the database, so the buttons only mirror what will actually be
+       allowed rather than being the thing that decides it. */
+    const canEditCase=function(c){ return canManage || eq(c&&c.created_by, mySelf); };
+    const canDeleteCase=function(c){
+      if(canManage) return true;
+      return fcs.some(function(x){
+        if(x.case_id!==(c&&c.id)) return false;
+        if(eq(x.person||'', mySelf)) return true;
+        return Array.isArray(x.candidates) && x.candidates.some(function(e){ return eq(e, mySelf); });
+      });
+    };
+    const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head=(canManage?'<th class="wf-chk-col"></th>':'')
+      const head=(anyActionable?'<th class="wf-chk-col"></th>':'')
         // On the bill workflow the number IS the Wheredoc Id it was filed under; ordinary
         // workflows just count their instances.
         +'<th>No.</th>'+(isBill?'<th>Wheredoc Id</th>':'')
@@ -2308,12 +2372,12 @@
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
-          +(canManage?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
+          +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
-        +(canManage?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
+        +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
           +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No. or Wheredoc Id…':'Search by No.…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
@@ -2421,15 +2485,75 @@
     const oneSel = checks.length===1;
     const editBlocked = oneSel && checks[0].getAttribute('data-inst-over')==='1';
     const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
-    if(eb){ eb.disabled = !oneSel || editBlocked; eb.title = editBlocked ? ('Can’t edit — this '+N.lc+' is already over (completed)') : ('Edit selected '+N.lc); }
-    if(db){ db.disabled = checks.length<1 || delBlocked; db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)') : 'Delete selected'; }
+    // rights carried on the row itself — editing is the Administrator's or the starter's, deleting
+    // is also open to anyone the instance runs through
+    const mayEdit = oneSel && checks[0].getAttribute('data-can-edit')==='1';
+    const mayDel  = checks.length>0 && checks.every(function(c){ return c.getAttribute('data-can-del')==='1'; });
+    if(eb){
+      eb.disabled = !oneSel || editBlocked || !mayEdit;
+      eb.title = !oneSel ? ('Select one '+N.lc+' to edit')
+        : (editBlocked ? ('Can’t edit — this '+N.lc+' is already over (completed)')
+        : (!mayEdit ? ('Only the Administrator, or whoever started this '+N.lc+', can edit it')
+        : ('Edit selected '+N.lc)));
+    }
+    if(db){
+      db.disabled = checks.length<1 || delBlocked || !mayDel;
+      db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)')
+        : (!mayDel ? ('You can only delete a '+N.lc+' you are part of') : 'Delete selected');
+    }
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(checks.length!==1) return;
     if(checks[0].getAttribute('data-inst-over')==='1'){ toast('Can’t edit — this '+wfN().lc+' is already over','err'); return; }
+    if(checks[0].getAttribute('data-can-edit')!=='1'){ toast('Only the Administrator, or whoever started this '+wfN().lc+', can edit it','err'); return; }
     wfEventOpen(window._wfFlowId, Number(checks[0].getAttribute('data-case')));
   };
+  /* Deleting an instance removed its records but left its uploaded files behind in S3 with
+     nothing pointing at them any more - invisible in the app, still stored, still paid for.
+     These two collect the paths BEFORE the records go (afterwards there is nothing left to read
+     them from) and remove the files only AFTER the delete is confirmed, so a delete that fails
+     never costs a file the instance still needs. Same order the Tasks delete already uses. */
+  async function wfCaseFilePaths(ids){
+    const paths=[];
+    if(!ids||!ids.length) return paths;
+    try{
+      // the pinned trigger-event Attachment fields, stored inline on the instance as 's3:...'
+      const {data:cs}=await ACC().from('flow_cases').select('trigger_details').in('id',ids);
+      (cs||[]).forEach(function(c){
+        (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){
+          // a Multiple-entry instance keeps one entry per separator segment, and each entry can
+          // carry its own file, so every segment has to be looked at - not just the whole value
+          wfSplitSets(String((d&&d.value)||'')).forEach(function(x){
+            if(x.indexOf('s3:')===0) paths.push(x);
+          });
+        });
+      });
+    }catch(e){}
+    try{
+      // anything attached to an Update / Feedback post on those instances
+      const {data:ups}=await ACC().from('flow_updates').select('id').in('case_id',ids);
+      const uids=(ups||[]).map(function(u){ return u.id; });
+      if(uids.length){
+        const {data:ats}=await ACC().from('flow_update_attachments').select('storage_path').in('update_id',uids);
+        (ats||[]).forEach(function(a){ if(a&&a.storage_path) paths.push(a.storage_path); });
+      }
+    }catch(e){}
+    return paths.filter(function(x,i){ return x && paths.indexOf(x)===i; });
+  }
+  /* Each file goes only once acc.wf_file_referenced() confirms nothing anywhere still points at
+     it - the same file can be shared, e.g. an instance attachment that was also posted as an
+     Update. Failures are swallowed on purpose: the records are already gone, and a file left
+     behind is not worth showing the user an error they can do nothing about. */
+  async function wfPurgeCaseFiles(paths){
+    for(const path of (paths||[])){
+      try{
+        const {data:used}=await ACC().rpc('wf_file_referenced',{p_path:path});
+        if(!used) await s3Delete(path);
+      }catch(e){}
+    }
+  }
+
   window.wfInstDelSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
     if(!checks.length) return;
@@ -2438,7 +2562,9 @@
     const ids=checks.map(function(c){return Number(c.getAttribute('data-case'));});
     const word=(ids.length===1?N.lc:N.lcMany);
     wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      const doomed=await wfCaseFilePaths(ids);
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+      await wfPurgeCaseFiles(doomed);
       toast('Deleted','ok'); renderPage();
     }});
   };
@@ -2457,7 +2583,9 @@
     const tr=rowEl||document.querySelector('.wf-itable tbody tr[data-case="'+caseId+'"]'); if(tr)tr.classList.add('sel');
     let c=null,fcs=[],updates=[],atts=[],flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('card_fields,tracker_sum_field,card_wide_field,multiple_fields,multi_entry_label,extra_admins').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
+    // both sides added a column here: extra_admins (who else may manage this flow) and
+    // reject_deletes_instance (whether rejecting ends the instance). Both are needed.
+    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('card_fields,tracker_sum_field,card_wide_field,multiple_fields,multi_entry_label,extra_admins,reject_deletes_instance').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
@@ -2544,15 +2672,72 @@
     }catch(e){ WF_UPI_CACHE=[]; }
     return WF_UPI_CACHE;
   }
+  /* One UPI id for the whole claim. It is stored per entry — so the table has its own column and a
+     row could in principle differ — but nobody is paid into five different accounts for one
+     reimbursement, so filling it once fills it everywhere: typing it in the first entry carries it
+     into every other, and any entry added afterwards arrives already holding it. */
+  function wfUpiCurrent(){
+    const boxes=[].slice.call(document.querySelectorAll('.wf-evt-upi'));
+    for(let i=0;i<boxes.length;i++){ const v=(boxes[i].value||'').trim(); if(v) return v; }
+    return '';
+  }
+  /* One UPI id across a claim, until an entry is given its own.
+     Typing an id fills every entry that is still EMPTY — nobody is paid into five accounts for one
+     claim, so it should only be typed once. An entry that already holds an id is left alone, which
+     is what makes the exception work: put a different id on entry three and the rest keep theirs,
+     because theirs are already set. Adding an entry later fills it the same way. */
+  window.wfUpiTyped=function(src){
+    wfUpiSpread(src);
+    // mark it wrong as it is typed rather than only at save time
+    [].slice.call(document.querySelectorAll('.wf-evt-upi')).forEach(function(inp){
+      const pat=inp.getAttribute('data-pattern'); if(!pat) return;
+      const v=(inp.value||'').trim();
+      inp.classList.toggle('wf-bad', !!v && !(new RegExp(pat)).test(v));
+    });
+  };
+  function wfUpiSpread(src){
+    const v=(src&&src.value||'').trim();
+    if(!v) return;                                        // clearing one does not blank the others
+    [].slice.call(document.querySelectorAll('.wf-evt-upi')).forEach(function(inp){
+      if(inp===src) return;
+      if((inp.value||'').trim()) return;                  // already has one — leave it be
+      inp.value=v;
+    });
+  }
+  window.wfUpiSync=function(src){ wfUpiTyped(src); };    // kept: older markup calls this
+  window.wfUpiToggle=function(btn){
+    const wrap=btn&&btn.closest('.wf-upi-wrap'); if(!wrap) return;
+    const open=wrap.classList.contains('open');
+    document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){ w.classList.remove('open'); });
+    if(!open){ wrap.classList.add('open'); wfUpiFillPanel(wrap); }
+  };
+  window.wfUpiPick=function(el){
+    const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
+    const inp=wrap.querySelector('.wf-evt-upi');
+    if(inp){ inp.value=el.getAttribute('data-v')||''; wfUpiTyped(inp); }
+    wrap.classList.remove('open');
+  };
+  function wfUpiFillPanel(wrap){
+    const panel=wrap.querySelector('.wf-upi-panel'); if(!panel) return;
+    const list=WF_UPI_CACHE||[];
+    const cur=(wrap.querySelector('.wf-evt-upi')||{}).value||'';
+    // every saved id, always — what is typed is not a filter
+    panel.innerHTML=list.length
+      ? list.map(function(u){
+          const on=String(u).toLowerCase()===String(cur).trim().toLowerCase();
+          return '<div class="wf-upi-opt'+(on?' on':'')+'" data-v="'+esc2(u)+'" onclick="wfUpiPick(this)">'
+            +'<i class="fa-solid fa-indian-rupee-sign wf-upi-ic"></i><span>'+esc2(u)+'</span>'
+            +(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
+        }).join('')
+      : '<div class="wf-upi-empty">No saved UPI ids yet — type one and it is kept for next time</div>';
+  }
   async function wfUpiHydrate(){
     const boxes=[].slice.call(document.querySelectorAll('.wf-evt-upi'));
     if(!boxes.length) return;
-    const list=await wfUpiList();
-    boxes.forEach(function(inp){
-      const dl=document.getElementById(inp.getAttribute('list'));
-      if(dl) dl.innerHTML=list.map(function(u){ return '<option value="'+esc2(u)+'"></option>'; }).join('');
-      if(!inp.value && list.length) inp.value=list[0];    // the one used most, as the default
-    });
+    await wfUpiList();
+    // whatever is already typed in this form wins over the remembered default
+    const current=wfUpiCurrent() || ((WF_UPI_CACHE&&WF_UPI_CACHE.length)?WF_UPI_CACHE[0]:'');
+    boxes.forEach(function(inp){ if(!inp.value && current) inp.value=current; });
   }
   async function wfUpiRemember(vals){
     const seen={};
@@ -2563,6 +2748,78 @@
     for(const u of list){ try{ await ACC().rpc('upi_remember',{p_upi:u}); }catch(e){} }
     WF_UPI_CACHE=null;   // re-read next time so the ordering reflects the new counts
   }
+  /* Amount, as one field with a slot per thing being claimed for.
+     Four anonymous boxes would be worse than one: with three transports and a meal you could not
+     tell which box was the food. So every slot is LABELLED with what it is for — Auto, Bus, Train,
+     Lunch — and there is exactly one per option chosen anywhere in the entry's multi-select fields.
+     Tick another mode and a slot appears named after it; untick one and its slot goes, taking its
+     own figure with it rather than shifting everyone else's along.
+     The stored value stays the plain comma list the table prints and the totals sum, in slot order,
+     so nothing downstream changes. */
+  /* A short list, one line per thing claimed for: what it is on the left, its amount on the right.
+     Squeezing several labelled boxes inside one bordered field was cramped and hard to read — this
+     is the shape the information actually has. Nothing chosen yet means a single plain box, exactly
+     as any other amount field. */
+  function wfAmtSlots(pairs){
+    const list=(pairs&&pairs.length)?pairs:[{k:'',v:''}];
+    const labelled=list.some(function(p){ return !!p.k; });
+    if(!labelled){
+      return '<div class="wf-amt-plain"><input class="wf-amt-seg" type="text" inputmode="decimal" data-k="" '
+        +'value="'+esc2((list[0]&&list[0].v)||'')+'" placeholder="0" oninput="wfAmtSeg(this)"></div>';
+    }
+    return '<div class="wf-amt-list">'+list.map(function(p){
+      return '<label class="wf-amt-line">'
+        +'<span class="wf-amt-for">'+esc2(p.k)+'</span>'
+        +'<span class="wf-amt-cur">₹</span>'
+        +'<input class="wf-amt-seg" type="text" inputmode="decimal" data-k="'+esc2(p.k)+'" '
+          +'value="'+esc2(p.v||'')+'" placeholder="0" oninput="wfAmtSeg(this)">'
+      +'</label>';
+    }).join('')+'</div>';
+  }
+  window.wfAmtSeg=function(el){
+    if(el){ const clean=(el.value||'').replace(/[^0-9.]/g,''); if(clean!==el.value){ const at=el.selectionStart; el.value=clean; try{el.setSelectionRange(at,at);}catch(_){} } }
+    const wrap=el&&el.closest('.wf-amt'); if(wrap) wfAmtCollect(wrap);
+  };
+  function wfAmtCollect(wrap){
+    const segs=[].slice.call(wrap.querySelectorAll('.wf-amt-seg'));
+    const vals=segs.map(function(i){ return (i.value||'').trim(); });
+    const hid=wrap.querySelector('.wf-evt-value');
+    if(hid) hid.value=vals.filter(function(v){ return v!==''; }).join(', ');
+    const nums=vals.map(parseFloat).filter(function(n){ return !isNaN(n); });
+    const labelled=segs.some(function(i){ return !!i.getAttribute('data-k'); });
+    const missing=segs.filter(function(i){ return i.getAttribute('data-k') && !(i.value||'').trim(); }).length;
+    let t=wrap.querySelector('.wf-amt-total');
+    if(labelled){
+      if(!t){ t=document.createElement('div'); t.className='wf-amt-total'; wrap.appendChild(t); }
+      t.innerHTML='<span>Total</span><b>'+wfMoney(nums.reduce(function(a,b){return a+b;},0))+'</b>'
+        +(missing?('<span class="wf-amt-miss">'+missing+' still to fill</span>'):'');
+    } else if(t){ t.remove(); }
+  }
+  /* Rebuild the slots from everything chosen in this entry: every option ticked in any of its
+     multi-select fields, in the order those fields appear. Amounts already typed are kept by WHAT
+     they were for, not by position. */
+  window.wfAmtMatch=function(fromBox){
+    const scope=(fromBox&&(fromBox.closest('.wf-evt-group')||fromBox.closest('#wfEvtDetails')));
+    if(!scope) return;
+    const amt=scope.querySelector('.wf-amt'); if(!amt) return;
+    const keys=[];
+    [].slice.call(scope.querySelectorAll('.wf-evt-selbox[data-multi="1"]')).forEach(function(box){
+      const hid=box.querySelector('.wf-evt-value');
+      String((hid&&hid.value)||'').split(',').map(function(x){return x.trim();})
+        .filter(Boolean).forEach(function(k){ keys.push(k); });
+    });
+    const had={}, spare=[];
+    [].slice.call(amt.querySelectorAll('.wf-amt-seg')).forEach(function(i){
+      const k=i.getAttribute('data-k')||'', v=(i.value||'').trim();
+      if(k) had[k]=v; else if(v) spare.push(v);
+    });
+    const pairs=keys.length
+      ? keys.map(function(k,i){ return {k:k, v:(had[k]!=null?had[k]:(spare[i]||''))}; })
+      : [{k:'', v:(spare[0]||'')}];
+    const box=amt.querySelector('.wf-amt-box'); if(!box) return;
+    box.innerHTML=wfAmtSlots(pairs);
+    wfAmtCollect(amt);
+  };
   function wfEvtSelValues(value){ return String(value||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
   function wfEvtSelectHtml(f,value){
     const opts=Array.isArray(f.options)?f.options:[];
@@ -2591,6 +2848,10 @@
       +'<div class="wf-evt-selpanel">'+listHtml+'</div>'
     +'</div>';
   }
+  document.addEventListener('click',function(e){
+    if(e.target.closest && e.target.closest('.wf-upi-wrap')) return;
+    document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){ w.classList.remove('open'); });
+  });
   window.wfEvtSelToggle=function(btn){
     const box=btn.closest('.wf-evt-selbox'); if(!box) return;
     const open=box.classList.contains('open');
@@ -2634,7 +2895,8 @@
       if(on&&!tick) o.insertAdjacentHTML('beforeend','<i class="fa-solid fa-check"></i>');
       if(!on&&tick) tick.remove();
     });
-    if(multi) return;   // leave the panel open on a multi field
+    // a multi field that drives the amount slots (Transport) resizes them as modes are ticked
+    if(multi){ try{ wfAmtMatch(box); }catch(_){} return; }   // and the panel stays open
     box.classList.remove('open');
   };
   function wfEvtRowHtml(field,value,locked){
@@ -2650,14 +2912,20 @@
       // pattern as the builder's own field-type picker, so it actually matches the app's design.
       valueHtml=wfEvtSelectHtml(f,value);
     } else if(f.upiMemory){
-      /* The UPI id somebody was paid to last time, offered back to them. Every id they have ever
-         used stays on the list with the most-used first, and anything they type joins the list for
-         next time — so it keeps learning instead of being a fixed list someone has to maintain.
-         A datalist, not a dropdown, precisely because it must stay freely editable. */
-      const dl='wfupi'+(++WF_PID);
-      valueHtml='<input class="ac-in wf-evt-value wf-evt-upi" list="'+dl+'" value="'+esc2(value||'')+'" '
-        +'placeholder="name@bank" autocomplete="off">'
-        +'<datalist id="'+dl+'"></datalist>';
+      /* A typed box with a real dropdown beside it. A datalist was wrong: it treats what you have
+         typed as a filter and hides everything that does not match, so once you had typed anything
+         the saved ids disappeared — and they are there to be PICKED, not matched against. Opening
+         the list always shows every id, whatever is in the box.
+         Still freely typed: whatever is entered is used and joins the list for next time. */
+      const pid='wfupi'+(++WF_PID);
+      valueHtml='<div class="wf-upi-wrap" id="'+pid+'">'
+        +'<input class="ac-in wf-evt-value wf-evt-upi" value="'+esc2(value||'')+'" placeholder="1234567890@abc" '
+          +(f.pattern?(' data-pattern="'+esc2(f.pattern)+'"'):'')
+          +' autocomplete="off" oninput="wfUpiTyped(this)" onchange="wfUpiTyped(this)">'
+        +'<button type="button" class="wf-upi-caret" title="Saved UPI ids" onclick="wfUpiToggle(this)">'
+          +'<i class="fa-solid fa-chevron-down"></i></button>'
+        +'<div class="wf-upi-panel"></div>'
+      +'</div>';
     } else if(type==='people'){
       /* A People field is answered by picking from the staff list rather than typing a name, so
          what is stored is a real person - the value is the picker's own hidden input. */
@@ -2680,7 +2948,18 @@
       const typeName=wfTypeDef(type)[1]||'Text';
       const placeholder=f.placeholder||(eq(label,'Wheredoc Id')?'The Wheredoc reference this bill was filed under'
         :(typeName+(f.optional?' (optional)':'')));
-      if(type==='number'){
+      if(type==='number' && f.parts){
+        /* One field, divided into a slot per transport with a + between them. Two modes for one
+           journey means two fares, so the field itself shows two places to type rather than leaving
+           it to be remembered. The slots follow the Transport picker; the value stored is the
+           comma form the table prints and the totals sum. */
+        const parts=String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+        valueHtml='<div class="wf-amt" data-ph="'+esc2(placeholder)+'">'
+          +'<div class="wf-amt-box">'+wfAmtSlots(parts.length?parts:[''])+'</div>'
+          +'<input type="hidden" class="wf-evt-value" value="'+esc2(parts.join(', '))+'">'
+          +'<div class="wf-amt-hint">A line appears for each transport and meal chosen</div>'
+        +'</div>';
+      } else if(type==='number'){
         // Number field: whole numbers and decimals only — digits and a single dot, nothing else.
         valueHtml='<input class="ac-in wf-evt-value" type="text" inputmode="decimal" placeholder="'+esc2(placeholder)+'" value="'+esc2(value||'')+'" oninput="wfNumOnly(this)">';
       } else if(type==='text'&&f.multiline){
@@ -2838,10 +3117,32 @@
       }catch(_e){}
     }
     const rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
-    // Multi-entry workflows (flow.multiple_fields) let someone fill the same fixed detail fields
-    // several times in one go (e.g. several conveyance/food lines) — only meaningful when the
-    // template is locked and this is a fresh instance, not an edit of an existing one.
-    const allowMulti=!!(flow.multiple_fields && locked && !editing);
+    /* Multi-entry workflows (flow.multiple_fields) let the same fixed fields be filled several
+       times in one go. Editing is allowed to do this too: a four-entry claim opened for editing
+       used to collapse into ONE section, every field showing the whole packed value
+       ("Auto | Bus | Train | Cab") in a single box — so the entries could not be edited at all,
+       and saving flattened four of them into one. Each stored entry is unpacked back into its own
+       section, so all of them show and any of them can be changed. */
+    const allowMulti=!!(flow.multiple_fields && locked);
+    let editGroupsHtml='';
+    if(allowMulti && editing && src.length){
+      const setsFor={}; let nSets=1;
+      src.forEach(function(t){
+        const parts=wfSplitSets((t&&t.value)||'');
+        setsFor[t.label]=parts;
+        if(parts.length>nSets) nSets=parts.length;
+      });
+      for(let gi=0; gi<nSets; gi++){
+        const rows=src.map(function(t){
+          const arr=setsFor[t.label]||[];
+          return wfEvtRowHtml(t, (arr[gi]!=null?arr[gi]:''), locked);
+        }).join('');
+        editGroupsHtml+='<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'
+          +esc2(flow.multi_entry_label||'Set')+' '+(gi+1)+'</span>'
+          +(nSets>1?'<button type="button" class="ac-btn ic danger" title="Remove this set" onclick="wfEvtRemoveGroup(this)"><i class="fa-solid fa-xmark"></i></button>':'')
+          +'</div>'+rows+'</div>';
+      }
+    }
     window._wfEvtTemplate=template;
     window._wfEvtAllowMulti=allowMulti;
     window._wfEvtGroupLabel=flow.multi_entry_label||'Set';
@@ -2894,7 +3195,10 @@
         +membersHtml
         +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +(allowMulti
-          ? '<div id="wfEvtDetails"><div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+esc2(window._wfEvtGroupLabel)+' 1</span></div>'+rowsHtml+'</div></div>'
+          ? '<div id="wfEvtDetails">'
+              +(editGroupsHtml
+                 || '<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+esc2(window._wfEvtGroupLabel)+' 1</span></div>'+rowsHtml+'</div>')
+            +'</div>'
             +'<div class="wf-addstep-ghost" onclick="wfEvtAddGroup()"><i class="fa-solid fa-plus"></i> Add another set</div>'
           : '<div id="wfEvtDetails">'+rowsHtml+'</div>'
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
@@ -2913,6 +3217,11 @@
     const saveBtn=document.querySelector('.modal-foot .ac-btn.primary'); if(saveBtn) saveBtn.disabled=true;
     try{
     return await wfEventSaveInner(flowId, caseId);
+    }catch(e){
+      // Without this the form just refused to submit and said nothing — an error in here has to be
+      // visible, not swallowed by the guard that stops double-submits.
+      toast('Could not save: '+((e&&e.message)||e),'err');
+      try{ console.error('wfEventSave',e); }catch(_){}
     } finally { window._wfSaving=false; if(saveBtn) saveBtn.disabled=false; }
   };
   async function wfEventSaveInner(flowId, caseId){
@@ -2941,6 +3250,21 @@
       // entry per label either way, so nothing downstream (Tracker, timeline) needs to change.
       // Not a comma: a multi-select day is itself comma-separated ("Auto, Bus").
       order.forEach(function(label){ details.push({label:label, value:wfJoinSets(byLabel[label])}); });
+      /* A UPI id has to be the real shape — ten digits, @, then letters (1234567890@abc) — or the
+         payment simply fails later, by which time the claim has been through two approvals. Checked
+         here, against the pattern the field itself declares, so no other workflow is affected. */
+      // `template` is a local of wfEventOpen and is NOT in scope here — referencing it threw, and
+      // because the whole save is wrapped in a try the form simply refused to submit with no
+      // message at all. The template is published on window for exactly this reason.
+      const upiField=((window._wfEvtTemplate)||[]).filter(function(t){ return t&&t.pattern && /upi/i.test(t.label||''); })[0];
+      if(upiField){
+        const re=new RegExp(upiField.pattern);
+        const bad=(byLabel[upiField.label]||[]).filter(function(v){ const t=String(v||'').trim(); return t && !re.test(t); });
+        if(bad.length){
+          toast('"'+bad[0]+'" is not a valid UPI id. '+(upiField.patternHint||'Expected 10 digits, then @, then letters.'),'warn');
+          return;
+        }
+      }
       // Anything typed into a UPI field joins that person's own list for next time.
       const upiLabel=Object.keys(byLabel).filter(function(l){ return /upi/i.test(l); })[0];
       if(upiLabel) wfUpiRemember(byLabel[upiLabel]);
@@ -3090,7 +3414,10 @@
          nobody until somebody Receives, and wf_reject now accepts anyone it was offered to, so it
          no longer has to be claimed before it can be declined. The very first step has nobody to
          go back to, so it is never rejectable. */
-      const rejectBtn=isFirst?'':'<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
+      /* The first step can be rejected too. It used to be excluded because there is nobody to send
+         it back to — but that is the reason it ends the instance instead: the whole thing is thrown
+         away and whoever raised it is asked to do it again. */
+      const rejectBtn='<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
@@ -3194,12 +3521,72 @@
   // Reject: an in-app note (Updates & Feedback) then bounce to the previous person
   // Reject flows through the Updates & Feedback section (no popup): scroll there, reveal the confirm bar.
   // Reject now asks for confirmation in a popup (no jumping to Updates & Feedback).
-  window.wfRejectStart=function(fcsId, caseId){
-    wfConfirm({ title:'Reject this step?', body:'This sends the task back to the previous person.', okLabel:'Reject', okClass:'danger', onOk:async function(){
-      try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
-      catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
-      toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
-    }});
+  /* Rejecting asks WHY, in the rejecter's own words. On a workflow where a rejection ends the
+     instance (Reimbursement), that reason is the only thing the claimant gets to work from — the
+     claim itself is deleted — so it is required there, and it is emailed to them along with what
+     they submitted and a note that a corrected one has to be raised. */
+  window.wfRejectStart=async function(fcsId, caseId){
+    let noun='instance', wantsReason=false, isFirst=false;
+    try{
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
+      const cid=(mine&&mine.case_id)||caseId;
+      if(cid){
+        const {data:c}=await ACC().from('flow_cases').select('flow_id').eq('id',cid).maybeSingle();
+        if(c&&c.flow_id){
+          const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
+          wantsReason=!!(f&&f.reject_deletes_instance);
+          noun=(f&&f.instance_noun)||'instance';
+        }
+        // nothing sits behind the first step, so rejecting it ends the instance in ANY workflow
+        const {data:sib}=await ACC().from('flow_case_steps').select('seq').eq('case_id',cid);
+        if(mine&&Array.isArray(sib)) isFirst=!sib.some(function(x){ return x.seq<mine.seq; });
+      }
+    }catch(e){}
+    const ends = isFirst || wantsReason;
+    const warn = ends
+      ? '<div class="wf-rej-warn"><i class="fa-solid fa-triangle-exclamation"></i> <span>This '+esc2(noun)+' will be <b>deleted</b>, not sent back'+(isFirst&&!wantsReason?' — there is no earlier step to return it to':'')+'. Whoever raised it is emailed to say it was rejected and needs doing again.</span></div>'
+      : '<div class="wf-rej-note">The task goes back to the previous person.</div>';
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-ban" style="color:#dc2626"></i> Reject this step</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm" style="width:min(94vw,520px)">'
+        +warn
+        /* The reason box belongs to the workflows that ask for one (Reimbursement). Elsewhere a
+           rejection is just a rejection and an empty box would only be noise. */
+        +(wantsReason
+          ? '<label>Reason</label>'
+            +'<textarea id="wfRejReason" rows="4" placeholder="What is wrong with it? Be specific — this is what they have to act on."></textarea>'
+            +'<div id="wfRejErr" class="wf-rej-err" style="display:none"></div>'
+          : '')
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
+        +'<button class="ac-btn danger" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+','+(ends?'true':'false')+')">'
+        +'<i class="fa-solid fa-ban"></i> '+(ends?('Reject and delete this '+esc2(noun)):'Reject')+'</button></div>','md');
+    if(wantsReason) setTimeout(function(){ const t=$('wfRejReason'); if(t)try{t.focus();}catch(_){} },40);
+  };
+  window.wfRejectConfirm=async function(fcsId, needReason, ends){
+    const box=$('wfRejReason'), err=$('wfRejErr');
+    const reason=((box&&box.value)||'').trim();
+    if(needReason && reason.length<3){
+      if(err){ err.textContent='Please say why — this is all they will have to go on.'; err.style.display='block'; }
+      if(box)try{box.focus();}catch(_){}
+      return;
+    }
+    const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    /* A rejection that ends the instance deletes it outright, so its files need collecting
+       here too - once wf_reject() has run there is no instance left to read them from. */
+    let doomed=[];
+    if(ends){ try{
+      const {data:cs}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      if(cs&&cs.case_id) doomed=await wfCaseFilePaths([cs.case_id]);
+    }catch(e){} }
+    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    catch(e){
+      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-ban"></i> Reject'; }
+      toast('Could not reject: '+((e&&e.message)||e),'err'); return;
+    }
+    closeModal();
+    await wfPurgeCaseFiles(doomed);
+    toast(ends?'Rejected — deleted, and an email has gone out':'Step rejected — sent back to the previous person','ok');
+    navTo('tasks/work');
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
   // From a task-list row: same confirmation popup, no navigation needed.
@@ -3294,6 +3681,56 @@
     .wf-tlcard .tp-f .v{overflow-wrap:anywhere;word-break:break-word;margin-top:2px}
     .wf-tlcard .tp-f-wide{flex:1 1 100%;width:100%;min-width:0}
     /* ---- day-wise instance: table on a wide screen, stacked blocks on a phone ---- */
+    /* UPI field: a typed box with a real dropdown of everything saved. Opening the list always
+       shows every id — what is typed is not a filter, they are there to be picked. */
+    .wf-evt-upi.wf-bad{border-color:#dc2626;background:#fef2f2}
+    /* Amount: a line per thing claimed for — what it is, then what it cost. */
+    .wf-amt{flex:1;min-width:0}
+    .wf-amt-plain .wf-amt-seg{width:100%;height:38px;border:1px solid var(--line);border-radius:9px;
+      background:var(--bg-card,#fff);color:var(--ink);font:inherit;padding:0 11px;outline:none}
+    .wf-amt-plain .wf-amt-seg:focus{border-color:var(--brand)}
+    .wf-amt-list{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--bg-card,#fff)}
+    .wf-amt-line{display:flex;align-items:center;gap:8px;padding:7px 11px;border-top:1px solid var(--line);cursor:text}
+    .wf-amt-line:first-child{border-top:0}
+    .wf-amt-line:focus-within{background:#f8faff}
+    /* The label sizes to its own word instead of stretching across the row — as flex:1 it took all
+       the spare width and the left half of every line read as a heavy empty block. Lighter weight
+       and colour too, so the figure is what the eye lands on. */
+    .wf-amt-for{flex:0 1 auto;max-width:52%;font-size:12px;font-weight:600;color:var(--slate);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-amt-cur{color:var(--slate);font-size:12px;flex:none;margin-left:auto}
+    .wf-amt-seg{flex:0 1 92px;width:92px;min-width:56px;border:0;background:transparent;color:var(--ink);
+      font:inherit;font-weight:600;padding:2px 0;outline:none;text-align:right;font-variant-numeric:tabular-nums}
+    .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
+    .wf-amt-total{display:flex;align-items:baseline;gap:9px;margin-top:6px;padding:0 2px;font-size:12.5px}
+    .wf-amt-total>span:first-child{color:var(--slate);font-size:10.5px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.04em}
+    .wf-amt-total b{color:var(--ink);font-size:13.5px}
+    .wf-amt-miss{margin-left:auto;color:#b45309;font-weight:600;font-size:11.5px}
+    .wf-rej-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
+      background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:13px;line-height:1.55}
+    .wf-rej-warn i{margin-top:2px}
+    .wf-rej-note{padding:10px 12px;margin-bottom:14px;background:var(--bg,#f8fafc);border:1px solid var(--line);
+      border-radius:9px;color:var(--slate);font-size:12.5px;line-height:1.5}
+    .wf-rej-err{margin-top:7px;color:#dc2626;font-size:12.5px;font-weight:600}
+    .wf-upi-wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center}
+    .wf-upi-wrap .wf-evt-upi{width:100%;padding-right:32px}
+    .wf-upi-caret{position:absolute;right:4px;top:50%;transform:translateY(-50%);height:26px;width:26px;
+      display:flex;align-items:center;justify-content:center;border:0;background:transparent;
+      color:var(--slate);cursor:pointer;border-radius:6px;font-size:11px}
+    .wf-upi-caret:hover{background:var(--bg,#f1f5f9);color:var(--ink)}
+    .wf-upi-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;
+      background:var(--bg-card,#fff);border:1px solid var(--line);border-radius:9px;
+      box-shadow:0 12px 28px rgba(15,23,42,.14);max-height:210px;overflow-y:auto;padding:4px}
+    .wf-upi-wrap.open .wf-upi-panel{display:block}
+    .wf-upi-opt{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;
+      font-size:13px;color:var(--ink);cursor:pointer}
+    .wf-upi-opt:hover{background:var(--bg,#f1f5f9)}
+    .wf-upi-opt.on{color:var(--brand);font-weight:650}
+    .wf-upi-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .wf-upi-ic{font-size:10px;color:var(--slate);width:13px;text-align:center;flex:none}
+    .wf-upi-opt.on .wf-upi-ic{color:var(--brand)}
+    .wf-upi-empty{padding:9px 10px;font-size:12px;color:var(--slate);line-height:1.5}
     .wf-evt-selopt{display:flex;align-items:center;gap:9px}
     .wf-evt-selic{width:15px;text-align:center;font-size:11.5px;color:var(--slate);flex:none}
     .wf-evt-selopt.on .wf-evt-selic{color:var(--brand)}
@@ -5558,7 +5995,7 @@
         let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -5598,7 +6035,7 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):''};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -5976,7 +6413,8 @@
     // Reject sits beside Receive: the choice on arrival is take it or send it back. Once received
     // it is yours, and the way on is Forward. (Being offered a shared step is enough to reject it
     // — wf_reject accepts a candidate, so it no longer has to be claimed first.)
-    const wfRejectBtn=wfIsFirst?'':`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo&&wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`;
+    // every step can be rejected, the first one included — rejecting that one ends the instance
+    const wfRejectBtn=`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo&&wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`;
     if(opt.checkable&&wfInfo){
       if(wfNeedsReceive){
         wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfRejectBtn}</div>`;
