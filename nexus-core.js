@@ -11277,20 +11277,40 @@ function trNextPinRank(){
   const ranks=(TR_ROWS||[]).filter(function(r){return r.pinned&&typeof r.pin_rank==='number';}).map(function(r){return r.pin_rank;});
   return ranks.length?Math.max.apply(null,ranks)+1:0;
 }
+/* A call that never produced a transcript is not a readable row: no transcript, no criteria, no QA.
+   Half a day's feed is like this - no recording sent, a ring-out under 60s, or hold music only - and
+   they were burying the calls that DO have something to read. They stay in the database and stay
+   counted (they are why "69 received" becomes "30 transcribed"); they are simply not listed.
+   "Not transcribed" on the KPI row brings them up when someone wants to see why. */
+const TR_NO_TRANSCRIPT = ['no_recording', 'too_short', 'non_transcribable'];
+function trIsNilRow(r){
+  return TR_NO_TRANSCRIPT.indexOf(String((r && r.status) || '')) !== -1;
+}
 // KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
 function trApplyFilter(rows){
+  if(TR_FILTER==='nil')return rows.filter(trIsNilRow);
+  // every other view hides them
+  rows=rows.filter(function(r){ return !trIsNilRow(r); });
   if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
   if(TR_FILTER==='notqualified')return rows.filter(function(r){return r.qualification==='Not Qualified';});
-  if(TR_FILTER==='processing')return rows.filter(function(r){return r.status==='processing';});
+  // 'queued' counts too: from the user's side a call waiting its turn and one mid-transcription
+  // are the same thing, and the card counts both - a card whose number does not match what
+  // clicking it shows is worse than either number alone.
+  if(TR_FILTER==='processing')return rows.filter(function(r){return r.status==='processing'||r.status==='queued';});
   return rows;
 }
 window.trSetFilter=function(f){TR_FILTER=(TR_FILTER===f)?'all':f;trRenderList();};
 function trKpisHtml(rows){
   const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
   const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
-  const proc=rows.filter(function(r){return r.status==='processing';}).length;
-  const cards=[['all','Calls',rows.length,'all time','var(--slate)'],['qualified','Qualified',qual,'leads matched','#16a34a'],['notqualified','Not Qualified',notq,'did not match','#dc2626'],['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
-  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
+  const proc=rows.filter(function(r){return r.status==='processing'||r.status==='queued';}).length;
+  /* Counted from ALL rows, not the listed ones: the point of showing "received" against
+     "transcribed" is that the gap is visible rather than the day looking smaller than it was. */
+  const nil=rows.filter(trIsNilRow).length;
+  // Only actually-finished calls. rows.length-nil would count the ones still queued as transcribed.
+  const done=rows.filter(function(r){return r.status==='done';}).length;
+  const cards=[['all','Transcribed',done,rows.length+' calls received','var(--slate)'],['qualified','Qualified',qual,'leads matched','#16a34a'],['notqualified','Not Qualified',notq,'did not match','#dc2626'],['nil','Not transcribed',nil,'no audio / too short / no talk','#64748b'],['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
+  return '<div class="grid kpis" style="grid-template-columns:repeat('+cards.length+',1fr)">'+cards.map(function(c){
     const active=TR_FILTER===c[0];
     return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
       +'<div class="lbl" style="margin-bottom:7px">'+esc(c[1])+(active?' <i class="fa-solid fa-filter" style="font-size:10px"></i>':'')+'</div>'
