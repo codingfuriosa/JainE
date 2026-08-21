@@ -8354,6 +8354,24 @@ window.rtDelete=async function(){if(!recGuard())return;
 // staff should be the only ones with Share access.
 const RT_SHARE_ALLOWED=['shuchandra das','khushbu singh','uzma ahmed','administrator','abhay mati'];
 function rtShareNorm(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+/* Whether this person has granted the app permission to send mail from their own Gmail. Read from
+   acc.google_connections, a view that exposes only email / connected_at / can_send_mail - never a
+   token. Connecting for Calendar alone does NOT include sending, so this is a separate question from
+   "are they connected". */
+let RT_CAN_SEND_AS_SELF=null;
+async function rtShareCheckGmail(){
+  try{
+    const {data}=await sb.schema('acc').from('google_connections')
+      .select('can_send_mail').eq('email',(state.email||'').toLowerCase()).maybeSingle();
+    RT_CAN_SEND_AS_SELF=!!(data&&data.can_send_mail);
+  }catch(e){ RT_CAN_SEND_AS_SELF=false; }
+  return RT_CAN_SEND_AS_SELF;
+}
+window.rtShareConnectGoogle=function(){
+  // Same one-time consent the Meetings page uses; it now asks for mail-sending as well.
+  location.href='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-oauth-start?email='
+    +encodeURIComponent(state.email||'');
+};
 function rtCanShare(){
   const nm=rtShareNorm((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'');
   return RT_SHARE_ALLOWED.includes(nm);
@@ -8371,8 +8389,9 @@ window.rtShareAddN=function(){
   const cont=$('rtEmailFields');if(!cont)return;
   for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
 };
-window.rtShare=function(){
+window.rtShare=async function(){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  await rtShareCheckGmail();
   const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
   if(sel.length!==1){toast('Select exactly one test to share','err');return;}
   const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
@@ -8382,7 +8401,12 @@ window.rtShare=function(){
   const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    <div style="background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--slate);margin-bottom:4px">Sending as <b style="color:var(--ink)">${esc(senderName)}</b> · ${esc(state.email||'')}</div>
+    ${RT_CAN_SEND_AS_SELF
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b> — it will be in your own Sent folder, and replies come straight to you.</div>`
+      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
+           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you, with replies pointed at <b>${esc(state.email||'')}</b>. Connect your Google account to send it from your own address instead.</div>
+           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
+         </div>`}
     <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
     <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
     <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
@@ -8425,7 +8449,16 @@ window.rtShareSend=async function(id){
     });
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
-    closeModal();toast('Test shared with '+emails.length+' candidate'+(emails.length>1?'s':''),'ok');
+    closeModal();
+    const n=Number(out.sent||emails.length);
+    const who=(out.via==='gmail')
+      ? ('from '+(out.sent_as||'your address'))
+      : 'from the shared address (replies come to you)';
+    toast('Test shared with '+n+' candidate'+(n>1?'s':'')+' '+who,'ok');
+    // one failed address among several should not read as a clean success
+    if(Array.isArray(out.failed)&&out.failed.length){
+      toast(out.failed.length+' address'+(out.failed.length>1?'es':'')+' could not be reached','warn');
+    }
   }catch(e){
     if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
