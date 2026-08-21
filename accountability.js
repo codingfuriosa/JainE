@@ -3144,8 +3144,15 @@
       if(!e.target||!e.target.closest) return;
       if(!e.target.closest('.wf-evt-selbox') && !e.target.closest('.wf-upi-wrap')) wfCloseAllPanels();
     });
-    // capture, so a scroll inside the modal body counts and not only one on the page itself
-    window.addEventListener('scroll', wfCloseAllPanels, true);
+    /* Capture, so a scroll of the modal body counts and not only one of the page itself. But the
+       panel is scrollable in its own right, and in capture mode its OWN scroll arrives here too -
+       which shut the list the instant you tried to reach the options at the bottom of it. A scroll
+       that started inside an open panel is the one kind that must not dismiss it. */
+    window.addEventListener('scroll', function(e){
+      const t=e&&e.target;
+      if(t&&t.closest&&(t.closest('.wf-evt-selpanel')||t.closest('.wf-upi-panel'))) return;
+      wfCloseAllPanels();
+    }, true);
     window.addEventListener('resize', wfCloseAllPanels);
   }
   window.wfEvtSelToggle=function(btn){
