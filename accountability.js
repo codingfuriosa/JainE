@@ -2801,8 +2801,14 @@
   window.wfUpiToggle=function(btn){
     const wrap=btn&&btn.closest('.wf-upi-wrap'); if(!wrap) return;
     const open=wrap.classList.contains('open');
-    document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){ w.classList.remove('open'); });
-    if(!open){ wrap.classList.add('open'); wfUpiFillPanel(wrap); }
+    wfCloseAllPanels();
+    if(!open){
+      wrap.classList.add('open');
+      wfUpiFillPanel(wrap);
+      // measured off the whole field, not the little caret button, so the list lines up under it
+      wfPinPanel(wrap, wrap.querySelector('.wf-upi-panel'));
+      wfWirePanelDismiss();
+    }
   };
   window.wfUpiPick=function(el){
     const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
@@ -3036,6 +3042,8 @@
     });
     const btn=box.querySelector('.wf-evt-selbtn');
     if(btn) btn.innerHTML=wfDuoBtnLabel(next)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
+    // the panel stays open for the second section, so keep it against the field
+    if(btn) wfPinPanel(btn, box.querySelector('.wf-evt-selpanel'));
     wfShowWhenSync(box.closest('.wf-evt-exp')||box.closest('.wf-evt-group')||document);
     // the Amount boxes are named after what was just chosen, so they are rebuilt with it
     wfAmtMatch(box);
@@ -3096,17 +3104,58 @@
     if(e.target.closest && e.target.closest('.wf-upi-wrap')) return;
     document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){ w.classList.remove('open'); });
   });
+  /* Places an open panel against its field using viewport coordinates. Needed because the panel
+     lives inside the modal body, which scrolls - so as an absolutely-positioned child it is clipped
+     at the modal's edge however high its z-index. Fixed positioning takes it out of that box
+     altogether; the trade is that it no longer moves with the content, which is why anything that
+     scrolls closes it. */
+  function wfPinPanel(anchor, panel){
+    if(!anchor||!panel) return;
+    const r=anchor.getBoundingClientRect();
+    const vh=window.innerHeight||document.documentElement.clientHeight;
+    const below=vh-r.bottom-10, above=r.top-10;
+    // whichever side has more room, capped so it can never run off either end
+    const useAbove=below<180 && above>below;
+    const space=Math.max(120, Math.min(300, useAbove?above:below));
+    panel.style.position='fixed';
+    panel.style.left=r.left+'px';
+    panel.style.width=r.width+'px';
+    panel.style.right='auto';
+    panel.style.maxHeight=space+'px';
+    if(useAbove){ panel.style.top='auto'; panel.style.bottom=(vh-r.top+5)+'px'; }
+    else { panel.style.bottom='auto'; panel.style.top=(r.bottom+5)+'px'; }
+  }
+  function wfUnpinPanel(panel){
+    if(!panel) return;
+    ['position','left','width','right','maxHeight','top','bottom'].forEach(function(k){ panel.style[k]=''; });
+  }
+  // A pinned panel does not travel with the content it is attached to, so any scroll closes it
+  // rather than leaving it floating beside nothing.
+  function wfCloseAllPanels(){
+    document.querySelectorAll('.wf-evt-selbox.open').forEach(function(x){
+      x.classList.remove('open'); wfUnpinPanel(x.querySelector('.wf-evt-selpanel')); });
+    document.querySelectorAll('.wf-upi-wrap.open').forEach(function(w){
+      w.classList.remove('open'); wfUnpinPanel(w.querySelector('.wf-upi-panel')); });
+  }
+  window.wfCloseAllPanels=wfCloseAllPanels;
+  function wfWirePanelDismiss(){
+    if(window._wfPanelWired) return; window._wfPanelWired=true;
+    document.addEventListener('click',function(e){
+      if(!e.target||!e.target.closest) return;
+      if(!e.target.closest('.wf-evt-selbox') && !e.target.closest('.wf-upi-wrap')) wfCloseAllPanels();
+    });
+    // capture, so a scroll inside the modal body counts and not only one on the page itself
+    window.addEventListener('scroll', wfCloseAllPanels, true);
+    window.addEventListener('resize', wfCloseAllPanels);
+  }
   window.wfEvtSelToggle=function(btn){
     const box=btn.closest('.wf-evt-selbox'); if(!box) return;
     const open=box.classList.contains('open');
-    document.querySelectorAll('.wf-evt-selbox.open').forEach(function(x){x.classList.remove('open');});
-    if(!open){ box.classList.add('open');
-      if(!window._wfEvtSelWired){ window._wfEvtSelWired=true;
-        document.addEventListener('click',function(e){
-          if(!e.target||!e.target.closest||!e.target.closest('.wf-evt-selbox'))
-            document.querySelectorAll('.wf-evt-selbox.open').forEach(function(x){x.classList.remove('open');});
-        });
-      }
+    wfCloseAllPanels();
+    if(!open){
+      box.classList.add('open');
+      wfPinPanel(btn, box.querySelector('.wf-evt-selpanel'));
+      wfWirePanelDismiss();
     }
   };
   window.wfEvtSelPick=function(opt){
@@ -4503,8 +4552,9 @@
        panel alone is not enough - a z-index only competes within its own stacking context, so the
        BOX it sits in has to be lifted too. Applied only while open, otherwise every closed field
        would sit above the buttons for no reason. */
-    .wf-evt-selbox.open,.wf-upi-wrap.open{position:relative;z-index:220}
-    .wf-evt-selbox.open .wf-evt-selpanel,.wf-upi-wrap.open .wf-upi-panel{z-index:221}
+    /* Pinned to the viewport by wfPinPanel, so it clears both the sticky button strip AND the
+       modal's own overflow clipping - which no z-index alone could do. */
+    .wf-evt-selbox.open .wf-evt-selpanel,.wf-upi-wrap.open .wf-upi-panel{z-index:1200}
     .modal-foot{z-index:5}
     .wf-evt-selopt{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:7px;
       font-size:13.5px;color:var(--ink);cursor:pointer}
