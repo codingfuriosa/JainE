@@ -952,9 +952,13 @@
   function wfDurText(v,u){ if(v==null||v==='')return ''; u=u||'days'; return v+' '+(Number(v)===1?String(u).replace(/s$/,''):u); }
   function wfAddDuration(base,value,unit){ const d=new Date(base.getTime()); value=Number(value)||0; if(unit==='hours')d.setHours(d.getHours()+value); else if(unit==='weeks')d.setDate(d.getDate()+value*7); else d.setDate(d.getDate()+value); return d; }
   function wfDateOnly(d){ const z=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
-  function wfDT(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
-  // Same as wfDT but always carries the year too, for the timeline cards.
-  function wfDTFull(iso){ if(!iso)return '—'; try{ return new Date(iso).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(e){ return String(iso); } }
+  // Every Workflow date reads DD-MM-YYYY, built by hand rather than left to toLocaleString's
+  // locale-dependent month/day ordering.
+  function wfDMY(d){ const z=function(n){return String(n).padStart(2,'0');}; return z(d.getDate())+'-'+z(d.getMonth()+1)+'-'+d.getFullYear(); }
+  function wfDT(iso){ if(!iso)return '—'; try{ const d=new Date(iso); const z=function(n){return String(n).padStart(2,'0');}; return wfDMY(d)+', '+z(d.getHours())+':'+z(d.getMinutes()); }catch(e){ return String(iso); } }
+  // Same as wfDT — kept as a separate name since callers distinguish "brief" vs "full" contexts,
+  // even though both now render the same DD-MM-YYYY, HH:MM shape.
+  function wfDTFull(iso){ return wfDT(iso); }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
   // How an instance's number reads on screen. The bill workflow pads to a 5-digit Id (00042),
@@ -1077,15 +1081,15 @@
     const sumField=(flow&&flow.tracker_sum_field||'').trim();
     let full;
     if(listFields){
-      full=listFields.map(function(l){ return byLabel[l]||''; }).filter(Boolean).join(', ');
+      full=listFields.map(function(l){ return wfDetailDisp(byLabel[l]||''); }).filter(Boolean).join(', ');
     } else {
       const base=c.title||'';
       let vals;
       if(cardFields){
-        vals=cardFields.map(function(l){ return byLabel[l]||''; }).filter(Boolean);
+        vals=cardFields.map(function(l){ return wfDetailDisp(byLabel[l]||''); }).filter(Boolean);
         if(sumField){ const total=wfSumField(byLabel[sumField]); if(total) vals.push(wfMoney(total)); }
       } else {
-        vals=det.map(function(d){return (d&&(d.value||d.label))||'';}).filter(Boolean);
+        vals=det.map(function(d){return wfDetailDisp((d&&(d.value||d.label))||'');}).filter(Boolean);
       }
       full=base+(vals.length?(' : '+vals.join(', ')):'');
     }
@@ -1225,7 +1229,14 @@
   // nothing after it. An uploaded file shows as "file attached" rather than its raw storage path.
   function wfDetailDisp(v){
     v=(v==null?'':String(v));
-    if(v.indexOf('s3:')!==0) return v;
+    if(v.indexOf('s3:')!==0){
+      // A field typed through a native date input stores plain ISO (2026-08-14) — shown as
+      // DD-MM-YYYY here, same as every other date in the Workflow module. Anything that isn't
+      // exactly that shape (free text, a multi-entry list of dates, etc.) passes through as-is.
+      const m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(m) return m[3]+'-'+m[2]+'-'+m[1];
+      return v;
+    }
     const n=v.split(',').filter(function(s){return s.trim().indexOf('s3:')===0;}).length;
     return n>1?(n+' files attached'):'file attached';
   }
@@ -1244,7 +1255,7 @@
         if(k===sumField){ const t=wfSumField(raw); if(t) out.push('Total '+wfMoney(t)); return; }
         // the days, and any multi-select values inside them, all read as one comma-separated list
         const flat=[]; wfSplitSets(raw).forEach(function(s){
-          String(s).split(',').forEach(function(x){ const v=x.trim(); if(v&&flat.indexOf(v)===-1) flat.push(v); }); });
+          String(s).split(',').forEach(function(x){ const v=wfDetailDisp(x.trim()); if(v&&flat.indexOf(v)===-1) flat.push(v); }); });
         if(flat.length) out.push(flat.join(', '));
       });
       return out.join(' · ');
@@ -1338,7 +1349,7 @@
             if(!val) return '<td><span class="wf-dw-none">—</span></td>';
             if(c===sumField) return '<td class="wf-dw-amt">'+money(val)+'</td>';
             if(c==='Remarks') return '<td class="wf-dw-rem">'+esc2(val).replace(/\n/g,'<br>')+'</td>';
-            return '<td>'+esc2(val)+'</td>';
+            return '<td>'+esc2(wfDetailDisp(val))+'</td>';
           }).join('')
         +(d.anyAtt?('<td class="wf-dw-attcol">'+wfDayAttHtml(r.__att)+'</td>'):'')
       +'</tr>';
@@ -1947,7 +1958,7 @@
      Tracker lives on bill-style workflows only — ordinary workflows never show this tab. */
   function wfTrackDT(iso){ if(!iso) return ''; try{ const d=new Date(iso);
     const p=function(n){return String(n).padStart(2,'0');};
-    return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+    return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
   }catch(e){ return String(iso); } }
   // Overshoot against the planned date, in the sheet's own "Dd Hh" shape. Blank when on time.
   function wfTrackDelay(planned,actual){
@@ -2053,12 +2064,12 @@
 
     // A multi-entry workflow's comma-joined value (several sets concatenated) can run long —
     // clip it in the cell with an ellipsis, full text still available on hover.
-    const cellText=function(v){ v=String(v||''); return v.length>60 ? esc2(v.slice(0,59))+'…' : esc2(v); };
+    const cellText=function(v){ v=wfDetailDisp(v); return v.length>60 ? esc2(v.slice(0,59))+'…' : esc2(v); };
     const body=cases.map(function(c){
       const by={}; (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
       const extraTds=sumField
         ? '<td>'+esc2(wfNm(c.created_by)||'')+'</td><td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
-        : tmpl.map(function(f){ return '<td title="'+esc2(by[f.label]||'')+'">'+cellText(by[f.label])+'</td>'; }).join('');
+        : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join('');
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
         const cs=byCase[c.id]&&byCase[c.id][s.seq];
