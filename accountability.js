@@ -6620,7 +6620,10 @@
         // person/candidates/owner_from_trigger come along so the Forward button can name who the
         // step is about to go to, rather than saying "the next person".
         let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title').in('case_id',caseIds); allc=(r&&r.data)||[]; }
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
+           It was missing from this select, so the owner silently vanished from the name shown in the
+           list - for everyone, not just the person who raised it. */
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details,created_by').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field').in('id',flowIds); flowsD=(r&&r.data)||[]; }
