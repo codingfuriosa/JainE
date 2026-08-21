@@ -10657,12 +10657,23 @@ function trStatusTag(st){
 function trPhoneNorm(s){s=String(s||'').replace(/[^\d]/g,'');if(s.length===12&&s.slice(0,2)==='91')s=s.slice(2);if(s.length===11&&s.charAt(0)==='0')s=s.slice(1);return s;}
 function trPhoneValid(s){return /^[6-9]\d{9}$/.test(trPhoneNorm(s));}
 function trPhoneFmt(s){const d=trPhoneNorm(s);if(/^[6-9]\d{9}$/.test(d))return '+91 '+d.slice(0,5)+' '+d.slice(5);return s?esc(String(s)):'—';}
+/* The three outcomes, in one place so a badge, a KPI card and a banner cannot drift apart.
+   Follow-Up exists because "Qualified or not" cannot describe a customer who asked to be called back
+   later: they are neither a lead that matched nor one that was lost, and pushing them into Not
+   Qualified is exactly how a live lead gets written off. */
+const TR_OUTCOMES = {
+  'Qualified':     { colour:'#16a34a', bg:'#dcfce7', ink:'#166534', tag:'t-green', icon:'fa-circle-check' },
+  'Follow-Up':     { colour:'#d97706', bg:'#fef3c7', ink:'#92400e', tag:'t-amber', icon:'fa-clock-rotate-left' },
+  'Not Qualified': { colour:'#dc2626', bg:'#fee2e2', ink:'#991b1b', tag:'t-red',   icon:'fa-circle-xmark' }
+};
+function trOutcome(q){ return TR_OUTCOMES[q] || null; }
+
 // Qualification / status badge shown in the list + detail.
 function trQualTag(r){
-  if(r.status==='processing')return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Analysing</span>';
+  if(r.status==='processing'||r.status==='queued')return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Analysing</span>';
   if(r.status==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
-  if(r.qualification==='Qualified')return '<span class="tag t-green"><i class="fa-solid fa-circle-check"></i> Qualified</span>';
-  if(r.qualification==='Not Qualified')return '<span class="tag t-red"><i class="fa-solid fa-circle-xmark"></i> Not Qualified</span>';
+  const o=trOutcome(r.qualification);
+  if(o)return '<span class="tag '+o.tag+'"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>';
   return '<span class="tag t-gray">—</span>';
 }
 
@@ -11286,30 +11297,40 @@ const TR_NO_TRANSCRIPT = ['no_recording', 'too_short', 'non_transcribable'];
 function trIsNilRow(r){
   return TR_NO_TRANSCRIPT.indexOf(String((r && r.status) || '')) !== -1;
 }
+// A call still waiting its turn has nothing to read either - no transcript, no criteria, no outcome.
+// It is counted on the Processing card and listed there, but not mixed in with finished work.
+function trIsPendingRow(r){
+  const st=String((r && r.status) || '');
+  return st === 'queued' || st === 'processing';
+}
 // KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
 function trApplyFilter(rows){
   if(TR_FILTER==='nil')return rows.filter(trIsNilRow);
-  // every other view hides them
-  rows=rows.filter(function(r){ return !trIsNilRow(r); });
+  if(TR_FILTER==='processing')return rows.filter(trIsPendingRow);
+  // every other view lists finished calls only
+  rows=rows.filter(function(r){ return !trIsNilRow(r) && !trIsPendingRow(r); });
   if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
+  if(TR_FILTER==='followup')return rows.filter(function(r){return r.qualification==='Follow-Up';});
   if(TR_FILTER==='notqualified')return rows.filter(function(r){return r.qualification==='Not Qualified';});
-  // 'queued' counts too: from the user's side a call waiting its turn and one mid-transcription
-  // are the same thing, and the card counts both - a card whose number does not match what
-  // clicking it shows is worse than either number alone.
-  if(TR_FILTER==='processing')return rows.filter(function(r){return r.status==='processing'||r.status==='queued';});
   return rows;
 }
 window.trSetFilter=function(f){TR_FILTER=(TR_FILTER===f)?'all':f;trRenderList();};
 function trKpisHtml(rows){
   const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
   const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
-  const proc=rows.filter(function(r){return r.status==='processing'||r.status==='queued';}).length;
+  const foll=rows.filter(function(r){return r.qualification==='Follow-Up';}).length;
+  const proc=rows.filter(trIsPendingRow).length;
   /* Counted from ALL rows, not the listed ones: the point of showing "received" against
      "transcribed" is that the gap is visible rather than the day looking smaller than it was. */
   const nil=rows.filter(trIsNilRow).length;
   // Only actually-finished calls. rows.length-nil would count the ones still queued as transcribed.
   const done=rows.filter(function(r){return r.status==='done';}).length;
-  const cards=[['all','Transcribed',done,rows.length+' calls received','var(--slate)'],['qualified','Qualified',qual,'leads matched','#16a34a'],['notqualified','Not Qualified',notq,'did not match','#dc2626'],['nil','Not transcribed',nil,'no audio / too short / no talk','#64748b'],['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
+  const cards=[['all','Transcribed',done,rows.length+' calls received','var(--slate)'],
+    ['qualified','Qualified',qual,'leads matched',TR_OUTCOMES['Qualified'].colour],
+    ['followup','Follow-Up',foll,'call back later',TR_OUTCOMES['Follow-Up'].colour],
+    ['notqualified','Not Qualified',notq,'did not match',TR_OUTCOMES['Not Qualified'].colour],
+    ['nil','Not transcribed',nil,'no audio / too short / no talk','#64748b'],
+    ['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
   return '<div class="grid kpis" style="grid-template-columns:repeat('+cards.length+',1fr)">'+cards.map(function(c){
     const active=TR_FILTER===c[0];
     return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
@@ -11556,8 +11577,8 @@ function trExportHtml(rows,heading){
   const now=new Date();
   const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   const cards=rows.map(function(r){
-    const qb=r.qualification==='Qualified';
-    const badge=r.qualification?('<span class="badge" style="background:'+(qb?'#dcfce7':'#fee2e2')+';color:'+(qb?'#166534':'#991b1b')+'">'+esc(r.qualification)+'</span>'):'';
+    const o=trOutcome(r.qualification);
+    const badge=o?('<span class="badge" style="background:'+o.bg+';color:'+o.ink+'">'+esc(r.qualification)+'</span>'):'';
     const langs=(r.languages&&r.languages.length)?r.languages.map(trLangName).join(', '):'—';
     const reasonHtml=r.reason?('<div class="sec"><div class="sec-h">Qualification reason</div><div class="pre">'+esc(r.reason)+'</div></div>'):'';
     const summaryHtml=r.summary?('<div class="sec"><div class="sec-h">Summary</div><div class="pre">'+esc(r.summary)+'</div></div>'):'';
@@ -11841,8 +11862,8 @@ async function trDetail(v,id){
   const name=phone?trPhoneFmt(phone):(r.file_name||'Recording');
   const a=r.analysis||{};
   const sub=(r.customer_name?esc(r.customer_name)+' · ':'')+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0]);
-  const qb=r.qualification==='Qualified';
-  const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
+  const o=trOutcome(r.qualification)||TR_OUTCOMES['Not Qualified'];
+  const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
   let comments=[];
   try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
@@ -11898,12 +11919,12 @@ window.trCmDelete=async function(cid){
 
 function trCriteriaHtml(r){
   const c=r.criteria||{};
-  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction'],['follow_up_requested','Asked to be called back later']];
   return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it,idx){
     const ok=c[it[0]]===true;
     const badge=(idx===0)?'<span style="font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 5px;margin-left:6px">PRIORITY</span>':'';
     return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+badge+'</div>';
-  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match.</div></div>';
+  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match. If neither matched but the customer asked to be <b>called back later</b>, it is a <b>Follow-Up</b> rather than lost.</div></div>';
 }
 function trAnalysisHtml(r){
   const a=r.analysis||{};
