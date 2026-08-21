@@ -2878,26 +2878,81 @@
      multi-select fields, in the order those fields appear. Amounts already typed are kept by WHAT
      they were for, not by position. */
   window.wfAmtMatch=function(fromBox){
-    const scope=(fromBox&&(fromBox.closest('.wf-evt-group')||fromBox.closest('#wfEvtDetails')));
+    /* The nearest expense first: on a date-grouped form a day holds several expenses, each with its
+       own dropdown and its own Amount, so widening to the whole date container would rebuild the
+       wrong one. */
+    const scope=(fromBox&&(fromBox.closest('.wf-evt-exp')||fromBox.closest('.wf-evt-group')||fromBox.closest('#wfEvtDetails')));
     if(!scope) return;
     const amt=scope.querySelector('.wf-amt'); if(!amt) return;
     const keys=[];
+    /* Each box is named after WHAT it is for - "Auto", "Lunch" - rather than a fixed
+       "Transport Cost / Food Cost". Two boxes when a meal was claimed as well, one when it was not:
+       an empty "Food Cost" line invited a figure against a meal nobody had. */
+    [].slice.call(scope.querySelectorAll('.wf-duo')).forEach(function(box){
+      const hid=box.querySelector('.wf-evt-value');
+      const parts=wfDuoParts((hid&&hid.value)||'');
+      [parts.a,parts.b].forEach(function(k){ if(String(k||'').trim()) keys.push(String(k).trim()); });
+    });
     [].slice.call(scope.querySelectorAll('.wf-evt-selbox[data-multi="1"]')).forEach(function(box){
       const hid=box.querySelector('.wf-evt-value');
       String((hid&&hid.value)||'').split(',').map(function(x){return x.trim();})
         .filter(Boolean).forEach(function(k){ keys.push(k); });
     });
-    const had={}, spare=[];
-    [].slice.call(amt.querySelectorAll('.wf-amt-seg')).forEach(function(i){
+    const had={}, spare=[], ordered=[];
+    const segs=[].slice.call(amt.querySelectorAll('.wf-amt-seg'));
+    segs.forEach(function(i){
       const k=i.getAttribute('data-k')||'', v=(i.value||'').trim();
+      ordered.push(v);
       if(k) had[k]=v; else if(v) spare.push(v);
     });
+    /* Opening a saved claim: the figures are in the stored value, and the boxes have not been drawn
+       from it yet. Falling back to it means editing an existing expense keeps its amounts instead of
+       blanking them the moment the slots are rebuilt. */
+    if(!segs.length){
+      const hid0=amt.querySelector('.wf-evt-value');
+      String((hid0&&hid0.value)||'').split(',').forEach(function(x){ spare.push(x.trim()); });
+    }
+    /* A figure is kept by WHAT it was for first, and failing that by where it sat. Position matters
+       because slot 1 is always the transport and slot 2 always the meal: changing Lunch to Dinner
+       renames the box but the meal still cost what it cost, so re-typing it would be busywork. */
     const pairs=keys.length
-      ? keys.map(function(k,i){ return {k:k, v:(had[k]!=null?had[k]:(spare[i]||''))}; })
-      : [{k:'', v:(spare[0]||'')}];
+      ? keys.map(function(k,i){ return {k:k, v:(had[k]!=null?had[k]:(ordered[i]||spare[i]||''))}; })
+      : [{k:'', v:(ordered[0]||spare[0]||'')}];
     const box=amt.querySelector('.wf-amt-box'); if(!box) return;
     box.innerHTML=wfAmtSlots(pairs);
     wfAmtCollect(amt);
+    wfAmtGate(scope);
+  };
+  /* Amount stays shut until the description is filled in: a figure with nothing saying what it was
+     for is exactly what an approver has to send back, so it is better not to be able to enter one.
+     Disabled rather than hidden, with a line saying why - a box that simply is not there reads as a
+     bug. */
+  function wfAmtGate(scope){
+    if(!scope||!scope.querySelectorAll) return;
+    const rows=[].slice.call(scope.querySelectorAll('.wf-evt-row'));
+    const find=function(label){
+      return rows.filter(function(r){ return eq(((r.querySelector('.wf-evt-label')||{}).value||'').trim(), label); })[0];
+    };
+    const amtRow=rows.filter(function(r){ return r.querySelector('.wf-amt'); })[0];
+    if(!amtRow) return;
+    const need=amtRow.getAttribute('data-requires')||'';
+    if(!need) return;
+    const src=find(need);
+    const filled=!!String(((src&&src.querySelector('.wf-evt-value'))||{}).value||'').trim();
+    const amt=amtRow.querySelector('.wf-amt');
+    amt.classList.toggle('locked', !filled);
+    [].slice.call(amt.querySelectorAll('.wf-amt-seg')).forEach(function(i){ i.disabled=!filled; });
+    let note=amt.querySelector('.wf-amt-lock');
+    if(!filled){
+      if(!note){ note=document.createElement('div'); note.className='wf-amt-lock'; amt.appendChild(note); }
+      note.innerHTML='<i class="fa-solid fa-lock"></i> Fill in "'+esc2(need)+'" first';
+    } else if(note){ note.remove(); }
+  }
+  // Every expense on the form, after a render or any typing.
+  window.wfAmtSyncAll=function(){
+    const box=$('wfEvtDetails'); if(!box) return;
+    const units=[].slice.call(box.querySelectorAll('.wf-evt-exp'));
+    (units.length?units:[box]).forEach(function(u){ wfAmtGate(u); });
   };
   function wfEvtSelValues(value){ return String(value||'').split(',').map(function(s){return s.trim();}).filter(Boolean); }
   /* Transport and Food used to be two separate multi-select fields, which let one expense claim
@@ -2965,6 +3020,8 @@
     const btn=box.querySelector('.wf-evt-selbtn');
     if(btn) btn.innerHTML=wfDuoBtnLabel(next)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
     wfShowWhenSync(box.closest('.wf-evt-exp')||box.closest('.wf-evt-group')||document);
+    // the Amount boxes are named after what was just chosen, so they are rebuilt with it
+    wfAmtMatch(box);
   };
   /* A field can declare showWhen:{field,is} and then only appear when that field holds one of those
      values - Km, which is meaningless unless the journey was in your own vehicle. It is hidden
@@ -3196,7 +3253,8 @@
     // data-orig remembers what was already saved in this field, so wfEventSave can tell an
     // untouched legacy value apart from something the person actually typed just now.
     const showWhen=f.showWhen?(' data-showwhen="'+esc2(JSON.stringify(f.showWhen))+'"'):'';
-    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
+    const requires=f.requires?(' data-requires="'+esc2(f.requires)+'"'):'';
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
   // One attached file on a multi-file field. The stored path is kept on the chip so the hidden
   // value can be rebuilt from whatever chips are left after a removal.
@@ -3350,6 +3408,7 @@
     box.insertAdjacentHTML('beforeend', wfExpBlockHtml(fields, null, true, box.querySelectorAll('.wf-evt-exp').length+1, true));
     wfExpRenumber(group);
     wfShowWhenSyncAll();
+    wfAmtSyncAll();
   };
   window.wfExpRemove=function(btn){
     const b=btn.closest('.wf-evt-exp'), g=btn.closest('.wf-evt-group');
@@ -3363,6 +3422,7 @@
       window._wfEvtDateField||{label:'Date',type:'date'}, window._wfEvtExpFields||[], '', [null], true, n, true));
     wfEvtRenumberGroups(w);
     wfShowWhenSyncAll();
+    wfAmtSyncAll();
     // straight to the new date - it is the one thing that must be answered before anything else
     const groups=w.querySelectorAll('.wf-evt-group');
     const last=groups[groups.length-1];
@@ -3610,6 +3670,16 @@
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','md');
     wfUpiHydrate();
     wfShowWhenSyncAll();
+    /* Draw the Amount boxes from what is already chosen, and shut them if the description is still
+       empty. One delegated listener keeps the gate honest as things are typed - cheaper and less
+       invasive than an oninput on every field, and it cannot clash with the handlers the fields
+       already carry. */
+    [].slice.call(document.querySelectorAll('#wfEvtDetails .wf-duo')).forEach(function(b){ wfAmtMatch(b); });
+    wfAmtSyncAll();
+    (function(){ const f=document.querySelector('.wf-evt-form');
+      if(f && !f._wfGateWired){ f._wfGateWired=true;
+        f.addEventListener('input', function(){ wfAmtSyncAll(); });
+      } })();
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
   };
 
@@ -4154,6 +4224,9 @@
     .wf-amt-seg{flex:0 1 92px;width:92px;min-width:56px;border:0;background:transparent;color:var(--ink);
       font:inherit;font-weight:600;padding:2px 0;outline:none;text-align:right;font-variant-numeric:tabular-nums}
     .wf-amt-hint{margin-top:4px;font-size:11.5px;color:var(--slate)}
+    .wf-amt.locked .wf-amt-list,.wf-amt.locked .wf-amt-plain{opacity:.55;background:var(--bg,#f8fafc)}
+    .wf-amt.locked .wf-amt-seg{cursor:not-allowed}
+    .wf-amt-lock{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:11.5px;color:#b45309}
     .wf-amt-total{display:flex;align-items:baseline;gap:9px;margin-top:6px;padding:0 2px;font-size:12.5px}
     .wf-amt-total>span:first-child{color:var(--slate);font-size:10.5px;font-weight:700;
       text-transform:uppercase;letter-spacing:.04em}
@@ -4507,7 +4580,7 @@
     .wf-evt-people .wf-pp-btn{width:100%}
     .wf-evt-att{flex:1;min-width:0;display:flex;align-items:center}
     .wf-evt-attbox{position:relative;flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;
-      height:40px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
+      height:40px;padding:0 14px;border:1.5px dashed var(--line);border-radius:9px;background:var(--bg,#f8fafc);
       color:var(--slate);font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
     .wf-evt-attbox:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-a10,rgba(224,18,28,.06))}
     .wf-evt-attbox i{font-size:12px}
