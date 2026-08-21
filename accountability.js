@@ -938,8 +938,7 @@
 
   /* small workflow helpers */
   // trigger_owner is stored as '' / an email / a comma-list of emails / the '__ALL__' sentinel.
-  const WF_TRIGGER_ALL_KEY='__ALL__';
-  function wfOwnerIsAll(raw){ return String(raw||'').trim()===WF_TRIGGER_ALL_KEY; }
+  function wfOwnerIsAll(raw){ return String(raw||'').trim()===WF_ALL_PEOPLE_KEY; }
   function wfOwnerEmails(raw){ return wfOwnerIsAll(raw)?[]:String(raw||'').split(',').map(function(x){return x.trim();}).filter(Boolean); }
   function wfOwnerDisplay(raw){
     if(wfOwnerIsAll(raw)) return 'All People';
@@ -2078,9 +2077,10 @@
        only ever defined `owner` - so the two rows that say what starts a claim and who starts it
        showed a dash. Named to match what the band rows actually ask for. */
     const zero={
-      what:flow.trigger_event||flow.name||'—',
+      what:(flow.trigger_event||flow.name||''),
       who:trigAll?('Person who needs '+((flow.name||'').toLowerCase()||'it')):wfOwnerDisplay(flow.trigger_owner),
       department:trigAll?'Respective department':(trigEmails.length?(wfDeptOf(trigEmails[0])||'—'):''),
+      how:(flow.trigger_method||''),
       when:'Whenever needed'
     };
     // The bill columns get no step code of their own — the sheet doesn't label them either.
@@ -2144,41 +2144,55 @@
       else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
         now=cur?(cur.title||('Step '+cur.seq)):'—'; }
       // Clicking a tracker row opens that instance's own timeline, same as the Instances table.
+      /* Everything a row can be found by. Company / Wheredoc Id / Bill No. are read the same way
+         on any workflow that happens to have them (Invoice Processing does; most others won't and
+         simply never match). The instance number and its owner apply everywhere. */
+      const findLabel=function(name){ const k=Object.keys(by).find(function(l){return eq(l,name);}); return k?String(by[k]||''):''; };
       const tkKey=(wfCaseNoText(c)+' '+(wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
       return '<tr class="wf-tk-row" data-case="'+c.id+'" data-find="'+esc2(tkKey)+'" onclick="wfTrackerOpen('+c.id+')" '
+        +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
         +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
     }).join('');
 
-    /* One row per instance and potentially hundreds of them, so the Tracker gets the same way in
-       as the Instances table: the instance number, or whose it is. Shown only where the owner is
-       actually a column of this tracker (a flow with a sum field), since otherwise there is no
-       owner on screen to search for. */
-    /* The search box lives up on the tab strip, to the right of the tab buttons themselves - not
-       inside the tracker, where it sat on top of a table that scrolls sideways and went off-screen
-       with it. Built here because this is what knows whether the tracker has an Owner column worth
-       searching, and picked up by the tab strip. */
-    window._wfTkFindBar=sumField
-      ? '<div class="wf-tk-find"><i class="fa-solid fa-magnifying-glass"></i>'
-          +'<input class="ac-in" id="wfTkSearch" placeholder="Search by No. or owner…" oninput="wfTrackerFilter()">'
-          +'<button class="ac-btn ic" title="Clear" onclick="wfTrackerFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
-        +'</div>'
-      : '';
+    /* One row per instance and potentially hundreds of them, so the Tracker gets its own way in.
+       Both a Company/Wheredoc/Bill No. search and a No./owner one were written for this at the same
+       time, for different workflows; they are one box now, matching whichever of those a row
+       actually carries.
+
+       It lives up on the tab strip, to the right of the tab buttons - not inside the tracker, where
+       it sat on top of a table that scrolls sideways and went off-screen with it. Built here because
+       this is what knows which columns the tracker has, and picked up by the tab strip. */
+    const tkFindWhat=[ 'No.', 'owner' ]
+      .concat(tmpl.some(function(f){ return eq(f.label,'Company'); })?['Company']:[])
+      .concat(tmpl.some(function(f){ return eq(f.label,'Wheredoc Id'); })?['Wheredoc Id']:[])
+      .concat(tmpl.some(function(f){ return eq(f.label,'Bill No.'); })?['Bill No.']:[]);
+    window._wfTkFindBar='<div class="wf-tk-find"><i class="fa-solid fa-magnifying-glass"></i>'
+        +'<input class="ac-in" id="wfTkSearch" placeholder="Search by '+esc2(tkFindWhat.join(', '))+'\u2026" oninput="wfTrackerFilter()">'
+        +'<button class="ac-btn ic" title="Clear" onclick="wfTrackerFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
+      +'</div>';
     return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
       +'<div id="wfTkNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div>';
   }
+  /* Filters the Tracker's own rows - independent of the Instances table's search, which is a
+     different tab with different columns. A row matches on its number or owner, or on any of the
+     bill fields it happens to carry. */
   window.wfTrackerFilter=function(){
     const q=((($('wfTkSearch')||{}).value)||'').trim().toLowerCase();
-    const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr'));
+    const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
     let shown=0;
     rows.forEach(function(r){
-      const ok=!q || (r.getAttribute('data-find')||'').indexOf(q)!==-1;
+      const ok=!q || ['data-find','data-company','data-wheredoc','data-billno'].some(function(a){
+        return (r.getAttribute(a)||'').indexOf(q)!==-1;
+      });
       r.style.display=ok?'':'none';
       if(ok) shown++;
     });
     const nm=$('wfTkNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
   };
   window.wfTrackerFilterClear=function(){ const b=$('wfTkSearch'); if(b) b.value=''; wfTrackerFilter(); };
+  // The other session's name for the same thing, kept so anything still calling it works.
+  window.wfTrackFilter=function(){ wfTrackerFilter(); };
   // Each header row sticks below the one above it, which needs the real height of every row
   // before it — guessing a fixed number left a strip of body text showing through between the
   // bands. Measured here instead, and re-measured whenever the pane is shown or the window
