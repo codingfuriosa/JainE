@@ -10640,7 +10640,7 @@ const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',t
 const TR_TIMERS={};
 let TR_ROWS=null;
 let TR_DELETED_ROWS=null; // soft-deleted calls, shown on their own "Deleted" tab
-let TR_FILTER='all'; // 'all'|'qualified'|'notqualified'|'processing' — driven by the KPI cards
+let TR_FILTER='all'; // 'all'|'qualified'|'followup'|'notqualified'|'nil' — driven by the KPI cards
 let TR_FOLDER=null; // folder currently drilled into on the "Folders" tab
 let TR_SELECTED=new Set(); // ids checked in the All Calls log, for folder assignment
 let TR_DATE_FROM=null, TR_DATE_TO=null; // 'YYYY-MM-DD' — applies to the log everywhere (All Calls + inside folders)
@@ -11297,8 +11297,10 @@ const TR_NO_TRANSCRIPT = ['no_recording', 'too_short', 'non_transcribable'];
 function trIsNilRow(r){
   return TR_NO_TRANSCRIPT.indexOf(String((r && r.status) || '')) !== -1;
 }
-// A call still waiting its turn has nothing to read either - no transcript, no criteria, no outcome.
-// It is counted on the Processing card and listed there, but not mixed in with finished work.
+/* A call still waiting its turn has nothing to read - no transcript, no criteria, no outcome - so it
+   is not listed until it is finished. It gets no card of its own: a "Processing" count is a progress
+   bar pretending to be a statistic, always either everything or nothing and stale the moment it is
+   drawn. "Transcribed 13 of 69 received" already says how much is left. */
 function trIsPendingRow(r){
   const st=String((r && r.status) || '');
   return st === 'queued' || st === 'processing';
@@ -11306,8 +11308,7 @@ function trIsPendingRow(r){
 // KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
 function trApplyFilter(rows){
   if(TR_FILTER==='nil')return rows.filter(trIsNilRow);
-  if(TR_FILTER==='processing')return rows.filter(trIsPendingRow);
-  // every other view lists finished calls only
+  // every view lists finished calls only
   rows=rows.filter(function(r){ return !trIsNilRow(r) && !trIsPendingRow(r); });
   if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
   if(TR_FILTER==='followup')return rows.filter(function(r){return r.qualification==='Follow-Up';});
@@ -11319,7 +11320,6 @@ function trKpisHtml(rows){
   const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
   const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
   const foll=rows.filter(function(r){return r.qualification==='Follow-Up';}).length;
-  const proc=rows.filter(trIsPendingRow).length;
   /* Counted from ALL rows, not the listed ones: the point of showing "received" against
      "transcribed" is that the gap is visible rather than the day looking smaller than it was. */
   const nil=rows.filter(trIsNilRow).length;
@@ -11329,8 +11329,7 @@ function trKpisHtml(rows){
     ['qualified','Qualified',qual,'leads matched',TR_OUTCOMES['Qualified'].colour],
     ['followup','Follow-Up',foll,'call back later',TR_OUTCOMES['Follow-Up'].colour],
     ['notqualified','Not Qualified',notq,'did not match',TR_OUTCOMES['Not Qualified'].colour],
-    ['nil','Not transcribed',nil,'no audio / too short / no talk','#64748b'],
-    ['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
+    ['nil','Not transcribed',nil,'no recording, or under a minute','#64748b']];
   return '<div class="grid kpis" style="grid-template-columns:repeat('+cards.length+',1fr)">'+cards.map(function(c){
     const active=TR_FILTER===c[0];
     return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
@@ -11628,7 +11627,7 @@ function trDownloadRows(rows,heading){
   trTriggerDownload(trExportHtml(doneRows,heading),trSafeFilename(heading)+'.html');
 }
 window.trDownloadList=function(){
-  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='processing'?'Processing calls':'All calls'));
+  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':'All calls');
   trDownloadRows(trApplyFilter(TR_ROWS||[]),label);
 };
 window.trDownloadReport=function(id){
