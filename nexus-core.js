@@ -1772,6 +1772,12 @@ function misInput(k,vals,opt){
       +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
       +'</select></div>';
   }
+  if(k==='next_date'){
+    // A real date picker, not the flexible free-text dates used elsewhere — this is the one
+    // place a date is picked rather than typed, so there's no ambiguous format to parse. Its
+    // value is already ISO, which misToIso reads just as well as the typed dd/mm/yyyy forms.
+    return '<div>'+lab+'<input type="date" id="misF_'+k+'" class="sel" value="'+esc(v)+'"'+ro+'></div>';
+  }
   if(MIS_SUGGEST.has(k)){
     // A real dropdown that also accepts a new value: the list opens on click and filters as you
     // type. A bare <datalist> only opens once you start typing, which hid the existing values.
@@ -1858,9 +1864,13 @@ function misFormHtml(vals,mode){
   }
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
-    /* Dates are never typed into these forms. A new case has no action yet, so no Action Date and
-       therefore no Previous Date either; on an existing case both are moved by the action panel. */
-    if(f.k==='next_date'||f.k==='previous_date') return;
+    /* Previous Date never appears here — it only ever comes from a real reschedule, moved by the
+       action panel. Next Date is different: a brand-new case can already have a hearing date on
+       hand (e.g. straight off a court notice), so Add Case lets it be entered up front. On an
+       EXISTING case, though, it keeps coming from the action panel only, to stay in step with
+       Previous Date and the action history. */
+    if(f.k==='previous_date') return;
+    if(f.k==='next_date'&&isEdit) return;
     // The action fields live in their own panel (click a case), not in the case record forms.
     if(f.k==='action_needed'||f.k==='action_date'||f.k==='action_executed_date') return;
     // No (i) tooltips on the Add Case form — they only appear when editing.

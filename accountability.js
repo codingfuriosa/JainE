@@ -940,7 +940,7 @@
 
   /* small workflow helpers */
   // trigger_owner is stored as '' / an email / a comma-list of emails / the '__ALL__' sentinel.
-  function wfOwnerIsAll(raw){ return String(raw||'').trim()===WF_TRIGGER_ALL_KEY; }
+  function wfOwnerIsAll(raw){ return String(raw||'').trim()===WF_ALL_PEOPLE_KEY; }
   function wfOwnerEmails(raw){ return wfOwnerIsAll(raw)?[]:String(raw||'').split(',').map(function(x){return x.trim();}).filter(Boolean); }
   function wfOwnerDisplay(raw){
     if(wfOwnerIsAll(raw)) return 'All People';
@@ -1970,8 +1970,10 @@
     const trigAll=wfOwnerIsAll(flow.trigger_owner);
     const trigEmails=wfOwnerEmails(flow.trigger_owner);
     const zero={
-      owner:trigAll?('Person who needs '+((flow.name||'').toLowerCase()||'it')):wfOwnerDisplay(flow.trigger_owner),
+      what:(flow.trigger_event||flow.name||''),
+      who:trigAll?('Person who needs '+((flow.name||'').toLowerCase()||'it')):wfOwnerDisplay(flow.trigger_owner),
       department:trigAll?'Respective department':(trigEmails.length?(wfDeptOf(trigEmails[0])||'—'):''),
+      how:(flow.trigger_method||''),
       when:'Whenever needed'
     };
     // The bill columns get no step code of their own — the sheet doesn't label them either.
@@ -1993,7 +1995,7 @@
     const head=codeRow
       +bandRow('WHAT',zero.what,function(s){ return s.title||('Step '+s.seq); })
       +bandRow('WHO',zero.who,wfStepWhoText)
-      +(hasDept?bandRow('DEPARTMENT','',function(s){ return s.department||''; }):'')
+      +(hasDept?bandRow('DEPARTMENT',zero.department,function(s){ return s.department||''; }):'')
       +(hasHow?bandRow('HOW',zero.how,function(s){ return s.method||s.description||''; }):'')
       +bandRow('WHEN',zero.when,function(s){ const d=wfDurText(s.duration_value,s.duration_unit); return d?('In next '+d):''; })
       +'<tr class="wf-tk-cols">'+fixed.map(function(f){ return '<th>'+esc2(f.k)+'</th>'; }).join('')
@@ -2035,13 +2037,35 @@
       else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
         now=cur?(cur.title||('Step '+cur.seq)):'—'; }
       // Clicking a tracker row opens that instance's own timeline, same as the Instances table.
+      // Company / Wheredoc Id / Bill No. are read the same way on any workflow that happens to
+      // have them (Invoice Processing does; most others won't, and just never match anything).
+      const findLabel=function(name){ const k=Object.keys(by).find(function(l){return eq(l,name);}); return k?String(by[k]||''):''; };
       return '<tr class="wf-tk-row" data-case="'+c.id+'" onclick="wfTrackerOpen('+c.id+')" '
+        +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
         +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
     }).join('');
 
-    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+    return '<div class="wf-tk-searchbar"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfTrackSearch" placeholder="Search by Company, Wheredoc Id or Bill No.…" oninput="wfTrackFilter()"></div>'
+      +'<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+      +'<div class="ac-empty" id="wfTrackNoMatch" style="display:none;cursor:default">No matches</div></div>';
   }
+  // Filters the Tracker's own rows by Company / Wheredoc Id / Bill No. — independent of the
+  // Instances table's search, which is a different tab with different columns.
+  window.wfTrackFilter=function(){
+    const q=(($('wfTrackSearch')||{}).value||'').trim().toLowerCase();
+    const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
+    let shown=0;
+    rows.forEach(function(r){
+      const ok=!q
+        || (r.getAttribute('data-company')||'').indexOf(q)!==-1
+        || (r.getAttribute('data-wheredoc')||'').indexOf(q)!==-1
+        || (r.getAttribute('data-billno')||'').indexOf(q)!==-1;
+      r.style.display=ok?'':'none';
+      if(ok) shown++;
+    });
+    const nm=$('wfTrackNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
+  };
   // Each header row sticks below the one above it, which needs the real height of every row
   // before it — guessing a fixed number left a strip of body text showing through between the
   // bands. Measured here instead, and re-measured whenever the pane is shown or the window
@@ -3314,6 +3338,9 @@
     .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
     .wf-card-hd i{color:var(--slate);font-size:13px}
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
+    .wf-tk-searchbar{position:relative;margin-bottom:10px;max-width:360px}
+    .wf-tk-searchbar i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none}
+    .wf-tk-searchbar .ac-in{width:100%;padding-left:30px;box-sizing:border-box}
     .wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px}
     .wf-inst-filter-search{position:relative;flex:1;min-width:180px}
     .wf-inst-filter-search i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none}
