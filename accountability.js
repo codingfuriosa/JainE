@@ -2927,6 +2927,10 @@
        "Transport Cost / Food Cost". Two boxes when a meal was claimed as well, one when it was not:
        an empty "Food Cost" line invited a figure against a meal nobody had. */
     [].slice.call(scope.querySelectorAll('.wf-duo')).forEach(function(box){
+      /* An exclusive picker contributes NO key: there is one thing in the expense, so there is one
+         figure, and a single box labelled with what is already named in the field above it just
+         repeats itself. A two-section picker still names each of its lines. */
+      if(box.getAttribute('data-exclusive')==='1') return;
       const hid=box.querySelector('.wf-evt-value');
       const parts=wfDuoParts((hid&&hid.value)||'');
       [parts.a,parts.b].forEach(function(k){ if(String(k||'').trim()) keys.push(String(k).trim()); });
@@ -3011,7 +3015,13 @@
      fares and a meal on the same day are three expenses under that date, which is what "Add
      expense" is for, and it keeps one description and one amount per expense meaningful. */
   function wfDuoIsExclusive(f){ return !!(f&&f.exclusive); }
-  function wfDuoBtnLabel(v){
+  function wfDuoBtnLabel(v,excl){
+    /* An exclusive value is ONE label and is used whole. Splitting it on the slash broke every
+       option that contains one - "Cab / Uber" read as a transport "Cab" plus a meal "Uber". */
+    if(excl){
+      const one=String(v==null?'':v).trim();
+      return one?('<span class="wf-evt-seltxt">'+esc2(one)+'</span>'):'<span class="wf-evt-selph">Select</span>';
+    }
     const parts=wfDuoParts(v);
     if(!parts.a && !parts.b) return '<span class="wf-evt-selph">Select</span>';
     return '<span class="wf-evt-seltxt">'+esc2(wfDuoJoin(parts.a,parts.b))+'</span>';
@@ -3020,8 +3030,9 @@
     const secs=Array.isArray(f.sections)?f.sections:[];
     const excl=wfDuoIsExclusive(f);
     const cur=wfDuoParts(value);
-    // one answer either way when exclusive, so the ticked option is whichever section holds it
-    const picked=excl?[cur.a||cur.b,cur.a||cur.b]:[cur.a,cur.b];
+    // exclusive: the stored string IS the answer, taken whole so a label containing a slash survives
+    const one=String(value==null?'':value).trim();
+    const picked=excl?[one,one]:[cur.a,cur.b];
     let listHtml='';
     secs.forEach(function(sec,si){
       // The section headings are grouping, not separate questions, once the field is exclusive -
@@ -3041,7 +3052,7 @@
     });
     return '<div class="wf-evt-selbox wf-duo" data-exclusive="'+(excl?'1':'0')+'" data-optional="'+(f.optional?'1':'0')+'">'
       +'<input type="hidden" class="wf-evt-value" value="'+esc2(value||'')+'">'
-      +'<button type="button" class="ac-in wf-evt-selbtn" onclick="wfEvtSelToggle(this)">'+wfDuoBtnLabel(value)
+      +'<button type="button" class="ac-in wf-evt-selbtn" onclick="wfEvtSelToggle(this)">'+wfDuoBtnLabel(value,excl)
         +'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i></button>'
       +'<div class="wf-evt-selpanel">'+listHtml+'</div>'
     +'</div>';
@@ -3068,7 +3079,7 @@
       if(on) o.insertAdjacentHTML('beforeend','<i class="fa-solid fa-check"></i>');
     });
     const btn=box.querySelector('.wf-evt-selbtn');
-    if(btn) btn.innerHTML=wfDuoBtnLabel(next)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
+    if(btn) btn.innerHTML=wfDuoBtnLabel(next,excl)+'<i class="fa-solid fa-chevron-down wf-evt-selcaret"></i>';
     // the panel stays open for the second section, so keep it against the field
     if(excl){ box.classList.remove('open'); wfUnpinPanel(box.querySelector('.wf-evt-selpanel')); }
     else if(btn) wfPinPanel(btn, box.querySelector('.wf-evt-selpanel'));
