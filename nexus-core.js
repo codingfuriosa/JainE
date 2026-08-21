@@ -8252,10 +8252,12 @@ function rtRender(){
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Assessment Tests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      ${rtCanManage()?`
       <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
       <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
       <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
-      ${rtCanShare()?`<button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`:''}
+      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`
+      : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
     </div>
   </div>
   <div class="card" style="overflow:hidden">
@@ -8281,6 +8283,8 @@ function rtRender(){
 }
 window.rtToggleAll=function(el){document.querySelectorAll('.rt-chk').forEach(c=>c.checked=el.checked);rtSyncToolbar();};
 window.rtSyncToolbar=function(){
+  // the toolbar buttons only exist for the four who may use them
+  if(!rtCanManage()) return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   const n=sel.length;
   const ren=$('rtRenBtn'),del=$('rtDelBtn');
@@ -8290,7 +8294,7 @@ window.rtSyncToolbar=function(){
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
-window.rtAdd=function(){if(!recGuard())return;
+window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
@@ -8302,6 +8306,7 @@ window.rtAdd=function(){if(!recGuard())return;
   setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
 window.rtSave=async function(){
+  if(!rtTestsGuard())return;
   const name=($('rtFName')||{}).value?.trim();
   const link=($('rtFLink')||{}).value?.trim()||'';
   const sheet=($('rtFSheet')||{}).value?.trim()||'';
@@ -8312,7 +8317,7 @@ window.rtSave=async function(){
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
 };
-window.rtRename=function(){if(!recGuard())return;
+window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   if(sel.length!==1)return;
   const id=parseInt(sel[0].value);
@@ -8327,6 +8332,7 @@ window.rtRename=function(){if(!recGuard())return;
   setTimeout(()=>{const el=$('rtFRename');if(el)el.focus();},100);
 };
 window.rtUpdate=async function(id){
+  if(!rtTestsGuard())return;
   const name=($('rtFRename')||{}).value?.trim();
   const link=($('rtFRLink')||{}).value?.trim()||'';
   const sheet=($('rtFRSheet')||{}).value?.trim()||'';
@@ -8337,7 +8343,7 @@ window.rtUpdate=async function(id){
   if(rec){rec.name=name;rec.link=link;rec.response_sheet_url=sheet||null;}
   closeModal();toast('Test updated');rtRender();
 };
-window.rtDelete=async function(){if(!recGuard())return;
+window.rtDelete=async function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
   if(!await confirmDialog('Delete '+sel.length+' test(s)? All associated responses will also be deleted. This cannot be undone.'))return;
@@ -8352,8 +8358,27 @@ window.rtDelete=async function(){if(!recGuard())return;
 // (Others with recruitment access will NOT see the Share button.)
 // NOTE: 'administrator' & 'abhay mati' added for testing — remove later if the 3 named
 // staff should be the only ones with Share access.
-const RT_SHARE_ALLOWED=['shuchandra das','khushbu singh','uzma ahmed','administrator','abhay mati'];
-function rtShareNorm(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+/* Assessment Tests are managed by these four and nobody else - adding, renaming, deleting and
+   sharing alike. Matched by EMAIL: the previous list matched display names and held
+   "khushbu singh" while her profile reads "Khusbu Singh", so it never matched her and she could not
+   see the Share button at all. A name is typed by hand and gets edited; an address does not drift.
+
+   Mirrored by recruit.can_manage_tests() in the database, which is what actually enforces this -
+   the page hiding a button is a courtesy, not a control. */
+const RT_TESTS_ALLOWED=[
+  'mgr.hr@thejaingroup.com',   // Shuchandra Das
+  'hr@thejaingroup.com',       // Khusbu Singh
+  'career@thejaingroup.com',   // Uzma Ahmed
+  'ayushruia1@gmail.com'       // Administrator
+];
+function rtCanManage(){
+  return RT_TESTS_ALLOWED.includes(String(state.email||'').trim().toLowerCase());
+}
+function rtTestsGuard(){
+  if(rtCanManage()) return true;
+  toast('Assessment Tests can only be changed by Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator','err');
+  return false;
+}
 /* Whether this person has granted the app permission to send mail from their own Gmail. Read from
    acc.google_connections, a view that exposes only email / connected_at / can_send_mail - never a
    token. Connecting for Calendar alone does NOT include sending, so this is a separate question from
@@ -8372,10 +8397,9 @@ window.rtShareConnectGoogle=function(){
   location.href='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-oauth-start?email='
     +encodeURIComponent(state.email||'');
 };
-function rtCanShare(){
-  const nm=rtShareNorm((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'');
-  return RT_SHARE_ALLOWED.includes(nm);
-}
+// Sharing is one of the managed actions, not a separately-permissioned one; the name is kept so
+// the existing call sites read unchanged.
+function rtCanShare(){ return rtCanManage(); }
 function rtShareFieldRow(val){
   return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
     <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
