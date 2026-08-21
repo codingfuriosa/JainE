@@ -2055,8 +2055,13 @@
     // Without this the whole left-hand block of the header sat empty.
     const trigAll=wfOwnerIsAll(flow.trigger_owner);
     const trigEmails=wfOwnerEmails(flow.trigger_owner);
+    /* The opening column describes the triggering event itself. Its WHAT and WHO cells came out
+       blank on every workflow because they were read as zero.what and zero.who while the object
+       only ever defined `owner` - so the two rows that say what starts a claim and who starts it
+       showed a dash. Named to match what the band rows actually ask for. */
     const zero={
-      owner:trigAll?('Person who needs '+((flow.name||'').toLowerCase()||'it')):wfOwnerDisplay(flow.trigger_owner),
+      what:flow.trigger_event||flow.name||'—',
+      who:trigAll?('Person who needs '+((flow.name||'').toLowerCase()||'it')):wfOwnerDisplay(flow.trigger_owner),
       department:trigAll?'Respective department':(trigEmails.length?(wfDeptOf(trigEmails[0])||'—'):''),
       when:'Whenever needed'
     };
@@ -2079,7 +2084,7 @@
     const head=codeRow
       +bandRow('WHAT',zero.what,function(s){ return s.title||('Step '+s.seq); })
       +bandRow('WHO',zero.who,wfStepWhoText)
-      +(hasDept?bandRow('DEPARTMENT','',function(s){ return s.department||''; }):'')
+      +(hasDept?bandRow('DEPARTMENT',zero.department,function(s){ return s.department||''; }):'')
       +(hasHow?bandRow('HOW',zero.how,function(s){ return s.method||s.description||''; }):'')
       +bandRow('WHEN',zero.when,function(s){ const d=wfDurText(s.duration_value,s.duration_unit); return d?('In next '+d):''; })
       +'<tr class="wf-tk-cols">'+fixed.map(function(f){ return '<th>'+esc2(f.k)+'</th>'; }).join('')
@@ -2131,13 +2136,17 @@
        as the Instances table: the instance number, or whose it is. Shown only where the owner is
        actually a column of this tracker (a flow with a sum field), since otherwise there is no
        owner on screen to search for. */
-    const findBar=sumField
+    /* The search box lives up on the tab strip, to the right of the tab buttons themselves - not
+       inside the tracker, where it sat on top of a table that scrolls sideways and went off-screen
+       with it. Built here because this is what knows whether the tracker has an Owner column worth
+       searching, and picked up by the tab strip. */
+    window._wfTkFindBar=sumField
       ? '<div class="wf-tk-find"><i class="fa-solid fa-magnifying-glass"></i>'
           +'<input class="ac-in" id="wfTkSearch" placeholder="Search by No. or owner…" oninput="wfTrackerFilter()">'
           +'<button class="ac-btn ic" title="Clear" onclick="wfTrackerFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
         +'</div>'
       : '';
-    return findBar+'<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
       +'<div id="wfTkNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div>';
   }
   window.wfTrackerFilter=function(){
@@ -2281,6 +2290,10 @@
       if(p) p.style.display=(k===which)?'':'none';
       if(b) b.classList.toggle('on', k===which);
     });
+    // the search box on the right of the tab strip searches the tracker's rows, so it is only on
+    // show while the tracker is
+    const right=$('wfTabsRight');
+    if(right) right.style.display=(which==='tracker' && (window._wfTkFindBar||''))?'':'none';
   };
   if(!window._wfTkResizeWired){
     window._wfTkResizeWired=true;
@@ -2399,6 +2412,8 @@
           const cs=(byCase[c.id]||{})[s.seq];
           if(cs&&(cs.status==='done'||cs.forwarded_at)){ var rcv=cs.received_at?wfDT(cs.received_at):'—'; var don=cs.forwarded_at?wfDT(cs.forwarded_at):'—'; return '<td><span class="wf-pill ok wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-check"></i> Done<span class="wf-tip-txt">Received: '+esc2(rcv)+'<br>Done: '+esc2(don)+'</span></span></td>'; }
           if(c.status==='Pending' && c.current_step===s.seq){
+            // a returned instance is not waiting on this step's owner, it is waiting on its own
+            if(c.returned_at) return '<td><span class="wf-pill back wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-rotate-left"></i> Sent back<span class="wf-tip-txt">'+esc2(c.returned_reason||'Waiting on a correction')+'</span></span></td>';
             if(cs&&cs.received_at) return '<td><span class="wf-pill cur wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-inbox"></i> Received<span class="wf-tip-txt">Received: '+esc2(wfDT(cs.received_at))+'</span></span></td>';
             return '<td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>';
           }
@@ -2408,6 +2423,7 @@
         const firstDone=!!(fst&&(fst.status==='done'||fst.forwarded_at));
         const firstReceived=!!(fst&&(fst.received_at||fst.status==='received'||firstDone));
         const instOver=(c.status==='Done'||c.status==='Cancelled');
+        const sentBack=!!c.returned_at;
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
         // Searchable by whose instance it is - the name shown everywhere else, and the address,
@@ -2443,6 +2459,10 @@
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
+    /* Built up front rather than inline below: rendering the tracker is what works out whether it
+       has an Owner column worth searching, and the tab strip - which carries the search box - is
+       concatenated before it in the same expression. */
+    const trackerHtml=wfTrackerHtml(flow,steps,cases,fcs);
     v.innerHTML='<div class="wf-page">'
       +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'+headActs+'</div>'
       +'<div class="wf-card wf-meta">'
@@ -2458,6 +2478,9 @@
           +'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>'
           +(showForms?('<button class="wf-tab" id="wfTabBtn_forms" onclick="wfTabShow(\'forms\')"><i class="fa-solid fa-clipboard-list"></i> Forms'
              +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')+'</button>'):'')
+          // pushed to the right-hand end of the same row, and only on show while the Tracker is the
+          // open tab - it searches the tracker's rows and means nothing against the others
+          +'<span class="wf-tabs-right" id="wfTabsRight" style="display:none">'+(window._wfTkFindBar||'')+'</span>'
         +'</div>')
       +'<div id="wfPane_main">'
         +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
@@ -2466,7 +2489,7 @@
       +('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
-          +wfTrackerHtml(flow,steps,cases,fcs)
+          +trackerHtml
         +'</div></div>')
       +(showForms?('<div id="wfPane_forms" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-clipboard-list"></i> Forms'
@@ -2628,7 +2651,7 @@
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
     // both sides added a column here: extra_admins (who else may manage this flow) and
     // reject_deletes_instance (whether rejecting ends the instance). Both are needed.
-    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('card_fields,tracker_sum_field,card_wide_field,multiple_fields,multi_entry_label,extra_admins,reject_deletes_instance').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
+    if(c&&c.flow_id){ try{ const {data}=await ACC().from('flows').select('*').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',caseId).order('seq',{ascending:true}); fcs=data||[]; }catch(e){}
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',caseId).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
@@ -2645,7 +2668,16 @@
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
-      +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'+detHtml
+      +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
+      /* A returned instance is stopped and waiting on its owner, which is not something the timeline
+         shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
+      +(c.returned_at
+        ? '<div class="wf-returned"><div class="wf-returned-h"><i class="fa-solid fa-rotate-left"></i> Sent back for correction</div>'
+          +'<div class="wf-returned-b">'+esc2(wfNm(c.returned_by)||c.returned_by||'Someone')+' sent this back at "'+esc2(c.returned_step||'a step')+'"'
+            +(c.returned_reason?(' — <b>'+esc2(c.returned_reason)+'</b>'):'')+'.<br>'
+            +'It is on hold until '+esc2(wfNm(c.created_by)||c.created_by||'whoever raised it')+' edits it, and then it starts again from the first step.</div></div>'
+        : '')
+      +detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
       +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
     wfHydrateAttThumbs();
@@ -3829,19 +3861,16 @@
         A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
       }
     } else if(amAssignee && caseActive){
-      /* Reject sits beside Receive — on arrival the choice is take it or send it back. Once
-         received it is yours and the way on is Forward. A step shared between people is held by
-         nobody until somebody Receives, and wf_reject now accepts anyone it was offered to, so it
-         no longer has to be claimed before it can be declined. The very first step has nobody to
-         go back to, so it is never rejectable. */
-      /* The first step can be rejected too. It used to be excluded because there is nobody to send
-         it back to — but that is the reason it ends the instance instead: the whole thing is thrown
-         away and whoever raised it is asked to do it again. */
-      const rejectBtn='<button class="ac-btn danger" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-ban"></i> Reject</button>';
+      /* Send back is on offer at any point the step is yours - on arrival, and also after you have
+         received it, because a problem is as often spotted while working through something as at
+         first glance. It goes to whoever raised the instance rather than one step back: they are the
+         only person who can actually correct it. Not styled as a destructive action any more, since
+         nothing is destroyed - it is a return. */
+      const rejectBtn='<button class="ac-btn" title="Send the whole '+esc2(wfNounOf(flow).lc)+' back to whoever raised it" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
-        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>';
+        A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
@@ -3953,12 +3982,13 @@
      claim itself is deleted — so it is required there, and it is emailed to them along with what
      they submitted and a note that a corrected one has to be raised. */
   window.wfRejectStart=async function(fcsId, caseId){
-    let noun='instance', wantsReason=false, isFirst=false;
+    let noun='instance', wantsReason=false, isFirst=false, raisedBy='';
     try{
       const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       const cid=(mine&&mine.case_id)||caseId;
       if(cid){
-        const {data:c}=await ACC().from('flow_cases').select('flow_id').eq('id',cid).maybeSingle();
+        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by').eq('id',cid).maybeSingle();
+        raisedBy=(c&&c.created_by)||'';
         if(c&&c.flow_id){
           const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
           wantsReason=!!(f&&f.reject_deletes_instance);
@@ -3969,24 +3999,26 @@
         if(mine&&Array.isArray(sib)) isFirst=!sib.some(function(x){ return x.seq<mine.seq; });
       }
     }catch(e){}
-    const ends = isFirst || wantsReason;
-    const warn = ends
-      ? '<div class="wf-rej-warn"><i class="fa-solid fa-triangle-exclamation"></i> <span>This '+esc2(noun)+' will be <b>deleted</b>, not sent back'+(isFirst&&!wantsReason?' — there is no earlier step to return it to':'')+'. Whoever raised it is emailed to say it was rejected and needs doing again.</span></div>'
-      : '<div class="wf-rej-note">The task goes back to the previous person.</div>';
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-ban" style="color:#dc2626"></i> Reject this step</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    /* Every rejection now goes the same way: the whole thing returns to whoever raised it, every
+       task on it stops, and it only moves again once they have corrected it. Nothing is deleted, so
+       there is no longer anything to warn about - just a plain statement of what happens next. */
+    const who=raisedBy?wfNm(raisedBy):('whoever raised this '+noun);
+    const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
+      +' goes back to <b>'+esc2(who)+'</b> to correct. It stops here until they have — nobody else can act on it in the meantime.</span></div>';
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
         /* The reason box belongs to the workflows that ask for one (Reimbursement). Elsewhere a
            rejection is just a rejection and an empty box would only be noise. */
         +(wantsReason
           ? '<label>Reason</label>'
-            +'<textarea id="wfRejReason" rows="4" placeholder="What is wrong with it? Be specific — this is what they have to act on."></textarea>'
+            +'<textarea id="wfRejReason" rows="4" placeholder="What needs correcting? Be specific — this is all they have to go on."></textarea>'
             +'<div id="wfRejErr" class="wf-rej-err" style="display:none"></div>'
           : '')
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
-        +'<button class="ac-btn danger" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+','+(ends?'true':'false')+')">'
-        +'<i class="fa-solid fa-ban"></i> '+(ends?('Reject and delete this '+esc2(noun)):'Reject')+'</button></div>','md');
+        +'<button class="ac-btn primary" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+',true)">'
+        +'<i class="fa-solid fa-rotate-left"></i> Send back for correction</button></div>','md');
     if(wantsReason) setTimeout(function(){ const t=$('wfRejReason'); if(t)try{t.focus();}catch(_){} },40);
   };
   window.wfRejectConfirm=async function(fcsId, needReason, ends){
@@ -3998,21 +4030,14 @@
       return;
     }
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
-    /* A rejection that ends the instance deletes it outright, so its files need collecting
-       here too - once wf_reject() has run there is no instance left to read them from. */
-    let doomed=[];
-    if(ends){ try{
-      const {data:cs}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
-      if(cs&&cs.case_id) doomed=await wfCaseFilePaths([cs.case_id]);
-    }catch(e){} }
+    // nothing is deleted any more, so there are no files to collect first
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
-      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-ban"></i> Reject'; }
-      toast('Could not reject: '+((e&&e.message)||e),'err'); return;
+      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Send back for correction'; }
+      toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
     closeModal();
-    await wfPurgeCaseFiles(doomed);
-    toast(ends?'Rejected — deleted, and an email has gone out':'Step rejected — sent back to the previous person','ok');
+    toast('Sent back for correction — an email has gone out','ok');
     navTo('tasks/work');
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
@@ -4134,11 +4159,14 @@
       text-transform:uppercase;letter-spacing:.04em}
     .wf-amt-total b{color:var(--ink);font-size:13.5px}
     .wf-amt-miss{margin-left:auto;color:#b45309;font-weight:600;font-size:11.5px}
-    .wf-rej-warn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
+    .wf-rej-oldwarn{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;margin-bottom:14px;
       background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:13px;line-height:1.55}
-    .wf-rej-warn i{margin-top:2px}
-    .wf-rej-note{padding:10px 12px;margin-bottom:14px;background:var(--bg,#f8fafc);border:1px solid var(--line);
-      border-radius:9px;color:var(--slate);font-size:12.5px;line-height:1.5}
+    .wf-rej-oldwarn i{margin-top:2px}
+    .wf-rej-note{display:flex;gap:9px;align-items:flex-start;line-height:1.6;
+      padding:11px 13px;margin-bottom:14px;background:var(--brand-a10,#eef2ff);border:1px solid var(--line);
+      border-left:3px solid var(--brand);
+      border-radius:9px;color:var(--ink);font-size:12.5px}
+    .wf-rej-note i{margin-top:2px;color:var(--brand);flex:none}
     .wf-rej-err{margin-top:7px;color:#dc2626;font-size:12.5px;font-weight:600}
     .wf-upi-wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center}
     .wf-upi-wrap .wf-evt-upi{width:100%;padding-right:32px}
@@ -4267,9 +4295,16 @@
     .wf-duo .wf-evt-selopt{padding-left:12px}
     .wf-duo-opt{color:var(--slate);font-weight:400;text-transform:none;letter-spacing:0}
     .wf-evt-selph{color:var(--slate)}
-    .wf-tk-find{display:flex;align-items:center;gap:8px;margin:0 0 10px;position:relative}
+    .wf-returned{border:1px solid #fcd34d;background:#fffbeb;border-left:3px solid #f59e0b;border-radius:8px;
+      padding:10px 13px;font-size:12.5px;color:#78350f;margin:10px 0 0}
+    .wf-returned-h{font-weight:700;display:flex;align-items:center;gap:7px;margin-bottom:4px}
+    .wf-returned-b{line-height:1.6}
+    .wf-pill.back{background:#fef3c7;color:#92400e}
+    .wf-tabs-right{margin-left:auto;display:flex;align-items:center}
+    .wf-tk-find{display:flex;align-items:center;gap:6px;position:relative}
     .wf-tk-find>i{position:absolute;left:11px;font-size:12px;color:var(--slate);pointer-events:none}
-    .wf-tk-find .ac-in{padding-left:31px;max-width:320px}
+    .wf-tk-find .ac-in{padding-left:31px;width:230px;max-width:44vw}
+    @media(max-width:620px){ .wf-tabs-right{margin-left:0;width:100%;padding-top:8px} .wf-tk-find .ac-in{width:100%;max-width:none} }
     .wf-evt-att-multi{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0}
     .wf-evt-attlist{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
     .wf-evt-att-multi .wf-evt-att-name{max-width:100%}
