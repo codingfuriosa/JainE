@@ -11322,10 +11322,17 @@ function trKpisHtml(rows){
   const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
   const foll=rows.filter(function(r){return r.qualification==='Follow-Up';}).length;
   /* Counted from ALL rows, not the listed ones: the point of showing "received" against
-     "transcribed" is that the gap stays visible rather than the day looking smaller than it was. */
+     "transcribed" is that the gap stays visible rather than the day looking smaller than it was.
+     And the gap has to say what it IS - a card reading "528 of 536" with nothing accounting for the
+     other 8 just looks like the count is wrong. Each reason is named, in received order. */
   const done=rows.filter(function(r){return r.status==='done';}).length;
   const proc=rows.filter(trIsPendingRow).length;
-  const cards=[['all','Transcribed',done,rows.length+' calls received','var(--slate)'],
+  const n=function(st){return rows.filter(function(r){return r.status===st;}).length;};
+  const gaps=[[n('non_transcribable'),'no speech'],[n('no_recording'),'no recording'],
+              [n('too_short'),'under a minute'],[n('error'),'failed']]
+    .filter(function(g){return g[0]>0;}).map(function(g){return g[0]+' '+g[1];});
+  const recv=rows.length+' received'+(gaps.length?' · '+gaps.join(' · '):'');
+  const cards=[['all','Transcribed',done,recv,'var(--slate)'],
     ['qualified','Qualified',qual,'leads matched',TR_OUTCOMES['Qualified'].colour],
     ['followup','Follow-Up',foll,'call back later',TR_OUTCOMES['Follow-Up'].colour],
     ['notqualified','Not Qualified',notq,'did not match',TR_OUTCOMES['Not Qualified'].colour],
