@@ -2704,10 +2704,14 @@
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
     const pinned=wfOriginalAttachmentHtml(c,flow);
-    // Editing the fields submitted with this instance is open to whoever started it, not just
-    // the admin account — but only while it's still moving; once it's Done/Cancelled it's final.
+    /* The Administrator, the owner, or whoever it has been sent back to — and only while it is
+       still moving; once it is Done or Cancelled it is final. Mirrors acc.wf_update_instance, which
+       is what actually enforces this. A flow's extra admins used to be offered the pencil here and
+       were then refused by the database, so the button only ever produced an error. */
+    const backTo=String(c.returned_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
     const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')
-      &&(eq(c.created_by||'',me())||eq(me(),'ayushruia1@gmail.com')||(Array.isArray(flow&&flow.extra_admins)&&flow.extra_admins.some(function(e){return eq(e,me());})));
+      &&(eq(c.created_by||'',me())||eq(me(),'ayushruia1@gmail.com')
+         ||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'

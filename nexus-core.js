@@ -11307,8 +11307,9 @@ function trIsPendingRow(r){
 }
 // KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
 function trApplyFilter(rows){
-  if(TR_FILTER==='nil')return rows.filter(trIsNilRow);
-  // every view lists finished calls only
+  // The one view that deliberately shows unfinished calls, since that is the whole point of it.
+  if(TR_FILTER==='processing')return rows.filter(trIsPendingRow);
+  // every other view lists finished calls only
   rows=rows.filter(function(r){ return !trIsNilRow(r) && !trIsPendingRow(r); });
   if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
   if(TR_FILTER==='followup')return rows.filter(function(r){return r.qualification==='Follow-Up';});
@@ -11321,15 +11322,14 @@ function trKpisHtml(rows){
   const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
   const foll=rows.filter(function(r){return r.qualification==='Follow-Up';}).length;
   /* Counted from ALL rows, not the listed ones: the point of showing "received" against
-     "transcribed" is that the gap is visible rather than the day looking smaller than it was. */
-  const nil=rows.filter(trIsNilRow).length;
-  // Only actually-finished calls. rows.length-nil would count the ones still queued as transcribed.
+     "transcribed" is that the gap stays visible rather than the day looking smaller than it was. */
   const done=rows.filter(function(r){return r.status==='done';}).length;
+  const proc=rows.filter(trIsPendingRow).length;
   const cards=[['all','Transcribed',done,rows.length+' calls received','var(--slate)'],
     ['qualified','Qualified',qual,'leads matched',TR_OUTCOMES['Qualified'].colour],
     ['followup','Follow-Up',foll,'call back later',TR_OUTCOMES['Follow-Up'].colour],
     ['notqualified','Not Qualified',notq,'did not match',TR_OUTCOMES['Not Qualified'].colour],
-    ['nil','Not transcribed',nil,'no recording, or under a minute','#64748b']];
+    ['processing','In Progress',proc,proc?'being transcribed now':'all caught up',proc?'#d97706':'#16a34a']];
   return '<div class="grid kpis" style="grid-template-columns:repeat('+cards.length+',1fr)">'+cards.map(function(c){
     const active=TR_FILTER===c[0];
     return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
@@ -11627,7 +11627,7 @@ function trDownloadRows(rows,heading){
   trTriggerDownload(trExportHtml(doneRows,heading),trSafeFilename(heading)+'.html');
 }
 window.trDownloadList=function(){
-  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':'All calls');
+  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='followup'?'Follow-Up calls':(TR_FILTER==='processing'?'Calls being transcribed':'All calls')));
   trDownloadRows(trApplyFilter(TR_ROWS||[]),label);
 };
 window.trDownloadReport=function(id){
