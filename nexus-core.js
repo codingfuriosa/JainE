@@ -11248,7 +11248,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
     +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn" onclick="trDownloadList()"><i class="fa-solid fa-download"></i> Download</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="8"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="9"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
@@ -11418,9 +11418,13 @@ function trRowHtml(r,mode){
   // (taskDragOver) elsewhere in this file — persisted via pin_rank in trPinReorderDrop.
   const dragAttrs=r.pinned?(' draggable="true" data-id="'+r.id+'" ondragstart="event.dataTransfer.setData(\'text/plain\',\''+r.id+'\');this.classList.add(\'dragging\')" ondragend="this.classList.remove(\'dragging\')" ondragover="event.preventDefault();taskDragOver(event,this)" ondragleave="this.classList.remove(\'drop-above\',\'drop-below\')" ondrop="trPinReorderDrop(event,this)"'):'';
   const rowClass=r.pinned?' class="pin-drag"':'';
-  // Main line = the recording's file name (truncated with … if too long, full name on hover);
-  // below it = the detected customer name, when the call identified one.
-  const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+  /* Main line = the recording's name, which is now "Full Name_Lead Id" from the CRM (or the lead id
+     alone when the CRM holds no name). Below it = the caller's number, and a plain note when the
+     recording produced no transcript, so a row is never silently empty. */
+  const ph=trPhone(r);
+  const sub=[ph?trPhoneFmt(ph):'', trIsNilRow(r)?'<span style="color:#94a3b8">(Not Transcribed)</span>':'']
+    .filter(Boolean).join(' · ');
+  const nameLine=sub?'<div style="font-size:11px;color:var(--slate)">'+sub+'</div>':'';
   const checkTd=mode==='list'?('<td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox"'+(TR_SELECTED.has(r.id)?' checked':'')+' onchange="trToggleSelect('+r.id+',this.checked)"></td>'):'';
   // Pinned rows are draggable from anywhere on the row (no separate grip icon needed — that
   // used to widen this cell just for pinned rows and forced the table into horizontal scroll).
@@ -11429,11 +11433,13 @@ function trRowHtml(r,mode){
     +checkTd
     +'<td><div style="display:flex;align-items:center;gap:8px;max-width:280px">'+pinIcon+'<i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px;flex-shrink:0"></i><div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
     +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+    +'<td>'+trCrmTag(r.crm_status)+(r.mismatch?'<div style="font-size:10.5px;color:#dc2626;margin-top:3px;font-weight:600" title="'+esc(r.mismatch_reason||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> disagrees</div>':'')+'</td>'
     +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
     +'<td>'+trLangTags(r.languages)+'</td>'
     +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
     +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
     +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+      +(r.recording_url?'<button class="btn btn-sm btn-ghost" title="Copy the recording link — paste it to download the audio" onclick="trCopyUrl('+r.id+')"><i class="fa-solid fa-link"></i></button> ':'')
       +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Download report" onclick="trDownloadReport('+r.id+')"><i class="fa-solid fa-download"></i></button> ':'')
       +(mode==='folder'?'<button class="btn btn-sm btn-ghost" title="Remove from folder" onclick="trRemoveFromFolder('+r.id+')"><i class="fa-solid fa-xmark"></i></button> ':'')
       +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
@@ -11480,7 +11486,7 @@ function trFolderCallsHtml(rows,name){
     +'<button class="btn btn-sm" onclick="trFolderDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete folder</button>'
     +(list.length?'<button class="btn btn-sm" onclick="trDownloadFolder()"><i class="fa-solid fa-download"></i> Download</button>':'')+'</div>'
     +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid fa-folder" style="color:#0d9488"></i> '+esc(name)+'</h1></div>'
-    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
+    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
     +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
 // Keeps the folder drill-in list (if open) in sync after an optimistic delete/retry/remove — a
@@ -11947,11 +11953,62 @@ function trAnalysisHtml(r){
 }
 
 let TR_DETAIL_ROW=null;
+/* The CRM's own verdict on the lead, which is a different question from the AI's. The report used
+   to be lost calls only and now also sends leads still In Followup, so this is worth showing beside
+   the outcome rather than being assumed. */
+const TR_CRM_TAGS={ 'Lost':{bg:'#fee2e2',ink:'#991b1b'}, 'In Followup':{bg:'#fef3c7',ink:'#92400e'} };
+function trCrmTag(v){
+  const s=String(v||'').trim();
+  if(!s)return '<span style="color:var(--slate)">—</span>';
+  const t=TR_CRM_TAGS[s]||{bg:'#e2e8f0',ink:'#334155'};
+  return '<span class="badge" style="background:'+t.bg+';color:'+t.ink+';white-space:nowrap">'+esc(s)+'</span>';
+}
+
+// The caller, by number. Falls back to whichever of the two columns the row actually carries.
+function trPhone(r){ return String((r&&(r.phone||r.lead_mobile))||'').trim(); }
+
+/* Who said what. Rendered from `utterances` when we have it, so a turn can be labelled with the
+   customer's own number instead of the word "Customer", and so the Original toggle shows the native
+   script - it used to read transcript_bn, which this pipeline never writes, leaving both toggles
+   showing the same English. The flat transcript stays the fallback for older rows. */
 function trTranscriptHtml(r,lang){
+  const turns=Array.isArray(r&&r.utterances)?r.utterances:null;
+  if(turns&&turns.length){
+    const who=trPhone(r);
+    const rows=turns.map(function(t){
+      const isAgent=String((t&&t.speaker)||'').toLowerCase().indexOf('agent')!==-1;
+      // The agent is staff and stays "Agent"; the other side is this lead, so name them by number.
+      // trPhoneFmt returns +91 XXXXX XXXXX and escapes as it goes, so it is not escaped again below.
+      const labelHtml=isAgent?'Agent':(who?trPhoneFmt(who):'Customer');
+      const body=(lang==='bn')?((t&&(t.original||t.text))||''):((t&&(t.text||t.original))||'');
+      if(!String(body).trim())return '';
+      return '<div style="display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--line)">'
+        +'<div style="flex-shrink:0;width:118px">'
+          +'<div style="font-weight:600;font-size:12px;color:'+(isAgent?'#0d9488':'#4f46e5')+'">'+labelHtml+'</div>'
+          +(t&&t.timestamp?'<div style="font-size:10.5px;color:var(--slate)">'+esc(t.timestamp)+'</div>':'')
+        +'</div>'
+        +'<div style="flex:1;min-width:0;font-size:13.5px;line-height:1.65">'+esc(body)+'</div></div>';
+    }).join('');
+    if(rows)return '<div style="max-height:60vh;overflow:auto">'+rows+'</div>';
+  }
   const txt=(lang==='bn')?(r.transcript_bn||r.transcript||''):(r.transcript_en||r.transcript||'');
   if(txt)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(txt)+'</div>';
   return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
 }
+
+/* The Knowlarity link, which downloads the recording when opened. Copied rather than offered as a
+   download button: the link is what is useful to paste into a chat or a browser, and a page-driven
+   download would be blocked in some views anyway. */
+window.trCopyUrl=async function(id){
+  const r=(TR_ROWS||[]).concat(TR_DELETED_ROWS||[]).find(function(x){return x.id===id;});
+  const url=r&&r.recording_url;
+  if(!url){ toast('This call has no recording link','err'); return; }
+  try{ await navigator.clipboard.writeText(url); toast('Recording link copied — paste it anywhere to download','ok'); }
+  catch(e){
+    // clipboard is refused without a user gesture or over plain http; show it so it can be copied by hand
+    try{ window.prompt('Copy the recording link:', url); }catch(_e){ toast('Could not copy the link','err'); }
+  }
+};
 window.trSetLang=function(lang){
   if(!TR_DETAIL_ROW)return;
   const b=$('trTranscriptBody');if(b)b.innerHTML=trTranscriptHtml(TR_DETAIL_ROW,lang);
