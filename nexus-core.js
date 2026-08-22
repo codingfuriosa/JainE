@@ -8435,7 +8435,7 @@ window.rtShare=async function(){
     <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
     <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
     ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
-    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(each field must be filled)</span></label>
+    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(fill in as many as you need &mdash; blank ones are ignored)</span></label>
     <div id="rtEmailFields">${fields}</div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
       <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
@@ -8451,14 +8451,19 @@ window.rtShareSend=async function(id){
   if(!inps.length){toast('Add at least one candidate email','err');return;}
   const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const emails=[];
+  /* A blank box is simply not a candidate. The window opens with five and can be grown fifty at a
+     time, so treating every empty one as an error meant deleting boxes before a smaller send would
+     go - the box count is a convenience, not a declaration of how many people are being written to.
+     What was actually typed is still checked properly for shape and for duplicates. */
   for(const el of inps){
     const v=(el.value||'').trim();
     el.style.borderColor='';
-    if(!v){el.style.borderColor='var(--err)';toast('Every email field must be filled (or remove it)','err');el.focus();return;}
+    if(!v)continue;
     if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
     if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
     emails.push(v.toLowerCase());
   }
+  if(!emails.length){toast('Type at least one candidate email','err');inps[0].focus();return;}
   const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
   const body=($('rtShareBody')||{}).value?.trim()||'';
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
