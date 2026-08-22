@@ -43,6 +43,16 @@ const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
    so at two-at-a-time a 48 call backlog needed two dozen cron ticks - hours. Four fits inside the
    invocation wall clock with room to spare and stays well under the model's rate limit. */
 const CONCURRENCY = 4;
+/* Automatic retry. Both caps are three, and the "no speech" one is measured rather than guessed:
+   of six calls marked no-speech on 21 Aug, THREE transcribed on a plain second attempt - a 213
+   second recording first reported as "Ringing only" came back with ten turns in it. At a 50%
+   recovery rate one extra listen is clearly too few. The cost is bounded: a genuinely silent
+   recording is paid for three times and then left alone for good.
+   Ten minutes between attempts keeps a rate-limit or an outage from being hammered, and means a
+   retry lands on a later cron tick rather than the very next one. */
+const MAX_ATTEMPTS_ERROR = 3;
+const MAX_ATTEMPTS_NO_SPEECH = 3;
+const RETRY_AFTER_MINUTES = 10;
 
 const PROMPT = `### ROLE
 You are an expert Sales Quality Assurance Analyst for JainGroup, a Kolkata real-estate developer.
@@ -408,10 +418,17 @@ async function doPull(db: DB, from: string, to: string, trigger: string) {
 
 // ---------------------------------------------------------------- WORK
 async function processOne(db: DB, row: any, geminiKey: string) {
+  // Counted here rather than at the end, so an attempt that crashes still counts against the cap.
+  const attempts = Number(row.attempts || 0) + 1;
   const checks: Check[] = [{ check: "recording_present", status: "pass", detail: "CRM feed supplied a recording URL." }];
   const fail = async (status: string, errorText: string | null, extra: Record<string, unknown> = {}) => {
+    const giveUp = status === "error" && attempts >= MAX_ATTEMPTS_ERROR;
     await db.schema("acc").from("transcriptions").update({
-      status, error_text: errorText ? errorText.slice(0, 500) : null, verification: checks,
+      status, attempts,
+      error_text: errorText
+        ? (errorText.slice(0, 460) + (giveUp ? ` [gave up after ${attempts} tries]` : ` [try ${attempts}]`))
+        : null,
+      verification: checks,
       mismatch: null, mismatch_severity: null, mismatch_reason: null,
       updated_at: new Date().toISOString(), ...extra }).eq("id", row.id);
     return { id: row.id, lead_id: row.lead_id, status };
@@ -489,7 +506,7 @@ async function processOne(db: DB, row: any, geminiKey: string) {
     checks.push({ check: "crm_status_match", status: "skip",
       detail: "No conversation to judge the CRM's Lost status against." });
     await db.schema("acc").from("transcriptions").update({
-      status: "non_transcribable", non_transcribable_reason: reason,
+      status: "non_transcribable", non_transcribable_reason: reason, attempts,
       summary_verdict: parsed?.summary_verdict || null, duration_seconds: seconds,
       verification: checks, mismatch: null, mismatch_severity: null, mismatch_reason: null,
       error_text: null, updated_at: new Date().toISOString() }).eq("id", row.id);
@@ -530,7 +547,7 @@ async function processOne(db: DB, row: any, geminiKey: string) {
     : (aiLost || qual.why);
 
   const { error } = await db.schema("acc").from("transcriptions").update({
-    status: "done", duration_seconds: seconds,
+    status: "done", attempts, duration_seconds: seconds,
     utterances: turns, transcript: flattenTranscript(turns),
     languages: languagesFrom(parsed?.languages),
     dashboard_fields: df, ai_lead_category: category,
@@ -549,13 +566,41 @@ async function processOne(db: DB, row: any, geminiKey: string) {
            turns: turns.length, mismatch: verdict.mismatch };
 }
 
+/* Put anything worth another go back in the queue before the queue is read, so the ordinary path
+   picks it up with no special casing. Deliberately narrow: no_recording and too_short are never
+   retried - there is nothing to fetch in the first, and the second was skipped on purpose to avoid
+   paying to listen to a ring-out. */
+async function promoteRetries(db: DB) {
+  const after = new Date(Date.now() - RETRY_AFTER_MINUTES * 60e3).toISOString();
+  const requeue = { status: "queued", error_text: null, verification: null,
+                    non_transcribable_reason: null, updated_at: new Date().toISOString() };
+  let errors = 0, noSpeech = 0;
+
+  {
+    const { data } = await db.schema("acc").from("transcriptions").update(requeue)
+      .eq("source", SOURCE).eq("status", "error")
+      .not("recording_url", "is", null).is("deleted_at", null)
+      .lt("attempts", MAX_ATTEMPTS_ERROR).lt("updated_at", after).select("id");
+    errors = (data || []).length;
+  }
+  {
+    const { data } = await db.schema("acc").from("transcriptions").update(requeue)
+      .eq("source", SOURCE).eq("status", "non_transcribable")
+      .not("recording_url", "is", null).is("deleted_at", null)
+      .lt("attempts", MAX_ATTEMPTS_NO_SPEECH).lt("updated_at", after).select("id");
+    noSpeech = (data || []).length;
+  }
+  return { errors, no_speech: noSpeech };
+}
+
 async function doWork(db: DB, limit: number, geminiKey: string) {
-  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name";
+  const retried = await promoteRetries(db);
+  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, attempts";
   const { data: queue, error } = await db.schema("acc").from("transcriptions").select(cols)
     .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null)
     .order("id", { ascending: true }).limit(limit);
   if (error) return j({ error: error.message }, 500);
-  if (!queue || !queue.length) return { processed: 0, remaining: 0, results: [] };
+  if (!queue || !queue.length) return { processed: 0, remaining: 0, retried, results: [] };
 
   // Claim first, so an overlapping tick takes different rows instead of paying twice.
   const { data: claimed } = await db.schema("acc").from("transcriptions")
@@ -572,7 +617,7 @@ async function doWork(db: DB, limit: number, geminiKey: string) {
   const { count } = await db.schema("acc").from("transcriptions")
     .select("id", { count: "exact", head: true })
     .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null);
-  return { processed: results.length, remaining: count ?? 0, results };
+  return { processed: results.length, remaining: count ?? 0, retried, results };
 }
 
 // ---------------------------------------------------------------- HTTP
