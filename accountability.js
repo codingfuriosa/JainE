@@ -946,6 +946,26 @@
     return es.map(function(e){ return wfNm(e); }).join(' / ');
   }
   function wfNm(email){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,email);}); return (p&&p.name)||email||''; }
+  /* Everyone an instance can be looked up by: whoever raised it, plus every person any of its steps
+     is held by or waiting on. Searching "owner" and getting only the person who filled the form in
+     is not what anyone means by it - a reimbursement sitting at Accounts is Accounts's, whoever
+     typed it up. Names AND addresses, because half the office knows each other by one and half by
+     the other. Deduplicated, since one person usually appears on several steps. */
+  function wfOwnerKey(c, stepsById){
+    const seen=Object.create(null);
+    const add=function(e){
+      if(!e) return;
+      [wfNm(e)||'', String(e)].forEach(function(v){ v=String(v||'').trim().toLowerCase(); if(v) seen[v]=1; });
+    };
+    add(c&&c.created_by);
+    const mine=(stepsById&&stepsById[c&&c.id])||{};
+    Object.keys(mine).forEach(function(sq){
+      const st=mine[sq]; if(!st) return;
+      add(st.person);
+      (Array.isArray(st.candidates)?st.candidates:[]).forEach(add);
+    });
+    return Object.keys(seen).join(' ');
+  }
   function wfDeptOf(email){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,email);}); return (p&&Array.isArray(p.depts)&&p.depts.length)?p.depts.join(', '):''; }
   function wfDurText(v,u){ if(v==null||v==='')return ''; u=u||'days'; return v+' '+(Number(v)===1?String(u).replace(/s$/,''):u); }
   function wfAddDuration(base,value,unit){ const d=new Date(base.getTime()); value=Number(value)||0; if(unit==='hours')d.setHours(d.getHours()+value); else if(unit==='weeks')d.setDate(d.getDate()+value*7); else d.setDate(d.getDate()+value); return d; }
@@ -2159,7 +2179,7 @@
          on any workflow that happens to have them (Invoice Processing does; most others won't and
          simply never match). The instance number and its owner apply everywhere. */
       const findLabel=function(name){ const k=Object.keys(by).find(function(l){return eq(l,name);}); return k?String(by[k]||''):''; };
-      const tkKey=(wfCaseNoText(c)+' '+(wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
+      const tkKey=(wfCaseNoText(c)+' '+wfOwnerKey(c, byCase)).toLowerCase();
       return '<tr class="wf-tk-row" data-case="'+c.id+'" data-find="'+esc2(tkKey)+'" onclick="wfTrackerOpen('+c.id+')" '
         +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
@@ -2469,9 +2489,8 @@
         const sentBack=!!c.returned_at;
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
-        // Searchable by whose instance it is - the name shown everywhere else, and the address,
-        // since half the people here are known to each other by one and half by the other.
-        const ownerKey=((wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
+        // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
+        const ownerKey=wfOwnerKey(c, byCase);
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
@@ -2480,7 +2499,7 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id or owner…':'Search by No. or owner…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, or anyone it is with…':'Search by No., or anyone it is with…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -2554,7 +2573,11 @@
   window.wfInstFilter=function(){
     const q=(($('wfInstSearch')||{}).value||'').trim();
     const from=window._wfInstDateFilter.from, to=window._wfInstDateFilter.to;
-    const rows=[].slice.call(document.querySelectorAll('.wf-itable tbody tr'));
+    /* The Instances table only. The Tracker's table also carries wf-itable, and both panes sit in
+       the page at once (the tabs just set display:none), so the bare selector hid every Tracker row
+       as soon as anything was typed here - the Tracker then read as empty until its own search box
+       was touched. */
+    const rows=[].slice.call(document.querySelectorAll('.wf-itable:not(.wf-tktable) tbody tr'));
     let shown=0;
     const qLower=q.toLowerCase();
     rows.forEach(function(r){
