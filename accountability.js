@@ -3530,7 +3530,8 @@
   /* ---- date-grouped form (Reimbursement) --------------------------------------------------
      One container per date, each holding one or more expenses, because a day out is several fares
      and meals against one date - and typing the date again for each of them was both tedious and
-     the thing people got wrong. "Add expense" grows the day; "Add date" starts another one.
+     the thing people got wrong, so each button is named for it: "Add expense in same date" grows
+     the day you are on, "Add another date" starts a new one.
 
      Stored FLAT all the same: one entry per expense with its date repeated. The table, Tracker,
      totals and emails all read that shape already, so none of them need to know about the nesting.
@@ -3558,7 +3559,7 @@
       +'<div class="wf-evt-exps">'
         +exps.map(function(v,i){ return wfExpBlockHtml(expFields, v, locked, i+1, exps.length>1); }).join('')
       +'</div>'
-      +'<div class="wf-addstep-ghost wf-add-exp" onclick="wfExpAdd(this)"><i class="fa-solid fa-plus"></i> Add expense</div>'
+      +'<div class="wf-addstep-ghost wf-add-exp" onclick="wfExpAdd(this)"><i class="fa-solid fa-plus"></i> Add expense in same date</div>'
     +'</div>';
   }
   // Renumbers the "Expense n" headings and shows or hides each remove button, so a block is never
@@ -3834,7 +3835,7 @@
         +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +(dateMode
           ? '<div id="wfEvtDetails">'+dateGroupsHtml+'</div>'
-            +'<div class="wf-addstep-ghost wf-add-date" onclick="wfDateAdd()"><i class="fa-solid fa-calendar-plus"></i> Add date</div>'
+            +'<div class="wf-addstep-ghost wf-add-date" onclick="wfDateAdd()"><i class="fa-solid fa-calendar-plus"></i> Add another date</div>'
           : allowMulti
           ? '<div id="wfEvtDetails">'
               +(editGroupsHtml
