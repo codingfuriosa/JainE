@@ -1013,7 +1013,7 @@
   function wfInDept(dept){ return wfMyDepts().some(function(d){return eq(d,dept);}); }
   function wfInAnyDept(depts){ const mine=wfMyDepts(); return (depts||[]).some(function(d){return mine.some(function(m){return eq(m,d);});}); }
   // Who can create a brand-new workflow — mirrors acc.wf_can_create_flow() server-side exactly.
-  var WF_CREATE_DEPTS=['Systems','Administration'];
+  function wfCanCreateFlow(){ return eq(me(),'ayushruia1@gmail.com') || eq(me(),'businessanalyst@thejaingroup.com'); }
   function wfCanSee(f,ownersByFlow){
     const o=(ownersByFlow&&ownersByFlow[f.id])||[];
     // trigger_owner may be '__ALL__' (everyone) or a comma-separated list, not just one email —
@@ -1193,10 +1193,10 @@
       +'</div>';
     }).join('');
     const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet.</div>';
-    // Creating a brand-new workflow (not just viewing one) is restricted to Systems/Administration
-    // — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which is the real
-    // enforcement; this is just the matching client-side button visibility.
-    const canCreate=wfInAnyDept(WF_CREATE_DEPTS);
+    // Creating a brand-new workflow (not just viewing one) is restricted to the Administrator and
+    // Prerna Gupta — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which
+    // is the real enforcement; this is just the matching client-side button visibility.
+    const canCreate=wfCanCreateFlow();
     b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div>'+(canCreate?'<button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button>':'')+'</div>'
       +inner;
   }
@@ -2366,6 +2366,9 @@
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    // Reset — wfShowCase (called below when selCaseId is set) sets this itself; otherwise a case
+    // panel shown on a previous visit must not be mistaken for the one now on screen.
+    window._wfShownCaseId=null;
     try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     let flow=null, steps=[], cases=[], fcs=[];
     try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); flow=data; }catch(e){}
@@ -2446,19 +2449,12 @@
          EDIT   — the triggering event owner only (whoever started it) — not the workflow-management
                   admins, and not step members: changing the details changes what everyone
                   downstream is acting on.
-         DELETE — the Administrator, or anybody this instance runs through (holding or offered any
-                  of its steps), since they are the ones who spot a duplicate or mistaken one.
+         DELETE — the owner (whoever started it), or the Administrator only — not the wider
+                  workflow-management pair, and not step members who merely handle it.
        Both are re-checked in the database, so the buttons only mirror what will actually be
        allowed rather than being the thing that decides it. */
     const canEditCase=function(c){ return eq(c&&c.created_by, mySelf); };
-    const canDeleteCase=function(c){
-      if(canManage) return true;
-      return fcs.some(function(x){
-        if(x.case_id!==(c&&c.id)) return false;
-        if(eq(x.person||'', mySelf)) return true;
-        return Array.isArray(x.candidates) && x.candidates.some(function(e){ return eq(e, mySelf); });
-      });
-    };
+    const canDeleteCase=function(c){ return eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com'); };
     const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     let tableHtml='';
     if(cases.length){
@@ -2706,7 +2702,7 @@
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
-  window.wfShowDef=function(){ const box=$('wfTL'); if(box&&window._wfDefTL!=null) box.innerHTML=window._wfDefTL; document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');}); };
+  window.wfShowDef=function(){ window._wfShownCaseId=null; const box=$('wfTL'); if(box&&window._wfDefTL!=null) box.innerHTML=window._wfDefTL; document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');}); };
 
   window.wfShowCase=async function(caseId, rowEl){
     const box=$('wfTL'); if(box) box.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -2762,7 +2758,16 @@
         : '')
       +detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
-      +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
+      // Same Updates & Feedback section every step-task page already has (post a note, attach a
+      // file) — this panel used to only ever show past updates read-only, with no way to add one,
+      // so anyone who only ever sees an instance from the Tracker (never gets a step task of their
+      // own — the Reimbursement raiser, for one) had no way to post anything at all.
+      +'<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfN().lc+' as it moves to the next person, and rejection reasons appear here too.')+'</div>'+pinned
+        +'<div class="wf-updmini-list" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
+        +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+c.id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+c.id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+        +'<div id="wfUpdFileList" class="wf-updfile-list"></div>'
+      +'</div>';
+    window._wfShownCaseId=c.id;
     wfHydrateAttThumbs();
     /* Bring the panel into view. Clicking a row far down a long table used to load the instance
        somewhere off-screen - most obviously on a phone, where the panel sits below the whole
@@ -4100,7 +4105,7 @@
 
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
   async function wfTaskPage(v, t, members, list, ro){
-    wfInjectCss(); window._wfDelId=null; setCrumb(['Accountability','Workflow','Task']);
+    wfInjectCss(); window._wfDelId=null; window._wfShownCaseId=null; setCrumb(['Accountability','Workflow','Task']);
     try{ WF_PEOPLE=list||await people(); }catch(e){ WF_PEOPLE=list||WF_PEOPLE||[]; }
     let fcs=null;
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('id',t.flow_case_step_id).maybeSingle(); fcs=data; }catch(e){}
@@ -4370,7 +4375,11 @@
         if(insErr) throw insErr;
       }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
     }
-    if(inp)inp.value=''; if(fileInput)fileInput.value=''; renderPage();
+    if(inp)inp.value=''; if(fileInput)fileInput.value='';
+    // Posted from the Tracker's case panel (not a step task page) — refresh just that panel in
+    // place so the selected row and its position in the table survive, instead of a full
+    // renderPage() that would drop back to the unselected list.
+    if(window._wfShownCaseId===caseId){ wfShowCase(caseId,null); } else { renderPage(); }
   };
 
   function wfInjectCss(){
@@ -4908,6 +4917,7 @@
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
     .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;padding-right:4px}
+    .wf-updmini .wf-updbar{margin-top:12px}
     /* thin, unobtrusive scrollbars on the message lists */
     .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
     .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
