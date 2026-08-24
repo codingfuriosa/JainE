@@ -39,6 +39,8 @@
 // ever invents or pastes a password; (2) SYNC_SECRET (legacy); (3) a signed-in user's token.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+// Gemini takes audio as base64 inline data; the speech API takes the bytes directly.
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 type DB = ReturnType<typeof createClient>;
 
 const CORS = {
@@ -53,7 +55,60 @@ const j = (o: unknown, status = 200) =>
    Purpose-built for transcription: it decodes the audio with ffmpeg rather than through a
    general-purpose multimodal path, which is why it copes with these MPEG-2.5 16 kbps 8 kHz files
    where a language model reached for what a call like this usually contains. */
+/* THE EAR, either one. ChatGPT's speech model is the default on the evidence so far - on Pradip
+   Das's 301 second call it returned 4726 characters against Gemini's 1172 - but the two are kept
+   switchable so they can be compared on the same recordings rather than argued about. Only the ear
+   changes: the judging is gpt-4o in both cases. */
 const STT_MODEL = Deno.env.get("STT_MODEL") || "gpt-4o-transcribe";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
+
+/* Only these two statuses are taken. The report also sends Qualified, Sit Visited and OV now; they
+   are skipped at FETCH time rather than filtered afterwards, so they never reach the queue and never
+   cost anything to ignore. */
+const WANTED_STATUSES = ["Lost", "In Followup"];
+
+/* The switchboard, not the conversation. Every call opens with this and it was being written down as
+   the agent's first words, which made a two-line call look like a four-line one. Matched loosely -
+   punctuation and repetition vary - and only at the START of the transcript, so the same words spoken
+   later by a person would survive. */
+const IVR_PATTERNS: RegExp[] = [
+  /welcome\s+to\s+ja[iy]n\s+group[.,!]?/gi,
+  /this\s+call\s+(?:will\s+be|is\s+being)\s+recorded\s+for\s+(?:monitoring\s+and\s+)?(?:training|quality)\s*(?:and\s+training\s*)?purposes?[.,!]?/gi,
+  /please\s+wait\s+while\s+we\s+connect\s+your\s+call[.,!]?/gi,
+  /please\s+hold\s+while\s+we\s+connect\s+you[.,!]?/gi,
+];
+function stripIvr(t: string): string {
+  let out = String(t || "");
+  for (const re of IVR_PATTERNS) out = out.replace(re, " ");
+  /* A turn that was ONLY the IVR is now blank, and an empty "Agent:" line is worse than no line, so
+     the label goes with it. */
+  return out
+    .replace(/^\s*(?:Agent|Customer|Speaker)\s*\d*\s*:\s*(?=$|\n)/gim, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/* Kolkata place names as a Bengali speaker says them, which is not how they are written. Pailan comes
+   back as "Poylan" every time, so the recogniser is primed with the correct spellings AND these are
+   corrected afterwards - priming raises the odds, it does not guarantee them. Word-boundary matched
+   so a longer name containing one of these is left alone. */
+const SPELLINGS: [RegExp, string][] = [
+  [/\bpoylan\b/gi, "Pailan"], [/\bpoilan\b/gi, "Pailan"], [/\bpailaan\b/gi, "Pailan"],
+  [/\bjhoka\b/gi, "Joka"], [/\bjokha\b/gi, "Joka"],
+  [/\bmodhyomgram\b/gi, "Madhyamgram"], [/\bmadhyamgra?am\b/gi, "Madhyamgram"],
+  [/\bdoltola\b/gi, "Doltala"], [/\bdoltalla\b/gi, "Doltala"],
+  [/\brajarhaat\b/gi, "Rajarhat"], [/\brajarhut\b/gi, "Rajarhat"],
+  [/\bbarasaat\b/gi, "Barasat"], [/\bbarashat\b/gi, "Barasat"],
+  [/\bnarendrapore\b/gi, "Narendrapur"],
+  [/\bgems?\s+group\b/gi, "Jain Group"], [/\bjems?\s+group\b/gi, "Jain Group"],
+  [/\bdream\s+gurukool\b/gi, "Dream Gurukul"], [/\bdream\s+exotika\b/gi, "Dream Exotica"],
+];
+function fixSpellings(t: string): string {
+  let out = String(t || "");
+  for (const [re, right] of SPELLINGS) out = out.replace(re, right);
+  return out;
+}
 /* The judgement runs on the TEXT, which is a reading task, and gpt-4o is asked to do only that.
    Keeping the two stages on different providers is deliberate: the transcript is then evidence the
    judge did not produce, so name_matches_crm and crm_status_match stay meaningful checks. */
@@ -102,10 +157,40 @@ to be used to fill in anything you did not hear):
    recogniser gets wrong on a bad line, so the projects and the company name go in and nothing else
    does. No rules about summarising are needed: a transcription model has no concept of summarising,
    which is precisely why it is being used. */
+/* Gemini needs telling what a speech model knows by construction: transcribe, do not summarise,
+   and do not stop early. Every instruction here exists because its absence produced a specific
+   failure - an 8m26s call returned as 16 turns, a call written off as "silence" that had people
+   talking in it, and the project catalogue recited back as the conversation. Deliberately NO
+   catalogue here: given the list, it read the list out. */
+const GEMINI_TRANSCRIBE_PROMPT = `You are a transcriptionist. This is a Jain Group (Kolkata
+real-estate) sales call - a compressed 8 kHz telephone recording, speech mixing Bengali, Hindi and
+English.
+
+WRITE DOWN EVERY WORD SPOKEN. Not a summary. Not the gist. Every word.
+
+- Transcribe the WHOLE recording, first sound to last. Never stop early, never write "conversation
+  continues". Eight minutes of audio means dozens of turns.
+- VERBATIM: keep every "hello", "haan", "achha", "ji", every repetition and false start. Do not tidy,
+  merge or shorten.
+- There is ALMOST ALWAYS speech. Ringing, a caller tune or an IVR message at the start is normal and
+  is NEVER a reason to stop - skip past it and transcribe what follows. Do not call a recording empty
+  because it opens with ringing, is noisy, or the voices are faint.
+- Where you truly cannot make out a phrase, write [inaudible] in its place and carry on. That is for
+  gaps, never for a whole call.
+- NEVER invent a name, a figure, a location or a project you did not hear.
+
+Kolkata place names are said in Bengali and written differently: Pailan (heard as "Poylan"), Joka,
+Madhyamgram, Doltala, Rajarhat, Barasat, Narendrapur, Chinar Park. The developer is "Jain Group" -
+"Gems Group" or "Jems Group" is a mishearing.
+
+Output the conversation as plain text, one turn per line, each line starting "Agent:" or "Customer:".
+Nothing else - no preamble, no JSON, no commentary.`;
+
 const STT_HINT = "Jain Group real-estate sales call, Kolkata. Projects: Dream World City, Dream "
   + "Gurukul, Dream Exotica, Dream Valley, Dream Eco City, Dream One, Dream Residency Manor. Areas: "
-  + "Rajarhat, New Town, Madhyamgram, Doltala, Badu Road, Joka, Pailan, Siliguri, Durgapur, Eco Park. "
-  + "Speech mixes Bengali, Hindi and English. Amounts are in lakhs; flats are 2BHK or 3BHK.";
+  + "Rajarhat, New Town, Madhyamgram, Doltala, Badu Road, Joka, Pailan (spoken \"Poylan\"), Barasat, "
+  + "Narendrapur, Siliguri, Durgapur, Eco Park, Chinar Park. Speech mixes Bengali, Hindi and English. "
+  + "Amounts are in lakhs; flats are 2BHK or 3BHK. Ignore the recorded IVR greeting at the start.";
 
 /* STAGE 2. Reading, not listening. It receives the verbatim transcript and NOTHING else - not the
    audio, not the CRM's name, not the CRM's status - which is what keeps name_matches_crm and
@@ -236,7 +321,10 @@ function parseTurns(en: string, bn: string) {
 
 type FeedRow = {
   recording_url?: unknown; lead_id?: unknown; business_unit_name?: unknown;
-  lead_name?: unknown; lead_mobile?: unknown; status?: unknown;
+  lead_name?: unknown; status?: unknown;
+  /* What the AGENT recorded, which is the other half of every discrepancy check. lead_mobile is gone:
+     the report stopped sending it. */
+  next_follow_up_date?: unknown; lost_reason?: unknown; remarks?: unknown;
 };
 // The feed writes absence as text rather than as null, and not always the same text.
 const FEED_BLANKS = ["none", "null", "undefined", "na", "n/a", "-", ""];
@@ -398,18 +486,27 @@ async function doPull(db: DB, from: string, to: string, trigger: string) {
   // no-recording rows collapse to one per lead rather than inflating "calls received".
   const seen = new Set<string>();
   const queued: Record<string, unknown>[] = [];
-  let noRecording = 0;
+  let noRecording = 0, skippedStatus = 0;
 
   for (const row of feed) {
     const leadId = Number(row.lead_id) || null;
     if (!leadId) continue;
+    const crm = crmStatusFrom(row.status);
+    /* Lost and In Followup only. Skipped HERE, so Qualified, Sit Visited and OV never enter the queue:
+       filtering later would mean transcribing them first, which is the expensive way to ignore
+       something. */
+    if (!crm || !WANTED_STATUSES.includes(crm)) { skippedStatus++; continue; }
+
     const bu = row.business_unit_name ? String(row.business_unit_name) : null;
     const rec = realUrl(row.recording_url);
     // Straight from the CRM, so these are facts rather than the AI's reading of the audio.
     const nm = feedText(row.lead_name);
-    const mob = feedText(row.lead_mobile);
-    const crm = crmStatusFrom(row.status) || "Lost";
     const label = recordingName(nm, leadId);
+    /* The agent's own record of this call, kept apart from anything the AI produces so the two can be
+       compared rather than one quietly overwriting the other. */
+    const agentReason = feedText(row.lost_reason);
+    const agentRemarks = feedText(row.remarks);
+    const nextFollowUp = feedText(row.next_follow_up_date);
 
     if (!rec) {
       const key = `norec:${leadId}`;
@@ -417,7 +514,8 @@ async function doPull(db: DB, from: string, to: string, trigger: string) {
       seen.add(key); noRecording++;
       queued.push({
         source: SOURCE, title: label, file_name: label, lead_id: leadId,
-        customer_name: nm, lead_mobile: mob, phone: mob,
+        customer_name: nm,
+        crm_lost_reason: agentReason, crm_remarks: agentRemarks, next_follow_up_date: nextFollowUp,
         business_unit_name: bu, project: bu, crm_status: crm, report_date: from,
         status: "no_recording", synced_at: new Date().toISOString(),
         verification: [{ check: "recording_present", status: "fail",
@@ -432,7 +530,8 @@ async function doPull(db: DB, from: string, to: string, trigger: string) {
     // project comes from the feed and is known now; the AI returns "Unclear" most of the time.
     queued.push({
       source: SOURCE, title: label, file_name: label, lead_id: leadId,
-      customer_name: nm, lead_mobile: mob, phone: mob,
+      customer_name: nm,
+      crm_lost_reason: agentReason, crm_remarks: agentRemarks, next_follow_up_date: nextFollowUp,
       business_unit_name: bu, project: bu, crm_status: crm, report_date: from,
       recording_url: rec, call_uuid: uuid, status: "queued", synced_at: new Date().toISOString(),
     });
@@ -478,12 +577,14 @@ async function doPull(db: DB, from: string, to: string, trigger: string) {
     duplicates: queued.length - fresh.length, no_recording: noRecording });
 
   return { from, to, feed_rows: feed.length, unique_calls: queued.length, inserted,
-           duplicates: queued.length - fresh.length, no_recording: noRecording };
+           duplicates: queued.length - fresh.length, no_recording: noRecording,
+           skipped_other_statuses: skippedStatus };
 }
 
 // ---------------------------------------------------------------- WORK
 async function processOne(db: DB, row: any, openaiKey: string,
-                          sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL) {
+                          sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL,
+                          engine = "chatgpt", geminiKey = "", geminiModel = GEMINI_MODEL) {
   // Counted here rather than at the end, so an attempt that crashes still counts against the cap.
   const attempts = Number(row.attempts || 0) + 1;
   const checks: Check[] = [{ check: "recording_present", status: "pass", detail: "CRM feed supplied a recording URL." }];
@@ -550,31 +651,55 @@ async function processOne(db: DB, row: any, openaiKey: string,
       detail: `Reusing the transcript already stored for this call (${stored.length} characters) - only the analysis is being redone.` });
   }
 
-  /* STAGE 1 - speech to text. Multipart form, and the file MUST carry a name with an extension:
-     OpenAI picks its decoder from that, and an unnamed octet-stream is rejected outright. The bytes
-     are sent exactly as Knowlarity served them. */
+  /* STAGE 1 - the listening, by whichever engine was asked for. Everything after this point is
+     identical either way, which is the only way a comparison between the two means anything: the
+     judging is gpt-4o regardless, so a difference in the result is a difference in the ear. */
   let spoken = stored;
-  try {
-    if (stored) throw { skip: true };
-    if (!openaiKey) throw new Error("CHATGPT_API_KEY is not configured");
-    const fd = new FormData();
-    fd.append("file", new Blob([audio], { type: "audio/mpeg" }), "call.mp3");
-    fd.append("model", sttModel);
-    fd.append("response_format", "json");
-    fd.append("temperature", "0");
-    fd.append("prompt", STT_HINT);
-    const tr = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST", headers: { Authorization: "Bearer " + openaiKey }, body: fd });
-    const tj = await tr.json().catch(() => ({}));
-    if (!tr.ok) throw new Error(`speech-to-text failed (${tr.status}): ${JSON.stringify(tj).slice(0,300)}`);
-    spoken = String(tj.text || "").trim();
-    if (!spoken) throw new Error("speech-to-text returned no text");
-  } catch (e) {
-    // the sentinel above, not a failure - the stored transcript stands
-    if (!(e as any)?.skip) {
+  if (!stored) {
+    try {
+      if (engine === "gemini") {
+        if (!geminiKey) throw new Error("GEMINI_API_KEY is not configured");
+        /* audio/mpeg, NOT the "binary/octet-stream" Knowlarity serves. Passing the server's own
+           header through was the original bug in this file: Gemini received a blob declared as
+           unspecified binary data and answered from the prompt instead of the audio. */
+        const gr = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`,
+          { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [
+                { text: GEMINI_TRANSCRIBE_PROMPT },
+                { inline_data: { mime_type: "audio/mpeg", data: encodeBase64(audio) } }] }],
+              // Plain text out, no schema: one job, and a schema to fill is an invitation to invent.
+              generationConfig: { temperature: 0, maxOutputTokens: 60000 },
+            }) });
+        const gj = await gr.json().catch(() => ({}));
+        if (!gr.ok) throw new Error(`Gemini failed (${gr.status}): ${JSON.stringify(gj).slice(0,300)}`);
+        spoken = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+        if (!spoken) {
+          const why = gj?.candidates?.[0]?.finishReason;
+          throw new Error(why ? `Gemini returned no text (finishReason: ${why})` : "Gemini returned nothing");
+        }
+      } else {
+        if (!openaiKey) throw new Error("CHATGPT_API_KEY is not configured");
+        /* The file MUST carry a name with an extension: OpenAI picks its decoder from that, and an
+           unnamed octet-stream is rejected outright. The bytes go exactly as they were served. */
+        const fd = new FormData();
+        fd.append("file", new Blob([audio], { type: "audio/mpeg" }), "call.mp3");
+        fd.append("model", sttModel);
+        fd.append("response_format", "json");
+        fd.append("temperature", "0");
+        fd.append("prompt", STT_HINT);
+        const tr = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST", headers: { Authorization: "Bearer " + openaiKey }, body: fd });
+        const tj = await tr.json().catch(() => ({}));
+        if (!tr.ok) throw new Error(`speech-to-text failed (${tr.status}): ${JSON.stringify(tj).slice(0,300)}`);
+        spoken = String(tj.text || "").trim();
+        if (!spoken) throw new Error("speech-to-text returned no text");
+      }
+    } catch (e) {
       const msg = String((e as any)?.message || e);
       checks.push({ check: "human_conversation", status: "skip", detail: "Not reached: " + msg });
-      return fail("error", "transcription: " + msg, { duration_seconds: seconds });
+      return fail("error", `transcription (${engine}): ` + msg, { duration_seconds: seconds });
     }
   }
 
@@ -689,7 +814,7 @@ async function processOne(db: DB, row: any, openaiKey: string,
     : (aiLost || qual.why);
 
   const { error } = await db.schema("acc").from("transcriptions").update({
-    status: "done", attempts, duration_seconds: seconds,
+    status: "done", attempts, duration_seconds: seconds, gladia_id: engine,
     utterances: turns, transcript: transcriptEn,
     transcript_en: transcriptEn, transcript_bn: transcriptBn,
     languages: languagesFrom(parsed?.languages),
@@ -737,7 +862,8 @@ async function promoteRetries(db: DB) {
 }
 
 async function doWork(db: DB, limit: number, openaiKey: string,
-                      sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL) {
+                      sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL,
+                      engine = "chatgpt", geminiKey = "", geminiModel = GEMINI_MODEL) {
   const retried = await promoteRetries(db);
   const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, attempts, transcript";
   const { data: queue, error } = await db.schema("acc").from("transcriptions").select(cols)
@@ -755,13 +881,14 @@ async function doWork(db: DB, limit: number, openaiKey: string,
   const results: unknown[] = [];
   for (let i = 0; i < mine.length; i += CONCURRENCY) {
     results.push(...await Promise.all(mine.slice(i, i + CONCURRENCY).map((r) =>
-      processOne(db, r, openaiKey, sttModel, analysisModel).catch((e) => ({
+      processOne(db, r, openaiKey, sttModel, analysisModel, engine, geminiKey, geminiModel).catch((e) => ({
         id: r.id, lead_id: r.lead_id, status: "error", error: String((e as any)?.message || e) })))));
   }
   const { count } = await db.schema("acc").from("transcriptions")
     .select("id", { count: "exact", head: true })
     .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null);
-  return { processed: results.length, remaining: count ?? 0, retried, sttModel, analysisModel, results };
+  return { processed: results.length, remaining: count ?? 0, retried,
+           engine, transcriber: engine === "gemini" ? geminiModel : sttModel, analysisModel, results };
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -774,6 +901,7 @@ Deno.serve(async (req: Request) => {
   const SECRET = Deno.env.get("SYNC_SECRET");
   // This project names it CHATGPT_API_KEY; the conventional name is accepted as well.
   const OPENAI_KEY = Deno.env.get("CHATGPT_API_KEY") || Deno.env.get("OPENAI_API_KEY") || "";
+  const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 
   const secretHeader = req.headers.get("x-sync-secret") || "";
   const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -816,6 +944,12 @@ Deno.serve(async (req: Request) => {
   const reqStt = String(body.stt_model || body.model || "").trim();
   if (reqStt && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqStt)) return j({ error: "that does not look like a model name" }, 400);
   const sttModel = reqStt || STT_MODEL;
+  /* Which engine does the LISTENING. ChatGPT by default; "gemini" is here so the two can be run over
+     the same recordings and compared rather than argued about. The judging is gpt-4o either way. */
+  const engine = String(body.engine || "chatgpt").trim().toLowerCase() === "gemini" ? "gemini" : "chatgpt";
+  const reqGemini = String(body.gemini_model || "").trim();
+  if (reqGemini && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqGemini)) return j({ error: "that does not look like a model name" }, 400);
+  const geminiModel = reqGemini || GEMINI_MODEL;
   const reqAnalysis = String(body.analysis_model || "").trim();
   if (reqAnalysis && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqAnalysis)) return j({ error: "that does not look like a model name" }, 400);
   const analysisModel = reqAnalysis || ANALYSIS_MODEL;
@@ -844,20 +978,20 @@ Deno.serve(async (req: Request) => {
         .eq("id", id).not("recording_url", "is", null).select("id, status").maybeSingle();
       if (error) return j({ error: error.message }, 500);
       if (!data) return j({ error: "no such call, or it has no recording URL to retry" }, 404);
-      return j({ ok: true, requeued: id, work: await doWork(db, 1, OPENAI_KEY, sttModel, analysisModel) });
+      return j({ ok: true, requeued: id, work: await doWork(db, 1, OPENAI_KEY, sttModel, analysisModel, engine, GEMINI_KEY, geminiModel) });
     }
     if (action === "pull") {
       const pulled = await doPull(db, from, to, trigger);
       return pulled instanceof Response ? pulled : j({ ok: true, action, ...pulled });
     }
     if (action === "work") {
-      const worked = await doWork(db, limit, OPENAI_KEY, sttModel, analysisModel);
+      const worked = await doWork(db, limit, OPENAI_KEY, sttModel, analysisModel, engine, GEMINI_KEY, geminiModel);
       return worked instanceof Response ? worked : j({ ok: true, action, ...worked });
     }
     if (action === "run") {
       const pulled = await doPull(db, from, to, trigger);
       if (pulled instanceof Response) return pulled;
-      const worked = await doWork(db, limit, OPENAI_KEY, sttModel, analysisModel);
+      const worked = await doWork(db, limit, OPENAI_KEY, sttModel, analysisModel, engine, GEMINI_KEY, geminiModel);
       return worked instanceof Response ? worked : j({ ok: true, action, pull: pulled, work: worked });
     }
     return j({ error: `unknown action "${action}"` }, 400);
