@@ -1,4 +1,6 @@
-// TWO MODELS, ONE JOB EACH: Gemini transcribes the audio, gpt-4o judges the transcript.
+// ONE JOB EACH: a SPEECH model turns the audio into words, gpt-4o reads those words.
+// The speech model is gpt-4o-transcribe by default and Gemini on request, so the two can be
+// compared over the same recordings; the judging is gpt-4o either way.
 //
 // This exists because of a failure worth recording. The first version asked Gemini, in a single
 // call, for a per-turn JSON array with four keys AND six dashboard fields AND six booleans AND seven
@@ -20,7 +22,8 @@
 // and blanks rather than inventions where it could not tell. name_matches_crm keeps watching that.
 //
 // Nightly Lost-Call QA. Pulls DreamCRM's report - recording_url, lead_id, lead_name, lead_mobile,
-// business_unit_name and status (Lost | In Followup); still no call duration - then transcribes and
+// business_unit_name, status, next_follow_up_date, lost_reason and remarks; no call duration, and
+// no lead_mobile any more. Only Lost and In Followup are taken. Then it transcribes and
 // audits each call. The report covers leads being followed up as well as lost ones, so the AI's own
 // verdict (Qualified / Follow-Up / Not Qualified) is checked against the CRM's, and disagreement in
 // either direction is what this exists to surface.
@@ -51,10 +54,6 @@ const CORS = {
 const j = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json", ...CORS } });
 
-/* THE EAR. OpenAI's speech model, not Gemini - see the note at the top of this file for why.
-   Purpose-built for transcription: it decodes the audio with ffmpeg rather than through a
-   general-purpose multimodal path, which is why it copes with these MPEG-2.5 16 kbps 8 kHz files
-   where a language model reached for what a call like this usually contains. */
 /* THE EAR, either one. ChatGPT's speech model is the default on the evidence so far - on Pradip
    Das's 301 second call it returned 4726 characters against Gemini's 1172 - but the two are kept
    switchable so they can be compared on the same recordings rather than argued about. Only the ear
@@ -131,6 +130,14 @@ const CONCURRENCY = 3;
    recording is paid for three times and then left alone for good.
    Ten minutes between attempts keeps a rate-limit or an outage from being hammered, and means a
    retry lands on a later cron tick rather than the very next one. */
+/* What counts as "too thin to be a transcript of this recording".
+   Measured, not guessed: real transcripts of these calls run 6-16 characters per second of audio,
+   and the failures cluster far below - "Hello." at 0.1, Gemini's 40-character answers at 0.2 and 0.5.
+   1.5 sits in the empty gap between the two, so a genuinely brief exchange still passes while
+   near-silence does not.
+   The floor is absolute as well as relative: 120 characters is not a call whatever its length. */
+const MIN_TRANSCRIPT_CHARS = 120;
+const MIN_CHARS_PER_SECOND = 1.5;
 const MAX_ATTEMPTS_ERROR = 3;
 const MAX_ATTEMPTS_NO_SPEECH = 3;
 const RETRY_AFTER_MINUTES = 10;
@@ -248,6 +255,29 @@ call early, say so in notes rather than failing the agent for it.
 agreed, and what the agent should have done differently. If the call was only a few words, say that
 plainly instead of padding it out.`;
 
+
+/* STAGE 3. Two accounts of the same call - the agent's and the transcript's - and one question: do
+   they agree? It is given both, which is exactly what stage 2 must NOT be: the transcript and the
+   summary were produced without any sight of the agent's version, so comparing them here is a real
+   test rather than a confirmation.
+   Told plainly that different WORDS for the same substance is agreement, because the agent types
+   shorthand under time pressure and the point is whether the account is TRUE, not whether it is well
+   written. */
+const COMPARE_PROMPT = `You are auditing a sales call. You will be given what the CALL contains and
+what the AGENT recorded about it in the CRM. Decide whether the agent's record is TRUE to the call.
+Reply with a single json object and nothing else.
+
+Judge SUBSTANCE, not wording. The agent types shorthand: "budget low", "BUDGET AMOUNT LOW" and "the
+customer's budget was below our starting price" are all the SAME thing and all agree. Say it
+disagrees only where the agent's record states something the call does not support, or misses the
+actual reason entirely.
+
+Return:
+"lost_reason": { "agrees": true/false, "note": "one sentence" } - or null if no lost reason was given.
+  agrees=false when the agent's reason is not the reason the call shows.
+"remarks": { "agrees": true/false, "note": "one sentence" } - or null if no remarks were given.
+  agrees=false when the remarks describe something that did not happen on this call, or contradict it.
+Keep each note to one plain sentence naming the difference, or confirming the match.`;
 
 // Calls are Indian, so "yesterday" must be yesterday in IST - at 19:00 UTC when the cron fires, UTC
 // is still on the previous day.
@@ -705,13 +735,50 @@ async function processOne(db: DB, row: any, openaiKey: string,
 
   // audio goes out of scope here and is never persisted.
 
-  /* The verbatim record, exactly as the speech model returned it. Everything below is a rendering of
-     THIS, and this is what gets stored - so "every word" survives whatever the labelling makes of it. */
-  const verbatim = spoken;
+  /* The verbatim record, cleaned in this order: the IVR greeting out first, then the place names put
+     right. Both act on the VERBATIM text, so what is STORED is already correct rather than needing
+     fixing on screen - and everything below is a rendering of this, so "every word" survives whatever
+     the labelling makes of it. */
+  const verbatim = fixSpellings(stripIvr(spoken));
   checks.push({ check: "human_conversation", status: "pass",
     detail: `Speech-to-text returned ${verbatim.length} characters of speech`
       + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
       + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
+
+  /* TOO THIN TO BE A TRANSCRIPT? Then this is a failure to HEAR, not a fact about the call, and it
+     goes back round. Checked here, before the judging, for two reasons: paying to grade six
+     characters is waste, and a verdict formed from six characters is worse than none - "Hello."
+     produced a confident "Not Qualified" with every check green.
+     The transcript is CLEARED rather than kept: promoteRetries reuses a stored transcript, so leaving
+     the thin one in place would make every retry return the same nothing. */
+  const density = seconds ? verbatim.length / seconds : null;
+  const tooThin = verbatim.length < MIN_TRANSCRIPT_CHARS
+    || (density !== null && seconds! > MIN_DURATION_SECONDS && density < MIN_CHARS_PER_SECOND);
+  if (tooThin) {
+    const giveUp = attempts >= MAX_ATTEMPTS_NO_SPEECH;
+    const detail = `Only ${verbatim.length} characters came back for ~${seconds}s of audio`
+      + (density !== null ? ` (${Math.round(density*10)/10} per second, against 6-16 on a real transcript)` : "")
+      + `. Too little to be a transcript of this call`
+      + (giveUp ? `, and it has now been heard ${attempts} times - treat the recording as unusable.`
+                : `, so it will be listened to again.`);
+    checks.push({ check: "enough_speech", status: "fail", detail });
+    await db.schema("acc").from("transcriptions").update({
+      status: "non_transcribable", attempts, duration_seconds: seconds,
+      non_transcribable_reason: `Only ${verbatim.length} characters transcribed from ~${seconds}s of audio`,
+      // cleared on purpose - a retry must transcribe afresh, not reuse this
+      transcript: null, transcript_en: null, transcript_bn: null, utterances: null,
+      verification: checks, gladia_id: engine,
+      mismatch: null, mismatch_severity: null, mismatch_reason: null,
+      discrepancy: null, has_discrepancy: null,
+      error_text: null, updated_at: new Date().toISOString() }).eq("id", row.id);
+    return { id: row.id, lead_id: row.lead_id, status: "non_transcribable", engine,
+             verbatim_chars: verbatim.length, per_second: density ? Math.round(density*10)/10 : null,
+             attempts, retrying: !giveUp };
+  }
+  checks.push({ check: "enough_speech", status: "pass",
+    detail: `${verbatim.length} characters for ~${seconds}s of audio`
+      + (density !== null ? ` (${Math.round(density*10)/10} per second)` : "")
+      + `, in line with a real transcript.` });
 
   /* STAGE 2 - lay it out and judge it. */
   let parsed: any;
@@ -813,7 +880,83 @@ async function processOne(db: DB, row: any, openaiKey: string,
     : qual.qualification === "Follow-Up" ? (qual.why + (aiLost ? ` (${aiLost})` : ""))
     : (aiLost || qual.why);
 
+  /* STAGE 3 - the agent's record against the call. Skipped entirely when there is nothing to
+     compare, and a failure here never costs the transcript: the row still saves as done, just without
+     a comparison, and has_discrepancy stays NULL meaning "not checked" rather than "fine". */
+  const agentReason = String(row.crm_lost_reason || "").trim();
+  const agentRemarks = String(row.crm_remarks || "").trim();
+  /* The reason is only worth checking where it was asked for: a Lost lead that the call agrees is not
+     qualified. On a Qualified or Follow-Up call the agent's "lost reason" is not in play. */
+  const checkReason = !!agentReason
+    && String(row.crm_status || "").toLowerCase() === "lost"
+    && qual.qualification === "Not Qualified";
+  let discrepancy: Record<string, unknown> | null = null;
+  let hasDiscrepancy: boolean | null = null;
+
+  if (checkReason || agentRemarks) {
+    try {
+      const sides = [
+        "WHAT THE CALL CONTAINS",
+        "Summary: " + String(parsed?.summary_verdict || "(none)"),
+        "Why this lead did not progress, per the call: " + String(reason || "(none given)"),
+        "Outcome: " + String(qual.qualification || "(none)"),
+        "",
+        "WHAT THE AGENT RECORDED",
+        checkReason ? "Lost reason: " + agentReason : "Lost reason: (not applicable)",
+        agentRemarks ? "Remarks: " + agentRemarks : "Remarks: (none)",
+      ].join("\n");
+      const cr = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + openaiKey },
+        body: JSON.stringify({
+          model: analysisModel, temperature: 0,
+          response_format: { type: "json_object" },
+          messages: [{ role: "system", content: COMPARE_PROMPT }, { role: "user", content: sides }],
+        }) });
+      const cj = await cr.json().catch(() => ({}));
+      if (!cr.ok) throw new Error("comparison failed (" + cr.status + ")");
+      const got = JSON.parse(cj?.choices?.[0]?.message?.content || "{}");
+
+      const out: Record<string, unknown> = {};
+      if (checkReason && got?.lost_reason) {
+        out.lost_reason = { agrees: got.lost_reason.agrees !== false,
+                           note: String(got.lost_reason.note || ""),
+                           agent: agentReason, call: reason };
+      }
+      if (agentRemarks && got?.remarks) {
+        out.remarks = { agrees: got.remarks.agrees !== false,
+                        note: String(got.remarks.note || ""),
+                        agent: agentRemarks };
+      }
+      if (Object.keys(out).length) {
+        discrepancy = out;
+        hasDiscrepancy = Object.values(out).some((v: any) => v && v.agrees === false);
+        for (const [kind, v] of Object.entries(out)) {
+          const ok = (v as any).agrees !== false;
+          checks.push({
+            check: kind === "lost_reason" ? "agent_lost_reason_true" : "agent_remarks_true",
+            status: ok ? "pass" : "fail",
+            detail: "The agent's "
+              + (kind === "lost_reason" ? "reason for losing this lead " : "remarks ")
+              + (ok ? "match what the call contains. " : "do NOT match what the call contains. ")
+              + String((v as any).note || "") });
+        }
+      }
+    } catch (e) {
+      /* A failed comparison is not a failed call. The transcript and the judgement stand; only the
+         comparison is missing, and has_discrepancy stays null so it reads as unchecked. */
+      checks.push({ check: "agent_record_compared", status: "skip",
+        detail: "The agent's record could not be compared this time: " + String((e as any)?.message || e) });
+    }
+  } else {
+    checks.push({ check: "agent_record_compared", status: "skip",
+      detail: (agentRemarks || agentReason)
+        ? "Nothing to compare: a lost reason is only checked on a Lost lead the call agrees is not qualified."
+        : "The CRM holds no remarks or lost reason for this call, so there was nothing to compare." });
+  }
+
   const { error } = await db.schema("acc").from("transcriptions").update({
+    discrepancy, has_discrepancy: hasDiscrepancy,
     status: "done", attempts, duration_seconds: seconds, gladia_id: engine,
     utterances: turns, transcript: transcriptEn,
     transcript_en: transcriptEn, transcript_bn: transcriptBn,
@@ -829,9 +972,12 @@ async function processOne(db: DB, row: any, openaiKey: string,
 
   if (error) return fail("error", "could not save result: " + error.message, { duration_seconds: seconds });
 
-  return { id: row.id, lead_id: row.lead_id, status: "done", lead_category: category,
-           qualification: qual.qualification, languages: languagesFrom(parsed?.languages),
-           turns: turns.length, attempts, mismatch: verdict.mismatch };
+  return { id: row.id, lead_id: row.lead_id, status: "done", engine, lead_category: category,
+           qualification: qual.qualification, turns: turns.length,
+           verbatim_chars: verbatim.length,
+           per_second: seconds ? Math.round((verbatim.length/seconds)*10)/10 : null,
+           reused_transcript: !!stored, attempts, mismatch: verdict.mismatch,
+           discrepancy: hasDiscrepancy };
 }
 
 /* Put anything worth another go back in the queue before the queue is read, so the ordinary path
@@ -865,7 +1011,8 @@ async function doWork(db: DB, limit: number, openaiKey: string,
                       sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL,
                       engine = "chatgpt", geminiKey = "", geminiModel = GEMINI_MODEL) {
   const retried = await promoteRetries(db);
-  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, attempts, transcript";
+  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, "
+    + "attempts, transcript, crm_lost_reason, crm_remarks, next_follow_up_date";
   const { data: queue, error } = await db.schema("acc").from("transcriptions").select(cols)
     .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null)
     .order("id", { ascending: true }).limit(limit);
