@@ -4991,16 +4991,21 @@
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
   let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
   let GCAL_LAST=null; // {byDate,list,asg}
-  let GCAL_CASES=[]; // Legal cases with an upcoming Next Date — only ever populated for users with 'legal' module access
-  // Legal Next Dates ride the same Calendar as tasks/meetings, but visibility is permission-based
+  let GCAL_CASES=[]; // Legal cases with an upcoming Action Date and/or Next Date — only ever populated for users with 'legal' module access
+  // Legal dates ride the same Calendar as tasks/meetings, but visibility is permission-based
   // (module access), not participation-based like tasks/meetings — not everyone who can see the
   // Calendar has Legal access, so this must be checked before ever querying mis_cases.
   function gcalCanSeeCases(){ return !!(state && (state.super || (state.roles && Array.isArray(state.roles.modules) && state.roles.modules.includes('legal')))); }
   async function gcalCasesLoadData(){
     if(!gcalCanSeeCases()){ GCAL_CASES=[]; return GCAL_CASES; }
     try{
-      const {data}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,court').gte('next_date_iso',todayISO());
-      GCAL_CASES=(data||[]).filter(function(c){return !!c.next_date_iso;}).map(function(c){ c.title=c.cause_title||c.case_no||('Case #'+c.id); return c; });
+      const today=todayISO();
+      // A case qualifies via either date — its Action Date (moved by the action panel) or its
+      // Next Date (typed straight into Add Case, independent of that). Either one landing here
+      // is enough; each is rendered as its own calendar entry in gcalVisibleItems.
+      const {data}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,case_next_date_iso,court')
+        .or('next_date_iso.gte.'+today+',case_next_date_iso.gte.'+today);
+      GCAL_CASES=(data||[]).filter(function(c){return !!c.next_date_iso||!!c.case_next_date_iso;}).map(function(c){ c.title=c.cause_title||c.case_no||('Case #'+c.id); return c; });
     }catch(e){ GCAL_CASES=[]; }
     return GCAL_CASES;
   }
@@ -5029,19 +5034,25 @@
     const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr) && !MTG_DONE.has(m.id+'|'+dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
     // Past dates just stop being included here — same "render-time exclusion, row untouched" pattern
     // used for recurring meetings (mtgOccursOn) rather than any server-side delete/archive.
-    const caseItems=(dateStr<istTodayISO())?[]:(GCAL_CASES||[]).filter(function(c){return c.next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'case'};});
-    return items.concat(mtgItems).concat(caseItems).filter(x=>{
-      if(!GCAL_FILTERS.has(x.kind))return false;
+    const past=dateStr<istTodayISO();
+    const caseItems=past?[]:(GCAL_CASES||[]).filter(function(c){return c.next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'case'};});
+    // A case's own separate Next Date lands as its own entry, same day or not — a case can appear
+    // twice on the calendar (once per date) when both happen to be set.
+    const nextDateItems=past?[]:(GCAL_CASES||[]).filter(function(c){return c.case_next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'nextdate'};});
+    return items.concat(mtgItems).concat(caseItems).concat(nextDateItems).filter(x=>{
+      // Next Date entries share the "Legal dates" toggle with Action Date entries — one shared
+      // filter key, not two, since they are the same underlying legal case.
+      if(!GCAL_FILTERS.has(x.kind==='nextdate'?'case':x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':'#16a34a')); }
-  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : String(x.t.id)); }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':(kind==='nextdate'?'#0e7490':'#16a34a'))); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : (x.kind==='nextdate' ? ('n'+x.t.id) : String(x.t.id))); }
   window.gcalOpenItem=function(key){
     key=String(key);
     if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
-    else if(key.charAt(0)==='c'){ window.gcalOpenCase(Number(key.slice(1))); }
+    else if(key.charAt(0)==='c'||key.charAt(0)==='n'){ window.gcalOpenCase(Number(key.slice(1))); }
     else { window.gcalOpenTask(Number(key)); }
   };
 
@@ -5078,7 +5089,7 @@
       return '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has(f[0])?'checked':'')+' onchange="gcalToggleFilter(\''+f[0]+'\',this.checked)"><span class="gcal-filter-dot" style="background:'+f[2]+'"></span>'+f[1]+'</label>';
     }).join('');
     const caseRow=gcalCanSeeCases()
-      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal next dates</label>'
+      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal dates</label>'
       : '';
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
       +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
@@ -5293,8 +5304,11 @@
       const mtgDraggable = x.kind==='meeting' && (mtgRt0==='none'||mtgRt0==='weekly'||mtgRt0==='monthly');
       const draggable = x.kind!=='meeting' || mtgDraggable;
       let dragAttrs='';
-      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"'));
-      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='case' ? 'Next date' : (x.kind==='toMe'?'To me':'By me'));
+      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"')
+        : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-datefield="next_date" data-date="'+dateStr+'"')
+        : (x.kind==='nextdate' ? (' data-case="'+x.t.id+'" data-datefield="case_next_date" data-date="'+dateStr+'"')
+        : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"')));
+      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='case' ? 'Action date' : (x.kind==='nextdate' ? 'Next date' : (x.kind==='toMe'?'To me':'By me')));
       return '<div class="gcal-lrow"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'"><span class="gcal-lrow-dot" style="background:'+gcalEvColor(x.kind)+'"></span><span class="gcal-lrow-title">'+esc2(x.t.title)+'</span><span class="gcal-lrow-tag">'+esc2(tag)+'</span></div>';
     }).join(''):'<div class="gcal-lrow empty">Nothing scheduled</div>';
     return '<div class="gcal-lday'+(isToday?' today':'')+'" data-date="'+dateStr+'"><div class="gcal-lday-head">'+esc2(label)+(isToday?' <span class="gcal-lday-badge">Today</span>':'')+'</div><div class="gcal-lday-rows">'+rows+'</div></div>';
@@ -5362,7 +5376,8 @@
     if(c.case_no) html+='<div class="gcal-panel-row"><i class="fa-solid fa-hashtag"></i> '+esc2(c.case_no)+'</div>';
     if(c.court) html+='<div class="gcal-panel-row"><i class="fa-solid fa-building-columns"></i> '+esc2(c.court)+'</div>';
     if(c.priority) html+='<div class="gcal-panel-row"><i class="fa-solid fa-flag"></i> '+esc2(c.priority)+'</div>';
-    html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Next date: '+fmtDateY(c.next_date_iso)+'</div>';
+    if(c.next_date_iso) html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Action date: '+fmtDateY(c.next_date_iso)+'</div>';
+    if(c.case_next_date_iso) html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Next date: '+fmtDateY(c.case_next_date_iso)+'</div>';
     const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
     GCAL_PANEL_ANCHOR=null;
     const bodyEl=panel.querySelector('.gcal-panel-body'); if(bodyEl)bodyEl.innerHTML=html;
@@ -5405,6 +5420,7 @@
         const tid=chip.dataset.task!=null?Number(chip.dataset.task):null;
         const mid=chip.dataset.meeting!=null?Number(chip.dataset.meeting):null;
         const cid=chip.dataset.case!=null?Number(chip.dataset.case):null;
+        const dfield=chip.dataset.datefield||'next_date';
         const fromDate=chip.dataset.date;
         let armed=false, curTarget=null, longPressTimer=null;
         function arm(){
@@ -5450,7 +5466,7 @@
               if(newDate && newDate!==fromDate){
                 if(tid!=null) gcalTaskDrop(tid,newDate);
                 else if(mid!=null) gcalMeetingDateDrop(mid,newDate,fromDate);
-                else if(cid!=null) gcalCaseDrop(cid,newDate);
+                else if(cid!=null) gcalCaseDrop(cid,newDate,dfield);
               }
             }
           }
@@ -5487,16 +5503,20 @@
       await gcalRefresh();
     }catch(e){ toast('Failed to move task','err'); }
   };
-  // Dragging a Legal case to a new day writes straight into mis_cases.next_date (public schema,
-  // not acc — see gcalCasesLoadData). This fully replaces whatever free text was there before,
-  // same as dragging a task fully overwrites its due_date; a DB trigger on mis_cases recomputes
-  // next_date_iso from the new value and clears next_date_recorded_at (new date = new deadline).
-  window.gcalCaseDrop=async function(cid,newDate){
+  // Dragging a Legal case to a new day writes straight into mis_cases (public schema, not acc —
+  // see gcalCasesLoadData), into whichever of its two date columns the dragged chip came from:
+  // next_date (the Action Date pair, shown as "Action date") or case_next_date (its own
+  // independent Next Date). This fully replaces whatever free text was there before, same as
+  // dragging a task fully overwrites its due_date; a DB trigger on mis_cases recomputes the
+  // matching _iso column from the new value (and, for next_date, clears next_date_recorded_at —
+  // new date = new deadline).
+  window.gcalCaseDrop=async function(cid,newDate,field){
+    field=(field==='case_next_date')?'case_next_date':'next_date';
     try{
       if(newDate<todayISO()){ toast('Cannot move a case to a date before today','err'); return; }
-      const {error}=await sb.from('mis_cases').update({next_date:newDate}).eq('id',cid);
+      const {error}=await sb.from('mis_cases').update({[field]:newDate}).eq('id',cid);
       if(error){ toast('Failed to move case: '+error.message,'err'); return; }
-      toast('Next date moved to '+fmtDateY(newDate),'ok');
+      toast((field==='case_next_date'?'Next date':'Action date')+' moved to '+fmtDateY(newDate),'ok');
       await gcalLoadData();
       await gcalRefresh();
     }catch(e){ toast('Failed to move case','err'); }

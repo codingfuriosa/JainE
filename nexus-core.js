@@ -1723,6 +1723,7 @@ const MIS_FIELDS=[
   {k:'cause_title',l:'Cause Title / Parties'},
   {k:'case_no',l:'Case No.'},
   {k:'previous_date',l:'Previous Date'},
+  {k:'case_next_date',l:'Next Date'},
   {k:'next_date',l:'Action Date'},
   {k:'priority',l:'Priority'},
   {k:'advocate_incharge',l:'Advocate In-Charge'},
@@ -1773,7 +1774,7 @@ function misInput(k,vals,opt){
       +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
       +'</select></div>';
   }
-  if(k==='next_date'){
+  if(k==='next_date'||k==='case_next_date'){
     // A real date picker, not the flexible free-text dates used elsewhere — this is the one
     // place a date is picked rather than typed, so there's no ambiguous format to parse. Its
     // value is already ISO, which misToIso reads just as well as the typed dd/mm/yyyy forms.
@@ -1866,10 +1867,12 @@ function misFormHtml(vals,mode){
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
     /* Previous Date never appears here — it only ever comes from a real reschedule, moved by the
-       action panel. Next Date is different: a brand-new case can already have a hearing date on
-       hand (e.g. straight off a court notice), so Add Case lets it be entered up front. On an
-       EXISTING case, though, it keeps coming from the action panel only, to stay in step with
-       Previous Date and the action history. */
+       action panel. The Action Date field (internally next_date) is different: a brand-new case
+       can already have a hearing date on hand (e.g. straight off a court notice), so Add Case lets
+       it be entered up front. On an EXISTING case, though, it keeps coming from the action panel
+       only, to stay in step with Previous Date and the action history. Next Date (case_next_date)
+       is a separate, independent date — always editable on both Add and Edit, never touched by the
+       action panel. */
     if(f.k==='previous_date') return;
     if(f.k==='next_date'&&isEdit) return;
     // The action fields live in their own panel (click a case), not in the case record forms.
@@ -1894,7 +1897,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,case_next_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -3135,6 +3138,11 @@ function misCollect(orig){
   else if(row.next_date){ row.next_date_iso=null; }
   const pd=misToIso(row.previous_date);
   if(pd) row.previous_date=misDmy(pd);
+  // Next Date (case_next_date) — independent of the Action Date pair above, and never moved by
+  // the action panel, so it just gets the same dd/mm/yyyy + sortable-copy treatment on its own.
+  const cnd=misToIso(row.case_next_date);
+  if(cnd){ row.case_next_date=misDmy(cnd); row.case_next_date_iso=misIsoStr(cnd); }
+  else if(row.case_next_date){ row.case_next_date_iso=null; }
   // Remarks are cumulative in every form: what is typed is appended to what is already there,
   // comma separated, so an earlier note is never quietly wiped by a later edit.
   if(row.remarks!=null || orig){
@@ -3148,7 +3156,7 @@ function misCollect(orig){
   if(row.action_date_iso && (!orig || String(orig.action_date||'')!==String(row.action_date||''))){
     row.next_date_recorded_at=misIsoStr(new Date());
   }
-  // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
+  // A changed Action Date pushes the old one into Previous Date — that is the only way it moves.
   if(orig){
     const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
     if(before && after && before!==after){
