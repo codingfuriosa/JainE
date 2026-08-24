@@ -2374,12 +2374,10 @@
     // Uma Chatterjee is supposed to be able to. Instance-creation now only bypasses trigger_owner
     // for the true superadmin account, matching the server-side fix below exactly.
     const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || eq(mySelf,'ayushruia1@gmail.com');
-    // Editing/deleting the workflow itself (and, further down, its instances) is the Administrator
-    // account, plus this specific flow's own extra_admins (if any) — mirrors
-    // acc.wf_is_admin_dept(flow_id), the real server-side enforcement. Not the whole Administration
-    // department.
-    const canManage = eq(mySelf,'ayushruia1@gmail.com')
-      || (Array.isArray(flow.extra_admins) && flow.extra_admins.some(function(e){return eq(e,mySelf);}));
+    // Editing/deleting the workflow itself is just these two named accounts now — mirrors
+    // acc.wf_is_admin_dept() server-side exactly (which also keeps a real superadmin override,
+    // a separate pre-existing concept unrelated to this pair).
+    const canManage = eq(mySelf,'ayushruia1@gmail.com') || eq(mySelf,'businessanalyst@thejaingroup.com');
     window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
@@ -2425,13 +2423,14 @@
     // the first one.
     const showForms=isBill && (forms.length>0 || canManage);
     /* Who may do what, per instance:
-         EDIT   — the Administrator on any instance, or whoever started this one. Deliberately not
-                  step members: changing the details changes what everyone downstream is acting on.
+         EDIT   — the triggering event owner only (whoever started it) — not the workflow-management
+                  admins, and not step members: changing the details changes what everyone
+                  downstream is acting on.
          DELETE — the Administrator, or anybody this instance runs through (holding or offered any
                   of its steps), since they are the ones who spot a duplicate or mistaken one.
        Both are re-checked in the database, so the buttons only mirror what will actually be
        allowed rather than being the thing that decides it. */
-    const canEditCase=function(c){ return canManage || eq(c&&c.created_by, mySelf); };
+    const canEditCase=function(c){ return eq(c&&c.created_by, mySelf); };
     const canDeleteCase=function(c){
       if(canManage) return true;
       return fcs.some(function(x){
@@ -2704,10 +2703,10 @@
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
     const pinned=wfOriginalAttachmentHtml(c,flow);
-    // Editing the fields submitted with this instance is open to whoever started it, not just
-    // the admin account — but only while it's still moving; once it's Done/Cancelled it's final.
-    const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')
-      &&(eq(c.created_by||'',me())||eq(me(),'ayushruia1@gmail.com')||(Array.isArray(flow&&flow.extra_admins)&&flow.extra_admins.some(function(e){return eq(e,me());})));
+    // Editing the fields submitted with this instance is the triggering event owner only — not
+    // the workflow-management admins — and only while it's still moving; once it's Done/Cancelled
+    // it's final. Mirrors acc.wf_update_instance server-side exactly.
+    const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')&&eq(c.created_by||'',me());
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
