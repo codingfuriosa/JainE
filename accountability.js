@@ -946,6 +946,26 @@
     return es.map(function(e){ return wfNm(e); }).join(' / ');
   }
   function wfNm(email){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,email);}); return (p&&p.name)||email||''; }
+  /* Everyone an instance can be looked up by: whoever raised it, plus every person any of its steps
+     is held by or waiting on. Searching "owner" and getting only the person who filled the form in
+     is not what anyone means by it - a reimbursement sitting at Accounts is Accounts's, whoever
+     typed it up. Names AND addresses, because half the office knows each other by one and half by
+     the other. Deduplicated, since one person usually appears on several steps. */
+  function wfOwnerKey(c, stepsById){
+    const seen=Object.create(null);
+    const add=function(e){
+      if(!e) return;
+      [wfNm(e)||'', String(e)].forEach(function(v){ v=String(v||'').trim().toLowerCase(); if(v) seen[v]=1; });
+    };
+    add(c&&c.created_by);
+    const mine=(stepsById&&stepsById[c&&c.id])||{};
+    Object.keys(mine).forEach(function(sq){
+      const st=mine[sq]; if(!st) return;
+      add(st.person);
+      (Array.isArray(st.candidates)?st.candidates:[]).forEach(add);
+    });
+    return Object.keys(seen).join(' ');
+  }
   function wfDeptOf(email){ const p=(WF_PEOPLE||[]).find(function(x){return eq(x.email,email);}); return (p&&Array.isArray(p.depts)&&p.depts.length)?p.depts.join(', '):''; }
   function wfDurText(v,u){ if(v==null||v==='')return ''; u=u||'days'; return v+' '+(Number(v)===1?String(u).replace(/s$/,''):u); }
   function wfAddDuration(base,value,unit){ const d=new Date(base.getTime()); value=Number(value)||0; if(unit==='hours')d.setHours(d.getHours()+value); else if(unit==='weeks')d.setDate(d.getDate()+value*7); else d.setDate(d.getDate()+value); return d; }
@@ -2159,7 +2179,7 @@
          on any workflow that happens to have them (Invoice Processing does; most others won't and
          simply never match). The instance number and its owner apply everywhere. */
       const findLabel=function(name){ const k=Object.keys(by).find(function(l){return eq(l,name);}); return k?String(by[k]||''):''; };
-      const tkKey=(wfCaseNoText(c)+' '+(wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
+      const tkKey=(wfCaseNoText(c)+' '+wfOwnerKey(c, byCase)).toLowerCase();
       return '<tr class="wf-tk-row" data-case="'+c.id+'" data-find="'+esc2(tkKey)+'" onclick="wfTrackerOpen('+c.id+')" '
         +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
@@ -2468,9 +2488,8 @@
         const sentBack=!!c.returned_at;
         // Wheredoc Id is typed in on the form, unlike No. which counts the instances.
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
-        // Searchable by whose instance it is - the name shown everywhere else, and the address,
-        // since half the people here are known to each other by one and half by the other.
-        const ownerKey=((wfNm(c.created_by)||'')+' '+(c.created_by||'')).toLowerCase();
+        // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
+        const ownerKey=wfOwnerKey(c, byCase);
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
@@ -2479,7 +2498,7 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id or owner…':'Search by No. or owner…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, or anyone it is with…':'Search by No., or anyone it is with…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -2553,7 +2572,11 @@
   window.wfInstFilter=function(){
     const q=(($('wfInstSearch')||{}).value||'').trim();
     const from=window._wfInstDateFilter.from, to=window._wfInstDateFilter.to;
-    const rows=[].slice.call(document.querySelectorAll('.wf-itable tbody tr'));
+    /* The Instances table only. The Tracker's table also carries wf-itable, and both panes sit in
+       the page at once (the tabs just set display:none), so the bare selector hid every Tracker row
+       as soon as anything was typed here - the Tracker then read as empty until its own search box
+       was touched. */
+    const rows=[].slice.call(document.querySelectorAll('.wf-itable:not(.wf-tktable) tbody tr'));
     let shown=0;
     const qLower=q.toLowerCase();
     rows.forEach(function(r){
@@ -2703,10 +2726,12 @@
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
     const pinned=wfOriginalAttachmentHtml(c,flow);
-    // Editing the fields submitted with this instance is the triggering event owner only — not
-    // the workflow-management admins — and only while it's still moving; once it's Done/Cancelled
-    // it's final. Mirrors acc.wf_update_instance server-side exactly.
-    const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')&&eq(c.created_by||'',me());
+    /* The owner, or whoever it has been sent back to — not the workflow-management admins, and
+       only while it is still moving; once it is Done or Cancelled it is final. Mirrors
+       acc.wf_update_instance, which is what actually enforces this. */
+    const backTo=String(c.returned_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+    const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')
+      &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -2714,10 +2739,26 @@
       /* A returned instance is stopped and waiting on its owner, which is not something the timeline
          shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
       +(c.returned_at
-        ? '<div class="wf-returned"><div class="wf-returned-h"><i class="fa-solid fa-rotate-left"></i> Sent back for correction</div>'
-          +'<div class="wf-returned-b">'+esc2(wfNm(c.returned_by)||c.returned_by||'Someone')+' sent this back at "'+esc2(c.returned_step||'a step')+'"'
-            +(c.returned_reason?(' — <b>'+esc2(c.returned_reason)+'</b>'):'')+'.<br>'
-            +'It is on hold until '+esc2(wfNm(c.created_by)||c.created_by||'whoever raised it')+' edits it, and then it starts again from the first step.</div></div>'
+        ? (function(){
+            /* Who it actually went to. A flow with reject_to_seq set (Invoice Processing) sends it
+               back to that step's owner as a live task; everything else sends it to whoever raised
+               it, to edit. Saying "on hold until the raiser edits it" regardless was wrong for the
+               first kind - it pointed the whole team at the front office while the work was sitting
+               with a department. */
+            const toList=String(c.returned_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+            const toNames=toList.length
+              ? toList.map(function(e){return wfNm(e)||e;}).join(' or ')
+              : (wfNm(c.created_by)||c.created_by||'whoever raised it');
+            const toRaiser=!toList.length
+              || (toList.length===1 && String(toList[0]).toLowerCase()===String(c.created_by||'').toLowerCase());
+            return '<div class="wf-returned"><div class="wf-returned-h"><i class="fa-solid fa-rotate-left"></i> Sent back for correction</div>'
+              +'<div class="wf-returned-b">'+esc2(wfNm(c.returned_by)||c.returned_by||'Someone')+' sent this back at "'+esc2(c.returned_step||'a step')+'"'
+                +(c.returned_reason?(' — <b>'+esc2(c.returned_reason)+'</b>'):'')+'.<br>'
+                +(toRaiser
+                  ? ('It is on hold until '+esc2(toNames)+' edits it, and then it starts again from the first step.')
+                  : ('It is now with <b>'+esc2(toNames)+'</b> to correct, and carries on from there.'))
+              +'</div></div>';
+          })()
         : '')
       +detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
@@ -3407,6 +3448,28 @@
     if(chip) chip.remove();
     wfEvtAttSync(wrap);
   };
+  /* Everything this form session has put into S3. An upload happens on choosing the file, long
+     before Create is pressed, so the form owes the bucket a tidy-up on every way out. */
+  function wfEvtTrackUpload(path){
+    if(!path) return;
+    window._wfEvtUploads=window._wfEvtUploads||[];
+    if(window._wfEvtUploads.indexOf(path)===-1) window._wfEvtUploads.push(path);
+  }
+  /* Removes tracked files that nothing points at, `keep` being whatever the save has just written.
+     wfPurgeCaseFiles does the reference check, so a path that is genuinely in use survives. */
+  async function wfEvtSweepUploads(keep){
+    const list=(window._wfEvtUploads||[]).slice();
+    window._wfEvtUploads=[];
+    if(!list.length) return;
+    const kept=(keep||[]).join(' ');
+    const gone=list.filter(function(p){ return kept.indexOf(p)===-1; });
+    if(gone.length) await wfPurgeCaseFiles(gone);
+  }
+  window.wfEventCancel=function(){
+    // fire and forget: closing must not wait on the bucket
+    try{ wfEvtSweepUploads([]); }catch(_e){}
+    try{ closeModal(); }catch(_e){}
+  };
   window.wfEvtAttPick=async function(input){
     const wrapM=input.closest('.wf-evt-att-multi');
     if(wrapM){
@@ -3425,6 +3488,7 @@
           const key=s3KeyForFlowEvent(flowIdAttr, file.name);
           const {data,error}=await uploadFileToS3(key,file);
           if(error) throw error;
+          wfEvtTrackUpload(data.path);
           if(list) list.insertAdjacentHTML('beforeend', wfAttChipHtml(data.path));
         }catch(e){ toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err'); }
       }
@@ -3446,6 +3510,7 @@
       const key=prevKey || s3KeyForFlowEvent((evtForm&&evtForm.getAttribute('data-flow'))||'0', file.name);
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
+      wfEvtTrackUpload(data.path);
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(file.name)+'">'+esc2(file.name)+'</span> <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
@@ -3485,7 +3550,8 @@
   /* ---- date-grouped form (Reimbursement) --------------------------------------------------
      One container per date, each holding one or more expenses, because a day out is several fares
      and meals against one date - and typing the date again for each of them was both tedious and
-     the thing people got wrong. "Add expense" grows the day; "Add date" starts another one.
+     the thing people got wrong, so each button is named for it: "Add expense in same date" grows
+     the day you are on, "Add another date" starts a new one.
 
      Stored FLAT all the same: one entry per expense with its date repeated. The table, Tracker,
      totals and emails all read that shape already, so none of them need to know about the nesting.
@@ -3513,7 +3579,7 @@
       +'<div class="wf-evt-exps">'
         +exps.map(function(v,i){ return wfExpBlockHtml(expFields, v, locked, i+1, exps.length>1); }).join('')
       +'</div>'
-      +'<div class="wf-addstep-ghost wf-add-exp" onclick="wfExpAdd(this)"><i class="fa-solid fa-plus"></i> Add expense</div>'
+      +'<div class="wf-addstep-ghost wf-add-exp" onclick="wfExpAdd(this)"><i class="fa-solid fa-plus"></i> Add expense in same date</div>'
     +'</div>';
   }
   // Renumbers the "Expense n" headings and shows or hides each remove button, so a block is never
@@ -3573,6 +3639,10 @@
   }
   window.wfEventOpen=async function(flowId, caseId){
     wfInjectCss();
+    /* Anything left over from a previous session that was closed without Cancel - the overlay,
+       Escape, navigating away - is swept now. Doing it on the way IN covers every exit, without
+       having to hook the shared closeModal that the whole app uses. */
+    try{ await wfEvtSweepUploads([]); }catch(_e){}
     try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     let flow=null, steps=[], caseRow=null;
     try{ const {data}=await ACC().from('flows').select('*').eq('id',flowId).maybeSingle(); flow=data; }catch(e){}
@@ -3778,14 +3848,14 @@
           +'</div>'
         +'</div>'
       : '';
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-bolt"></i> '+esc2(editing?('Edit '+N.one+' '+(caseRow?wfCaseNoText(caseRow):caseId)):('New '+N.one))+'</h3><span class="x" onclick="wfEventCancel()">&times;</span></div>'
       +'<div class="modal-body wf-evt-form" data-flow="'+flowId+'" data-multiple="'+(allowMultiple?'1':'0')+'" style="min-width:min(94vw,660px)">'
         +membersHtml
         +(dateMode?commonHtml:'')
         +'<label class="wf-lbl">Details '+tip(locked?'These detail fields are fixed for this workflow — just fill in the values. They cannot be renamed, added or deleted.':('Specifics for this '+N.lc+'. Add or remove detail fields as needed.'))+'</label>'
         +(dateMode
           ? '<div id="wfEvtDetails">'+dateGroupsHtml+'</div>'
-            +'<div class="wf-addstep-ghost wf-add-date" onclick="wfDateAdd()"><i class="fa-solid fa-calendar-plus"></i> Add date</div>'
+            +'<div class="wf-addstep-ghost wf-add-date" onclick="wfDateAdd()"><i class="fa-solid fa-calendar-plus"></i> Add another date</div>'
           : allowMulti
           ? '<div id="wfEvtDetails">'
               +(editGroupsHtml
@@ -3796,7 +3866,7 @@
           : '<div id="wfEvtDetails">'+rowsHtml+'</div>'
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
       +'</div>'
-      +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<div class="modal-foot"><button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfShowWhenSyncAll();
     /* Draw the Amount boxes from what is already chosen, and shut them if the description is still
@@ -3940,6 +4010,8 @@
         }); }
         const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
         for(const oldPath of replacedAtts){ try{ await s3Delete(oldPath); }catch(_e){} }
+        // a file uploaded during this edit and then taken off again before saving
+        try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
         toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
@@ -3958,6 +4030,8 @@
         const {error}=await ACC().rpc('wf_create_instance',
           {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
         if(error)throw error;
+        // same on creation: attached, thought better of it, then created
+        try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
         toast(N.one+' created — first step assigned','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }

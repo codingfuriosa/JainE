@@ -8252,10 +8252,12 @@ function rtRender(){
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Assessment Tests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      ${rtCanManage()?`
       <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
       <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
       <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
-      ${rtCanShare()?`<button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`:''}
+      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`
+      : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
     </div>
   </div>
   <div class="card" style="overflow:hidden">
@@ -8281,6 +8283,8 @@ function rtRender(){
 }
 window.rtToggleAll=function(el){document.querySelectorAll('.rt-chk').forEach(c=>c.checked=el.checked);rtSyncToolbar();};
 window.rtSyncToolbar=function(){
+  // the toolbar buttons only exist for the four who may use them
+  if(!rtCanManage()) return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   const n=sel.length;
   const ren=$('rtRenBtn'),del=$('rtDelBtn');
@@ -8290,7 +8294,7 @@ window.rtSyncToolbar=function(){
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
-window.rtAdd=function(){if(!recGuard())return;
+window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
@@ -8302,6 +8306,7 @@ window.rtAdd=function(){if(!recGuard())return;
   setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
 window.rtSave=async function(){
+  if(!rtTestsGuard())return;
   const name=($('rtFName')||{}).value?.trim();
   const link=($('rtFLink')||{}).value?.trim()||'';
   const sheet=($('rtFSheet')||{}).value?.trim()||'';
@@ -8312,7 +8317,7 @@ window.rtSave=async function(){
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
 };
-window.rtRename=function(){if(!recGuard())return;
+window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   if(sel.length!==1)return;
   const id=parseInt(sel[0].value);
@@ -8327,6 +8332,7 @@ window.rtRename=function(){if(!recGuard())return;
   setTimeout(()=>{const el=$('rtFRename');if(el)el.focus();},100);
 };
 window.rtUpdate=async function(id){
+  if(!rtTestsGuard())return;
   const name=($('rtFRename')||{}).value?.trim();
   const link=($('rtFRLink')||{}).value?.trim()||'';
   const sheet=($('rtFRSheet')||{}).value?.trim()||'';
@@ -8337,7 +8343,7 @@ window.rtUpdate=async function(id){
   if(rec){rec.name=name;rec.link=link;rec.response_sheet_url=sheet||null;}
   closeModal();toast('Test updated');rtRender();
 };
-window.rtDelete=async function(){if(!recGuard())return;
+window.rtDelete=async function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
   if(!await confirmDialog('Delete '+sel.length+' test(s)? All associated responses will also be deleted. This cannot be undone.'))return;
@@ -8352,12 +8358,48 @@ window.rtDelete=async function(){if(!recGuard())return;
 // (Others with recruitment access will NOT see the Share button.)
 // NOTE: 'administrator' & 'abhay mati' added for testing — remove later if the 3 named
 // staff should be the only ones with Share access.
-const RT_SHARE_ALLOWED=['shuchandra das','khushbu singh','uzma ahmed','administrator','abhay mati'];
-function rtShareNorm(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
-function rtCanShare(){
-  const nm=rtShareNorm((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'');
-  return RT_SHARE_ALLOWED.includes(nm);
+/* Assessment Tests are managed by these four and nobody else - adding, renaming, deleting and
+   sharing alike. Matched by EMAIL: the previous list matched display names and held
+   "khushbu singh" while her profile reads "Khusbu Singh", so it never matched her and she could not
+   see the Share button at all. A name is typed by hand and gets edited; an address does not drift.
+
+   Mirrored by recruit.can_manage_tests() in the database, which is what actually enforces this -
+   the page hiding a button is a courtesy, not a control. */
+const RT_TESTS_ALLOWED=[
+  'mgr.hr@thejaingroup.com',   // Shuchandra Das
+  'hr@thejaingroup.com',       // Khusbu Singh
+  'career@thejaingroup.com',   // Uzma Ahmed
+  'ayushruia1@gmail.com'       // Administrator
+];
+function rtCanManage(){
+  return RT_TESTS_ALLOWED.includes(String(state.email||'').trim().toLowerCase());
 }
+function rtTestsGuard(){
+  if(rtCanManage()) return true;
+  toast('Assessment Tests can only be changed by Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator','err');
+  return false;
+}
+/* Whether this person has granted the app permission to send mail from their own Gmail. Read from
+   acc.google_connections, a view that exposes only email / connected_at / can_send_mail - never a
+   token. Connecting for Calendar alone does NOT include sending, so this is a separate question from
+   "are they connected". */
+let RT_CAN_SEND_AS_SELF=null;
+async function rtShareCheckGmail(){
+  try{
+    const {data}=await sb.schema('acc').from('google_connections')
+      .select('can_send_mail').eq('email',(state.email||'').toLowerCase()).maybeSingle();
+    RT_CAN_SEND_AS_SELF=!!(data&&data.can_send_mail);
+  }catch(e){ RT_CAN_SEND_AS_SELF=false; }
+  return RT_CAN_SEND_AS_SELF;
+}
+window.rtShareConnectGoogle=function(){
+  // Same one-time consent the Meetings page uses; it now asks for mail-sending as well.
+  location.href='https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/google-oauth-start?email='
+    +encodeURIComponent(state.email||'');
+};
+// Sharing is one of the managed actions, not a separately-permissioned one; the name is kept so
+// the existing call sites read unchanged.
+function rtCanShare(){ return rtCanManage(); }
 function rtShareFieldRow(val){
   return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
     <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
@@ -8371,8 +8413,9 @@ window.rtShareAddN=function(){
   const cont=$('rtEmailFields');if(!cont)return;
   for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
 };
-window.rtShare=function(){
+window.rtShare=async function(){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
+  await rtShareCheckGmail();
   const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
   if(sel.length!==1){toast('Select exactly one test to share','err');return;}
   const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
@@ -8382,12 +8425,17 @@ window.rtShare=function(){
   const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    <div style="background:var(--bg-subtle,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;color:var(--slate);margin-bottom:4px">Sending as <b style="color:var(--ink)">${esc(senderName)}</b> · ${esc(state.email||'')}</div>
+    ${RT_CAN_SEND_AS_SELF
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b> — it will be in your own Sent folder, and replies come straight to you.</div>`
+      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
+           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you, with replies pointed at <b>${esc(state.email||'')}</b>. Connect your Google account to send it from your own address instead.</div>
+           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
+         </div>`}
     <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
     <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
     <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
     ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
-    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(each field must be filled)</span></label>
+    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(fill in as many as you need &mdash; blank ones are ignored)</span></label>
     <div id="rtEmailFields">${fields}</div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
       <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
@@ -8403,14 +8451,19 @@ window.rtShareSend=async function(id){
   if(!inps.length){toast('Add at least one candidate email','err');return;}
   const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const emails=[];
+  /* A blank box is simply not a candidate. The window opens with five and can be grown fifty at a
+     time, so treating every empty one as an error meant deleting boxes before a smaller send would
+     go - the box count is a convenience, not a declaration of how many people are being written to.
+     What was actually typed is still checked properly for shape and for duplicates. */
   for(const el of inps){
     const v=(el.value||'').trim();
     el.style.borderColor='';
-    if(!v){el.style.borderColor='var(--err)';toast('Every email field must be filled (or remove it)','err');el.focus();return;}
+    if(!v)continue;
     if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
     if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
     emails.push(v.toLowerCase());
   }
+  if(!emails.length){toast('Type at least one candidate email','err');inps[0].focus();return;}
   const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
   const body=($('rtShareBody')||{}).value?.trim()||'';
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
@@ -8425,7 +8478,16 @@ window.rtShareSend=async function(id){
     });
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
-    closeModal();toast('Test shared with '+emails.length+' candidate'+(emails.length>1?'s':''),'ok');
+    closeModal();
+    const n=Number(out.sent||emails.length);
+    const who=(out.via==='gmail')
+      ? ('from '+(out.sent_as||'your address'))
+      : 'from the shared address (replies come to you)';
+    toast('Test shared with '+n+' candidate'+(n>1?'s':'')+' '+who,'ok');
+    // one failed address among several should not read as a clean success
+    if(Array.isArray(out.failed)&&out.failed.length){
+      toast(out.failed.length+' address'+(out.failed.length>1?'es':'')+' could not be reached','warn');
+    }
   }catch(e){
     if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
@@ -10583,7 +10645,7 @@ const TR_LANG_NAMES={hi:'Hindi',en:'English',bn:'Bengali',ur:'Urdu',ta:'Tamil',t
 const TR_TIMERS={};
 let TR_ROWS=null;
 let TR_DELETED_ROWS=null; // soft-deleted calls, shown on their own "Deleted" tab
-let TR_FILTER='all'; // 'all'|'qualified'|'notqualified'|'processing' — driven by the KPI cards
+let TR_FILTER='all'; // 'all'|'qualified'|'followup'|'notqualified'|'nil' — driven by the KPI cards
 let TR_FOLDER=null; // folder currently drilled into on the "Folders" tab
 let TR_SELECTED=new Set(); // ids checked in the All Calls log, for folder assignment
 let TR_DATE_FROM=null, TR_DATE_TO=null; // 'YYYY-MM-DD' — applies to the log everywhere (All Calls + inside folders)
@@ -10600,12 +10662,23 @@ function trStatusTag(st){
 function trPhoneNorm(s){s=String(s||'').replace(/[^\d]/g,'');if(s.length===12&&s.slice(0,2)==='91')s=s.slice(2);if(s.length===11&&s.charAt(0)==='0')s=s.slice(1);return s;}
 function trPhoneValid(s){return /^[6-9]\d{9}$/.test(trPhoneNorm(s));}
 function trPhoneFmt(s){const d=trPhoneNorm(s);if(/^[6-9]\d{9}$/.test(d))return '+91 '+d.slice(0,5)+' '+d.slice(5);return s?esc(String(s)):'—';}
+/* The three outcomes, in one place so a badge, a KPI card and a banner cannot drift apart.
+   Follow-Up exists because "Qualified or not" cannot describe a customer who asked to be called back
+   later: they are neither a lead that matched nor one that was lost, and pushing them into Not
+   Qualified is exactly how a live lead gets written off. */
+const TR_OUTCOMES = {
+  'Qualified':     { colour:'#16a34a', bg:'#dcfce7', ink:'#166534', tag:'t-green', icon:'fa-circle-check' },
+  'Follow-Up':     { colour:'#d97706', bg:'#fef3c7', ink:'#92400e', tag:'t-amber', icon:'fa-clock-rotate-left' },
+  'Not Qualified': { colour:'#dc2626', bg:'#fee2e2', ink:'#991b1b', tag:'t-red',   icon:'fa-circle-xmark' }
+};
+function trOutcome(q){ return TR_OUTCOMES[q] || null; }
+
 // Qualification / status badge shown in the list + detail.
 function trQualTag(r){
-  if(r.status==='processing')return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Analysing</span>';
+  if(r.status==='processing'||r.status==='queued')return '<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Analysing</span>';
   if(r.status==='error')return '<span class="tag t-red"><i class="fa-solid fa-circle-exclamation"></i> Failed</span>';
-  if(r.qualification==='Qualified')return '<span class="tag t-green"><i class="fa-solid fa-circle-check"></i> Qualified</span>';
-  if(r.qualification==='Not Qualified')return '<span class="tag t-red"><i class="fa-solid fa-circle-xmark"></i> Not Qualified</span>';
+  const o=trOutcome(r.qualification);
+  if(o)return '<span class="tag '+o.tag+'"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>';
   return '<span class="tag t-gray">—</span>';
 }
 
@@ -11180,7 +11253,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
     +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn" onclick="trDownloadList()"><i class="fa-solid fa-download"></i> Download</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="8"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="9"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
@@ -11220,20 +11293,56 @@ function trNextPinRank(){
   const ranks=(TR_ROWS||[]).filter(function(r){return r.pinned&&typeof r.pin_rank==='number';}).map(function(r){return r.pin_rank;});
   return ranks.length?Math.max.apply(null,ranks)+1:0;
 }
+/* A call that never produced a transcript is not a readable row: no transcript, no criteria, no QA.
+   Half a day's feed is like this - no recording sent, a ring-out under 60s, or hold music only - and
+   they were burying the calls that DO have something to read. They stay in the database and stay
+   counted (they are why "69 received" becomes "30 transcribed"); they are simply not listed.
+   "Not transcribed" on the KPI row brings them up when someone wants to see why. */
+const TR_NO_TRANSCRIPT = ['no_recording', 'too_short', 'non_transcribable'];
+function trIsNilRow(r){
+  return TR_NO_TRANSCRIPT.indexOf(String((r && r.status) || '')) !== -1;
+}
+/* A call still waiting its turn has nothing to read - no transcript, no criteria, no outcome - so it
+   is not listed until it is finished. It gets no card of its own: a "Processing" count is a progress
+   bar pretending to be a statistic, always either everything or nothing and stale the moment it is
+   drawn. "Transcribed 13 of 69 received" already says how much is left. */
+function trIsPendingRow(r){
+  const st=String((r && r.status) || '');
+  return st === 'queued' || st === 'processing';
+}
 // KPI cards double as filters — click one to narrow the list below, click again (or "Calls") to clear.
 function trApplyFilter(rows){
+  // The one view that deliberately shows unfinished calls, since that is the whole point of it.
+  if(TR_FILTER==='processing')return rows.filter(trIsPendingRow);
+  // every other view lists finished calls only
+  rows=rows.filter(function(r){ return !trIsNilRow(r) && !trIsPendingRow(r); });
   if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
+  if(TR_FILTER==='followup')return rows.filter(function(r){return r.qualification==='Follow-Up';});
   if(TR_FILTER==='notqualified')return rows.filter(function(r){return r.qualification==='Not Qualified';});
-  if(TR_FILTER==='processing')return rows.filter(function(r){return r.status==='processing';});
   return rows;
 }
 window.trSetFilter=function(f){TR_FILTER=(TR_FILTER===f)?'all':f;trRenderList();};
 function trKpisHtml(rows){
   const qual=rows.filter(function(r){return r.qualification==='Qualified';}).length;
   const notq=rows.filter(function(r){return r.qualification==='Not Qualified';}).length;
-  const proc=rows.filter(function(r){return r.status==='processing';}).length;
-  const cards=[['all','Calls',rows.length,'all time','var(--slate)'],['qualified','Qualified',qual,'leads matched','#16a34a'],['notqualified','Not Qualified',notq,'did not match','#dc2626'],['processing','Processing',proc,proc?'in progress':'all clear',proc?'#d97706':'#16a34a']];
-  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
+  const foll=rows.filter(function(r){return r.qualification==='Follow-Up';}).length;
+  /* Counted from ALL rows, not the listed ones: the point of showing "received" against
+     "transcribed" is that the gap stays visible rather than the day looking smaller than it was.
+     And the gap has to say what it IS - a card reading "528 of 536" with nothing accounting for the
+     other 8 just looks like the count is wrong. Each reason is named, in received order. */
+  const done=rows.filter(function(r){return r.status==='done';}).length;
+  const proc=rows.filter(trIsPendingRow).length;
+  const n=function(st){return rows.filter(function(r){return r.status===st;}).length;};
+  const gaps=[[n('non_transcribable'),'no speech'],[n('no_recording'),'no recording'],
+              [n('too_short'),'under a minute'],[n('error'),'failed']]
+    .filter(function(g){return g[0]>0;}).map(function(g){return g[0]+' '+g[1];});
+  const recv=rows.length+' received'+(gaps.length?' · '+gaps.join(' · '):'');
+  const cards=[['all','Transcribed',done,recv,'var(--slate)'],
+    ['qualified','Qualified',qual,'leads matched',TR_OUTCOMES['Qualified'].colour],
+    ['followup','Follow-Up',foll,'call back later',TR_OUTCOMES['Follow-Up'].colour],
+    ['notqualified','Not Qualified',notq,'did not match',TR_OUTCOMES['Not Qualified'].colour],
+    ['processing','In Progress',proc,proc?'being transcribed now':'all caught up',proc?'#d97706':'#16a34a']];
+  return '<div class="grid kpis" style="grid-template-columns:repeat('+cards.length+',1fr)">'+cards.map(function(c){
     const active=TR_FILTER===c[0];
     return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
       +'<div class="lbl" style="margin-bottom:7px">'+esc(c[1])+(active?' <i class="fa-solid fa-filter" style="font-size:10px"></i>':'')+'</div>'
@@ -11321,9 +11430,13 @@ function trRowHtml(r,mode){
   // (taskDragOver) elsewhere in this file — persisted via pin_rank in trPinReorderDrop.
   const dragAttrs=r.pinned?(' draggable="true" data-id="'+r.id+'" ondragstart="event.dataTransfer.setData(\'text/plain\',\''+r.id+'\');this.classList.add(\'dragging\')" ondragend="this.classList.remove(\'dragging\')" ondragover="event.preventDefault();taskDragOver(event,this)" ondragleave="this.classList.remove(\'drop-above\',\'drop-below\')" ondrop="trPinReorderDrop(event,this)"'):'';
   const rowClass=r.pinned?' class="pin-drag"':'';
-  // Main line = the recording's file name (truncated with … if too long, full name on hover);
-  // below it = the detected customer name, when the call identified one.
-  const nameLine=r.customer_name?'<div style="font-size:11px;color:var(--slate)">'+esc(r.customer_name)+'</div>':'';
+  /* Main line = the recording's name, which is now "Full Name_Lead Id" from the CRM (or the lead id
+     alone when the CRM holds no name). Below it = the caller's number, and a plain note when the
+     recording produced no transcript, so a row is never silently empty. */
+  const ph=trPhone(r);
+  const sub=[ph?trPhoneFmt(ph):'', trIsNilRow(r)?'<span style="color:#94a3b8">(Not Transcribed)</span>':'']
+    .filter(Boolean).join(' · ');
+  const nameLine=sub?'<div style="font-size:11px;color:var(--slate)">'+sub+'</div>':'';
   const checkTd=mode==='list'?('<td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox"'+(TR_SELECTED.has(r.id)?' checked':'')+' onchange="trToggleSelect('+r.id+',this.checked)"></td>'):'';
   // Pinned rows are draggable from anywhere on the row (no separate grip icon needed — that
   // used to widen this cell just for pinned rows and forced the table into horizontal scroll).
@@ -11332,11 +11445,13 @@ function trRowHtml(r,mode){
     +checkTd
     +'<td><div style="display:flex;align-items:center;gap:8px;max-width:280px">'+pinIcon+'<i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px;flex-shrink:0"></i><div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
     +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
+    +'<td>'+trCrmTag(r.crm_status)+(r.mismatch?'<div style="font-size:10.5px;color:#dc2626;margin-top:3px;font-weight:600" title="'+esc(r.mismatch_reason||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> disagrees</div>':'')+'</td>'
     +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
     +'<td>'+trLangTags(r.languages)+'</td>'
     +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
     +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
     +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+      +(r.recording_url?'<button class="btn btn-sm btn-ghost" title="Copy the recording link — paste it to download the audio" onclick="trCopyUrl('+r.id+')"><i class="fa-solid fa-link"></i></button> ':'')
       +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Download report" onclick="trDownloadReport('+r.id+')"><i class="fa-solid fa-download"></i></button> ':'')
       +(mode==='folder'?'<button class="btn btn-sm btn-ghost" title="Remove from folder" onclick="trRemoveFromFolder('+r.id+')"><i class="fa-solid fa-xmark"></i></button> ':'')
       +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
@@ -11383,7 +11498,7 @@ function trFolderCallsHtml(rows,name){
     +'<button class="btn btn-sm" onclick="trFolderDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete folder</button>'
     +(list.length?'<button class="btn btn-sm" onclick="trDownloadFolder()"><i class="fa-solid fa-download"></i> Download</button>':'')+'</div>'
     +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid fa-folder" style="color:#0d9488"></i> '+esc(name)+'</h1></div>'
-    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
+    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
     +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
 // Keeps the folder drill-in list (if open) in sync after an optimistic delete/retry/remove — a
@@ -11479,8 +11594,8 @@ function trExportHtml(rows,heading){
   const now=new Date();
   const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   const cards=rows.map(function(r){
-    const qb=r.qualification==='Qualified';
-    const badge=r.qualification?('<span class="badge" style="background:'+(qb?'#dcfce7':'#fee2e2')+';color:'+(qb?'#166534':'#991b1b')+'">'+esc(r.qualification)+'</span>'):'';
+    const o=trOutcome(r.qualification);
+    const badge=o?('<span class="badge" style="background:'+o.bg+';color:'+o.ink+'">'+esc(r.qualification)+'</span>'):'';
     const langs=(r.languages&&r.languages.length)?r.languages.map(trLangName).join(', '):'—';
     const reasonHtml=r.reason?('<div class="sec"><div class="sec-h">Qualification reason</div><div class="pre">'+esc(r.reason)+'</div></div>'):'';
     const summaryHtml=r.summary?('<div class="sec"><div class="sec-h">Summary</div><div class="pre">'+esc(r.summary)+'</div></div>'):'';
@@ -11530,7 +11645,7 @@ function trDownloadRows(rows,heading){
   trTriggerDownload(trExportHtml(doneRows,heading),trSafeFilename(heading)+'.html');
 }
 window.trDownloadList=function(){
-  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='processing'?'Processing calls':'All calls'));
+  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='followup'?'Follow-Up calls':(TR_FILTER==='processing'?'Calls being transcribed':'All calls')));
   trDownloadRows(trApplyFilter(TR_ROWS||[]),label);
 };
 window.trDownloadReport=function(id){
@@ -11764,8 +11879,8 @@ async function trDetail(v,id){
   const name=phone?trPhoneFmt(phone):(r.file_name||'Recording');
   const a=r.analysis||{};
   const sub=(r.customer_name?esc(r.customer_name)+' · ':'')+fmtDate(r.created_at)+' · '+esc((r.created_by||'').split('@')[0]);
-  const qb=r.qualification==='Qualified';
-  const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+(qb?'#16a34a':'#dc2626')+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+(qb?'t-green':'t-red')+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+(qb?'fa-circle-check':'fa-circle-xmark')+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
+  const o=trOutcome(r.qualification)||TR_OUTCOMES['Not Qualified'];
+  const banner=(r.status==='done'&&r.qualification)?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(r.qualification)+'</span>'+(r.project&&r.project!=='Unclear'?'<span style="font-weight:700;color:#0d9488;font-size:15px">'+esc(r.project)+'</span>':'')+'</div>'+(r.reason?'<div style="margin-top:10px;font-size:14px;line-height:1.55">'+esc(r.reason)+'</div>':'')+'</div>'):'';
   let comments=[];
   try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
@@ -11821,12 +11936,12 @@ window.trCmDelete=async function(cid){
 
 function trCriteriaHtml(r){
   const c=r.criteria||{};
-  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction']];
+  const items=[['site_visit_interested','Wants a site visit'],['location_match','Location match'],['bhk_match','BHK available'],['budget_match','Budget match'],['ready_move_match','Ready / Under-construction'],['follow_up_requested','Asked to be called back later']];
   return '<div style="display:flex;flex-direction:column;gap:8px">'+items.map(function(it,idx){
     const ok=c[it[0]]===true;
     const badge=(idx===0)?'<span style="font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 5px;margin-left:6px">PRIORITY</span>':'';
     return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px"><i class="fa-solid '+(ok?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(ok?'#16a34a':'#dc2626')+';width:16px"></i> '+it[1]+badge+'</div>';
-  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match.</div></div>';
+  }).join('')+'<div style="margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--slate);line-height:1.4">Qualified if <b>site visit</b> is agreed — or if <b>Location, BHK, Budget &amp; Ready/Construction</b> all match. If neither matched but the customer asked to be <b>called back later</b>, it is a <b>Follow-Up</b> rather than lost.</div></div>';
 }
 function trAnalysisHtml(r){
   const a=r.analysis||{};
@@ -11850,11 +11965,62 @@ function trAnalysisHtml(r){
 }
 
 let TR_DETAIL_ROW=null;
+/* The CRM's own verdict on the lead, which is a different question from the AI's. The report used
+   to be lost calls only and now also sends leads still In Followup, so this is worth showing beside
+   the outcome rather than being assumed. */
+const TR_CRM_TAGS={ 'Lost':{bg:'#fee2e2',ink:'#991b1b'}, 'In Followup':{bg:'#fef3c7',ink:'#92400e'} };
+function trCrmTag(v){
+  const s=String(v||'').trim();
+  if(!s)return '<span style="color:var(--slate)">—</span>';
+  const t=TR_CRM_TAGS[s]||{bg:'#e2e8f0',ink:'#334155'};
+  return '<span class="badge" style="background:'+t.bg+';color:'+t.ink+';white-space:nowrap">'+esc(s)+'</span>';
+}
+
+// The caller, by number. Falls back to whichever of the two columns the row actually carries.
+function trPhone(r){ return String((r&&(r.phone||r.lead_mobile))||'').trim(); }
+
+/* Who said what. Rendered from `utterances` when we have it, so a turn can be labelled with the
+   customer's own number instead of the word "Customer", and so the Original toggle shows the native
+   script - it used to read transcript_bn, which this pipeline never writes, leaving both toggles
+   showing the same English. The flat transcript stays the fallback for older rows. */
 function trTranscriptHtml(r,lang){
+  const turns=Array.isArray(r&&r.utterances)?r.utterances:null;
+  if(turns&&turns.length){
+    const who=trPhone(r);
+    const rows=turns.map(function(t){
+      const isAgent=String((t&&t.speaker)||'').toLowerCase().indexOf('agent')!==-1;
+      // The agent is staff and stays "Agent"; the other side is this lead, so name them by number.
+      // trPhoneFmt returns +91 XXXXX XXXXX and escapes as it goes, so it is not escaped again below.
+      const labelHtml=isAgent?'Agent':(who?trPhoneFmt(who):'Customer');
+      const body=(lang==='bn')?((t&&(t.original||t.text))||''):((t&&(t.text||t.original))||'');
+      if(!String(body).trim())return '';
+      return '<div style="display:flex;gap:10px;padding:7px 0;border-top:1px solid var(--line)">'
+        +'<div style="flex-shrink:0;width:118px">'
+          +'<div style="font-weight:600;font-size:12px;color:'+(isAgent?'#0d9488':'#4f46e5')+'">'+labelHtml+'</div>'
+          +(t&&t.timestamp?'<div style="font-size:10.5px;color:var(--slate)">'+esc(t.timestamp)+'</div>':'')
+        +'</div>'
+        +'<div style="flex:1;min-width:0;font-size:13.5px;line-height:1.65">'+esc(body)+'</div></div>';
+    }).join('');
+    if(rows)return '<div style="max-height:60vh;overflow:auto">'+rows+'</div>';
+  }
   const txt=(lang==='bn')?(r.transcript_bn||r.transcript||''):(r.transcript_en||r.transcript||'');
   if(txt)return '<div style="font-size:13.5px;line-height:1.7;white-space:pre-wrap;max-height:60vh;overflow:auto">'+esc(txt)+'</div>';
   return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
 }
+
+/* The Knowlarity link, which downloads the recording when opened. Copied rather than offered as a
+   download button: the link is what is useful to paste into a chat or a browser, and a page-driven
+   download would be blocked in some views anyway. */
+window.trCopyUrl=async function(id){
+  const r=(TR_ROWS||[]).concat(TR_DELETED_ROWS||[]).find(function(x){return x.id===id;});
+  const url=r&&r.recording_url;
+  if(!url){ toast('This call has no recording link','err'); return; }
+  try{ await navigator.clipboard.writeText(url); toast('Recording link copied — paste it anywhere to download','ok'); }
+  catch(e){
+    // clipboard is refused without a user gesture or over plain http; show it so it can be copied by hand
+    try{ window.prompt('Copy the recording link:', url); }catch(_e){ toast('Could not copy the link','err'); }
+  }
+};
 window.trSetLang=function(lang){
   if(!TR_DETAIL_ROW)return;
   const b=$('trTranscriptBody');if(b)b.innerHTML=trTranscriptHtml(TR_DETAIL_ROW,lang);
