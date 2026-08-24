@@ -45,8 +45,9 @@ function loader(host){host.innerHTML='<div class="loader"><div class="spin"></di
 
 /* modal */
 function openModal(html,size){const h=$('modalHost');h.innerHTML='<div class="modal '+(size||'')+'">'+html+'</div>';$('overlay').classList.add('show');}
-function closeModal(){$('overlay').classList.remove('show');$('modalHost').innerHTML='';window._modalMandatory=false;if(__confirmResolve){const r=__confirmResolve;__confirmResolve=null;r(false);}}
-$('overlay').addEventListener('click',e=>{if(e.target===$('overlay')){ if(window._modalMandatory)return; closeModal(); }});
+function closeModal(){$('overlay').classList.remove('show');$('modalHost').innerHTML='';if(__confirmResolve){const r=__confirmResolve;__confirmResolve=null;r(false);}}
+// Clicking the backdrop never closes a form — only an explicit Cancel/×/Save does. Typing lost
+// to an accidental outside click was the recurring complaint this replaced.
 /* ---- custom confirm dialog — replaces the native confirm() everywhere so delete/decline
    prompts look and behave the same on every device, instead of relying on the browser's own
    "This page says…" dialog (whose styling/wording is desktop-Chrome-specific and inconsistent
@@ -3106,10 +3107,6 @@ window.misAiSearch=async function(raw){
   }catch(e){ if(statusEl)statusEl.textContent=''; }
 };
 window.misCreate=function(){
-  // Filling out a case is real typing to lose — clicking the backdrop by accident no longer
-  // closes this one; only Cancel or the × does (both already go through closeModal(), which
-  // clears this flag for whatever opens next).
-  window._modalMandatory=true;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-gavel"></i> Add Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">${misFormHtml({},'add')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misSave()"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg');
@@ -7035,7 +7032,6 @@ window.inspSave=async function(){
 /* ---- set/change password so Google users can also use email+password ---- */
 function userHasPassword(){ try{ return !(state.profile && state.profile.password_set===false); }catch(e){ return true; } }
 window.setPasswordModal=function(){
-  window._modalMandatory=true;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-key"></i> Set a password</h3></div>
   <div class="modal-body frm">
     <p style="color:var(--slate);font-size:13.5px;margin-bottom:4px">Set a password so you can sign in with <b>email + password</b> as well as Google. This is required before you can continue.</p>
@@ -7052,7 +7048,6 @@ window.setPasswordSave=async function(){
   const {error}=await sb.auth.updateUser({password:p});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='Save password';}return;}
   try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); }catch(e){}
-  window._modalMandatory=false;
   closeModal();toast('Password set — you can now sign in with email + password too','ok');
 };
 /* ---- complete a "Forgot password" reset (lands here via PASSWORD_RECOVERY after the emailed link) ---- */
