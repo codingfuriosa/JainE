@@ -895,7 +895,7 @@ async function promoteRetries(db: DB) {
   const after = new Date(Date.now() - RETRY_AFTER_MINUTES * 60e3).toISOString();
   const requeue = { status: "queued", error_text: null, verification: null,
                     non_transcribable_reason: null, updated_at: new Date().toISOString() };
-  let errors = 0, noSpeech = 0;
+  let errors = 0, noSpeech = 0, stuck = 0;
 
   {
     const { data } = await db.schema("acc").from("transcriptions").update(requeue)
@@ -911,7 +911,32 @@ async function promoteRetries(db: DB) {
       .lt("attempts", MAX_ATTEMPTS_NO_SPEECH).lt("updated_at", after).select("id");
     noSpeech = (data || []).length;
   }
-  return { errors, no_speech: noSpeech };
+  /* A row can be CLAIMED (status set to "processing") and then never finish - the platform kills
+     a call that runs past its own request limit, which a long recording's two-stage transcribe +
+     analyse can do. processOne never got to run its own attempts += 1 or write any status, so
+     without this the row sits in "processing" forever: promoteRetries only ever looked at "error"
+     and "non_transcribable", never this. Attempts is bumped HERE, on the way back to the queue,
+     precisely because the dead invocation never got the chance to. */
+  {
+    const { data: staleRows } = await db.schema("acc").from("transcriptions")
+      .select("id, attempts")
+      .eq("source", SOURCE).eq("status", "processing")
+      .not("recording_url", "is", null).is("deleted_at", null)
+      .lt("updated_at", after);
+    for (const r of (staleRows || [])) {
+      const attempts = Number((r as any).attempts || 0) + 1;
+      const giveUp = attempts >= MAX_ATTEMPTS_ERROR;
+      await db.schema("acc").from("transcriptions").update(giveUp
+        ? { status: "error", attempts,
+            error_text: `stuck mid-run and never finished [gave up after ${attempts} tries]`,
+            updated_at: new Date().toISOString() }
+        : { status: "queued", attempts, error_text: null, verification: null,
+            updated_at: new Date().toISOString() }
+      ).eq("id", (r as any).id);
+      stuck++;
+    }
+  }
+  return { errors, no_speech: noSpeech, stuck };
 }
 
 async function doWork(db: DB, limit: number, openaiKey: string,
