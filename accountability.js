@@ -822,7 +822,7 @@
      appear in their own department below, because that is where somebody scanning by department
      will look for them. `allowAll` adds an "All People" option, exclusive with picking names. */
   const WF_ALL_PEOPLE_KEY='__ALL__';
-  function wfPersonPickerHtml(sel, multi, allowTrigger, extraClass, pinned, allowAll){
+  function wfPersonPickerHtml(sel, multi, allowTrigger, extraClass, pinned, allowAll, restrictTo){
     const pid='wfpp'+(++WF_PID);
     const chosen=Array.isArray(sel)?sel.filter(Boolean):(sel?[sel]:[]);
     const fromTrigger=chosen.length===1&&chosen[0]===WF_TRIGGER_OWNER_KEY;
@@ -841,8 +841,17 @@
               +esc2(people.length<=2?people.map(function(p){return p.name;}).join(' / ')
                     :(people[0].name+' + '+(people.length-1)+' more'))+'</span>'
           : '<span class="wf-pp-ph">Assign person…</span>');
-    const groups={}; (WF_PEOPLE||[]).forEach(function(pp){ const ds=(Array.isArray(pp.depts)?pp.depts:[]).map(function(d){return String(d||'').trim();}).filter(Boolean); const key=ds.length?ds.slice().sort().join(', '):'Unassigned'; (groups[key]=groups[key]||[]).push(pp); });
-    const order=Object.keys(groups).sort(function(a,b){ return a==='Unassigned'?1:(b==='Unassigned'?-1:a.localeCompare(b)); });
+    // A flow can restrict this picker to a fixed handful of people (Bill Processing's trigger
+    // owners may only ever hand its open steps to two named people, not anyone in the company) —
+    // when set, that short list replaces the usual "everyone, grouped by department" listing.
+    const restrictList=(Array.isArray(restrictTo)?restrictTo:[]).filter(Boolean);
+    const groups={};
+    if(restrictList.length){
+      groups['Allowed']=restrictList.map(function(e){ return (WF_PEOPLE||[]).find(function(x){return eq(x.email,e);})||{email:e,name:e,depts:[]}; });
+    } else {
+      (WF_PEOPLE||[]).forEach(function(pp){ const ds=(Array.isArray(pp.depts)?pp.depts:[]).map(function(d){return String(d||'').trim();}).filter(Boolean); const key=ds.length?ds.slice().sort().join(', '):'Unassigned'; (groups[key]=groups[key]||[]).push(pp); });
+    }
+    const order=restrictList.length?['Allowed']:Object.keys(groups).sort(function(a,b){ return a==='Unassigned'?1:(b==='Unassigned'?-1:a.localeCompare(b)); });
     let listHtml='';
     const avOf=function(nm){ try{ return (typeof avatar==='function')?avatar(nm):('<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'); }catch(e){ return '<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'; } };
     const isOn=function(em){ return chosen.some(function(c){ return eq(c,em); }); };
@@ -865,7 +874,8 @@
         +(fromAll?'<i class="fa-solid fa-check" style="color:var(--brand)"></i>':'')+'</div>';
     }
     // Already in this workflow — repeated at the top, and left in their department below too.
-    const pinList=(Array.isArray(pinned)?pinned:[]).filter(Boolean)
+    // Not shown at all when restricted: the "Allowed" group above is already the whole list.
+    const pinList=restrictList.length?[]:(Array.isArray(pinned)?pinned:[]).filter(Boolean)
       .filter(function(e){ return e!==WF_TRIGGER_OWNER_KEY && e!==WF_ALL_PEOPLE_KEY; })
       .map(function(e){ return (WF_PEOPLE||[]).find(function(x){return eq(x.email,e);})||{email:e,name:e,depts:[]}; })
       .filter(function(pp,i,arr){ return arr.findIndex(function(y){return eq(y.email,pp.email);})===i; });
@@ -3837,6 +3847,7 @@
        named here does all of them and it's required — can't leave a step silently unassigned.
        Asking the same question once per step made the form long and invited answering it
        differently for steps that are meant to be handled by the same person. */
+    const stepAssignRestrict=(flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
           +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
@@ -3849,7 +3860,7 @@
                     ? ('Step '+openSteps[0].seq+' · '+esc2(openSteps[0].title||''))
                     : (openSteps.length+' steps · '+esc2(openSteps.map(function(s){return s.title||('Step '+s.seq);}).join(', '))))
               +'</span></div>'
-            +wfPersonPickerHtml([], true, false, '', wfRegulars)
+            +wfPersonPickerHtml([], true, false, '', wfRegulars, undefined, stepAssignRestrict.length?stepAssignRestrict:undefined)
           +'</div>'
         +'</div>'
       : '';
