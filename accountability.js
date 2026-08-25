@@ -2454,6 +2454,11 @@
       if(cs.received_at){ if(eq(cs.person,mySelf)) myRecv++; }
       else if(cands.some(function(e){return eq(e,mySelf);})) myWait++;
     });
+    // The badge itself — not just its number — is restricted to the Administrator and whoever is
+    // actually assigned somewhere in this workflow (a step owner, or its trigger owner). Someone
+    // who can merely see the workflow page (e.g. through department-wide visibility) but has no
+    // role in it at all has no reason to see this indicator, even at 0/0.
+    const canSeeWaitRecv=eq(mySelf,'ayushruia1@gmail.com') || members.some(function(e){return eq(e,mySelf);});
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
@@ -2526,10 +2531,10 @@
     }
 
     const headActs='<div class="wf-head-acts">'
-      +'<span class="wf-my-wr" title="Your own count for this workflow — only you can see this">'
+      +(canSeeWaitRecv?('<span class="wf-my-wr" title="Your own count for this workflow — only you can see this">'
         +'<span class="wf-wr-seg wf-wr-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting <b>'+myWait+'</b></span>'
         +'<span class="wf-wr-seg wf-wr-recv"><i class="fa-solid fa-inbox"></i> Received <b>'+myRecv+'</b></span>'
-      +'</span>'
+      +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
