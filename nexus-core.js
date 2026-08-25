@@ -11261,7 +11261,16 @@ VIEWS.transcription=async function(v,seg){
   const ti=mTab(seg,tabs.length);
   const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
   if(ti===3){
-    const rows=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&(r.has_discrepancy||r.status==='error'||r.status==='no_recording');});
+    /* Only calls where the agent's record and the recording actually DISAGREE.
+       A call that could not be checked is not a disagreement: failed transcriptions and missing
+       recordings were listed here too, burying the real mismatches under rows needing no judgement.
+       A matching follow-up date is the same kind of noise — so a row must carry at least one
+       genuinely FAILED check to appear, which is what leaves only the dates that differ. */
+    const rows=(await trFetch(true)).filter(function(r){
+      if(r.source!=='lost_call_sync')return false;
+      const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
+      return cs.some(function(c){ return c&&c.status==='fail'; });
+    });
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
       +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
@@ -11274,7 +11283,10 @@ VIEWS.transcription=async function(v,seg){
     const leads=Object.keys(groups).map(function(id){
       const list=groups[id].slice().sort(function(a,b){return new Date(a.report_date||a.created_at)-new Date(b.report_date||b.created_at);});
       return {leadId:id, rows:list};
-    }).sort(function(a,b){
+    /* Compilation is for leads that have been called MORE THAN ONCE. A single call has nothing to
+       compile — its "combined verdict" is just that call's verdict, so listing it here only hides
+       the leads where the story actually developed across several conversations. */
+    }).filter(function(g){ return g.rows.length>1; }).sort(function(a,b){
       const la=a.rows[a.rows.length-1], lb=b.rows[b.rows.length-1];
       return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
     });
@@ -12116,10 +12128,21 @@ function trCrmTag(v){
 }
 // The CRM sends a next-followup date on an open lead and a lost reason on a closed one — whichever
 // applies to this row is what "Date / Reason" shows, straight from the feed, not the AI's own read.
+/* A promised callback date means nothing on its own. "14 Sep" is only late or early relative to the
+   day the promise was made, so the call's own date is shown above it — the two together are the
+   whole fact, and a reader should not have to hold one of them in their head from another column. */
+function trCallDate(r){
+  const d=new Date((r&&(r.report_date||r.created_at))||'');
+  return isNaN(d)?'':d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
 function trDateReasonHtml(r){
   if(r.crm_status==='In Followup'&&r.next_follow_up_date){
     const d=new Date(r.next_follow_up_date);
-    if(!isNaN(d))return '<span style="font-size:12.5px">'+esc(d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}))+'</span>';
+    if(!isNaN(d)){
+      const called=trCallDate(r);
+      return (called?('<div style="font-size:11px;color:var(--slate)">called '+esc(called)+'</div>'):'')
+        +'<span style="font-size:12.5px"><b>next:</b> '+esc(d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}))+'</span>';
+    }
   }
   if(r.crm_status==='Lost'&&r.crm_lost_reason)return '<span style="font-size:12.5px">'+esc(r.crm_lost_reason)+'</span>';
   return '<span style="color:var(--slate)">—</span>';
