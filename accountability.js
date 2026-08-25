@@ -4040,7 +4040,14 @@
        named here does all of them and it's required — can't leave a step silently unassigned.
        Asking the same question once per step made the form long and invited answering it
        differently for steps that are meant to be handled by the same person. */
-    const stepAssignRestrict=(flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+    /* The restriction is for the people who RAISE these day to day - a bill may only be handed to
+       the two named people, so the picker offers only those two and the question cannot be answered
+       wrongly. Systems is exempt: they are the ones who have to put things right when a bill has
+       gone to the wrong person, and a picker that cannot name anyone else leaves them unable to.
+       An empty list means the workflow never restricted the picker, and nothing changes. */
+    const stepAssignRestrict=(wfInDept('Systems')||eq(me(),'ayushruia1@gmail.com'))
+      ? []
+      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
           +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
