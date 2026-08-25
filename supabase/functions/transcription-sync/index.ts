@@ -118,6 +118,13 @@ const CONCURRENCY = 3;
    than a fact about the recording, which is why it is retried too - 17 calls once written off as
    silence turned out to hold conversations. Bounded at three so a genuinely empty file stops costing
    money, and spaced ten minutes so a rate limit or an outage is not hammered. */
+/* What counts as "too thin to be a transcript of THIS recording".
+   Measured, not guessed: real transcripts of these calls run 6-16 characters per second of audio,
+   and the failures cluster far below - "Hello." at 0.1, and the 40-character answers at 0.2 and 0.5.
+   1.5 sits in the empty gap between the two, so a genuinely terse exchange still passes while
+   near-silence does not. The 120-character floor is absolute: that is not a call at any length. */
+const MIN_TRANSCRIPT_CHARS = 120;
+const MIN_CHARS_PER_SECOND = 1.5;
 const MAX_ATTEMPTS_ERROR = 3;
 const MAX_ATTEMPTS_NO_SPEECH = 3;
 const RETRY_AFTER_MINUTES = 10;
@@ -708,6 +715,46 @@ async function processOne(db: DB, row: any, openaiKey: string,
       : `Speech-to-text returned ${verbatim.length} characters of speech`
         + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
         + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
+
+  /* TOO THIN TO BE A TRANSCRIPT OF THIS CALL? Then this is a failure to HEAR, not a fact about the
+     call, and it goes back round.
+     Debayan_706926 is why this exists. Eighty-nine seconds of audio came back as the single word
+     "Hello." - six characters - and every check went green: human_conversation passed because the
+     text was not empty, the turn checks passed because six characters lay out as one tidy turn, and
+     the CRM comparison passed because the judge inferred "Not Interested" from one word and the CRM
+     happened to say Lost. A confident "Not Qualified" verdict, formed on nothing.
+     degenerateRepeat() above cannot catch it: that needs 8+ words before it will call anything a
+     stuck loop, and this is one word. It tests whether the words REPEAT; this tests whether there
+     are enough of them for the length of the audio. Different failures, both real.
+     Checked here, BEFORE stage 2, for two reasons: paying to grade six characters is waste, and a
+     verdict formed from six characters is worse than no verdict at all.
+     The transcript is CLEARED rather than kept, because `stored` above reuses whatever is on the
+     row - leaving the thin text in place would make every retry hand back the same nothing. */
+  const density = seconds ? verbatim.length / seconds : null;
+  const tooThin = verbatim.length < MIN_TRANSCRIPT_CHARS
+    || (density !== null && seconds! > MIN_DURATION_SECONDS && density < MIN_CHARS_PER_SECOND);
+  if (tooThin) {
+    const giveUp = attempts >= MAX_ATTEMPTS_NO_SPEECH;
+    checks.push({ check: "enough_speech", status: "fail",
+      detail: `Only ${verbatim.length} characters came back for ~${seconds}s of audio`
+        + (density !== null ? ` (${Math.round(density*10)/10} per second, against 6-16 on a real transcript)` : "")
+        + `. Too little to be a transcript of this call`
+        + (giveUp
+            ? `, and it has now been listened to ${attempts} times - treat the recording as unusable.`
+            : `, so it will be listened to again.`) });
+    return fail("non_transcribable", null, {
+      duration_seconds: seconds,
+      non_transcribable_reason:
+        `Only ${verbatim.length} characters transcribed from ~${seconds}s of audio`,
+      // cleared deliberately - a retry must transcribe afresh rather than reuse this
+      transcript: null, transcript_en: null, transcript_bn: null, utterances: null,
+      discrepancy: null, has_discrepancy: null,
+    });
+  }
+  checks.push({ check: "enough_speech", status: "pass",
+    detail: `${verbatim.length} characters for ~${seconds}s of audio`
+      + (density !== null ? ` (${Math.round(density*10)/10} per second)` : "")
+      + `, in line with a real transcript.` });
 
   /* STAGE 2 - lay it out and judge it. The CRM's own record (if it sent one) rides along in the SAME
      call rather than a separate one - the model already has the transcript in front of it, so asking

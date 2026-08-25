@@ -3383,7 +3383,35 @@ function taskTabs(active){
   return '<div class="tabs">'+t.map(x=>`<div class="tab ${active===x[0]?'active':''}" onclick="location.hash='#/tasks${x[0]?'/'+x[0]:''}'"><i class="fa-solid ${x[2]}"></i> ${x[1]}</div>`).join('')+'</div>';
 }
 
-VIEWS.tasks=async function(v,seg){
+VIEWS.tasks=async function legacyTasksView(v,seg){
+  /* The Accountability people actually use lives in accountability.js, which loads after this file
+     on accountability.html and replaces this function outright. Everything below is the RETIRED
+     Accountability — "Home" / "Projects" / "Scoreboard" — kept only because other modules still call
+     into its task, project and goal helpers.
+     It must never paint on the Accountability page. boot() calls renderPage() immediately after
+     awaiting the auth check, and with a warm session that await can resolve through microtasks
+     before accountability.js has finished downloading — so this legacy view starts rendering. The
+     damage is done by WHEN it paints: it writes to the view only after its own `await getPeople()`,
+     which lands a moment AFTER accountability.js's defensive re-render has already put the real UI
+     up. The stale three tabs end up on top, and nothing repaints them until a hard refresh.
+     Painting a loader and returning removes the race at its source — nothing is left in flight to
+     overwrite the real UI, and accountability.js repaints as soon as it is in place. */
+  if(PAGE==='tasks'){
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    /* If accountability.js never arrives at all (a failed or blocked download), say so plainly
+       rather than spinning forever — and only if the real view is still not installed by then. */
+    clearTimeout(window.__accWaitTimer);
+    window.__accWaitTimer=setTimeout(function(){
+      if(VIEWS.tasks===legacyTasksView&&v.querySelector('.loader')){
+        v.innerHTML='<div class="card card-pad empty" style="padding:40px">'
+          +'<i class="fa-solid fa-triangle-exclamation"></i>'
+          +'<div>Accountability could not finish loading.</div>'
+          +'<div style="margin-top:12px"><button class="btn btn-sm" onclick="location.reload()">'
+          +'<i class="fa-solid fa-rotate-right"></i> Reload</button></div></div>';
+      }
+    },8000);
+    return;
+  }
   await getPeople();
   // reset list filters on every fresh navigation into Accountability (not on in-page filter changes)
   PFILTER.prio='All';PFILTER.status='All';
