@@ -3876,12 +3876,14 @@
        person uploaded, same idea as UPI Id remembering the last typed value — except there is only
        ever one of it, so it is fetched and pre-filled straight onto a brand-new instance rather
        than offered as a pick-from-list. Never on Edit: an existing case keeps whatever it actually
-       has saved, from savedDetails above. */
+       has saved, from savedDetails above. upi_scanner_get falls back to the person's own most
+       recent past submission of THIS flow when nothing has been explicitly remembered yet, so the
+       pre-fill still works even if a save never actually reached upi_scanner_remember. */
     if(!editing){
       const scannerField=template.find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
         try{
-          const {data:remembered}=await ACC().rpc('upi_scanner_get');
+          const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
           if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
         }catch(_e){}
       }
@@ -4165,12 +4167,16 @@
       const upiLabel=Object.keys(byLabel).filter(function(l){ return /upi/i.test(l); })[0];
       if(upiLabel) wfUpiRemember(byLabel[upiLabel]);
       // Whatever image ends up in the QR Code field becomes the one remembered for next time —
-      // unlike UPI Id there's only ever one, so this replaces rather than joins a list.
+      // unlike UPI Id there's only ever one, so this replaces rather than joins a list. Logged
+      // (not silently swallowed) if it fails — upi_scanner_get() falls back to the person's own
+      // past submissions regardless, but a failure here is still worth being able to see.
       const scannerField=((window._wfEvtTemplate)||[]).find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
         const scannerVal=(byLabel[scannerField.label]||[])[0];
         if(scannerVal && String(scannerVal).indexOf('s3:')===0){
-          try{ ACC().rpc('upi_scanner_remember',{p_storage_path:scannerVal}); }catch(_e){}
+          ACC().rpc('upi_scanner_remember',{p_storage_path:scannerVal}).then(function(r){
+            if(r&&r.error) try{ console.error('upi_scanner_remember failed',r.error); }catch(_e){}
+          },function(e){ try{ console.error('upi_scanner_remember failed',e); }catch(_e){} });
         }
       }
     }
