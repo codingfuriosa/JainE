@@ -2542,9 +2542,13 @@
          DELETE — the owner (whoever started it), or the Administrator only — not the wider
                   workflow-management pair, and not step members who merely handle it.
        Both are re-checked in the database, so the buttons only mirror what will actually be
-       allowed rather than being the thing that decides it. */
-    const canEditCase=function(c){ return eq(c&&c.created_by, mySelf); };
-    const canDeleteCase=function(c){ return eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com'); };
+       allowed rather than being the thing that decides it.
+       Reimbursement only: once an instance has moved past its first step, NEITHER right applies
+       to anyone — not even the owner or the Administrator. A returned-for-correction instance is
+       exempt (current_step is reset back to the first step for exactly that reason). */
+    const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
+    const canEditCase=function(c){ return !wfPastStep1Locked(c) && eq(c&&c.created_by, mySelf); };
+    const canDeleteCase=function(c){ return !wfPastStep1Locked(c) && (eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com')); };
     const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     let tableHtml='';
     if(cases.length){
@@ -2829,7 +2833,10 @@
        only while it is still moving; once it is Done or Cancelled it is final. Mirrors
        acc.wf_update_instance, which is what actually enforces this. */
     const backTo=String(c.returned_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-    const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')
+    // Reimbursement only: past its first step, nobody edits it — see wfPastStep1Locked in
+    // wfDetailPage / acc.wf_update_instance for the same rule. A returned instance is exempt.
+    const pastStep1Locked=c.flow_id===39 && c.current_step>1 && !c.returned_at;
+    const canEditThis=!pastStep1Locked&&(c.status!=='Done'&&c.status!=='Cancelled')
       &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     const printBtn='<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
