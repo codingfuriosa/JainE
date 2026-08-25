@@ -1136,7 +1136,12 @@
          now reads as whose claim it is, what it comes to, the date and the UPI id - the four things
          that actually tell one claim from another. */
       if(sumField){
-        full=[ wfNm(c.created_by)||c.created_by||'', wfDetailsInline(det,flow) ].filter(Boolean).join(' · ');
+        /* Whose claim it is, but only when that is news. To HR and Accounts the name is the first
+           thing they need; to the person who raised it, it is their own name on every row of their
+           own list, pushing the date and the amount - the two things that actually tell their claims
+           apart - off to the right. So it is dropped on your own rows and kept on everyone else's. */
+        const who=eq(c.created_by||'', me()) ? '' : (wfNm(c.created_by)||c.created_by||'');
+        full=[ who, wfDetailsInline(det,flow) ].filter(Boolean).join(' · ');
       } else {
       const base=c.title||'';
       let vals;
@@ -1303,7 +1308,9 @@
      was for, and where the money goes. The transports and meals are in the table below - repeating
      them here made the line long and told you nothing you could act on. The owner is prepended by
      the caller, which is the only one that knows it. */
-  var WF_TITLE_FIELDS=['Amount','Date','UPI Id'];
+  /* Date leads, then the total, then everything else. A claim is remembered as "the 14th" before it
+     is remembered as a number, so the date is what lets someone find their own row at a glance. */
+  var WF_TITLE_FIELDS=['Date','Amount','UPI Id'];
   function wfDetailsInline(details,flow){
     const det=details||[];
     if(wfIsDaywise(flow,det)){
@@ -1322,6 +1329,37 @@
       return out.join(' · ');
     }
     return det.map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?String(l)+': ':'')+wfDetailDisp(v); }).filter(function(x){ return String(x).trim(); }).join(' · ');
+  }
+  /* What else a row can be searched by, shared by the Instances table and the Tracker so the two
+     boxes never disagree about what is findable.
+     Amount is indexed BOTH as its individual entries and as the total, because people search for
+     whichever number they happen to remember - the 500 they spent on one taxi, or the 1,250 the
+     whole claim came to. Punctuation is stripped from the numbers so "1,250" and "1250" both hit.
+     Description is flattened across entries; on a multi-day claim every line is searchable, not
+     just the first. Both are found by label, so a workflow without them simply indexes nothing. */
+  function wfFindExtra(det,flow){
+    const by={}; (det||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    const amtKey=(flow&&flow.tracker_sum_field||'Amount');
+    const amt=[];
+    const rawAmt=by[amtKey];
+    if(rawAmt!=null&&String(rawAmt).trim()){
+      wfSplitSets(rawAmt).forEach(function(s){
+        String(s).split(',').forEach(function(x){
+          const v=String(x).trim(); if(!v)return;
+          amt.push(v); const bare=v.replace(/[^0-9.]/g,''); if(bare&&bare!==v) amt.push(bare);
+        });
+      });
+      const t=wfSumField(rawAmt); if(t) amt.push(String(t));
+    }
+    /* Only the entry separator is flattened, NOT the commas: a description is a phrase people wrote
+       ("auto to site, then lunch"), and chopping it at its commas would stop that phrase matching
+       itself. The amount above is the opposite case - there the commas separate real values. */
+    const descKey=Object.keys(by).filter(function(l){ return /descript/i.test(l); })[0];
+    const desc=[];
+    if(descKey&&String(by[descKey]||'').trim()){
+      desc.push(String(by[descKey]).replace(/\|/g,' '));
+    }
+    return { amount: amt.join(' ').toLowerCase(), desc: desc.join(' ').toLowerCase() };
   }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(wfDetailDisp(v)); }).filter(Boolean).join('<br>'); }
 
@@ -2212,8 +2250,11 @@
          simply never match). The instance number and its owner apply everywhere. */
       const findLabel=function(name){ const k=Object.keys(by).find(function(l){return eq(l,name);}); return k?String(by[k]||''):''; };
       const tkKey=(wfCaseNoText(c)+' '+wfOwnerKey(c, byCase)).toLowerCase();
+      // The same index the Instances search uses, so the two boxes agree on what is findable.
+      const tkX=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
       return '<tr class="wf-tk-row" data-case="'+c.id+'" data-find="'+esc2(tkKey)+'" onclick="wfTrackerOpen('+c.id+')" '
         +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
+        +'data-amount="'+esc2(tkX.amount)+'" data-desc="'+esc2(tkX.desc)+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
         +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
     }).join('');
@@ -2226,7 +2267,11 @@
        It lives up on the tab strip, to the right of the tab buttons - not inside the tracker, where
        it sat on top of a table that scrolls sideways and went off-screen with it. Built here because
        this is what knows which columns the tracker has, and picked up by the tab strip. */
-    const tkFindWhat=[ 'No.', 'owner' ]
+    /* Amount and description are named only when the workflow actually carries them, so the
+       placeholder never offers a search that could not match anything. */
+    const tkFindWhat=[ 'No.', 'anyone it is with' ]
+      .concat(tmpl.some(function(f){ return eq(f.label,(flow&&flow.tracker_sum_field)||'Amount'); })?['amount']:[])
+      .concat(tmpl.some(function(f){ return /descript/i.test((f&&f.label)||''); })?['description']:[])
       .concat(tmpl.some(function(f){ return eq(f.label,'Company'); })?['Company']:[])
       .concat(tmpl.some(function(f){ return eq(f.label,'Wheredoc Id'); })?['Wheredoc Id']:[])
       .concat(tmpl.some(function(f){ return eq(f.label,'Bill No.'); })?['Bill No.']:[]);
@@ -2245,7 +2290,7 @@
     const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
     let shown=0;
     rows.forEach(function(r){
-      const ok=!q || ['data-find','data-company','data-wheredoc','data-billno'].some(function(a){
+      const ok=!q || ['data-find','data-company','data-wheredoc','data-billno','data-amount','data-desc'].some(function(a){
         return (r.getAttribute(a)||'').indexOf(q)!==-1;
       });
       r.style.display=ok?'':'none';
@@ -2471,7 +2516,15 @@
     // actually assigned somewhere in this workflow (a step owner, or its trigger owner). Someone
     // who can merely see the workflow page (e.g. through department-wide visibility) but has no
     // role in it at all has no reason to see this indicator, even at 0/0.
-    const canSeeWaitRecv=eq(mySelf,'ayushruia1@gmail.com') || members.some(function(e){return eq(e,mySelf);});
+    const isStepHolder=members.some(function(e){return eq(e,mySelf);});
+    const canSeeWaitRecv=eq(mySelf,'ayushruia1@gmail.com') || isStepHolder;
+    /* On a workflow ANYONE may raise (Reimbursement), somebody holding no step is simply a claimant
+       looking at their own claims. They still see progress - which steps are finished, and anything
+       sent back to them to fix - but not the live "Waiting" / "Received" state, because that says
+       which colleague is sitting on it right now, and that is between the approvers. A flow with a
+       named trigger-owner list (Invoice Processing) is untouched: there the people who raise bills
+       are meant to be able to see exactly where each one has reached. */
+    const hideLiveState=(flow.trigger_owner==='__ALL__') && !isStepHolder && !eq(mySelf,'ayushruia1@gmail.com');
 
     // Default timeline panel = the workflow's step definition
     const defTL=wfTimelineHtml(steps,{})||'<div class="ac-empty" style="cursor:default">No steps yet</div>';
@@ -2509,6 +2562,8 @@
           if(c.status==='Pending' && c.current_step===s.seq){
             // a returned instance is not waiting on this step's owner, it is waiting on its own
             if(c.returned_at) return '<td><span class="wf-pill back wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-rotate-left"></i> Sent back<span class="wf-tip-txt">'+esc2(c.returned_reason||'Waiting on a correction')+'</span></span></td>';
+            // Sent back is deliberately ABOVE this: that one is the claimant's own business.
+            if(hideLiveState) return '<td><span class="wf-pill wait">·</span></td>';
             if(cs&&cs.received_at) return '<td><span class="wf-pill cur wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-inbox"></i> Received<span class="wf-tip-txt">Received: '+esc2(wfDT(cs.received_at))+'</span></span></td>';
             return '<td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>';
           }
@@ -2523,7 +2578,8 @@
         const wheredoc=(Array.isArray(c.trigger_details)?c.trigger_details:[]).find(function(d){return d&&eq(d.label,'Wheredoc Id');});
         // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
         const ownerKey=wfOwnerKey(c, byCase);
-        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
+        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
@@ -2531,7 +2587,7 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, or anyone it is with…':'Search by No., or anyone it is with…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, anyone it is with, amount or description…':'Search by No., anyone it is with, amount or description…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -2623,8 +2679,12 @@
       const wheredoc=r.getAttribute('data-wheredoc')||'';
       const owner=r.getAttribute('data-owner')||'';
       const created=r.getAttribute('data-created')||'';
+      // The claim's own contents, so a row is findable by what it was for and what it cost - see wfFindExtra.
+      const amount=r.getAttribute('data-amount')||'';
+      const desc=r.getAttribute('data-desc')||'';
       let ok=true;
-      if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1 && owner.indexOf(qLower)===-1) ok=false;
+      if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1 && owner.indexOf(qLower)===-1
+           && amount.indexOf(qLower)===-1 && desc.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
       if(ok && to && created && created>to) ok=false;
       r.style.display=ok?'':'none';
