@@ -4028,7 +4028,16 @@
            nearly always one of them, so they are pinned to the top of the picker rather than
            having to be found among everyone in the company. */
         const seen=[];
-        if(flow.trigger_owner) seen.push(flow.trigger_owner);
+        /* trigger_owner is '' / one email / a COMMA-LIST of emails / the '__ALL__' sentinel — the
+           same shape already unpacked in wfCanSee and in the workflow list, both of which carry a
+           comment about the raw string producing a garbled avatar. This one was missed: pushing it
+           whole pinned a single entry that is not an email and matches nobody, so on Invoice
+           Processing the five people who actually raise bills were absent from the top of the
+           picker. '__ALL__' means everyone and so pins no one in particular. */
+        if(flow.trigger_owner && flow.trigger_owner!=='__ALL__'){
+          flow.trigger_owner.split(',').map(function(x){return x.trim();}).filter(Boolean)
+            .forEach(function(e){ if(!seen.some(function(x){return eq(x,e);})) seen.push(e); });
+        }
         all.forEach(function(s){
           const owners=(Array.isArray(s.owner_emails)&&s.owner_emails.length)?s.owner_emails:(s.owner_email?[s.owner_email]:[]);
           owners.filter(Boolean).forEach(function(e){ if(!seen.some(function(x){return eq(x,e);})) seen.push(e); });
