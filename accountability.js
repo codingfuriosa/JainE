@@ -1013,7 +1013,7 @@
   function wfInDept(dept){ return wfMyDepts().some(function(d){return eq(d,dept);}); }
   function wfInAnyDept(depts){ const mine=wfMyDepts(); return (depts||[]).some(function(d){return mine.some(function(m){return eq(m,d);});}); }
   // Who can create a brand-new workflow — mirrors acc.wf_can_create_flow() server-side exactly.
-  var WF_CREATE_DEPTS=['Systems','Administration'];
+  function wfCanCreateFlow(){ return eq(me(),'ayushruia1@gmail.com') || eq(me(),'businessanalyst@thejaingroup.com'); }
   function wfCanSee(f,ownersByFlow){
     const o=(ownersByFlow&&ownersByFlow[f.id])||[];
     // trigger_owner may be '__ALL__' (everyone) or a comma-separated list, not just one email —
@@ -1193,10 +1193,10 @@
       +'</div>';
     }).join('');
     const inner=flows.length?('<div class="wf-list">'+rows+'</div>'):'<div class="ac-empty" style="cursor:default">No workflows yet.</div>';
-    // Creating a brand-new workflow (not just viewing one) is restricted to Systems/Administration
-    // — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which is the real
-    // enforcement; this is just the matching client-side button visibility.
-    const canCreate=wfInAnyDept(WF_CREATE_DEPTS);
+    // Creating a brand-new workflow (not just viewing one) is restricted to the Administrator and
+    // Prerna Gupta — matches the backend's own acc.wf_can_create_flow check in wf_save_flow, which
+    // is the real enforcement; this is just the matching client-side button visibility.
+    const canCreate=wfCanCreateFlow();
     b.innerHTML='<div class="wf-listhead"><div class="wf-listhead-t"><i class="fa-solid fa-diagram-project"></i> Workflows</div>'+(canCreate?'<button class="ac-btn primary" onclick="wfNew()"><i class="fa-solid fa-plus"></i> New Workflow</button>':'')+'</div>'
       +inner;
   }
@@ -2366,6 +2366,9 @@
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    // Reset — wfShowCase (called below when selCaseId is set) sets this itself; otherwise a case
+    // panel shown on a previous visit must not be mistaken for the one now on screen.
+    window._wfShownCaseId=null;
     try{ WF_PEOPLE=await people(); }catch(e){ WF_PEOPLE=WF_PEOPLE||[]; }
     let flow=null, steps=[], cases=[], fcs=[];
     try{ const {data}=await ACC().from('flows').select('*').eq('id',id).maybeSingle(); flow=data; }catch(e){}
@@ -2394,12 +2397,10 @@
     // Uma Chatterjee is supposed to be able to. Instance-creation now only bypasses trigger_owner
     // for the true superadmin account, matching the server-side fix below exactly.
     const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || eq(mySelf,'ayushruia1@gmail.com');
-    // Editing/deleting the workflow itself (and, further down, its instances) is the Administrator
-    // account, plus this specific flow's own extra_admins (if any) — mirrors
-    // acc.wf_is_admin_dept(flow_id), the real server-side enforcement. Not the whole Administration
-    // department.
-    const canManage = eq(mySelf,'ayushruia1@gmail.com')
-      || (Array.isArray(flow.extra_admins) && flow.extra_admins.some(function(e){return eq(e,mySelf);}));
+    // Editing/deleting the workflow itself is just these two named accounts now — mirrors
+    // acc.wf_is_admin_dept() server-side exactly (which also keeps a real superadmin override,
+    // a separate pre-existing concept unrelated to this pair).
+    const canManage = eq(mySelf,'ayushruia1@gmail.com') || eq(mySelf,'businessanalyst@thejaingroup.com');
     window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
@@ -2445,21 +2446,15 @@
     // the first one.
     const showForms=isBill && (forms.length>0 || canManage);
     /* Who may do what, per instance:
-         EDIT   — the Administrator on any instance, or whoever started this one. Deliberately not
-                  step members: changing the details changes what everyone downstream is acting on.
-         DELETE — the Administrator, or anybody this instance runs through (holding or offered any
-                  of its steps), since they are the ones who spot a duplicate or mistaken one.
+         EDIT   — the triggering event owner only (whoever started it) — not the workflow-management
+                  admins, and not step members: changing the details changes what everyone
+                  downstream is acting on.
+         DELETE — the owner (whoever started it), or the Administrator only — not the wider
+                  workflow-management pair, and not step members who merely handle it.
        Both are re-checked in the database, so the buttons only mirror what will actually be
        allowed rather than being the thing that decides it. */
-    const canEditCase=function(c){ return canManage || eq(c&&c.created_by, mySelf); };
-    const canDeleteCase=function(c){
-      if(canManage) return true;
-      return fcs.some(function(x){
-        if(x.case_id!==(c&&c.id)) return false;
-        if(eq(x.person||'', mySelf)) return true;
-        return Array.isArray(x.candidates) && x.candidates.some(function(e){ return eq(e, mySelf); });
-      });
-    };
+    const canEditCase=function(c){ return eq(c&&c.created_by, mySelf); };
+    const canDeleteCase=function(c){ return eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com'); };
     const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     let tableHtml='';
     if(cases.length){
@@ -2707,7 +2702,7 @@
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
-  window.wfShowDef=function(){ const box=$('wfTL'); if(box&&window._wfDefTL!=null) box.innerHTML=window._wfDefTL; document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');}); };
+  window.wfShowDef=function(){ window._wfShownCaseId=null; const box=$('wfTL'); if(box&&window._wfDefTL!=null) box.innerHTML=window._wfDefTL; document.querySelectorAll('.wf-itable tbody tr.sel').forEach(function(r){r.classList.remove('sel');}); };
 
   window.wfShowCase=async function(caseId, rowEl){
     const box=$('wfTL'); if(box) box.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -2727,14 +2722,12 @@
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
     const pinned=wfOriginalAttachmentHtml(c,flow);
-    /* The Administrator, the owner, or whoever it has been sent back to — and only while it is
-       still moving; once it is Done or Cancelled it is final. Mirrors acc.wf_update_instance, which
-       is what actually enforces this. A flow's extra admins used to be offered the pencil here and
-       were then refused by the database, so the button only ever produced an error. */
+    /* The owner, or whoever it has been sent back to — not the workflow-management admins, and
+       only while it is still moving; once it is Done or Cancelled it is final. Mirrors
+       acc.wf_update_instance, which is what actually enforces this. */
     const backTo=String(c.returned_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
     const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')
-      &&(eq(c.created_by||'',me())||eq(me(),'ayushruia1@gmail.com')
-         ||backTo.some(function(e){return eq(e,me());}));
+      &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -2765,7 +2758,16 @@
         : '')
       +detHtml
       +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
-      +((updates.length||pinned)?('<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates'+tip('Notes people added while this '+wfN().lc+' moved through the steps, oldest first. Everyone in this workflow can see them.')+'</div>'+pinned+'<div class="wf-updmini-list">'+updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join('')+'</div></div>'):'');
+      // Same Updates & Feedback section every step-task page already has (post a note, attach a
+      // file) — this panel used to only ever show past updates read-only, with no way to add one,
+      // so anyone who only ever sees an instance from the Tracker (never gets a step task of their
+      // own — the Reimbursement raiser, for one) had no way to post anything at all.
+      +'<div class="wf-updmini"><div class="wf-updmini-h"><i class="fa-solid fa-comments"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfN().lc+' as it moves to the next person, and rejection reasons appear here too.')+'</div>'+pinned
+        +'<div class="wf-updmini-list" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
+        +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+c.id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+c.id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
+        +'<div id="wfUpdFileList" class="wf-updfile-list"></div>'
+      +'</div>';
+    window._wfShownCaseId=c.id;
     wfHydrateAttThumbs();
     /* Bring the panel into view. Clicking a row far down a long table used to load the instance
        somewhere off-screen - most obviously on a phone, where the panel sits below the whole
@@ -4103,7 +4105,7 @@
 
   /* ----- Workflow task detail (rendered from taskPage when a task is a workflow step) ----- */
   async function wfTaskPage(v, t, members, list, ro){
-    wfInjectCss(); window._wfDelId=null; setCrumb(['Accountability','Workflow','Task']);
+    wfInjectCss(); window._wfDelId=null; window._wfShownCaseId=null; setCrumb(['Accountability','Workflow','Task']);
     try{ WF_PEOPLE=list||await people(); }catch(e){ WF_PEOPLE=list||WF_PEOPLE||[]; }
     let fcs=null;
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('id',t.flow_case_step_id).maybeSingle(); fcs=data; }catch(e){}
@@ -4373,7 +4375,11 @@
         if(insErr) throw insErr;
       }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
     }
-    if(inp)inp.value=''; if(fileInput)fileInput.value=''; renderPage();
+    if(inp)inp.value=''; if(fileInput)fileInput.value='';
+    // Posted from the Tracker's case panel (not a step task page) — refresh just that panel in
+    // place so the selected row and its position in the table survive, instead of a full
+    // renderPage() that would drop back to the unselected list.
+    if(window._wfShownCaseId===caseId){ wfShowCase(caseId,null); } else { renderPage(); }
   };
 
   function wfInjectCss(){
@@ -4907,6 +4913,7 @@
     .wf-updmini{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .wf-updmini-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:7px}
     .wf-updmini-list{display:flex;flex-direction:column;gap:12px;max-height:min(330px,48vh);overflow-y:auto;overscroll-behavior:auto;padding-right:4px}
+    .wf-updmini .wf-updbar{margin-top:12px}
     /* thin, unobtrusive scrollbars on the message lists */
     .wf-updlist,.wf-updmini-list{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
     .wf-updlist::-webkit-scrollbar,.wf-updmini-list::-webkit-scrollbar{width:6px}
@@ -4980,16 +4987,21 @@
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
   let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
   let GCAL_LAST=null; // {byDate,list,asg}
-  let GCAL_CASES=[]; // Legal cases with an upcoming Next Date — only ever populated for users with 'legal' module access
-  // Legal Next Dates ride the same Calendar as tasks/meetings, but visibility is permission-based
+  let GCAL_CASES=[]; // Legal cases with an upcoming Action Date and/or Next Date — only ever populated for users with 'legal' module access
+  // Legal dates ride the same Calendar as tasks/meetings, but visibility is permission-based
   // (module access), not participation-based like tasks/meetings — not everyone who can see the
   // Calendar has Legal access, so this must be checked before ever querying mis_cases.
   function gcalCanSeeCases(){ return !!(state && (state.super || (state.roles && Array.isArray(state.roles.modules) && state.roles.modules.includes('legal')))); }
   async function gcalCasesLoadData(){
     if(!gcalCanSeeCases()){ GCAL_CASES=[]; return GCAL_CASES; }
     try{
-      const {data}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,court').gte('next_date_iso',todayISO());
-      GCAL_CASES=(data||[]).filter(function(c){return !!c.next_date_iso;}).map(function(c){ c.title=c.cause_title||c.case_no||('Case #'+c.id); return c; });
+      const today=todayISO();
+      // A case qualifies via either date — its Action Date (moved by the action panel) or its
+      // Next Date (typed straight into Add Case, independent of that). Either one landing here
+      // is enough; each is rendered as its own calendar entry in gcalVisibleItems.
+      const {data}=await sb.from('mis_cases').select('id,case_type,cause_title,case_no,priority,next_date_iso,case_next_date_iso,court')
+        .or('next_date_iso.gte.'+today+',case_next_date_iso.gte.'+today);
+      GCAL_CASES=(data||[]).filter(function(c){return !!c.next_date_iso||!!c.case_next_date_iso;}).map(function(c){ c.title=c.cause_title||c.case_no||('Case #'+c.id); return c; });
     }catch(e){ GCAL_CASES=[]; }
     return GCAL_CASES;
   }
@@ -5018,19 +5030,25 @@
     const mtgItems=(MTG_LIST||[]).filter(function(m){return mtgOccursOn(m,dateStr) && !MTG_DONE.has(m.id+'|'+dateStr);}).map(function(m){return {t:m,kind:'meeting'};});
     // Past dates just stop being included here — same "render-time exclusion, row untouched" pattern
     // used for recurring meetings (mtgOccursOn) rather than any server-side delete/archive.
-    const caseItems=(dateStr<istTodayISO())?[]:(GCAL_CASES||[]).filter(function(c){return c.next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'case'};});
-    return items.concat(mtgItems).concat(caseItems).filter(x=>{
-      if(!GCAL_FILTERS.has(x.kind))return false;
+    const past=dateStr<istTodayISO();
+    const caseItems=past?[]:(GCAL_CASES||[]).filter(function(c){return c.next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'case'};});
+    // A case's own separate Next Date lands as its own entry, same day or not — a case can appear
+    // twice on the calendar (once per date) when both happen to be set.
+    const nextDateItems=past?[]:(GCAL_CASES||[]).filter(function(c){return c.case_next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'nextdate'};});
+    return items.concat(mtgItems).concat(caseItems).concat(nextDateItems).filter(x=>{
+      // Next Date entries share the "Legal dates" toggle with Action Date entries — one shared
+      // filter key, not two, since they are the same underlying legal case.
+      if(!GCAL_FILTERS.has(x.kind==='nextdate'?'case':x.kind))return false;
       if(GCAL_Q && !String(x.t.title||'').toLowerCase().includes(GCAL_Q))return false;
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':'#16a34a')); }
-  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : String(x.t.id)); }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':(kind==='nextdate'?'#0e7490':'#16a34a'))); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : (x.kind==='nextdate' ? ('n'+x.t.id) : String(x.t.id))); }
   window.gcalOpenItem=function(key){
     key=String(key);
     if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
-    else if(key.charAt(0)==='c'){ window.gcalOpenCase(Number(key.slice(1))); }
+    else if(key.charAt(0)==='c'||key.charAt(0)==='n'){ window.gcalOpenCase(Number(key.slice(1))); }
     else { window.gcalOpenTask(Number(key)); }
   };
 
@@ -5067,7 +5085,7 @@
       return '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has(f[0])?'checked':'')+' onchange="gcalToggleFilter(\''+f[0]+'\',this.checked)"><span class="gcal-filter-dot" style="background:'+f[2]+'"></span>'+f[1]+'</label>';
     }).join('');
     const caseRow=gcalCanSeeCases()
-      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal next dates</label>'
+      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal dates</label>'
       : '';
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
       +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
@@ -5282,8 +5300,11 @@
       const mtgDraggable = x.kind==='meeting' && (mtgRt0==='none'||mtgRt0==='weekly'||mtgRt0==='monthly');
       const draggable = x.kind!=='meeting' || mtgDraggable;
       let dragAttrs='';
-      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"') : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-date="'+dateStr+'"') : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"'));
-      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='case' ? 'Next date' : (x.kind==='toMe'?'To me':'By me'));
+      if(draggable) dragAttrs = x.kind==='meeting' ? (' data-meeting="'+x.t.id+'" data-date="'+dateStr+'"')
+        : (x.kind==='case' ? (' data-case="'+x.t.id+'" data-datefield="next_date" data-date="'+dateStr+'"')
+        : (x.kind==='nextdate' ? (' data-case="'+x.t.id+'" data-datefield="case_next_date" data-date="'+dateStr+'"')
+        : (' data-task="'+x.t.id+'" data-date="'+dateStr+'"')));
+      const tag = x.kind==='meeting' ? (mtgFmtTime(x.t.start_time)+(x.t.end_time?(' – '+mtgFmtTime(x.t.end_time)):'')) : (x.kind==='case' ? 'Action date' : (x.kind==='nextdate' ? 'Next date' : (x.kind==='toMe'?'To me':'By me')));
       return '<div class="gcal-lrow"'+dragAttrs+' onclick="if(this._suppressClick){this._suppressClick=false;return;}gcalOpenItem(\''+gcalItemKey(x)+'\')" title="'+esc2(x.t.title)+'"><span class="gcal-lrow-dot" style="background:'+gcalEvColor(x.kind)+'"></span><span class="gcal-lrow-title">'+esc2(x.t.title)+'</span><span class="gcal-lrow-tag">'+esc2(tag)+'</span></div>';
     }).join(''):'<div class="gcal-lrow empty">Nothing scheduled</div>';
     return '<div class="gcal-lday'+(isToday?' today':'')+'" data-date="'+dateStr+'"><div class="gcal-lday-head">'+esc2(label)+(isToday?' <span class="gcal-lday-badge">Today</span>':'')+'</div><div class="gcal-lday-rows">'+rows+'</div></div>';
@@ -5351,7 +5372,8 @@
     if(c.case_no) html+='<div class="gcal-panel-row"><i class="fa-solid fa-hashtag"></i> '+esc2(c.case_no)+'</div>';
     if(c.court) html+='<div class="gcal-panel-row"><i class="fa-solid fa-building-columns"></i> '+esc2(c.court)+'</div>';
     if(c.priority) html+='<div class="gcal-panel-row"><i class="fa-solid fa-flag"></i> '+esc2(c.priority)+'</div>';
-    html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Next date: '+fmtDateY(c.next_date_iso)+'</div>';
+    if(c.next_date_iso) html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Action date: '+fmtDateY(c.next_date_iso)+'</div>';
+    if(c.case_next_date_iso) html+='<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> Next date: '+fmtDateY(c.case_next_date_iso)+'</div>';
     const panel=$('gcalPanel'), backdrop=$('gcalBackdrop'); if(!panel)return;
     GCAL_PANEL_ANCHOR=null;
     const bodyEl=panel.querySelector('.gcal-panel-body'); if(bodyEl)bodyEl.innerHTML=html;
@@ -5394,6 +5416,7 @@
         const tid=chip.dataset.task!=null?Number(chip.dataset.task):null;
         const mid=chip.dataset.meeting!=null?Number(chip.dataset.meeting):null;
         const cid=chip.dataset.case!=null?Number(chip.dataset.case):null;
+        const dfield=chip.dataset.datefield||'next_date';
         const fromDate=chip.dataset.date;
         let armed=false, curTarget=null, longPressTimer=null;
         function arm(){
@@ -5439,7 +5462,7 @@
               if(newDate && newDate!==fromDate){
                 if(tid!=null) gcalTaskDrop(tid,newDate);
                 else if(mid!=null) gcalMeetingDateDrop(mid,newDate,fromDate);
-                else if(cid!=null) gcalCaseDrop(cid,newDate);
+                else if(cid!=null) gcalCaseDrop(cid,newDate,dfield);
               }
             }
           }
@@ -5476,16 +5499,20 @@
       await gcalRefresh();
     }catch(e){ toast('Failed to move task','err'); }
   };
-  // Dragging a Legal case to a new day writes straight into mis_cases.next_date (public schema,
-  // not acc — see gcalCasesLoadData). This fully replaces whatever free text was there before,
-  // same as dragging a task fully overwrites its due_date; a DB trigger on mis_cases recomputes
-  // next_date_iso from the new value and clears next_date_recorded_at (new date = new deadline).
-  window.gcalCaseDrop=async function(cid,newDate){
+  // Dragging a Legal case to a new day writes straight into mis_cases (public schema, not acc —
+  // see gcalCasesLoadData), into whichever of its two date columns the dragged chip came from:
+  // next_date (the Action Date pair, shown as "Action date") or case_next_date (its own
+  // independent Next Date). This fully replaces whatever free text was there before, same as
+  // dragging a task fully overwrites its due_date; a DB trigger on mis_cases recomputes the
+  // matching _iso column from the new value (and, for next_date, clears next_date_recorded_at —
+  // new date = new deadline).
+  window.gcalCaseDrop=async function(cid,newDate,field){
+    field=(field==='case_next_date')?'case_next_date':'next_date';
     try{
       if(newDate<todayISO()){ toast('Cannot move a case to a date before today','err'); return; }
-      const {error}=await sb.from('mis_cases').update({next_date:newDate}).eq('id',cid);
+      const {error}=await sb.from('mis_cases').update({[field]:newDate}).eq('id',cid);
       if(error){ toast('Failed to move case: '+error.message,'err'); return; }
-      toast('Next date moved to '+fmtDateY(newDate),'ok');
+      toast((field==='case_next_date'?'Next date':'Action date')+' moved to '+fmtDateY(newDate),'ok');
       await gcalLoadData();
       await gcalRefresh();
     }catch(e){ toast('Failed to move case','err'); }
