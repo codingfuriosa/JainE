@@ -3726,6 +3726,20 @@
     }
     else if(locked){ src=template.map(function(t){ return Object.assign({},t,{value:''}); }); }
     else { src=[]; }
+    /* A field marked upiScannerMemory (Reimbursement's "UPI Scanner") remembers the last image a
+       person uploaded, same idea as UPI Id remembering the last typed value — except there is only
+       ever one of it, so it is fetched and pre-filled straight onto a brand-new instance rather
+       than offered as a pick-from-list. Never on Edit: an existing case keeps whatever it actually
+       has saved, from savedDetails above. */
+    if(!editing){
+      const scannerField=template.find(function(t){ return t&&t.upiScannerMemory; });
+      if(scannerField){
+        try{
+          const {data:remembered}=await ACC().rpc('upi_scanner_get');
+          if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
+        }catch(_e){}
+      }
+    }
     // A text field can opt into a growing autocomplete list (flow.autocomplete_fields, e.g.
     // Invoice Processing's Company) drawn from every value ever entered for it on this flow's own
     // past instances — no separate admin-maintained list, it just learns from real usage.
@@ -4004,6 +4018,15 @@
       // Anything typed into a UPI field joins that person's own list for next time.
       const upiLabel=Object.keys(byLabel).filter(function(l){ return /upi/i.test(l); })[0];
       if(upiLabel) wfUpiRemember(byLabel[upiLabel]);
+      // Whatever image ends up in the UPI Scanner field becomes the one remembered for next time —
+      // unlike UPI Id there's only ever one, so this replaces rather than joins a list.
+      const scannerField=((window._wfEvtTemplate)||[]).find(function(t){ return t&&t.upiScannerMemory; });
+      if(scannerField){
+        const scannerVal=(byLabel[scannerField.label]||[])[0];
+        if(scannerVal && String(scannerVal).indexOf('s3:')===0){
+          try{ ACC().rpc('upi_scanner_remember',{p_storage_path:scannerVal}); }catch(_e){}
+        }
+      }
     }
     if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
     const N=wfN();
