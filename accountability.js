@@ -1036,7 +1036,20 @@
       // Administration) instead of just its creator/trigger-owner/step-owners — mirrors the
       // backend's own acc.wf_can_see_flow RLS check, which is the real enforcement; this is just
       // the matching client-side filter so the list doesn't have to round-trip a denied row.
-      || wfInAnyDept(f.visible_departments);
+      || wfInAnyDept(f.visible_departments)
+      // Or they are a read-only observer of somebody else's instances (below).
+      || wfIsCaseViewer(f);
+  }
+  /* A read-only observer: given sight of ANOTHER person's instances, and nothing more. Susanta Ghosh
+     sees the bills handed to Rabindra Nath Dey so he can check what was submitted and where it has
+     reached — he is never an owner, never a candidate, gets no task, and cannot act. flows.case_viewers
+     holds [{viewer, watches}] and the database decides which instances that actually reveals
+     (acc.wf_can_see_case); this is only the matching client-side check, so the flow has somewhere to
+     appear in his list and can be labelled honestly as view-only. */
+  function wfIsCaseViewer(f){
+    const v=f&&f.case_viewers;
+    if(!Array.isArray(v))return false;
+    return v.some(function(x){ return x && eq(x.viewer||'', me()); });
   }
   // A flow can curate which detail fields summarize an instance (flow.card_fields, e.g.
   // Reimbursement -> Date/Conveyance/Food, then Total Amount) instead of showing every field it has.
@@ -2545,7 +2558,13 @@
        concatenated before it in the same expression. */
     const trackerHtml=wfTrackerHtml(flow,steps,cases,fcs);
     v.innerHTML='<div class="wf-page">'
-      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'+headActs+'</div>'
+      /* An observer sees a page with no buttons on it, which reads as something being broken rather
+         than as something being deliberate. Say so once, plainly, next to the title. */
+      +'<div class="wf-page-head"><button class="ac-btn ic" title="Back" onclick="wfCancel()"><i class="fa-solid fa-arrow-left"></i></button><h1><i class="fa-solid fa-diagram-project"></i> '+esc2(flow.name||'Workflow')+'</h1>'
+      +((wfIsCaseViewer(flow)&&!canManage&&!canEvent)
+        ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
+        : '')
+      +headActs+'</div>'
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
