@@ -434,6 +434,19 @@ function flattenTurns(turns: Record<string, string>[], field: "text" | "original
               .filter((l) => l.replace(/^\w+:\s*/, "").length).join("\n");
 }
 
+/* A real failure mode, caught live: a 77-second call came back as "hello" repeated 56 times -
+   the speech model got stuck in a loop rather than genuinely listening, and every existing check
+   (non-empty, turn count) tests SHAPE, so it sailed through as a clean "pass". This tests CONTENT:
+   one word dominating almost everything said is the signature of a stuck loop, not a real call. */
+function degenerateRepeat(text: string): { word: string; count: number; total: number } | null {
+  const words = text.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (words.length < 8) return null;
+  const counts: Record<string, number> = {};
+  for (const w of words) counts[w] = (counts[w] || 0) + 1;
+  const [word, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return (count / words.length >= 0.6 && count >= 6) ? { word, count, total: words.length } : null;
+}
+
 // Only the three languages these calls are in, so a hallucinated value cannot reach the column.
 const KNOWN_LANGUAGES = ["hindi", "bengali", "english"];
 function languagesFrom(v: unknown): string[] | null {
@@ -686,10 +699,15 @@ async function processOne(db: DB, row: any, openaiKey: string,
      fixing on screen - and everything below is a rendering of this, so "every word" survives whatever
      the labelling makes of it. */
   const verbatim = fixSpellings(stripIvr(spoken));
-  checks.push({ check: "human_conversation", status: "pass",
-    detail: `Speech-to-text returned ${verbatim.length} characters of speech`
-      + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
-      + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
+  const degen = degenerateRepeat(verbatim);
+  checks.push({ check: "human_conversation", status: degen ? "fail" : "pass",
+    detail: degen
+      ? `Speech-to-text returned ${verbatim.length} characters, but ${degen.count} of ${degen.total} words `
+        + `are just "${degen.word}" repeated - the recognizer likely got stuck in a loop rather than `
+        + `genuinely hearing this call. Do not trust the qualification below; listen to the recording.`
+      : `Speech-to-text returned ${verbatim.length} characters of speech`
+        + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
+        + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
 
   /* STAGE 2 - lay it out and judge it. The CRM's own record (if it sent one) rides along in the SAME
      call rather than a separate one - the model already has the transcript in front of it, so asking
@@ -858,6 +876,17 @@ async function processOne(db: DB, row: any, openaiKey: string,
     discrepancy.push({ check: "remarks_match", status: m === false ? "fail" : m === true ? "pass" : "skip",
       detail: dc.remarks_note
         || (m == null ? "The analysis did not return a clear comparison for this one." : "") });
+  }
+
+  // 4. Stuck-loop transcription - everything downstream (qualification, mismatch, dashboard
+  // fields) was judged from a garbage transcript, so this row needs a human before anyone trusts
+  // its verdict. Always recorded regardless of the other three, which is why it lives here rather
+  // than only in `checks`.
+  if (degen) {
+    discrepancy.push({ check: "transcript_quality", status: "fail",
+      detail: `Likely a stuck-loop transcription ("${degen.word}" repeated ${degen.count} of `
+        + `${degen.total} words), not a genuine listen - the qualification below is not trustworthy `
+        + `until someone plays the recording.` });
   }
 
   const hasDiscrepancy = discrepancy.some((c) => c.status === "fail");
