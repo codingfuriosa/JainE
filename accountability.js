@@ -1051,6 +1051,24 @@
     if(!Array.isArray(v))return false;
     return v.some(function(x){ return x && eq(x.viewer||'', me()); });
   }
+  /* Who may see the People row and the Tracker on a workflow.
+     Both answer the same question — who is handling these, and where has each one reached — and on
+     Invoice Processing that is the business of the people who raise bills, the two people a bill may
+     be handed to, and Systems. Not of everyone who can open the page.
+     Deliberately keyed on trigger_step_assignable_to: a flow that restricts WHO its instances may be
+     given to is one where the handling roster is sensitive. Every other workflow has no such list and
+     is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
+  function wfMaySeeRoster(f){
+    const assign=String((f&&f.trigger_step_assignable_to)||'')
+      .split(',').map(function(x){return x.trim();}).filter(Boolean);
+    if(!assign.length) return true;                       // flow doesn't restrict handover — unchanged
+    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
+    const trig=String((f&&f.trigger_owner)||'');
+    if(trig==='__ALL__') return true;                     // an everyone-may-raise flow hides nothing
+    const trigList=trig.split(',').map(function(x){return x.trim();}).filter(Boolean);
+    return trigList.some(function(e){return eq(e,me());})
+        || assign.some(function(e){return eq(e,me());});
+  }
   // A flow can curate which detail fields summarize an instance (flow.card_fields, e.g.
   // Reimbursement -> Date/Conveyance/Food, then Total Amount) instead of showing every field it has.
   // Sums a comma-joined multi-entry value (e.g. "500, 300, 200") into a single number.
@@ -2534,7 +2552,12 @@
     const isBill=wfIsBillFlow(flow); window._wfIsBill=isBill;
     // Forms show wherever any exist; an Administration user always sees the tab so they can add
     // the first one.
-    const showForms=isBill && (forms.length>0 || canManage);
+    /* Forms is gone. It was the one tab specific to the bill flow, and it is not part of how bills
+       are actually handled — kept as a single flag rather than ripped out so the pane below and its
+       loader stay intact and it is one word to put back. */
+    const showForms=false;
+    // Who may see the handling roster (the People row) and the Tracker on this workflow.
+    const maySeeRoster=wfMaySeeRoster(flow);
     /* Who may do what, per instance:
          EDIT   — the triggering event owner only (whoever started it) — not the workflow-management
                   admins, and not step members: changing the details changes what everyone
@@ -2628,16 +2651,17 @@
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
-        +'<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'
+        // Who is handling these — shown only to the people it concerns. See wfMaySeeRoster.
+        +(maySeeRoster?('<div class="wf-members-row"><span class="wf-mini-lbl">People</span>'+wfCircles(members)+'</div>'):'')
       +'</div>'
       /* Every workflow gets a Tracker tab. It was gated behind the Invoice Processing flow, but all
          it reports is each instance against each step — due date, actual date, delay — which is
          true of any workflow that has steps. Forms stay restricted to the bill flow. */
       +('<div class="wf-tabs">'
           +'<button class="wf-tab on" id="wfTabBtn_main" onclick="wfTabShow(\'main\')"><i class="fa-solid fa-list-check"></i> '+esc2(N.many)+'</button>'
-          +'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>'
-          +(showForms?('<button class="wf-tab" id="wfTabBtn_forms" onclick="wfTabShow(\'forms\')"><i class="fa-solid fa-clipboard-list"></i> Forms'
-             +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')+'</button>'):'')
+          // The Tracker reports where every instance has reached, so it is held to the same roster
+          // rule as the People row above rather than being open to anyone who can see the page.
+          +(maySeeRoster?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
           // pushed to the right-hand end of the same row, and only on show while the Tracker is the
           // open tab - it searches the tracker's rows and means nothing against the others
           +'<span class="wf-tabs-right" id="wfTabsRight" style="display:none">'+(window._wfTkFindBar||'')+'</span>'
@@ -2646,11 +2670,13 @@
         +'<div class="wf-card wf-tlcard"><div id="wfTL">'+window._wfDefTL+'</div></div>'
         +tableHtml
       +'</div>'
-      +('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
+      // Gated as well as the tab: a hidden pane still ships its rows to the browser, and "you cannot
+      // click to it" is not the same as "you were not sent it".
+      +(maySeeRoster?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
           +trackerHtml
-        +'</div></div>')
+        +'</div></div>'):'')
       +(showForms?('<div id="wfPane_forms" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-clipboard-list"></i> Forms'
             +(forms.length?(' <span class="cnt">'+forms.length+'</span>'):'')
