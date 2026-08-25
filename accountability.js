@@ -2739,8 +2739,9 @@
     const canEditThis=(c.status!=='Done'&&c.status!=='Cancelled')
       &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
+    const printBtn='<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
-      +'<div class="wf-tlhead-acts">'+editBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
+      +'<div class="wf-tlhead-acts">'+editBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
       /* A returned instance is stopped and waiting on its owner, which is not something the timeline
          shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
@@ -2793,6 +2794,58 @@
         }
       }catch(_e){}
     },40);
+  };
+
+  /* ----- Print an instance --------------------------------------------------------------------
+     Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
+     flow like Reimbursement, or the detail-card grid for anything else) plus the whole injected
+     app stylesheet, so the printed page reads the same as the app itself — not a separately
+     designed print layout that could drift out of sync with it. A field flagged upiScannerMemory
+     (Reimbursement's "QR Code") is the one exception: on screen it is just a "file attached" note
+     like any other attachment, but here it prints as the actual image, since that's the one thing
+     someone printing this needs to be able to scan or check by eye. Opened in a new tab rather
+     than done via @media print CSS on the live page, so it doesn't have to fight the app's own
+     nav/sidebar/panel chrome to hide everything else. */
+  window.wfPrintCase=async function(caseId){
+    let c=null, flow=null;
+    try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
+    if(!c){ toast('Not found','err'); return; }
+    if(c.flow_id){ try{ const {data}=await ACC().from('flows').select('*').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
+    const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
+    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    let qrHtml='';
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    if(qrField){
+      const raw=det.find(function(d){ return d&&eq(d.label,qrField.label); });
+      const paths=wfSplitSets((raw&&raw.value)||'').filter(function(p){ return String(p).trim().indexOf('s3:')===0; });
+      if(paths.length){
+        const urls=(await Promise.all(paths.map(function(p){ return wfSignedUrl(p); }))).filter(Boolean);
+        if(urls.length) qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'
+          +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
+      }
+    }
+    const css=(($('wfCss')||{}).textContent)||'';
+    const title=wfN().one+' '+wfCaseNoText(c);
+    const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc2(title)+'</title><style>'+css
+      +'body{margin:24px;font-family:Inter,system-ui,sans-serif;color:#0f172a;background:#fff}'
+      +'.wf-print-qr{margin-top:18px}.wf-print-qr-h{font-weight:700;margin-bottom:8px}'
+      +'.wf-print-qr-img{max-width:260px;display:block;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px}'
+      +'</style></head><body>'
+      +'<h2 style="margin:0 0 4px">'+esc2(title)+'</h2>'
+      +'<div style="color:#64748b;margin-bottom:14px">'+esc2(wfN().one)+' by: '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
+      +detHtml+qrHtml
+      +'</body></html>';
+    const w=window.open('','_blank');
+    if(!w){ toast('Please allow popups to print','err'); return; }
+    w.document.write(html);
+    w.document.close();
+    let printed=false;
+    const doPrint=function(){ if(printed)return; printed=true; try{ w.focus(); w.print(); }catch(_e){} };
+    // Images (the QR code, if any) may still be loading when the document write finishes —
+    // load fires once they've all resolved; the timeout is a fallback if it never does.
+    w.addEventListener('load', doPrint);
+    setTimeout(doPrint, 600);
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
@@ -3726,7 +3779,7 @@
     }
     else if(locked){ src=template.map(function(t){ return Object.assign({},t,{value:''}); }); }
     else { src=[]; }
-    /* A field marked upiScannerMemory (Reimbursement's "UPI Scanner") remembers the last image a
+    /* A field marked upiScannerMemory (Reimbursement's "QR Code") remembers the last image a
        person uploaded, same idea as UPI Id remembering the last typed value — except there is only
        ever one of it, so it is fetched and pre-filled straight onto a brand-new instance rather
        than offered as a pick-from-list. Never on Edit: an existing case keeps whatever it actually
@@ -4018,7 +4071,7 @@
       // Anything typed into a UPI field joins that person's own list for next time.
       const upiLabel=Object.keys(byLabel).filter(function(l){ return /upi/i.test(l); })[0];
       if(upiLabel) wfUpiRemember(byLabel[upiLabel]);
-      // Whatever image ends up in the UPI Scanner field becomes the one remembered for next time —
+      // Whatever image ends up in the QR Code field becomes the one remembered for next time —
       // unlike UPI Id there's only ever one, so this replaces rather than joins a list.
       const scannerField=((window._wfEvtTemplate)||[]).find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
