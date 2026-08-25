@@ -45,8 +45,9 @@ function loader(host){host.innerHTML='<div class="loader"><div class="spin"></di
 
 /* modal */
 function openModal(html,size){const h=$('modalHost');h.innerHTML='<div class="modal '+(size||'')+'">'+html+'</div>';$('overlay').classList.add('show');}
-function closeModal(){$('overlay').classList.remove('show');$('modalHost').innerHTML='';window._modalMandatory=false;if(__confirmResolve){const r=__confirmResolve;__confirmResolve=null;r(false);}}
-$('overlay').addEventListener('click',e=>{if(e.target===$('overlay')){ if(window._modalMandatory)return; closeModal(); }});
+function closeModal(){$('overlay').classList.remove('show');$('modalHost').innerHTML='';if(__confirmResolve){const r=__confirmResolve;__confirmResolve=null;r(false);}}
+// Clicking the backdrop never closes a form — only an explicit Cancel/×/Save does. Typing lost
+// to an accidental outside click was the recurring complaint this replaced.
 /* ---- custom confirm dialog — replaces the native confirm() everywhere so delete/decline
    prompts look and behave the same on every device, instead of relying on the browser's own
    "This page says…" dialog (whose styling/wording is desktop-Chrome-specific and inconsistent
@@ -1722,6 +1723,7 @@ const MIS_FIELDS=[
   {k:'cause_title',l:'Cause Title / Parties'},
   {k:'case_no',l:'Case No.'},
   {k:'previous_date',l:'Previous Date'},
+  {k:'case_next_date',l:'Next Date'},
   {k:'next_date',l:'Action Date'},
   {k:'priority',l:'Priority'},
   {k:'advocate_incharge',l:'Advocate In-Charge'},
@@ -1772,7 +1774,7 @@ function misInput(k,vals,opt){
       +['High','Medium','Low'].map(p=>'<option value="'+p+'"'+(String(cur).toLowerCase()===p.toLowerCase()?' selected':'')+'>'+p+'</option>').join('')
       +'</select></div>';
   }
-  if(k==='next_date'){
+  if(k==='next_date'||k==='case_next_date'){
     // A real date picker, not the flexible free-text dates used elsewhere — this is the one
     // place a date is picked rather than typed, so there's no ambiguous format to parse. Its
     // value is already ISO, which misToIso reads just as well as the typed dd/mm/yyyy forms.
@@ -1865,10 +1867,12 @@ function misFormHtml(vals,mode){
   MIS_FIELDS.forEach(f=>{
     if(done.has(f.k)) return;
     /* Previous Date never appears here — it only ever comes from a real reschedule, moved by the
-       action panel. Next Date is different: a brand-new case can already have a hearing date on
-       hand (e.g. straight off a court notice), so Add Case lets it be entered up front. On an
-       EXISTING case, though, it keeps coming from the action panel only, to stay in step with
-       Previous Date and the action history. */
+       action panel. The Action Date field (internally next_date) is different: a brand-new case
+       can already have a hearing date on hand (e.g. straight off a court notice), so Add Case lets
+       it be entered up front. On an EXISTING case, though, it keeps coming from the action panel
+       only, to stay in step with Previous Date and the action history. Next Date (case_next_date)
+       is a separate, independent date — always editable on both Add and Edit, never touched by the
+       action panel. */
     if(f.k==='previous_date') return;
     if(f.k==='next_date'&&isEdit) return;
     // The action fields live in their own panel (click a case), not in the case record forms.
@@ -1893,7 +1897,7 @@ function misPriorityTag(p){
 }
 const MIS_CLAMP=new Set(['cause_title','court','status','remarks','project_land_name','action_needed']);
 const MIS_NOWRAP_TRUNC=new Set(['case_no','advocate_incharge','file_no','cnr_no']);
-const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
+const MIS_WIDTH={case_type:170,cause_title:240,case_no:160,previous_date:100,case_next_date:100,next_date:100,priority:100,advocate_incharge:150,court:160,status:200,action_needed:200,action_executed_date:120,remarks:180,project_land_name:160,date_of_filing:105,pc_in_charge:120,file_no:130,cnr_no:190};
 function misCellHtml(f,r){
   const v=r[f.k];
   if(f.k==='priority')return '<td>'+misPriorityTag(v)+'</td>';
@@ -3106,10 +3110,6 @@ window.misAiSearch=async function(raw){
   }catch(e){ if(statusEl)statusEl.textContent=''; }
 };
 window.misCreate=function(){
-  // Filling out a case is real typing to lose — clicking the backdrop by accident no longer
-  // closes this one; only Cancel or the × does (both already go through closeModal(), which
-  // clears this flag for whatever opens next).
-  window._modalMandatory=true;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-gavel"></i> Add Case</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">${misFormHtml({},'add')}</div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="misSaveBtn" onclick="misSave()"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg');
@@ -3138,6 +3138,11 @@ function misCollect(orig){
   else if(row.next_date){ row.next_date_iso=null; }
   const pd=misToIso(row.previous_date);
   if(pd) row.previous_date=misDmy(pd);
+  // Next Date (case_next_date) — independent of the Action Date pair above, and never moved by
+  // the action panel, so it just gets the same dd/mm/yyyy + sortable-copy treatment on its own.
+  const cnd=misToIso(row.case_next_date);
+  if(cnd){ row.case_next_date=misDmy(cnd); row.case_next_date_iso=misIsoStr(cnd); }
+  else if(row.case_next_date){ row.case_next_date_iso=null; }
   // Remarks are cumulative in every form: what is typed is appended to what is already there,
   // comma separated, so an earlier note is never quietly wiped by a later edit.
   if(row.remarks!=null || orig){
@@ -3151,7 +3156,7 @@ function misCollect(orig){
   if(row.action_date_iso && (!orig || String(orig.action_date||'')!==String(row.action_date||''))){
     row.next_date_recorded_at=misIsoStr(new Date());
   }
-  // A changed Next Date pushes the old one into Previous Date — that is the only way it moves.
+  // A changed Action Date pushes the old one into Previous Date — that is the only way it moves.
   if(orig){
     const before=String(orig.next_date||'').trim(), after=String(row.next_date||'').trim();
     if(before && after && before!==after){
@@ -7035,7 +7040,6 @@ window.inspSave=async function(){
 /* ---- set/change password so Google users can also use email+password ---- */
 function userHasPassword(){ try{ return !(state.profile && state.profile.password_set===false); }catch(e){ return true; } }
 window.setPasswordModal=function(){
-  window._modalMandatory=true;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-key"></i> Set a password</h3></div>
   <div class="modal-body frm">
     <p style="color:var(--slate);font-size:13.5px;margin-bottom:4px">Set a password so you can sign in with <b>email + password</b> as well as Google. This is required before you can continue.</p>
@@ -7052,7 +7056,6 @@ window.setPasswordSave=async function(){
   const {error}=await sb.auth.updateUser({password:p});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='Save password';}return;}
   try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); }catch(e){}
-  window._modalMandatory=false;
   closeModal();toast('Password set — you can now sign in with email + password too','ok');
 };
 /* ---- complete a "Forgot password" reset (lands here via PASSWORD_RECOVERY after the emailed link) ---- */
@@ -11226,9 +11229,32 @@ VIEWS.organic=async function(v,seg){
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
-  const tabs=['All Calls','Folders','Deleted'];
+  const tabs=['All Calls','Folders','Deleted','Discrepancies','Compilation'];
   const ti=mTab(seg,tabs.length);
   const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
+  if(ti===3){
+    const rows=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&(r.has_discrepancy||r.status==='error'||r.status==='no_recording');});
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
+      +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
+    return;
+  }
+  if(ti===4){
+    const all=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
+    const groups={};
+    all.forEach(function(r){ (groups[r.lead_id]=groups[r.lead_id]||[]).push(r); });
+    const leads=Object.keys(groups).map(function(id){
+      const list=groups[id].slice().sort(function(a,b){return new Date(a.report_date||a.created_at)-new Date(b.report_date||b.created_at);});
+      return {leadId:id, rows:list};
+    }).sort(function(a,b){
+      const la=a.rows[a.rows.length-1], lb=b.rows[b.rows.length-1];
+      return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
+    });
+    const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
+    return;
+  }
   if(ti===2){
     const rows=await trFetchDeleted(true);
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
@@ -11269,10 +11295,10 @@ function trRenderList(){
   if(kh)kh.innerHTML=trKpisHtml(rows);
   trRenderSelBar();
   const host=$('trRows');if(!host)return;
-  if(!all.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
-  if(TR_ADD_TARGET&&!rows.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>Every call is already in "'+esc(TR_ADD_TARGET)+'"</div><button class="btn btn-sm" style="margin-top:12px" onclick="trDoneAddTarget()">Done, back to folder</button></div></td></tr>';return;}
+  if(!all.length){host.innerHTML='<tr><td colspan="10"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  if(TR_ADD_TARGET&&!rows.length){host.innerHTML='<tr><td colspan="10"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>Every call is already in "'+esc(TR_ADD_TARGET)+'"</div><button class="btn btn-sm" style="margin-top:12px" onclick="trDoneAddTarget()">Done, back to folder</button></div></td></tr>';return;}
   const filtered=trApplyFilter(rows);
-  if(!filtered.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter'+((TR_DATE_FROM||TR_DATE_TO)?' / date range':'')+'</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button> <button class="btn btn-sm" style="margin-top:12px" onclick="trClearDateRange()">Clear dates</button></div></td></tr>';return;}
+  if(!filtered.length){host.innerHTML='<tr><td colspan="10"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter'+((TR_DATE_FROM||TR_DATE_TO)?' / date range':'')+'</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button> <button class="btn btn-sm" style="margin-top:12px" onclick="trClearDateRange()">Clear dates</button></div></td></tr>';return;}
   host.innerHTML=trRowsBodyHtml(trSortPinned(filtered),'list');
 }
 // Pinned calls float to the top, ordered by pin_rank (drag-and-drop sets this — see
@@ -11314,11 +11340,6 @@ function trIsPendingRow(r){
 function trApplyFilter(rows){
   // The one view that deliberately shows unfinished calls, since that is the whole point of it.
   if(TR_FILTER==='processing')return rows.filter(trIsPendingRow);
-  /* Discrepancies: every call where what the agent recorded does not match what the recording
-     contains - a wrong lost reason, remarks describing a different conversation, a callback promised
-     and then not kept. One list rather than three tabs, because it is one question asked of three
-     fields, and a person reviewing them wants them together. */
-  if(TR_FILTER==='discrepancy')return rows.filter(function(r){ return r && r.has_discrepancy===true; });
   // every other view lists finished calls only
   rows=rows.filter(function(r){ return !trIsNilRow(r) && !trIsPendingRow(r); });
   if(TR_FILTER==='qualified')return rows.filter(function(r){return r.qualification==='Qualified';});
@@ -11337,7 +11358,6 @@ function trKpisHtml(rows){
      other 8 just looks like the count is wrong. Each reason is named, in received order. */
   const done=rows.filter(function(r){return r.status==='done';}).length;
   const proc=rows.filter(trIsPendingRow).length;
-  const disc=rows.filter(function(r){ return r && r.has_discrepancy===true; }).length;
   const n=function(st){return rows.filter(function(r){return r.status===st;}).length;};
   const gaps=[[n('non_transcribable'),'no speech'],[n('no_recording'),'no recording'],
               [n('too_short'),'under a minute'],[n('error'),'failed']]
@@ -11347,12 +11367,7 @@ function trKpisHtml(rows){
     ['qualified','Qualified',qual,'leads matched',TR_OUTCOMES['Qualified'].colour],
     ['followup','Follow-Up',foll,'call back later',TR_OUTCOMES['Follow-Up'].colour],
     ['notqualified','Not Qualified',notq,'did not match',TR_OUTCOMES['Not Qualified'].colour],
-    ['processing','In Progress',proc,proc?'being transcribed now':'all caught up',proc?'#d97706':'#16a34a'],
-    /* Discrepancies earns a card rather than a hidden filter: it is the one number here that is about
-       the TEAM rather than about the leads, and a count of "the CRM does not match the call" that
-       nobody can see is a count nobody acts on. Purple, not red - it is a review queue, not a fault. */
-    ['discrepancy','Discrepancies',disc, disc?'CRM does not match the call':'CRM matches the calls',
-     disc?'#7c3aed':'#16a34a']];
+    ['processing','In Progress',proc,proc?'being transcribed now':'all caught up',proc?'#d97706':'#16a34a']];
   return '<div class="grid kpis" style="grid-template-columns:repeat('+cards.length+',1fr)">'+cards.map(function(c){
     const active=TR_FILTER===c[0];
     return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[4]:'')+'" onclick="trSetFilter(\''+c[0]+'\')" title="Show '+esc(c[1])+' calls">'
@@ -11457,8 +11472,7 @@ function trRowHtml(r,mode){
     +'<td><div style="display:flex;align-items:center;gap:8px;max-width:280px">'+pinIcon+'<i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px;flex-shrink:0"></i><div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
     +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
     +'<td>'+trCrmTag(r.crm_status)+(r.mismatch?'<div style="font-size:10.5px;color:#dc2626;margin-top:3px;font-weight:600" title="'+esc(r.mismatch_reason||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> disagrees</div>':'')+'</td>'
-    // The CRM's own note: a callback date on a Follow-Up, a lost reason on a Lost one.
-    +'<td style="max-width:190px">'+trDateReason(r)+'<div style="margin-top:4px">'+trDiscrepancyTag(r)+'</div></td>'
+    +'<td>'+trDateReasonHtml(r)+'</td>'
     +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
     +'<td>'+trLangTags(r.languages)+'</td>'
     +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
@@ -11512,14 +11526,98 @@ function trFolderCallsHtml(rows,name){
     +(list.length?'<button class="btn btn-sm" onclick="trDownloadFolder()"><i class="fa-solid fa-download"></i> Download</button>':'')+'</div>'
     +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid fa-folder" style="color:#0d9488"></i> '+esc(name)+'</h1></div>'
     +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
-    +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
+    +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="9"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
+
+/* ---------- Discrepancies (CRM lost/followup calls only) ---------- */
+// One row per call that's worth a human look: a real disagreement between the CRM's own record
+// and what the call actually contains, or the call simply couldn't be checked at all (failed /
+// no recording was ever supplied).
+function trDiscrepancyRowHtml(r){
+  const fname=r.file_name||'Recording';
+  const openAttr=(r.status==='done')?' onclick="navTo(\'transcription/view/'+r.id+'\')" style="cursor:pointer"':'';
+  let whatWrong;
+  if(r.status==='error'){
+    whatWrong='<span style="color:#dc2626">Transcription failed'+(r.error_text?': '+esc(String(r.error_text).slice(0,90)):'')+'</span>';
+  } else if(r.status==='no_recording'){
+    whatWrong='<span style="color:#dc2626">No recording was available from the CRM for this call.</span>';
+  } else {
+    const fails=(Array.isArray(r.discrepancy)?r.discrepancy:[]).filter(function(c){return c.status==='fail';});
+    whatWrong=fails.length
+      ? fails.map(function(c){return '<div style="margin-bottom:4px"><b>'+esc(String(c.check||'').replace(/_/g,' '))+':</b> '+esc(c.detail||'')+'</div>';}).join('')
+      : '<span style="color:var(--slate)">—</span>';
+  }
+  return '<tr'+openAttr+'>'
+    +'<td><div style="font-weight:600;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div></td>'
+    +'<td>'+trQualTag(r)+'</td>'
+    +'<td>'+trCrmTag(r.crm_status)+'</td>'
+    +'<td>'+trDateReasonHtml(r)+'</td>'
+    +'<td style="font-size:12.5px;max-width:360px">'+whatWrong+'</td>'
+  +'</tr>';
+}
+
+/* ---------- Compilation (CRM lost/followup calls, grouped by lead_id) ---------- */
+// The SAME criteria/qualification rule the backend uses (acc functions/transcription-sync,
+// qualifyFrom) mirrored client-side, run over the UNION of every call's criteria for one lead —
+// "the whole", not just whatever the most recent call happened to show.
+const TR_CRIT_KEYS=['site_visit_interested','location_match','bhk_match','budget_match','ready_move_match','follow_up_requested'];
+function trCombinedQualify(rows){
+  const merged={}; TR_CRIT_KEYS.forEach(function(k){merged[k]=false;});
+  (rows||[]).forEach(function(r){ const c=r.criteria||{}; TR_CRIT_KEYS.forEach(function(k){ if(c[k]===true)merged[k]=true; }); });
+  let qualification='Not Qualified';
+  if(merged.site_visit_interested) qualification='Qualified';
+  else if(merged.location_match&&merged.bhk_match&&merged.budget_match&&merged.ready_move_match) qualification='Qualified';
+  else if(merged.follow_up_requested) qualification='Follow-Up';
+  return {qualification:qualification, criteria:merged};
+}
+function trCompGridHtml(leads){
+  if(!leads.length)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-users"></i><div>No CRM lost/followup calls yet</div></div>';
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:16px">'+leads.map(function(g){
+    const last=g.rows[g.rows.length-1];
+    const nm=last.customer_name||('Lead '+g.leadId);
+    const combined=trCombinedQualify(g.rows);
+    const o=trOutcome(combined.qualification);
+    return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/4/'+encodeURIComponent(g.leadId)+'\')">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+        +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nm)+'</div>'
+        +'<div style="font-size:12px;color:var(--slate);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(last.business_unit_name||'')+'</div></div>'
+        +(o?'<span class="tag '+o.tag+'" style="white-space:nowrap;flex-shrink:0"><i class="fa-solid '+o.icon+'"></i> '+esc(combined.qualification)+'</span>':'')
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:10px">'+g.rows.length+' call'+(g.rows.length===1?'':'s')+' · lead #'+esc(g.leadId)+'</div>'
+    +'</div>';
+  }).join('')+'</div>';
+}
+function trCompDetailHtml(leads,leadId){
+  const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
+  if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/4\')">Back</button></div>';
+  const last=g.rows[g.rows.length-1];
+  const combined=trCombinedQualify(g.rows);
+  const o=trOutcome(combined.qualification);
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>';
+  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
+  const banner2=o?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(combined.qualification)+'</span><span style="margin-left:10px;font-size:12.5px;color:var(--slate)">combined across all '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</span></div>'):'';
+  const criteriaCard='<div class="card card-pad" style="margin-bottom:16px"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Combined qualification checklist</div>'+trCriteriaHtml({criteria:combined.criteria})+'</div>';
+  const days=g.rows.map(function(r,idx){
+    const dt=r.report_date?fmtDate(r.report_date):fmtDate(r.created_at);
+    return '<div style="padding:12px 0;'+(idx?'border-top:1px dashed var(--line)':'')+'">'
+      +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+        +'<div style="font-weight:700;font-size:12.5px;color:#0d9488;text-transform:uppercase;letter-spacing:.03em">'+esc(dt)+'</div>'
+        +trQualTag(r)+trCrmTag(r.crm_status)
+        +(r.status==='done'?'<button class="btn btn-sm btn-ghost" onclick="navTo(\'transcription/view/'+r.id+'\')">Open</button>':'')
+      +'</div>'
+      +(r.summary?'<div style="font-size:13.5px;margin-top:8px;line-height:1.6">'+esc(r.summary)+'</div>':'<div style="font-size:12.5px;color:var(--slate);margin-top:8px">No summary for this call.</div>')
+      +(r.mismatch?'<div style="font-size:11.5px;color:#dc2626;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(r.mismatch_reason||'')+'</div>':'')
+    +'</div>';
+  }).join('');
+  return header+banner2+criteriaCard+'<div class="card card-pad"><div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Day-wise history</div>'+days+'</div>';
+}
+
 // Keeps the folder drill-in list (if open) in sync after an optimistic delete/retry/remove — a
 // no-op when that view isn't currently on screen, same guard pattern as trRenderList's #trRows check.
 function trRenderFolderRows(){
   const host=$('trFolderRowsBody');if(!host||!TR_FOLDER)return;
   const list=trFolderRows(TR_ROWS||[],TR_FOLDER);
-  host.innerHTML=list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>';
+  host.innerHTML=list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="9"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>';
 }
 // "Add calls" takes you to the All Calls log (tab 0) in a targeted mode: a banner up top
 // says which folder you're adding to, and the selection bar's action adds straight into it —
@@ -11658,7 +11756,7 @@ function trDownloadRows(rows,heading){
   trTriggerDownload(trExportHtml(doneRows,heading),trSafeFilename(heading)+'.html');
 }
 window.trDownloadList=function(){
-  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='followup'?'Follow-Up calls':(TR_FILTER==='processing'?'Calls being transcribed':(TR_FILTER==='discrepancy'?'Calls where the CRM does not match the recording':'All calls'))));
+  const label=TR_FILTER==='qualified'?'Qualified calls':(TR_FILTER==='notqualified'?'Not qualified calls':(TR_FILTER==='followup'?'Follow-Up calls':(TR_FILTER==='processing'?'Calls being transcribed':'All calls')));
   trDownloadRows(trApplyFilter(TR_ROWS||[]),label);
 };
 window.trDownloadReport=function(id){
@@ -11910,7 +12008,6 @@ async function trDetail(v,id){
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary</div><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+(r.summary?esc(r.summary):'<span style="color:var(--slate)">No summary available.</span>')+'</div></div>'
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Qualification checklist</div>'+trCriteriaHtml(r)+'<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+trAnalysisHtml(r)+'</div></div>'
     +'</div>'
-    +trDiscrepancyPanel(r)
     +'<div class="card card-pad" style="margin-top:16px"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px"><div class="sec-title" style="margin:0"><i class="fa-solid fa-quote-left" style="color:#0d9488"></i> Transcript</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" id="trLangEn" onclick="trSetLang(\'en\')">English</button><button class="btn btn-sm" id="trLangBn" onclick="trSetLang(\'bn\')">বাংলা / Original</button></div></div><div id="trTranscriptBody">'+trTranscriptHtml(r,'en')+'</div></div>'
     +'<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-comments" style="color:#0d9488"></i> Remarks</div>'
       +'<div class="chat-wrap" id="trCmWrap">'+(comments.length?comments.map(trCmItem).join(''):'<div class="empty" style="padding:26px 10px"><i class="fa-solid fa-comment-slash"></i><div style="font-size:13px">No remarks yet — anyone on the team can add one</div></div>')+'</div>'
@@ -11989,66 +12086,15 @@ function trCrmTag(v){
   const t=TR_CRM_TAGS[s]||{bg:'#e2e8f0',ink:'#334155'};
   return '<span class="badge" style="background:'+t.bg+';color:'+t.ink+';white-space:nowrap">'+esc(s)+'</span>';
 }
-
-/* The CRM's own note against this call, which is a different thing per status: a lead still being
-   followed up has a promised callback DATE, a lost one has a REASON. One column shows whichever
-   applies, because they are never both meaningful at once and two half-empty columns read worse. */
-function trDateReason(r){
-  const st=String((r&&r.crm_status)||'').toLowerCase();
-  if(st==='in followup'){
-    const d=r&&r.next_follow_up_date;
-    if(!d)return '<span style="color:var(--slate)">no date set</span>';
-    /* Shown as a date only. The feed sends a timestamp, but a callback promised "on the 27th" is a
-       day rather than a moment, and printing 19:00 invites an argument about the hour. */
-    const dt=new Date(d);
-    if(isNaN(dt))return esc(String(d));
-    const overdue=dt < new Date(new Date().toDateString());
-    return '<span style="font-weight:600'+(overdue?';color:#b45309':'')+'">'
-      +esc(dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))+'</span>'
-      +(overdue?'<div style="font-size:10.5px;color:#b45309">callback date passed</div>':'');
+// The CRM sends a next-followup date on an open lead and a lost reason on a closed one — whichever
+// applies to this row is what "Date / Reason" shows, straight from the feed, not the AI's own read.
+function trDateReasonHtml(r){
+  if(r.crm_status==='In Followup'&&r.next_follow_up_date){
+    const d=new Date(r.next_follow_up_date);
+    if(!isNaN(d))return '<span style="font-size:12.5px">'+esc(d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}))+'</span>';
   }
-  const why=r&&r.crm_lost_reason;
-  if(!why)return '<span style="color:var(--slate)">—</span>';
-  return '<span title="'+esc(why)+'" style="font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+esc(why)+'</span>';
-}
-
-/* Did the agent's own record of the call survive checking? Rendered small on the row, in full inside
-   the recording. Null is NOT the same as agreeing: a call nobody could compare says nothing either
-   way, and colouring it green would be a lie. */
-function trDiscrepancyTag(r){
-  if(!r||r.has_discrepancy===null||r.has_discrepancy===undefined)
-    return '<span style="color:var(--slate);font-size:11.5px" title="Not compared - the CRM had no remarks or reason to check against, or the comparison did not run">not checked</span>';
-  if(!r.has_discrepancy)
-    return '<span class="badge" style="background:#dcfce7;color:#166534;white-space:nowrap">matches</span>';
-  const d=r.discrepancy||{};
-  const which=['lost_reason','remarks','follow_up'].filter(function(k){ return d[k] && d[k].agrees===false; })
-    .map(function(k){ return k==='lost_reason'?'reason':k==='remarks'?'remarks':'date'; });
-  return '<span class="badge" style="background:#fee2e2;color:#991b1b;white-space:nowrap">'
-    +esc(which.join(' + ')||'disagrees')+'</span>';
-}
-
-/* Every disagreement on a row, spelled out. The agent's words and the call's are shown side by side
-   rather than summarised, because the point is for a person to judge who is right. */
-function trDiscrepancyPanel(r){
-  const d=(r&&r.discrepancy)||null;
-  if(!d)return '';
-  const LABEL={lost_reason:'Reason for losing the lead', remarks:'Remarks against the call', follow_up:'Promised callback date'};
-  const rows=['lost_reason','remarks','follow_up'].filter(function(k){return d[k];}).map(function(k){
-    const it=d[k], ok=it.agrees!==false;
-    return '<div style="padding:11px 13px;border-radius:8px;margin-bottom:8px;background:'+(ok?'#f0fdf4':'#fef2f2')
-      +';border-left:3px solid '+(ok?'#16a34a':'#dc2626')+'">'
-      +'<div style="font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:'+(ok?'#166534':'#991b1b')+'">'
-        +esc(LABEL[k]||k)+' · '+(ok?'matches':'does not match')+'</div>'
-      +(it.agent?'<div style="font-size:12.5px;margin-top:6px"><b>Agent recorded:</b> '+esc(it.agent)+'</div>':'')
-      +(it.call?'<div style="font-size:12.5px;margin-top:3px"><b>The call says:</b> '+esc(it.call)+'</div>':'')
-      +(it.note?'<div style="font-size:12.5px;color:var(--slate);margin-top:5px">'+esc(it.note)+'</div>':'')
-    +'</div>';
-  }).join('');
-  if(!rows)return '';
-  return '<div class="card card-pad" style="margin-top:16px">'
-    +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-balanced" style="color:#7c3aed"></i> The agent\'s record against the call</div>'
-    +'<div class="sec-sub" style="margin-bottom:11px">What was typed into the CRM after this call, checked against what the recording contains. The transcript was produced without sight of either, so this is a test rather than a confirmation.</div>'
-    +rows+'</div>';
+  if(r.crm_status==='Lost'&&r.crm_lost_reason)return '<span style="font-size:12.5px">'+esc(r.crm_lost_reason)+'</span>';
+  return '<span style="color:var(--slate)">—</span>';
 }
 
 // The caller, by number. Falls back to whichever of the two columns the row actually carries.

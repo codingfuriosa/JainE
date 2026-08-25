@@ -6,40 +6,34 @@
 // call, for a per-turn JSON array with four keys AND six dashboard fields AND six booleans AND seven
 // QA judgements with evidence AND a summary - and it quietly stopped transcribing and started
 // composing. Across 175 calls the name it claimed to hear matched the CRM's own record ZERO times
-// out of the 20 it offered one: Pradip Das was greeted as "Suman babu", GB Nilachala Acharya came
-// back as "Anil Sharma". Every check passed, because every check tested the SHAPE of the output.
+// out of the 20 it offered one: Pradip Das was greeted as "Suman babu". Every check passed, because
+// every check tested the SHAPE of the output.
 //
-// It was not the model. acc's own transcribe/analyse function has been reading these same
-// recordings accurately all along - byte-identical MPEG-2.5 16 kbps 8 kHz files, same
-// gemini-flash-latest - because it does three things this did not:
-//   1. declares the audio as audio/mpeg. Knowlarity serves "binary/octet-stream" and the old code
-//      passed that through, so Gemini was handed an unlabelled blob and a very suggestive prompt.
-//   2. puts the PROJECT CATALOGUE in the prompt. A model cannot recognise "Dream Exotica" or "Badu
-//      Road" in 8 kHz telephone speech unless it knows those words are possible.
-//   3. asks for a transcript and little else, so the output budget goes on listening.
+// Five attempts to fix Gemini by prompt each improved the shape and none made it true: the mime type
+// (Knowlarity serves "binary/octet-stream" and the old code passed it through, so Gemini got an
+// unlabelled blob and answered from the prompt); the project catalogue, which it recited back as the
+// conversation; a response schema; removing a "no_speech_reason" escape hatch, which did recover 17
+// calls wrongly written off as silence; and demanding verbatim at temperature 0, after which an
+// 8m26s call still came back as 16 turns and named the wrong project. Head to head on Pradip Das's
+// 301 seconds: Gemini 1172 characters, gpt-4o-transcribe 4726, with the real name and real project.
 //
-// Measured on six calls with independently known answers: 4 of 6 projects and 3 of 6 names exact,
-// and blanks rather than inventions where it could not tell. name_matches_crm keeps watching that.
+// THE VERBATIM RECORD IS WHAT IS STORED. Stage 2's speaker labels and English are a RENDERING of the
+// stage-1 output, and the raw text is kept in transcript_bn whatever the rendering makes of it.
 //
-// Nightly Lost-Call QA. Pulls DreamCRM's report - recording_url, lead_id, lead_name, lead_mobile,
+// Nightly Lost-Call QA. Pulls DreamCRM's report - recording_url, lead_id, lead_name,
 // business_unit_name, status, next_follow_up_date, lost_reason and remarks; no call duration, and
 // no lead_mobile any more. Only Lost and In Followup are taken. Then it transcribes and
 // audits each call. The report covers leads being followed up as well as lost ones, so the AI's own
 // verdict (Qualified / Follow-Up / Not Qualified) is checked against the CRM's, and disagreement in
 // either direction is what this exists to surface.
 //
-// AUDIO IS NEVER STORED: it lives in memory for one AI call. We keep the transcript and the ~90 byte
+// AUDIO IS NEVER STORED: it lives in memory for one API call. We keep the transcript and the ~90 byte
 // link, and re-fetch audio live from Knowlarity. Storing it would be ~4.7 GB/year for no benefit.
 //
-// Two actions, because a day is 40-110 calls and one invocation cannot do them all:
-//   pull  queue the day (seconds, no AI) - cron 00:30 IST, retried hourly to 05:30, because the
-//         CRM's report for a day is not always published by half an hour after midnight
-//   work  process a bounded batch      - cron every minute, no-ops when the queue is empty
-//   run / retry / status
-//
-// Callers prove themselves via (1) acc.job_secrets, a token the DATABASE generated for itself, which
+// Actions: pull (queue a day, no AI) / work (process a bounded batch) / run / retry / status.
+// Callers prove themselves via acc.job_secrets, a token the DATABASE generated for itself, which
 // pg_cron reads to build x-sync-secret and this function reads with its service-role key - no human
-// ever invents or pastes a password; (2) SYNC_SECRET (legacy); (3) a signed-in user's token.
+// ever invents or pastes a password; or SYNC_SECRET (legacy); or a signed-in user's token.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 // Gemini takes audio as base64 inline data; the speech API takes the bytes directly.
@@ -68,8 +62,7 @@ const WANTED_STATUSES = ["Lost", "In Followup"];
 
 /* The switchboard, not the conversation. Every call opens with this and it was being written down as
    the agent's first words, which made a two-line call look like a four-line one. Matched loosely -
-   punctuation and repetition vary - and only at the START of the transcript, so the same words spoken
-   later by a person would survive. */
+   punctuation and repetition vary. */
 const IVR_PATTERNS: RegExp[] = [
   /welcome\s+to\s+ja[iy]n\s+group[.,!]?/gi,
   /this\s+call\s+(?:will\s+be|is\s+being)\s+recorded\s+for\s+(?:monitoring\s+and\s+)?(?:training|quality)\s*(?:and\s+training\s*)?purposes?[.,!]?/gi,
@@ -109,61 +102,39 @@ function fixSpellings(t: string): string {
   return out;
 }
 /* The judgement runs on the TEXT, which is a reading task, and gpt-4o is asked to do only that.
-   Keeping the two stages on different providers is deliberate: the transcript is then evidence the
-   judge did not produce, so name_matches_crm and crm_status_match stay meaningful checks. */
+   Keeping the two stages apart is deliberate: the transcript is then evidence the judge did not
+   produce, so name_matches_crm and crm_status_match stay meaningful checks. */
 const ANALYSIS_MODEL = Deno.env.get("ANALYSIS_MODEL") || "gpt-4o";
-// Was unset, which means a low default - one of the ways long output gets cut off.
 const FEED_URL = Deno.env.get("LOST_CALL_FEED") || "https://www.realtybucket.com/report/lost_call_recordings";
 
 const SOURCE = "lost_call_sync";
 const JOB_SECRET_NAME = "transcription_sync";
 const MIN_DURATION_SECONDS = 60;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
-/* Three recordings at once, each now costing two API calls rather than one. Flash transcribes a
-   five minute call in well under a minute and the analysis is seconds, so one round per invocation
-   stays comfortably inside the wall clock while clearing ~180 calls an hour. */
+/* Three recordings at once, each costing two API calls. Transcription of a five minute call takes
+   seconds, so one round per invocation stays comfortably inside the wall clock. */
 const CONCURRENCY = 3;
-/* Automatic retry. Both caps are three, and the "no speech" one is measured rather than guessed:
-   of six calls marked no-speech on 21 Aug, THREE transcribed on a plain second attempt - a 213
-   second recording first reported as "Ringing only" came back with ten turns in it. At a 50%
-   recovery rate one extra listen is clearly too few. The cost is bounded: a genuinely silent
-   recording is paid for three times and then left alone for good.
-   Ten minutes between attempts keeps a rate-limit or an outage from being hammered, and means a
-   retry lands on a later cron tick rather than the very next one. */
-/* What counts as "too thin to be a transcript of this recording".
-   Measured, not guessed: real transcripts of these calls run 6-16 characters per second of audio,
-   and the failures cluster far below - "Hello." at 0.1, Gemini's 40-character answers at 0.2 and 0.5.
-   1.5 sits in the empty gap between the two, so a genuinely brief exchange still passes while
-   near-silence does not.
-   The floor is absolute as well as relative: 120 characters is not a call whatever its length. */
-const MIN_TRANSCRIPT_CHARS = 120;
-const MIN_CHARS_PER_SECOND = 1.5;
+/* Automatic retry. An error is usually transient; an empty transcript is a failure to hear rather
+   than a fact about the recording, which is why it is retried too - 17 calls once written off as
+   silence turned out to hold conversations. Bounded at three so a genuinely empty file stops costing
+   money, and spaced ten minutes so a rate limit or an outage is not hammered. */
 const MAX_ATTEMPTS_ERROR = 3;
 const MAX_ATTEMPTS_NO_SPEECH = 3;
 const RETRY_AFTER_MINUTES = 10;
 
-/* The catalogue is VOCABULARY, not content. Its job is to make the real words available to the
-   recogniser - a model that has never heard of "Dream Exotica" will not pick it out of 8 kHz
-   telephone speech. It has to be paired with a firm instruction not to recite it, because when the
-   audio is hard a catalogue is also a tempting script: asked for a transcript with this list and no
-   such warning, Gemini once returned "2 BHK starts from 57 lakh and 3 BHK starts from 80 lakh" -
-   the catalogue's own figures, on a call that was about neither.
-   Dream One is included because it is a real project that acc's own copy of this list omits, and a
-   missing project reads as a misheard one. */
-const CATALOGUE = `Jain Group projects (for RECOGNISING names, locations and figures you hear - never
-to be used to fill in anything you did not hear):
+/* The catalogue is VOCABULARY for the JUDGE, never content, and it is deliberately kept out of the
+   transcription step: given this list and a hard recording, Gemini returned "2 BHK starts from 57
+   lakh and 3 BHK starts from 80 lakh" - the list's own figures, on a call about neither. */
+const CATALOGUE = `Jain Group projects, for reference when reading the transcript (never to fill in
+anything the transcript does not contain):
 - Dream Gurukul: 3BHK from 80 lakh, 2BHK from 57 lakh. UNDER CONSTRUCTION. Doltala, Madhyamgram / near Airport. Possession 2027/2028.
 - Dream World City: 2BHK 29 lakh, 3BHK 36 lakh. READY TO MOVE. Near Joka Metro / Pailan More.
 - Dream Valley: 3BHK 73 lakh (no 2BHK). READY TO MOVE. Siliguri, Hill Cart Road, Dagapur.
 - Dream Eco City: 2BHK 34 lakh, 2.5BHK 39 lakh. READY TO MOVE. Durgapur, Muchipara, NH-2.
 - Dream Exotica: 2BHK 36 lakh, 3BHK 44 lakh. READY TO MOVE. Madhyamgram, Badu Road.
-- Dream One: Rajarhat, opposite Eco Park.`;
+- Dream One: Rajarhat, opposite Eco Park.
+- Dream Residency Manor.`;
 
-/* STAGE 1 is now a speech-to-text call, so there is no room for a page of instructions - the API
-   takes one short "prompt" whose only real job is to prime spellings. Proper nouns are what a
-   recogniser gets wrong on a bad line, so the projects and the company name go in and nothing else
-   does. No rules about summarising are needed: a transcription model has no concept of summarising,
-   which is precisely why it is being used. */
 /* Gemini needs telling what a speech model knows by construction: transcribe, do not summarise,
    and do not stop early. Every instruction here exists because its absence produced a specific
    failure - an 8m26s call returned as 16 turns, a call written off as "silence" that had people
@@ -201,12 +172,15 @@ const STT_HINT = "Jain Group real-estate sales call, Kolkata. Projects: Dream Wo
 
 /* STAGE 2. Reading, not listening. It receives the verbatim transcript and NOTHING else - not the
    audio, not the CRM's name, not the CRM's status - which is what keeps name_matches_crm and
-   crm_status_match honest checks rather than the judge agreeing with what it was told. */
+   crm_status_match honest checks rather than the judge agreeing with what it was told.
+   THE WORD "json" MUST APPEAR HERE: OpenAI refuses response_format json_object outright unless the
+   messages contain it, and rewriting this prompt once dropped the word and 400'd every call. */
 const ANALYSE_PROMPT = `You are a Sales Quality Assurance Analyst for JainGroup, a Kolkata
 real-estate developer. Below is a VERBATIM transcript of one outbound call, produced by a
-speech-to-text system. Reply with a single json object and nothing else - the keys are listed below. It has no speaker labels and it is in the languages actually spoken - usually
-a mix of Bengali, Hindi and English. It may contain repetitions, false starts and filler, because
-that is what people say.
+speech-to-text system. Reply with a single json object and nothing else - the keys are listed below.
+The transcript has no speaker labels and it is in the languages actually spoken - usually a mix of
+Bengali, Hindi and English. It may contain repetitions, false starts and filler, because that is what
+people say.
 
 ${CATALOGUE}
 
@@ -253,31 +227,20 @@ call early, say so in notes rather than failing the agent for it.
 
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
 agreed, and what the agent should have done differently. If the call was only a few words, say that
-plainly instead of padding it out.`;
+plainly instead of padding it out.
 
-
-/* STAGE 3. Two accounts of the same call - the agent's and the transcript's - and one question: do
-   they agree? It is given both, which is exactly what stage 2 must NOT be: the transcript and the
-   summary were produced without any sight of the agent's version, so comparing them here is a real
-   test rather than a confirmation.
-   Told plainly that different WORDS for the same substance is agreement, because the agent types
-   shorthand under time pressure and the point is whether the account is TRUE, not whether it is well
-   written. */
-const COMPARE_PROMPT = `You are auditing a sales call. You will be given what the CALL contains and
-what the AGENT recorded about it in the CRM. Decide whether the agent's record is TRUE to the call.
-Reply with a single json object and nothing else.
-
-Judge SUBSTANCE, not wording. The agent types shorthand: "budget low", "BUDGET AMOUNT LOW" and "the
-customer's budget was below our starting price" are all the SAME thing and all agree. Say it
-disagrees only where the agent's record states something the call does not support, or misses the
-actual reason entirely.
-
-Return:
-"lost_reason": { "agrees": true/false, "note": "one sentence" } - or null if no lost reason was given.
-  agrees=false when the agent's reason is not the reason the call shows.
-"remarks": { "agrees": true/false, "note": "one sentence" } - or null if no remarks were given.
-  agrees=false when the remarks describe something that did not happen on this call, or contradict it.
-Keep each note to one plain sentence naming the difference, or confirming the match.`;
+If a message below the transcript gives the CRM's own record for this call (a lost reason and/or
+remarks the sales agent typed in), also return:
+"discrepancy_check": {
+  "lost_reason_match": true if the CRM's stated lost reason and your own dashboard_fields.lost_reason
+    refer to the same underlying issue, false if they clearly differ, null if the CRM gave no reason,
+  "lost_reason_note": one short sentence on the comparison, "" if null,
+  "remarks_match": true if the CRM's remarks and your summary_verdict describe the same gist/outcome,
+    false if they substantially disagree, null if the CRM gave no remarks,
+  "remarks_note": one short sentence on the comparison, "" if null
+}
+Judge these on substance, not wording - a CRM code like "LOCATION NOT SUITABLE" matches a summary
+that says the customer wanted a different area, even though the words differ.`;
 
 // Calls are Indian, so "yesterday" must be yesterday in IST - at 19:00 UTC when the cron fires, UTC
 // is still on the previous day.
@@ -286,11 +249,10 @@ const istYesterday = () => new Date(Date.now() + 5.5 * 3600e3 - 864e5).toISOStri
 const isDate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 /* Duration without decoding. Knowlarity sends CBR MPEG 2.5 Layer III, 16 kbps, 8 kHz mono, so bytes
-   over bitrate is exact enough - verified against ffprobe within 0.3s, and against a real 166,752
-   byte file that came to 83.4s. The feed sends no duration, so this is the only way to apply the
-   ">1 minute" rule, and it is what stops us paying to listen to ring-outs.
-   NOTE it measures the FILE, which includes ringing and post-hangup silence: an 83s file held 15s of
-   talk. So it is a cost gate, not a measure of conversation length. null never fails the gate. */
+   over bitrate is exact enough - verified against a real 166,752 byte file that came to 83.4s. The
+   feed sends no duration, so this is the only way to apply the ">1 minute" rule, and it is what stops
+   us paying to listen to ring-outs.
+   NOTE it measures the FILE, which includes ringing and post-hangup silence. null never fails. */
 const BR_V1 = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0];
 const BR_V2 = [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0];
 const SAMPLE_RATES: Record<number, number[]> = { 3:[44100,48000,32000], 2:[22050,24000,16000], 0:[11025,12000,8000] };
@@ -315,17 +277,13 @@ function estimateDurationSeconds(b: Uint8Array): number | null {
   return null;
 }
 
-/* Turns, from the two flat transcripts. The stage-1 prompt asks for one turn per line in the same
-   order in both versions, so line N of the English is line N of the original. Deliberately no
-   timestamps: this pipeline genuinely does not have them, and an invented "00:42" beside a real
-   sentence is exactly the kind of plausible detail that caused the trouble in the first place.
-   A line the model did not label is kept rather than dropped - losing a turn is worse than showing
-   it without a speaker. */
+/* Turns, from the two laid-out transcripts stage 2 returns. Split on the SPEAKER LABEL, not on the
+   line break: asked for one turn per line, gpt-4o just as often returns them comma-separated on a
+   single line, which read as one 3,768 character turn the first time this ran. The label is the real
+   boundary, so whatever sits between turns is treated as the separator.
+   Deliberately no timestamps: this pipeline does not have them, and an invented "00:42" beside a real
+   sentence is exactly the kind of plausible detail that caused the original trouble. */
 function parseTurns(en: string, bn: string) {
-  /* Split on the SPEAKER LABEL, not on the line break. Asked for one turn per line, gpt-4o just as
-     often returns them comma-separated on a single line - which read as one 3,768 character turn the
-     first time this ran. The label is the real boundary, so whatever sits between turns (a newline, a
-     comma, a semicolon, nothing at all) is treated as the separator. */
   const clean = (t: string) => String(t || "")
     .replace(/\r/g, "")
     .replace(/\s*[,;|]?\s*(?=(?:Agent|Customer|Speaker)\s*\d*\s*:)/g, "\n")
@@ -377,8 +335,7 @@ function crmStatusFrom(v: unknown): string | null {
 }
 
 /* What each recording is called: "Full Name_Lead Id", or the lead id on its own when the CRM has no
-   name for the lead. The lead id is always sent, so a recording can never end up nameless.
-   Characters that are illegal in a file name are stripped, since this is used as one. */
+   name for the lead. The lead id is always sent, so a recording can never end up nameless. */
 function recordingName(name: string | null, leadId: number): string {
   const clean = String(name || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
   return clean ? clean + "_" + leadId : String(leadId);
@@ -387,10 +344,9 @@ const callUuidFrom = (url: string) => url.match(/callid=([0-9a-fA-F-]{36})/)?.[1
 
 type Check = { check: string; status: "pass" | "fail" | "skip"; detail: string };
 
-/* Does the CRM's verdict match what the call actually contains? The report used to be lost calls
-   only; it now also sends leads still In Followup, and the two disagree in opposite directions:
-   a Lost lead that wanted to buy was written off too early, while a lead still being chased who
-   said no is effort going nowhere. Surfacing both is the point of this dashboard. */
+/* Does the CRM's verdict match what the call actually contains? The two disagree in opposite
+   directions: a Lost lead that wanted to buy was written off too early, while a lead still being
+   chased who said no is effort going nowhere. Surfacing both is the point of this dashboard. */
 const HIGH_INTENT = ["qualified", "interested site visit", "interested in booking"];
 function judgeMismatch(crmStatus: string | null, category: string | null) {
   const st = String(crmStatus || "").toLowerCase();
@@ -404,14 +360,14 @@ function judgeMismatch(crmStatus: string | null, category: string | null) {
     }
     if (HIGH_INTENT.includes(c)) {
       return { mismatch: true, severity: "high",
-        reason: `CRM marked this lead Lost, but the call shows buying intent - the AI graded it "${cat}". This lead was written off while still active and should be re-opened.` };
+        reason: `CRM marked this lead Lost, but the call shows buying intent - graded "${cat}". This lead was written off while still active and should be re-opened.` };
     }
     if (c === "interested not qualified") {
       return { mismatch: true, severity: "low",
         reason: "CRM marked this lead Lost. The customer was interested but did not fit current inventory, so closing it is defensible - worth nurturing rather than discarding." };
     }
     return { mismatch: true, severity: "low",
-      reason: `CRM marked this lead Lost; the AI returned an unrecognised category "${cat}" - review manually.` };
+      reason: `CRM marked this lead Lost; an unrecognised category "${cat}" came back - review manually.` };
   }
 
   if (st === "in followup") {
@@ -420,7 +376,7 @@ function judgeMismatch(crmStatus: string | null, category: string | null) {
         reason: "CRM still has this lead In Followup, but on the call the customer said they are not interested - the team is chasing a lead that is already closed." };
     }
     return { mismatch: false, severity: null,
-      reason: `CRM has this lead In Followup and the call agrees - the AI graded it "${cat}", so it is rightly still open.` };
+      reason: `CRM has this lead In Followup and the call agrees - graded "${cat}", so it is rightly still open.` };
   }
 
   return { mismatch: null, severity: null,
@@ -428,13 +384,9 @@ function judgeMismatch(crmStatus: string | null, category: string | null) {
 }
 
 /* THE OUTCOME, from the SAME criteria the dashboard renders, by the same rule it prints, so the panel
-   and the badge cannot disagree. Previously this was
-   `category === 'not interested' ? 'Not Qualified' : 'Qualified'` and `criteria` was never written at
-   all - so the panel showed five red crosses beside a Qualified badge, two unrelated sources.
-
-   Three outcomes, not two. A customer who asked to be called back later has neither matched nor been
-   lost, and forcing them into Not Qualified is how a live lead gets written off. Order matters: a
-   firm yes outranks a maybe, and a maybe outranks nothing. */
+   and the badge cannot disagree. Three outcomes, not two: a customer who asked to be called back has
+   neither matched nor been lost, and forcing them into Not Qualified is how a live lead gets written
+   off. Order matters - a firm yes outranks a maybe, and a maybe outranks nothing. */
 const CRIT_KEYS = ["site_visit_interested","location_match","bhk_match","budget_match","ready_move_match","follow_up_requested"];
 function normaliseCriteria(v: unknown): Record<string, boolean> | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -475,12 +427,24 @@ function qaScoreFor(qa: unknown): number | null {
   return Math.round((got / qa.length) * 100);
 }
 
-/* Flat searchable text for the list, the export and the detail view - one labelled line per turn,
-   which is also the shape the mailer and the tracker already read. No timestamp prefix: this
-   pipeline has no timestamps, and inventing one would undo the point of the exercise. */
+/* Flat text for the list, the export and the detail view - one labelled line per turn, which is the
+   shape the mailer and the tracker already read. No timestamp prefix: there are none to print. */
 function flattenTurns(turns: Record<string, string>[], field: "text" | "original"): string {
   return turns.map((t) => `${t.speaker || "Speaker"}: ${t[field] || t.text || ""}`.trim())
               .filter((l) => l.replace(/^\w+:\s*/, "").length).join("\n");
+}
+
+/* A real failure mode, caught live: a 77-second call came back as "hello" repeated 56 times -
+   the speech model got stuck in a loop rather than genuinely listening, and every existing check
+   (non-empty, turn count) tests SHAPE, so it sailed through as a clean "pass". This tests CONTENT:
+   one word dominating almost everything said is the signature of a stuck loop, not a real call. */
+function degenerateRepeat(text: string): { word: string; count: number; total: number } | null {
+  const words = text.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (words.length < 8) return null;
+  const counts: Record<string, number> = {};
+  for (const w of words) counts[w] = (counts[w] || 0) + 1;
+  const [word, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return (count / words.length >= 0.6 && count >= 6) ? { word, count, total: words.length } : null;
 }
 
 // Only the three languages these calls are in, so a hallucinated value cannot reach the column.
@@ -643,8 +607,7 @@ async function processOne(db: DB, row: any, openaiKey: string,
            if (!/^audio\/|octet-stream$/i.test(mimeType)) mimeType = "audio/mpeg";
        which allows anything ending in octet-stream THROUGH - so Gemini was handed a blob declared as
        unspecified binary data, could not treat it as audio, and answered from the prompt instead.
-       octet-stream was the one case that needed replacing, not exempting. Only a genuine audio/* or
-       video/* type from the server is trusted now; everything else is what these files actually are. */
+       octet-stream was the one case that needed replacing, not exempting. */
     const served = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     mimeType = /^(audio|video)\/[a-z0-9.+-]+$/.test(served) ? served : "audio/mpeg";
     audio = new Uint8Array(await res.arrayBuffer());
@@ -671,10 +634,9 @@ async function processOne(db: DB, row: any, openaiKey: string,
       detail: `Recording file is ~${seconds}s (includes ringing and any silence after hang-up).` });
   }
 
-  /* Already transcribed? Then do not pay to transcribe it again. This matters because the two stages
-     fail independently: when the judgement failed on all 12 calls of the first ChatGPT run, the
-     transcripts had already been bought and saved, and re-running would have bought them twice for
-     nothing. A stored transcript is reused and only the judgement is redone. */
+  /* Already transcribed? Then do not pay to transcribe it again. The two stages fail independently:
+     when the judgement failed on all 12 calls of one run, the transcripts had already been bought and
+     saved, and re-running would have bought them twice for nothing. */
   const stored = String(row.transcript || "").trim();
   if (stored) {
     checks.push({ check: "recording_fetched", status: "skip",
@@ -689,16 +651,13 @@ async function processOne(db: DB, row: any, openaiKey: string,
     try {
       if (engine === "gemini") {
         if (!geminiKey) throw new Error("GEMINI_API_KEY is not configured");
-        /* audio/mpeg, NOT the "binary/octet-stream" Knowlarity serves. Passing the server's own
-           header through was the original bug in this file: Gemini received a blob declared as
-           unspecified binary data and answered from the prompt instead of the audio. */
         const gr = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`,
           { method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               contents: [{ parts: [
                 { text: GEMINI_TRANSCRIBE_PROMPT },
-                { inline_data: { mime_type: "audio/mpeg", data: encodeBase64(audio) } }] }],
+                { inline_data: { mime_type: mimeType, data: encodeBase64(audio) } }] }],
               // Plain text out, no schema: one job, and a schema to fill is an invitation to invent.
               generationConfig: { temperature: 0, maxOutputTokens: 60000 },
             }) });
@@ -740,49 +699,28 @@ async function processOne(db: DB, row: any, openaiKey: string,
      fixing on screen - and everything below is a rendering of this, so "every word" survives whatever
      the labelling makes of it. */
   const verbatim = fixSpellings(stripIvr(spoken));
-  checks.push({ check: "human_conversation", status: "pass",
-    detail: `Speech-to-text returned ${verbatim.length} characters of speech`
-      + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
-      + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
+  const degen = degenerateRepeat(verbatim);
+  checks.push({ check: "human_conversation", status: degen ? "fail" : "pass",
+    detail: degen
+      ? `Speech-to-text returned ${verbatim.length} characters, but ${degen.count} of ${degen.total} words `
+        + `are just "${degen.word}" repeated - the recognizer likely got stuck in a loop rather than `
+        + `genuinely hearing this call. Do not trust the qualification below; listen to the recording.`
+      : `Speech-to-text returned ${verbatim.length} characters of speech`
+        + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
+        + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
 
-  /* TOO THIN TO BE A TRANSCRIPT? Then this is a failure to HEAR, not a fact about the call, and it
-     goes back round. Checked here, before the judging, for two reasons: paying to grade six
-     characters is waste, and a verdict formed from six characters is worse than none - "Hello."
-     produced a confident "Not Qualified" with every check green.
-     The transcript is CLEARED rather than kept: promoteRetries reuses a stored transcript, so leaving
-     the thin one in place would make every retry return the same nothing. */
-  const density = seconds ? verbatim.length / seconds : null;
-  const tooThin = verbatim.length < MIN_TRANSCRIPT_CHARS
-    || (density !== null && seconds! > MIN_DURATION_SECONDS && density < MIN_CHARS_PER_SECOND);
-  if (tooThin) {
-    const giveUp = attempts >= MAX_ATTEMPTS_NO_SPEECH;
-    const detail = `Only ${verbatim.length} characters came back for ~${seconds}s of audio`
-      + (density !== null ? ` (${Math.round(density*10)/10} per second, against 6-16 on a real transcript)` : "")
-      + `. Too little to be a transcript of this call`
-      + (giveUp ? `, and it has now been heard ${attempts} times - treat the recording as unusable.`
-                : `, so it will be listened to again.`);
-    checks.push({ check: "enough_speech", status: "fail", detail });
-    await db.schema("acc").from("transcriptions").update({
-      status: "non_transcribable", attempts, duration_seconds: seconds,
-      non_transcribable_reason: `Only ${verbatim.length} characters transcribed from ~${seconds}s of audio`,
-      // cleared on purpose - a retry must transcribe afresh, not reuse this
-      transcript: null, transcript_en: null, transcript_bn: null, utterances: null,
-      verification: checks, gladia_id: engine,
-      mismatch: null, mismatch_severity: null, mismatch_reason: null,
-      discrepancy: null, has_discrepancy: null,
-      error_text: null, updated_at: new Date().toISOString() }).eq("id", row.id);
-    return { id: row.id, lead_id: row.lead_id, status: "non_transcribable", engine,
-             verbatim_chars: verbatim.length, per_second: density ? Math.round(density*10)/10 : null,
-             attempts, retrying: !giveUp };
-  }
-  checks.push({ check: "enough_speech", status: "pass",
-    detail: `${verbatim.length} characters for ~${seconds}s of audio`
-      + (density !== null ? ` (${Math.round(density*10)/10} per second)` : "")
-      + `, in line with a real transcript.` });
-
-  /* STAGE 2 - lay it out and judge it. */
+  /* STAGE 2 - lay it out and judge it. The CRM's own record (if it sent one) rides along in the SAME
+     call rather than a separate one - the model already has the transcript in front of it, so asking
+     it to also compare against the CRM's lost reason/remarks costs nothing extra. */
+  const crmContext = (row.crm_lost_reason || row.crm_remarks)
+    ? "\n\nCRM'S OWN RECORD FOR THIS CALL (compare your findings against this, do not treat it as fact "
+      + "about what was said on the call):\n"
+      + `- Lost reason on file: ${row.crm_lost_reason || "(none given)"}\n`
+      + `- Remarks on file: ${row.crm_remarks || "(none given)"}\n`
+    : "";
   let parsed: any;
   try {
+    if (!openaiKey) throw new Error("CHATGPT_API_KEY is not configured");
     const ar = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + openaiKey },
@@ -790,24 +728,36 @@ async function processOne(db: DB, row: any, openaiKey: string,
         model: analysisModel,
         temperature: 0,
         response_format: { type: "json_object" },
+        // The reply duplicates the transcript twice over (original + English) plus everything
+        // else, so a long call's JSON can run long. Left unset, a handful of calls a night came
+        // back with the closing quote missing mid-string - the model just ran out of budget.
+        max_tokens: 16000,
         messages: [
           { role: "system", content: ANALYSE_PROMPT },
-          { role: "user", content: "VERBATIM TRANSCRIPT:\n\n" + verbatim },
+          { role: "user", content: "VERBATIM TRANSCRIPT:\n\n" + verbatim + crmContext },
         ],
       }) });
     const aj = await ar.json().catch(() => ({}));
     if (!ar.ok) throw new Error(`analysis failed (${ar.status}): ${JSON.stringify(aj).slice(0,300)}`);
     const raw = aj?.choices?.[0]?.message?.content || "";
     if (!raw) throw new Error("the analysis returned nothing");
-    parsed = JSON.parse(raw);
+    try {
+      parsed = JSON.parse(raw);
+    } catch (pe) {
+      // A cut-off JSON string (missing closing quote/brace) means the model hit its output cap
+      // mid-reply, not a genuinely malformed response - worth telling apart from other parse bugs.
+      const cutOff = aj?.choices?.[0]?.finish_reason === "length";
+      throw new Error(cutOff
+        ? `analysis reply was cut off (hit the ${16000} token cap) before the JSON closed`
+        : `could not parse the analysis reply as JSON: ${String((pe as any)?.message || pe)}`);
+    }
   } catch (e) {
     /* The transcript is the expensive part and it is already in hand, so it is SAVED even when the
-       judgement fails - left as 'error' so a retry redoes only the analysis. Losing a good verbatim
-       transcript because the second call timed out would be daft. */
+       judgement fails - left as 'error' so a retry redoes only the analysis, reusing this text. */
     const msg = String((e as any)?.message || e);
     checks.push({ check: "analysis", status: "fail", detail: msg });
     return fail("error", "analysis: " + msg, {
-      duration_seconds: seconds, transcript: verbatim, transcript_bn: verbatim,
+      duration_seconds: seconds, transcript: verbatim, transcript_bn: verbatim, gladia_id: engine,
     });
   }
 
@@ -816,9 +766,8 @@ async function processOne(db: DB, row: any, openaiKey: string,
   // The original-language column keeps the raw speech-to-text output, not a re-rendering of it.
   const transcriptBn = verbatim;
 
-  /* Every word means every word: if the laid-out version came back materially shorter than the
-     verbatim transcript it was given, turns were dropped, and that belongs on the row. The verbatim
-     text is kept either way. */
+  /* Every word means every word. A single giant turn and a materially shorter rendering are the same
+     failure wearing different hats, and both belong on the row; the verbatim text is kept either way. */
   if (turns.length === 1 && verbatim.length > 400) {
     checks.push({ check: "transcript_complete", status: "fail",
       detail: `The whole ${verbatim.length} character call came back as a single turn - the speaker labelling failed, though the words themselves are all present.` });
@@ -839,7 +788,7 @@ async function processOne(db: DB, row: any, openaiKey: string,
   /* Does what was heard agree with what the CRM independently knows? The only check here that tests
      CONTENT rather than shape, and the one that exposed the old prompt writing fiction. Informational
      rather than fatal: plenty of agents never say a name, so one mismatch is a reason to look. A RUN
-     where it almost never agrees is the alarm. The name comes from stage 1, which was never told it. */
+     where it almost never agrees is the alarm. The judge was never told the CRM's name. */
   const heardName = String(parsed?.customer_name || "").trim();
   const knownName = String(row.customer_name || "").trim();
   if (heardName && heardName.toLowerCase() !== "none" && knownName) {
@@ -868,11 +817,11 @@ async function processOne(db: DB, row: any, openaiKey: string,
       detail: `${qual.qualification} - ${qual.why}` });
   }
 
-  /* The CRM's name for the lead is authoritative on the record; what was heard on a bad line only
-     fills a gap. The heard name still travels into the check above, so overwriting here hides nothing. */
+  /* The CRM's name for the lead is authoritative on the record; what was heard only fills a gap. The
+     heard name still travels into the check above, so overwriting here hides nothing. */
   const customerName = row.customer_name || (heardName && heardName.toLowerCase() !== "none" ? heardName : null);
   /* The feed's project is where the lead came from, which is not always what the agent pitched - so
-     the project NAMED on the call wins when there is one, and the feed's is the fallback. */
+     the project NAMED in the transcript wins when there is one, and the feed's is the fallback. */
   const namedProject = String(parsed?.project_discussed || "").trim();
   const project = (namedProject && namedProject.toLowerCase() !== "unclear") ? namedProject : (row.business_unit_name || null);
   const aiLost = df?.lost_reason && String(df.lost_reason).toLowerCase() !== "none" ? String(df.lost_reason) : null;
@@ -880,83 +829,71 @@ async function processOne(db: DB, row: any, openaiKey: string,
     : qual.qualification === "Follow-Up" ? (qual.why + (aiLost ? ` (${aiLost})` : ""))
     : (aiLost || qual.why);
 
-  /* STAGE 3 - the agent's record against the call. Skipped entirely when there is nothing to
-     compare, and a failure here never costs the transcript: the row still saves as done, just without
-     a comparison, and has_discrepancy stays NULL meaning "not checked" rather than "fine". */
-  const agentReason = String(row.crm_lost_reason || "").trim();
-  const agentRemarks = String(row.crm_remarks || "").trim();
-  /* The reason is only worth checking where it was asked for: a Lost lead that the call agrees is not
-     qualified. On a Qualified or Follow-Up call the agent's "lost reason" is not in play. */
-  const checkReason = !!agentReason
-    && String(row.crm_status || "").toLowerCase() === "lost"
-    && qual.qualification === "Not Qualified";
-  let discrepancy: Record<string, unknown> | null = null;
-  let hasDiscrepancy: boolean | null = null;
+  /* Does what the CRM's agent recorded agree with what actually happened on the call? Three checks,
+     none fatal to the row - a fail here means "worth a human look", not "this call failed". */
+  const dc = parsed?.discrepancy_check || {};
+  const discrepancy: Check[] = [];
 
-  if (checkReason || agentRemarks) {
-    try {
-      const sides = [
-        "WHAT THE CALL CONTAINS",
-        "Summary: " + String(parsed?.summary_verdict || "(none)"),
-        "Why this lead did not progress, per the call: " + String(reason || "(none given)"),
-        "Outcome: " + String(qual.qualification || "(none)"),
-        "",
-        "WHAT THE AGENT RECORDED",
-        checkReason ? "Lost reason: " + agentReason : "Lost reason: (not applicable)",
-        agentRemarks ? "Remarks: " + agentRemarks : "Remarks: (none)",
-      ].join("\n");
-      const cr = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + openaiKey },
-        body: JSON.stringify({
-          model: analysisModel, temperature: 0,
-          response_format: { type: "json_object" },
-          messages: [{ role: "system", content: COMPARE_PROMPT }, { role: "user", content: sides }],
-        }) });
-      const cj = await cr.json().catch(() => ({}));
-      if (!cr.ok) throw new Error("comparison failed (" + cr.status + ")");
-      const got = JSON.parse(cj?.choices?.[0]?.message?.content || "{}");
-
-      const out: Record<string, unknown> = {};
-      if (checkReason && got?.lost_reason) {
-        out.lost_reason = { agrees: got.lost_reason.agrees !== false,
-                           note: String(got.lost_reason.note || ""),
-                           agent: agentReason, call: reason };
-      }
-      if (agentRemarks && got?.remarks) {
-        out.remarks = { agrees: got.remarks.agrees !== false,
-                        note: String(got.remarks.note || ""),
-                        agent: agentRemarks };
-      }
-      if (Object.keys(out).length) {
-        discrepancy = out;
-        hasDiscrepancy = Object.values(out).some((v: any) => v && v.agrees === false);
-        for (const [kind, v] of Object.entries(out)) {
-          const ok = (v as any).agrees !== false;
-          checks.push({
-            check: kind === "lost_reason" ? "agent_lost_reason_true" : "agent_remarks_true",
-            status: ok ? "pass" : "fail",
-            detail: "The agent's "
-              + (kind === "lost_reason" ? "reason for losing this lead " : "remarks ")
-              + (ok ? "match what the call contains. " : "do NOT match what the call contains. ")
-              + String((v as any).note || "") });
-        }
-      }
-    } catch (e) {
-      /* A failed comparison is not a failed call. The transcript and the judgement stand; only the
-         comparison is missing, and has_discrepancy stays null so it reads as unchecked. */
-      checks.push({ check: "agent_record_compared", status: "skip",
-        detail: "The agent's record could not be compared this time: " + String((e as any)?.message || e) });
-    }
-  } else {
-    checks.push({ check: "agent_record_compared", status: "skip",
-      detail: (agentRemarks || agentReason)
-        ? "Nothing to compare: a lost reason is only checked on a Lost lead the call agrees is not qualified."
-        : "The CRM holds no remarks or lost reason for this call, so there was nothing to compare." });
+  // 1. Lost reason - only meaningful once the call itself is graded Not Qualified, and only when the
+  // CRM actually gave a reason to compare against.
+  if (qual.qualification === "Not Qualified" && row.crm_lost_reason) {
+    const m = dc.lost_reason_match;
+    discrepancy.push({ check: "lost_reason_match", status: m === false ? "fail" : m === true ? "pass" : "skip",
+      detail: dc.lost_reason_note
+        || (m == null ? "The analysis did not return a clear comparison for this one." : "") });
   }
 
+  // 2. Follow-up date - pure date arithmetic against the MOST RECENT earlier call for this same lead
+  // that had a next_follow_up_date on file. Nothing here is an AI judgement.
+  let followupDetail: Check;
+  if (row.lead_id) {
+    const { data: prior } = await db.schema("acc").from("transcriptions")
+      .select("report_date, next_follow_up_date")
+      .eq("source", SOURCE).eq("lead_id", row.lead_id).neq("id", row.id)
+      .not("next_follow_up_date", "is", null)
+      .order("report_date", { ascending: false }).limit(1).maybeSingle();
+    if (prior?.next_follow_up_date) {
+      const expectedIst = new Date(new Date(prior.next_follow_up_date).getTime() + 5.5 * 3600e3)
+        .toISOString().slice(0, 10);
+      const actual = String(row.report_date || "").slice(0, 10);
+      const match = expectedIst === actual;
+      followupDetail = { check: "followup_date_match", status: match ? "pass" : "fail",
+        detail: match
+          ? `This call happened on ${actual}, matching the follow-up date (${expectedIst}) noted after the earlier call.`
+          : `The earlier call for this lead expected a follow-up on ${expectedIst}, but this call happened on ${actual}.` };
+    } else {
+      followupDetail = { check: "followup_date_match", status: "skip",
+        detail: "No earlier call for this lead had a follow-up date on file to check against." };
+    }
+  } else {
+    followupDetail = { check: "followup_date_match", status: "skip", detail: "This call has no lead id." };
+  }
+  discrepancy.push(followupDetail);
+
+  // 3. Remarks - only when the CRM's agent actually typed something to compare the summary against.
+  if (row.crm_remarks) {
+    const m = dc.remarks_match;
+    discrepancy.push({ check: "remarks_match", status: m === false ? "fail" : m === true ? "pass" : "skip",
+      detail: dc.remarks_note
+        || (m == null ? "The analysis did not return a clear comparison for this one." : "") });
+  }
+
+  // 4. Stuck-loop transcription - everything downstream (qualification, mismatch, dashboard
+  // fields) was judged from a garbage transcript, so this row needs a human before anyone trusts
+  // its verdict. Always recorded regardless of the other three, which is why it lives here rather
+  // than only in `checks`.
+  if (degen) {
+    discrepancy.push({ check: "transcript_quality", status: "fail",
+      detail: `Likely a stuck-loop transcription ("${degen.word}" repeated ${degen.count} of `
+        + `${degen.total} words), not a genuine listen - the qualification below is not trustworthy `
+        + `until someone plays the recording.` });
+  }
+
+  const hasDiscrepancy = discrepancy.some((c) => c.status === "fail");
+
   const { error } = await db.schema("acc").from("transcriptions").update({
-    discrepancy, has_discrepancy: hasDiscrepancy,
+    // gladia_id carries WHICH ENGINE produced this row, so a Gemini/ChatGPT comparison can be told
+    // apart afterwards. An old column repurposed rather than a new one added for a temporary need.
     status: "done", attempts, duration_seconds: seconds, gladia_id: engine,
     utterances: turns, transcript: transcriptEn,
     transcript_en: transcriptEn, transcript_bn: transcriptBn,
@@ -967,7 +904,8 @@ async function processOne(db: DB, row: any, openaiKey: string,
     summary_verdict: parsed?.summary_verdict || null, summary: parsed?.summary_verdict || null,
     customer_name: customerName, project,
     mismatch: verdict.mismatch, mismatch_severity: verdict.severity, mismatch_reason: verdict.reason,
-    verification: checks, non_transcribable_reason: null, error_text: null,
+    verification: checks, discrepancy, has_discrepancy: hasDiscrepancy,
+    non_transcribable_reason: null, error_text: null,
     updated_at: new Date().toISOString() }).eq("id", row.id);
 
   if (error) return fail("error", "could not save result: " + error.message, { duration_seconds: seconds });
@@ -976,19 +914,17 @@ async function processOne(db: DB, row: any, openaiKey: string,
            qualification: qual.qualification, turns: turns.length,
            verbatim_chars: verbatim.length,
            per_second: seconds ? Math.round((verbatim.length/seconds)*10)/10 : null,
-           reused_transcript: !!stored, attempts, mismatch: verdict.mismatch,
-           discrepancy: hasDiscrepancy };
+           reused_transcript: !!stored, attempts, mismatch: verdict.mismatch };
 }
 
 /* Put anything worth another go back in the queue before the queue is read, so the ordinary path
    picks it up with no special casing. Deliberately narrow: no_recording and too_short are never
-   retried - there is nothing to fetch in the first, and the second was skipped on purpose to avoid
-   paying to listen to a ring-out. */
+   retried - there is nothing to fetch in the first, and the second was skipped on purpose. */
 async function promoteRetries(db: DB) {
   const after = new Date(Date.now() - RETRY_AFTER_MINUTES * 60e3).toISOString();
   const requeue = { status: "queued", error_text: null, verification: null,
                     non_transcribable_reason: null, updated_at: new Date().toISOString() };
-  let errors = 0, noSpeech = 0;
+  let errors = 0, noSpeech = 0, stuck = 0;
 
   {
     const { data } = await db.schema("acc").from("transcriptions").update(requeue)
@@ -1004,15 +940,39 @@ async function promoteRetries(db: DB) {
       .lt("attempts", MAX_ATTEMPTS_NO_SPEECH).lt("updated_at", after).select("id");
     noSpeech = (data || []).length;
   }
-  return { errors, no_speech: noSpeech };
+  /* A row can be CLAIMED (status set to "processing") and then never finish - the platform kills
+     a call that runs past its own request limit, which a long recording's two-stage transcribe +
+     analyse can do. processOne never got to run its own attempts += 1 or write any status, so
+     without this the row sits in "processing" forever: promoteRetries only ever looked at "error"
+     and "non_transcribable", never this. Attempts is bumped HERE, on the way back to the queue,
+     precisely because the dead invocation never got the chance to. */
+  {
+    const { data: staleRows } = await db.schema("acc").from("transcriptions")
+      .select("id, attempts")
+      .eq("source", SOURCE).eq("status", "processing")
+      .not("recording_url", "is", null).is("deleted_at", null)
+      .lt("updated_at", after);
+    for (const r of (staleRows || [])) {
+      const attempts = Number((r as any).attempts || 0) + 1;
+      const giveUp = attempts >= MAX_ATTEMPTS_ERROR;
+      await db.schema("acc").from("transcriptions").update(giveUp
+        ? { status: "error", attempts,
+            error_text: `stuck mid-run and never finished [gave up after ${attempts} tries]`,
+            updated_at: new Date().toISOString() }
+        : { status: "queued", attempts, error_text: null, verification: null,
+            updated_at: new Date().toISOString() }
+      ).eq("id", (r as any).id);
+      stuck++;
+    }
+  }
+  return { errors, no_speech: noSpeech, stuck };
 }
 
 async function doWork(db: DB, limit: number, openaiKey: string,
                       sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL,
                       engine = "chatgpt", geminiKey = "", geminiModel = GEMINI_MODEL) {
   const retried = await promoteRetries(db);
-  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, "
-    + "attempts, transcript, crm_lost_reason, crm_remarks, next_follow_up_date";
+  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, attempts, transcript, crm_lost_reason, crm_remarks, next_follow_up_date";
   const { data: queue, error } = await db.schema("acc").from("transcriptions").select(cols)
     .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null)
     .order("id", { ascending: true }).limit(limit);
@@ -1071,7 +1031,7 @@ Deno.serve(async (req: Request) => {
     authorized = !!data?.user;
   }
   if (!authorized) return j({ error: "unauthorized" }, 401);
-  if (!OPENAI_KEY) return j({ error: "CHATGPT_API_KEY not configured in Secrets - the analysis stage needs it" }, 500);
+  if (!OPENAI_KEY) return j({ error: "CHATGPT_API_KEY not configured in Secrets" }, 500);
 
   let body: any = {};
   try { body = await req.json(); } catch { /* empty body is fine */ }
@@ -1100,6 +1060,7 @@ Deno.serve(async (req: Request) => {
   const reqAnalysis = String(body.analysis_model || "").trim();
   if (reqAnalysis && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqAnalysis)) return j({ error: "that does not look like a model name" }, 400);
   const analysisModel = reqAnalysis || ANALYSIS_MODEL;
+  if (engine === "gemini" && !GEMINI_KEY) return j({ error: "GEMINI_API_KEY not configured in Secrets" }, 500);
 
   try {
     if (action === "status") {
@@ -1113,13 +1074,17 @@ Deno.serve(async (req: Request) => {
       const { data: last } = await db.schema("acc").from("lost_call_sync_runs")
         .select("*").order("created_at", { ascending: false }).limit(1).maybeSingle();
       return j({ ok: true, counts, last_run: last || null,
-                 transcriber: STT_MODEL, analyst: ANALYSIS_MODEL });
+                 transcriber: STT_MODEL, gemini: GEMINI_MODEL, analyst: ANALYSIS_MODEL });
     }
     if (action === "retry") {
       const id = Number(body.id);
       if (!id) return j({ error: "missing id" }, 400);
+      /* A retry asked for by hand resets the counter: the automatic cap exists to stop the machine
+         looping on its own, not to refuse a person who has looked at the call and wants another go.
+         The transcript is deliberately NOT cleared - reusing it is the point. */
       const { data, error } = await db.schema("acc").from("transcriptions")
-        .update({ status: "queued", error_text: null, verification: null,
+        .update({ status: "queued", attempts: 0, error_text: null, verification: null,
+                  non_transcribable_reason: null,
                   mismatch: null, mismatch_severity: null, mismatch_reason: null,
                   updated_at: new Date().toISOString() })
         .eq("id", id).not("recording_url", "is", null).select("id, status").maybeSingle();
