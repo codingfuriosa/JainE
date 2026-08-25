@@ -3478,8 +3478,13 @@
           +'</div>';
         } else {
         const parts=String(value||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+        // wfAmtSlots reads {k,v} pairs, not bare strings — passing the strings directly left
+        // p.k/p.v undefined for every slot, so a saved figure rendered as a blank box the moment
+        // there was one to show (a brand-new blank entry looked fine only because blank was
+        // already the right answer either way).
+        const pairs=(parts.length?parts:['']).map(function(v){ return {k:'', v:v}; });
         valueHtml='<div class="wf-amt" data-ph="'+esc2(placeholder)+'">'
-          +'<div class="wf-amt-box">'+wfAmtSlots(parts.length?parts:[''])+'</div>'
+          +'<div class="wf-amt-box">'+wfAmtSlots(pairs)+'</div>'
           +'<input type="hidden" class="wf-evt-value" value="'+esc2(parts.join(', '))+'">'
         +'</div>';
         }
