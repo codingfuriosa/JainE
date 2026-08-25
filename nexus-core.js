@@ -11229,9 +11229,32 @@ VIEWS.organic=async function(v,seg){
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
-  const tabs=['All Calls','Folders','Deleted'];
+  const tabs=['All Calls','Folders','Deleted','Discrepancies','Compilation'];
   const ti=mTab(seg,tabs.length);
   const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
+  if(ti===3){
+    const rows=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&(r.has_discrepancy||r.status==='error'||r.status==='no_recording');});
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
+      +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
+    return;
+  }
+  if(ti===4){
+    const all=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
+    const groups={};
+    all.forEach(function(r){ (groups[r.lead_id]=groups[r.lead_id]||[]).push(r); });
+    const leads=Object.keys(groups).map(function(id){
+      const list=groups[id].slice().sort(function(a,b){return new Date(a.report_date||a.created_at)-new Date(b.report_date||b.created_at);});
+      return {leadId:id, rows:list};
+    }).sort(function(a,b){
+      const la=a.rows[a.rows.length-1], lb=b.rows[b.rows.length-1];
+      return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
+    });
+    const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+      +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
+    return;
+  }
   if(ti===2){
     const rows=await trFetchDeleted(true);
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
@@ -11256,7 +11279,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
     +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn" onclick="trDownloadList()"><i class="fa-solid fa-download"></i> Download</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="9"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
+    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="10"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
@@ -11272,10 +11295,10 @@ function trRenderList(){
   if(kh)kh.innerHTML=trKpisHtml(rows);
   trRenderSelBar();
   const host=$('trRows');if(!host)return;
-  if(!all.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
-  if(TR_ADD_TARGET&&!rows.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>Every call is already in "'+esc(TR_ADD_TARGET)+'"</div><button class="btn btn-sm" style="margin-top:12px" onclick="trDoneAddTarget()">Done, back to folder</button></div></td></tr>';return;}
+  if(!all.length){host.innerHTML='<tr><td colspan="10"><div class="empty" style="padding:34px"><i class="fa-solid fa-microphone-lines"></i><div>No calls yet</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload a recording</button></div></td></tr>';return;}
+  if(TR_ADD_TARGET&&!rows.length){host.innerHTML='<tr><td colspan="10"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>Every call is already in "'+esc(TR_ADD_TARGET)+'"</div><button class="btn btn-sm" style="margin-top:12px" onclick="trDoneAddTarget()">Done, back to folder</button></div></td></tr>';return;}
   const filtered=trApplyFilter(rows);
-  if(!filtered.length){host.innerHTML='<tr><td colspan="8"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter'+((TR_DATE_FROM||TR_DATE_TO)?' / date range':'')+'</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button> <button class="btn btn-sm" style="margin-top:12px" onclick="trClearDateRange()">Clear dates</button></div></td></tr>';return;}
+  if(!filtered.length){host.innerHTML='<tr><td colspan="10"><div class="empty" style="padding:34px"><i class="fa-solid fa-filter"></i><div>No calls match this filter'+((TR_DATE_FROM||TR_DATE_TO)?' / date range':'')+'</div><button class="btn btn-sm" style="margin-top:12px" onclick="trSetFilter(\'all\')">Clear filter</button> <button class="btn btn-sm" style="margin-top:12px" onclick="trClearDateRange()">Clear dates</button></div></td></tr>';return;}
   host.innerHTML=trRowsBodyHtml(trSortPinned(filtered),'list');
 }
 // Pinned calls float to the top, ordered by pin_rank (drag-and-drop sets this — see
@@ -11449,6 +11472,7 @@ function trRowHtml(r,mode){
     +'<td><div style="display:flex;align-items:center;gap:8px;max-width:280px">'+pinIcon+'<i class="fa-solid fa-file-audio" style="color:#0d9488;font-size:15px;flex-shrink:0"></i><div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div>'+nameLine+'</div></div></td>'
     +'<td>'+trQualTag(r)+(r.status==='error'&&r.error_text?'<div style="font-size:11px;color:#dc2626;margin-top:3px" title="'+esc(r.error_text)+'">'+esc(String(r.error_text).slice(0,60))+'</div>':'')+'</td>'
     +'<td>'+trCrmTag(r.crm_status)+(r.mismatch?'<div style="font-size:10.5px;color:#dc2626;margin-top:3px;font-weight:600" title="'+esc(r.mismatch_reason||'')+'"><i class="fa-solid fa-triangle-exclamation"></i> disagrees</div>':'')+'</td>'
+    +'<td>'+trDateReasonHtml(r)+'</td>'
     +'<td style="max-width:260px"><div title="'+(r.reason?esc(r.reason):'')+'" style="font-size:12.5px;color:var(--slate);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'+(r.reason?esc(r.reason):'—')+'</div>'+(r.project&&r.project!=='Unclear'?'<div style="font-size:11px;color:#0d9488;font-weight:600;margin-top:2px">'+esc(r.project)+'</div>':'')+'</td>'
     +'<td>'+trLangTags(r.languages)+'</td>'
     +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
@@ -11501,15 +11525,99 @@ function trFolderCallsHtml(rows,name){
     +'<button class="btn btn-sm" onclick="trFolderDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete folder</button>'
     +(list.length?'<button class="btn btn-sm" onclick="trDownloadFolder()"><i class="fa-solid fa-download"></i> Download</button>':'')+'</div>'
     +'<div class="page-head" style="padding:0 0 10px"><h1 style="font-size:17px"><i class="fa-solid fa-folder" style="color:#0d9488"></i> '+esc(name)+'</h1></div>'
-    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
-    +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
+    +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>'
+    +'<tbody id="trFolderRowsBody">'+(list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="9"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>')+'</tbody></table></div></div>';
 }
+
+/* ---------- Discrepancies (CRM lost/followup calls only) ---------- */
+// One row per call that's worth a human look: a real disagreement between the CRM's own record
+// and what the call actually contains, or the call simply couldn't be checked at all (failed /
+// no recording was ever supplied).
+function trDiscrepancyRowHtml(r){
+  const fname=r.file_name||'Recording';
+  const openAttr=(r.status==='done')?' onclick="navTo(\'transcription/view/'+r.id+'\')" style="cursor:pointer"':'';
+  let whatWrong;
+  if(r.status==='error'){
+    whatWrong='<span style="color:#dc2626">Transcription failed'+(r.error_text?': '+esc(String(r.error_text).slice(0,90)):'')+'</span>';
+  } else if(r.status==='no_recording'){
+    whatWrong='<span style="color:#dc2626">No recording was available from the CRM for this call.</span>';
+  } else {
+    const fails=(Array.isArray(r.discrepancy)?r.discrepancy:[]).filter(function(c){return c.status==='fail';});
+    whatWrong=fails.length
+      ? fails.map(function(c){return '<div style="margin-bottom:4px"><b>'+esc(String(c.check||'').replace(/_/g,' '))+':</b> '+esc(c.detail||'')+'</div>';}).join('')
+      : '<span style="color:var(--slate)">—</span>';
+  }
+  return '<tr'+openAttr+'>'
+    +'<td><div style="font-weight:600;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(fname)+'">'+esc(fname)+'</div></td>'
+    +'<td>'+trQualTag(r)+'</td>'
+    +'<td>'+trCrmTag(r.crm_status)+'</td>'
+    +'<td>'+trDateReasonHtml(r)+'</td>'
+    +'<td style="font-size:12.5px;max-width:360px">'+whatWrong+'</td>'
+  +'</tr>';
+}
+
+/* ---------- Compilation (CRM lost/followup calls, grouped by lead_id) ---------- */
+// The SAME criteria/qualification rule the backend uses (acc functions/transcription-sync,
+// qualifyFrom) mirrored client-side, run over the UNION of every call's criteria for one lead —
+// "the whole", not just whatever the most recent call happened to show.
+const TR_CRIT_KEYS=['site_visit_interested','location_match','bhk_match','budget_match','ready_move_match','follow_up_requested'];
+function trCombinedQualify(rows){
+  const merged={}; TR_CRIT_KEYS.forEach(function(k){merged[k]=false;});
+  (rows||[]).forEach(function(r){ const c=r.criteria||{}; TR_CRIT_KEYS.forEach(function(k){ if(c[k]===true)merged[k]=true; }); });
+  let qualification='Not Qualified';
+  if(merged.site_visit_interested) qualification='Qualified';
+  else if(merged.location_match&&merged.bhk_match&&merged.budget_match&&merged.ready_move_match) qualification='Qualified';
+  else if(merged.follow_up_requested) qualification='Follow-Up';
+  return {qualification:qualification, criteria:merged};
+}
+function trCompGridHtml(leads){
+  if(!leads.length)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-users"></i><div>No CRM lost/followup calls yet</div></div>';
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:16px">'+leads.map(function(g){
+    const last=g.rows[g.rows.length-1];
+    const nm=last.customer_name||('Lead '+g.leadId);
+    const combined=trCombinedQualify(g.rows);
+    const o=trOutcome(combined.qualification);
+    return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/4/'+encodeURIComponent(g.leadId)+'\')">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+        +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nm)+'</div>'
+        +'<div style="font-size:12px;color:var(--slate);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(last.business_unit_name||'')+'</div></div>'
+        +(o?'<span class="tag '+o.tag+'" style="white-space:nowrap;flex-shrink:0"><i class="fa-solid '+o.icon+'"></i> '+esc(combined.qualification)+'</span>':'')
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:10px">'+g.rows.length+' call'+(g.rows.length===1?'':'s')+' · lead #'+esc(g.leadId)+'</div>'
+    +'</div>';
+  }).join('')+'</div>';
+}
+function trCompDetailHtml(leads,leadId){
+  const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
+  if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/4\')">Back</button></div>';
+  const last=g.rows[g.rows.length-1];
+  const combined=trCombinedQualify(g.rows);
+  const o=trOutcome(combined.qualification);
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>';
+  const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
+  const banner2=o?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(combined.qualification)+'</span><span style="margin-left:10px;font-size:12.5px;color:var(--slate)">combined across all '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</span></div>'):'';
+  const criteriaCard='<div class="card card-pad" style="margin-bottom:16px"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Combined qualification checklist</div>'+trCriteriaHtml({criteria:combined.criteria})+'</div>';
+  const days=g.rows.map(function(r,idx){
+    const dt=r.report_date?fmtDate(r.report_date):fmtDate(r.created_at);
+    return '<div style="padding:12px 0;'+(idx?'border-top:1px dashed var(--line)':'')+'">'
+      +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+        +'<div style="font-weight:700;font-size:12.5px;color:#0d9488;text-transform:uppercase;letter-spacing:.03em">'+esc(dt)+'</div>'
+        +trQualTag(r)+trCrmTag(r.crm_status)
+        +(r.status==='done'?'<button class="btn btn-sm btn-ghost" onclick="navTo(\'transcription/view/'+r.id+'\')">Open</button>':'')
+      +'</div>'
+      +(r.summary?'<div style="font-size:13.5px;margin-top:8px;line-height:1.6">'+esc(r.summary)+'</div>':'<div style="font-size:12.5px;color:var(--slate);margin-top:8px">No summary for this call.</div>')
+      +(r.mismatch?'<div style="font-size:11.5px;color:#dc2626;margin-top:6px"><i class="fa-solid fa-triangle-exclamation"></i> '+esc(r.mismatch_reason||'')+'</div>':'')
+    +'</div>';
+  }).join('');
+  return header+banner2+criteriaCard+'<div class="card card-pad"><div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Day-wise history</div>'+days+'</div>';
+}
+
 // Keeps the folder drill-in list (if open) in sync after an optimistic delete/retry/remove — a
 // no-op when that view isn't currently on screen, same guard pattern as trRenderList's #trRows check.
 function trRenderFolderRows(){
   const host=$('trFolderRowsBody');if(!host||!TR_FOLDER)return;
   const list=trFolderRows(TR_ROWS||[],TR_FOLDER);
-  host.innerHTML=list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="7"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>';
+  host.innerHTML=list.length?trRowsBodyHtml(trSortPinned(list),'folder'):'<tr><td colspan="9"><div class="empty" style="padding:34px"><i class="fa-solid fa-folder-open"></i><div>No calls in this folder yet</div></div></td></tr>';
 }
 // "Add calls" takes you to the All Calls log (tab 0) in a targeted mode: a banner up top
 // says which folder you're adding to, and the selection bar's action adds straight into it —
@@ -11977,6 +12085,16 @@ function trCrmTag(v){
   if(!s)return '<span style="color:var(--slate)">—</span>';
   const t=TR_CRM_TAGS[s]||{bg:'#e2e8f0',ink:'#334155'};
   return '<span class="badge" style="background:'+t.bg+';color:'+t.ink+';white-space:nowrap">'+esc(s)+'</span>';
+}
+// The CRM sends a next-followup date on an open lead and a lost reason on a closed one — whichever
+// applies to this row is what "Date / Reason" shows, straight from the feed, not the AI's own read.
+function trDateReasonHtml(r){
+  if(r.crm_status==='In Followup'&&r.next_follow_up_date){
+    const d=new Date(r.next_follow_up_date);
+    if(!isNaN(d))return '<span style="font-size:12.5px">'+esc(d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}))+'</span>';
+  }
+  if(r.crm_status==='Lost'&&r.crm_lost_reason)return '<span style="font-size:12.5px">'+esc(r.crm_lost_reason)+'</span>';
+  return '<span style="color:var(--slate)">—</span>';
 }
 
 // The caller, by number. Falls back to whichever of the two columns the row actually carries.
