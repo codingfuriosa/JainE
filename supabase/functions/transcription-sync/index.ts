@@ -710,6 +710,10 @@ async function processOne(db: DB, row: any, openaiKey: string,
         model: analysisModel,
         temperature: 0,
         response_format: { type: "json_object" },
+        // The reply duplicates the transcript twice over (original + English) plus everything
+        // else, so a long call's JSON can run long. Left unset, a handful of calls a night came
+        // back with the closing quote missing mid-string - the model just ran out of budget.
+        max_tokens: 16000,
         messages: [
           { role: "system", content: ANALYSE_PROMPT },
           { role: "user", content: "VERBATIM TRANSCRIPT:\n\n" + verbatim + crmContext },
@@ -719,7 +723,16 @@ async function processOne(db: DB, row: any, openaiKey: string,
     if (!ar.ok) throw new Error(`analysis failed (${ar.status}): ${JSON.stringify(aj).slice(0,300)}`);
     const raw = aj?.choices?.[0]?.message?.content || "";
     if (!raw) throw new Error("the analysis returned nothing");
-    parsed = JSON.parse(raw);
+    try {
+      parsed = JSON.parse(raw);
+    } catch (pe) {
+      // A cut-off JSON string (missing closing quote/brace) means the model hit its output cap
+      // mid-reply, not a genuinely malformed response - worth telling apart from other parse bugs.
+      const cutOff = aj?.choices?.[0]?.finish_reason === "length";
+      throw new Error(cutOff
+        ? `analysis reply was cut off (hit the ${16000} token cap) before the JSON closed`
+        : `could not parse the analysis reply as JSON: ${String((pe as any)?.message || pe)}`);
+    }
   } catch (e) {
     /* The transcript is the expensive part and it is already in hand, so it is SAVED even when the
        judgement fails - left as 'error' so a retry redoes only the analysis, reusing this text. */
