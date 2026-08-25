@@ -1396,8 +1396,17 @@
       const uniq=parts.filter(function(x,i){ return parts.indexOf(x)===i; });
       return uniq.length?uniq.join(', '):String(v||'');
     };
+    // Whichever field is flagged upiScannerMemory (Reimbursement's "QR Code") is an attachment,
+    // not text — shown here as an openable chip, same as the table's own Attachment column,
+    // rather than printing its raw s3: path like every other common field's value.
+    const qrLabel=(function(){
+      const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+      const f=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+      return f?f.label:null;
+    })();
     const head=d.common.length
       ? '<div class="wf-dw-common">'+d.common.map(function(c){
+          if(qrLabel && c.k===qrLabel) return '<span><b>'+esc2(c.k)+'</b> '+wfDayAttHtml(c.v)+'</span>';
           return '<span><b>'+esc2(c.k)+'</b> '+esc2(oneLine(c.v))+'</span>'; }).join('')+'</div>'
       : '';
     // ---- table (wide) ----
@@ -2731,7 +2740,7 @@
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
-    const pinned=wfOriginalAttachmentHtml(c,flow);
+    const pinned=wfOriginalAttachmentHtml(c,flow)+wfQrCodeAttachmentHtml(c,flow);
     /* The owner, or whoever it has been sent back to — not the workflow-management admins, and
        only while it is still moving; once it is Done or Cancelled it is final. Mirrors
        acc.wf_update_instance, which is what actually enforces this. */
@@ -4182,6 +4191,22 @@
     if(!paths.length) return '';
     return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment'+(paths.length>1?'s':'')+'</div>'+wfAttachmentsRowHtml(paths.map(function(p){return {storage_path:p};}))+'</div>';
   }
+  // Whichever field is flagged upiScannerMemory (Reimbursement's "QR Code") is shown the same way
+  // as the Original attachment above — a real image chip, not just the "file attached" text every
+  // other detail field gets — since the whole point of it is to be looked at or scanned. Unlike
+  // Attachment this field is always `common` (one per instance, never per entry), so there's no
+  // day-wise skip to mirror here.
+  function wfQrCodeAttachmentHtml(c,flow){
+    const det=Array.isArray(c&&c.trigger_details)?c.trigger_details:[];
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    if(!qrField) return '';
+    const f=det.find(function(d){ return d&&eq(d.label,qrField.label)&&d.value; });
+    if(!f) return '';
+    const paths=wfSplitSets(f.value).filter(function(p){ return String(p).trim().indexOf('s3:')===0; });
+    if(!paths.length) return '';
+    return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-qrcode"></i> '+esc2(qrField.label)+(paths.length>1?'s':'')+'</div>'+wfAttachmentsRowHtml(paths.map(function(p){return {storage_path:p};}))+'</div>';
+  }
 
   function wfUpdateHtml(u,atts){
     const attHtml=wfAttachmentsRowHtml(atts);
@@ -4287,7 +4312,7 @@
         +'<div class="tp-f"><div class="k">Time taken</div><div class="v">'+takenTxt+'</div></div>'
       +'</div></div>'
       +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfNounOf(flow).lc+' as it moves to the next person, and rejection reasons appear here too.')+'</h3>'
-        +wfOriginalAttachmentHtml(caseRow,flow)
+        +wfOriginalAttachmentHtml(caseRow,flow)+wfQrCodeAttachmentHtml(caseRow,flow)
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
         +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
