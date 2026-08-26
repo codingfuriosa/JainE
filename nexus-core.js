@@ -251,15 +251,27 @@ const NAV=[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
 ];
-const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';
+const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
 const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
 function navIcon(id){return ICONS[id]||'fa-square';}
 function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return ss;}const ss=new Set(['dashboard','settings','network']);return ss;}
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>!allow||allow.has(it.id))})).filter(g=>g.items.length);if(state.super)groups=[{group:'Administration',items:[{id:'security',label:'Control Panel',icon:'fa-sliders'}]}].concat(groups);return groups;}
-function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
+/* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
+   superadmin-only: the Systems department are the people who actually read it, and they are not
+   superadmins. So it is granted the ordinary way — 'usability' in a person's modules — and the
+   Administration group appears for anyone holding either of the two. The database enforces the same
+   rule inside erp_usability_report(), which is what actually protects the numbers; this only decides
+   whether the menu entry is worth drawing. */
+function hasUsability(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('usability')!==-1; }
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>!allow||allow.has(it.id))})).filter(g=>g.items.length);
+  const admItems=[];
+  if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
+  if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
+  if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
+  return groups;}
+function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -7358,6 +7370,169 @@ function mTable(cols,rows){return '<div class="card qc-table-card" style="paddin
 function mCard(title,inner){return '<div class="card card-pad"><div class="sec-title" style="margin:0 0 12px">'+esc(title)+'</div>'+inner+'</div>';}
 function mHead(icon,color,title){return '<div class="page-head"><div><h1><i class="fa-solid '+icon+'" style="color:'+color+'"></i> '+esc(title)+'</h1></div></div>';}
 function mTab(seg,n){let t=parseInt(seg&&seg[0]);return (isNaN(t)||t<0||t>=n)?0:t;}
+
+/* ================================ USABILITY ================================
+   Which parts of the portal are actually being used, and by whom. Systems and the Administrator
+   only — enforced in the database by erp_usability_report(), which refuses anyone else outright;
+   everything here is presentation on top of that one call. */
+const USB_BANDS=[
+  ['Very Active','#15803d','#dcfce7'],
+  ['Active',     '#0369a1','#e0f2fe'],
+  ['Less',       '#b45309','#fef3c7'],
+  ['Inactive',   '#64748b','#f1f5f9']
+];
+function usbBandStyle(b){ const f=USB_BANDS.find(function(x){return x[0]===b;})||USB_BANDS[3]; return {ink:f[1],bg:f[2]}; }
+const USB={preset:'30d',from:null,to:null,email:'',rows:null,people:null};
+/* The presets the user asked for, resolved against IST because a "month" is a month where the
+   people using this actually are. Kept as pure date maths so the same range is produced whatever
+   the browser's own timezone happens to be set to. */
+function usbRange(preset){
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
+  const iso=function(dt){ return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); };
+  if(preset==='week'){ const dow=(now.getDay()+6)%7; return {from:iso(new Date(y,m,d-dow)), to:iso(now)}; }   // Monday-start
+  if(preset==='month'){ return {from:iso(new Date(y,m,1)), to:iso(now)}; }
+  if(preset==='prev'){ return {from:iso(new Date(y,m-1,1)), to:iso(new Date(y,m,0))}; }                        // day 0 = last of prev
+  return {from:iso(new Date(y,m,d-29)), to:iso(now)};                                                          // past 30 days
+}
+function usbCurrentRange(){
+  if(USB.preset==='custom'&&USB.from&&USB.to) return {from:USB.from,to:USB.to};
+  return usbRange(USB.preset);
+}
+async function usbLoad(){
+  const r=usbCurrentRange();
+  try{
+    const {data,error}=await sb.rpc('erp_usability_report',{p_from:r.from,p_to:r.to,p_email:USB.email||null});
+    if(error)throw error;
+    USB.rows=data||[];
+  }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
+  if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
+}
+function usbControlsHtml(){
+  const r=usbCurrentRange();
+  const opt=function(v,l){ return '<option value="'+v+'"'+(USB.preset===v?' selected':'')+'>'+esc(l)+'</option>'; };
+  const ppl=(USB.people||[]).slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));});
+  return '<div class="card card-pad" style="margin-top:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
+    +'<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">Period</label>'
+      +'<select class="inp" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:170px">'
+        +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')+opt('custom','Custom range…')
+      +'</select></div>'
+    +(USB.preset==='custom'
+      ? '<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">From</label><input type="date" class="inp" id="usbFrom" value="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
+       +'<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">To</label><input type="date" class="inp" id="usbTo" value="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
+      : '')
+    +'<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">Person</label>'
+      +'<select class="inp" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:210px">'
+        +'<option value="">Everyone</option>'
+        +ppl.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
+      +'</select></div>'
+    +'<div style="margin-left:auto;font-size:12px;color:var(--slate)">'+esc(fmtDate(r.from))+' → '+esc(fmtDate(r.to))+'</div>'
+  +'</div>';
+}
+window.usbSetPreset=function(v){ USB.preset=v; if(v==='custom'){ const r=usbRange('30d'); USB.from=USB.from||r.from; USB.to=USB.to||r.to; } renderPage(); };
+window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
+window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
+// One bar showing how a set of features splits across the four bands.
+function usbBandBar(rows){
+  const total=rows.length||1;
+  return '<div style="display:flex;height:8px;border-radius:5px;overflow:hidden;background:#f1f5f9">'
+    +USB_BANDS.map(function(b){
+        const n=rows.filter(function(r){return r.band===b[0];}).length;
+        return n?'<div title="'+esc(b[0]+': '+n)+'" style="width:'+(n*100/total)+'%;background:'+b[1]+'"></div>':'';
+      }).join('')
+  +'</div>';
+}
+function usbBandChips(rows){
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+    +USB_BANDS.map(function(b){
+        const n=rows.filter(function(r){return r.band===b[0];}).length;
+        const s=usbBandStyle(b[0]);
+        return '<span class="badge" style="background:'+s.bg+';color:'+s.ink+'">'+esc(b[0])+' '+n+'</span>';
+      }).join('')
+  +'</div>';
+}
+function usbModuleGridHtml(){
+  const rows=USB.rows||[];
+  const by={};
+  rows.forEach(function(r){ (by[r.module_id]=by[r.module_id]||{label:r.module_label,rows:[]}).rows.push(r); });
+  const mods=Object.keys(by).sort(function(a,b){ return by[a].label.localeCompare(by[b].label); });
+  if(!mods.length)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-chart-simple"></i><div>No features registered yet</div></div>';
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-top:16px">'
+    +mods.map(function(id){
+      const g=by[id], uses=g.rows.reduce(function(a,r){return a+Number(r.uses||0);},0);
+      const used=g.rows.filter(function(r){return Number(r.uses||0)>0;}).length;
+      return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'usability/'+encodeURIComponent(id)+'\')">'
+        +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'
+          +'<div style="font-weight:700;font-size:14px">'+esc(g.label)+'</div>'
+          +'<div style="font-size:18px;font-weight:800;color:'+(uses?'#0f766e':'var(--slate)')+'">'+uses.toLocaleString('en-IN')+'</div>'
+        +'</div>'
+        +'<div style="font-size:12px;color:var(--slate);margin:2px 0 10px">'+used+' of '+g.rows.length+' features used · '+uses.toLocaleString('en-IN')+' use'+(uses===1?'':'s')+'</div>'
+        +usbBandBar(g.rows)+usbBandChips(g.rows)
+      +'</div>';
+    }).join('')
+  +'</div>';
+}
+function usbModuleDetailHtml(moduleId){
+  const rows=(USB.rows||[]).filter(function(r){return String(r.module_id)===String(moduleId);});
+  if(!rows.length)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Module not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'usability\')">Back</button></div>';
+  const label=rows[0].module_label;
+  const tabs=[]; rows.forEach(function(r){ if(tabs.indexOf(r.tab)===-1)tabs.push(r.tab); });
+  const head='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-chart-simple" style="color:#7c3aed"></i> '+esc(label)+'</h1>'
+    +'<p>'+rows.length+' features across '+tabs.length+' tab'+(tabs.length===1?'':'s')+'</p></div>'
+    +'<button class="btn btn-sm" onclick="navTo(\'usability\')"><i class="fa-solid fa-arrow-left"></i> All modules</button></div>';
+  const body=tabs.map(function(tb){
+    const list=rows.filter(function(r){return r.tab===tb;});
+    return '<div class="card" style="margin-bottom:14px">'
+      +'<div class="card-pad" style="padding-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-folder-open" style="color:#7c3aed"></i> '+esc(tb)+'</div>'
+        +'<div style="font-size:12px;color:var(--slate)">'+list.reduce(function(a,r){return a+Number(r.uses||0);},0).toLocaleString('en-IN')+' uses</div>'
+      +'</div></div>'
+      +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr>'
+        +'<th>Feature</th><th style="width:90px">Uses</th><th style="width:90px">People</th><th style="width:130px">Last used</th><th style="width:120px">Activity</th>'
+      +'</tr></thead><tbody>'
+      +list.map(function(r){
+          const s=usbBandStyle(r.band);
+          return '<tr><td>'+esc(r.feature)+'</td>'
+            +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
+            +'<td>'+Number(r.users||0)+'</td>'
+            +'<td style="color:var(--slate);font-size:12px">'+(r.last_used?esc(fmtDate(r.last_used)):'—')+'</td>'
+            +'<td><span class="badge" style="background:'+s.bg+';color:'+s.ink+';white-space:nowrap">'+esc(r.band)+'</span></td></tr>';
+        }).join('')
+      +'</tbody></table></div></div>';
+  }).join('');
+  return head+usbControlsHtml()+body;
+}
+VIEWS.usability=async function(v,seg){
+  setCrumb(['Administration','Usability']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  await usbLoad();
+  if(USB.rows===null){
+    v.innerHTML=mHead('fa-chart-simple','#7c3aed','Usability')
+      +'<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-lock"></i>'
+      +'<div>'+esc(USB.err||'Could not load usage')+'</div></div>';
+    return;
+  }
+  const moduleId=seg&&seg[0]?decodeURIComponent(seg[0]):null;
+  if(moduleId){ v.innerHTML=mHead('fa-chart-simple','#7c3aed','Usability')+usbModuleDetailHtml(moduleId); return; }
+  const rows=USB.rows;
+  const totalUses=rows.reduce(function(a,r){return a+Number(r.uses||0);},0);
+  const used=rows.filter(function(r){return Number(r.uses||0)>0;}).length;
+  /* Said plainly rather than left to be inferred from a screen of zeros: until the portal reports
+     what people click, every feature here reads Inactive because nothing has been recorded, which
+     is not the same as nobody using it. */
+  const notice=totalUses===0
+    ? '<div class="card card-pad" style="margin-top:14px;background:#fffbeb;border-color:#fde68a;font-size:13.5px">'
+      +'<i class="fa-solid fa-circle-info" style="color:#b45309"></i> <b>No usage has been recorded yet.</b> '
+      +'Every feature reads Inactive because nothing has been logged — not because nobody is using it. '
+      +'The catalogue below is complete and the counts will fill in once the portal starts reporting what people open.</div>'
+    : '';
+  v.innerHTML=mHead('fa-chart-simple','#7c3aed','Usability')
+    +'<div class="card card-pad" style="margin-top:14px;background:#faf5ff;border-color:#e9d5ff;font-size:13.5px">'
+      +'<i class="fa-solid fa-chart-simple" style="color:#7c3aed"></i> Which parts of the portal are actually being used. '
+      +'<b>'+used+'</b> of <b>'+rows.length+'</b> features used in this period · <b>'+totalUses.toLocaleString('en-IN')+'</b> total uses.</div>'
+    +notice
+    +usbControlsHtml()
+    +usbModuleGridHtml();
+};
 function mSoon(name){return '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-regular fa-clipboard"></i><div style="font-weight:600;color:var(--ink)">'+esc(name)+'</div><p style="max-width:420px;margin:6px auto 0">This section is being built to match the reference.</p></div>';}
 
 VIEWS.gtd=function(v,seg){
