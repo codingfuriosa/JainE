@@ -7382,7 +7382,10 @@ const USB_BANDS=[
   ['Inactive',   '#64748b','#f1f5f9']
 ];
 function usbBandStyle(b){ const f=USB_BANDS.find(function(x){return x[0]===b;})||USB_BANDS[3]; return {ink:f[1],bg:f[2]}; }
-const USB={preset:'30d',from:null,to:null,email:'',rows:null,people:null};
+/* Opens on Custom, with the last 30 days already filled in. The dates are therefore ALWAYS on
+   screen, which is the point: the bar used to grow and shrink as Custom was picked and unpicked,
+   shoving the Person dropdown sideways under the pointer. */
+const USB={preset:'custom',from:null,to:null,email:'',rows:null,people:null};
 /* The presets the user asked for, resolved against IST because a "month" is a month where the
    people using this actually are. Kept as pure date maths so the same range is produced whatever
    the browser's own timezone happens to be set to. */
@@ -7434,10 +7437,11 @@ function usbControlsHtml(){
       +'<select class="sel" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:180px">'
         +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')+opt('custom','Custom range…')
       +'</select></div>'
-    +(USB.preset==='custom'
-      ? '<div class="usb-f"><label for="usbFrom">From</label><input type="date" id="usbFrom" value="'+esc(r.from)+'" max="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
-       +'<div class="usb-f"><label for="usbTo">To</label><input type="date" id="usbTo" value="'+esc(r.to)+'" min="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
-      : '')
+    /* Always rendered, never conditionally. They show whatever the chosen preset works out to, and
+       editing either one simply becomes the custom range — so the row never changes width and a
+       preset stays readable as actual dates rather than a word. */
+    +'<div class="usb-f"><label for="usbFrom">From</label><input type="date" id="usbFrom" value="'+esc(r.from)+'" max="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
+    +'<div class="usb-f"><label for="usbTo">To</label><input type="date" id="usbTo" value="'+esc(r.to)+'" min="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
     +'<div class="usb-f"><label for="usbPerson">Person</label>'
       +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
         +'<option value="">Everyone</option>'
@@ -7446,7 +7450,9 @@ function usbControlsHtml(){
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
   +'</div>';
 }
-window.usbSetPreset=function(v){ USB.preset=v; if(v==='custom'){ const r=usbRange('30d'); USB.from=USB.from||r.from; USB.to=USB.to||r.to; } renderPage(); };
+/* Picking a preset writes its dates into From/To as well, so the two boxes always agree with the
+   dropdown instead of showing a stale range beside it. */
+window.usbSetPreset=function(v){ USB.preset=v; const r=usbRange(v==='custom'?'30d':v); USB.from=r.from; USB.to=r.to; renderPage(); };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
 window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
 // One bar showing how a set of features splits across the four bands.
@@ -12573,6 +12579,42 @@ const USAGE_MAP={
   psaDownloadOne:'postsales.adhoc.download_a_document',
   psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip'
 };
+/* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
+   speed-test tables. Wrapping buttons can never catch those: there is no button, the act is opening
+   the tab. They stayed empty no matter how often anyone used them, which reads as "nobody goes
+   there" when it actually meant "nothing here reports".
+   Keyed on page/tab. The numeric ones are the tab index the module already routes on. */
+const USAGE_VIEWS={
+  'tasks/calendar':      'tasks.calendar.view_month_week_day_calendar',
+  'tasks/archive':       'tasks.archive.view_completed_archived_tasks',
+  'tasks/scoreboard':    'tasks.scoreboard.view_task_completion_leaderboard',
+  'campaigns/0':         'campaigns.overview.view_spend_leads_cost_charts',
+  'campaigns/1':         'campaigns.campaigns.view_campaign_performance_list',
+  'campaigns/2':         'campaigns.by_project.view_per_project_rollup_table',
+  'campaigns/3':         'campaigns.ads.view_ad_level_performance_table',
+  'campaigns/4':         'campaigns.trend.view_spend_results_trend_vs_previous_period',
+  'campaigns/5':         'campaigns.ad_fatigue.view_fatigue_ranking_by_ad_campaign',
+  'network/0':           'network.overview.view_live_monitoring_status',
+  'network/1':           'network.all_readings.view_full_readings_table',
+  'inspection/console':  'inspection.console.view_inspection_kpis_and_breakdowns'
+};
+let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
+function usageViewTick(){
+  try{
+    let seg=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);
+    if(seg[0]===PAGE) seg=seg.slice(1);
+    // No tab in the hash means the module's own first tab, which each one indexes from 0.
+    const tab=(seg[0]!==undefined&&seg[0]!=='')?String(seg[0]):(PAGE==='tasks'?'work':'0');
+    const key=USAGE_VIEWS[PAGE+'/'+tab];
+    if(!key) return;
+    /* renderPage can fire twice for one navigation - accountability.js re-renders defensively after
+       it loads - and two events for one look would overstate every view feature. */
+    const now=Date.now();
+    if(key===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
+    USAGE_LAST_VIEW=key; USAGE_LAST_VIEW_AT=now;
+    usageQueue(key,'view');
+  }catch(e){}
+}
 /* The verb, read off the function's own name rather than kept in a second map that could drift out
    of step with the first. Only ever used to label the event; the feature is what is counted. */
 function usageAction(fn){
@@ -12604,6 +12646,18 @@ async function usageFlush(){
 }
 function usageInstall(){
   let n=0;
+  /* Navigation is the event for a view feature, and renderPage is the one place every navigation
+     goes through — the hashchange listener, boot, and each in-page tab click all land here. */
+  if(typeof window.renderPage==='function' && !window.renderPage.__usageViewWrapped){
+    const origRender=window.renderPage;
+    const wrappedRender=function(){
+      const r=origRender.apply(this,arguments);
+      try{ usageViewTick(); }catch(e){}
+      return r;
+    };
+    wrappedRender.__usageViewWrapped=true;
+    try{ window.renderPage=wrappedRender; }catch(e){}
+  }
   Object.keys(USAGE_MAP).forEach(function(fn){
     const orig=window[fn];
     if(typeof orig!=='function' || orig.__usageWrapped) return;
