@@ -1475,7 +1475,14 @@
     })();
     const head=d.common.length
       ? '<div class="wf-dw-common">'+d.common.map(function(c){
-          if(qrLabel && c.k===qrLabel) return '<span><b>'+esc2(c.k)+'</b> '+wfDayAttHtml(c.v)+'</span>';
+          /* Recognised by its VALUE as well as by its current label. Matching the label alone meant a
+             claim saved before the field was renamed - stored as "UPI Scanner", while the workflow now
+             says "QR Code" - stopped being recognised as an attachment and printed its raw
+             s3:portal/... path as text on screen. Anything holding a stored file is an attachment
+             whatever the label happens to say today, so no future rename can strip the picture off
+             claims already filed. */
+          const isAtt=String(c.v||'').trim().indexOf('s3:')===0;
+          if((qrLabel && c.k===qrLabel) || isAtt) return '<span><b>'+esc2(c.k)+'</b> '+wfDayAttHtml(c.v)+'</span>';
           return '<span><b>'+esc2(c.k)+'</b> '+esc2(oneLine(c.v))+'</span>'; }).join('')+'</div>'
       : '';
     // ---- table (wide) ----
@@ -4310,7 +4317,11 @@
   window.wfAttOpen=function(path,name){ s3OpenSigned(path,name||''); };
   function wfAttachmentHtml(a){
     const name=a.file_name||(a.storage_path||'').split('/').pop();
-    const isImg=/\.(png|jpe?g|gif|webp|bmp)$/i.test(name||'');
+    /* .jfif is what Windows and WhatsApp hand you when you save a JPEG, and several people's payment
+       QR codes arrived as one. It was missing here, so those rendered as a download link with a file
+       icon instead of the picture - a QR code you cannot see is useless. heic/heif come off iPhones
+       and avif from newer Android for the same reason. */
+    const isImg=/\.(png|jpe?g|jfif|pjpeg|gif|webp|bmp|svg|avif|heic|heif|tiff?)$/i.test(name||'');
     if(isImg){
       return '<span class="wf-att-thumb" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')" title="'+esc2(name)+'"><img class="wf-att-img" data-path="'+esc2(a.storage_path)+'" alt=""></span>';
     }
