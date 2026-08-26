@@ -4306,12 +4306,24 @@
     window._wfSignCache[path]=data.url;
     return data.url;
   }
+  /* A thumbnail that cannot be shown must SAY so. Two ways it can fail: the path cannot be signed,
+     or it signs fine and the fetch then 403s because the object is not in the bucket - S3 answers
+     AccessDenied rather than Not Found, since the bucket user has no listing right. Either way the
+     old behaviour left an empty bordered box next to the file name, which reads as "here is a link"
+     rather than "this picture is gone", and nobody could tell a missing QR from a slow one. */
+  window.wfAttImgFailed=function(img){
+    const wrap=img&&img.parentNode; if(!wrap)return;
+    wrap.className='wf-att-missing';
+    wrap.title='This file is no longer in storage — ask the person to upload it again.';
+    wrap.innerHTML='<i class="fa-solid fa-triangle-exclamation"></i> image missing';
+  };
   async function wfHydrateAttThumbs(){
     const els=[].slice.call(document.querySelectorAll('.wf-att-img[data-path]'));
     await Promise.all(els.map(async function(el){
       const path=el.getAttribute('data-path');
       const url=await wfSignedUrl(path);
-      if(url && el.isConnected) el.src=url;
+      if(!el.isConnected) return;
+      if(url) el.src=url; else wfAttImgFailed(el);   // could not even be signed
     }));
   }
   window.wfAttOpen=function(path,name){ s3OpenSigned(path,name||''); };
@@ -4323,7 +4335,7 @@
        and avif from newer Android for the same reason. */
     const isImg=/\.(png|jpe?g|jfif|pjpeg|gif|webp|bmp|svg|avif|heic|heif|tiff?)$/i.test(name||'');
     if(isImg){
-      return '<span class="wf-att-thumb" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')" title="'+esc2(name)+'"><img class="wf-att-img" data-path="'+esc2(a.storage_path)+'" alt=""></span>';
+      return '<span class="wf-att-thumb" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')" title="'+esc2(name)+'"><img class="wf-att-img" data-path="'+esc2(a.storage_path)+'" alt="" onerror="wfAttImgFailed(this)"></span>';
     }
     return '<span class="wf-att-file" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')"><i class="fa-solid fa-file-arrow-down"></i> '+esc2(name)+'</span>';
   }
@@ -5169,6 +5181,9 @@
     .wf-att-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
     .wf-att-thumb{display:inline-block;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--bg,#f1f5f9)}
     .wf-att-img{width:100%;height:100%;object-fit:cover;display:block}
+  /* Amber, not red: the claim is fine, only its picture is gone. */
+  .wf-att-missing{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:6px;
+    background:#fef3c7;color:#92400e;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:help}
     .wf-att-file{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--brand);background:var(--brand-a10,#eef2ff);border-radius:8px;padding:6px 10px;cursor:pointer}
     .wf-upd-pinned{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
     .wf-upd-pinned-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--slate);margin-bottom:6px;display:flex;align-items:center;gap:6px}
