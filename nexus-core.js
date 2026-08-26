@@ -11610,18 +11610,34 @@ function trCombinedQualify(rows){
   else if(merged.follow_up_requested) qualification='Follow-Up';
   return {qualification:qualification, criteria:merged};
 }
+/* The lead's verdict is the verdict of their MOST RECENT call, not a merge of all of them.
+   A lead moves: someone who was Not Qualified in July and asked for a callback yesterday is a
+   Follow-Up today, and rolling every call together permanently remembered the best answer any call
+   ever gave. The combined CRITERIA checklist below is still shown, because "what have we ever
+   established about this lead" is a genuinely different and useful question from "where do they
+   stand now".
+   Walks BACKWARDS to the last call that actually produced a verdict: the newest row may be one the
+   CRM sent no recording for, and that has nothing to say either way rather than saying nothing. */
+function trLatestVerdict(rows){
+  const list=rows||[];
+  for(let i=list.length-1;i>=0;i--){
+    const q=list[i]&&list[i].qualification;
+    if(q&&String(q).trim()) return {qualification:String(q).trim(), row:list[i], stale:i!==list.length-1};
+  }
+  return {qualification:null, row:null, stale:false};
+}
 function trCompGridHtml(leads){
   if(!leads.length)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-users"></i><div>No CRM lost/followup calls yet</div></div>';
   return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:16px">'+leads.map(function(g){
     const last=g.rows[g.rows.length-1];
     const nm=last.customer_name||('Lead '+g.leadId);
-    const combined=trCombinedQualify(g.rows);
-    const o=trOutcome(combined.qualification);
+    const latest=trLatestVerdict(g.rows);
+    const o=trOutcome(latest.qualification);
     return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/4/'+encodeURIComponent(g.leadId)+'\')">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
         +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nm)+'</div>'
         +'<div style="font-size:12px;color:var(--slate);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(last.business_unit_name||'')+'</div></div>'
-        +(o?'<span class="tag '+o.tag+'" style="white-space:nowrap;flex-shrink:0"><i class="fa-solid '+o.icon+'"></i> '+esc(combined.qualification)+'</span>':'')
+        +(o?'<span class="tag '+o.tag+'" style="white-space:nowrap;flex-shrink:0"><i class="fa-solid '+o.icon+'"></i> '+esc(latest.qualification)+'</span>':'')
       +'</div>'
       +'<div style="font-size:12px;color:var(--slate);margin-top:10px">'+g.rows.length+' call'+(g.rows.length===1?'':'s')+' · lead #'+esc(g.leadId)+'</div>'
     +'</div>';
@@ -11632,10 +11648,16 @@ function trCompDetailHtml(leads,leadId){
   if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/4\')">Back</button></div>';
   const last=g.rows[g.rows.length-1];
   const combined=trCombinedQualify(g.rows);
-  const o=trOutcome(combined.qualification);
+  const latest=trLatestVerdict(g.rows);
+  const o=trOutcome(latest.qualification);
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>';
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
-  const banner2=o?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(combined.qualification)+'</span><span style="margin-left:10px;font-size:12.5px;color:var(--slate)">combined across all '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</span></div>'):'';
+  // Says which call the verdict came from, so nobody reads it as a merge of all of them.
+  const verdictFrom=latest.row
+    ? ('from the '+(latest.stale?'most recent call with a transcript':'latest call')
+       +' · '+esc(fmtDate(latest.row.report_date||latest.row.created_at)))
+    : '';
+  const banner2=o?('<div class="card card-pad" style="margin:6px 0 16px;border-left:5px solid '+o.colour+'"><span class="tag '+o.tag+'" style="font-size:14px;padding:6px 12px"><i class="fa-solid '+o.icon+'"></i> '+esc(latest.qualification)+'</span><span style="margin-left:10px;font-size:12.5px;color:var(--slate)">'+verdictFrom+'</span></div>'):'';
   const criteriaCard='<div class="card card-pad" style="margin-bottom:16px"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-list-check" style="color:#0d9488"></i> Combined qualification checklist</div>'+trCriteriaHtml({criteria:combined.criteria})+'</div>';
   const days=g.rows.map(function(r,idx){
     const dt=r.report_date?fmtDate(r.report_date):fmtDate(r.created_at);
