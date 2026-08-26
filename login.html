@@ -141,15 +141,28 @@ $('form').addEventListener('submit',async function(e){
   const btn=$('submitBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Signing in…';
   const {error}=await sb.auth.signInWithPassword({email,password});
   if(error){
-    let onboarded=true;
-    try{ const {data:ob}=await sb.schema('acc').rpc('check_onboarded',{p_email:email.toLowerCase()}); onboarded=!!ob; }catch(e){}
-    if(!onboarded){
+    /* Ask whether the ACCOUNT EXISTS, not whether its owner ever finished onboarding.
+       This used to call check_onboarded, which answers a different question: a real account whose
+       owner never completed the profile step reported false, so anyone with an existing account and
+       a mistyped password was told they had no account and pushed to sign up — where the address is
+       already taken, so they could not. Exactly the trap the Forgot-password handler below was fixed
+       for; this one was missed. account_status separates the three facts that matter. */
+    let st={exists:true,has_password:true,providers:[]};
+    try{ const {data}=await sb.schema('acc').rpc('account_status',{p_email:email.toLowerCase()}); if(data) st=data; }catch(e){}
+    if(!st.exists){
       msg('There’s no JAIN-E account for '+email+' yet. Redirecting to create one…','err');
       setTimeout(()=>location.replace('signup.html?notsignedup=1'),900);
       return;
     }
     let m=error.message;
-    if(/confirm/i.test(m))m='Your email isn’t verified yet. Check your inbox for the verification link, or ask an admin to disable email confirmation.';
+    // The account is real, so say what is actually wrong with it rather than the raw auth error.
+    if(!st.has_password){
+      m=((st.providers||[]).indexOf('google')!==-1)
+        ? 'This account signs in with Google — use the “Continue with Google” button instead of a password.'
+        : 'This account has no password set yet. Use “Forgot password” to create one.';
+    }
+    else if(/confirm/i.test(m))m='Your email isn’t verified yet. Check your inbox for the verification link, or ask an admin to disable email confirmation.';
+    else if(/invalid login credentials/i.test(m))m='That password is not right for '+email+'. Check it, or use “Forgot password” below.';
     msg(m,'err');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-right-to-bracket"></i> Sign In';return;
   }
   location.replace('index.html');
