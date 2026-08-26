@@ -7407,25 +7407,43 @@ async function usbLoad(){
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
 }
+/* The filter bar had class "inp" on its controls, which is styled NOWHERE in this codebase — so the
+   dropdowns rendered as raw browser widgets of differing heights next to properly styled cards. The
+   styled select in this app is .sel; these use it, with the rest scoped under .usb- so nothing here
+   can leak into another screen. */
+const USB_CSS='<style id="usbCss">'
+  +'.usb-bar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:14px}'
+  +'.usb-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
+  +'.usb-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
+  +'.usb-f .sel,.usb-f input[type=date]{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 11px;'
+    +'font-size:13px;font-family:inherit;background:#fff;color:#334155;cursor:pointer;transition:border-color .15s,box-shadow .15s}'
+  +'.usb-f .sel:focus,.usb-f input[type=date]:focus{outline:none;border-color:#a78bfa;box-shadow:0 0 0 3px rgba(124,58,237,.13)}'
+  +'.usb-f .sel:hover,.usb-f input[type=date]:hover{border-color:#c4b5fd}'
+  /* The chosen window, pinned right so the eye lands on it after the controls rather than before. */
+  +'.usb-range{margin-left:auto;display:flex;align-items:center;gap:8px;height:38px;padding:0 13px;border-radius:9px;'
+    +'background:#faf5ff;border:1px solid #e9d5ff;color:#6b21a8;font-size:12.5px;font-weight:600;white-space:nowrap}'
+  +'@media(max-width:720px){.usb-range{margin-left:0;width:100%;justify-content:center}.usb-f{flex:1 1 44%}}'
+  +'</style>';
 function usbControlsHtml(){
   const r=usbCurrentRange();
   const opt=function(v,l){ return '<option value="'+v+'"'+(USB.preset===v?' selected':'')+'>'+esc(l)+'</option>'; };
   const ppl=(USB.people||[]).slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));});
-  return '<div class="card card-pad" style="margin-top:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">'
-    +'<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">Period</label>'
-      +'<select class="inp" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:170px">'
+  return (document.getElementById('usbCss')?'':USB_CSS)
+    +'<div class="card card-pad usb-bar">'
+    +'<div class="usb-f"><label for="usbPreset">Period</label>'
+      +'<select class="sel" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:180px">'
         +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')+opt('custom','Custom range…')
       +'</select></div>'
     +(USB.preset==='custom'
-      ? '<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">From</label><input type="date" class="inp" id="usbFrom" value="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
-       +'<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">To</label><input type="date" class="inp" id="usbTo" value="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
+      ? '<div class="usb-f"><label for="usbFrom">From</label><input type="date" id="usbFrom" value="'+esc(r.from)+'" max="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
+       +'<div class="usb-f"><label for="usbTo">To</label><input type="date" id="usbTo" value="'+esc(r.to)+'" min="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
       : '')
-    +'<div><label class="wf-lbl" style="display:block;font-size:11.5px;color:var(--slate)">Person</label>'
-      +'<select class="inp" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:210px">'
+    +'<div class="usb-f"><label for="usbPerson">Person</label>'
+      +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
         +'<option value="">Everyone</option>'
         +ppl.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
       +'</select></div>'
-    +'<div style="margin-left:auto;font-size:12px;color:var(--slate)">'+esc(fmtDate(r.from))+' → '+esc(fmtDate(r.to))+'</div>'
+    +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
   +'</div>';
 }
 window.usbSetPreset=function(v){ USB.preset=v; if(v==='custom'){ const r=usbRange('30d'); USB.from=USB.from||r.from; USB.to=USB.to||r.to; } renderPage(); };
@@ -12427,6 +12445,21 @@ const USAGE_MAP={
   cmAdd:'tasks.tasks.comment_on_a_task', taskAttachUpload:'tasks.tasks.attach_file_to_a_task_or_comment',
   taskAttachDelete:'tasks.tasks.delete_attached_file', taskAttachDeleteSel:'tasks.tasks.delete_attached_file',
   notifDismissAllDue:'tasks.tasks.mark_all_notifications_as_read',
+  /* Accountability — Meetings. Missed entirely on the first pass: the whole tab reported nothing,
+     which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
+     scheduling rather than editing because it saves both and scheduling is the act it usually is;
+     "Edit a meeting" is deliberately left unmapped rather than counted wrongly. */
+  mtgFormSave:'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
+  mtgCancelDo:'tasks.meetings.cancel_a_meeting',
+  mtgReschedApply:'tasks.meetings.reschedule_one_occurrence_or_a_whole_series',
+  mtgTryJoin:'tasks.meetings.join_a_meeting',
+  mtgRecStart:'tasks.meetings.start_stop_recording', mtgRecStop:'tasks.meetings.start_stop_recording',
+  mtgSetLang:'tasks.meetings.set_transcription_language',
+  mtgWrapSave:'tasks.meetings.save_meeting_wrap_up_summary',
+  mtgSetGroup:'tasks.meetings.filter_meetings_by_group',
+  // Inspection / Campaigns entry points that had no mapping
+  inspGo:'inspection.console.start_new_inspection',
+  cmpShowProjectAds:'campaigns.by_project.drill_into_a_project_s_campaigns',
   // Accountability — Workflow
   wfNew:'tasks.workflow.create_a_new_workflow', wfEdit:'tasks.workflow.edit_workflow_steps_owners',
   wfDelete:'tasks.workflow.delete_a_workflow', wfEventSave:'tasks.workflow.start_a_new_instance',
