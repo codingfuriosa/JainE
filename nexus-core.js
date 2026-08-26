@@ -12405,3 +12405,189 @@ window.trDownload=async function(id){
   if(!path){toast('Recording file not available','err');return;}
   s3OpenSigned(path,(r&&r.file_name)||undefined);
 };
+
+/* ============================ USAGE TELEMETRY ============================
+   Records WHICH FEATURE a person just used, so the Usability screen has something to count.
+
+   Done by wrapping the global functions the buttons already call, from one map, instead of editing
+   ~110 call sites. Three reasons: the call sites stay untouched so nothing can break by accident, a
+   feature added later is one line here rather than a hunt through 600KB, and the map doubles as a
+   readable statement of which button means which feature.
+
+   The wrapper must be incapable of breaking the app it measures: the logging is inside its own
+   try/catch, and the original function is called through unconditionally whatever happens. Events
+   are queued and sent in batches, never one request per click. */
+const USAGE_MAP={
+  // Accountability — Tasks
+  taskSave:'tasks.tasks.create_task', taskUpdateDue:'tasks.tasks.edit_task_due_date',
+  taskDelegateSave:'tasks.tasks.delegate_task_to_someone',
+  taskMarkComplete:'tasks.tasks.mark_task_done_send_for_approval',
+  taskApprove:'tasks.tasks.approve_a_completed_task', taskDecline:'tasks.tasks.decline_a_completed_task',
+  taskReorderDrop:'tasks.tasks.insert_a_task_at_a_specific_position',
+  cmAdd:'tasks.tasks.comment_on_a_task', taskAttachUpload:'tasks.tasks.attach_file_to_a_task_or_comment',
+  taskAttachDelete:'tasks.tasks.delete_attached_file', taskAttachDeleteSel:'tasks.tasks.delete_attached_file',
+  notifDismissAllDue:'tasks.tasks.mark_all_notifications_as_read',
+  // Accountability — Workflow
+  wfNew:'tasks.workflow.create_a_new_workflow', wfEdit:'tasks.workflow.edit_workflow_steps_owners',
+  wfDelete:'tasks.workflow.delete_a_workflow', wfEventSave:'tasks.workflow.start_a_new_instance',
+  wfInstEditSel:'tasks.workflow.edit_an_instance', wfInstDelSel:'tasks.workflow.delete_an_instance',
+  wfReceive:'tasks.workflow.receive_a_step',
+  wfForward:'tasks.workflow.forward_a_step', wfRowForward:'tasks.workflow.forward_a_step',
+  wfDoReject:'tasks.workflow.reject_send_a_step_back', wfRejectConfirm:'tasks.workflow.reject_send_a_step_back',
+  wfRowReject:'tasks.workflow.reject_send_a_step_back',
+  wfDone:'tasks.workflow.mark_final_step_done', wfReopen:'tasks.workflow.reopen_a_completed_instance',
+  wfRevert:'tasks.workflow.revert_a_forwarded_step',
+  wfPostUpdate:'tasks.workflow.post_an_update_comment_on_an_instance',
+  wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
+  wfPrintCase:'tasks.workflow.print_an_instance', wfTrackerFilter:'tasks.workflow.search_filter_the_tracker',
+  wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
+  // Transcription
+  trUploadStart:'transcription.all_calls.upload_call_recording_s',
+  trSetFilter:'transcription.all_calls.filter_calls_by_outcome_or_date',
+  trApplyDateRange:'transcription.all_calls.filter_calls_by_outcome_or_date',
+  trPinSelected:'transcription.all_calls.pin_unpin_calls',
+  trAssignToFolder:'transcription.all_calls.add_calls_to_a_folder',
+  trDownloadReport:'transcription.all_calls.download_call_report_or_copy_link',
+  trCopyUrl:'transcription.all_calls.download_call_report_or_copy_link',
+  trRetry:'transcription.all_calls.retry_failed_transcription', trDelete:'transcription.all_calls.delete_a_call',
+  trFolderRenameSave:'transcription.folders.rename_delete_a_folder',
+  trFolderDeleteConfirm:'transcription.folders.rename_delete_a_folder',
+  trRemoveFromFolder:'transcription.folders.add_or_remove_calls_from_a_folder',
+  trAddSelectedToTarget:'transcription.folders.add_or_remove_calls_from_a_folder',
+  trDownloadFolder:'transcription.folders.download_all_calls_in_a_folder',
+  trRestore:'transcription.deleted.restore_a_deleted_call_single_or_all',
+  trRestoreAll:'transcription.deleted.restore_a_deleted_call_single_or_all',
+  trShowHistory:'transcription.deleted.view_delete_restore_activity_history',
+  trSetLang:'transcription.call_detail.switch_transcript_language',
+  trCmAdd:'transcription.call_detail.add_delete_a_remark', trCmDelete:'transcription.call_detail.add_delete_a_remark',
+  trDownload:'transcription.call_detail.play_download_recording',
+  // Legal — Documents
+  docNewFolderSave:'legal.documents.add_folder_sub_category', docUploadSave:'legal.documents.upload_document',
+  docPreview:'legal.documents.preview_download_document', docDownload:'legal.documents.preview_download_document',
+  docRenameSave:'legal.documents.rename_document',
+  docMoveSave:'legal.documents.move_document_to_another_category',
+  docMoveSaveLegal:'legal.documents.move_document_to_another_category',
+  docReplaceSave:'legal.documents.replace_document_version', docPin:'legal.documents.pin_unpin_document',
+  docDeleteConfirm:'legal.documents.delete_document_s',
+  docBulkDeleteConfirm:'legal.documents.bulk_download_delete',
+  // Legal — MIS / Actions / Advocates
+  misSave:'legal.mis.add_case', misUpdate:'legal.mis.edit_case', misDeleteSel:'legal.mis.delete_case_s',
+  misSetRange:'legal.mis.filter_cases_by_hearing_date_range',
+  misRangePick:'legal.mis.filter_cases_by_hearing_date_range',
+  misFilter:'legal.mis.search_cases_incl_ai_semantic_search',
+  misAiSearch:'legal.mis.search_cases_incl_ai_semantic_search',
+  misActionExecute:'legal.mis.record_execute_a_case_action',
+  misActionSave:'legal.mis.record_execute_a_case_action',
+  misSwipeToggle:'legal.mis.mark_case_complete_reopen',
+  misDocsPick:'legal.mis.upload_documents_for_a_case', misExportCauselist:'legal.mis.export_causelist',
+  legalActionsFilter:'legal.actions.view_search_filter_case_actions',
+  advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
+  advFilter:'legal.advocates.search_advocates',
+  // Human Resources
+  hsSave:'hr.h_s_candidates.add_candidate', hsUpdate:'hr.h_s_candidates.edit_candidate',
+  hsDeleteSel:'hr.h_s_candidates.delete_candidate_s', hsFilter:'hr.h_s_candidates.search_filter_candidates',
+  muSaveNew:'hr.monthly_update.create_new_month_record', muAddRowSave:'hr.monthly_update.add_position_row',
+  muSaveCell:'hr.monthly_update.edit_tracking_values',
+  muDeleteChecked:'hr.monthly_update.delete_rows_or_whole_month',
+  muDeleteMonth:'hr.monthly_update.delete_rows_or_whole_month',
+  trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
+  trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
+  trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
+  trackerFilter:'hr.interview_tracker.search_filter_interviews',
+  rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
+  rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
+  rsBulkDelete:'hr.resumes.delete_resume_s', rsSearch:'hr.resumes.ai_natural_language_resume_search',
+  igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
+  // Recruitment (ATS)
+  rtSave:'recruitment.tests.add_test', rtRename:'recruitment.tests.rename_test',
+  rtDelete:'recruitment.tests.delete_test_s', rtShareSend:'recruitment.tests.share_test_via_email',
+  rtPreview:'recruitment.tests.preview_test_responses_scores',
+  recJdSave:'recruitment.descriptions.upload_job_description',
+  recJdOpen:'recruitment.descriptions.preview_download_job_description',
+  recJdDownload:'recruitment.descriptions.preview_download_job_description',
+  recDeleteSel:'recruitment.descriptions.delete_job_description_s',
+  mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:'recruitment.manpower_form.edit_requisition',
+  mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
+  mpDeleteOne:'recruitment.manpower_form.delete_requisition_s',
+  // Inspection
+  inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
+  inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',
+  inspRespFilter:'inspection.responses.search_filter_submissions',
+  inspOpenSub:'inspection.responses.open_and_edit_a_submission',
+  inspEditSub:'inspection.responses.open_and_edit_a_submission',
+  inspUpdateSub:'inspection.responses.update_check_status_per_item',
+  inspBulkE:'inspection.responses.bulk_mark_all_checks_ok',
+  inspBulk:'inspection.new_inspection.bulk_mark_all_items_ok',
+  inspLogFilter:'inspection.log.search_filter_inspection_log',
+  inspPick:'inspection.new_inspection.mark_item_ok_not_ok_n_a',
+  inspLevelPick:'inspection.new_inspection.select_project_block_floor_flat_work_category',
+  inspOpenPhoto:'inspection.responses.add_replace_defect_photo',
+  // Campaign Analytics
+  cmpSetSource:'campaigns.overview.switch_data_source_meta_google_both',
+  cmpSetPeriod:'campaigns.overview.select_or_customize_date_range',
+  cmpSetCustom:'campaigns.overview.select_or_customize_date_range',
+  cmpShowProject:'campaigns.overview.drill_into_a_project_s_campaigns',
+  cmpSetStatus:'campaigns.campaigns.filter_campaigns_by_project_status',
+  cmpSetCampProject:'campaigns.campaigns.filter_campaigns_by_project_status',
+  cmpSetAdProject:'campaigns.ads.filter_ads_by_project',
+  // Internet Speed
+  netRefresh:'network.overview.refresh_speed_test_now',
+  netRangeChange:'network.overview.filter_chart_by_date_range',
+  // Post Sales
+  psaUploadStart:'postsales.adhoc.upload_document_for_adhoc_replacement',
+  psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
+  psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
+  psaDownloadOne:'postsales.adhoc.download_a_document',
+  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip'
+};
+/* The verb, read off the function's own name rather than kept in a second map that could drift out
+   of step with the first. Only ever used to label the event; the feature is what is counted. */
+function usageAction(fn){
+  if(/delete|remove|dismiss/i.test(fn))            return 'delete';
+  if(/download|export|print/i.test(fn))            return 'export';
+  if(/filter|search/i.test(fn))                    return 'search';
+  if(/save|create|add|upload|submit|new/i.test(fn))return 'create';
+  /* Approving, forwarding and rejecting are all changes of state, and the server's vocabulary has no
+     verb of their own for them - without this line they fell through to "view", which reads as
+     somebody merely looking at a task they in fact approved. */
+  if(/approve|decline|forward|reject|receive|revert|reopen|done|retry|restore|share|generate|complete/i.test(fn)) return 'update';
+  if(/update|edit|rename|pin|move|replace|toggle|set/i.test(fn)) return 'update';
+  return 'view';
+}
+let USAGE_Q=[], USAGE_TIMER=null;
+function usageQueue(featureKey, action){
+  if(!featureKey || !(state&&state.email)) return;
+  USAGE_Q.push({module_id:String(featureKey).split('.')[0], feature_key:featureKey,
+                action:action||'view', occurred_at:new Date().toISOString()});
+  // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
+  if(USAGE_Q.length>=40){ usageFlush(); }
+  else if(!USAGE_TIMER){ USAGE_TIMER=setTimeout(usageFlush, 8000); }
+}
+async function usageFlush(){
+  if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
+  if(!USAGE_Q.length) return;
+  const batch=USAGE_Q.splice(0, 60);
+  try{ await sb.rpc('erp_log_usage',{p_events:batch}); }catch(e){ /* telemetry never interrupts work */ }
+}
+function usageInstall(){
+  let n=0;
+  Object.keys(USAGE_MAP).forEach(function(fn){
+    const orig=window[fn];
+    if(typeof orig!=='function' || orig.__usageWrapped) return;
+    const key=USAGE_MAP[fn], act=usageAction(fn);
+    const wrapped=function(){
+      try{ usageQueue(key, act); }catch(e){}
+      return orig.apply(this, arguments);      // called through no matter what happened above
+    };
+    wrapped.__usageWrapped=true;
+    try{ window[fn]=wrapped; n++; }catch(e){}
+  });
+  return n;
+}
+/* Installed twice on purpose: accountability.js loads AFTER this file and defines its own globals,
+   so a single pass here would wrap only half the map. The __usageWrapped guard makes the second
+   pass free and idempotent. */
+window.addEventListener('load', function(){ usageInstall(); setTimeout(usageInstall, 2000); });
+// Anything still queued when the tab goes away would otherwise be lost.
+window.addEventListener('pagehide', usageFlush);
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden') usageFlush(); });
