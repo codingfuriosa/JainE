@@ -4067,8 +4067,11 @@
        the two named people, so the picker offers only those two and the question cannot be answered
        wrongly. Systems is exempt: they are the ones who have to put things right when a bill has
        gone to the wrong person, and a picker that cannot name anyone else leaves them unable to.
-       An empty list means the workflow never restricted the picker, and nothing changes. */
-    const stepAssignRestrict=(wfInDept('Systems')||eq(me(),'ayushruia1@gmail.com'))
+       Uma Chatterjee is exempt too: she is a trigger owner on Invoice Processing but not one of the
+       day-to-day store raisers the restriction targets, so her picker offers everyone — matches
+       acc.wf_create_instance's own exemption exactly, or the server would reject what this form let
+       her pick. An empty list means the workflow never restricted the picker, and nothing changes. */
+    const stepAssignRestrict=(wfInDept('Systems')||eq(me(),'ayushruia1@gmail.com')||eq(me(),'frontoffice@thejaingroup.com'))
       ? []
       : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
     const membersHtml=openSteps.length

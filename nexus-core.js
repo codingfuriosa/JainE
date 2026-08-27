@@ -7431,7 +7431,16 @@ function usbControlsHtml(){
   const r=usbCurrentRange();
   const opt=function(v,l){ return '<option value="'+v+'"'+(USB.preset===v?' selected':'')+'>'+esc(l)+'</option>'; };
   const ppl=(USB.people||[]).slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));});
-  return (document.getElementById('usbCss')?'':USB_CSS)
+  /* Always emitted, never guarded behind "is #usbCss already in the DOM?" — every caller sets it via
+     v.innerHTML=..., which fully replaces v's subtree (style tag included) on each render. The old
+     document.getElementById('usbCss') check read that OUTGOING subtree a moment before it was
+     discarded: if a previous render's style tag was still sitting there when this string was built,
+     the check saw it as "already present" and skipped re-adding it — then the innerHTML assignment
+     destroyed that old tag anyway, leaving the new markup with no style tag at all. That is exactly
+     the "styled after a hard reload, stacked and bare after an in-app re-render" bug — a hard reload
+     never has a stale tag to see, so it always got the CSS; a filter change or repeat visit within
+     the SPA usually did have one, so it usually lost it. */
+  return USB_CSS
     +'<div class="card card-pad usb-bar">'
     +'<div class="usb-f"><label for="usbPreset">Period</label>'
       +'<select class="sel" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:180px">'
