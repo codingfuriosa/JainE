@@ -1,42 +1,36 @@
-// ONE JOB EACH: a SPEECH model turns the audio into words, gpt-4o reads those words.
-// The speech model is gpt-4o-transcribe by default and Gemini on request, so the two can be
-// compared over the same recordings; the judging is gpt-4o either way.
+// LOST-CALL QA PIPELINE — daily CRM fetch -> FIFO queue -> Gemini 2.5 Pro -> CRM comparison.
 //
-// This exists because of a failure worth recording. The first version asked Gemini, in a single
-// call, for a per-turn JSON array with four keys AND six dashboard fields AND six booleans AND seven
-// QA judgements with evidence AND a summary - and it quietly stopped transcribing and started
-// composing. Across 175 calls the name it claimed to hear matched the CRM's own record ZERO times
-// out of the 20 it offered one: Pradip Das was greeted as "Suman babu". Every check passed, because
-// every check tested the SHAPE of the output.
+// THE SHAPE, in one paragraph. At 00:00 IST a cron calls `pull`, which asks DreamCRM for
+// YESTERDAY's lost_call_recordings, stores the raw JSON array verbatim (both as a run payload and
+// per-record), and turns each record into a durable processing row. A second cron calls `work`
+// every minute, which takes exactly ONE row off the front of the queue, hands the audio to Gemini
+// 2.5 Pro, validates what comes back, saves it, compares it against the CRM's own verdict, and
+// stops. Nothing runs in parallel. Nothing is held in memory between invocations.
 //
-// Five attempts to fix Gemini by prompt each improved the shape and none made it true: the mime type
-// (Knowlarity serves "binary/octet-stream" and the old code passed it through, so Gemini got an
-// unlabelled blob and answered from the prompt); the project catalogue, which it recited back as the
-// conversation; a response schema; removing a "no_speech_reason" escape hatch, which did recover 17
-// calls wrongly written off as silence; and demanding verbatim at temperature 0, after which an
-// 8m26s call still came back as 16 turns and named the wrong project. Head to head on Pradip Das's
-// 301 seconds: Gemini 1172 characters, gpt-4o-transcribe 4726, with the real name and real project.
+// ONE ROW PER LEAD. A lead that is called more than once keeps ONE row: the newest call is the
+// "current" one on the row's own columns, every earlier call is archived into `call_history`, and
+// `status_trail` records how the CRM's own verdict moved over time - "Qualified -> Lost". Extra
+// calls that arrive while one is still being processed wait in `pending_calls` and rotate in when
+// the current call reaches a terminal state. So every detail for a lead lives in a single row.
 //
-// THE VERBATIM RECORD IS WHAT IS STORED. Stage 2's speaker labels and English are a RENDERING of the
-// stage-1 output, and the raw text is kept in transcript_bn whatever the rendering makes of it.
+// AUDIO IS NEVER STORED. It is fetched from Knowlarity into memory for exactly one Gemini call and
+// then goes out of scope. The row keeps the ~90 byte recording_url and nothing else. Storing the
+// audio would be ~4.7 GB/year for no benefit, and re-fetching is free.
 //
-// Nightly Lost-Call QA. Pulls DreamCRM's report - recording_url, lead_id, lead_name,
-// business_unit_name, status, next_follow_up_date, lost_reason and remarks; no call duration, and
-// no lead_mobile any more. Only Lost and In Followup are taken. Then it transcribes and
-// audits each call. The report covers leads being followed up as well as lost ones, so the AI's own
-// verdict (Qualified / Follow-Up / Not Qualified) is checked against the CRM's, and disagreement in
-// either direction is what this exists to surface.
+// WHY THE LOCAL GUARDS EXIST, since the prompt now asks Gemini to both listen and judge in one
+// call. An earlier version of exactly this shape quietly stopped transcribing and started
+// composing: across 175 calls the name it claimed to hear matched the CRM's own record ZERO times
+// out of the 20 it offered one - Pradip Das was greeted as "Suman babu". Every check passed,
+// because every check tested the SHAPE of the output. So shape validation is necessary and not
+// sufficient. degenerateRepeat(), the chars-per-second density floor and nameMatchesCrm() test the
+// CONTENT, and a call that fails them is marked `failed` and retried rather than saved as a
+// confident verdict formed on nothing. Do not remove them.
 //
-// AUDIO IS NEVER STORED: it lives in memory for one API call. We keep the transcript and the ~90 byte
-// link, and re-fetch audio live from Knowlarity. Storing it would be ~4.7 GB/year for no benefit.
-//
-// Actions: pull (queue a day, no AI) / work (process a bounded batch) / run / retry / status.
-// Callers prove themselves via acc.job_secrets, a token the DATABASE generated for itself, which
-// pg_cron reads to build x-sync-secret and this function reads with its service-role key - no human
-// ever invents or pastes a password; or SYNC_SECRET (legacy); or a signed-in user's token.
+// Actions: pull | work | retry | status | run (pull then one work step).
+// Auth: acc.job_secrets (a token the DATABASE generated for itself, read by pg_cron) via
+// x-sync-secret, or SYNC_SECRET (legacy), or a signed-in user's bearer token.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-// Gemini takes audio as base64 inline data; the speech API takes the bytes directly.
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 type DB = ReturnType<typeof createClient>;
 
@@ -48,21 +42,59 @@ const CORS = {
 const j = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json", ...CORS } });
 
-/* THE EAR, either one. ChatGPT's speech model is the default on the evidence so far - on Pradip
-   Das's 301 second call it returned 4726 characters against Gemini's 1172 - but the two are kept
-   switchable so they can be compared on the same recordings rather than argued about. Only the ear
-   changes: the judging is gpt-4o in both cases. */
-const STT_MODEL = Deno.env.get("STT_MODEL") || "gpt-4o-transcribe";
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
+/* ------------------------------------------------------------------ CONFIG
+   Everything sensitive or environment-shaped comes from Secrets. Nothing here is a credential and
+   nothing here reaches the browser. */
+/* The spec asked for gemini-2.5-pro. Google no longer serves it to this API project - a live call on
+   2026-08-27 returned 404 "models/gemini-2.5-pro is no longer available to new users. Please update
+   your code to use models/gemini-3.1-pro-preview". So the default is the model Google's own error
+   names, and GEMINI_MODEL in Secrets overrides it without a redeploy when that changes again. */
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.1-pro-preview";
+const FEED_URL = Deno.env.get("LOST_CALL_FEED") || "https://www.realtybucket.com/report/lost_call_recordings";
+/* The application timezone, as an offset in minutes. Calls are Indian, so "yesterday" must be
+   yesterday in IST: at 18:30 UTC when the cron fires, UTC is still on the previous day. */
+const APP_TZ_OFFSET_MIN = Number(Deno.env.get("APP_TZ_OFFSET_MIN") || 330); // +05:30
+const APP_TZ_NAME = Deno.env.get("APP_TZ") || "Asia/Kolkata";
 
-/* Only these two statuses are taken. The report also sends Qualified, Sit Visited and OV now; they
-   are skipped at FETCH time rather than filtered afterwards, so they never reach the queue and never
-   cost anything to ignore. */
-const WANTED_STATUSES = ["Lost", "In Followup"];
+const SOURCE = "lost_call_sync";
+const JOB_SECRET_NAME = "transcription_sync";
 
-/* The switchboard, not the conversation. Every call opens with this and it was being written down as
-   the agent's first words, which made a two-line call look like a four-line one. Matched loosely -
-   punctuation and repetition vary. */
+/* Which CRM statuses to ingest. EMPTY MEANS ALL, which is the default: "Total Calls" has to be the
+   honest total for the day, and a lead's "Qualified -> Lost" trail cannot be built if the Qualified
+   leg was never ingested. Set WANTED_STATUSES to a comma-separated list (e.g. "Lost,In Followup")
+   to narrow it again if the Gemini bill argues for it. */
+const WANTED_STATUSES = (Deno.env.get("WANTED_STATUSES") || "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+
+/* STRICTLY ONE AT A TIME. Not a tuning knob - the spec requires FIFO with no overlap, and the
+   claim-then-process step below depends on it. */
+const BATCH = 1;
+/* A recording under this many seconds is a ring-out, and paying a 2.5 Pro call to be told so is
+   waste. Recorded as non_transcribable with an explicit reason, so it is visible and retryable
+   rather than silently skipped. Set to 0 to send everything to Gemini. */
+const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 60);
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+/* Automatic retry. An error is usually transient. Bounded so a genuinely broken recording stops
+   costing money, and spaced so a rate limit or an outage is not hammered. */
+const MAX_ATTEMPTS = Number(Deno.env.get("MAX_ATTEMPTS") || 3);
+const RETRY_AFTER_MINUTES = 10;
+/* A row left in `processing` past this is a killed invocation, not work in flight. Reclaimed on the
+   next tick, which is what makes the queue restart-safe. */
+const STALE_PROCESSING_MINUTES = 15;
+/* The CRM feed occasionally 502s. Controlled retry policy, per spec 2.7. */
+const FEED_ATTEMPTS = 3;
+const FEED_BACKOFF_MS = [0, 2000, 6000];
+
+/* What counts as "too thin to be a transcript of THIS recording". Measured, not guessed: real
+   transcripts of these calls run 6-16 characters per second of audio, and the failures cluster far
+   below - "Hello." at 0.1, and the 40-character answers at 0.2 and 0.5. 1.5 sits in the empty gap
+   between the two, so a genuinely terse exchange still passes while near-silence does not. */
+const MIN_TRANSCRIPT_CHARS = 120;
+const MIN_CHARS_PER_SECOND = 1.5;
+
+/* ------------------------------------------------------------- TEXT REPAIR
+   The switchboard, not the conversation. Every call opens with this and it was being written down
+   as the agent's first words, which made a two-line call look like a four-line one. */
 const IVR_PATTERNS: RegExp[] = [
   /welcome\s+to\s+ja[iy]n\s+group[.,!]?/gi,
   /this\s+call\s+(?:will\s+be|is\s+being)\s+recorded\s+for\s+(?:monitoring\s+and\s+)?(?:training|quality)\s*(?:and\s+training\s*)?purposes?[.,!]?/gi,
@@ -72,19 +104,12 @@ const IVR_PATTERNS: RegExp[] = [
 function stripIvr(t: string): string {
   let out = String(t || "");
   for (const re of IVR_PATTERNS) out = out.replace(re, " ");
-  /* A turn that was ONLY the IVR is now blank, and an empty "Agent:" line is worse than no line, so
-     the label goes with it. */
-  return out
-    .replace(/^\s*(?:Agent|Customer|Speaker)\s*\d*\s*:\s*(?=$|\n)/gim, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return out.replace(/[ \t]{2,}/g, " ").trim();
 }
 
-/* Kolkata place names as a Bengali speaker says them, which is not how they are written. Pailan comes
-   back as "Poylan" every time, so the recogniser is primed with the correct spellings AND these are
-   corrected afterwards - priming raises the odds, it does not guarantee them. Word-boundary matched
-   so a longer name containing one of these is left alone. */
+/* Kolkata place names as a Bengali speaker says them, which is not how they are written. Pailan
+   comes back as "Poylan" every time, so the model is primed with the correct spellings AND these
+   are corrected afterwards - priming raises the odds, it does not guarantee them. */
 const SPELLINGS: [RegExp, string][] = [
   [/\bpoylan\b/gi, "Pailan"], [/\bpoilan\b/gi, "Pailan"], [/\bpailaan\b/gi, "Pailan"],
   [/\bjhoka\b/gi, "Joka"], [/\bjokha\b/gi, "Joka"],
@@ -101,39 +126,26 @@ function fixSpellings(t: string): string {
   for (const [re, right] of SPELLINGS) out = out.replace(re, right);
   return out;
 }
-/* The judgement runs on the TEXT, which is a reading task, and gpt-4o is asked to do only that.
-   Keeping the two stages apart is deliberate: the transcript is then evidence the judge did not
-   produce, so name_matches_crm and crm_status_match stay meaningful checks. */
-const ANALYSIS_MODEL = Deno.env.get("ANALYSIS_MODEL") || "gpt-4o";
-const FEED_URL = Deno.env.get("LOST_CALL_FEED") || "https://www.realtybucket.com/report/lost_call_recordings";
 
-const SOURCE = "lost_call_sync";
-const JOB_SECRET_NAME = "transcription_sync";
-const MIN_DURATION_SECONDS = 60;
-const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
-/* Three recordings at once, each costing two API calls. Transcription of a five minute call takes
-   seconds, so one round per invocation stays comfortably inside the wall clock. */
-const CONCURRENCY = 3;
-/* Automatic retry. An error is usually transient; an empty transcript is a failure to hear rather
-   than a fact about the recording, which is why it is retried too - 17 calls once written off as
-   silence turned out to hold conversations. Bounded at three so a genuinely empty file stops costing
-   money, and spaced ten minutes so a rate limit or an outage is not hammered. */
-/* What counts as "too thin to be a transcript of THIS recording".
-   Measured, not guessed: real transcripts of these calls run 6-16 characters per second of audio,
-   and the failures cluster far below - "Hello." at 0.1, and the 40-character answers at 0.2 and 0.5.
-   1.5 sits in the empty gap between the two, so a genuinely terse exchange still passes while
-   near-silence does not. The 120-character floor is absolute: that is not a call at any length. */
-const MIN_TRANSCRIPT_CHARS = 120;
-const MIN_CHARS_PER_SECOND = 1.5;
-const MAX_ATTEMPTS_ERROR = 3;
-const MAX_ATTEMPTS_NO_SPEECH = 3;
-const RETRY_AFTER_MINUTES = 10;
+/* One word repeated is a recogniser stuck in a loop, not a listen. Needs 8+ words before it will
+   call anything a loop, so a genuine "haan haan haan" is left alone. */
+function degenerateRepeat(text: string): { word: string; count: number; total: number } | null {
+  const words = String(text || "").toLowerCase().replace(/[^a-zऀ-ॿঀ-৿ ]/g, " ")
+    .split(/\s+/).filter(Boolean);
+  if (words.length < 8) return null;
+  const freq: Record<string, number> = {};
+  for (const w of words) freq[w] = (freq[w] || 0) + 1;
+  let top = "", n = 0;
+  for (const w of Object.keys(freq)) if (freq[w] > n) { n = freq[w]; top = w; }
+  return n / words.length > 0.6 ? { word: top, count: n, total: words.length } : null;
+}
 
-/* The catalogue is VOCABULARY for the JUDGE, never content, and it is deliberately kept out of the
-   transcription step: given this list and a hard recording, Gemini returned "2 BHK starts from 57
-   lakh and 3 BHK starts from 80 lakh" - the list's own figures, on a call about neither. */
-const CATALOGUE = `Jain Group projects, for reference when reading the transcript (never to fill in
-anything the transcript does not contain):
+/* ------------------------------------------------------------ THE CATALOGUE
+   VOCABULARY for the judging half, never content. Given this list and a hard recording, an earlier
+   version returned "2 BHK starts from 57 lakh and 3 BHK starts from 80 lakh" - the list's own
+   figures, on a call about neither. The prompt below says so explicitly, twice. */
+const CATALOGUE = `Jain Group projects, for reference when READING the conversation (never to fill in
+anything the audio does not contain):
 - Dream Gurukul: 3BHK from 80 lakh, 2BHK from 57 lakh. UNDER CONSTRUCTION. Doltala, Madhyamgram / near Airport. Possession 2027/2028.
 - Dream World City: 2BHK 29 lakh, 3BHK 36 lakh. READY TO MOVE. Near Joka Metro / Pailan More.
 - Dream Valley: 3BHK 73 lakh (no 2BHK). READY TO MOVE. Siliguri, Hill Cart Road, Dagapur.
@@ -142,128 +154,164 @@ anything the transcript does not contain):
 - Dream One: Rajarhat, opposite Eco Park.
 - Dream Residency Manor.`;
 
-/* Gemini needs telling what a speech model knows by construction: transcribe, do not summarise,
-   and do not stop early. Every instruction here exists because its absence produced a specific
-   failure - an 8m26s call returned as 16 turns, a call written off as "silence" that had people
-   talking in it, and the project catalogue recited back as the conversation. Deliberately NO
-   catalogue here: given the list, it read the list out. */
-const GEMINI_TRANSCRIBE_PROMPT = `You are a transcriptionist. This is a Jain Group (Kolkata
-real-estate) sales call - a compressed 8 kHz telephone recording, speech mixing Bengali, Hindi and
-English.
+/* ------------------------------------------------------------------ PROMPT
+   Section 5 of the specification, verbatim in structure, with the application's own field
+   definitions filled into TASK 2 and TASK 3 where the spec says "use the exact existing dashboard
+   field definitions / QA evaluation points already configured in the application". */
+const QA_PROMPT = `### ROLE
+You are an expert Sales Quality Assurance Analyst for JainGroup, a Kolkata real-estate developer.
 
-WRITE DOWN EVERY WORD SPOKEN. Not a summary. Not the gist. Every word.
+### CRITICAL PRE-CHECK - READ FIRST
+Before performing any other task, listen to the complete audio.
+Determine whether there is an actual human conversation between an Agent and a Customer.
+If the call contains ONLY one or more of the following:
+- Ringing
+- Caller tune
+- Busy signal
+- Switch-off message
+- IVR recording
+- Automated system message
+- Silence
+- No meaningful human conversation between an Agent and Customer
+STOP IMMEDIATELY.
+In this case, return ONLY the following valid JSON structure and nothing else:
+{
+  "status": "Non-Transcribable",
+  "reason": "[Specific reason such as Caller Tune, Busy, Switch Off, IVR, Silence, or No Conversation]",
+  "transcript": [],
+  "dashboard_fields": null,
+  "qa_evaluation": [],
+  "summary_verdict": "Call discarded due to lack of human conversation."
+}
+Do not invent a conversation.
+IMPORTANT: ringing, a caller tune or the recorded IVR greeting AT THE START is normal and is NEVER
+on its own a reason to stop - skip past it and check whether people speak after it. Only call the
+recording non-transcribable if there is no human conversation ANYWHERE in it.
 
-- Transcribe the WHOLE recording, first sound to last. Never stop early, never write "conversation
-  continues". Eight minutes of audio means dozens of turns.
-- VERBATIM: keep every "hello", "haan", "achha", "ji", every repetition and false start. Do not tidy,
-  merge or shorten.
-- There is ALMOST ALWAYS speech. Ringing, a caller tune or an IVR message at the start is normal and
-  is NEVER a reason to stop - skip past it and transcribe what follows. Do not call a recording empty
-  because it opens with ringing, is noisy, or the voices are faint.
-- Where you truly cannot make out a phrase, write [inaudible] in its place and carry on. That is for
-  gaps, never for a whole call.
+### TASK 1 - END-TO-END TRANSCRIPTION
+Only if a real human conversation exists:
+Transcribe the COMPLETE audio from beginning to end.
+Requirements:
+- Preserve the ORIGINAL spoken language.
+- Do not translate the conversation unless specifically requested in another field.
+- Support Hindi, English, Bengali, and code-switching between these languages.
+- Maintain strict speaker diarization.
+- Identify speakers as "Agent" and "Customer" whenever possible.
+- Include timestamps in MM:SS format for every speaker turn.
+- Do not omit important conversation segments.
+- Do not summarize instead of transcribing.
+- The transcript must represent the complete conversation.
+- WRITE DOWN EVERY WORD SPOKEN. Keep every "hello", "haan", "achha", "ji", every repetition and
+  false start. Do not tidy, merge or shorten. Eight minutes of audio means dozens of turns.
+- Where you truly cannot make out a phrase, write [inaudible] in its place and carry on. That is
+  for gaps, never for a whole call.
 - NEVER invent a name, a figure, a location or a project you did not hear.
 
 Kolkata place names are said in Bengali and written differently: Pailan (heard as "Poylan"), Joka,
 Madhyamgram, Doltala, Rajarhat, Barasat, Narendrapur, Chinar Park. The developer is "Jain Group" -
 "Gems Group" or "Jems Group" is a mishearing.
 
-Output the conversation as plain text, one turn per line, each line starting "Agent:" or "Customer:".
-Nothing else - no preamble, no JSON, no commentary.`;
+The transcript must be returned as a JSON array, for example:
+[
+  { "timestamp": "00:05", "speaker": "Agent", "text": "..." },
+  { "timestamp": "00:12", "speaker": "Customer", "text": "..." }
+]
 
-const STT_HINT = "Jain Group real-estate sales call, Kolkata. Projects: Dream World City, Dream "
-  + "Gurukul, Dream Exotica, Dream Valley, Dream Eco City, Dream One, Dream Residency Manor. Areas: "
-  + "Rajarhat, New Town, Madhyamgram, Doltala, Badu Road, Joka, Pailan (spoken \"Poylan\"), Barasat, "
-  + "Narendrapur, Siliguri, Durgapur, Eco Park, Chinar Park. Speech mixes Bengali, Hindi and English. "
-  + "Amounts are in lakhs; flats are 2BHK or 3BHK. Ignore the recorded IVR greeting at the start.";
-
-/* STAGE 2. Reading, not listening. It receives the verbatim transcript and NOTHING else - not the
-   audio, not the CRM's name, not the CRM's status - which is what keeps name_matches_crm and
-   crm_status_match honest checks rather than the judge agreeing with what it was told.
-   THE WORD "json" MUST APPEAR HERE: OpenAI refuses response_format json_object outright unless the
-   messages contain it, and rewriting this prompt once dropped the word and 400'd every call. */
-const ANALYSE_PROMPT = `You are a Sales Quality Assurance Analyst for JainGroup, a Kolkata
-real-estate developer. Below is a VERBATIM transcript of one outbound call, produced by a
-speech-to-text system. Reply with a single json object and nothing else - the keys are listed below.
-The transcript has no speaker labels and it is in the languages actually spoken - usually a mix of
-Bengali, Hindi and English. It may contain repetitions, false starts and filler, because that is what
-people say.
+### TASK 2 - DASHBOARD FIELD MAPPING
+Analyze the complete conversation and extract the dashboard fields configured in this application.
+Base every value ONLY on the actual conversation. Do not guess. Where the information is not in the
+audio, return null or "None" as indicated.
 
 ${CATALOGUE}
-
-Do TWO things.
-
-FIRST, lay the conversation out. Split it into turns and label each one, ONE PER LINE:
-- "transcript_original": every turn as spoken, in the original words, each line starting "Agent:" or
-  "Customer:". KEEP EVERY WORD. Do not summarise, do not tidy, do not merge turns, do not drop
-  repetitions or fillers. The agent is the one calling from Jain Group; the customer is the other
-  party. If you cannot tell who spoke a line, label it "Speaker:" rather than guessing.
-- "transcript_english": the SAME turns, same count, same order, translated to natural English.
-  A complete translation, not a condensed one.
-Add nothing that is not in the transcript. If a passage is garbled, carry it across as it is.
-
-SECOND, judge the call, using ONLY what the transcript contains:
-
-"customer_name": the customer's name ONLY if it is actually spoken in the transcript, else ""
-"project_discussed": the project actually named in the transcript, else "Unclear"
-"languages": which of Hindi, Bengali, English actually appear
 
 "dashboard_fields": {
   "number_asked": "Yes" or "No" - did the agent ask for or confirm a contact number,
   "pincode_provided": the pincode if one was given, else "None",
   "lead_category": EXACTLY one of 'Not Interested','Qualified','Interested Not Qualified','Interested Site Visit','Interested in Booking',
   "lost_reason": why this lead did not progress, or "None",
-  "project_discussed": as above
+  "project_discussed": the project actually named in the conversation, else "Unclear"
 }
 
-"criteria": six booleans, true ONLY where the transcript establishes it:
+"criteria": six booleans, true ONLY where the conversation establishes it:
   "site_visit_interested" - the customer agreed to a site visit or asked for one
   "location_match"        - the location they want is one JainGroup builds in
   "bhk_match"             - the configuration they want is available
   "budget_match"          - their budget fits the project discussed
   "ready_move_match"      - ready-to-move vs under-construction matches what was offered
   "follow_up_requested"   - they did not decide but asked to be contacted again ("call me later",
-                            "I am busy", "call me next week"), or a callback time was agreed. FALSE if
-                            they said they have no requirement, have already bought, or are simply
-                            not interested - that is a closed lead, not a pending one.
+                            "I am busy", "call me next week"), or a callback time was agreed. FALSE
+                            if they said they have no requirement, have already bought, or are
+                            simply not interested - that is a closed lead, not a pending one.
 
-"qa_evaluation": seven objects, each {"point","status","evidence","notes"}, status "Pass", "Fail" or
-"Partial". The points are Script, Etiquette, Query Handling, Call to Action, Leakage Avoidance,
-Follow-up Accuracy, Hyper-personalization. If something never arose because the customer ended the
-call early, say so in notes rather than failing the agent for it.
+"customer_name": the customer's name ONLY if it is actually spoken in the audio, else ""
+"project_discussed": the project actually named in the audio, else "Unclear"
+"languages": which of "Hindi", "Bengali", "English" actually appear
 
+### TASK 3 - AGENT QA AUDIT
+Evaluate the Agent against the seven QA points configured in this application. Return
+"qa_evaluation" as an array of seven objects, each {"point","status","evidence","notes"}, where
+"status" is exactly "Pass", "Fail" or "Partial" and "evidence" quotes the conversation.
+The seven points, in this order: Script, Etiquette, Query Handling, Call to Action,
+Leakage Avoidance, Follow-up Accuracy, Hyper-personalization.
+Do not give credit for actions that did not occur. Do not invent statements that are not in the
+audio. If something never arose because the customer ended the call early, say so in "notes" rather
+than failing the agent for it.
+
+### TASK 4 - FINAL VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
 agreed, and what the agent should have done differently. If the call was only a few words, say that
 plainly instead of padding it out.
 
-If a message below the transcript gives the CRM's own record for this call (a lost reason and/or
-remarks the sales agent typed in), also return:
-"discrepancy_check": {
-  "lost_reason_match": true if the CRM's stated lost reason and your own dashboard_fields.lost_reason
-    refer to the same underlying issue, false if they clearly differ, null if the CRM gave no reason,
-  "lost_reason_note": one short sentence on the comparison, "" if null,
-  "remarks_match": true if the CRM's remarks and your summary_verdict describe the same gist/outcome,
-    false if they substantially disagree, null if the CRM gave no remarks,
-  "remarks_note": one short sentence on the comparison, "" if null
-}
-Judge these on substance, not wording - a CRM code like "LOCATION NOT SUITABLE" matches a summary
-that says the customer wanted a different area, even though the words differ.`;
+### OUTPUT FORMAT - STRICT
+Return ONLY valid JSON.
+Do not return:
+- Markdown
+- Markdown code fences
+- Explanations outside JSON
+- Comments
+- Additional text before or after the JSON
+If the call is non-conversational, return the exact "Non-Transcribable" structure above.
+If the call contains a conversation, return:
+{
+  "status": "Completed",
+  "reason": null,
+  "transcript": [ { "timestamp": "MM:SS", "speaker": "Agent", "text": "..." } ],
+  "dashboard_fields": { },
+  "criteria": { },
+  "customer_name": "",
+  "project_discussed": "",
+  "languages": [],
+  "qa_evaluation": [ ],
+  "summary_verdict": ""
+}`;
 
-// Calls are Indian, so "yesterday" must be yesterday in IST - at 19:00 UTC when the cron fires, UTC
-// is still on the previous day.
-const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
-const istYesterday = () => new Date(Date.now() + 5.5 * 3600e3 - 864e5).toISOString().slice(0, 10);
+/* --------------------------------------------------------------- TIME / IDs */
+const nowIso = () => new Date().toISOString();
+const appNow = () => new Date(Date.now() + APP_TZ_OFFSET_MIN * 60e3);
+const appToday = () => appNow().toISOString().slice(0, 10);
+/* Yesterday in the APPLICATION timezone, computed at call time. Never hardcoded, never derived from
+   UTC's idea of the date. */
+const appYesterday = () => new Date(appNow().getTime() - 864e5).toISOString().slice(0, 10);
 const isDate = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+/* FIFO ordering. A Postgres sequence hands out strictly increasing numbers, so the order the CRM
+   returned its records in survives pulls, retries, overlapping ticks and restarts - which a
+   max(queue_seq)+1 read could not promise. Reserves a block of n and returns the FIRST number in
+   it. If the function is somehow unavailable, a millisecond-based number is still monotonic and
+   still orders correctly, so the queue degrades rather than breaking. */
+async function reserveQueueSeq(db: DB, n: number): Promise<number> {
+  const { data, error } = await db.rpc("next_transcription_queue_block", { n: Math.max(1, n) });
+  const first = Number(data);
+  return (error || !Number.isFinite(first)) ? Date.now() * 1000 : first;
+}
 
 /* Duration without decoding. Knowlarity sends CBR MPEG 2.5 Layer III, 16 kbps, 8 kHz mono, so bytes
    over bitrate is exact enough - verified against a real 166,752 byte file that came to 83.4s. The
-   feed sends no duration, so this is the only way to apply the ">1 minute" rule, and it is what stops
-   us paying to listen to ring-outs.
+   feed sends no duration, so this is the only way to apply the ">1 minute" rule.
    NOTE it measures the FILE, which includes ringing and post-hangup silence. null never fails. */
 const BR_V1 = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0];
 const BR_V2 = [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0];
 const SAMPLE_RATES: Record<number, number[]> = { 3:[44100,48000,32000], 2:[22050,24000,16000], 0:[11025,12000,8000] };
-
 function estimateDurationSeconds(b: Uint8Array): number | null {
   let off = 0;
   if (b.length > 10 && b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) {
@@ -284,116 +332,114 @@ function estimateDurationSeconds(b: Uint8Array): number | null {
   return null;
 }
 
-/* Turns, from the two laid-out transcripts stage 2 returns. Split on the SPEAKER LABEL, not on the
-   line break: asked for one turn per line, gpt-4o just as often returns them comma-separated on a
-   single line, which read as one 3,768 character turn the first time this ran. The label is the real
-   boundary, so whatever sits between turns is treated as the separator.
-   Deliberately no timestamps: this pipeline does not have them, and an invented "00:42" beside a real
-   sentence is exactly the kind of plausible detail that caused the original trouble. */
-function parseTurns(en: string, bn: string) {
-  const clean = (t: string) => String(t || "")
-    .replace(/\r/g, "")
-    .replace(/\s*[,;|]?\s*(?=(?:Agent|Customer|Speaker)\s*\d*\s*:)/g, "\n")
-    .split("\n").map((x) => x.trim()).filter(Boolean);
-  const eL = clean(en), bL = clean(bn);
-  if (!eL.length) return [];
-  const speakerOf = (line: string) => {
-    const m = line.match(/^\s*(agent|customer|speaker\s*\d*)\s*:\s*/i);
-    return m ? { who: /agent/i.test(m[1]) ? "Agent" : /customer/i.test(m[1]) ? "Customer" : "Speaker",
-                 rest: line.slice(m[0].length) } : null;
-  };
-  const out: Record<string, string>[] = [];
-  for (let i = 0; i < eL.length; i++) {
-    const e = speakerOf(eL[i]);
-    const b = i < bL.length ? speakerOf(bL[i]) : null;
-    const text = e ? e.rest : eL[i];
-    const original = b ? b.rest : (i < bL.length ? bL[i] : "");
-    if (!text && !original) continue;
-    out.push({ speaker: e ? e.who : "Speaker", text, original });
-  }
-  return out;
-}
-
-type FeedRow = {
-  recording_url?: unknown; lead_id?: unknown; business_unit_name?: unknown;
-  lead_name?: unknown; status?: unknown;
-  /* What the AGENT recorded, which is the other half of every discrepancy check. lead_mobile is gone:
-     the report stopped sending it. */
-  next_follow_up_date?: unknown; lost_reason?: unknown; remarks?: unknown;
-};
+/* ------------------------------------------------------------------- FEED */
+type FeedRow = Record<string, unknown>;
 // The feed writes absence as text rather than as null, and not always the same text.
 const FEED_BLANKS = ["none", "null", "undefined", "na", "n/a", "-", ""];
 function feedText(v: unknown): string | null {
   const s = String(v ?? "").trim();
   return FEED_BLANKS.includes(s.toLowerCase()) ? null : s;
 }
-const realUrl = feedText;
-
-/* The CRM's own verdict on the lead, which is a different thing from the AI's. It sends "lost" and
-   "In Followup" - inconsistent casing, so it is normalised here rather than at every place that
-   reads it. An unrecognised value is kept as-is instead of dropped, so a new status shows up on
-   screen as itself rather than silently becoming blank. */
+/* The CRM's own verdict. It sends "lost" and "In Followup" - inconsistent casing, so it is
+   normalised here rather than at every place that reads it. An unrecognised value is kept as-is
+   instead of dropped, so a new status shows up on screen as itself rather than silently blank. */
 const CRM_STATUSES: Record<string, string> = {
   "lost": "Lost", "in followup": "In Followup", "followup": "In Followup", "follow up": "In Followup",
+  "qualified": "Qualified", "sit visited": "Sit Visited", "site visited": "Sit Visited", "ov": "OV",
 };
 function crmStatusFrom(v: unknown): string | null {
   const s = feedText(v);
   return s ? (CRM_STATUSES[s.toLowerCase()] || s) : null;
 }
-
 /* What each recording is called: "Full Name_Lead Id", or the lead id on its own when the CRM has no
-   name for the lead. The lead id is always sent, so a recording can never end up nameless. */
+   name. The lead id is always sent, so a recording can never end up nameless. */
 function recordingName(name: string | null, leadId: number): string {
   const clean = String(name || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
   return clean ? clean + "_" + leadId : String(leadId);
 }
+/* The stable per-call identity. lead_id alone is the LEAD; lead_id + callid is the CALL, which is
+   what deduplication has to key on so a second call to the same person is new work and a re-run of
+   the same day is not. */
 const callUuidFrom = (url: string) => url.match(/callid=([0-9a-fA-F-]{36})/)?.[1] ?? null;
+const callKeyOf = (leadId: number, uuid: string | null, url: string | null) =>
+  `${leadId}:${uuid || url || "norec"}`;
 
 type Check = { check: string; status: "pass" | "fail" | "skip"; detail: string };
 
-/* Does the CRM's verdict match what the call actually contains? The two disagree in opposite
-   directions: a Lost lead that wanted to buy was written off too early, while a lead still being
-   chased who said no is effort going nowhere. Surfacing both is the point of this dashboard. */
+/* ------------------------------------------------- DERIVED STATUS + COMPARISON
+   The transcription-derived status, in the CRM's own vocabulary so the two can be compared at all.
+   Three outcomes, not two: a customer who asked to be called back has neither matched nor been
+   lost, and forcing them into "lost" is how a live lead gets written off. */
 const HIGH_INTENT = ["qualified", "interested site visit", "interested in booking"];
-function judgeMismatch(crmStatus: string | null, category: string | null) {
-  const st = String(crmStatus || "").toLowerCase();
-  const cat = String(category || "").trim(), c = cat.toLowerCase();
-  if (!cat) return { mismatch: null, severity: null, reason: null };
-
-  if (st === "lost") {
-    if (c === "not interested") {
-      return { mismatch: false, severity: null,
-        reason: "CRM marked this lead Lost and the call confirms the customer was not interested." };
-    }
-    if (HIGH_INTENT.includes(c)) {
-      return { mismatch: true, severity: "high",
-        reason: `CRM marked this lead Lost, but the call shows buying intent - graded "${cat}". This lead was written off while still active and should be re-opened.` };
-    }
-    if (c === "interested not qualified") {
-      return { mismatch: true, severity: "low",
-        reason: "CRM marked this lead Lost. The customer was interested but did not fit current inventory, so closing it is defensible - worth nurturing rather than discarding." };
-    }
-    return { mismatch: true, severity: "low",
-      reason: `CRM marked this lead Lost; an unrecognised category "${cat}" came back - review manually.` };
+function derivedStatusFrom(category: string | null, crit: Record<string, boolean> | null): string | null {
+  const c = String(category || "").trim().toLowerCase();
+  if (!c) {
+    if (crit?.follow_up_requested) return "follow_up";
+    return null;
   }
-
-  if (st === "in followup") {
-    if (c === "not interested") {
-      return { mismatch: true, severity: "low",
-        reason: "CRM still has this lead In Followup, but on the call the customer said they are not interested - the team is chasing a lead that is already closed." };
-    }
-    return { mismatch: false, severity: null,
-      reason: `CRM has this lead In Followup and the call agrees - graded "${cat}", so it is rightly still open.` };
+  if (c === "not interested") return "lost";
+  if (HIGH_INTENT.includes(c)) return "qualified";
+  if (c === "interested not qualified") return crit?.follow_up_requested ? "follow_up" : "lost";
+  return null;
+}
+const CRM_TO_DERIVED: Record<string, string> = {
+  "lost": "lost", "in followup": "follow_up", "qualified": "qualified",
+  "sit visited": "qualified", "ov": "qualified",
+};
+/* MATCH / MISMATCH / NOT_COMPARABLE. NOT_COMPARABLE is a real answer, not a failure to answer: a
+   call with no conversation in it cannot agree or disagree with the CRM, and counting it as a match
+   would inflate the only number on the dashboard anyone acts on. */
+function compareWithCrm(crmStatus: string | null, derived: string | null, processing: string):
+  { comparison_status: string; comparison_reason: string } {
+  if (processing === "non_transcribable") {
+    return { comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The recording holds no human conversation, so there is nothing to compare against the CRM's verdict." };
   }
-
-  return { mismatch: null, severity: null,
-    reason: `CRM status "${crmStatus}" is not one this report has sent before, so it was not checked against the call.` };
+  if (processing !== "completed") {
+    return { comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "This call has not been transcribed yet, so no comparison has been made." };
+  }
+  if (!crmStatus) {
+    return { comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The CRM feed sent no status for this lead." };
+  }
+  if (!derived) {
+    return { comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The conversation did not establish a clear outcome, so no status could be derived from it." };
+  }
+  const crmDerived = CRM_TO_DERIVED[crmStatus.toLowerCase()];
+  if (!crmDerived) {
+    return { comparison_status: "NOT_COMPARABLE",
+      comparison_reason: `CRM status "${crmStatus}" is not one this report has sent before, so it was not checked against the call.` };
+  }
+  if (crmDerived === derived) {
+    return { comparison_status: "MATCH",
+      comparison_reason: `CRM has this lead as "${crmStatus}" and the call agrees - the conversation reads as "${derived}".` };
+  }
+  // The two disagree in opposite directions, and both are worth surfacing.
+  if (crmDerived === "lost" && derived === "qualified") {
+    return { comparison_status: "MISMATCH",
+      comparison_reason: `CRM marked this lead Lost, but the call shows buying intent. This lead was written off while still active and should be re-opened.` };
+  }
+  if (crmDerived === "lost" && derived === "follow_up") {
+    return { comparison_status: "MISMATCH",
+      comparison_reason: `CRM marked this lead Lost, but on the call the customer asked to be contacted again - it is a pending lead, not a closed one.` };
+  }
+  if (crmDerived === "follow_up" && derived === "lost") {
+    return { comparison_status: "MISMATCH",
+      comparison_reason: `CRM still has this lead In Followup, but on the call the customer said they are not interested - the team is chasing a lead that is already closed.` };
+  }
+  if (crmDerived === "qualified" && derived === "lost") {
+    return { comparison_status: "MISMATCH",
+      comparison_reason: `CRM has this lead as "${crmStatus}", but the call reads as a customer who is not interested.` };
+  }
+  return { comparison_status: "MISMATCH",
+    comparison_reason: `CRM has this lead as "${crmStatus}" (${crmDerived}) but the call reads as "${derived}".` };
 }
 
-/* THE OUTCOME, from the SAME criteria the dashboard renders, by the same rule it prints, so the panel
-   and the badge cannot disagree. Three outcomes, not two: a customer who asked to be called back has
-   neither matched nor been lost, and forcing them into Not Qualified is how a live lead gets written
-   off. Order matters - a firm yes outranks a maybe, and a maybe outranks nothing. */
+/* The three-way outcome the existing dashboard renders, from the SAME criteria, by the same rule it
+   prints, so the panel and the badge cannot disagree. Order matters - a firm yes outranks a maybe,
+   and a maybe outranks nothing. */
 const CRIT_KEYS = ["site_visit_interested","location_match","bhk_match","budget_match","ready_move_match","follow_up_requested"];
 function normaliseCriteria(v: unknown): Record<string, boolean> | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -402,219 +448,398 @@ function normaliseCriteria(v: unknown): Record<string, boolean> | null {
   return out;
 }
 function qualifyFrom(c: Record<string, boolean> | null) {
-  if (!c) return { qualification: null as string | null, why: null as string | null };
-  if (c.site_visit_interested) {
-    return { qualification: "Qualified", why: "The customer agreed to a site visit." };
-  }
-  if (c.location_match && c.bhk_match && c.budget_match && c.ready_move_match) {
-    return { qualification: "Qualified", why: "Location, configuration, budget and possession timeline all match." };
+  if (!c) return { qualification: null as string | null, why: "" };
+  const core = ["location_match","bhk_match","budget_match","ready_move_match"];
+  const met = core.filter((k) => c[k]);
+  if (c.site_visit_interested || met.length === core.length) {
+    return { qualification: "Qualified",
+      why: c.site_visit_interested ? "The customer agreed to a site visit." : "Location, configuration, budget and possession all matched." };
   }
   if (c.follow_up_requested) {
-    return { qualification: "Follow-Up",
-      why: "The customer did not decide on this call but asked to be contacted again - still open, not lost." };
+    return { qualification: "Follow-Up", why: "The customer did not decide but asked to be contacted again." };
   }
-  const missing = ([["location_match","location"],["bhk_match","configuration"],
-                    ["budget_match","budget"],["ready_move_match","possession timeline"]] as const)
-    .filter(([k]) => !c[k]).map(([, label]) => label);
-  return {
-    qualification: "Not Qualified",
-    why: "No site visit was agreed and no callback was asked for" +
-         (missing.length ? `; ${missing.join(", ")} did not match` : "") + ".",
-  };
+  return { qualification: "Not Qualified",
+    why: met.length ? `Only ${met.length} of ${core.length} requirements matched.` : "None of the requirements matched." };
 }
-
-// Share of the 7 criteria passed, Partial counting as half.
 function qaScoreFor(qa: unknown): number | null {
   if (!Array.isArray(qa) || !qa.length) return null;
   let got = 0;
-  for (const it of qa) {
-    const s = String((it as any)?.status || "").toLowerCase();
+  for (const p of qa as any[]) {
+    const s = String(p?.status || "").toLowerCase();
     if (s === "pass") got += 1; else if (s === "partial") got += 0.5;
   }
-  return Math.round((got / qa.length) * 100);
+  return Math.round((got / (qa as any[]).length) * 100);
 }
-
-/* Flat text for the list, the export and the detail view - one labelled line per turn, which is the
-   shape the mailer and the tracker already read. No timestamp prefix: there are none to print. */
-function flattenTurns(turns: Record<string, string>[], field: "text" | "original"): string {
-  return turns.map((t) => `${t.speaker || "Speaker"}: ${t[field] || t.text || ""}`.trim())
-              .filter((l) => l.replace(/^\w+:\s*/, "").length).join("\n");
-}
-
-/* A real failure mode, caught live: a 77-second call came back as "hello" repeated 56 times -
-   the speech model got stuck in a loop rather than genuinely listening, and every existing check
-   (non-empty, turn count) tests SHAPE, so it sailed through as a clean "pass". This tests CONTENT:
-   one word dominating almost everything said is the signature of a stuck loop, not a real call. */
-function degenerateRepeat(text: string): { word: string; count: number; total: number } | null {
-  const words = text.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
-  if (words.length < 8) return null;
-  const counts: Record<string, number> = {};
-  for (const w of words) counts[w] = (counts[w] || 0) + 1;
-  const [word, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-  return (count / words.length >= 0.6 && count >= 6) ? { word, count, total: words.length } : null;
-}
-
-// Only the three languages these calls are in, so a hallucinated value cannot reach the column.
-const KNOWN_LANGUAGES = ["hindi", "bengali", "english"];
 function languagesFrom(v: unknown): string[] | null {
   if (!Array.isArray(v)) return null;
-  const out: string[] = [];
-  for (const x of v) {
-    const s = String(x || "").trim(), k = s.toLowerCase();
-    if (KNOWN_LANGUAGES.includes(k) && !out.some((y) => y.toLowerCase() === k)) {
-      out.push(k.charAt(0).toUpperCase() + k.slice(1));
-    }
-  }
+  const map: Record<string, string> = { hindi: "hi", english: "en", bengali: "bn", bangla: "bn", hi: "hi", en: "en", bn: "bn" };
+  const out = Array.from(new Set(v.map((x) => map[String(x).trim().toLowerCase()]).filter(Boolean)));
   return out.length ? out : null;
 }
 
-// ---------------------------------------------------------------- PULL
-async function doPull(db: DB, from: string, to: string, trigger: string) {
-  let feed: FeedRow[];
-  try {
-    const res = await fetch(`${FEED_URL}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error(`feed returned ${res.status}`);
-    const body = await res.json();
-    if (!Array.isArray(body)) throw new Error("feed did not return a JSON array");
-    feed = body;
-  } catch (e) {
-    const error_text = String((e as any)?.message || e).slice(0, 500);
-    await db.schema("acc").from("lost_call_sync_runs").insert({ from_date: from, to_date: to, trigger, error_text });
-    return j({ error: "feed fetch failed: " + error_text }, 502);
+/* ----------------------------------------------------- TRANSCRIPT RENDERING
+   The turns Gemini returns, kept as given and also flattened to plain text so the existing detail
+   view, the search box and the density check all keep working on `transcript`. */
+type Turn = { timestamp: string; speaker: string; text: string };
+function normaliseTurns(v: unknown): Turn[] {
+  if (!Array.isArray(v)) return [];
+  const out: Turn[] = [];
+  for (const t of v as any[]) {
+    if (!t || typeof t !== "object") continue;
+    const text = fixSpellings(stripIvr(String(t.text ?? "")));
+    if (!text) continue;
+    const rawSpeaker = String(t.speaker ?? "").trim();
+    const speaker = /agent/i.test(rawSpeaker) ? "Agent"
+      : /customer/i.test(rawSpeaker) ? "Customer"
+      : (rawSpeaker || "Speaker");
+    const ts = String(t.timestamp ?? "").trim();
+    out.push({ timestamp: /^\d{1,2}:\d{2}(:\d{2})?$/.test(ts) ? ts : "", speaker, text });
   }
+  return out;
+}
+const flattenTurns = (turns: Turn[]) =>
+  turns.map((t) => (t.timestamp ? `[${t.timestamp}] ` : "") + t.speaker + ": " + t.text).join("\n");
+const plainText = (turns: Turn[]) => turns.map((t) => t.text).join(" ");
 
-  // The feed repeats rows, and sends exact duplicates when recording_url is "None". Dedupe so the
-  // no-recording rows collapse to one per lead rather than inflating "calls received".
-  const seen = new Set<string>();
-  const queued: Record<string, unknown>[] = [];
-  let noRecording = 0, skippedStatus = 0;
-
-  for (const row of feed) {
-    const leadId = Number(row.lead_id) || null;
-    if (!leadId) continue;
-    const crm = crmStatusFrom(row.status);
-    /* Lost and In Followup only. Skipped HERE, so Qualified, Sit Visited and OV never enter the queue:
-       filtering later would mean transcribing them first, which is the expensive way to ignore
-       something. */
-    if (!crm || !WANTED_STATUSES.includes(crm)) { skippedStatus++; continue; }
-
-    const bu = row.business_unit_name ? String(row.business_unit_name) : null;
-    const rec = realUrl(row.recording_url);
-    // Straight from the CRM, so these are facts rather than the AI's reading of the audio.
-    const nm = feedText(row.lead_name);
-    const label = recordingName(nm, leadId);
-    /* The agent's own record of this call, kept apart from anything the AI produces so the two can be
-       compared rather than one quietly overwriting the other. */
-    const agentReason = feedText(row.lost_reason);
-    const agentRemarks = feedText(row.remarks);
-    const nextFollowUp = feedText(row.next_follow_up_date);
-
-    if (!rec) {
-      const key = `norec:${leadId}`;
-      if (seen.has(key)) continue;
-      seen.add(key); noRecording++;
-      queued.push({
-        source: SOURCE, title: label, file_name: label, lead_id: leadId,
-        customer_name: nm,
-        crm_lost_reason: agentReason, crm_remarks: agentRemarks, next_follow_up_date: nextFollowUp,
-        business_unit_name: bu, project: bu, crm_status: crm, report_date: from,
-        status: "no_recording", synced_at: new Date().toISOString(),
-        verification: [{ check: "recording_present", status: "fail",
-          detail: 'The CRM feed returned "None" for this call - there is no recording to transcribe.' }] satisfies Check[],
-      });
-      continue;
-    }
-    const uuid = callUuidFrom(rec);
-    const key = uuid ? `uuid:${uuid}` : `url:${rec}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // project comes from the feed and is known now; the AI returns "Unclear" most of the time.
-    queued.push({
-      source: SOURCE, title: label, file_name: label, lead_id: leadId,
-      customer_name: nm,
-      crm_lost_reason: agentReason, crm_remarks: agentRemarks, next_follow_up_date: nextFollowUp,
-      business_unit_name: bu, project: bu, crm_status: crm, report_date: from,
-      recording_url: rec, call_uuid: uuid, status: "queued", synced_at: new Date().toISOString(),
-    });
-  }
-
-  // Skip what we already hold, so a re-run never re-bills for a call.
-  const uuids = queued.map((r) => r.call_uuid).filter(Boolean) as string[];
-  const urls = queued.map((r) => r.recording_url).filter(Boolean) as string[];
-  const known = new Set<string>();
-  if (uuids.length) {
-    const { data } = await db.schema("acc").from("transcriptions").select("call_uuid").in("call_uuid", uuids);
-    for (const r of data || []) if (r.call_uuid) known.add("uuid:" + r.call_uuid);
-  }
-  if (urls.length) {
-    const { data } = await db.schema("acc").from("transcriptions").select("recording_url").in("recording_url", urls);
-    for (const r of data || []) if (r.recording_url) known.add("url:" + r.recording_url);
-  }
-  {
-    const { data } = await db.schema("acc").from("transcriptions")
-      .select("lead_id").eq("report_date", from).eq("status", "no_recording");
-    for (const r of data || []) if (r.lead_id) known.add("norec:" + r.lead_id);
-  }
-  const fresh = queued.filter((r) =>
-    r.status === "no_recording" ? !known.has("norec:" + r.lead_id)
-    : r.call_uuid ? !known.has("uuid:" + r.call_uuid)
-    : !known.has("url:" + r.recording_url));
-
-  let inserted = 0;
-  for (let i = 0; i < fresh.length; i += 100) {
-    const { data, error } = await db.schema("acc").from("transcriptions").insert(fresh.slice(i, i + 100)).select("id");
-    // 23505 is a duplicate key: two overlapping runs, not worth aborting on.
-    if (error && error.code !== "23505") {
-      await db.schema("acc").from("lost_call_sync_runs").insert({
-        from_date: from, to_date: to, trigger, feed_rows: feed.length, inserted,
-        duplicates: queued.length - fresh.length, no_recording: noRecording,
-        error_text: error.message.slice(0, 500) });
-      return j({ error: error.message }, 500);
-    }
-    inserted += (data || []).length;
-  }
-  await db.schema("acc").from("lost_call_sync_runs").insert({
-    from_date: from, to_date: to, trigger, feed_rows: feed.length, inserted,
-    duplicates: queued.length - fresh.length, no_recording: noRecording });
-
-  return { from, to, feed_rows: feed.length, unique_calls: queued.length, inserted,
-           duplicates: queued.length - fresh.length, no_recording: noRecording,
-           skipped_other_statuses: skippedStatus };
+/* ------------------------------------------------------------ GEMINI OUTPUT
+   Gemini is asked for bare JSON and asked again via responseMimeType, and still occasionally wraps
+   it in a fence. Unwrapping a fence is not "accepting invalid JSON" - the JSON inside is either
+   valid or it is not, and if it is not, this returns null and the attempt FAILS. */
+function parseGeminiJson(raw: string): any | null {
+  let s = String(raw || "").trim();
+  if (s.startsWith("```")) s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { /* fall through */ }
+  // A single trailing brace short, or trailing prose after the object: take the outermost braces.
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch { /* give up */ } }
+  return null;
 }
 
-// ---------------------------------------------------------------- WORK
-async function processOne(db: DB, row: any, openaiKey: string,
-                          sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL,
-                          engine = "chatgpt", geminiKey = "", geminiModel = GEMINI_MODEL) {
-  // Counted here rather than at the end, so an attempt that crashes still counts against the cap.
-  const attempts = Number(row.attempts || 0) + 1;
+/* SHAPE validation. Necessary, and - as the header says - not sufficient; the content guards in
+   processOne are the other half. */
+function validateGemini(p: any): { ok: true; nonTranscribable: boolean } | { ok: false; why: string } {
+  if (!p || typeof p !== "object" || Array.isArray(p)) return { ok: false, why: "the reply was not a JSON object" };
+  const st = String(p.status || "").trim().toLowerCase();
+  if (st === "non-transcribable" || st === "non_transcribable") {
+    if (!feedText(p.reason)) return { ok: false, why: 'status was "Non-Transcribable" but no reason was given' };
+    return { ok: true, nonTranscribable: true };
+  }
+  if (st !== "completed") return { ok: false, why: `unrecognised status "${p.status}"` };
+  if (!Array.isArray(p.transcript) || !p.transcript.length) {
+    return { ok: false, why: 'status was "Completed" but the transcript array was empty' };
+  }
+  if (!Array.isArray(p.qa_evaluation)) return { ok: false, why: "qa_evaluation was not an array" };
+  return { ok: true, nonTranscribable: false };
+}
+
+/* ============================================================ PULL (daily) */
+async function fetchFeed(from: string, to: string): Promise<{ rows: FeedRow[]; raw: unknown }> {
+  let lastErr = "";
+  for (let i = 0; i < FEED_ATTEMPTS; i++) {
+    if (FEED_BACKOFF_MS[i]) await new Promise((r) => setTimeout(r, FEED_BACKOFF_MS[i]));
+    try {
+      const res = await fetch(`${FEED_URL}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`feed returned ${res.status}`);
+      const body = await res.json();
+      if (!Array.isArray(body)) throw new Error("feed did not return a JSON array");
+      return { rows: body as FeedRow[], raw: body };
+    } catch (e) {
+      lastErr = String((e as any)?.message || e);
+    }
+  }
+  throw new Error(lastErr || "feed fetch failed");
+}
+
+async function doPull(db: DB, from: string, to: string, trigger: string) {
+  let feed: FeedRow[], raw: unknown;
+  try {
+    const got = await fetchFeed(from, to);
+    feed = got.rows; raw = got.raw;
+  } catch (e) {
+    /* Logged in both places on purpose: the run log is the operational history, and a failed job row
+       is what makes "we have nothing for the 26th" visible next to the days that worked, rather than
+       the day simply being absent. */
+    const error_text = String((e as any)?.message || e).slice(0, 500);
+    await db.schema("acc").from("lost_call_sync_runs").insert({
+      from_date: from, to_date: to, trigger, error_text, attempts: FEED_ATTEMPTS });
+    await db.schema("acc").from("transcription_jobs").insert({
+      job_date: from, trigger, status: "failed", error_text, completed_at: nowIso() });
+    return j({ error: "feed fetch failed after " + FEED_ATTEMPTS + " attempts: " + error_text }, 502);
+  }
+
+  /* THE ORIGINAL RESPONSE, STORED VERBATIM, BEFORE ANY TRANSCRIPTION STARTS. An edge function has no
+     filesystem between invocations, so "temporarily as JSON" means a row: acc.transcription_jobs
+     exists for exactly this and was never wired up. The payload is cleared once the day's queue
+     drains (see clearFinishedJobPayloads) - the durable audit is per-row original_crm_response,
+     which is what the Copy Response button hands back. */
+  const { data: job } = await db.schema("acc").from("transcription_jobs").insert({
+    job_date: from, trigger, payload: raw as any, feed_rows: feed.length, status: "fetched",
+  }).select("job_date").maybeSingle();
+  if (!job) {
+    console.warn("could not park the raw feed payload for " + from + " - continuing");
+  }
+  const { data: run } = await db.schema("acc").from("lost_call_sync_runs").insert({
+    from_date: from, to_date: to, trigger, feed_rows: feed.length,
+  }).select("id").single();
+  const runId = run?.id ?? null;
+
+  const seen = new Set<string>();
+  type Prepared = {
+    leadId: number; key: string; uuid: string | null; url: string | null;
+    crm: string | null; name: string | null; crmRow: FeedRow; order: number;
+  };
+  const prepared: Prepared[] = [];
+  let skippedStatus = 0, noRecording = 0;
+
+  feed.forEach((row, idx) => {
+    const leadId = Number((row as any).lead_id) || null;
+    if (!leadId) return;
+    const crm = crmStatusFrom((row as any).status);
+    if (WANTED_STATUSES.length && (!crm || !WANTED_STATUSES.includes(crm))) { skippedStatus++; return; }
+    const url = feedText((row as any).recording_url);
+    const uuid = url ? callUuidFrom(url) : null;
+    const key = callKeyOf(leadId, uuid, url);
+    // The feed repeats rows, and sends exact duplicates when recording_url is "None".
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (!url) noRecording++;
+    prepared.push({ leadId, key, uuid, url, crm, name: feedText((row as any).lead_name), crmRow: row, order: idx });
+  });
+
+  // What we already hold for these leads. ONE ROW PER LEAD, so this is a lead lookup, not a call one.
+  const leadIds = Array.from(new Set(prepared.map((p) => p.leadId)));
+  const existing = new Map<number, any>();
+  for (let i = 0; i < leadIds.length; i += 200) {
+    /* The whole row, not a column list. A lead whose current call is finished gets that call folded
+       into call_history by archiveCurrent(), and a partial read silently drops whatever it did not
+       ask for - the turn-by-turn transcript went missing exactly that way. */
+    const { data } = await db.schema("acc").from("transcriptions")
+      .select("*")
+      .eq("source", SOURCE).is("deleted_at", null).in("lead_id", leadIds.slice(i, i + 200));
+    for (const r of data || []) existing.set(Number(r.lead_id), r);
+  }
+
+  const TERMINAL = ["completed", "failed", "non_transcribable"];
+  let inserted = 0, appendedHistory = 0, queuedBehind = 0, duplicates = 0;
+  /* Feed order IS queue order - spec 3. One block reserved for the whole pull, handed out in the
+     order the CRM returned the records, so the first record in the response is the first one
+     worked. */
+  let seq = (await reserveQueueSeq(db, prepared.length)) - 1;
+  const nextSeq = () => ++seq;
+
+  for (const p of prepared) {
+    const base = {
+      source: SOURCE,
+      title: recordingName(p.name, p.leadId),
+      file_name: recordingName(p.name, p.leadId),
+      lead_id: p.leadId,
+      customer_name: p.name,
+      crm_status: p.crm,
+      crm_lost_reason: feedText((p.crmRow as any).lost_reason),
+      crm_remarks: feedText((p.crmRow as any).remarks),
+      next_follow_up_date: feedText((p.crmRow as any).next_follow_up_date),
+      business_unit_name: feedText((p.crmRow as any).business_unit_name),
+      project: feedText((p.crmRow as any).business_unit_name),
+      recording_url: p.url,
+      call_uuid: p.uuid,
+      // The complete CRM record for this row, exactly as the API sent it. Spec 11.
+      original_crm_response: p.crmRow as any,
+      source_date: from,
+      report_date: from,
+      sync_run_id: runId,
+      synced_at: nowIso(),
+    };
+
+    const prior = existing.get(p.leadId);
+
+    /* ---- brand new lead ---- */
+    if (!prior) {
+      const noRec = !p.url;
+      const { error } = await db.schema("acc").from("transcriptions").insert({
+        ...base,
+        status: noRec ? "non_transcribable" : "pending",
+        non_transcribable_reason: noRec ? "The CRM feed returned no recording URL for this call." : null,
+        comparison_status: "NOT_COMPARABLE",
+        comparison_reason: noRec
+          ? "There is no recording, so nothing can be compared against the CRM's verdict."
+          : "This call has not been transcribed yet, so no comparison has been made.",
+        queue_seq: noRec ? null : nextSeq(),
+        queued_at: noRec ? null : nowIso(),
+        completed_at: noRec ? nowIso() : null,
+        attempt_count: 0, attempts: 0,
+        processed_call_uuids: p.uuid ? [p.uuid] : [],
+        status_trail: p.crm ? [p.crm] : [],
+        call_history: [], pending_calls: [],
+        verification: [{ check: "recording_present", status: noRec ? "fail" : "pass",
+          detail: noRec ? 'The CRM feed returned "None" for this call - there is no recording to transcribe.'
+                        : "CRM feed supplied a recording URL." }] satisfies Check[],
+      });
+      // 23505 is a duplicate key: two overlapping runs, not worth aborting on.
+      if (error && error.code !== "23505") {
+        await db.schema("acc").from("lost_call_sync_runs")
+          .update({ error_text: error.message.slice(0, 500) }).eq("id", runId);
+        return j({ error: error.message }, 500);
+      }
+      if (!error) inserted++;
+      /* Re-read so a second call for the same lead in this same feed sees the row we just made.
+         Whole row, not a subset: if that second call finds this one already terminal (a
+         no-recording row is), archiveCurrent() runs against it, and a partial read would archive a
+         mostly-empty entry. */
+      const { data: fresh } = await db.schema("acc").from("transcriptions")
+        .select("*")
+        .eq("source", SOURCE).eq("lead_id", p.leadId).is("deleted_at", null).maybeSingle();
+      if (fresh) existing.set(p.leadId, fresh);
+      continue;
+    }
+
+    /* ---- lead we already hold ---- */
+    const known: string[] = Array.isArray(prior.processed_call_uuids) ? prior.processed_call_uuids : [];
+    const pendingQ: any[] = Array.isArray(prior.pending_calls) ? prior.pending_calls : [];
+    const thisCallId = p.uuid || p.url || null;
+    const alreadyKnown = !!thisCallId && (
+      known.includes(thisCallId) ||
+      prior.call_uuid === p.uuid ||
+      pendingQ.some((q: any) => (q.call_uuid || q.recording_url) === thisCallId)
+    );
+    // Already processed or already queued: a re-run of the same day must change nothing. Spec 2.8.
+    if (alreadyKnown || !thisCallId) { duplicates++; continue; }
+
+    const trail: string[] = Array.isArray(prior.status_trail) ? prior.status_trail.slice() : [];
+    if (p.crm && trail[trail.length - 1] !== p.crm) trail.push(p.crm);
+
+    if (TERMINAL.includes(String(prior.status))) {
+      /* The current call is finished, so it becomes history and this new call takes the row. Every
+         detail for the lead stays in this one row - the archived call keeps its own transcript, QA
+         and comparison. */
+      const archived = archiveCurrent(prior);
+      const history = (Array.isArray(prior.call_history) ? prior.call_history : []).concat(archived ? [archived] : []);
+      const { error } = await db.schema("acc").from("transcriptions").update({
+        ...base,
+        status: "pending",
+        call_history: history,
+        status_trail: trail,
+        processed_call_uuids: known.concat([thisCallId]),
+        queue_seq: nextSeq(), queued_at: nowIso(),
+        processing_started_at: null, completed_at: null,
+        attempt_count: 0, attempts: 0, last_error: null, error_text: null,
+        // the previous call's result is in call_history now; the row's own result fields reset
+        transcript: null, transcript_en: null, transcript_bn: null, utterances: null,
+        dashboard_fields: null, criteria: null, qa_evaluation: null, qa_score: null,
+        summary_verdict: null, summary: null, qualification: null, reason: null,
+        ai_lead_category: null, transcription_status: null, non_transcribable_reason: null,
+        gemini_raw: null, languages: null, duration_seconds: null,
+        comparison_status: "NOT_COMPARABLE",
+        comparison_reason: "This call has not been transcribed yet, so no comparison has been made.",
+        mismatch: null, mismatch_severity: null, mismatch_reason: null,
+        verification: null, discrepancy: null, has_discrepancy: null,
+        updated_at: nowIso(),
+      }).eq("id", prior.id);
+      if (error) return j({ error: error.message }, 500);
+      appendedHistory++;
+      existing.set(p.leadId, { ...prior, ...base, status: "pending",
+        processed_call_uuids: known.concat([thisCallId]), call_history: history, status_trail: trail, pending_calls: pendingQ });
+    } else {
+      /* The row is mid-flight. Queue the new call behind it rather than clobbering work in progress
+         - it rotates in the moment the current one reaches a terminal state. */
+      const q = pendingQ.concat([{ ...base, queued_at: nowIso() }]);
+      const { error } = await db.schema("acc").from("transcriptions").update({
+        pending_calls: q, status_trail: trail,
+        processed_call_uuids: known.concat([thisCallId]),
+        updated_at: nowIso(),
+      }).eq("id", prior.id);
+      if (error) return j({ error: error.message }, 500);
+      queuedBehind++;
+      existing.set(p.leadId, { ...prior, pending_calls: q, status_trail: trail,
+        processed_call_uuids: known.concat([thisCallId]) });
+    }
+  }
+
+  await db.schema("acc").from("lost_call_sync_runs").update({
+    inserted, duplicates, no_recording: noRecording,
+    appended_history: appendedHistory, queued_behind: queuedBehind,
+  }).eq("id", runId);
+  await db.schema("acc").from("transcription_jobs").update({
+    queued: inserted + appendedHistory + queuedBehind,
+    duplicates, no_recording: noRecording, status: "queued",
+  }).eq("job_date", from).is("completed_at", null);
+
+  return { from, to, timezone: APP_TZ_NAME, feed_rows: feed.length, unique_calls: prepared.length,
+           inserted, appended_history: appendedHistory, queued_behind: queuedBehind,
+           duplicates, no_recording: noRecording, skipped_other_statuses: skippedStatus, run_id: runId };
+}
+
+/* A finished call, packed for the history array. Everything that made it a call - the transcript,
+   the QA, the verdict, the comparison - travels with it, so nothing is lost when the row moves on
+   to the lead's next conversation. */
+function archiveCurrent(row: any) {
+  /* A call with no recording still happened, and the CRM still had a verdict on it - dropping it
+     would put a hole in the lead's trail. Only a genuinely empty row is skipped. */
+  if (!row.call_uuid && !row.recording_url && !row.transcript
+      && !row.source_date && !row.crm_status) return null;
+  return {
+    call_uuid: row.call_uuid ?? null,
+    recording_url: row.recording_url ?? null,
+    source_date: row.source_date ?? row.report_date ?? null,
+    crm_status: row.crm_status ?? null,
+    processing_status: row.status ?? null,
+    transcription_status: row.transcription_status ?? null,
+    comparison_status: row.comparison_status ?? null,
+    comparison_reason: row.comparison_reason ?? null,
+    duration_seconds: row.duration_seconds ?? null,
+    transcript: row.transcript ?? null,
+    utterances: row.utterances ?? null,
+    dashboard_fields: row.dashboard_fields ?? null,
+    qa_evaluation: row.qa_evaluation ?? null,
+    summary_verdict: row.summary_verdict ?? null,
+    non_transcribable_reason: row.non_transcribable_reason ?? null,
+    last_error: row.last_error ?? null,
+    attempt_count: row.attempt_count ?? null,
+    original_crm_response: row.original_crm_response ?? null,
+    queued_at: row.queued_at ?? null,
+    processing_started_at: row.processing_started_at ?? null,
+    completed_at: row.completed_at ?? null,
+    archived_at: nowIso(),
+  };
+}
+
+/* ====================================================== WORK (one at a time) */
+async function processOne(db: DB, row: any, geminiKey: string, geminiModel: string) {
+  const attempt = Number(row.attempt_count || row.attempts || 0) + 1;
   const checks: Check[] = [{ check: "recording_present", status: "pass", detail: "CRM feed supplied a recording URL." }];
-  const fail = async (status: string, errorText: string | null, extra: Record<string, unknown> = {}) => {
-    const giveUp = status === "error" && attempts >= MAX_ATTEMPTS_ERROR;
-    await db.schema("acc").from("transcriptions").update({
-      status, attempts,
-      error_text: errorText
-        ? (errorText.slice(0, 460) + (giveUp ? ` [gave up after ${attempts} tries]` : ` [try ${attempts}]`))
-        : null,
-      verification: checks,
-      mismatch: null, mismatch_severity: null, mismatch_reason: null,
-      updated_at: new Date().toISOString(), ...extra }).eq("id", row.id);
-    return { id: row.id, lead_id: row.lead_id, status };
+
+  /* Every terminal write goes through here, so a row can never be left in `processing` and can
+     never be marked completed by a path that did not actually produce a result. */
+  const finish = async (status: string, extra: Record<string, unknown> = {}, err: string | null = null) => {
+    const retryable = status === "failed" && attempt < MAX_ATTEMPTS;
+    const errText = err
+      ? err.slice(0, 460) + (retryable ? ` [try ${attempt}, will retry]` : ` [try ${attempt}]`)
+      : null;
+    const patch: Record<string, unknown> = {
+      status, attempt_count: attempt, attempts: attempt,
+      last_error: errText, error_text: errText,
+      verification: checks, updated_at: nowIso(),
+      /* completed_at means REACHED A TERMINAL STATE, not "the attempt ended". A failure that is
+         going to be retried has not finished, and stamping it would make the dashboard's own
+         definition of a finished call untrue. */
+      completed_at: retryable ? null : nowIso(),
+      ...extra,
+    };
+    await db.schema("acc").from("transcriptions").update(patch).eq("id", row.id);
+    await rotatePending(db, row.id);
+    return { id: row.id, lead_id: row.lead_id, status, attempt };
   };
 
-  let audio: Uint8Array;
-  let mimeType = "audio/mpeg";
+  /* ---- 1. the audio, into memory only ---- */
+  let audio: Uint8Array, mimeType = "audio/mpeg";
   try {
     // fetch follows the 302 to Knowlarity's presigned S3 URL, which expires in ~600s - which is why
-    // we store the knowlarity link and not the redirect target.
+    // the knowlarity link is what we store, never the redirect target.
     const res = await fetch(row.recording_url);
     if (!res.ok) throw new Error(`recording fetch failed (HTTP ${res.status})`);
-    /* THE BUG THAT CAUSED ALL OF THIS. Knowlarity serves these recordings as
-       "binary/octet-stream", and the previous line read
-           if (!/^audio\/|octet-stream$/i.test(mimeType)) mimeType = "audio/mpeg";
-       which allows anything ending in octet-stream THROUGH - so Gemini was handed a blob declared as
-       unspecified binary data, could not treat it as audio, and answered from the prompt instead.
-       octet-stream was the one case that needed replacing, not exempting. */
+    /* Knowlarity serves these as "binary/octet-stream". Passing that through is the bug that caused
+       all the earlier trouble: Gemini got an unlabelled blob, could not treat it as audio, and
+       answered from the prompt instead. octet-stream needs REPLACING, not exempting. */
     const served = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     mimeType = /^(audio|video)\/[a-z0-9.+-]+$/.test(served) ? served : "audio/mpeg";
     audio = new Uint8Array(await res.arrayBuffer());
@@ -623,232 +848,160 @@ async function processOne(db: DB, row: any, openaiKey: string,
   } catch (e) {
     const msg = String((e as any)?.message || e);
     checks.push({ check: "recording_fetched", status: "fail", detail: msg });
-    return fail("error", msg);
+    return finish("failed", {
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The recording could not be fetched, so there is nothing to compare.",
+    }, msg);
   }
   checks.push({ check: "recording_fetched", status: "pass",
-    detail: `Fetched ${Math.round(audio.length/1024)} KB of ${mimeType}.` });
+    detail: `Fetched ${Math.round(audio.length/1024)} KB of ${mimeType}. The audio is held in memory for this one call and is never stored.` });
 
   const seconds = estimateDurationSeconds(audio);
-  if (seconds === null) {
-    checks.push({ check: "duration_over_60s", status: "skip",
-      detail: "Could not read the audio header - sending to the AI without a duration check." });
-  } else if (seconds <= MIN_DURATION_SECONDS) {
-    checks.push({ check: "duration_over_60s", status: "fail",
-      detail: `Recording is ~${seconds}s, at or under the ${MIN_DURATION_SECONDS}s floor - almost certainly a ring-out. Skipped without calling the AI.` });
-    return fail("too_short", null, { duration_seconds: seconds });
-  } else {
-    checks.push({ check: "duration_over_60s", status: "pass",
-      detail: `Recording file is ~${seconds}s (includes ringing and any silence after hang-up).` });
-  }
-
-  /* Already transcribed? Then do not pay to transcribe it again. The two stages fail independently:
-     when the judgement failed on all 12 calls of one run, the transcripts had already been bought and
-     saved, and re-running would have bought them twice for nothing. */
-  const stored = String(row.transcript || "").trim();
-  if (stored) {
-    checks.push({ check: "recording_fetched", status: "skip",
-      detail: `Reusing the transcript already stored for this call (${stored.length} characters) - only the analysis is being redone.` });
-  }
-
-  /* STAGE 1 - the listening, by whichever engine was asked for. Everything after this point is
-     identical either way, which is the only way a comparison between the two means anything: the
-     judging is gpt-4o regardless, so a difference in the result is a difference in the ear. */
-  let spoken = stored;
-  if (!stored) {
-    try {
-      if (engine === "gemini") {
-        if (!geminiKey) throw new Error("GEMINI_API_KEY is not configured");
-        const gr = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`,
-          { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [
-                { text: GEMINI_TRANSCRIBE_PROMPT },
-                { inline_data: { mime_type: mimeType, data: encodeBase64(audio) } }] }],
-              // Plain text out, no schema: one job, and a schema to fill is an invitation to invent.
-              generationConfig: { temperature: 0, maxOutputTokens: 60000 },
-            }) });
-        const gj = await gr.json().catch(() => ({}));
-        if (!gr.ok) throw new Error(`Gemini failed (${gr.status}): ${JSON.stringify(gj).slice(0,300)}`);
-        spoken = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-        if (!spoken) {
-          const why = gj?.candidates?.[0]?.finishReason;
-          throw new Error(why ? `Gemini returned no text (finishReason: ${why})` : "Gemini returned nothing");
-        }
-      } else {
-        if (!openaiKey) throw new Error("CHATGPT_API_KEY is not configured");
-        /* The file MUST carry a name with an extension: OpenAI picks its decoder from that, and an
-           unnamed octet-stream is rejected outright. The bytes go exactly as they were served. */
-        const fd = new FormData();
-        fd.append("file", new Blob([audio], { type: "audio/mpeg" }), "call.mp3");
-        fd.append("model", sttModel);
-        fd.append("response_format", "json");
-        fd.append("temperature", "0");
-        fd.append("prompt", STT_HINT);
-        const tr = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-          method: "POST", headers: { Authorization: "Bearer " + openaiKey }, body: fd });
-        const tj = await tr.json().catch(() => ({}));
-        if (!tr.ok) throw new Error(`speech-to-text failed (${tr.status}): ${JSON.stringify(tj).slice(0,300)}`);
-        spoken = String(tj.text || "").trim();
-        if (!spoken) throw new Error("speech-to-text returned no text");
-      }
-    } catch (e) {
-      const msg = String((e as any)?.message || e);
-      checks.push({ check: "human_conversation", status: "skip", detail: "Not reached: " + msg });
-      return fail("error", `transcription (${engine}): ` + msg, { duration_seconds: seconds });
-    }
-  }
-
-  // audio goes out of scope here and is never persisted.
-
-  /* The verbatim record, cleaned in this order: the IVR greeting out first, then the place names put
-     right. Both act on the VERBATIM text, so what is STORED is already correct rather than needing
-     fixing on screen - and everything below is a rendering of this, so "every word" survives whatever
-     the labelling makes of it. */
-  const verbatim = fixSpellings(stripIvr(spoken));
-  const degen = degenerateRepeat(verbatim);
-  checks.push({ check: "human_conversation", status: degen ? "fail" : "pass",
-    detail: degen
-      ? `Speech-to-text returned ${verbatim.length} characters, but ${degen.count} of ${degen.total} words `
-        + `are just "${degen.word}" repeated - the recognizer likely got stuck in a loop rather than `
-        + `genuinely hearing this call. Do not trust the qualification below; listen to the recording.`
-      : `Speech-to-text returned ${verbatim.length} characters of speech`
-        + (seconds ? ` for ~${seconds}s of audio (${Math.round((verbatim.length/seconds)*10)/10} per second)` : "")
-        + `${attempts > 1 ? `, on attempt ${attempts}` : ""}.` });
-
-  /* TOO THIN TO BE A TRANSCRIPT OF THIS CALL? Then this is a failure to HEAR, not a fact about the
-     call, and it goes back round.
-     Debayan_706926 is why this exists. Eighty-nine seconds of audio came back as the single word
-     "Hello." - six characters - and every check went green: human_conversation passed because the
-     text was not empty, the turn checks passed because six characters lay out as one tidy turn, and
-     the CRM comparison passed because the judge inferred "Not Interested" from one word and the CRM
-     happened to say Lost. A confident "Not Qualified" verdict, formed on nothing.
-     degenerateRepeat() above cannot catch it: that needs 8+ words before it will call anything a
-     stuck loop, and this is one word. It tests whether the words REPEAT; this tests whether there
-     are enough of them for the length of the audio. Different failures, both real.
-     Checked here, BEFORE stage 2, for two reasons: paying to grade six characters is waste, and a
-     verdict formed from six characters is worse than no verdict at all.
-     The transcript is CLEARED rather than kept, because `stored` above reuses whatever is on the
-     row - leaving the thin text in place would make every retry hand back the same nothing. */
-  const density = seconds ? verbatim.length / seconds : null;
-  const tooThin = verbatim.length < MIN_TRANSCRIPT_CHARS
-    || (density !== null && seconds! > MIN_DURATION_SECONDS && density < MIN_CHARS_PER_SECOND);
-  if (tooThin) {
-    const giveUp = attempts >= MAX_ATTEMPTS_NO_SPEECH;
-    checks.push({ check: "enough_speech", status: "fail",
-      detail: `Only ${verbatim.length} characters came back for ~${seconds}s of audio`
-        + (density !== null ? ` (${Math.round(density*10)/10} per second, against 6-16 on a real transcript)` : "")
-        + `. Too little to be a transcript of this call`
-        + (giveUp
-            ? `, and it has now been listened to ${attempts} times - treat the recording as unusable.`
-            : `, so it will be listened to again.`) });
-    return fail("non_transcribable", null, {
+  if (MIN_DURATION_SECONDS > 0 && seconds !== null && seconds <= MIN_DURATION_SECONDS) {
+    checks.push({ check: "duration_floor", status: "fail",
+      detail: `Recording is ~${seconds}s, at or under the ${MIN_DURATION_SECONDS}s floor - almost certainly a ring-out. Not sent to Gemini.` });
+    return finish("non_transcribable", {
       duration_seconds: seconds,
-      non_transcribable_reason:
-        `Only ${verbatim.length} characters transcribed from ~${seconds}s of audio`,
-      // cleared deliberately - a retry must transcribe afresh rather than reuse this
-      transcript: null, transcript_en: null, transcript_bn: null, utterances: null,
-      discrepancy: null, has_discrepancy: null,
+      non_transcribable_reason: `Ring-out or unanswered: the recording is only ~${seconds}s, under the ${MIN_DURATION_SECONDS}s floor.`,
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The recording holds no human conversation, so there is nothing to compare against the CRM's verdict.",
     });
   }
-  checks.push({ check: "enough_speech", status: "pass",
-    detail: `${verbatim.length} characters for ~${seconds}s of audio`
-      + (density !== null ? ` (${Math.round(density*10)/10} per second)` : "")
-      + `, in line with a real transcript.` });
+  checks.push({ check: "duration_floor", status: seconds === null ? "skip" : "pass",
+    detail: seconds === null
+      ? "Could not read the audio header - sent to Gemini without a duration check."
+      : `Recording file is ~${seconds}s (includes ringing and any silence after hang-up).` });
 
-  /* STAGE 2 - lay it out and judge it. The CRM's own record (if it sent one) rides along in the SAME
-     call rather than a separate one - the model already has the transcript in front of it, so asking
-     it to also compare against the CRM's lost reason/remarks costs nothing extra. */
-  const crmContext = (row.crm_lost_reason || row.crm_remarks)
-    ? "\n\nCRM'S OWN RECORD FOR THIS CALL (compare your findings against this, do not treat it as fact "
-      + "about what was said on the call):\n"
-      + `- Lost reason on file: ${row.crm_lost_reason || "(none given)"}\n`
-      + `- Remarks on file: ${row.crm_remarks || "(none given)"}\n`
-    : "";
-  let parsed: any;
+  /* ---- 2. Gemini 2.5 Pro: pre-check, transcription, dashboard fields, QA, verdict ---- */
+  let rawText = "";
   try {
-    if (!openaiKey) throw new Error("CHATGPT_API_KEY is not configured");
-    const ar = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + openaiKey },
-      body: JSON.stringify({
-        model: analysisModel,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        // The reply duplicates the transcript twice over (original + English) plus everything
-        // else, so a long call's JSON can run long. Left unset, a handful of calls a night came
-        // back with the closing quote missing mid-string - the model just ran out of budget.
-        max_tokens: 16000,
-        messages: [
-          { role: "system", content: ANALYSE_PROMPT },
-          { role: "user", content: "VERBATIM TRANSCRIPT:\n\n" + verbatim + crmContext },
-        ],
-      }) });
-    const aj = await ar.json().catch(() => ({}));
-    if (!ar.ok) throw new Error(`analysis failed (${ar.status}): ${JSON.stringify(aj).slice(0,300)}`);
-    const raw = aj?.choices?.[0]?.message?.content || "";
-    if (!raw) throw new Error("the analysis returned nothing");
-    try {
-      parsed = JSON.parse(raw);
-    } catch (pe) {
-      // A cut-off JSON string (missing closing quote/brace) means the model hit its output cap
-      // mid-reply, not a genuinely malformed response - worth telling apart from other parse bugs.
-      const cutOff = aj?.choices?.[0]?.finish_reason === "length";
-      throw new Error(cutOff
-        ? `analysis reply was cut off (hit the ${16000} token cap) before the JSON closed`
-        : `could not parse the analysis reply as JSON: ${String((pe as any)?.message || pe)}`);
+    const gr = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
+      { method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [
+            { text: QA_PROMPT },
+            { inline_data: { mime_type: mimeType, data: encodeBase64(audio) } },
+          ] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: "application/json",
+            // A long call's reply carries the whole transcript plus the QA; left low, it truncates
+            // mid-string and the JSON never closes.
+            maxOutputTokens: 65536,
+          },
+        }) });
+    const gj = await gr.json().catch(() => ({}));
+    if (!gr.ok) throw new Error(`Gemini failed (${gr.status}): ${JSON.stringify(gj).slice(0, 300)}`);
+    rawText = String(gj?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+    if (!rawText) {
+      const why = gj?.candidates?.[0]?.finishReason;
+      throw new Error(why ? `Gemini returned no text (finishReason: ${why})` : "Gemini returned nothing");
     }
   } catch (e) {
-    /* The transcript is the expensive part and it is already in hand, so it is SAVED even when the
-       judgement fails - left as 'error' so a retry redoes only the analysis, reusing this text. */
     const msg = String((e as any)?.message || e);
-    checks.push({ check: "analysis", status: "fail", detail: msg });
-    return fail("error", "analysis: " + msg, {
-      duration_seconds: seconds, transcript: verbatim, transcript_bn: verbatim, gladia_id: engine,
+    checks.push({ check: "gemini_call", status: "fail", detail: msg });
+    return finish("failed", {
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The transcription step failed, so there is nothing to compare.",
+    }, msg);
+  }
+  // audio goes out of scope here and is never persisted. Only the URL is kept on the row.
+
+  /* ---- 3. validate BEFORE saving anything as a success ---- */
+  const parsed = parseGeminiJson(rawText);
+  if (!parsed) {
+    checks.push({ check: "gemini_json", status: "fail", detail: "The reply was not valid JSON." });
+    return finish("failed", {
+      // the raw reply is kept for debugging; it is explicitly NOT saved as a transcript
+      gemini_raw: rawText.slice(0, 20000), gemini_model: geminiModel,
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "Gemini's reply could not be parsed, so there is nothing to compare.",
+    }, "Gemini did not return valid JSON");
+  }
+  const shape = validateGemini(parsed);
+  if (!shape.ok) {
+    checks.push({ check: "gemini_json", status: "fail", detail: shape.why });
+    return finish("failed", {
+      gemini_raw: rawText.slice(0, 20000), gemini_model: geminiModel,
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "Gemini's reply did not match the required structure, so there is nothing to compare.",
+    }, "invalid Gemini response: " + shape.why);
+  }
+  checks.push({ check: "gemini_json", status: "pass", detail: "Valid JSON in the required structure." });
+
+  /* ---- 4a. no conversation in the recording ---- */
+  if (shape.nonTranscribable) {
+    const why = String(parsed.reason || "No conversation").trim();
+    checks.push({ check: "human_conversation", status: "fail",
+      detail: `Gemini's pre-check found no Agent-Customer conversation: ${why}.` });
+    return finish("non_transcribable", {
+      duration_seconds: seconds, gemini_model: geminiModel,
+      non_transcribable_reason: why,
+      summary_verdict: String(parsed.summary_verdict || "Call discarded due to lack of human conversation."),
+      summary: String(parsed.summary_verdict || "Call discarded due to lack of human conversation."),
+      transcription_status: "non_transcribable",
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: `The recording holds no human conversation (${why}), so there is nothing to compare against the CRM's verdict.`,
+      mismatch: null, mismatch_severity: null, mismatch_reason: null,
     });
   }
 
-  const turns = parseTurns(String(parsed?.transcript_english || ""), String(parsed?.transcript_original || ""));
-  const transcriptEn = turns.length ? flattenTurns(turns, "text") : verbatim;
-  // The original-language column keeps the raw speech-to-text output, not a re-rendering of it.
-  const transcriptBn = verbatim;
+  /* ---- 4b. a real conversation: the CONTENT guards, then save ---- */
+  const turns = normaliseTurns(parsed.transcript);
+  const body = plainText(turns);
+  const flat = flattenTurns(turns);
 
-  /* Every word means every word. A single giant turn and a materially shorter rendering are the same
-     failure wearing different hats, and both belong on the row; the verbatim text is kept either way. */
-  if (turns.length === 1 && verbatim.length > 400) {
-    checks.push({ check: "transcript_complete", status: "fail",
-      detail: `The whole ${verbatim.length} character call came back as a single turn - the speaker labelling failed, though the words themselves are all present.` });
-  } else if (turns.length && transcriptEn.length < verbatim.length * 0.5) {
-    checks.push({ check: "transcript_complete", status: "fail",
-      detail: `Speech-to-text produced ${verbatim.length} characters but the laid-out version is only ${transcriptEn.length} - turns were dropped or condensed. The verbatim text is kept in the original-language column.` });
-  } else {
-    checks.push({ check: "transcript_complete", status: "pass",
-      detail: `${turns.length} turns laid out from ${verbatim.length} characters of verbatim speech.` });
+  const degen = degenerateRepeat(body);
+  if (degen) {
+    checks.push({ check: "human_conversation", status: "fail",
+      detail: `${degen.count} of ${degen.total} words are just "${degen.word}" repeated - the model got stuck in a loop rather than genuinely hearing this call.` });
+    return finish("failed", {
+      duration_seconds: seconds, gemini_raw: rawText.slice(0, 20000), gemini_model: geminiModel,
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The transcript is a stuck-loop artefact, so no comparison was made.",
+    }, `stuck-loop transcription ("${degen.word}" repeated ${degen.count} of ${degen.total} words)`);
   }
 
-  const df = parsed?.dashboard_fields || null;
-  const category = df?.lead_category ? String(df.lead_category) : null;
-  const crit = normaliseCriteria(parsed?.criteria);
-  const qual = qualifyFrom(crit);
-  const verdict = judgeMismatch(row.crm_status, category);
+  const density = seconds ? body.length / seconds : null;
+  const tooThin = body.length < MIN_TRANSCRIPT_CHARS
+    || (density !== null && seconds! > MIN_DURATION_SECONDS && density < MIN_CHARS_PER_SECOND);
+  if (tooThin) {
+    checks.push({ check: "enough_speech", status: "fail",
+      detail: `Only ${body.length} characters came back for ~${seconds}s of audio`
+        + (density !== null ? ` (${Math.round(density*10)/10} per second, against 6-16 on a real transcript)` : "")
+        + ". Too little to be a transcript of this call." });
+    return finish("failed", {
+      duration_seconds: seconds, gemini_raw: rawText.slice(0, 20000), gemini_model: geminiModel,
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "The transcript is too thin to be a record of this call, so no comparison was made.",
+    }, `transcript too thin: ${body.length} characters for ~${seconds}s of audio`);
+  }
+  checks.push({ check: "enough_speech", status: "pass",
+    detail: `${turns.length} turns, ${body.length} characters for ~${seconds ?? "?"}s of audio`
+      + (density !== null ? ` (${Math.round(density*10)/10} per second)` : "") + "." });
 
-  /* Does what was heard agree with what the CRM independently knows? The only check here that tests
-     CONTENT rather than shape, and the one that exposed the old prompt writing fiction. Informational
-     rather than fatal: plenty of agents never say a name, so one mismatch is a reason to look. A RUN
-     where it almost never agrees is the alarm. The judge was never told the CRM's name. */
-  const heardName = String(parsed?.customer_name || "").trim();
+  const df = parsed.dashboard_fields && typeof parsed.dashboard_fields === "object" ? parsed.dashboard_fields : null;
+  const category = df?.lead_category ? String(df.lead_category) : null;
+  const crit = normaliseCriteria(parsed.criteria);
+  const qual = qualifyFrom(crit);
+  const derived = derivedStatusFrom(category, crit);
+
+  /* Does what was heard agree with what the CRM independently knows? The only check that tests
+     CONTENT rather than shape, and the one that exposed the old prompt writing fiction.
+     Informational rather than fatal: plenty of agents never say a name, so one mismatch is a reason
+     to look. A RUN where it almost never agrees is the alarm. */
+  const heardName = String(parsed.customer_name || "").trim();
   const knownName = String(row.customer_name || "").trim();
   if (heardName && heardName.toLowerCase() !== "none" && knownName) {
     const firstOf = (x: string) => (x.toLowerCase().replace(/[^a-z ]/g, " ").trim().split(/ +/)[0] || "");
     const a = firstOf(knownName), b = firstOf(heardName);
-    const agrees = !!a && !!b && (a === b
-      || knownName.toLowerCase().includes(b) || heardName.toLowerCase().includes(a));
+    const agrees = !!a && !!b && (a === b || knownName.toLowerCase().includes(b) || heardName.toLowerCase().includes(a));
     checks.push({ check: "name_matches_crm", status: agrees ? "pass" : "fail",
       detail: agrees
-        ? 'The name heard on the call ("' + heardName + '") matches the CRM record ("' + knownName + '").'
-        : 'The CRM has this lead as "' + knownName + '" but the call was transcribed as being with "'
-          + heardName + '". One of the two is wrong; if many calls in a run disagree like this, the '
-          + 'transcripts are not reliable.' });
+        ? `The name heard on the call ("${heardName}") matches the CRM record ("${knownName}").`
+        : `The CRM has this lead as "${knownName}" but the call was transcribed as being with "${heardName}". One of the two is wrong; if many calls in a run disagree like this, the transcripts are not reliable.` });
   } else {
     checks.push({ check: "name_matches_crm", status: "skip",
       detail: knownName
@@ -856,196 +1009,217 @@ async function processOne(db: DB, row: any, openaiKey: string,
         : "The CRM holds no name for this lead, so there was nothing to check against." });
   }
 
+  const cmp = compareWithCrm(row.crm_status, derived, "completed");
   checks.push({ check: "crm_status_match",
-    status: verdict.mismatch === true ? "fail" : verdict.mismatch === false ? "pass" : "skip",
-    detail: verdict.reason || "No lead category was returned, so the CRM status could not be verified." });
-  if (qual.qualification) {
-    checks.push({ check: "outcome", status: qual.qualification === "Not Qualified" ? "fail" : "pass",
-      detail: `${qual.qualification} - ${qual.why}` });
-  }
+    status: cmp.comparison_status === "MATCH" ? "pass" : cmp.comparison_status === "MISMATCH" ? "fail" : "skip",
+    detail: cmp.comparison_reason });
 
-  /* The CRM's name for the lead is authoritative on the record; what was heard only fills a gap. The
-     heard name still travels into the check above, so overwriting here hides nothing. */
+  /* The CRM's name for the lead is authoritative; what was heard only fills a gap. */
   const customerName = row.customer_name || (heardName && heardName.toLowerCase() !== "none" ? heardName : null);
   /* The feed's project is where the lead came from, which is not always what the agent pitched - so
-     the project NAMED in the transcript wins when there is one, and the feed's is the fallback. */
-  const namedProject = String(parsed?.project_discussed || "").trim();
-  const project = (namedProject && namedProject.toLowerCase() !== "unclear") ? namedProject : (row.business_unit_name || null);
+     the project NAMED in the conversation wins when there is one, and the feed's is the fallback. */
+  const namedProject = String(parsed.project_discussed || df?.project_discussed || "").trim();
+  const project = (namedProject && namedProject.toLowerCase() !== "unclear")
+    ? namedProject : (row.business_unit_name || null);
   const aiLost = df?.lost_reason && String(df.lost_reason).toLowerCase() !== "none" ? String(df.lost_reason) : null;
-  const reason = qual.qualification === "Qualified" ? null
-    : qual.qualification === "Follow-Up" ? (qual.why + (aiLost ? ` (${aiLost})` : ""))
-    : (aiLost || qual.why);
 
-  /* Does what the CRM's agent recorded agree with what actually happened on the call? Three checks,
-     none fatal to the row - a fail here means "worth a human look", not "this call failed". */
-  const dc = parsed?.discrepancy_check || {};
-  const discrepancy: Check[] = [];
-
-  // 1. Lost reason - only meaningful once the call itself is graded Not Qualified, and only when the
-  // CRM actually gave a reason to compare against.
-  if (qual.qualification === "Not Qualified" && row.crm_lost_reason) {
-    const m = dc.lost_reason_match;
-    discrepancy.push({ check: "lost_reason_match", status: m === false ? "fail" : m === true ? "pass" : "skip",
-      detail: dc.lost_reason_note
-        || (m == null ? "The analysis did not return a clear comparison for this one." : "") });
+  /* The existing Discrepancies tab reads `discrepancy` / `has_discrepancy`; keep them in step with
+     the new comparison so that view does not go quiet. */
+  const discrepancy: Check[] = [{
+    check: "crm_status_match",
+    status: cmp.comparison_status === "MISMATCH" ? "fail" : cmp.comparison_status === "MATCH" ? "pass" : "skip",
+    detail: cmp.comparison_reason,
+  }];
+  if (row.crm_lost_reason && derived === "lost" && aiLost) {
+    const same = String(row.crm_lost_reason).toLowerCase().slice(0, 12) === String(aiLost).toLowerCase().slice(0, 12);
+    discrepancy.push({ check: "lost_reason_match", status: same ? "pass" : "fail",
+      detail: `CRM recorded "${row.crm_lost_reason}"; the call reads as "${aiLost}".` });
   }
 
-  // 2. Follow-up date - pure date arithmetic against the MOST RECENT earlier call for this same lead
-  // that had a next_follow_up_date on file. Nothing here is an AI judgement.
-  let followupDetail: Check;
-  if (row.lead_id) {
-    const { data: prior } = await db.schema("acc").from("transcriptions")
-      .select("report_date, next_follow_up_date")
-      .eq("source", SOURCE).eq("lead_id", row.lead_id).neq("id", row.id)
-      .not("next_follow_up_date", "is", null)
-      .order("report_date", { ascending: false }).limit(1).maybeSingle();
-    if (prior?.next_follow_up_date) {
-      const expectedIst = new Date(new Date(prior.next_follow_up_date).getTime() + 5.5 * 3600e3)
-        .toISOString().slice(0, 10);
-      const actual = String(row.report_date || "").slice(0, 10);
-      const match = expectedIst === actual;
-      followupDetail = { check: "followup_date_match", status: match ? "pass" : "fail",
-        detail: match
-          ? `This call happened on ${actual}, matching the follow-up date (${expectedIst}) noted after the earlier call.`
-          : `The earlier call for this lead expected a follow-up on ${expectedIst}, but this call happened on ${actual}.` };
-    } else {
-      followupDetail = { check: "followup_date_match", status: "skip",
-        detail: "No earlier call for this lead had a follow-up date on file to check against." };
-    }
-  } else {
-    followupDetail = { check: "followup_date_match", status: "skip", detail: "This call has no lead id." };
-  }
-  discrepancy.push(followupDetail);
-
-  // 3. Remarks - only when the CRM's agent actually typed something to compare the summary against.
-  if (row.crm_remarks) {
-    const m = dc.remarks_match;
-    discrepancy.push({ check: "remarks_match", status: m === false ? "fail" : m === true ? "pass" : "skip",
-      detail: dc.remarks_note
-        || (m == null ? "The analysis did not return a clear comparison for this one." : "") });
-  }
-
-  // 4. Stuck-loop transcription - everything downstream (qualification, mismatch, dashboard
-  // fields) was judged from a garbage transcript, so this row needs a human before anyone trusts
-  // its verdict. Always recorded regardless of the other three, which is why it lives here rather
-  // than only in `checks`.
-  if (degen) {
-    discrepancy.push({ check: "transcript_quality", status: "fail",
-      detail: `Likely a stuck-loop transcription ("${degen.word}" repeated ${degen.count} of `
-        + `${degen.total} words), not a genuine listen - the qualification below is not trustworthy `
-        + `until someone plays the recording.` });
-  }
-
-  const hasDiscrepancy = discrepancy.some((c) => c.status === "fail");
-
-  const { error } = await db.schema("acc").from("transcriptions").update({
-    // gladia_id carries WHICH ENGINE produced this row, so a Gemini/ChatGPT comparison can be told
-    // apart afterwards. An old column repurposed rather than a new one added for a temporary need.
-    status: "done", attempts, duration_seconds: seconds, gladia_id: engine,
-    utterances: turns, transcript: transcriptEn,
-    transcript_en: transcriptEn, transcript_bn: transcriptBn,
-    languages: languagesFrom(parsed?.languages),
+  return finish("completed", {
+    duration_seconds: seconds,
+    gemini_model: geminiModel, gemini_raw: null, gladia_id: "gemini",
+    utterances: turns,
+    transcript: flat, transcript_bn: flat, transcript_en: null,
+    languages: languagesFrom(parsed.languages),
     dashboard_fields: df, ai_lead_category: category,
-    criteria: crit, qualification: qual.qualification, reason,
-    qa_evaluation: parsed?.qa_evaluation || null, qa_score: qaScoreFor(parsed?.qa_evaluation),
-    summary_verdict: parsed?.summary_verdict || null, summary: parsed?.summary_verdict || null,
+    criteria: crit, qualification: qual.qualification,
+    reason: qual.qualification === "Qualified" ? null : (aiLost || qual.why),
+    ai_lost_reason: aiLost,
+    qa_evaluation: parsed.qa_evaluation || null, qa_score: qaScoreFor(parsed.qa_evaluation),
+    summary_verdict: parsed.summary_verdict || null, summary: parsed.summary_verdict || null,
     customer_name: customerName, project,
-    mismatch: verdict.mismatch, mismatch_severity: verdict.severity, mismatch_reason: verdict.reason,
-    verification: checks, discrepancy, has_discrepancy: hasDiscrepancy,
-    non_transcribable_reason: null, error_text: null,
-    updated_at: new Date().toISOString() }).eq("id", row.id);
-
-  if (error) return fail("error", "could not save result: " + error.message, { duration_seconds: seconds });
-
-  return { id: row.id, lead_id: row.lead_id, status: "done", engine, lead_category: category,
-           qualification: qual.qualification, turns: turns.length,
-           verbatim_chars: verbatim.length,
-           per_second: seconds ? Math.round((verbatim.length/seconds)*10)/10 : null,
-           reused_transcript: !!stored, attempts, mismatch: verdict.mismatch };
+    transcription_status: derived,
+    comparison_status: cmp.comparison_status, comparison_reason: cmp.comparison_reason,
+    mismatch: cmp.comparison_status === "MISMATCH" ? true : cmp.comparison_status === "MATCH" ? false : null,
+    mismatch_severity: cmp.comparison_status === "MISMATCH"
+      ? (derived === "qualified" && String(row.crm_status).toLowerCase() === "lost" ? "high" : "low") : null,
+    mismatch_reason: cmp.comparison_reason,
+    discrepancy, has_discrepancy: discrepancy.some((c) => c.status === "fail"),
+    non_transcribable_reason: null,
+  });
 }
 
-/* Put anything worth another go back in the queue before the queue is read, so the ordinary path
-   picks it up with no special casing. Deliberately narrow: no_recording and too_short are never
-   retried - there is nothing to fetch in the first, and the second was skipped on purpose. */
+/* When the current call finishes and another call for the same lead was waiting, rotate it in:
+   the finished call goes to history, the waiting one takes the row and re-enters the queue. This is
+   what keeps "one row per lead" true without ever losing a call. */
+async function rotatePending(db: DB, id: number) {
+  const { data: row } = await db.schema("acc").from("transcriptions").select("*").eq("id", id).maybeSingle();
+  if (!row) return;
+  const q: any[] = Array.isArray(row.pending_calls) ? row.pending_calls : [];
+  if (!q.length) return;
+  const next = q[0], rest = q.slice(1);
+  const archived = archiveCurrent(row);
+  const history = (Array.isArray(row.call_history) ? row.call_history : []).concat(archived ? [archived] : []);
+  await db.schema("acc").from("transcriptions").update({
+    ...next,
+    pending_calls: rest, call_history: history,
+    status: "pending",
+    queue_seq: await reserveQueueSeq(db, 1), queued_at: nowIso(),
+    processing_started_at: null, completed_at: null,
+    attempt_count: 0, attempts: 0, last_error: null, error_text: null,
+    transcript: null, transcript_en: null, transcript_bn: null, utterances: null,
+    dashboard_fields: null, criteria: null, qa_evaluation: null, qa_score: null,
+    summary_verdict: null, summary: null, qualification: null, reason: null,
+    ai_lead_category: null, transcription_status: null, non_transcribable_reason: null,
+    gemini_raw: null, languages: null, duration_seconds: null,
+    comparison_status: "NOT_COMPARABLE",
+    comparison_reason: "This call has not been transcribed yet, so no comparison has been made.",
+    mismatch: null, mismatch_severity: null, mismatch_reason: null,
+    verification: null, discrepancy: null, has_discrepancy: null,
+    updated_at: nowIso(),
+  }).eq("id", id);
+}
+
+/* Anything worth another go goes back in the queue BEFORE the queue is read, so the ordinary path
+   picks it up with no special casing. Also reclaims rows abandoned mid-flight by a killed
+   invocation, which is what makes this restart-safe. */
 async function promoteRetries(db: DB) {
-  const after = new Date(Date.now() - RETRY_AFTER_MINUTES * 60e3).toISOString();
-  const requeue = { status: "queued", error_text: null, verification: null,
-                    non_transcribable_reason: null, updated_at: new Date().toISOString() };
-  let errors = 0, noSpeech = 0, stuck = 0;
+  const cutoff = new Date(Date.now() - RETRY_AFTER_MINUTES * 60e3).toISOString();
+  const stale = new Date(Date.now() - STALE_PROCESSING_MINUTES * 60e3).toISOString();
+  let reclaimed = 0;
 
-  {
-    const { data } = await db.schema("acc").from("transcriptions").update(requeue)
-      .eq("source", SOURCE).eq("status", "error")
-      .not("recording_url", "is", null).is("deleted_at", null)
-      .lt("attempts", MAX_ATTEMPTS_ERROR).lt("updated_at", after).select("id");
-    errors = (data || []).length;
+  const { data: retryRows } = await db.schema("acc").from("transcriptions")
+    .update({ status: "retrying", queued_at: nowIso(), updated_at: nowIso() })
+    .eq("source", SOURCE).eq("status", "failed").is("deleted_at", null)
+    .lt("attempt_count", MAX_ATTEMPTS).lt("updated_at", cutoff)
+    .not("recording_url", "is", null).select("id");
+  const requeued = (retryRows || []).length;
+
+  /* Reclaiming a killed invocation MUST count as an attempt. It did not, and that was a live
+     runaway: a recording whose Gemini call always overruns the 150s edge worker limit (HTTP 546)
+     gets killed before `finish` runs, so attempt_count stays where it was, so the cap is never
+     reached, so it is reclaimed and re-billed every RETRY_AFTER_MINUTES forever. Counting it here
+     is what makes the cap mean something for the one failure mode that never reaches finish().
+     Rows already at the cap are left alone and land in `failed` below. */
+  const { data: stuckAtCap } = await db.schema("acc").from("transcriptions")
+    .update({ status: "failed", processing_started_at: null, completed_at: nowIso(), updated_at: nowIso(),
+              last_error: "The attempt was cut off before it finished (edge worker limit) and the retry cap is reached - listen to this recording by hand, or lower the model's latency.",
+              error_text: "The attempt was cut off before it finished (edge worker limit) and the retry cap is reached." })
+    .eq("source", SOURCE).eq("status", "processing").is("deleted_at", null)
+    .gte("attempt_count", MAX_ATTEMPTS).lt("processing_started_at", stale).select("id");
+
+  const { data: stuck } = await db.schema("acc").from("transcriptions")
+    .select("id, attempt_count")
+    .eq("source", SOURCE).eq("status", "processing").is("deleted_at", null)
+    .lt("attempt_count", MAX_ATTEMPTS).lt("processing_started_at", stale);
+  for (const s of stuck || []) {
+    const n = Number(s.attempt_count || 0) + 1;
+    await db.schema("acc").from("transcriptions").update({
+      status: "retrying", processing_started_at: null, updated_at: nowIso(),
+      attempt_count: n, attempts: n,
+      last_error: `Recovered: the previous attempt was cut off before it finished [try ${n}].`,
+      error_text: `Recovered: the previous attempt was cut off before it finished [try ${n}].`,
+    }).eq("id", s.id);
   }
-  {
-    const { data } = await db.schema("acc").from("transcriptions").update(requeue)
-      .eq("source", SOURCE).eq("status", "non_transcribable")
-      .not("recording_url", "is", null).is("deleted_at", null)
-      .lt("attempts", MAX_ATTEMPTS_NO_SPEECH).lt("updated_at", after).select("id");
-    noSpeech = (data || []).length;
-  }
-  /* A row can be CLAIMED (status set to "processing") and then never finish - the platform kills
-     a call that runs past its own request limit, which a long recording's two-stage transcribe +
-     analyse can do. processOne never got to run its own attempts += 1 or write any status, so
-     without this the row sits in "processing" forever: promoteRetries only ever looked at "error"
-     and "non_transcribable", never this. Attempts is bumped HERE, on the way back to the queue,
-     precisely because the dead invocation never got the chance to. */
-  {
-    const { data: staleRows } = await db.schema("acc").from("transcriptions")
-      .select("id, attempts")
-      .eq("source", SOURCE).eq("status", "processing")
-      .not("recording_url", "is", null).is("deleted_at", null)
-      .lt("updated_at", after);
-    for (const r of (staleRows || [])) {
-      const attempts = Number((r as any).attempts || 0) + 1;
-      const giveUp = attempts >= MAX_ATTEMPTS_ERROR;
-      await db.schema("acc").from("transcriptions").update(giveUp
-        ? { status: "error", attempts,
-            error_text: `stuck mid-run and never finished [gave up after ${attempts} tries]`,
-            updated_at: new Date().toISOString() }
-        : { status: "queued", attempts, error_text: null, verification: null,
-            updated_at: new Date().toISOString() }
-      ).eq("id", (r as any).id);
-      stuck++;
-    }
-  }
-  return { errors, no_speech: noSpeech, stuck };
+  reclaimed = (stuck || []).length + (stuckAtCap || []).length;
+
+  return { requeued, reclaimed };
 }
 
-async function doWork(db: DB, limit: number, openaiKey: string,
-                      sttModel = STT_MODEL, analysisModel = ANALYSIS_MODEL,
-                      engine = "chatgpt", geminiKey = "", geminiModel = GEMINI_MODEL) {
-  const retried = await promoteRetries(db);
-  const cols = "id, lead_id, recording_url, crm_status, report_date, business_unit_name, customer_name, attempts, transcript, crm_lost_reason, crm_remarks, next_follow_up_date";
-  const { data: queue, error } = await db.schema("acc").from("transcriptions").select(cols)
-    .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null)
-    .order("id", { ascending: true }).limit(limit);
-  if (error) return j({ error: error.message }, 500);
-  if (!queue || !queue.length) return { processed: 0, remaining: 0, retried, results: [] };
+async function doWork(db: DB, geminiKey: string, geminiModel: string) {
+  const promoted = await promoteRetries(db);
 
-  // Claim first, so an overlapping tick takes different rows instead of paying twice.
-  const { data: claimed } = await db.schema("acc").from("transcriptions")
-    .update({ status: "processing", updated_at: new Date().toISOString() })
-    .in("id", queue.map((r) => r.id)).eq("status", "queued").select(cols);
-
-  const mine = claimed || [];
-  const results: unknown[] = [];
-  for (let i = 0; i < mine.length; i += CONCURRENCY) {
-    results.push(...await Promise.all(mine.slice(i, i + CONCURRENCY).map((r) =>
-      processOne(db, r, openaiKey, sttModel, analysisModel, engine, geminiKey, geminiModel).catch((e) => ({
-        id: r.id, lead_id: r.lead_id, status: "error", error: String((e as any)?.message || e) })))));
-  }
-  const { count } = await db.schema("acc").from("transcriptions")
+  /* STRICT FIFO: refuse to start anything while a call is genuinely in flight. promoteRetries has
+     already released rows abandoned by a killed invocation, so anything still `processing` here is
+     a live one. */
+  const { count: inFlight } = await db.schema("acc").from("transcriptions")
     .select("id", { count: "exact", head: true })
-    .eq("source", SOURCE).eq("status", "queued").is("deleted_at", null);
-  return { processed: results.length, remaining: count ?? 0, retried,
-           engine, transcriber: engine === "gemini" ? geminiModel : sttModel, analysisModel, results };
+    .eq("source", SOURCE).eq("status", "processing").is("deleted_at", null);
+  if ((inFlight ?? 0) > 0) {
+    return { processed: 0, skipped: "a call is already being processed", ...promoted };
+  }
+
+  // Front of the queue. queue_seq is handed out in CRM feed order, so this is the first call in.
+  const { data: queue, error } = await db.schema("acc").from("transcriptions")
+    .select("id")
+    .eq("source", SOURCE).in("status", ["pending", "retrying"]).is("deleted_at", null)
+    .not("recording_url", "is", null)
+    .order("queue_seq", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true })
+    .limit(BATCH);
+  if (error) return j({ error: error.message }, 500);
+  if (!queue || !queue.length) {
+    return { processed: 0, remaining: 0, ...promoted };
+  }
+
+  /* Claim it. The status predicate is the lock: two overlapping ticks cannot both win, so the same
+     recording is never paid for twice. */
+  const { data: claimed } = await db.schema("acc").from("transcriptions")
+    .update({ status: "processing", processing_started_at: nowIso(), updated_at: nowIso() })
+    .eq("id", queue[0].id).in("status", ["pending", "retrying"])
+    .select("id, lead_id, recording_url, crm_status, customer_name, business_unit_name, crm_lost_reason, crm_remarks, attempt_count, attempts, source_date")
+    .maybeSingle();
+  if (!claimed) return { processed: 0, skipped: "another tick claimed it first", ...promoted };
+
+  let result: unknown;
+  try {
+    result = await processOne(db, claimed, geminiKey, geminiModel);
+  } catch (e) {
+    /* Never leave a claimed row in `processing`. An unexpected throw is a failed attempt, and it
+       must say so on the row or the queue stalls behind it forever. */
+    const msg = String((e as any)?.message || e);
+    const attempt = Number(claimed.attempt_count || 0) + 1;
+    await db.schema("acc").from("transcriptions").update({
+      status: "failed", attempt_count: attempt, attempts: attempt,
+      last_error: msg.slice(0, 460), error_text: msg.slice(0, 460),
+      completed_at: nowIso(), updated_at: nowIso(),
+      comparison_status: "NOT_COMPARABLE",
+      comparison_reason: "Processing threw before a result was produced, so there is nothing to compare.",
+    }).eq("id", claimed.id);
+    result = { id: claimed.id, lead_id: claimed.lead_id, status: "failed", error: msg };
+  }
+
+  const { count: remaining } = await db.schema("acc").from("transcriptions")
+    .select("id", { count: "exact", head: true })
+    .eq("source", SOURCE).in("status", ["pending", "retrying"]).is("deleted_at", null);
+
+  if ((remaining ?? 0) === 0) await clearFinishedJobPayloads(db);
+
+  return { processed: 1, remaining: remaining ?? 0, model: geminiModel, ...promoted, result };
 }
 
-// ---------------------------------------------------------------- HTTP
+/* "Temporarily as JSON" - the raw feed is parked so the day can be replayed while it is being
+   worked, and dropped once there is nothing left to replay. The durable audit is the per-row
+   original_crm_response, which is never cleared; this only releases the duplicate copy of the whole
+   array. Runs when the queue empties, so a day is never cleared mid-flight. */
+async function clearFinishedJobPayloads(db: DB) {
+  const { data: open } = await db.schema("acc").from("transcription_jobs")
+    .select("job_date").is("completed_at", null).not("payload", "is", null);
+  for (const jobRow of open || []) {
+    const day = jobRow.job_date;
+    const { count: unfinished } = await db.schema("acc").from("transcriptions")
+      .select("id", { count: "exact", head: true })
+      .eq("source", SOURCE).eq("source_date", day).is("deleted_at", null)
+      .in("status", ["pending", "processing", "retrying"]);
+    if ((unfinished ?? 0) > 0) continue;
+    await db.schema("acc").from("transcription_jobs")
+      .update({ payload: null, status: "completed", completed_at: nowIso() })
+      .eq("job_date", day).is("completed_at", null);
+  }
+}
+
+/* ------------------------------------------------------------------- HTTP */
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return j({ error: "method not allowed" }, 405);
@@ -1053,8 +1227,6 @@ Deno.serve(async (req: Request) => {
   const SB = Deno.env.get("SUPABASE_URL")!;
   const SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const SECRET = Deno.env.get("SYNC_SECRET");
-  // This project names it CHATGPT_API_KEY; the conventional name is accepted as well.
-  const OPENAI_KEY = Deno.env.get("CHATGPT_API_KEY") || Deno.env.get("OPENAI_API_KEY") || "";
   const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 
   const secretHeader = req.headers.get("x-sync-secret") || "";
@@ -1078,79 +1250,74 @@ Deno.serve(async (req: Request) => {
     authorized = !!data?.user;
   }
   if (!authorized) return j({ error: "unauthorized" }, 401);
-  if (!OPENAI_KEY) return j({ error: "CHATGPT_API_KEY not configured in Secrets" }, 500);
 
   let body: any = {};
   try { body = await req.json(); } catch { /* empty body is fine */ }
 
   const action = String(body.action || "run");
   const trigger = viaCron ? "cron" : "manual";
-  const from = isDate(body.from) ? body.from : istYesterday();
-  const to = isDate(body.to) ? body.to : (isDate(body.from) ? body.from : istYesterday());
+  /* Previous day in the application timezone, computed now. Never hardcoded. An explicit from/to is
+     accepted so a missed day can be back-filled by hand. */
+  const from = isDate(body.from) ? body.from : appYesterday();
+  const to = isDate(body.to) ? body.to : (isDate(body.from) ? body.from : from);
   if (from > to) return j({ error: "`from` is after `to`" }, 400);
-  if (to > istToday()) return j({ error: "`to` is in the future" }, 400);
-  // One round of CONCURRENCY per invocation: two API calls per recording, so a small batch keeps each
-  // invocation well inside its wall clock.
-  const limit = Math.min(Math.max(Number(body.limit) || 3, 1), 24);
-  /* Optional per-request models, so a new id can be proved on one call before it becomes the default
-     for every call. Restricted to the shape of a model name so a request cannot point the URL
-     somewhere else. */
-  const reqStt = String(body.stt_model || body.model || "").trim();
-  if (reqStt && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqStt)) return j({ error: "that does not look like a model name" }, 400);
-  const sttModel = reqStt || STT_MODEL;
-  /* Which engine does the LISTENING. ChatGPT by default; "gemini" is here so the two can be run over
-     the same recordings and compared rather than argued about. The judging is gpt-4o either way. */
-  const engine = String(body.engine || "chatgpt").trim().toLowerCase() === "gemini" ? "gemini" : "chatgpt";
-  const reqGemini = String(body.gemini_model || "").trim();
-  if (reqGemini && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqGemini)) return j({ error: "that does not look like a model name" }, 400);
-  const geminiModel = reqGemini || GEMINI_MODEL;
-  const reqAnalysis = String(body.analysis_model || "").trim();
-  if (reqAnalysis && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqAnalysis)) return j({ error: "that does not look like a model name" }, 400);
-  const analysisModel = reqAnalysis || ANALYSIS_MODEL;
-  if (engine === "gemini" && !GEMINI_KEY) return j({ error: "GEMINI_API_KEY not configured in Secrets" }, 500);
+  if (to > appToday()) return j({ error: "`to` is in the future" }, 400);
+
+  const reqModel = String(body.gemini_model || body.model || "").trim();
+  if (reqModel && !/^[a-zA-Z0-9._-]{3,60}$/.test(reqModel)) {
+    return j({ error: "that does not look like a model name" }, 400);
+  }
+  const geminiModel = reqModel || GEMINI_MODEL;
+
+  const needsGemini = action === "work" || action === "run" || action === "retry";
+  if (needsGemini && !GEMINI_KEY) return j({ error: "GEMINI_API_KEY not configured in Secrets" }, 500);
 
   try {
     if (action === "status") {
       const counts: Record<string, number> = {};
-      for (const st of ["queued","processing","done","non_transcribable","no_recording","too_short","error"]) {
+      for (const st of ["pending","processing","completed","failed","retrying","non_transcribable"]) {
         const { count } = await db.schema("acc").from("transcriptions")
           .select("id", { count: "exact", head: true })
           .eq("source", SOURCE).eq("status", st).is("deleted_at", null);
         counts[st] = count ?? 0;
       }
       const { data: last } = await db.schema("acc").from("lost_call_sync_runs")
-        .select("*").order("created_at", { ascending: false }).limit(1).maybeSingle();
-      return j({ ok: true, counts, last_run: last || null,
-                 transcriber: STT_MODEL, gemini: GEMINI_MODEL, analyst: ANALYSIS_MODEL });
+        .select("id, from_date, to_date, trigger, feed_rows, inserted, duplicates, no_recording, appended_history, queued_behind, error_text, created_at")
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      return j({ ok: true, counts, last_run: last || null, model: geminiModel,
+                 timezone: APP_TZ_NAME, next_pull_for: appYesterday() });
     }
+
     if (action === "retry") {
       const id = Number(body.id);
       if (!id) return j({ error: "missing id" }, 400);
-      /* A retry asked for by hand resets the counter: the automatic cap exists to stop the machine
-         looping on its own, not to refuse a person who has looked at the call and wants another go.
-         The transcript is deliberately NOT cleared - reusing it is the point. */
+      /* A retry asked for by hand does NOT reset attempt_count - the audit trail is the point, and
+         spec 12 says increment it. It goes to the BACK of the queue so it cannot starve the day's
+         own calls, and the existing result is left untouched until a new one replaces it. */
       const { data, error } = await db.schema("acc").from("transcriptions")
-        .update({ status: "queued", attempts: 0, error_text: null, verification: null,
-                  non_transcribable_reason: null,
-                  mismatch: null, mismatch_severity: null, mismatch_reason: null,
-                  updated_at: new Date().toISOString() })
-        .eq("id", id).not("recording_url", "is", null).select("id, status").maybeSingle();
+        .update({ status: "retrying", queue_seq: await reserveQueueSeq(db, 1),
+                  queued_at: nowIso(), processing_started_at: null, completed_at: null,
+                  updated_at: nowIso() })
+        .eq("id", id).eq("source", SOURCE).not("recording_url", "is", null)
+        .select("id, status, attempt_count").maybeSingle();
       if (error) return j({ error: error.message }, 500);
       if (!data) return j({ error: "no such call, or it has no recording URL to retry" }, 404);
-      return j({ ok: true, requeued: id, work: await doWork(db, 1, OPENAI_KEY, sttModel, analysisModel, engine, GEMINI_KEY, geminiModel) });
+      // Work it immediately if nothing else is in flight; otherwise it waits its turn.
+      return j({ ok: true, requeued: id, work: await doWork(db, GEMINI_KEY, geminiModel) });
     }
+
     if (action === "pull") {
       const pulled = await doPull(db, from, to, trigger);
       return pulled instanceof Response ? pulled : j({ ok: true, action, ...pulled });
     }
     if (action === "work") {
-      const worked = await doWork(db, limit, OPENAI_KEY, sttModel, analysisModel, engine, GEMINI_KEY, geminiModel);
+      const worked = await doWork(db, GEMINI_KEY, geminiModel);
       return worked instanceof Response ? worked : j({ ok: true, action, ...worked });
     }
     if (action === "run") {
       const pulled = await doPull(db, from, to, trigger);
       if (pulled instanceof Response) return pulled;
-      const worked = await doWork(db, limit, OPENAI_KEY, sttModel, analysisModel, engine, GEMINI_KEY, geminiModel);
+      const worked = await doWork(db, GEMINI_KEY, geminiModel);
       return worked instanceof Response ? worked : j({ ok: true, action, pull: pulled, work: worked });
     }
     return j({ error: `unknown action "${action}"` }, 400);

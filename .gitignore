@@ -15,3 +15,6 @@ node_modules/
 
 # Local-only snapshot of live Supabase state (schema, migrations, edge functions) — not meant for version control
 /data/
+
+# Supabase CLI scratch state
+supabase/.temp/

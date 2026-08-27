@@ -11462,13 +11462,578 @@ VIEWS.organic=async function(v,seg){
          if(tag&&!window._orgSyncing) tag.innerHTML='<i class="fa-solid fa-circle-check" style="color:#16a34a"></i> Updated '+Math.max(1,Math.round(age/60000))+'m ago'; }
 };
 
+/* ==================== AUTOMATIC PROCESSING (lost-call pipeline) ====================
+   The daily CRM-imported calls: dashboard, filters, table, detail. Reads acc.transcriptions where
+   source='lost_call_sync' - the same rows the transcription-sync edge function writes. Manual
+   uploads live on their own tab and are never mixed in here.
+
+   Nothing on this page computes a number the backend does not already hold. Every count below is a
+   filter over real rows, so a card and the table under it cannot disagree, and an empty day reads
+   as empty rather than as zero-of-something. */
+
+/* Rows written before the pipeline rewrite carry the old status words. Normalising in one place
+   means the table, the cards and the filters all agree about what a row IS, whenever it was made. */
+const TRA_LEGACY_STATUS={queued:'pending',done:'completed',error:'failed',
+  no_recording:'non_transcribable',too_short:'non_transcribable'};
+const TRA_STATUS_META={
+  pending:          {label:'Pending',          tag:'t-gray',  icon:'fa-clock'},
+  processing:       {label:'Processing',       tag:'t-amber', icon:'fa-spinner fa-spin'},
+  retrying:         {label:'Retrying',         tag:'t-amber', icon:'fa-rotate'},
+  completed:        {label:'Completed',        tag:'t-green', icon:'fa-circle-check'},
+  failed:           {label:'Failed',           tag:'t-red',   icon:'fa-circle-exclamation'},
+  non_transcribable:{label:'Non-Transcribable',tag:'t-gray',  icon:'fa-volume-xmark'}
+};
+const TRA_MATCH_META={
+  MATCH:         {tag:'t-green',icon:'fa-equals',       label:'MATCH'},
+  MISMATCH:      {tag:'t-red',  icon:'fa-not-equal',    label:'MISMATCH'},
+  NOT_COMPARABLE:{tag:'t-gray', icon:'fa-circle-minus', label:'NOT COMPARABLE'}
+};
+const TRA_DERIVED_LABEL={lost:'Lost',follow_up:'Follow-Up',qualified:'Qualified',
+  non_transcribable:'No conversation'};
+
+function traStatus(r){const s=String(r&&r.status||'');return TRA_LEGACY_STATUS[s]||s;}
+function traStatusTag(r){
+  const m=TRA_STATUS_META[traStatus(r)];
+  if(!m)return '<span class="tag t-gray">'+esc(traStatus(r)||'—')+'</span>';
+  return '<span class="tag '+m.tag+'"><i class="fa-solid '+m.icon+'"></i> '+m.label+'</span>';
+}
+function traMatchTag(r){
+  const m=TRA_MATCH_META[String(r&&r.comparison_status||'')];
+  if(!m)return '<span class="tag t-gray">—</span>';
+  return '<span class="tag '+m.tag+'"><i class="fa-solid '+m.icon+'"></i> '+m.label+'</span>';
+}
+function traDerivedTag(r){
+  const d=r&&r.transcription_status;
+  if(!d)return '<span style="color:var(--slate)">—</span>';
+  const cls=d==='qualified'?'t-green':d==='follow_up'?'t-amber':d==='lost'?'t-red':'t-gray';
+  return '<span class="tag '+cls+'">'+esc(TRA_DERIVED_LABEL[d]||d)+'</span>';
+}
+/* "Qualified -> Lost". The whole point of one row per lead: how the CRM's own verdict moved across
+   this lead's calls, at a glance, without opening anything. */
+function traTrail(r){
+  const t=Array.isArray(r&&r.status_trail)?r.status_trail.filter(Boolean):[];
+  if(t.length<2)return '';
+  return '<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
+    +t.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>';
+}
+function traCallCount(r){
+  const n=(Array.isArray(r&&r.call_history)?r.call_history.length:0)+1
+         +(Array.isArray(r&&r.pending_calls)?r.pending_calls.length:0);
+  return n;
+}
+
+/* ---- filter state. One object so every control writes to the same place and the table, the cards
+   and the URL can never drift apart. ---- */
+let TRA_ROWS=null;
+const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',q:''};
+
+function traLocalDate(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
+function traToday(){return traLocalDate(new Date());}
+function traYesterday(){return traLocalDate(new Date(Date.now()-864e5));}
+/* source_date is the day the CALL belongs to, which is what someone inspecting "yesterday's import"
+   means. created_at is when the row happened to be written, and the two differ whenever a day is
+   back-filled - so source_date is used everywhere and created_at only as a last resort. */
+function traRowDate(r){return (r.source_date||r.report_date||(r.created_at?traLocalDate(r.created_at):null));}
+
+async function traFetch(force){
+  if(TRA_ROWS&&!force)return TRA_ROWS;
+  const PAGE=1000;let out=[],from=0;
+  try{
+    for(;;){
+      const {data,error}=await sb.schema('acc').from('transcriptions').select('*')
+        .eq('source','lost_call_sync').is('deleted_at',null)
+        .order('source_date',{ascending:false}).order('id',{ascending:false})
+        .range(from,from+PAGE-1);
+      if(error)throw error;
+      const batch=data||[];out=out.concat(batch);
+      if(batch.length<PAGE)break;
+      from+=PAGE;if(from>50000)break;
+    }
+    TRA_ROWS=out;
+  }catch(e){TRA_ROWS=out.length?out:[];}
+  return TRA_ROWS;
+}
+
+/* Every filter, applied together. A row has to satisfy all of them, which is what makes
+   "yesterday + failed + mismatch" mean what it looks like it means. */
+function traApply(rows){
+  const q=String(TRA_F.q||'').trim().toLowerCase();
+  return (rows||[]).filter(function(r){
+    const d=traRowDate(r);
+    if(TRA_F.from&&(!d||d<TRA_F.from))return false;
+    if(TRA_F.to&&(!d||d>TRA_F.to))return false;
+    if(TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
+    if(TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
+    if(TRA_F.crm!=='all'&&String(r.crm_status||'')!==TRA_F.crm)return false;
+    if(q){
+      const hay=String(r.lead_id||'')+' '+String(r.customer_name||'')+' '+String(r.title||'');
+      if(hay.toLowerCase().indexOf(q)<0)return false;
+    }
+    return true;
+  });
+}
+
+/* The four cards the spec asks for, plus the states that explain the gap between them. Counted over
+   the FILTERED rows, so changing the date range changes the numbers. A failed call is never counted
+   as transcribed. */
+function traKpiHtml(rows){
+  const n=function(st){return rows.filter(function(r){return traStatus(r)===st;}).length;};
+  const m=function(c){return rows.filter(function(r){return r.comparison_status===c;}).length;};
+  const cards=[
+    ['Total Calls',rows.length,'fetched for this range','var(--slate)','all','proc'],
+    ['Transcribed',n('completed'),'processed with a transcript','#16a34a','completed','proc'],
+    ['CRM Match',m('MATCH'),'call agrees with the CRM','#16a34a','MATCH','match'],
+    ['CRM Mismatch',m('MISMATCH'),'call disagrees with the CRM','#dc2626','MISMATCH','match']
+  ];
+  const sub=[
+    ['Pending',n('pending'),'pending'],['Processing',n('processing'),'processing'],
+    ['Retrying',n('retrying'),'retrying'],['Failed',n('failed'),'failed'],
+    ['Non-Transcribable',n('non_transcribable'),'non_transcribable']
+  ];
+  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
+      const active=(c[5]==='proc'?TRA_F.proc:TRA_F.match)===c[4];
+      return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="traCard(\''+c[5]+'\',\''+c[4]+'\')">'
+        +'<div class="lbl" style="margin-bottom:7px">'+esc(c[0])+(active?' <i class="fa-solid fa-filter" style="font-size:10px"></i>':'')+'</div>'
+        +'<div class="val">'+c[1]+'</div>'
+        +'<div style="font-size:12px;color:'+c[3]+';margin-top:3px">'+esc(c[2])+'</div></div>';
+    }).join('')+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'+sub.map(function(s){
+      const on=TRA_F.proc===s[2];
+      const meta=TRA_STATUS_META[s[2]];
+      return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="traCard(\'proc\',\''+s[2]+'\')">'
+        +'<i class="fa-solid '+meta.icon.replace(' fa-spin','')+'"></i> '+esc(s[0])+' <b>'+s[1]+'</b></button>';
+    }).join('')+'</div>';
+}
+
+window.traCard=function(kind,val){
+  if(kind==='proc'){TRA_F.proc=(TRA_F.proc===val?'all':val);TRA_F.match='all';}
+  else{TRA_F.match=(TRA_F.match===val?'all':val);TRA_F.proc='all';}
+  traRender();
+};
+
+/* Date filter: single day, a range, or the two presets people actually reach for. Yesterday is the
+   default view because that is the day the 00:00 job just imported. */
+function traDateBar(){
+  const preset=function(id,label,f,t){
+    const on=TRA_F.from===f&&TRA_F.to===t;
+    return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="traSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
+  };
+  const y=traYesterday(),td=traToday();
+  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +preset('y','Previous day',y,y)+preset('t','Today',td,td)+preset('a','All time',null,null)
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<label style="font-size:12px;color:var(--slate)">From</label>'
+    +'<input type="date" id="traFrom" value="'+esc(TRA_F.from||'')+'" onchange="traSetRange(this.value||null,(document.getElementById(\'traTo\').value||this.value||null))" style="padding:5px 8px">'
+    +'<label style="font-size:12px;color:var(--slate)">To</label>'
+    +'<input type="date" id="traTo" value="'+esc(TRA_F.to||'')+'" onchange="traSetRange((document.getElementById(\'traFrom\').value||this.value||null),this.value||null)" style="padding:5px 8px">'
+  +'</div>';
+}
+window.traSetRange=function(f,t){TRA_F.from=f||null;TRA_F.to=t||null;traRender(true);};
+
+function traFilterBar(all){
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
+  return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
+    +'<select onchange="traSet(\'proc\',this.value)" style="padding:6px 8px">'
+      +opt('all','All processing states',TRA_F.proc)
+      +Object.keys(TRA_STATUS_META).map(function(k){return opt(k,TRA_STATUS_META[k].label,TRA_F.proc);}).join('')
+    +'</select>'
+    +'<select onchange="traSet(\'match\',this.value)" style="padding:6px 8px">'
+      +opt('all','All match results',TRA_F.match)
+      +['MATCH','MISMATCH','NOT_COMPARABLE'].map(function(k){return opt(k,TRA_MATCH_META[k].label,TRA_F.match);}).join('')
+    +'</select>'
+    +'<select onchange="traSet(\'crm\',this.value)" style="padding:6px 8px">'
+      +opt('all','All CRM statuses',TRA_F.crm)
+      +crmValues.map(function(k){return opt(k,k,TRA_F.crm);}).join('')
+    +'</select>'
+    +'<input id="traQ" placeholder="Search lead ID or name…" value="'+esc(TRA_F.q||'')+'" oninput="traSet(\'q\',this.value)" style="padding:6px 10px;min-width:220px">'
+    +'<div class="grow"></div>'
+    +'<button class="btn btn-sm" onclick="traClear()"><i class="fa-solid fa-filter-circle-xmark"></i> Clear filters</button>'
+    +'<button class="btn btn-sm" onclick="traRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+  +'</div>';
+}
+window.traSet=function(k,v){
+  TRA_F[k]=v;
+  // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
+  traRender(k!=='q');
+};
+window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
+window.traRefresh=async function(){await traFetch(true);traRender(true);};
+
+/* A cell for free text the CRM typed. Clamped rather than truncated with a hard slice, so the full
+   value is still there on the row and in the detail view - a lost reason cut to 60 characters is how
+   "LOCATION NOT SUITABLE - customer wants Rajarhat" becomes just "LOCATION NOT SUITABLE". */
+function traTextCell(v,width){
+  if(!v)return '<td><span style="color:var(--slate)">—</span></td>';
+  return '<td style="max-width:'+(width||220)+'px"><div title="'+esc(String(v))+'" '
+    +'style="font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'
+    +esc(String(v))+'</div></td>';
+}
+
+function traRowHtml(r){
+  const calls=traCallCount(r);
+  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/auto/'+r.id+'\')">'
+    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(r.lead_id||'—'))+'</td>'
+    +'<td><div style="font-weight:600">'+esc(r.customer_name||r.title||'—')+'</div>'
+      +(calls>1?'<div style="font-size:11.5px;color:var(--slate)">'+calls+' calls on this lead</div>':'')
+      +traTrail(r)+'</td>'
+    +'<td>'+(r.crm_status?'<span class="tag t-blue">'+esc(r.crm_status)+'</span>':'<span style="color:var(--slate)">—</span>')+'</td>'
+    +'<td>'+traDerivedTag(r)+'</td>'
+    +traTextCell(r.business_unit_name,170)
+    +'<td style="white-space:nowrap;font-size:12.5px">'+(r.next_follow_up_date?esc(fmtDate(r.next_follow_up_date)):'<span style="color:var(--slate)">—</span>')+'</td>'
+    +traTextCell(r.crm_lost_reason,200)
+    +traTextCell(r.crm_remarks,240)
+    +'<td onclick="event.stopPropagation()" style="white-space:nowrap">'
+      +(r.recording_url
+        ? '<button class="btn btn-sm" onclick="traCopyUrl('+r.id+')" title="Copy this call\'s recording URL"><i class="fa-regular fa-copy"></i> Copy URL</button>'
+        : '<span style="color:var(--slate);font-size:12px">no recording</span>')
+    +'</td>'
+  +'</tr>';
+}
+
+function traTableHtml(rows){
+  if(!rows.length){
+    return '<tr><td colspan="9"><div class="empty" style="padding:40px"><i class="fa-solid fa-inbox"></i>'
+      +'<div>No calls match these filters</div></div></td></tr>';
+  }
+  return rows.map(traRowHtml).join('');
+}
+
+/* full=true repaints the cards and the filter bar too; full=false repaints only the table body, so
+   typing in the search box does not steal focus from itself. */
+function traRender(full){
+  const all=TRA_ROWS||[];
+  const rows=traApply(all);
+  if(full!==false){
+    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
+    const f=$('traFilters');if(f)f.innerHTML=traFilterBar(all);
+    const d=$('traDates');if(d)d.innerHTML=traDateBar();
+  }else{
+    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
+  }
+  const b=$('traRows');if(b)b.innerHTML=traTableHtml(rows);
+  const c=$('traCount');if(c)c.textContent=rows.length+' of '+all.length+' call'+(all.length===1?'':'s');
+}
+
+/* Copy Response - the complete CRM record for this row, exactly as the API sent it. No download
+   button anywhere on this page, by requirement. */
+window.traCopy=async function(id){
+  const r=(TRA_ROWS||[]).find(function(x){return x.id===id;});
+  if(!r)return toast('Call not found','err');
+  const payload=r.original_crm_response||null;
+  if(!payload)return toast('No CRM response stored for this call','warn');
+  await traClip(JSON.stringify(payload,null,2),'CRM response copied');
+};
+
+/* One clipboard write, used by both copy buttons. navigator.clipboard needs a secure context and a
+   permission that is not always granted, and silently doing nothing is the worst outcome for a
+   button whose entire job is to copy - so there is a fallback that always works. */
+async function traClip(text,okMsg){
+  try{
+    await navigator.clipboard.writeText(text);
+    toast(okMsg,'ok');
+  }catch(e){
+    const ta=document.createElement('textarea');
+    ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy');toast(okMsg,'ok');}
+    catch(e2){toast('Could not copy to clipboard','err');}
+    ta.remove();
+  }
+}
+
+/* The Knowlarity link, which is the STABLE one. It 302s to a presigned S3 URL that expires in about
+   ten minutes, so copying the redirect target would hand someone a link that is dead by the time
+   they paste it. This is why the row stores the Knowlarity URL and not the redirect. */
+window.traCopyUrl=async function(id){
+  const r=(TRA_ROWS||[]).find(function(x){return x.id===id;});
+  if(!r||!r.recording_url)return toast('No recording URL on this call','warn');
+  await traClip(r.recording_url,'Recording URL copied');
+};
+
+/* Retry - hands the call back to the same pipeline. The backend re-queues it at the BACK of the
+   FIFO queue and increments the attempt count; nothing here duplicates a row or clears a result. */
+window.traRetry=async function(id){
+  const btns=document.querySelectorAll('[onclick="traRetry('+id+')"]');
+  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Queued';});
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-sync',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({action:'retry',id:id})});
+    const out=await res.json().catch(function(){return {};});
+    if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
+    toast('Back in the queue','ok');
+  }catch(e){
+    toast('Could not retry: '+((e&&e.message)||e),'err');
+  }
+  await traFetch(true);traRender(true);
+};
+
+/* ---- the tab itself ---- */
+async function traView(v,seg){
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
+    +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Imported calls</div>'
+      +'<div id="traCount" style="font-size:12.5px;color:var(--slate)"></div></div>'
+      +'<div id="traDates" style="margin-top:12px"></div></div>'
+    +'<div id="traKpis" style="margin-top:16px"></div>'
+    +'<div id="traFilters"></div>'
+    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:64vh"><table class="tbl">'
+      +'<thead><tr><th>Lead ID</th><th>Lead Name</th><th>CRM Status</th><th>Transcription Status</th>'
+      +'<th>Business Unit</th><th>Next Follow-up</th><th>Lost Reason</th><th>Remarks</th><th></th></tr></thead>'
+      +'<tbody id="traRows"><tr><td colspan="9"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
+    +'</table></div></div>';
+  await traFetch(true);
+  traRender(true);
+}
+
+/* ---- detail: everything known about one lead, in one place ---- */
+function traKV(label,value,mono){
+  return '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">'
+    +'<div style="min-width:170px;font-size:12.5px;color:var(--slate)">'+esc(label)+'</div>'
+    +'<div style="flex:1;font-size:13.5px;'+(mono?'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;':'')+'">'
+    +(value===null||value===undefined||value===''?'<span style="color:var(--slate)">—</span>':esc(String(value)))+'</div></div>';
+}
+function traSection(icon,title,inner){
+  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
+    +'<i class="fa-solid '+icon+'" style="color:#0d9488"></i> '+esc(title)+'</div>'+inner+'</div>';
+}
+/* The complete end-to-end conversation, in order, with the MM:SS timestamps Gemini returned. Never
+   a summary - the whole point is that someone can read what was actually said. */
+function traTranscriptHtml(turns,fallback){
+  const list=Array.isArray(turns)?turns:[];
+  if(!list.length){
+    return fallback
+      ? '<div style="font-size:13.5px;white-space:pre-wrap;line-height:1.65">'+esc(fallback)+'</div>'
+      : '<div class="empty" style="padding:26px"><i class="fa-solid fa-comment-slash"></i><div>No transcript for this call</div></div>';
+  }
+  return '<div style="display:flex;flex-direction:column;gap:10px">'+list.map(function(t){
+    const agent=/agent/i.test(String(t.speaker||''));
+    return '<div style="display:flex;gap:12px">'
+      +'<div style="min-width:52px;font-variant-numeric:tabular-nums;font-size:12px;color:var(--slate);padding-top:2px">'+esc(t.timestamp||'')+'</div>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:11.5px;font-weight:700;color:'+(agent?'#0d9488':'#7c3aed')+';letter-spacing:.02em">'+esc(t.speaker||'Speaker')+'</div>'
+        +'<div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+esc(t.text||'')+'</div>'
+      +'</div></div>';
+  }).join('')+'</div>';
+}
+function traQaHtml(qa){
+  const list=Array.isArray(qa)?qa:[];
+  if(!list.length)return '<div style="color:var(--slate);font-size:13.5px">No QA evaluation for this call.</div>';
+  return '<table class="tbl"><thead><tr><th>Point</th><th>Result</th><th>Evidence</th><th>Notes</th></tr></thead><tbody>'
+    +list.map(function(p){
+      const s=String(p&&p.status||'');
+      const cls=/^pass$/i.test(s)?'t-green':/^fail$/i.test(s)?'t-red':/^partial$/i.test(s)?'t-amber':'t-gray';
+      return '<tr><td style="font-weight:600">'+esc(p.point||'—')+'</td>'
+        +'<td><span class="tag '+cls+'">'+esc(s||'—')+'</span></td>'
+        +'<td style="font-size:12.5px">'+esc(p.evidence||'—')+'</td>'
+        +'<td style="font-size:12.5px;color:var(--slate)">'+esc(p.notes||'')+'</td></tr>';
+    }).join('')+'</tbody></table>';
+}
+function traFieldsHtml(df){
+  if(!df||typeof df!=='object')return '<div style="color:var(--slate);font-size:13.5px">No dashboard fields extracted.</div>';
+  const nice={number_asked:'Number asked',pincode_provided:'Pincode provided',lead_category:'Lead category',
+    lost_reason:'Lost reason',project_discussed:'Project discussed'};
+  return Object.keys(df).map(function(k){return traKV(nice[k]||k,df[k]);}).join('');
+}
+function traCritHtml(c){
+  if(!c||typeof c!=='object')return '';
+  const nice={site_visit_interested:'Site visit agreed',location_match:'Location matches',
+    bhk_match:'Configuration matches',budget_match:'Budget matches',
+    ready_move_match:'Possession matches',follow_up_requested:'Follow-up requested'};
+  return '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">'+Object.keys(nice).map(function(k){
+    const on=c[k]===true;
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:13.5px">'
+      +'<i class="fa-solid '+(on?'fa-circle-check':'fa-circle-xmark')+'" style="color:'+(on?'#16a34a':'#cbd5e1')+'"></i> '+esc(nice[k])+'</div>';
+  }).join('')+'</div>';
+}
+/* Earlier calls on this lead. Each one kept everything that made it a call, so the history is
+   inspectable rather than a list of dates. */
+function traHistoryHtml(hist){
+  const list=Array.isArray(hist)?hist:[];
+  if(!list.length)return '';
+  return traSection('fa-clock-rotate-left','Earlier calls on this lead ('+list.length+')',
+    list.map(function(h,i){
+      const turns=Array.isArray(h.utterances)?h.utterances:[];
+      return '<details style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+        +'<summary style="cursor:pointer;font-size:13.5px;font-weight:600">'
+          +esc(h.source_date||'unknown date')+' · '+esc(h.crm_status||'—')
+          +' · <span style="font-weight:400;color:var(--slate)">'+esc(h.processing_status||'—')+'</span>'
+          +(h.comparison_status?' · '+esc(h.comparison_status):'')+'</summary>'
+        +'<div style="margin-top:10px">'
+          +traKV('Comparison reason',h.comparison_reason)
+          +traKV('Recording URL',h.recording_url,true)
+          +(h.non_transcribable_reason?traKV('Not transcribable',h.non_transcribable_reason):'')
+          +(h.summary_verdict?'<div style="margin-top:10px;font-size:13.5px;line-height:1.6;white-space:pre-wrap">'+esc(h.summary_verdict)+'</div>':'')
+          +(turns.length||h.transcript?'<div style="margin-top:12px">'+traTranscriptHtml(turns,h.transcript)+'</div>':'')
+        +'</div></details>';
+    }).join(''));
+}
+
+/* Remarks — anyone who can reach this page can leave one, and everyone sees the same list. Stored in
+   acc.transcription_comments, the SAME table the manual-upload tab uses, so a call discussed on
+   either side of the app has one thread rather than two. Rendered as a table here because that is
+   what this page is: rows of facts, and a remark is one more column of judgement beside them. */
+/* A conversation, not a log. Same .chat-* components the manual-upload tab already uses, so the two
+   sides of the app look like one product and there is only one set of styles to maintain. Your own
+   remarks sit right-aligned; everyone else's carry an avatar. */
+function traRemarksHtml(rows,id){
+  const list=Array.isArray(rows)?rows:[];
+  const thread=list.length
+    ? list.map(function(c){
+        const mine=c.author===(state&&state.email);
+        return '<div class="chat-msg'+(mine?' mine':'')+'">'
+          +(mine?'':avatar(nameOf(c.author)))
+          +'<div style="min-width:0">'
+            +'<div class="chat-meta"><b>'+esc(mine?'You':nameOf(c.author))+'</b>'
+              +'<span>'+relTime(c.created_at)+'</span>'
+              +(mine?'<i class="fa-solid fa-trash tr-cm-del" title="Delete remark" onclick="traCmDelete('+c.id+','+id+')"></i>':'')
+            +'</div>'
+            +'<div class="chat-bubble">'+esc(c.body)+'</div>'
+          +'</div>'
+        +'</div>';
+      }).join('')
+    : '<div class="empty" style="padding:26px 10px"><i class="fa-solid fa-comment-slash"></i>'
+      +'<div style="font-size:13px">No remarks yet — anyone on the team can add one</div></div>';
+  return '<div class="chat-wrap" id="traCmWrap">'+thread+'</div>'
+    +'<div class="tr-cm-composer">'
+      +'<input id="traCmNew" placeholder="Add a remark…" onkeydown="if(event.key===\'Enter\')traCmAdd('+id+')">'
+      +'<button class="tr-cm-send" onclick="traCmAdd('+id+')" title="Post remark"><i class="fa-solid fa-paper-plane"></i></button>'
+    +'</div>';
+}
+window.traCmAdd=async function(id){
+  const inp=$('traCmNew');const body=(inp&&inp.value||'').trim();
+  if(!body)return;
+  try{
+    await sb.schema('acc').from('transcription_comments')
+      .insert({transcription_id:id,author:(state&&state.email)||null,body:body});
+  }catch(e){ toast('Could not post remark: '+((e&&e.message)||e),'err'); return; }
+  trLogActivity(id,null,'commented');
+  traDetail($('view'),id);
+};
+window.traCmDelete=async function(cid,id){
+  const ok=await confirmDialog('Delete this remark?');
+  if(!ok)return;
+  try{ await sb.schema('acc').from('transcription_comments').delete().eq('id',cid); }
+  catch(e){ toast((e&&e.message)||'Failed to delete','err'); return; }
+  trLogActivity(id,null,'remark_deleted');
+  toast('Remark deleted','ok');
+  traDetail($('view'),id);
+};
+
+async function traDetail(v,id){
+  setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Call']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  let r=null;
+  try{const {data}=await sb.schema('acc').from('transcriptions').select('*').eq('id',id).single();r=data;}catch(e){}
+  if(!r){
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
+      +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Call not found</div>'
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+    return;
+  }
+  const st=traStatus(r);
+  let remarks=[];
+  try{
+    const {data:cd}=await sb.schema('acc').from('transcription_comments')
+      .select('*').eq('transcription_id',id).order('created_at');
+    remarks=cd||[];
+  }catch(e){ remarks=[]; }
+  const crm=r.original_crm_response||{};
+  const back='<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
+  const retry=(st==='failed')
+    ?'<button class="btn btn-primary" onclick="traRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'';
+  const copy='<button class="btn" onclick="traCopy('+r.id+')"><i class="fa-regular fa-copy"></i> Copy Response</button>';
+
+  /* The CRM record, whatever keys it carried. Rendered from the stored response rather than from
+     the unpacked columns, so a field the API starts sending tomorrow shows up here on its own. */
+  const crmKeys=Object.keys(crm).filter(function(k){return k.charAt(0)!=='_';});
+  const crmHtml=crmKeys.length
+    ? crmKeys.map(function(k){return traKV(k.replace(/_/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}),crm[k],/url/i.test(k));}).join('')
+      +(crm._reconstructed?'<div style="margin-top:10px;font-size:12px;color:#92400e;background:#fef3c7;border-radius:6px;padding:8px 10px">This record predates response capture — it was reconstructed from the stored fields, not from the API payload.</div>':'')
+    : traKV('Lead ID',r.lead_id)+traKV('Lead Name',r.customer_name)+traKV('Recording URL',r.recording_url,true)
+      +traKV('CRM Status',r.crm_status)+traKV('Business Unit',r.business_unit_name)
+      +traKV('Next Follow-up',r.next_follow_up_date)+traKV('Lost Reason',r.crm_lost_reason)+traKV('Remarks',r.crm_remarks);
+
+  const trail=Array.isArray(r.status_trail)?r.status_trail.filter(Boolean):[];
+  const trailHtml=trail.length>1
+    ? '<div style="margin:6px 0 0;font-size:13.5px">CRM verdict over time: <b>'
+      +trail.map(esc).join('</b> <i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--slate)"></i> <b>')+'</b></div>'
+    : '';
+
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '
+      +esc(r.customer_name||r.title||('Lead '+(r.lead_id||'')))+'</h1>'
+      +'<p>Lead '+esc(String(r.lead_id||'—'))+' · '+esc(traRowDate(r)||'—')+'</p></div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+back+copy+retry+'</div></div>'
+    +'<div class="card card-pad" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
+      +traStatusTag(r)+traMatchTag(r)
+      +(r.crm_status?'<span class="tag t-blue">CRM: '+esc(r.crm_status)+'</span>':'')
+      +traDerivedTag(r)
+      +(r.qa_score!==null&&r.qa_score!==undefined?'<span class="tag t-gray">QA '+esc(String(r.qa_score))+'%</span>':'')
+      +(r.duration_seconds?'<span class="tag t-gray">'+esc(trFmtDur(r.duration_seconds))+'</span>':'')
+      +trailHtml
+    +'</div>'
+    +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="traGrid">'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> CRM details</div>'+crmHtml+'</div>'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-gears" style="color:#0d9488"></i> Processing</div>'
+        +traKV('Processing status',(TRA_STATUS_META[st]||{}).label||st)
+        +traKV('Attempt count',String(r.attempt_count||r.attempts||0))
+        +traKV('Queued at',r.queued_at?fmtDate(r.queued_at)+' '+new Date(r.queued_at).toLocaleTimeString('en-IN'):null)
+        +traKV('Processing started',r.processing_started_at?fmtDate(r.processing_started_at)+' '+new Date(r.processing_started_at).toLocaleTimeString('en-IN'):null)
+        +traKV('Completed at',r.completed_at?fmtDate(r.completed_at)+' '+new Date(r.completed_at).toLocaleTimeString('en-IN'):null)
+        +traKV('Queue position',r.queue_seq)
+        +traKV('Model',r.gemini_model)
+        +traKV('Last error',r.last_error||r.error_text)
+        +(r.non_transcribable_reason?traKV('Not transcribable',r.non_transcribable_reason):'')
+        /* Kept only when a reply could not be parsed. Not the raw-result dump that used to sit at the
+           bottom of this page — without this a failed row cannot be diagnosed at all. */
+        +(r.gemini_raw
+          ? '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:#dc2626">'
+            +'Model reply that failed to parse</summary>'
+            +'<pre style="margin-top:8px;overflow:auto;max-height:260px;font-size:11.5px;background:#fef2f2;padding:10px;border-radius:8px;white-space:pre-wrap">'
+            +esc(r.gemini_raw)+'</pre></details>'
+          : '')
+      +'</div>'
+    +'</div>'
+    +traSection('fa-code-compare','CRM comparison',
+        traKV('CRM status',r.crm_status)
+       +traKV('Transcription-derived status',TRA_DERIVED_LABEL[r.transcription_status]||r.transcription_status)
+       +'<div style="display:flex;gap:10px;padding:8px 0;align-items:center"><div style="min-width:170px;font-size:12.5px;color:var(--slate)">Result</div>'+traMatchTag(r)+'</div>'
+       +'<div style="font-size:13.5px;line-height:1.6;color:var(--ink)">'+esc(r.comparison_reason||'—')+'</div>')
+    +traSection('fa-quote-left','Complete conversation',traTranscriptHtml(r.utterances,r.transcript))
+    +'<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="traGrid2">'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Dashboard fields</div>'
+        +traFieldsHtml(r.dashboard_fields)+traCritHtml(r.criteria)+'</div>'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-wand-magic-sparkles" style="color:#0d9488"></i> Summary / verdict</div>'
+        +'<div style="font-size:14px;line-height:1.65;white-space:pre-wrap">'+(r.summary_verdict?esc(r.summary_verdict):'<span style="color:var(--slate)">No verdict for this call.</span>')+'</div></div>'
+    +'</div>'
+    +traSection('fa-clipboard-check','QA evaluation',traQaHtml(r.qa_evaluation))
+    +traHistoryHtml(r.call_history)
+    +traSection('fa-comments','Remarks',traRemarksHtml(remarks,r.id));
+
+  const s=document.createElement('style');
+  s.textContent='@media(max-width:900px){#traGrid,#traGrid2{grid-template-columns:1fr!important}}';
+  document.head.appendChild(s);
+}
+
+/* One tab strip, shared by every branch, so adding a tab cannot leave one view showing the old set. */
+const TRA_TABS=['Automatic Processing','Manual Upload','Folders','Deleted','Discrepancies','Compilation'];
+function TRA_TABS_HTML(ti){return mTabs('transcription',TRA_TABS,ti);}
+
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
+  // Automatic-processing detail. Checked before the tab index, because 'auto' is not a number.
+  if(seg[0]==='auto'&&seg[1]){return traDetail(v,seg[1]);}
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
-  const tabs=['All Calls','Folders','Deleted','Discrepancies','Compilation'];
+  const tabs=TRA_TABS;
   const ti=mTab(seg,tabs.length);
-  const banner='<div class="card card-pad" style="background:#f0fdfa;border-color:#99f6e4;margin:14px 0 16px;font-size:13.5px"><i class="fa-solid fa-language" style="color:#0d9488"></i> Upload a pre-sales call recording — it is transcribed in <b>Hindi, English &amp; Bengali</b> (code-switching aware) and the lead is automatically marked <b>Qualified</b> or <b>Not Qualified</b> against the JainGroup projects, with a reason.</div>';
-  if(ti===3){
+  if(ti===0){return traView(v,seg);}
+  /* No banner. This page is for watching calls move through the pipeline, and a paragraph of
+     product copy above the numbers is not that. */
+  const banner='';
+  if(ti===4){
     /* Only calls where the agent's record and the recording actually DISAGREE.
        A call that could not be checked is not a disagreement: failed transcriptions and missing
        recordings were listed here too, burying the real mismatches under rows needing no judgement.
@@ -11484,7 +12049,7 @@ VIEWS.transcription=async function(v,seg){
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
     return;
   }
-  if(ti===4){
+  if(ti===5){
     const all=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
     const groups={};
     all.forEach(function(r){ (groups[r.lead_id]=groups[r.lead_id]||[]).push(r); });
@@ -11503,7 +12068,7 @@ VIEWS.transcription=async function(v,seg){
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
     return;
   }
-  if(ti===2){
+  if(ti===3){
     const rows=await trFetchDeleted(true);
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
       +'<div class="toolbar" style="margin:16px 0"><div class="grow"></div><button class="btn btn-sm" onclick="trShowHistory()"><i class="fa-solid fa-clock-rotate-left"></i> Full history</button>'
@@ -11512,7 +12077,7 @@ VIEWS.transcription=async function(v,seg){
       +'<tbody id="trDeletedRows">'+trDeletedTableBody()+'</tbody></table></div></div>';
     return;
   }
-  if(ti===1){
+  if(ti===2){
     const rows=await trFetch(true);
     const folder=seg[1]?decodeURIComponent(seg[1]):null;
     TR_FOLDER=folder;
@@ -11524,9 +12089,10 @@ VIEWS.transcription=async function(v,seg){
   TR_SELECTED=new Set();
   const addTargetBanner=TR_ADD_TARGET?('<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><i class="fa-solid fa-folder-plus" style="color:#1d4ed8"></i><div style="flex:1;font-size:13.5px">Tick calls below to add them to <b>'+esc(TR_ADD_TARGET)+'</b></div><button class="btn btn-sm" onclick="trCancelAddTarget()">Cancel</button><button class="btn btn-sm btn-primary" onclick="trDoneAddTarget()">Done, back to folder</button></div>'):'';
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)+addTargetBanner
+    +'<div class="card card-pad" style="margin:14px 0 0;font-size:13px;color:var(--slate)"><i class="fa-solid fa-circle-info" style="color:#0d9488"></i> Recordings uploaded by hand. The daily CRM import is on the <b>Automatic Processing</b> tab and is kept entirely separate from this one.</div>'
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
-    +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn" onclick="trDownloadList()"><i class="fa-solid fa-download"></i> Download</button><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
+    +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="10"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
   const rows=await trFetch(true);
   trRenderList();
@@ -11534,7 +12100,9 @@ VIEWS.transcription=async function(v,seg){
 };
 
 function trRenderList(){
-  const all=TR_ROWS||[];
+  /* Manual uploads only. The CRM-imported calls have their own tab, their own dashboard and their
+     own queue; mixing them into this list is what made "Calls" mean two different things. */
+  const all=(TR_ROWS||[]).filter(function(r){return r.source!=='lost_call_sync';});
   let rows=trDateFilterRows(all);
   // In "add calls to folder X" mode, calls already in X have nothing to add — hide them so
   // only genuine candidates show up.
@@ -12265,7 +12833,7 @@ async function trDetail(v,id){
   let comments=[];
   try{const {data:cd}=await sb.schema('acc').from('transcription_comments').select('*').eq('transcription_id',id).order('created_at');comments=cd||[];}catch(e){}
   const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
-  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+(r.status==='done'?'<button class="btn" onclick="trDownloadDetail()"><i class="fa-solid fa-file-arrow-down"></i> Download report</button>':'')+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '+esc(name)+'</h1><p>'+sub+'</p></div><div style="display:flex;gap:10px">'+backBtn+'<button class="btn" onclick="trDownload('+r.id+')"><i class="fa-solid fa-download"></i> Recording</button></div></div>'
     +'<div id="trAudio" style="margin:6px 0 16px"></div>'
     +banner
     +mKpis([
