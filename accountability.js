@@ -1328,7 +1328,7 @@
      the caller, which is the only one that knows it. */
   /* Date leads, then the total, then everything else. A claim is remembered as "the 14th" before it
      is remembered as a number, so the date is what lets someone find their own row at a glance. */
-  var WF_TITLE_FIELDS=['Date','Amount','UPI Id'];
+  var WF_TITLE_FIELDS=['Date','Amount','UPI Id','Phone Number'];
   function wfDetailsInline(details,flow){
     const det=details||[];
     if(wfIsDaywise(flow,det)){
@@ -2580,11 +2580,19 @@
     const canEditCase=function(c){ return !wfPastStep1Locked(c) && eq(c&&c.created_by, mySelf); };
     const canDeleteCase=function(c){ return !wfPastStep1Locked(c) && (eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com')); };
     const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
+    /* PRINTING is not editing. Bulk print is for the people who have to file these - the claimant
+       whose claim it is, and HR and Accounts sitting on the steps - none of whom may touch a claim
+       once it has moved past step 1, so the edit/delete gate would have hidden the checkboxes from
+       exactly the people who need them. Nothing is disclosed by it either: it can only print rows
+       already visible on this page, which visibility has already decided. */
+    const canPrintBulk=isStepHolder || eq(mySelf,'ayushruia1@gmail.com')
+      || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
+    const showChk=anyActionable||canPrintBulk;
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
-      const head=(anyActionable?'<th class="wf-chk-col"></th>':'')
+      const head=(showChk?'<th class="wf-chk-col"></th>':'')
         // On the bill workflow the number IS the Wheredoc Id it was filed under; ordinary
         // workflows just count their instances.
         +'<th>No.</th>'+(isBill?'<th>Wheredoc Id</th>':'')
@@ -2614,12 +2622,15 @@
         const ownerKey=wfOwnerKey(c, byCase);
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
         return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
-          +(anyActionable?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
+          +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
-        +(anyActionable?('<span class="wf-inst-tools"><button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button></span>'):'')+'</div>'
+        +(showChk?('<span class="wf-inst-tools">'
+          +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
+          +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
+        +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
           +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, anyone it is with, amount or description…':'Search by No., anyone it is with, amount or description…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
@@ -2748,7 +2759,13 @@
   };
   window.wfInstSelChange=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
-    const eb=$('wfInstEdit'), db=$('wfInstDel'), N=wfN();
+    const eb=$('wfInstEdit'), db=$('wfInstDel'), pb=$('wfInstPrint'), N=wfN();
+    // Print asks nothing of the row beyond existing - any selection at all can be printed.
+    if(pb){
+      pb.disabled = checks.length<1;
+      pb.title = checks.length<1 ? ('Tick one or more '+N.lcMany+' to print')
+        : ('Print '+checks.length+' selected '+(checks.length===1?N.lc:N.lcMany));
+    }
     const oneSel = checks.length===1;
     const editBlocked = oneSel && checks[0].getAttribute('data-inst-over')==='1';
     const delBlocked = checks.some(function(c){ return c.getAttribute('data-first-received')==='1'; });
@@ -2768,6 +2785,17 @@
       db.title = delBlocked ? ('Can’t delete — a selected '+N.lc+' has already started (first step received)')
         : (!mayDel ? ('You can only delete a '+N.lc+' you are part of') : 'Delete selected');
     }
+  };
+  window.wfInstPrintSel=function(){
+    /* Printed in the order the table shows them, not the order they happened to be ticked in -
+       whoever is filing these is working down the list, and a stack that does not match the screen
+       is a stack that has to be re-sorted by hand. */
+    const ids=[].slice.call(document.querySelectorAll('.wf-inst-chk'))
+      .filter(function(c){ return c.checked; })
+      .map(function(c){ return Number(c.getAttribute('data-case')); })
+      .filter(function(n){ return !isNaN(n); });
+    if(!ids.length){ toast('Tick the ones you want to print first','warn'); return; }
+    window.wfPrintCases(ids);
   };
   window.wfInstEditSel=function(){
     const checks=[].slice.call(document.querySelectorAll('.wf-inst-chk:checked'));
@@ -2939,10 +2967,10 @@
      someone printing this needs to be able to scan or check by eye. Opened in a new tab rather
      than done via @media print CSS on the live page, so it doesn't have to fight the app's own
      nav/sidebar/panel chrome to hide everything else. */
-  window.wfPrintCase=async function(caseId){
+  async function wfCasePrintSection(caseId){
     let c=null, flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(!c){ toast('Not found','err'); return; }
+    if(!c) return null;
     if(c.flow_id){ try{ const {data}=await ACC().from('flows').select('*').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
@@ -2958,28 +2986,55 @@
           +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
       }
     }
-    const css=(($('wfCss')||{}).textContent)||'';
     const title=wfN().one+' '+wfCaseNoText(c);
+    return { title:title,
+      html:'<section class="wf-print-case">'
+        +'<h2 style="margin:0 0 4px">'+esc2(title)+'</h2>'
+        +'<div style="color:#64748b;margin-bottom:14px">'+esc2(wfN().one)+' by: '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
+        +detHtml+qrHtml
+      +'</section>' };
+  }
+
+  /* One tab, one print dialog, one page per instance - which is the whole point of printing in
+     bulk. Printing them one at a time meant a dialog per claim and a popup blocker after the
+     first, so Accounts were doing thirty of these by hand at month end. */
+  window.wfPrintCases=async function(caseIds){
+    const ids=(caseIds||[]).filter(function(x){ return x!=null; });
+    if(!ids.length){ toast('Nothing selected','warn'); return; }
+    /* The tab is opened BEFORE anything is awaited. A window.open() that happens after an await is
+       no longer attributable to the click that asked for it, and every browser blocks it - which
+       is why this cannot simply build the HTML first and open the tab at the end. */
+    const w=window.open('','_blank');
+    if(!w){ toast('Please allow popups to print','err'); return; }
+    try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
+      +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
+    const parts=[];
+    for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
+    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return; }
+    const css=(($('wfCss')||{}).textContent)||'';
+    const title=(parts.length===1)?parts[0].title:(wfN().many+' — '+parts.length+' selected');
     const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc2(title)+'</title><style>'+css
       +'body{margin:24px;font-family:Inter,system-ui,sans-serif;color:#0f172a;background:#fff}'
       +'.wf-print-qr{margin-top:18px}.wf-print-qr-h{font-weight:700;margin-bottom:8px}'
       +'.wf-print-qr-img{max-width:260px;display:block;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px}'
+      // Each claim starts its own sheet, so one can be handed to one person - except the last,
+      // which would otherwise throw a blank page at the end of every print job.
+      +'.wf-print-case{break-after:page;page-break-after:always}'
+      +'.wf-print-case:last-child{break-after:auto;page-break-after:auto}'
       +'</style></head><body>'
-      +'<h2 style="margin:0 0 4px">'+esc2(title)+'</h2>'
-      +'<div style="color:#64748b;margin-bottom:14px">'+esc2(wfN().one)+' by: '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
-      +detHtml+qrHtml
+      +parts.map(function(p){ return p.html; }).join('')
       +'</body></html>';
-    const w=window.open('','_blank');
-    if(!w){ toast('Please allow popups to print','err'); return; }
-    w.document.write(html);
-    w.document.close();
+    try{ w.document.open(); w.document.write(html); w.document.close(); }
+    catch(_e){ toast('Could not build the printout','err'); return; }
     let printed=false;
     const doPrint=function(){ if(printed)return; printed=true; try{ w.focus(); w.print(); }catch(_e){} };
-    // Images (the QR code, if any) may still be loading when the document write finishes —
-    // load fires once they've all resolved; the timeout is a fallback if it never does.
+    // Images (the QR codes) may still be loading when the document write finishes - load fires once
+    // they have all resolved; the timeout is a fallback if it never does. Scaled to the number of
+    // pages, since thirty QR images do not arrive as fast as one.
     w.addEventListener('load', doPrint);
-    setTimeout(doPrint, 600);
+    setTimeout(doPrint, 600+Math.min(parts.length,30)*120);
   };
+  window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
     const ae=document.activeElement, tag=(ae&&ae.tagName)||'';
@@ -3112,6 +3167,94 @@
     if(!list.length) return;
     for(const u of list){ try{ await ACC().rpc('upi_remember',{p_upi:u}); }catch(e){} }
     WF_UPI_CACHE=null;   // re-read next time so the ordering reflects the new counts
+  }
+
+  /* ----- Phone number: the same box, the same list, the same habit -----
+     A phone number behaves exactly as the UPI id does - typed once, remembered, offered back on
+     every later claim - so it is built on the UPI field's own wrapper and panel rather than a
+     second set of nearly-identical widgets. The WRAPPER class stays .wf-upi-wrap on purpose: every
+     piece of panel behaviour already written (opening, pinning under the field, closing on an
+     outside click, closing on scroll) keys off that class, and a private class would have meant
+     re-registering all of it and getting one of them subtly wrong.
+     Only what genuinely differs is separate: its own input class, its own cache, its own store. */
+  let WF_PHONE_CACHE=null;
+  async function wfPhoneList(force){
+    if(WF_PHONE_CACHE && !force) return WF_PHONE_CACHE;
+    try{
+      const {data}=await ACC().from('user_phone').select('phone,uses,last_used')
+        .eq('email',String(me()||'').toLowerCase())
+        .order('uses',{ascending:false}).order('last_used',{ascending:false});
+      WF_PHONE_CACHE=(data||[]).map(function(r){ return r.phone; }).filter(Boolean);
+    }catch(e){ WF_PHONE_CACHE=[]; }
+    return WF_PHONE_CACHE;
+  }
+  function wfPhoneCurrent(){
+    const boxes=[].slice.call(document.querySelectorAll('.wf-evt-phone'));
+    for(let i=0;i<boxes.length;i++){ const v=(boxes[i].value||'').trim(); if(v) return v; }
+    return '';
+  }
+  function wfPhoneSpread(src){
+    const v=(src&&src.value||'').trim();
+    if(!v) return;                                        // clearing one does not blank the others
+    [].slice.call(document.querySelectorAll('.wf-evt-phone')).forEach(function(inp){
+      if(inp===src) return;
+      if((inp.value||'').trim()) return;                  // already has one — leave it be
+      inp.value=v;
+    });
+  }
+  window.wfPhoneTyped=function(src){
+    // Only digits survive: people paste "+91 98300 12345" and every one of those spaces would have
+    // to be stripped by somebody later. Better to refuse them as they arrive than to reject the
+    // whole form at save time over a space.
+    if(src){ const cleaned=String(src.value||'').replace(/\D+/g,'').slice(0,10);
+             if(cleaned!==src.value) src.value=cleaned; }
+    wfPhoneSpread(src);
+  };
+  window.wfPhoneToggle=function(btn){
+    const wrap=btn&&btn.closest('.wf-upi-wrap'); if(!wrap) return;
+    const open=wrap.classList.contains('open');
+    wfCloseAllPanels();
+    if(!open){
+      wrap.classList.add('open');
+      wfPhoneFillPanel(wrap);
+      wfPinPanel(wrap, wrap.querySelector('.wf-upi-panel'));
+      wfWirePanelDismiss();
+    }
+  };
+  window.wfPhonePick=function(el){
+    const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
+    const inp=wrap.querySelector('.wf-evt-phone');
+    if(inp){ inp.value=el.getAttribute('data-v')||''; wfPhoneTyped(inp); }
+    wrap.classList.remove('open');
+  };
+  function wfPhoneFillPanel(wrap){
+    const panel=wrap.querySelector('.wf-upi-panel'); if(!panel) return;
+    const list=WF_PHONE_CACHE||[];
+    const cur=(wrap.querySelector('.wf-evt-phone')||{}).value||'';
+    panel.innerHTML=list.length
+      ? list.map(function(u){
+          const on=String(u)===String(cur).trim();
+          return '<div class="wf-upi-opt'+(on?' on':'')+'" data-v="'+esc2(u)+'" onclick="wfPhonePick(this)">'
+            +'<i class="fa-solid fa-phone wf-upi-ic"></i><span>'+esc2(u)+'</span>'
+            +(on?'<i class="fa-solid fa-check"></i>':'')+'</div>';
+        }).join('')
+      : '<div class="wf-upi-empty">No saved numbers yet — type one and it is kept for next time</div>';
+  }
+  async function wfPhoneHydrate(){
+    const boxes=[].slice.call(document.querySelectorAll('.wf-evt-phone'));
+    if(!boxes.length) return;
+    await wfPhoneList();
+    const current=wfPhoneCurrent() || ((WF_PHONE_CACHE&&WF_PHONE_CACHE.length)?WF_PHONE_CACHE[0]:'');
+    boxes.forEach(function(inp){ if(!inp.value && current) inp.value=current; });
+  }
+  async function wfPhoneRemember(vals){
+    const seen={};
+    (vals||[]).forEach(function(v){ String(v||'').split(',').forEach(function(x){
+      const t=x.trim(); if(t && !seen[t]){ seen[t]=1; } }); });
+    const list=Object.keys(seen);
+    if(!list.length) return;
+    for(const u of list){ try{ await ACC().rpc('phone_remember',{p_phone:u}); }catch(e){} }
+    WF_PHONE_CACHE=null;
   }
   /* Amount, as one field with a slot per thing being claimed for.
      Four anonymous boxes would be worse than one: with three transports and a meal you could not
@@ -3525,6 +3668,19 @@
           +'<i class="fa-solid fa-chevron-down"></i></button>'
         +'<div class="wf-upi-panel"></div>'
       +'</div>';
+    } else if(f.phoneMemory){
+      // Same shape as the UPI box above, for the same reason: the saved numbers are there to be
+      // PICKED from, so opening the list always shows all of them whatever has been typed.
+      const pid='wfphone'+(++WF_PID);
+      valueHtml='<div class="wf-upi-wrap" id="'+pid+'">'
+        +'<input class="ac-in wf-evt-value wf-evt-phone" value="'+esc2(value||'')+'" placeholder="'+esc2(f.placeholder||'10-digit mobile number')+'" '
+          +'inputmode="numeric" maxlength="10"'
+          +(f.pattern?(' data-pattern="'+esc2(f.pattern)+'"'):'')
+          +' autocomplete="off" oninput="wfPhoneTyped(this)" onchange="wfPhoneTyped(this)">'
+        +'<button type="button" class="wf-upi-caret" title="Saved phone numbers" onclick="wfPhoneToggle(this)">'
+          +'<i class="fa-solid fa-chevron-down"></i></button>'
+        +'<div class="wf-upi-panel"></div>'
+      +'</div>';
     } else if(type==='people'){
       /* A People field is answered by picking from the staff list rather than typing a name, so
          what is stored is a real person - the value is the picker's own hidden input. */
@@ -3743,6 +3899,7 @@
     const groupHtml='<div class="wf-evt-group"><div class="wf-evt-group-hd"><span>'+label+'</span><button type="button" class="ac-btn ic danger" title="Remove this set" onclick="wfEvtRemoveGroup(this)"><i class="fa-solid fa-xmark"></i></button></div>'+rowsHtml+'</div>';
     w.insertAdjacentHTML('beforeend', groupHtml);
     wfUpiHydrate();
+    wfPhoneHydrate();
   };
   window.wfEvtRemoveGroup=function(btn){
     const g=btn.closest('.wf-evt-group'); const w=g&&g.closest('#wfEvtDetails'); if(g) g.remove();
@@ -4110,6 +4267,7 @@
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
+    wfPhoneHydrate();
     wfShowWhenSyncAll();
     /* Draw the Amount boxes from what is already chosen, and shut them if the description is still
        empty. One delegated listener keeps the gate honest as things are typed - cheaper and less
@@ -4230,6 +4388,26 @@
       // Anything typed into a UPI field joins that person's own list for next time.
       const upiLabel=Object.keys(byLabel).filter(function(l){ return /upi/i.test(l); })[0];
       if(upiLabel) wfUpiRemember(byLabel[upiLabel]);
+
+      /* A phone number is checked the same way and for the same reason: it is what Accounts ring
+         when a payment bounces, and a nine-digit one is no use to them by the time anyone notices.
+         Mandatory unless the field itself says otherwise - the emptiness is caught here rather than
+         left to the generic required-field check so the message can say what is actually wrong. */
+      const phoneField=((window._wfEvtTemplate)||[]).find(function(t){ return t&&t.phoneMemory; });
+      if(phoneField){
+        const vals=(byLabel[phoneField.label]||[]).map(function(v){ return String(v||'').trim(); });
+        const re=new RegExp(phoneField.pattern||'^[0-9]{10}$');
+        if(!phoneField.optional && !vals.some(Boolean)){
+          toast('Please enter your phone number — Accounts need it to reach you about this payment.','warn');
+          return;
+        }
+        const bad=vals.filter(function(v){ return v && !re.test(v); });
+        if(bad.length){
+          toast('"'+bad[0]+'" is not a valid phone number. Enter the 10 digits without spaces or +91.','warn');
+          return;
+        }
+        wfPhoneRemember(byLabel[phoneField.label]);
+      }
       // Whatever image ends up in the QR Code field becomes the one remembered for next time —
       // unlike UPI Id there's only ever one, so this replaces rather than joins a list. Logged
       // (not silently swallowed) if it fails — upi_scanner_get() falls back to the person's own
@@ -4396,6 +4574,16 @@
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',fcs.case_id).maybeSingle(); caseRow=data; }catch(e){}
     if(caseRow){ try{ const {data}=await ACC().from('flows').select('*').eq('id',caseRow.flow_id).maybeSingle(); flow=data; }catch(e){} }
     try{ const {data}=await ACC().from('flow_case_steps').select('*').eq('case_id',fcs.case_id).order('seq',{ascending:true}); allSteps=data||[]; }catch(e){}
+    /* Is this step answered Done-or-Reject and nothing else? The flag lives on the workflow
+       DEFINITION: flow_case_steps is a snapshot taken at creation and carries no such column, so
+       matching by seq is the only way to ask - and it is also what keeps steps added to a workflow
+       after an instance started behaving correctly. */
+    let confirmOnly=false;
+    if(caseRow&&caseRow.flow_id!=null){
+      try{ const {data}=await ACC().from('flow_steps').select('confirm_only')
+             .eq('flow_id',caseRow.flow_id).eq('seq',fcs.seq).maybeSingle();
+           confirmOnly=!!(data&&data.confirm_only); }catch(e){}
+    }
     try{ const {data}=await ACC().from('flow_updates').select('*').eq('case_id',fcs.case_id).order('created_at',{ascending:true}); updates=data||[]; }catch(e){}
     let atts=[]; if(updates.length){ try{ const {data}=await ACC().from('flow_update_attachments').select('*').in('update_id',updates.map(function(u){return u.id;})); atts=data||[]; }catch(e){} }
     const attsByUpdate={}; atts.forEach(function(a){ (attsByUpdate[a.update_id]=attsByUpdate[a.update_id]||[]).push(a); });
@@ -4424,6 +4612,16 @@
       } else {
         A='<button class="ac-btn ok" disabled><i class="fa-solid fa-circle-check"></i> Completed</button>';
       }
+    } else if(amAssignee && caseActive && confirmOnly){
+      /* A confirmation step asks one question - did the money arrive? - so it offers exactly two
+         answers and nothing else. No Receive: there is nothing to work through and no timer worth
+         starting, and making people click Receive before they may answer would only put a step in
+         front of a yes/no. No Forward either: this is the end of the line.
+         Reject here means "it did not arrive", which is a matter for Accounts and nobody else, so
+         it goes back one step to them rather than all the way to the claimant - who is the person
+         pressing the button. That is also why no reason is asked for: the reason is the button. */
+      A='<button class="ac-btn ok" onclick="wfConfirmDone('+fcs.id+')"><i class="fa-solid fa-circle-check"></i> Done</button>'
+       +'<button class="ac-btn danger" onclick="wfConfirmReject('+fcs.id+')"><i class="fa-solid fa-rotate-left"></i> Reject</button>';
     } else if(amAssignee && caseActive){
       /* Send back is on offer at any point the step is yours - on arrival, and also after you have
          received it, because a problem is as often spotted while working through something as at
@@ -4540,6 +4738,35 @@
     try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
     toast('Workflow completed','ok'); navTo('tasks/work');
+  };
+
+  /* ----- Confirmation steps (Reimbursement's "Payment Received") -----
+     Two answers, each behind a confirmation because each one is final in its own way: Done closes
+     the claim for good, Reject puts it back on Accounts' desk. Neither asks for a reason - Done
+     needs none, and for Reject the button IS the reason ("the money did not reach me"), which is
+     the whole point of not making someone type it out.
+     Reject goes through the ONE-argument wf_reject, which steps back exactly one place. The
+     two-argument version would send the claim all the way home to the claimant - who is the person
+     clicking Reject - and demand a reason on the way. */
+  window.wfConfirmDone=function(fcsId){
+    wfConfirm({ title:'Confirm you received the payment?',
+      body:'This closes the reimbursement for good. Only do this once the money is actually in your account.',
+      okLabel:'Yes, I received it', okClass:'ok',
+      onOk:async function(){
+        try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
+        catch(e){ toast('Could not close it: '+((e&&e.message)||e),'err'); return; }
+        toast('Confirmed — this reimbursement is complete','ok'); navTo('tasks/work');
+      }});
+  };
+  window.wfConfirmReject=function(fcsId){
+    wfConfirm({ title:'Payment not received?',
+      body:'This goes straight back to Accounts so they can look into it. You will get it again once they have sorted it out.',
+      okLabel:'Send back to Accounts', okClass:'danger',
+      onOk:async function(){
+        try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
+        catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
+        toast('Sent back to Accounts','ok'); navTo('tasks/work');
+      }});
   };
 
   // Reject: an in-app note (Updates & Feedback) then bounce to the previous person
@@ -4740,7 +4967,7 @@
     .wf-rej-note i{margin-top:2px;color:var(--brand);flex:none}
     .wf-rej-err{margin-top:7px;color:#dc2626;font-size:12.5px;font-weight:600}
     .wf-upi-wrap{position:relative;flex:1;min-width:0;display:flex;align-items:center}
-    .wf-upi-wrap .wf-evt-upi{width:100%;padding-right:32px}
+    .wf-upi-wrap .wf-evt-upi,.wf-upi-wrap .wf-evt-phone{width:100%;padding-right:32px}
     .wf-upi-caret{position:absolute;right:4px;top:50%;transform:translateY(-50%);height:26px;width:26px;
       display:flex;align-items:center;justify-content:center;border:0;background:transparent;
       color:var(--slate);cursor:pointer;border-radius:6px;font-size:11px}
@@ -7090,11 +7317,15 @@
            not see simply was not there, so a middle step looked like the end of the line and got
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
-        const maxSeqByFlow={}, minSeqByFlow={};
-        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq').in('flow_id',flowIds);
+        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={};
+        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only').in('flow_id',flowIds);
           (((r&&r.data)||[])).forEach(function(s){
             if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
             if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
+            // A confirm-only step is answered Done or Reject and nothing else - read from the
+            // DEFINITION for the same reason the bounds are: an instance's own rows may not be
+            // readable, and guessing wrong here would offer the wrong buttons entirely.
+            if(s.confirm_only) confirmOnly[s.flow_id+':'+s.seq]=true;
           }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
@@ -7122,7 +7353,7 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -7503,7 +7734,12 @@
     // every step can be rejected, the first one included — rejecting that one ends the instance
     const wfRejectBtn=`<button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="wfRowReject(${t.flow_case_step_id},${wfInfo&&wfInfo.case_id},${t.id})"><i class="fa-solid fa-ban"></i></button>`;
     if(opt.checkable&&wfInfo){
-      if(wfNeedsReceive){
+      if(wfInfo.confirmOnly){
+        /* A confirmation step reads the same from the list as it does on its own page: the two
+           answers, straight away. Receive is skipped here too - being asked to confirm a payment
+           is not work to be taken on, it is a question to be answered. */
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="I received the payment" onclick="wfConfirmDone(${t.flow_case_step_id})"><i class="fa-solid fa-circle-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Not received — send back to Accounts" onclick="wfConfirmReject(${t.flow_case_step_id})"><i class="fa-solid fa-rotate-left"></i></button></div>`;
+      } else if(wfNeedsReceive){
         wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Receive" onclick="wfReceive(${t.flow_case_step_id})"><i class="fa-solid fa-inbox"></i></button>${wfRejectBtn}</div>`;
       } else if(wfReceived){
         // Received: a Forward button (or Done on the last step) in the exterior list — the same
