@@ -11575,14 +11575,14 @@ async function traFetch(force){
 
 /* Every filter, applied together. A row has to satisfy all of them, which is what makes
    "yesterday + failed + mismatch" mean what it looks like it means. */
-function traApply(rows){
+function traApply(rows,skipCards){
   const q=String(TRA_F.q||'').trim().toLowerCase();
   return (rows||[]).filter(function(r){
     const d=traRowDate(r);
     if(TRA_F.from&&(!d||d<TRA_F.from))return false;
     if(TRA_F.to&&(!d||d>TRA_F.to))return false;
-    if(TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
-    if(TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
+    if(!skipCards&&TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
+    if(!skipCards&&TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
     if(TRA_F.crm!=='all'&&String(r.crm_status||'')!==TRA_F.crm)return false;
     if(q){
       const hay=String(r.lead_id||'')+' '+String(r.customer_name||'')+' '+String(r.title||'');
@@ -11593,8 +11593,9 @@ function traApply(rows){
 }
 
 /* The four cards the spec asks for, plus the states that explain the gap between them. Counted over
-   the FILTERED rows, so changing the date range changes the numbers. A failed call is never counted
-   as transcribed. */
+   the rows the date range, CRM status and search leave behind - but NOT over the card selection
+   itself, so clicking "CRM Mismatch" filters the table without collapsing every other card to a
+   number that only describes the mismatches. A failed call is never counted as transcribed. */
 function traKpiHtml(rows){
   const n=function(st){return rows.filter(function(r){return traStatus(r)===st;}).length;};
   const m=function(c){return rows.filter(function(r){return r.comparison_status===c;}).length;};
@@ -11723,12 +11724,14 @@ function traTableHtml(rows){
 function traRender(full){
   const all=TRA_ROWS||[];
   const rows=traApply(all);
+  /* The cards are counted with the card filters LIFTED, so the four totals stay put while a tab is
+     active and clicking a second tab still shows a real number rather than the leftovers of the
+     first one. */
+  const scope=traApply(all,true);
+  const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(scope);
   if(full!==false){
-    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
     const f=$('traFilters');if(f)f.innerHTML=traFilterBar(all);
     const d=$('traDates');if(d)d.innerHTML=traDateBar();
-  }else{
-    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
   }
   const b=$('traRows');if(b)b.innerHTML=traTableHtml(rows);
   const c=$('traCount');if(c)c.textContent=rows.length+' of '+all.length+' call'+(all.length===1?'':'s');
