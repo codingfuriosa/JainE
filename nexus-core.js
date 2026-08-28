@@ -11544,7 +11544,7 @@ function traCallCount(r){
 /* ---- filter state. One object so every control writes to the same place and the table, the cards
    and the URL can never drift apart. ---- */
 let TRA_ROWS=null;
-const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',q:''};
+const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',bu:'all',q:''};
 
 function traLocalDate(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
 function traToday(){return traLocalDate(new Date());}
@@ -11584,6 +11584,7 @@ function traApply(rows,skipCards){
     if(!skipCards&&TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
     if(!skipCards&&TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
     if(TRA_F.crm!=='all'&&String(r.crm_status||'')!==TRA_F.crm)return false;
+    if(TRA_F.bu!=='all'&&String(r.business_unit_name||'')!==TRA_F.bu)return false;
     if(q){
       const hay=String(r.lead_id||'')+' '+String(r.customer_name||'')+' '+String(r.title||'');
       if(hay.toLowerCase().indexOf(q)<0)return false;
@@ -11652,12 +11653,9 @@ window.traSetRange=function(f,t){TRA_F.from=f||null;TRA_F.to=t||null;traRender(t
 
 function traFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
-    +'<select onchange="traSet(\'proc\',this.value)" style="padding:6px 8px">'
-      +opt('all','All processing states',TRA_F.proc)
-      +Object.keys(TRA_STATUS_META).map(function(k){return opt(k,TRA_STATUS_META[k].label,TRA_F.proc);}).join('')
-    +'</select>'
     +'<select onchange="traSet(\'match\',this.value)" style="padding:6px 8px">'
       +opt('all','All match results',TRA_F.match)
       +['MATCH','MISMATCH','NOT_COMPARABLE'].map(function(k){return opt(k,TRA_MATCH_META[k].label,TRA_F.match);}).join('')
@@ -11665,6 +11663,10 @@ function traFilterBar(all){
     +'<select onchange="traSet(\'crm\',this.value)" style="padding:6px 8px">'
       +opt('all','All CRM statuses',TRA_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRA_F.crm);}).join('')
+    +'</select>'
+    +'<select onchange="traSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRA_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRA_F.bu);}).join('')
     +'</select>'
     +'<input id="traQ" placeholder="Search lead ID or name…" value="'+esc(TRA_F.q||'')+'" oninput="traSet(\'q\',this.value)" style="padding:6px 10px;min-width:220px">'
     +'<div class="grow"></div>'
@@ -11677,7 +11679,7 @@ window.traSet=function(k,v){
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   traRender(k!=='q');
 };
-window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
+window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.bu='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
 window.traRefresh=async function(){await traFetch(true);traRender(true);};
 
 /* A cell for free text the CRM typed. Clamped rather than truncated with a hard slice, so the full
