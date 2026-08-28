@@ -11471,10 +11471,29 @@ VIEWS.organic=async function(v,seg){
    filter over real rows, so a card and the table under it cannot disagree, and an empty day reads
    as empty rather than as zero-of-something. */
 
+/* STOPGAP, 2026-08-28. The model a hand-triggered retry asks for.
+
+   Normally the browser should NOT name a model - the backend owns that choice, through GEMINI_MODEL
+   in Edge Function Secrets, precisely so it can change in one place. It is named here because the
+   DEPLOYED edge function still has the withdrawn gemini-2.5-pro compiled in as its default, and
+   Google now answers that with a 404. The nightly worker was already passing a model explicitly and
+   so kept working; Retry was the one caller that named none, fell through to that dead default, and
+   404'd. That is what failed 6 of the 2026-08-27 calls, all of them rows a human had retried by hand.
+
+   REMOVE this constant and the gemini_model key below once GEMINI_MODEL is set in Secrets, or the
+   current main is deployed (its default is already gemini-flash-latest). A per-request model beats
+   the secret, so leaving this here would silently pin the dashboard to this model forever and make
+   the next model change look like it had no effect.
+   See supabase/migrations/20260828060000_transcription_model_override.sql for the matching cron note. */
+const TRA_RETRY_MODEL='gemini-flash-latest';
+
 /* Rows written before the pipeline rewrite carry the old status words. Normalising in one place
    means the table, the cards and the filters all agree about what a row IS, whenever it was made. */
 const TRA_LEGACY_STATUS={queued:'pending',done:'completed',error:'failed',
   no_recording:'non_transcribable',too_short:'non_transcribable'};
+/* Normalised statuses that mean the call has not finished this attempt yet. Keyed rather than an
+   array so the lookups below read as a question about one row. */
+const TRA_IN_FLIGHT={pending:true,processing:true,retrying:true};
 const TRA_STATUS_META={
   pending:          {label:'Pending',          tag:'t-gray',  icon:'fa-clock'},
   processing:       {label:'Processing',       tag:'t-amber', icon:'fa-spinner fa-spin'},
@@ -11761,14 +11780,19 @@ window.traRetry=async function(id){
     const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-sync',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({action:'retry',id:id})});
+      body:JSON.stringify({action:'retry',id:id,gemini_model:TRA_RETRY_MODEL})});
     const out=await res.json().catch(function(){return {};});
     if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
     toast('Back in the queue','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
   }
-  await traFetch(true);traRender(true);
+  /* The re-render is what puts the button back, so it has to happen even if the refetch fails -
+     otherwise a dropped connection leaves a dead spinner where the Retry button used to be and the
+     only way out is reloading the page. */
+  try{ await traFetch(true); }
+  catch(e){ toast('Retry was sent, but the list could not be refreshed - reload to see it','warn'); }
+  traRender(true);
 };
 
 /* ---- the tab itself ---- */
@@ -11985,7 +12009,11 @@ async function traDetail(v,id){
         +traKV('Completed at',r.completed_at?fmtDate(r.completed_at)+' '+new Date(r.completed_at).toLocaleTimeString('en-IN'):null)
         +traKV('Queue position',r.queue_seq)
         +traKV('Model',r.gemini_model)
-        +traKV('Last error',r.last_error||r.error_text)
+        /* A requeued call KEEPS the error from the attempt that failed - it is the audit trail and
+           deliberately not cleared. But labelling it plain "Last error" while the row sits in the
+           queue reads as though it had just failed again, which is exactly how ten recovered calls
+           looked like ten still-broken ones. Say which attempt it belongs to instead. */
+        +traKV(TRA_IN_FLIGHT[st]?'Last error (previous attempt)':'Last error',r.last_error||r.error_text)
         +(r.non_transcribable_reason?traKV('Not transcribable',r.non_transcribable_reason):'')
         /* Kept only when a reply could not be parsed. Not the raw-result dump that used to sit at the
            bottom of this page — without this a failed row cannot be diagnosed at all. */

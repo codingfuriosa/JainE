@@ -1,11 +1,11 @@
-// LOST-CALL QA PIPELINE — daily CRM fetch -> FIFO queue -> Gemini 2.5 Pro -> CRM comparison.
+// LOST-CALL QA PIPELINE — daily CRM fetch -> FIFO queue -> Gemini -> CRM comparison.
 //
 // THE SHAPE, in one paragraph. At 00:00 IST a cron calls `pull`, which asks DreamCRM for
 // YESTERDAY's lost_call_recordings, stores the raw JSON array verbatim (both as a run payload and
 // per-record), and turns each record into a durable processing row. A second cron calls `work`
 // every minute, which takes exactly ONE row off the front of the queue, hands the audio to Gemini
-// 2.5 Pro, validates what comes back, saves it, compares it against the CRM's own verdict, and
-// stops. Nothing runs in parallel. Nothing is held in memory between invocations.
+// (GEMINI_MODEL, see CONFIG), validates what comes back, saves it, compares it against the CRM's own
+// verdict, and stops. Nothing runs in parallel. Nothing is held in memory between invocations.
 //
 // ONE ROW PER LEAD. A lead that is called more than once keeps ONE row: the newest call is the
 // "current" one on the row's own columns, every earlier call is archived into `call_history`, and
@@ -46,10 +46,18 @@ const j = (o: unknown, status = 200) =>
    Everything sensitive or environment-shaped comes from Secrets. Nothing here is a credential and
    nothing here reaches the browser. */
 /* The spec asked for gemini-2.5-pro. Google no longer serves it to this API project - a live call on
-   2026-08-27 returned 404 "models/gemini-2.5-pro is no longer available to new users. Please update
-   your code to use models/gemini-3.1-pro-preview". So the default is the model Google's own error
-   names, and GEMINI_MODEL in Secrets overrides it without a redeploy when that changes again. */
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.1-pro-preview";
+   2026-08-27 returned 404 "models/gemini-2.5-pro is no longer available to new users", which is what
+   failed 6 of that day's calls. Asked for on 2026-08-28: gemini-flash-latest.
+   TWO THINGS TO KNOW ABOUT THIS DEFAULT. It is an ALIAS, not a pinned model - Google repoints it at
+   the current Flash whenever that changes, so this line cannot 404 the way a pinned name just did,
+   but the model underneath can change without a deploy here and without warning. And Flash is the
+   cheaper, weaker tier: this prompt asks one call to both transcribe and judge, and the failure mode
+   that shape has already shown once is composing a plausible call instead of transcribing the real
+   one. That is precisely what degenerateRepeat(), MIN_CHARS_PER_SECOND and nameMatchesCrm() below
+   are for, so watch the name-match agreement rate after any change to this line.
+   GEMINI_MODEL in Secrets overrides it without a redeploy, and a per-request `gemini_model` overrides
+   both, which is how a candidate model gets tried on one call before it becomes everyone's default. */
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
 const FEED_URL = Deno.env.get("LOST_CALL_FEED") || "https://www.realtybucket.com/report/lost_call_recordings";
 /* The application timezone, as an offset in minutes. Calls are Indian, so "yesterday" must be
    yesterday in IST: at 18:30 UTC when the cron fires, UTC is still on the previous day. */
@@ -69,7 +77,7 @@ const WANTED_STATUSES = (Deno.env.get("WANTED_STATUSES") || "")
 /* STRICTLY ONE AT A TIME. Not a tuning knob - the spec requires FIFO with no overlap, and the
    claim-then-process step below depends on it. */
 const BATCH = 1;
-/* A recording under this many seconds is a ring-out, and paying a 2.5 Pro call to be told so is
+/* A recording under this many seconds is a ring-out, and paying for a Gemini call to be told so is
    waste. Recorded as non_transcribable with an explicit reason, so it is visible and retryable
    rather than silently skipped. Set to 0 to send everything to Gemini. */
 const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 60);
@@ -81,6 +89,11 @@ const RETRY_AFTER_MINUTES = 10;
 /* A row left in `processing` past this is a killed invocation, not work in flight. Reclaimed on the
    next tick, which is what makes the queue restart-safe. */
 const STALE_PROCESSING_MINUTES = 15;
+/* Statuses that mean "this call is already on its way through the queue", so a retry must refuse it
+   rather than reorder it underneath the worker. `queued` is in here because rows written before the
+   rebuild use that word for what is now `pending`, and a legacy row is exactly the kind that gets
+   retried by hand. */
+const IN_FLIGHT_STATUSES = ["pending", "processing", "retrying", "queued"];
 /* The CRM feed occasionally 502s. Controlled retry policy, per spec 2.7. */
 const FEED_ATTEMPTS = 3;
 const FEED_BACKOFF_MS = [0, 2000, 6000];
@@ -872,7 +885,7 @@ async function processOne(db: DB, row: any, geminiKey: string, geminiModel: stri
       ? "Could not read the audio header - sent to Gemini without a duration check."
       : `Recording file is ~${seconds}s (includes ringing and any silence after hang-up).` });
 
-  /* ---- 2. Gemini 2.5 Pro: pre-check, transcription, dashboard fields, QA, verdict ---- */
+  /* ---- 2. Gemini: pre-check, transcription, dashboard fields, QA, verdict ---- */
   let rawText = "";
   try {
     const gr = await fetch(
@@ -1291,17 +1304,50 @@ Deno.serve(async (req: Request) => {
     if (action === "retry") {
       const id = Number(body.id);
       if (!id) return j({ error: "missing id" }, 400);
-      /* A retry asked for by hand does NOT reset attempt_count - the audit trail is the point, and
-         spec 12 says increment it. It goes to the BACK of the queue so it cannot starve the day's
-         own calls, and the existing result is left untouched until a new one replaces it. */
+      /* LOOK BEFORE WRITING. This used to be a single UPDATE with the conditions folded into its
+         WHERE, which meant every refusal came back as one indistinguishable 404 and, worse, that a
+         condition nobody had thought of simply was not enforced. Read the row, say exactly what is
+         wrong, and only then write.
+
+         REFUSING AN IN-FLIGHT ROW IS THE IMPORTANT ONE. There was no status check at all, so
+         retrying a row that was mid-Gemini-call flipped it out of `processing`; doWork counts
+         `processing` rows to decide whether anything is in flight, so that count went to zero, the
+         next tick claimed the SAME recording, and two invocations transcribed it at once - paid for
+         twice, with both racing to write the result. The dashboard only shows Retry on failed rows,
+         so this was never reachable by clicking, but `retry` is a plain POST any signed-in user can
+         send and the guard belongs on the server, not in the button's render condition.
+
+         A retry asked for by hand does NOT reset attempt_count - the audit trail is the point, and
+         spec 12 says increment it, which finish() does when the attempt ends. It goes to the BACK of
+         the queue so it cannot starve the day's own calls, and the existing result is left untouched
+         until a new one replaces it. */
+      const { data: row, error: readErr } = await db.schema("acc").from("transcriptions")
+        .select("id, status, deleted_at, recording_url")
+        .eq("id", id).eq("source", SOURCE).maybeSingle();
+      if (readErr) return j({ error: readErr.message }, 500);
+      if (!row) return j({ error: "no such call" }, 404);
+      /* doWork's queue skips deleted rows, so requeuing one reports success and then parks it in
+         `retrying` where nothing will ever claim it - it just looks stuck forever. */
+      if (row.deleted_at) {
+        return j({ error: "that call is in the Deleted tab - restore it before retrying" }, 409);
+      }
+      if (!row.recording_url || row.recording_url === "None") {
+        return j({ error: "that call has no recording to transcribe" }, 409);
+      }
+      if (IN_FLIGHT_STATUSES.includes(String(row.status))) {
+        return j({ error: `that call is already ${row.status} - wait for it to finish`, call_status: row.status }, 409);
+      }
+
       const { data, error } = await db.schema("acc").from("transcriptions")
         .update({ status: "retrying", queue_seq: await reserveQueueSeq(db, 1),
                   queued_at: nowIso(), processing_started_at: null, completed_at: null,
                   updated_at: nowIso() })
-        .eq("id", id).eq("source", SOURCE).not("recording_url", "is", null)
+        .eq("id", id).eq("source", SOURCE).is("deleted_at", null)
+        .not("status", "in", `(${IN_FLIGHT_STATUSES.join(",")})`)
         .select("id, status, attempt_count").maybeSingle();
       if (error) return j({ error: error.message }, 500);
-      if (!data) return j({ error: "no such call, or it has no recording URL to retry" }, 404);
+      /* Lost the race between the read above and this write - something claimed it in between. */
+      if (!data) return j({ error: "that call started processing just now - wait for it to finish" }, 409);
       // Work it immediately if nothing else is in flight; otherwise it waits its turn.
       return j({ ok: true, requeued: id, work: await doWork(db, GEMINI_KEY, geminiModel) });
     }

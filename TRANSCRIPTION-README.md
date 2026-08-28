@@ -83,7 +83,7 @@ one; the rest have working defaults:
 | Secret | Default | What it does |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | **Required.** Never reaches the browser. |
-| `GEMINI_MODEL` | `gemini-3.1-pro-preview` | See **Model availability** below. Change without touching cron. |
+| `GEMINI_MODEL` | `gemini-flash-latest` | See **Model availability** below. Change without touching cron. |
 | `APP_TZ_OFFSET_MIN` | `330` | IST. Decides what "yesterday" means. |
 | `LOST_CALL_FEED` | the RealtyBucket URL | |
 | `WANTED_STATUSES` | *(empty — all)* | Comma-separated allow-list, e.g. `Lost,In Followup`. |
@@ -141,8 +141,52 @@ on 2026-08-27 returned:
 > 404 `models/gemini-2.5-pro is no longer available to new users. Please update your code to use
 > models/gemini-3.1-pro-preview`
 
-So the default is `gemini-3.1-pro-preview`, which the same key reaches without a 404. `GEMINI_MODEL`
-in Secrets overrides it with no redeploy when this changes again — and it will.
+That 404 is what failed 6 of the 2026-08-27 calls: the deployed build still had the pinned
+`gemini-2.5-pro` as its default, and the model was withdrawn under it mid-run.
+
+The default is now **`gemini-flash-latest`**, requested on 2026-08-28. Two properties of that choice
+are worth keeping in mind:
+
+- It is an **alias**, not a pinned version. Google repoints it at the current Flash model as that
+  changes, so this default cannot 404 the way a pinned name just did. The trade is that the model
+  underneath can change with no deploy here and no warning.
+- It is the **Flash tier** — cheaper and weaker than Pro. Since the rebuild, one call both
+  transcribes and judges, and the failure mode that shape has already demonstrated is *composing* a
+  plausible call rather than transcribing the real one. `degenerateRepeat()`, `MIN_CHARS_PER_SECOND`
+  and `nameMatchesCrm()` are the only things catching that. **Check the name-match agreement rate on
+  the first full day after this change** — a run where it almost never agrees means the model is
+  composing, and the answer is to move back up a tier via `GEMINI_MODEL`.
+
+`GEMINI_MODEL` in Secrets overrides the default with no redeploy. A per-request `gemini_model` in the
+POST body overrides both, which is how a candidate model gets tried on a single call before it
+becomes everyone's default.
+
+#### Current state, 2026-08-28 — there is a stopgap in place
+
+The **deployed** function is still the build whose compiled-in default is the withdrawn
+`gemini-2.5-pro`; the `gemini-flash-latest` default above is in the repo but not yet live. Until it
+is, the every-minute worker is pinned to the right model from its **cron body** — see
+`supabase/migrations/20260828060000_transcription_model_override.sql`.
+
+That covers the nightly automatic run. The dashboard's **Retry** button was the one caller that named
+no model, fell through to the dead deployed default and 404'd — which is what actually failed 6 of
+the 2026-08-27 calls, all of them rows a human had retried by hand. It now sends the model too, via
+`TRA_RETRY_MODEL` in `nexus-core.js`. Both stopgaps come out together.
+
+To finish the job properly, either of these is enough:
+
+```bash
+supabase secrets set GEMINI_MODEL=gemini-flash-latest --project-ref rkxsgtauigjrpcjkmccu
+supabase functions deploy transcription-sync --project-ref rkxsgtauigjrpcjkmccu --no-verify-jwt
+```
+
+Keep `--no-verify-jwt` on the deploy: the function verifies its own callers via `x-sync-secret` and
+is deployed with JWT verification off, so deploying without the flag breaks both cron jobs.
+
+**Then remove both overrides** — the cron one (re-run the `cron.schedule` block in
+`20260827090100_lost_call_schedule.sql`) and `TRA_RETRY_MODEL` in `nexus-core.js`. A per-request
+model beats the secret, so leaving either in place would make the secret look broken the next time
+someone changes it.
 
 **Billing.** The 36 pre-existing failures were all `429 Your prepayment credits are depleted`, and a
 test call on 2026-08-27 still returns 429. **The pipeline cannot transcribe anything until the Gemini
@@ -223,6 +267,41 @@ A call reaches `completed` only after **all** of these pass:
 
 Anything else is `failed`, with the raw reply kept in `gemini_raw` for debugging and explicitly
 **not** saved as a transcript.
+
+### Retrying: automatic, and by hand
+
+**Automatically.** `finish()` writes `failed` even when the attempt is going to be retried — it never
+writes `retrying` itself. `promoteRetries` then requeues `failed` rows whose `updated_at` is older
+than `RETRY_AFTER_MINUTES` (10) and whose `attempt_count` is under `MAX_ATTEMPTS` (3). The backoff is
+therefore driven by **time on the row, not by how often the worker ticks** — so changing the cron
+tick does not change how fast attempts are consumed.
+
+The consequence worth knowing: 3 attempts × 10 minutes spans roughly half an hour, so a Gemini
+brownout longer than that turns a transient failure into a permanent one. That is what happened to 4
+of the 2026-08-27 calls (`503 … experiencing high demand`). The cheap lever is `MAX_ATTEMPTS` in
+Secrets; the principled fix is per-row exponential backoff instead of one flat cutoff, which needs a
+change in `promoteRetries`.
+
+**By hand** (`{action:"retry", id}`, the dashboard's Retry button). It does not reset
+`attempt_count` — the audit trail is the point — and it goes to the **back** of the queue so it
+cannot starve the day's own calls. It is refused, with a distinct message, when:
+
+| condition | why |
+| --- | --- |
+| no row, or wrong `source` | 404 — nothing to retry |
+| `deleted_at` is set | the queue skips deleted rows, so requeuing one parks it in `retrying` forever |
+| no recording URL, or `"None"` | there is nothing to send to Gemini |
+| status is `pending`/`processing`/`retrying`/`queued` | it is already on its way through the queue |
+
+That last guard matters more than it looks. `doWork` decides whether anything is in flight by
+counting rows in `processing`; without the guard, retrying a row mid-Gemini-call moved it out of
+`processing`, the count fell to zero, and the next tick claimed the **same** recording — transcribed
+twice, paid for twice, two writers racing on one row. The button only appears on failed rows, but
+`retry` is a plain POST, so the guard belongs on the server.
+
+A requeued row deliberately **keeps** the error from the attempt that failed. The dashboard labels it
+"Last error (previous attempt)" while the row is not in a terminal state, because reading it as a
+fresh failure is exactly how ten recovered calls looked like ten broken ones.
 
 ### Why those last two content checks exist
 
