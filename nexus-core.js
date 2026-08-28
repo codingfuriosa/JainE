@@ -12048,7 +12048,14 @@ async function traDetail(v,id){
 
 /* One tab strip, shared by every branch, so adding a tab cannot leave one view showing the old set. */
 const TRA_TABS=['Automatic Processing','Manual Upload','Folders','Deleted','Discrepancies','Compilation'];
-function TRA_TABS_HTML(ti){return mTabs('transcription',TRA_TABS,ti);}
+/* Tabs kept out of the strip. The views below stay exactly where they are and keep their indexes,
+   so dropping a label from this list is all it takes to put its tab back. */
+const TRA_TABS_HIDDEN=['Folders','Deleted','Discrepancies','Compilation'];
+function TRA_TABS_HTML(ti){
+  return '<div class="tabs">'+TRA_TABS.map(function(t,i){
+    return TRA_TABS_HIDDEN.indexOf(t)>=0?'':'<div class="tab '+(i===ti?'active':'')+'" onclick="navTo(\'transcription/'+i+'\')">'+esc(t)+'</div>';
+  }).join('')+'</div>';
+}
 
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
@@ -12072,7 +12079,7 @@ VIEWS.transcription=async function(v,seg){
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
     });
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
     return;
@@ -12092,13 +12099,13 @@ VIEWS.transcription=async function(v,seg){
       return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
     });
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
     return;
   }
   if(ti===3){
     const rows=await trFetchDeleted(true);
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div class="toolbar" style="margin:16px 0"><div class="grow"></div><button class="btn btn-sm" onclick="trShowHistory()"><i class="fa-solid fa-clock-rotate-left"></i> Full history</button>'
       +(rows.length?'<button class="btn btn-sm btn-primary" onclick="trRestoreAll()"><i class="fa-solid fa-rotate-left"></i> Restore all</button>':'')+'</div>'
       +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Deleted by</th><th>Deleted at</th><th></th></tr></thead>'
@@ -12109,14 +12116,14 @@ VIEWS.transcription=async function(v,seg){
     const rows=await trFetch(true);
     const folder=seg[1]?decodeURIComponent(seg[1]):null;
     TR_FOLDER=folder;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trFolderArea">'+(folder?trFolderCallsHtml(rows,folder):trFolderGridHtml(rows))+'</div>';
     return;
   }
   TR_FOLDER=null;
   TR_SELECTED=new Set();
   const addTargetBanner=TR_ADD_TARGET?('<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><i class="fa-solid fa-folder-plus" style="color:#1d4ed8"></i><div style="flex:1;font-size:13.5px">Tick calls below to add them to <b>'+esc(TR_ADD_TARGET)+'</b></div><button class="btn btn-sm" onclick="trCancelAddTarget()">Cancel</button><button class="btn btn-sm btn-primary" onclick="trDoneAddTarget()">Done, back to folder</button></div>'):'';
-  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)+addTargetBanner
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+addTargetBanner
     +'<div class="card card-pad" style="margin:14px 0 0;font-size:13px;color:var(--slate)"><i class="fa-solid fa-circle-info" style="color:#0d9488"></i> Recordings uploaded by hand. The daily CRM import is on the <b>Automatic Processing</b> tab and is kept entirely separate from this one.</div>'
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
