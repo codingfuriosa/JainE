@@ -32,6 +32,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { QA_RUBRIC } from "./qa-rubric.ts";
 type DB = ReturnType<typeof createClient>;
 
 const CORS = {
@@ -264,8 +265,13 @@ ${CATALOGUE}
 Evaluate the Agent against the seven QA points configured in this application. Return
 "qa_evaluation" as an array of seven objects, each {"point","status","evidence","notes"}, where
 "status" is exactly "Pass", "Fail" or "Partial" and "evidence" quotes the conversation.
-The seven points, in this order: Script, Etiquette, Query Handling, Call to Action,
+Use these exact seven names, in this order: Script, Etiquette, Query Handling, Call to Action,
 Leakage Avoidance, Follow-up Accuracy, Hyper-personalization.
+
+${QA_RUBRIC}
+
+The rubric above describes AGENT BEHAVIOUR only and states no fact about any project. Nothing in it
+may appear in the transcript, in "dashboard_fields" or in "criteria".
 Do not give credit for actions that did not occur. Do not invent statements that are not in the
 audio. If something never arose because the customer ended the call early, say so in "notes" rather
 than failing the agent for it.

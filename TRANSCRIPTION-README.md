@@ -326,6 +326,31 @@ So shape validation is necessary and not sufficient. Three checks test the *cont
 
 Do not remove them.
 
+### The seven QA points
+
+`Script, Etiquette, Query Handling, Call to Action, Leakage Avoidance, Follow-up Accuracy,
+Hyper-personalization` used to be the whole definition — seven names, and the model invented a
+rubric for them on every call, so no two calls were scored against the same standard. Each one is
+now written out, Pass / Partial / Fail, in
+[supabase/functions/transcription-sync/qa-rubric.ts](supabase/functions/transcription-sync/qa-rubric.ts).
+
+The rules are the sales team's own funnel, taken from the WhatsApp assistant configurations and
+identical across every project: greet → is the customer actually buying → configuration → size range
+→ budget → does it match → **ask for the site visit** → confirm a day and time → give the address.
+*Leakage Avoidance* is that configuration's `information_restriction` list — cost sheet, floor plan,
+EMI, registration charges, room sizes, which flats are unsold, whether two can be merged — all of it
+settled at the site, never on the phone.
+
+**The rubric holds no figures, and must never hold any.** `CATALOGUE` has to stay thin because a
+list of prices in the prompt is a list of prices the model can read back as if it heard them. Every
+rule in the rubric is about what the *agent did* — asked, answered, confirmed, disclosed — so there
+is no project fact in it for a transcript to absorb. That is what makes it safe to send on every
+call. Project facts belong in `CATALOGUE`, where `nameMatchesCrm()` and the density floor can see
+what they do.
+
+Point names and their order are unchanged, so `qaScoreFor()` and the dashboard's QA table read it
+exactly as before.
+
 ### The comparison
 
 `transcription_status` is derived from the conversation, in the CRM's own vocabulary so the two are
