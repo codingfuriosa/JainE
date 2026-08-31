@@ -14706,7 +14706,7 @@ function trcLeadRowHtml(g){
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
     +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.lastDate)||'—')+'</td>'
+    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(last.next_follow_up_text,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     +'<td>'+(last.recording_url
@@ -14744,7 +14744,7 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Last call</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
+      +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
 }
 
 function trcRender(full){
