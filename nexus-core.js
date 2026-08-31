@@ -7,7 +7,10 @@ const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=nu
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const state={user:null,email:null,profile:null,roles:null,super:false};
 const PAGE=window.PAGE||'dashboard';
-function fileFor(id){if(id==='dashboard')return 'index.html';if(id==='tasks')return 'accountability.html';return id+'.html';}
+// A customer session never signs in through login.html and must never be sent back to it — see
+// the customer-detection block in boot() below and the isolation-retrofit migration.
+const LOGIN_PAGE=(PAGE==='customer')?'customer-login.html':'login.html';
+function fileFor(id){if(id==='dashboard')return 'index.html';if(id==='tasks')return 'accountability.html';if(id==='custportal_admin')return 'custportal-admin.html';return id+'.html';}
 function navTo(path){const seg=String(path).split('/');const first=seg[0];if(first===PAGE){location.hash=seg.length>1?('#/'+seg.slice(1).join('/')):'#/';renderPage();}else{const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';location.href=fileFor(first)+hash;}}
 window.navTo=navTo;
 function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+id;renderPage();} else location.href='tasks.html#/task/'+id; }
@@ -72,7 +75,7 @@ window.__confirmAnswer=function(val){
 /* ============================ AUTH ============================ */
 function fatal(msg){
   var a=$('authLoad');
-  if(a){a.style.display='flex';a.innerHTML='<div style="text-align:center;max-width:420px;padding:30px;font-family:Inter,system-ui,sans-serif"><div style="font-size:34px">⚠️</div><div style="margin-top:12px;font-weight:700;font-size:17px">Couldn’t load the workspace</div><div style="color:#64748b;font-size:13.5px;margin-top:8px;line-height:1.5">'+msg+'</div><a href="login.html" style="display:inline-block;margin-top:16px;background:#1d4ed8;color:#fff;padding:10px 18px;border-radius:9px;text-decoration:none;font-weight:600;font-size:14px">Go to Sign In</a></div>';}
+  if(a){a.style.display='flex';a.innerHTML='<div style="text-align:center;max-width:420px;padding:30px;font-family:Inter,system-ui,sans-serif"><div style="font-size:34px">⚠️</div><div style="margin-top:12px;font-weight:700;font-size:17px">Couldn’t load the workspace</div><div style="color:#64748b;font-size:13.5px;margin-top:8px;line-height:1.5">'+msg+'</div><a href="'+LOGIN_PAGE+'" style="display:inline-block;margin-top:16px;background:#1d4ed8;color:#fff;padding:10px 18px;border-radius:9px;text-decoration:none;font-weight:600;font-size:14px">Go to Sign In</a></div>';}
 }
 window.addEventListener('error',function(e){ if(!state.user){ fatal((e.message||'A script error occurred')+'.'); } });
 async function autoProvisionGoogleProfile(){
@@ -95,8 +98,55 @@ async function boot(){
     await new Promise(r=>setTimeout(r,700));
     try{ const {data}=await sb.auth.getSession(); sess=data.session; }catch(e){}
   }
-  if(!sess){ location.replace('login.html'); return; }
+  if(!sess){ location.replace(LOGIN_PAGE); return; }
   state.user=sess.user; state.email=state.user.email;
+
+  // Every existing staff table's RLS was `using(true)` until a real customer login existed
+  // (see 20260828090100_customer_portal_isolation_retrofit.sql), so the ONLY safe place to keep a
+  // customer session away from the staff shell is here, before anything staff-only is fetched.
+  let custRow=null;
+  try{
+    const {data}=await sb.schema('cust').from('customers').select('id,full_name').eq('auth_user_id',state.user.id).eq('status','active').is('deleted_at',null).maybeSingle();
+    custRow=data||null;
+  }catch(e){}
+  if(custRow){
+    if(PAGE!=='customer'){
+      // A customer JWT trying to load a staff page. Sign out rather than silently redirect — an
+      // active staff session must never keep running for someone who is, in fact, a customer.
+      try{ await sb.auth.signOut(); }catch(e){}
+      location.replace('customer-login.html'); return;
+    }
+    await customerBoot(custRow,false);
+    return;
+  }
+  if(PAGE==='customer'){
+    // Not a linked customer login. The one other legitimate reason to be here is a staff member
+    // previewing a specific customer's portal (Customer Portal Admin > Customers > "View portal"),
+    // flagged by ?as=<customerId> — so support/sales can see exactly what a buyer sees without
+    // needing a customer account of their own. Anyone else is bounced to the customer sign-in page.
+    const asId=Number(new URLSearchParams(location.search).get('as'));
+    if(asId){
+      try{
+        const {data:me}=await sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle();
+        state.roles=me;
+      }catch(e){}
+      try{
+        const {data:p}=await sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle();
+        state.super=!!(p&&p.super_admin);
+      }catch(e){}
+      // Client-side check decides only whether we ATTEMPT the preview — same as every other
+      // module-visibility check in this app (see hasUsability() above). The real boundary is RLS:
+      // cust.*'s staff_all policies (app.is_custportal_staff()) are what actually let this account
+      // read another customer's data at all, and a non-staff account gets zero rows regardless.
+      const canPreview=state.super||(state.roles&&Array.isArray(state.roles.modules)&&state.roles.modules.includes('custportal_admin'));
+      if(canPreview){
+        const {data:targetCust}=await sb.schema('cust').from('customers').select('id,full_name,email').eq('id',asId).is('deleted_at',null).maybeSingle();
+        if(targetCust){ await customerBoot(targetCust,true); return; }
+      }
+    }
+    location.replace('customer-login.html'); return;
+  }
+
   // ensure profile + permission rows exist (idempotent self-provision)
   try{
     const {data:prof}=await sb.schema('acc').from('user_profile').select('*').eq('email',state.email).maybeSingle();
@@ -150,13 +200,61 @@ async function boot(){
   startSessionGuard();
   promptSetPassword();
 }
+// A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
+// so the existing CSS just works, but with a single nav item, no search box, and a sign-out-only
+// profile menu instead of the full staff renderShell()/effectiveNav() (which reads adm.users data
+// a customer session never fetches — see the customer-detection block in boot() above).
+function renderCustomerShell(){
+  const nav=$('sbNav');
+  if(nav){
+    nav.innerHTML='';
+    nav.appendChild(el('div','sb-group','Portal'));
+    const a=el('a','sb-item active','<i class="fa-solid fa-user-tie"></i> Customer Portal');
+    a.href='customer.html';nav.appendChild(a);
+  }
+  // During impersonation, show the CUSTOMER's identity throughout (matching the "viewing as X"
+  // banner in VIEWS.customer) rather than the staff member's own — seeing your own email here while
+  // the banner says you're previewing someone else read as a bug, even though it wasn't one: the
+  // session really is the staff member's, only the data shown is scoped to the customer.
+  const nm=(state.customer&&state.customer.full_name)||(state.email||'').split('@')[0];
+  const displayEmail=state.impersonating?((state.customer&&state.customer.email)||''):state.email;
+  const pb=$('profileBtn');
+  if(pb){
+    pb.style.background=colorFor(displayEmail);pb.textContent=initials(nm).toUpperCase();
+    pb.onclick=e=>{e.stopPropagation();$('profileDd').classList.toggle('show');};
+  }
+  const dd=$('profileDd');
+  if(dd){
+    // Impersonation "signs out" of the PREVIEW only — a staff member's real session must survive
+    // exiting a customer preview, so this never calls doSignOut() (which ends their actual login).
+    const exitAction=state.impersonating?"location.href='custportal-admin.html'":'doSignOut()';
+    const exitLabel=state.impersonating?'Exit preview':'Sign Out';
+    dd.innerHTML='<div class="dd-head"><span class="avatar-sm" style="background:'+colorFor(displayEmail)+'">'+esc(initials(nm).toUpperCase())+'</span>'+
+      '<div class="dd-head-txt"><div class="nm">'+esc(nm)+'</div><div class="em">'+esc(displayEmail)+'</div></div></div>'+
+      '<div style="height:1px;background:var(--line-2);margin:6px 0"></div>'+
+      '<div class="dd-item" style="color:var(--err)" onclick="'+exitAction+'"><i class="fa-solid fa-arrow-right-from-bracket"></i> '+exitLabel+'</div>';
+    document.addEventListener('click',()=>{dd.classList.remove('show');});
+  }
+  const nb=$('notifBtn');if(nb)nb.style.display='none';
+  const gsBox=$('globalSearch');if(gsBox){const box=gsBox.closest('.search-box');if(box)box.style.display='none';}
+  const hb=$('hamburger');if(hb)hb.onclick=function(e){e.stopPropagation();document.body.classList.toggle('nav-open');};
+  const bd=$('sbBackdrop');if(bd)bd.onclick=function(){document.body.classList.remove('nav-open');};
+}
+async function customerBoot(custRow,impersonating){
+  state.isCustomer=!impersonating;state.impersonating=!!impersonating;state.customer=custRow;
+  renderCustomerShell();
+  $('authLoad').style.display='none';
+  $('shell').style.display='block';
+  renderPage();
+  startSessionGuard();
+}
 // Continuously enforce the session: if the token is gone/expired/tampered, log out.
 function startSessionGuard(){
   let kicking=false;
   async function kick(){
     if(kicking)return; kicking=true;
-    try{ const {data}=await sb.auth.getSession(); if(!data||!data.session){ location.replace('login.html'); } }
-    catch(e){ location.replace('login.html'); }
+    try{ const {data}=await sb.auth.getSession(); if(!data||!data.session){ location.replace(LOGIN_PAGE); } }
+    catch(e){ location.replace(LOGIN_PAGE); }
     finally{ kicking=false; }
   }
   // Fast, local-only check (no network round-trip) — safe to run on every in-app navigation.
@@ -167,7 +265,7 @@ function startSessionGuard(){
     if(kickingHard)return; kickingHard=true;
     try{
       const {data:sd}=await sb.auth.getSession();
-      if(!sd||!sd.session){ location.replace('login.html'); return; }
+      if(!sd||!sd.session){ location.replace(LOGIN_PAGE); return; }
       // getUser() actually asks Supabase to validate the token against auth.users —
       // if the account was deleted (e.g. from the admin panel) this comes back with
       // an error even though the locally-cached JWT hasn't expired yet.
@@ -180,7 +278,7 @@ function startSessionGuard(){
         // let the next periodic check retry.
         const status=error.status||(error.originalError&&error.originalError.status);
         const isAuthRejection=status===401||status===403||/invalid|expired|not.?found|jwt/i.test(error.message||'');
-        if(isAuthRejection){ try{await sb.auth.signOut();}catch(e){} location.replace('login.html'); }
+        if(isAuthRejection){ try{await sb.auth.signOut();}catch(e){} location.replace(LOGIN_PAGE); }
       }
     }catch(e){ /* network hiccup — don't log the user out over a transient failure */ }
     finally{ kickingHard=false; }
@@ -194,7 +292,7 @@ function startSessionGuard(){
   setInterval(kickHard, 45000);
   kickHard();
 }
-sb.auth.onAuthStateChange((ev)=>{if(ev==='SIGNED_OUT')location.replace('login.html'); else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }});
+sb.auth.onAuthStateChange((ev)=>{if(ev==='SIGNED_OUT')location.replace(LOGIN_PAGE); else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }});
 
 /* ============================ NAV ============================ */
 const NAV=[
@@ -242,7 +340,10 @@ const NAV=[
     {id:'reports',label:'Reports',icon:'fa-chart-pie'},
   ]},
   {group:'Stakeholder Portals',items:[
-    {id:'customer',label:'Customer Portal',icon:'fa-user-tie'},
+    // Deliberately no 'customer' entry here — customer.html is a real customer-only login
+    // (customer-login.html), never reached by clicking through the staff sidebar. Staff manage
+    // and preview it from Customer Portal Admin ("View portal" per customer needs no password).
+    {id:'custportal_admin',label:'Customer Portal Admin',icon:'fa-address-card'},
     {id:'supplier',label:'Supplier Portal',icon:'fa-truck'},
     {id:'whatsapp',label:'WhatsApp Bot',icon:'fa-comment-dots'},
     {id:'mail',label:"Naren's Mail",icon:'fa-envelope'},
@@ -271,7 +372,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -318,7 +419,7 @@ function renderShell(){
   var bd=$('sbBackdrop'); if(bd) bd.onclick=function(){ document.body.classList.remove('nav-open'); };
   document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
 }
-async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} location.replace('login.html'); }
+async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} location.replace(LOGIN_PAGE); }
 window.doSignOut=doSignOut;
 
 // Universal live document search (top nav)
@@ -772,6 +873,13 @@ function isS3Path(p){return typeof p==='string'&&p.indexOf('s3:')===0;}
    portal/recruitment/descriptions/...           Job Descriptions
    legal/<category path>/...                     Legal Vault (own top-level root, NOT under portal/)
    portal/postsales/adhoc/...                    Post Sales ADHOC-replace converted output files
+   customer-portal/projects/<id>/photos/...      Customer Portal — project-wide construction photos
+   customer-portal/projects/<id>/<docType>/...   Customer Portal — brochure / legal (project-scoped)
+   customer-portal/units/<id>/photos/...          Customer Portal — per-flat construction photos
+   customer-portal/units/<id>/<docType>/...       Customer Portal — celebration/agreement/possession/parking (unit-scoped)
+   customer-portal/process-videos/<category>/...  Customer Portal — Registry/Agreement/Nomination explainer videos (company-wide)
+   customer-portal/units/<id>/inspection-checklist/... Customer Portal — the current inspection checklist scan (one per unit)
+   customer-portal/units/<id>/inspection-updates/...   Customer Portal — dated photo/video updates against that checklist
 ------------------------------------------------- */
 function s3Stamp(){return Date.now()+'_'+Math.random().toString(36).slice(2,7);}
 function s3SafeName(name){return String(name||'file').replace(/[^\w.\-]/g,'_');}
@@ -807,6 +915,13 @@ function s3KeyForPostSalesAdhoc(filename){return `postsales/adhoc/${s3Stamp()}_$
 function s3KeyForTranscription(filename){return `transcription/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForFlowUpdate(caseId,filename){return `accountability/flow-updates/${caseId}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/${flowId}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForProjectPhoto(projectId,filename){return `customer-portal/projects/${projectId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForProjectDoc(projectId,docType,filename){return `customer-portal/projects/${projectId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForUnitPhoto(unitId,filename){return `customer-portal/units/${unitId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/units/${unitId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForInspectionChecklist(unitId,filename){return `customer-portal/units/${unitId}/inspection-checklist/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForInspectionUpdate(unitId,filename){return `customer-portal/units/${unitId}/inspection-updates/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -829,6 +944,15 @@ async function s3OpenSigned(storagePath,downloadName){
   if(error){toast('Could not open file: '+error.message,'err');return;}
   if(downloadName){const a=document.createElement('a');a.href=data.url;a.download=downloadName;document.body.appendChild(a);a.click();a.remove();}
   else window.open(data.url,'_blank');
+}
+// Signed URL for inline display (an <img src>, not a click-to-open/download) — used by the
+// customer-portal photo galleries so a thumbnail actually shows the photo instead of a placeholder
+// icon. Returns null on failure so callers can fall back to a placeholder rather than a broken <img>.
+async function s3SignedUrl(storagePath){
+  if(!isS3Path(storagePath))return null;
+  const key=storagePath.slice(3);
+  const {data,error}=await s3Sign('get',key);
+  return error?null:data.url;
 }
 async function s3Delete(storagePath){
   const key=storagePath.slice(3);
@@ -1264,6 +1388,14 @@ async function loadPdfLib(){
   if(window.PDFLib)return window.PDFLib;
   await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
   return window.PDFLib||null;
+}
+// Farvision CSV imports (Customer Portal Admin) need real CSV parsing — quoted fields with embedded
+// commas (addresses, "1,000.00"-style amounts), a UTF-8 BOM, CRLF line endings — a hand-rolled
+// split(',') silently mis-parses the first such row. PapaParse handles all of it.
+async function loadPapaParse(){
+  if(window.Papa)return window.Papa;
+  await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js';sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
+  return window.Papa||null;
 }
 function _letters(t){return (String(t||'').match(/[A-Za-z]/g)||[]).length;}
 
@@ -10826,19 +10958,651 @@ window.compDetailNav=function(delta){
 };
 
 
-VIEWS.customer=function(v,seg){
-  setCrumb(['Stakeholder Portals','Customer Portal']);
-  const tabs=['My units','Payments & demands','Construction progress','My documents','Service requests'];const ti=mTab(seg,tabs.length);
-  const kpis=[['My units','1','DV-C-1204'],['Total paid','25%','of agreement value'],['Next demand','05 Jul','15% on agreement','#e08600'],['Open requests','1','']];
+/* ============================ CUSTOMER PORTAL (real data) ============================ */
+// Backs both the staff-facing "Customer Portal Admin" module (project/unit/customer CRUD, Farvision
+// CSV import, photo & document uploads) and the customer-facing VIEWS.customer below — both read the
+// same cust.* schema. A customer's RLS (20260828090000_customer_portal_schema.sql) scopes every query
+// to their own unit(s) automatically, so the customer-facing view code never filters by customer_id
+// itself; it only ever sees what RLS already let through.
+const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});
+// A non-escaping sibling of mTable (nexus-core.js) — this module builds every cell itself (escaping
+// DB text with esc() inline) so it can freely embed buttons/tags without mTable's "only <span survives
+// unescaped" rule getting in the way.
+function cpaTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
+
+const CPA={projects:null,units:null,customers:null};
+async function cpaProjects(force){
+  if(CPA.projects&&!force)return CPA.projects;
+  const {data}=await sb.schema('cust').from('projects').select('*').is('deleted_at',null).order('name');
+  CPA.projects=data||[];return CPA.projects;
+}
+async function cpaUnits(force){
+  if(CPA.units&&!force)return CPA.units;
+  const {data}=await sb.schema('cust').from('units').select('*, projects(id,name)').is('deleted_at',null).order('id',{ascending:false});
+  CPA.units=data||[];return CPA.units;
+}
+async function cpaCustomers(force){
+  if(CPA.customers&&!force)return CPA.customers;
+  const {data}=await sb.schema('cust').from('customers').select('*').is('deleted_at',null).order('full_name');
+  CPA.customers=data||[];return CPA.customers;
+}
+
+VIEWS.custportal_admin=async function(v,seg){
+  setCrumb(['Stakeholder Portals','Customer Portal Admin']);
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents'];
+  const ti=mTab(seg,tabs.length);
+  v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
+  const host=$('cpaBody');if(!host)return;
+  if(ti===0) await cpaRenderProjectsUnits(host);
+  else if(ti===1) await cpaRenderCustomers(host);
+  else if(ti===2) await cpaRenderImport(host,seg);
+  else if(ti===3) await cpaRenderPhotos(host);
+  else if(ti===4) await cpaRenderInspection(host);
+  else await cpaRenderDocuments(host);
+};
+
+/* ---------- Tab 1: Projects & Units ---------- */
+async function cpaRenderProjectsUnits(host){
+  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true)]);
+  const projRows=projects.map(p=>[esc(p.name),esc(p.farvision_project_code||'—'),String(units.filter(u=>u.project_id===p.id).length),
+    `<button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`]);
+  const unitRows=units.map(u=>[esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_type||'—'),
+    `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
+    u.customer_id?'<span class="tag t-green">Assigned</span>':'<span class="tag t-gray">Unassigned</span>',
+    u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
+    `<button class="btn btn-sm" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
+    (u.floor_casting_completed_at?'':` <button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)]);
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
+    cpaTable(['Project','Farvision code','Units',''],projRows.length?projRows:[['No projects yet','','','']])+
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>`+
+    cpaTable(['Unit code','Project','Tower','Type','Status','Customer','Floor casting',''],unitRows.length?unitRows:[['No units yet','','','','','','','']]);
+}
+window.cpaProjectModal=function(id){
+  const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
+  openModal(`<div class="modal-head"><h3>${p?'Edit project':'New project'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Project name</label><input id="cpaPName" value="${p?esc(p.name):''}">
+    <label>Farvision project code (optional)</label><input id="cpaPCode" value="${p?esc(p.farvision_project_code||''):''}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaProjectSave(${p?p.id:'null'})">Save</button></div>`);
+};
+window.cpaProjectSave=async function(id){
+  const name=$('cpaPName').value.trim();const farvision_project_code=$('cpaPCode').value.trim()||null;
+  if(!name){toast('Enter a project name','err');return;}
+  let error;
+  if(id){({error}=await sb.schema('cust').from('projects').update({name,farvision_project_code}).eq('id',id));}
+  else{({error}=await sb.schema('cust').from('projects').insert({name,farvision_project_code,created_by:state.email}));}
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  closeModal();toast('Project saved','ok');route();
+};
+window.cpaUnitModal=async function(id){
+  const [projects,customers,units]=await Promise.all([cpaProjects(),cpaCustomers(),cpaUnits()]);
+  const u=id?units.find(x=>x.id===id):null;
+  const projOpts=projects.map(p=>`<option value="${p.id}" ${u&&u.project_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
+  const custOpts='<option value="">— Unassigned —</option>'+customers.map(c=>`<option value="${c.id}" ${u&&u.customer_id===c.id?'selected':''}>${esc(c.full_name)}</option>`).join('');
+  const statusOpts=['booked','registered','possession','cancelled'].map(s=>`<option ${u&&u.status===s?'selected':''}>${s}</option>`).join('');
+  openModal(`<div class="modal-head"><h3>${u?'Edit unit':'New unit'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <label>Project</label><select id="cpaUProject">${projOpts}</select>
+    <div class="two"><div><label>Unit code (Farvision — CSV import key)</label><input id="cpaUCode" value="${u?esc(u.unit_code):''}"></div><div><label>Unit type</label><input id="cpaUType" value="${u?esc(u.unit_type||''):''}" placeholder="3BHK"></div></div>
+    <div class="two"><div><label>Tower</label><input id="cpaUTower" value="${u?esc(u.tower||''):''}"></div><div><label>Floor no.</label><input id="cpaUFloor" value="${u?esc(u.floor_no||''):''}"></div></div>
+    <div class="two"><div><label>Carpet area (sqft)</label><input id="cpaUArea" type="number" value="${u&&u.carpet_area_sqft!=null?u.carpet_area_sqft:''}"></div><div><label>Agreement value (₹)</label><input id="cpaUAgVal" type="number" value="${u&&u.agreement_value!=null?u.agreement_value:''}"></div></div>
+    <label>Status</label><select id="cpaUStatus">${statusOpts}</select>
+    <label>Customer</label><select id="cpaUCustomer">${custOpts}</select>
+    </div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaUnitSave(${u?u.id:'null'})">Save</button></div>`,'lg');
+};
+window.cpaUnitSave=async function(id){
+  const project_id=Number($('cpaUProject').value);const unit_code=$('cpaUCode').value.trim();
+  if(!project_id||!unit_code){toast('Project and unit code are required','err');return;}
+  const row={project_id,unit_code,
+    unit_type:$('cpaUType').value.trim()||null,tower:$('cpaUTower').value.trim()||null,floor_no:$('cpaUFloor').value.trim()||null,
+    carpet_area_sqft:$('cpaUArea').value?Number($('cpaUArea').value):null,agreement_value:$('cpaUAgVal').value?Number($('cpaUAgVal').value):null,
+    status:$('cpaUStatus').value,customer_id:$('cpaUCustomer').value?Number($('cpaUCustomer').value):null};
+  let error;
+  if(id){({error}=await sb.schema('cust').from('units').update(row).eq('id',id));}
+  else{row.created_by=state.email;({error}=await sb.schema('cust').from('units').insert(row));}
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  closeModal();toast('Unit saved','ok');route();
+};
+window.cpaMarkCasting=async function(id){
+  if(!await confirmDialog('Mark this unit\u2019s floor casting as complete? Its construction-photo gallery becomes visible to the customer immediately.',{danger:false,okLabel:'Mark complete'}))return;
+  const {error}=await sb.schema('cust').from('units').update({floor_casting_completed_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Floor casting marked complete','ok');route();
+};
+
+/* ---------- Tab 2: Customers ---------- */
+async function cpaRenderCustomers(host){
+  const customers=await cpaCustomers(true);
+  const rows=customers.map(c=>[esc(c.full_name),esc(c.email),esc(c.phone||'—'),
+    c.auth_user_id?'<span class="tag t-green">Login active</span>':'<span class="tag t-gray">No login</span>',
+    `<button class="btn btn-sm" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
+    ` <button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i> View portal</button>`+
+    (c.auth_user_id?` <button class="btn btn-sm" onclick="cpaSetPasswordModal(${c.id},true)">Reset password</button>`:` <button class="btn btn-sm btn-primary" onclick="cpaSetPasswordModal(${c.id},false)">Create login</button>`)]);
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>`+
+    cpaTable(['Name','Email','Phone','Login','Actions'],rows.length?rows:[['No customers yet','','','','']]);
+}
+window.cpaCustomerModal=function(id){
+  const c=id?(CPA.customers||[]).find(x=>x.id===id):null;
+  openModal(`<div class="modal-head"><h3>${c?'Edit customer':'New customer'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Full name</label><input id="cpaCName" value="${c?esc(c.full_name):''}">
+    <label>Email</label><input id="cpaCEmail" value="${c?esc(c.email):''}" ${c&&c.auth_user_id?'disabled':''}>
+    ${c&&c.auth_user_id?'<div style="font-size:12px;color:var(--slate);margin-top:-8px">Email is locked once a login has been created.</div>':''}
+    <label>Phone</label><input id="cpaCPhone" value="${c?esc(c.phone||''):''}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaCustomerSave(${c?c.id:'null'})">Save</button></div>`);
+};
+window.cpaCustomerSave=async function(id){
+  const full_name=$('cpaCName').value.trim();const phone=$('cpaCPhone').value.trim()||null;
+  let error;
+  if(id){({error}=await sb.schema('cust').from('customers').update({full_name,phone}).eq('id',id));}
+  else{
+    const email=$('cpaCEmail').value.trim();
+    if(!full_name||!email){toast('Name and email are required','err');return;}
+    ({error}=await sb.schema('cust').from('customers').insert({full_name,email,phone,created_by:state.email}));
+  }
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  closeModal();toast('Customer saved','ok');route();
+};
+// No customer self-signup and no emailed reset link, by design — staff set the password directly
+// (typed or generated here) and hand it to the customer themselves. See customer-invite/index.ts.
+function cpaGenPassword(){
+  const chars='ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let out='';for(let i=0;i<10;i++)out+=chars[Math.floor(Math.random()*chars.length)];
+  return out;
+}
+window.cpaSetPasswordModal=function(id,isReset){
+  const c=(CPA.customers||[]).find(x=>x.id===id);
+  const pw=cpaGenPassword();
+  openModal(`<div class="modal-head"><h3>${isReset?'Reset password':'Create login'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <p style="font-size:13px;color:var(--slate);margin:0 0 6px">${isReset?'This replaces the current password for':'Sets the initial login password for'} <b>${esc((c&&c.email)||'')}</b>. Share it with them directly — there is no email link.</p>
+    <label>Password</label>
+    <div style="display:flex;gap:8px"><input id="cpaSetPw" value="${esc(pw)}" style="flex:1"><button type="button" class="btn" onclick="$('cpaSetPw').value=cpaGenPassword()">Generate</button></div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="cpaSetPwBtn" onclick="cpaSetPasswordSave(${id})">${isReset?'Reset password':'Create login'}</button></div>`);
+};
+window.cpaSetPasswordSave=async function(id){
+  const password=$('cpaSetPw').value;
+  if(!password||password.length<6){toast('Password must be at least 6 characters','err');return;}
+  const btn=$('cpaSetPwBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/customer-invite',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({customerId:id,password})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Could not save password: '+(out.error||res.status),'err');btn.disabled=false;btn.innerHTML='Save';return;}
+    closeModal();
+    toast('Password set for '+(out.email||'this customer')+' — share it with them directly','ok');
+    route();
+  }catch(e){toast('Could not save password: '+e.message,'err');btn.disabled=false;btn.innerHTML='Save';}
+};
+
+/* ---------- Tab 3: Farvision Import ---------- */
+const CPA_IMPORT_COLUMNS={
+  demand:{required:['unit_code','demand_no','milestone','demand_date','amount'],optional:['due_date','gst_amount','total_amount','status']},
+  receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_demand_no']},
+  cost_sheet:{required:['unit_code','component','amount'],optional:['milestone','percentage','sort_order']},
+  contacts:{required:['unit_code','contact_name'],optional:['contact_phone','contact_email','contact_address','booking_date','agreement_date']}
+};
+const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',cost_sheet:'Cost Sheet',contacts:'Contacts & Dates'};
+let CPA_IMPORT_STATE=null;
+async function cpaRenderImport(host,seg){
+  const projects=await cpaProjects();
+  if(seg&&seg[1]==='history'){ await cpaRenderImportHistory(host,projects); return; }
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const typeOpts=Object.keys(CPA_IMPORT_LABELS).map(k=>`<option value="${k}">${CPA_IMPORT_LABELS[k]}</option>`).join('');
+  host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
+    <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType">${typeOpts}</select></div>
+    <div><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
+    <label>CSV file</label><input type="file" id="cpaImpFile" accept=".csv">
+    <div id="cpaImpColsHelp" style="font-size:12px;color:var(--slate);margin-top:6px"></div>
+    <div style="margin-top:14px"><button class="btn btn-primary" onclick="cpaImportPreview()"><i class="fa-solid fa-magnifying-glass"></i> Preview</button></div>
+    </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
+  const help=$('cpaImpColsHelp'),typeSel=$('cpaImpType');
+  const paintHelp=function(){const c=CPA_IMPORT_COLUMNS[typeSel.value];help.textContent='Required columns: '+c.required.join(', ')+'. Optional: '+c.optional.join(', ')+'.';};
+  typeSel.addEventListener('change',paintHelp);paintHelp();
+}
+window.cpaImportPreview=async function(){
+  const type=$('cpaImpType').value,projectId=Number($('cpaImpProject').value);
+  const file=$('cpaImpFile').files[0];
+  if(!file){toast('Choose a CSV file','err');return;}
+  const Papa=await loadPapaParse();
+  if(!Papa){toast('Could not load the CSV parser — check your connection','err');return;}
+  const text=await file.text();
+  const parsed=Papa.parse(text,{header:true,skipEmptyLines:true,transformHeader:h=>String(h).trim().toLowerCase().replace(/\s+/g,'_')});
+  if(parsed.errors&&parsed.errors.length){toast('CSV parse error: '+parsed.errors[0].message,'err');return;}
+  const rows=parsed.data||[];
+  if(!rows.length){toast('No rows found in that file','err');return;}
+  const cols=CPA_IMPORT_COLUMNS[type];
+  const headerSet=new Set(Object.keys(rows[0]));
+  const missing=cols.required.filter(c=>!headerSet.has(c));
+  if(missing.length){toast('Missing required column(s): '+missing.join(', '),'err');return;}
+  const units=(await cpaUnits()).filter(u=>u.project_id===projectId);
+  const byCode={};units.forEach(u=>{byCode[String(u.unit_code).trim().toLowerCase()]=u;});
+  const matched=[],unmatchedCodes=[];
+  rows.forEach(r=>{
+    const code=String(r.unit_code||'').trim();
+    const u=byCode[code.toLowerCase()];
+    if(u)matched.push({unit:u,row:r});else if(code)unmatchedCodes.push(code);
+  });
+  CPA_IMPORT_STATE={type,projectId,fileName:file.name,rows,matched,unmatchedCodes};
+  const allCols=cols.required.concat(cols.optional);
+  const previewRows=matched.slice(0,10).map(m=>allCols.map(c=>esc(m.row[c]||'—')));
+  $('cpaImpPreview').innerHTML=`<div class="card card-pad">
+    <div class="sec-title" style="margin:0 0 10px">Preview — ${rows.length} row(s), ${matched.length} matched to a unit${unmatchedCodes.length?`, <span style="color:#c83232">${unmatchedCodes.length} unmatched</span>`:''}</div>
+    ${unmatchedCodes.length?`<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">Unmatched unit codes (will be skipped): ${esc(unmatchedCodes.slice(0,20).join(', '))}${unmatchedCodes.length>20?' …':''}</div>`:''}
+    ${matched.length?mTable(allCols,previewRows):''}
+    <div style="margin-top:12px;display:flex;gap:10px"><button class="btn" onclick="$('cpaImpPreview').innerHTML=''">Cancel</button>
+    ${matched.length?`<button class="btn btn-primary" onclick="cpaImportConfirm(this)"><i class="fa-solid fa-check"></i> Confirm import (${matched.length} row${matched.length>1?'s':''})</button>`:''}
+    </div></div>`;
+};
+window.cpaImportConfirm=async function(btn){
+  const st=CPA_IMPORT_STATE;if(!st){toast('Nothing to import','err');return;}
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Importing…';}
+  try{
+    const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
+      import_type:st.type,project_id:st.projectId,file_name:st.fileName,imported_by:state.email,
+      row_count:st.rows.length,matched_count:st.matched.length,unmatched_count:st.unmatchedCodes.length,
+      unmatched_codes:st.unmatchedCodes,raw_rows:st.rows}).select('id').single();
+    if(beErr)throw beErr;
+    const batchId=batch.id;
+    if(st.type==='demand'){
+      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,demand_no:String(m.row.demand_no),milestone:m.row.milestone||null,demand_date:m.row.demand_date||null,due_date:m.row.due_date||null,amount:m.row.amount?Number(m.row.amount):null,gst_amount:m.row.gst_amount?Number(m.row.gst_amount):null,total_amount:m.row.total_amount?Number(m.row.total_amount):null,status:m.row.status||null,raw:m.row,import_batch_id:batchId}));
+      const {error}=await sb.schema('cust').from('farvision_demand').upsert(rows,{onConflict:'unit_id,demand_no'});
+      if(error)throw error;
+    }else if(st.type==='receipts'){
+      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_demand_no:m.row.against_demand_no||null,raw:m.row,import_batch_id:batchId}));
+      const {error}=await sb.schema('cust').from('farvision_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
+      if(error)throw error;
+    }else if(st.type==='cost_sheet'){
+      const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
+      await sb.schema('cust').from('cost_sheet_items').update({is_current:false}).in('unit_id',unitIds).eq('is_current',true);
+      const rows=st.matched.map((m,i)=>({unit_id:m.unit.id,component:m.row.component,milestone:m.row.milestone||null,percentage:m.row.percentage?Number(m.row.percentage):null,amount:m.row.amount?Number(m.row.amount):null,sort_order:m.row.sort_order?Number(m.row.sort_order):i,is_current:true,import_batch_id:batchId}));
+      const {error}=await sb.schema('cust').from('cost_sheet_items').insert(rows);
+      if(error)throw error;
+    }else{
+      const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
+      await sb.schema('cust').from('farvision_contacts').update({is_current:false}).in('unit_id',unitIds).eq('is_current',true);
+      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,contact_name:m.row.contact_name||null,contact_phone:m.row.contact_phone||null,contact_email:m.row.contact_email||null,contact_address:m.row.contact_address||null,booking_date:m.row.booking_date||null,agreement_date:m.row.agreement_date||null,raw:m.row,is_current:true,import_batch_id:batchId}));
+      const {error}=await sb.schema('cust').from('farvision_contacts').insert(rows);
+      if(error)throw error;
+    }
+    toast(st.matched.length+' row(s) imported','ok');
+    CPA_IMPORT_STATE=null;
+    navTo('custportal_admin/2/history');
+  }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
+};
+async function cpaRenderImportHistory(host,projects){
+  const {data}=await sb.schema('cust').from('import_batches').select('*').order('imported_at',{ascending:false}).limit(200);
+  const rows=(data||[]).map(b=>{
+    const proj=projects.find(p=>p.id===b.project_id);
+    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(proj?proj.name:'—'),esc(b.file_name||'—'),
+      fmtDate(b.imported_at),esc(b.imported_by||'—'),
+      b.matched_count+' matched'+(b.unmatched_count?', '+b.unmatched_count+' unmatched':''),
+      b.status==='undone'?'<span class="tag t-gray">Undone</span>':'<span class="tag t-green">Completed</span>',
+      b.status==='undone'?'—':`<button class="btn btn-sm btn-danger" onclick="cpaUndoImport(${b.id})">Undo</button>`];
+  });
+  host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab" onclick="navTo('custportal_admin/2')">Import</div><div class="tab active">Import History</div></div>`+
+    cpaTable(['Type','Project','File','Imported','By','Rows','Status','Undo'],rows.length?rows:[['No imports yet','','','','','','','']]);
+}
+window.cpaUndoImport=async function(id){
+  if(!await confirmDialog('Undo this import? Every row it wrote will be soft-deleted, and — for cost sheet / contacts — the prior data will be restored.',{okLabel:'Undo import'}))return;
+  const {error}=await sb.schema('cust').rpc('undo_import_batch',{p_batch_id:id});
+  if(error){toast('Undo failed: '+error.message,'err');return;}
+  toast('Import undone','ok');route();
+};
+
+/* ---------- Tab 4: Photos ---------- */
+async function cpaRenderPhotos(host){
+  const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}${u.floor_casting_completed_at?'':' (casting pending)'}</option>`).join('');
+  const today=new Date().toISOString().slice(0,10);
+  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos</div>
+    <label>Project</label><select id="cpaPhProject">${projOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaPhCaption">
+    <label>Photos</label><input type="file" id="cpaPhFiles" accept="image/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos</div>
+    <label>Unit</label><select id="cpaUhUnit">${unitOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaUhCaption">
+    <label>Photos</label><input type="file" id="cpaUhFiles" accept="image/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    </div></div>`;
+}
+window.cpaUploadProjectPhotos=async function(){
+  const projectId=Number($('cpaPhProject').value),takenOn=$('cpaPhDate').value,caption=$('cpaPhCaption').value.trim()||null;
+  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo','err');return;}
+  const btn=$('cpaPhBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForProjectPhoto(projectId,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('project_photos').insert({project_id:projectId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' photo(s) uploaded','ok');
+  $('cpaPhFiles').value='';
+};
+window.cpaUploadUnitPhotos=async function(){
+  const unitId=Number($('cpaUhUnit').value),takenOn=$('cpaUhDate').value,caption=$('cpaUhCaption').value.trim()||null;
+  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo','err');return;}
+  const btn=$('cpaUhBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForUnitPhoto(unitId,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('unit_photos').insert({unit_id:unitId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' photo(s) uploaded','ok');
+  $('cpaUhFiles').value='';
+};
+
+/* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
+async function cpaRenderInspection(host){
+  const units=await cpaUnits();
+  const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('');
+  const today=new Date().toISOString().slice(0,10);
+  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+    <div class="card card-pad frm"><div class="sec-title">Inspection checklist</div>
+    <p style="font-size:12.5px;color:var(--slate);margin:0 0 6px">One checklist per unit — uploading a new one replaces the current one.</p>
+    <label>Unit</label><select id="cpaIcUnit">${unitOpts}</select>
+    <label>Checklist file (photo or PDF)</label><input type="file" id="cpaIcFile">
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaIcBtn" onclick="cpaUploadInspectionChecklist()"><i class="fa-solid fa-upload"></i> Upload / replace</button></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Inspection updates</div>
+    <p style="font-size:12.5px;color:var(--slate);margin:0 0 6px">Dated photo or video updates against the checklist — the customer sees these as a timeline.</p>
+    <label>Unit</label><select id="cpaIuUnit">${unitOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaIuDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaIuCaption">
+    <label>Photos or videos</label><input type="file" id="cpaIuFiles" accept="image/*,video/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaIuBtn" onclick="cpaUploadInspectionUpdate()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    </div></div>`;
+}
+window.cpaUploadInspectionChecklist=async function(){
+  const unitId=Number($('cpaIcUnit').value);
+  const f=$('cpaIcFile').files[0];if(!f){toast('Choose a file','err');return;}
+  const btn=$('cpaIcBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
+  const {data,error}=await uploadFileToS3(s3KeyForInspectionChecklist(unitId,f.name),f);
+  if(error){toast('Upload failed: '+error.message,'err');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload / replace';return;}
+  const {error:insErr}=await sb.schema('cust').from('inspection_checklists')
+    .upsert({unit_id:unitId,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email,updated_at:new Date().toISOString()},{onConflict:'unit_id'});
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload / replace';
+  if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');return;}
+  toast('Inspection checklist saved','ok');$('cpaIcFile').value='';
+};
+window.cpaUploadInspectionUpdate=async function(){
+  const unitId=Number($('cpaIuUnit').value),takenOn=$('cpaIuDate').value,caption=$('cpaIuCaption').value.trim()||null;
+  const files=[...$('cpaIuFiles').files];if(!files.length){toast('Choose at least one file','err');return;}
+  const btn=$('cpaIuBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForInspectionUpdate(unitId,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('inspection_updates').insert({unit_id:unitId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' update(s) uploaded','ok');
+  $('cpaIuFiles').value='';
+};
+
+/* ---------- Tab 6: Documents (+ company-wide process videos) ---------- */
+const CPA_PROJECT_DOC_TYPES={brochure:'Brochure',legal:'Legal documentation'};
+const CPA_CUSTOMER_DOC_TYPES={celebration_photo:'Celebration photo',celebration_video:'Celebration video',draft_agreement:'Draft Agreement for Sale',possession_letter:'Possession Letter',parking_allotment:'Parking Allotment Letter'};
+const CPA_VIDEO_CATEGORIES={registry:'Registry Process',agreement:'Agreement Process',nomination:'Nomination Process'};
+async function cpaRenderDocuments(host){
+  const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('');
+  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+    <div class="card card-pad frm"><div class="sec-title">Project documents (brochure / legal)</div>
+    <label>Project</label><select id="cpaPdProject">${projOpts}</select>
+    <label>Document type</label><select id="cpaPdType">${Object.keys(CPA_PROJECT_DOC_TYPES).map(k=>`<option value="${k}">${CPA_PROJECT_DOC_TYPES[k]}</option>`).join('')}</select>
+    <label>Title (optional)</label><input id="cpaPdTitle">
+    <label>File</label><input type="file" id="cpaPdFile">
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPdBtn" onclick="cpaUploadProjectDoc()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Customer documents (per flat)</div>
+    <label>Unit</label><select id="cpaCdUnit">${unitOpts}</select>
+    <label>Document type</label><select id="cpaCdType">${Object.keys(CPA_CUSTOMER_DOC_TYPES).map(k=>`<option value="${k}">${CPA_CUSTOMER_DOC_TYPES[k]}</option>`).join('')}</select>
+    <label>Title (optional)</label><input id="cpaCdTitle">
+    <label>File</label><input type="file" id="cpaCdFile">
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaCdBtn" onclick="cpaUploadCustomerDoc()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    </div></div>
+    <div class="card card-pad frm" style="margin-top:16px"><div class="sec-title">Process explainer videos (company-wide — every customer sees these, regardless of project)</div>
+    <div class="two"><div><label>Process</label><select id="cpaPvCategory">${Object.keys(CPA_VIDEO_CATEGORIES).map(k=>`<option value="${k}">${CPA_VIDEO_CATEGORIES[k]}</option>`).join('')}</select></div><div><label>Title (optional)</label><input id="cpaPvTitle"></div></div>
+    <label>Video file</label><input type="file" id="cpaPvFile" accept="video/*">
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPvBtn" onclick="cpaUploadProcessVideo()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaPvList" style="margin-top:16px"></div>
+    </div>`;
+  cpaRenderProcessVideoList();
+}
+async function cpaRenderProcessVideoList(){
+  const host=$('cpaPvList');if(!host)return;
+  const {data}=await sb.schema('cust').from('process_videos').select('*').is('deleted_at',null).order('category').order('created_at',{ascending:false});
+  const rows=(data||[]).map(v=>[CPA_VIDEO_CATEGORIES[v.category]||v.category,esc(v.title||v.file_name||'—'),fmtDate(v.created_at),
+    `<button class="btn btn-sm btn-danger" onclick="cpaDeleteProcessVideo(${v.id})">Delete</button>`]);
+  host.innerHTML=cpaTable(['Process','Title','Uploaded','Delete'],rows.length?rows:[['No videos yet','','','']]);
+}
+window.cpaUploadProcessVideo=async function(){
+  const category=$('cpaPvCategory').value,title=$('cpaPvTitle').value.trim()||null;
+  const f=$('cpaPvFile').files[0];if(!f){toast('Choose a video file','err');return;}
+  const btn=$('cpaPvBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
+  const {data,error}=await uploadFileToS3(s3KeyForProcessVideo(category,f.name),f);
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(error){toast('Upload failed: '+error.message,'err');return;}
+  const {error:insErr}=await sb.schema('cust').from('process_videos').insert({category,title,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+  if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');return;}
+  toast('Video uploaded','ok');$('cpaPvFile').value='';$('cpaPvTitle').value='';
+  cpaRenderProcessVideoList();
+};
+window.cpaDeleteProcessVideo=async function(id){
+  if(!await confirmDialog('Remove this video from the customer portal?',{okLabel:'Delete'}))return;
+  const {error}=await sb.schema('cust').from('process_videos').update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Delete failed: '+error.message,'err');return;}
+  toast('Video removed','ok');cpaRenderProcessVideoList();
+};
+window.cpaUploadProjectDoc=async function(){
+  const projectId=Number($('cpaPdProject').value),docType=$('cpaPdType').value,title=$('cpaPdTitle').value.trim()||null;
+  const f=$('cpaPdFile').files[0];if(!f){toast('Choose a file','err');return;}
+  const btn=$('cpaPdBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
+  const {data,error}=await uploadFileToS3(s3KeyForProjectDoc(projectId,docType,f.name),f);
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(error){toast('Upload failed: '+error.message,'err');return;}
+  const {error:insErr}=await sb.schema('cust').from('project_documents').insert({project_id:projectId,doc_type:docType,title,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+  if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');return;}
+  toast('Document uploaded','ok');$('cpaPdFile').value='';
+};
+window.cpaUploadCustomerDoc=async function(){
+  const unitId=Number($('cpaCdUnit').value),docType=$('cpaCdType').value,title=$('cpaCdTitle').value.trim()||null;
+  const f=$('cpaCdFile').files[0];if(!f){toast('Choose a file','err');return;}
+  const btn=$('cpaCdBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
+  const {data,error}=await uploadFileToS3(s3KeyForCustomerDoc(unitId,docType,f.name),f);
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(error){toast('Upload failed: '+error.message,'err');return;}
+  const {error:insErr}=await sb.schema('cust').from('customer_documents').insert({unit_id:unitId,doc_type:docType,title,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+  if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');return;}
+  toast('Document uploaded','ok');$('cpaCdFile').value='';
+};
+
+/* ============================ CUSTOMER-FACING PORTAL ============================ */
+let CUST_DATA=null,CUST_SELECTED_UNIT=null;
+async function custLoadData(customerId,force){
+  // Filtered by customerId explicitly, not left to RLS alone — a real customer JWT is scoped to
+  // its own rows by RLS regardless, but a staff session previewing a customer (state.impersonating,
+  // see boot() above) has full staff_all read access to every cust.* row, so without this filter a
+  // preview would show every customer's units mixed together instead of just the one being previewed.
+  if(CUST_DATA&&CUST_DATA.customerId===customerId&&!force)return CUST_DATA;
+  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId).order('id');
+  const list=units||[];
+  const unitIds=list.map(u=>u.id);
+  let contacts=[];
+  if(unitIds.length){
+    const {data}=await sb.schema('cust').from('farvision_contacts').select('*').in('unit_id',unitIds).eq('is_current',true);
+    contacts=data||[];
+  }
+  const contactByUnit={};contacts.forEach(c=>{contactByUnit[c.unit_id]=c;});
+  CUST_DATA={customerId,units:list,contactByUnit};
+  return CUST_DATA;
+}
+window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
+function custUnitPicker(units,selUnitId){
+  if(units.length<2)return '';
+  return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
+    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
+}
+async function custTabOverview(data,unit){
+  const c=data.contactByUnit[unit.id];
+  const [{data:demand},{data:receipts}]=await Promise.all([
+    sb.schema('cust').from('farvision_demand').select('amount').eq('unit_id',unit.id),
+    sb.schema('cust').from('farvision_receipts').select('amount').eq('unit_id',unit.id)
+  ]);
+  const totalDemand=(demand||[]).reduce((s,d)=>s+Number(d.amount||0),0);
+  const totalReceipt=(receipts||[]).reduce((s,r)=>s+Number(r.amount||0),0);
+  const outstanding=totalDemand-totalReceipt;
+  const kpis=[
+    ['My unit',esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'')],
+    ['Agreement value',custInr(unit.agreement_value),''],
+    ['Paid to date',custInr(totalReceipt),totalDemand?Math.round(totalReceipt/totalDemand*100)+'% of demand raised':''],
+    ['Outstanding',custInr(outstanding),outstanding>0?'due now':'—',outstanding>0?'#e08600':'#16855a']
+  ];
+  const unitRows=[[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(unit.unit_type||'—'),
+    unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',`<span class="tag t-amber">${esc(unit.status||'—')}</span>`,custInr(unit.agreement_value)]];
+  const contactRows=c?[[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]:[];
+  return mKpis(kpis)+
+    '<div class="sec-title" style="margin:18px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],unitRows)+
+    '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
+    (contactRows.length?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],contactRows):
+      '<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
+}
+async function custTabLedger(unit){
+  const [{data:demand},{data:receipts}]=await Promise.all([
+    sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
+    sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id)
+  ]);
+  const entries=[].concat((demand||[]).map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone,amount:Number(d.amount||0)})))
+    .concat((receipts||[]).map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  let bal=0;
+  const rows=entries.map(e=>{bal+=e.amount;
+    return [fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
+      esc(e.ref||'—'),esc(e.desc||'—'),custInr(Math.abs(e.amount)),custInr(bal)];});
+  return rows.length?mTable(['Date','Type','Reference','Details','Amount','Running balance'],rows):
+    '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>';
+}
+async function custTabCostSheet(unit){
+  const {data}=await sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order');
+  const rows=(data||[]).map(i=>[esc(i.component),esc(i.milestone||'—'),i.percentage!=null?i.percentage+'%':'—',custInr(i.amount)]);
+  return rows.length?mTable(['Component','Milestone','%','Amount'],rows):
+    '<div class="card card-pad empty">No cost sheet has been shared for this unit yet.</div>';
+}
+async function custTabProgress(unit){
+  const [{data:pPhotos},{data:uPhotos}]=await Promise.all([
+    sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
+    unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
+  ]);
+  const photoGrid=async list=>{
+    const urls=await Promise.all(list.map(p=>s3SignedUrl(p.storage_path)));
+    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
+      list.map((p,i)=>{const url=urls[i];
+        const thumb=url
+          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
+          :'<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid fa-image fa-lg"></i></div>';
+        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
+      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
+  };
+  let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
+    ((pPhotos&&pPhotos.length)?await photoGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
+  if(!unit.floor_casting_completed_at){
+    out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
+  }else{
+    out+=(uPhotos&&uPhotos.length)?await photoGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+  }
+  return out;
+}
+async function custTabDocuments(unit){
+  const [{data:pDocs},{data:cDocs}]=await Promise.all([
+    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id),
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id)
+  ]);
+  const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Document'),fmtDate(d.created_at),
+    `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
+  const pRows=(pDocs||[]).map(docRow),cRows=(cDocs||[]).map(docRow);
+  return '<div class="sec-title" style="margin:0 0 10px">Project documents</div>'+
+    (pRows.length?cpaTable(['Document','Shared on','Download'],pRows):'<div class="card card-pad empty">No project documents shared yet.</div>')+
+    '<div class="sec-title" style="margin:20px 0 10px">My documents</div>'+
+    (cRows.length?cpaTable(['Document','Shared on','Download'],cRows):'<div class="card card-pad empty">No personal documents shared yet.</div>');
+}
+async function custTabInspection(unit){
+  const [{data:checklist},{data:updates}]=await Promise.all([
+    sb.schema('cust').from('inspection_checklists').select('*').eq('unit_id',unit.id).maybeSingle(),
+    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
+  ]);
+  const checklistSection='<div class="sec-title" style="margin:0 0 10px">Inspection checklist</div>'+
+    (checklist?
+      `<div class="card card-pad" style="display:flex;justify-content:space-between;align-items:center">${fileIcon(checklist.file_type||'')} ${esc(checklist.file_name||'Inspection checklist')}<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${checklist.storage_path.replace(/'/g,"\\'")}','${(checklist.file_name||'checklist').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button></div>`:
+      '<div class="card card-pad empty">Your inspection checklist hasn\u2019t been uploaded yet.</div>');
+  const mediaGrid=async list=>{
+    const urls=await Promise.all(list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;return isVideo?Promise.resolve(null):s3SignedUrl(p.storage_path);}));
+    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
+      list.map((p,i)=>{const isVideo=(p.file_type||'').indexOf('video')===0;const url=urls[i];
+        const thumb=url
+          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
+          :`<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div>`;
+        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
+      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
+  };
+  const updatesSection='<div class="sec-title" style="margin:20px 0 10px">Updates against the checklist</div>'+
+    ((updates&&updates.length)?await mediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
+  return checklistSection+updatesSection;
+}
+async function custTabVideos(){
+  const {data}=await sb.schema('cust').from('process_videos').select('*').order('category').order('created_at',{ascending:false});
+  const byCat={};(data||[]).forEach(v=>{(byCat[v.category]=byCat[v.category]||[]).push(v);});
+  return Object.keys(CPA_VIDEO_CATEGORIES).map(cat=>{
+    const vids=byCat[cat]||[];
+    return '<div class="sec-title" style="margin:0 0 10px">'+esc(CPA_VIDEO_CATEGORIES[cat])+'</div>'+
+      (vids.length?cpaTable(['Video','Added','Watch'],vids.map(v=>[esc(v.title||v.file_name||'Video'),fmtDate(v.created_at),
+        `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${v.storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-circle-play"></i> Watch</button>`]))
+      :'<div class="card card-pad empty">Not available yet.</div>')+'<div style="margin-bottom:20px"></div>';
+  }).join('');
+}
+VIEWS.customer=async function(v,seg){
+  setCrumb(['Customer Portal']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos'];
+  const ti=mTab(seg,tabs.length);
+  const data=await custLoadData(state.customer&&state.customer.id);
+  // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
+  // WHO it's a preview of, or the empty state and the profile menu tell two different stories.
+  const banner=state.impersonating?
+    `<div class="card card-pad" style="background:#fffbeb;border-color:#f0dfa8;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-eye"></i> Staff preview — viewing the portal as <b>${esc((state.customer&&state.customer.full_name)||'this customer')}</b>. Read-only monitoring; this is not their real session. <a href="custportal-admin.html" style="margin-left:8px;font-weight:600">Exit preview</a></div>`:
+    `<div class="card card-pad" style="background:#eff4ff;border-color:#cfe0ef;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-user"></i> Signed in as <b>${esc(state.email||'')}</b>. You see only your own unit(s) and documents.</div>`;
+  if(!data.units.length){
+    v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+banner+
+      '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div>';
+    return;
+  }
+  if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
+  const unit=data.units.find(u=>u.id===CUST_SELECTED_UNIT);
   let body;
-  if(ti===0){ body=mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],[['DV-C-1204','Dream Valley Ph-2','3BHK','1180 sqft','<span class="tag t-amber">Booked</span>','₹1.18 Cr']]); }
-  else if(ti===1){ body=mTable(['Milestone','Demand','Due','Amount','Status'],[['On booking','10%','Paid','₹11.8L','<span class="tag t-green">Paid</span>'],['On agreement','15%','05 Jul','₹17.7L','<span class="tag t-amber">Due</span>']]); }
-  else if(ti===2){ body=mTable(['Tower','Stage','% Complete','Updated'],[['Tower C','Finishing','62%','Today']]); }
-  else if(ti===3){ body=mTable(['Document','Type','Shared','Status'],[['Allotment Letter','PDF','24 Jun','Available']]); }
-  else { body=mTable(['Ticket','Subject','Raised','Status'],[['SR-014','Parking allocation query','2 days','Open']]); }
+  if(ti===0)body=await custTabOverview(data,unit);
+  else if(ti===1)body=await custTabLedger(unit);
+  else if(ti===2)body=await custTabCostSheet(unit);
+  else if(ti===3)body=await custTabProgress(unit);
+  else if(ti===4)body=await custTabInspection(unit);
+  else if(ti===5)body=await custTabDocuments(unit);
+  else body=await custTabVideos();
   v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
-    '<div class="card card-pad" style="background:#eff4ff;border-color:#cfe0ef;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-user"></i> Signed in as <b>Suresh Agarwal</b> (customer). A customer sees only their own data — a separate, tokenised login backed by the same <b>core.parties</b> master, never the staff screens.</div>'+
-    mKpis(kpis)+mTabs('customer',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
+    banner+
+    custUnitPicker(data.units,unit.id)+
+    mTabs('customer',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
 VIEWS.supplier=function(v,seg){
   setCrumb(['Stakeholder Portals','Supplier Portal']);
