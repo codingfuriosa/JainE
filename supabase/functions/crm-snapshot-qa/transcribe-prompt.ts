@@ -6,10 +6,14 @@
 
 export const PROJECT_NAMES = `Jain Group project names, for SPELLING only - never to fill in anything
 the audio does not contain, and never as a fact about a project:
-Dream Gurukul (Doltala, Madhyamgram, near the airport) · Dream World City (Joka Metro, Pailan More)
+Dream Gurukul (Doltala, Madhyamgram, near the airport)
+· Dream Ananta (Doltala, Old Jessore Rd, near the airport) - a DIFFERENT project from Dream
+  Gurukul, and often pitched without its name, as "the new project near the airport"
+· Dream World City (Joka Metro, Pailan More) · Dream Diamond (Daulatpur, Pailan, near Joka Metro)
 · Dream Valley (Siliguri, Hill Cart Road, Dagapur) · Dream Eco City (Durgapur, Muchipara, NH-2)
-· Dream Exotica (Madhyamgram, Badu Road) · Dream One (Rajarhat, opposite Eco Park)
-· Dream Residency Manor · Ecocity Bungalows · Durbaar Banquets.`;
+· Dream Exotica (Madhyamgram, Badu Road, near Chowrasta)
+· Dream One (Rajarhat / New Town, opposite Eco Park)
+· Dream Residency Manor · Ecocity Bungalows · Durbaar Banquets (a banquet venue, New Town).`;
 
 export const TRANSCRIBE_PROMPT = `### ROLE
 You are a professional transcriptionist working on recorded sales calls for a Kolkata real-estate

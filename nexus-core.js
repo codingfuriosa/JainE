@@ -13783,8 +13783,8 @@ function trcTranscriptHtml(turns,fallback){
    one table, always visible, is what "marks and why for each" without separate tabs asked for. */
 function trcQaResultClass(s){
   s=String(s||'');
-  return /^(accurate|pass)$/i.test(s)?'t-green'
-    :/^(inaccurate|fail)$/i.test(s)?'t-red'
+  return /^(accurate|pass|match)$/i.test(s)?'t-green'
+    :/^(inaccurate|fail|mismatch)$/i.test(s)?'t-red'
     :/^(partial|partially accurate)$/i.test(s)?'t-amber':'t-gray';
 }
 function trcQaTableHtml(r,m){
@@ -13797,9 +13797,19 @@ function trcQaTableHtml(r,m){
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
         rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
+  /* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match,
+     sqft mismatch, and so on - each judged independently against the catalogue rather than folded
+     into one overall pitch verdict, so a call correct on Budget and wrong on Area shows as both. */
+  const factRows=(Array.isArray(pitch.fact_checks)?pitch.fact_checks:[]).map(function(f){
+    return {topic:'— '+((f&&f.fact)||'Fact'),status:f&&f.status,score:null,
+      why:join([f&&f.what_was_said?'Said: '+f.what_was_said:null,
+                f&&f.what_is_correct?'Correct: '+f.what_is_correct:null,
+                f&&f.note])};
+  });
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
-     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
+     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])}
+  ].concat(factRows).concat([
     {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
      why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
@@ -13810,7 +13820,7 @@ function trcQaTableHtml(r,m){
     {topic:'Status check',status:r.ai_assessed_status,score:null,
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
                m?m.label:null,sa.reason])}
-  ];
+  ]);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
