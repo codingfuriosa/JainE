@@ -12241,10 +12241,29 @@ VIEWS.organic=async function(v,seg){
    filter over real rows, so a card and the table under it cannot disagree, and an empty day reads
    as empty rather than as zero-of-something. */
 
+/* STOPGAP, 2026-08-28. The model a hand-triggered retry asks for.
+
+   Normally the browser should NOT name a model - the backend owns that choice, through GEMINI_MODEL
+   in Edge Function Secrets, precisely so it can change in one place. It is named here because the
+   DEPLOYED edge function still has the withdrawn gemini-2.5-pro compiled in as its default, and
+   Google now answers that with a 404. The nightly worker was already passing a model explicitly and
+   so kept working; Retry was the one caller that named none, fell through to that dead default, and
+   404'd. That is what failed 6 of the 2026-08-27 calls, all of them rows a human had retried by hand.
+
+   REMOVE this constant and the gemini_model key below once GEMINI_MODEL is set in Secrets, or the
+   current main is deployed (its default is already gemini-flash-latest). A per-request model beats
+   the secret, so leaving this here would silently pin the dashboard to this model forever and make
+   the next model change look like it had no effect.
+   See supabase/migrations/20260828060000_transcription_model_override.sql for the matching cron note. */
+const TRA_RETRY_MODEL='gemini-flash-latest';
+
 /* Rows written before the pipeline rewrite carry the old status words. Normalising in one place
    means the table, the cards and the filters all agree about what a row IS, whenever it was made. */
 const TRA_LEGACY_STATUS={queued:'pending',done:'completed',error:'failed',
   no_recording:'non_transcribable',too_short:'non_transcribable'};
+/* Normalised statuses that mean the call has not finished this attempt yet. Keyed rather than an
+   array so the lookups below read as a question about one row. */
+const TRA_IN_FLIGHT={pending:true,processing:true,retrying:true};
 const TRA_STATUS_META={
   pending:          {label:'Pending',          tag:'t-gray',  icon:'fa-clock'},
   processing:       {label:'Processing',       tag:'t-amber', icon:'fa-spinner fa-spin'},
@@ -12295,7 +12314,7 @@ function traCallCount(r){
 /* ---- filter state. One object so every control writes to the same place and the table, the cards
    and the URL can never drift apart. ---- */
 let TRA_ROWS=null;
-const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',q:''};
+const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',bu:'all',q:''};
 
 function traLocalDate(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
 function traToday(){return traLocalDate(new Date());}
@@ -12326,15 +12345,16 @@ async function traFetch(force){
 
 /* Every filter, applied together. A row has to satisfy all of them, which is what makes
    "yesterday + failed + mismatch" mean what it looks like it means. */
-function traApply(rows){
+function traApply(rows,skipCards){
   const q=String(TRA_F.q||'').trim().toLowerCase();
   return (rows||[]).filter(function(r){
     const d=traRowDate(r);
     if(TRA_F.from&&(!d||d<TRA_F.from))return false;
     if(TRA_F.to&&(!d||d>TRA_F.to))return false;
-    if(TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
-    if(TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
+    if(!skipCards&&TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
+    if(!skipCards&&TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
     if(TRA_F.crm!=='all'&&String(r.crm_status||'')!==TRA_F.crm)return false;
+    if(TRA_F.bu!=='all'&&String(r.business_unit_name||'')!==TRA_F.bu)return false;
     if(q){
       const hay=String(r.lead_id||'')+' '+String(r.customer_name||'')+' '+String(r.title||'');
       if(hay.toLowerCase().indexOf(q)<0)return false;
@@ -12344,8 +12364,9 @@ function traApply(rows){
 }
 
 /* The four cards the spec asks for, plus the states that explain the gap between them. Counted over
-   the FILTERED rows, so changing the date range changes the numbers. A failed call is never counted
-   as transcribed. */
+   the rows the date range, CRM status and search leave behind - but NOT over the card selection
+   itself, so clicking "CRM Mismatch" filters the table without collapsing every other card to a
+   number that only describes the mismatches. A failed call is never counted as transcribed. */
 function traKpiHtml(rows){
   const n=function(st){return rows.filter(function(r){return traStatus(r)===st;}).length;};
   const m=function(c){return rows.filter(function(r){return r.comparison_status===c;}).length;};
@@ -12402,12 +12423,9 @@ window.traSetRange=function(f,t){TRA_F.from=f||null;TRA_F.to=t||null;traRender(t
 
 function traFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
-    +'<select onchange="traSet(\'proc\',this.value)" style="padding:6px 8px">'
-      +opt('all','All processing states',TRA_F.proc)
-      +Object.keys(TRA_STATUS_META).map(function(k){return opt(k,TRA_STATUS_META[k].label,TRA_F.proc);}).join('')
-    +'</select>'
     +'<select onchange="traSet(\'match\',this.value)" style="padding:6px 8px">'
       +opt('all','All match results',TRA_F.match)
       +['MATCH','MISMATCH','NOT_COMPARABLE'].map(function(k){return opt(k,TRA_MATCH_META[k].label,TRA_F.match);}).join('')
@@ -12415,6 +12433,10 @@ function traFilterBar(all){
     +'<select onchange="traSet(\'crm\',this.value)" style="padding:6px 8px">'
       +opt('all','All CRM statuses',TRA_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRA_F.crm);}).join('')
+    +'</select>'
+    +'<select onchange="traSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRA_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRA_F.bu);}).join('')
     +'</select>'
     +'<input id="traQ" placeholder="Search lead ID or name…" value="'+esc(TRA_F.q||'')+'" oninput="traSet(\'q\',this.value)" style="padding:6px 10px;min-width:220px">'
     +'<div class="grow"></div>'
@@ -12427,7 +12449,7 @@ window.traSet=function(k,v){
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   traRender(k!=='q');
 };
-window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
+window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.bu='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
 window.traRefresh=async function(){await traFetch(true);traRender(true);};
 
 /* A cell for free text the CRM typed. Clamped rather than truncated with a hard slice, so the full
@@ -12474,12 +12496,14 @@ function traTableHtml(rows){
 function traRender(full){
   const all=TRA_ROWS||[];
   const rows=traApply(all);
+  /* The cards are counted with the card filters LIFTED, so the four totals stay put while a tab is
+     active and clicking a second tab still shows a real number rather than the leftovers of the
+     first one. */
+  const scope=traApply(all,true);
+  const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(scope);
   if(full!==false){
-    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
     const f=$('traFilters');if(f)f.innerHTML=traFilterBar(all);
     const d=$('traDates');if(d)d.innerHTML=traDateBar();
-  }else{
-    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
   }
   const b=$('traRows');if(b)b.innerHTML=traTableHtml(rows);
   const c=$('traCount');if(c)c.textContent=rows.length+' of '+all.length+' call'+(all.length===1?'':'s');
@@ -12531,14 +12555,19 @@ window.traRetry=async function(id){
     const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-sync',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({action:'retry',id:id})});
+      body:JSON.stringify({action:'retry',id:id,gemini_model:TRA_RETRY_MODEL})});
     const out=await res.json().catch(function(){return {};});
     if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
     toast('Back in the queue','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
   }
-  await traFetch(true);traRender(true);
+  /* The re-render is what puts the button back, so it has to happen even if the refetch fails -
+     otherwise a dropped connection leaves a dead spinner where the Retry button used to be and the
+     only way out is reloading the page. */
+  try{ await traFetch(true); }
+  catch(e){ toast('Retry was sent, but the list could not be refreshed - reload to see it','warn'); }
+  traRender(true);
 };
 
 /* ---- the tab itself ---- */
@@ -12755,7 +12784,11 @@ async function traDetail(v,id){
         +traKV('Completed at',r.completed_at?fmtDate(r.completed_at)+' '+new Date(r.completed_at).toLocaleTimeString('en-IN'):null)
         +traKV('Queue position',r.queue_seq)
         +traKV('Model',r.gemini_model)
-        +traKV('Last error',r.last_error||r.error_text)
+        /* A requeued call KEEPS the error from the attempt that failed - it is the audit trail and
+           deliberately not cleared. But labelling it plain "Last error" while the row sits in the
+           queue reads as though it had just failed again, which is exactly how ten recovered calls
+           looked like ten still-broken ones. Say which attempt it belongs to instead. */
+        +traKV(TRA_IN_FLIGHT[st]?'Last error (previous attempt)':'Last error',r.last_error||r.error_text)
         +(r.non_transcribable_reason?traKV('Not transcribable',r.non_transcribable_reason):'')
         /* Kept only when a reply could not be parsed. Not the raw-result dump that used to sit at the
            bottom of this page — without this a failed row cannot be diagnosed at all. */
@@ -12790,7 +12823,14 @@ async function traDetail(v,id){
 
 /* One tab strip, shared by every branch, so adding a tab cannot leave one view showing the old set. */
 const TRA_TABS=['Automatic Processing','Manual Upload','Folders','Deleted','Discrepancies','Compilation'];
-function TRA_TABS_HTML(ti){return mTabs('transcription',TRA_TABS,ti);}
+/* Tabs kept out of the strip. The views below stay exactly where they are and keep their indexes,
+   so dropping a label from this list is all it takes to put its tab back. */
+const TRA_TABS_HIDDEN=['Folders','Deleted','Discrepancies','Compilation'];
+function TRA_TABS_HTML(ti){
+  return '<div class="tabs">'+TRA_TABS.map(function(t,i){
+    return TRA_TABS_HIDDEN.indexOf(t)>=0?'':'<div class="tab '+(i===ti?'active':'')+'" onclick="navTo(\'transcription/'+i+'\')">'+esc(t)+'</div>';
+  }).join('')+'</div>';
+}
 
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
@@ -12814,7 +12854,7 @@ VIEWS.transcription=async function(v,seg){
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
     });
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
     return;
@@ -12834,13 +12874,13 @@ VIEWS.transcription=async function(v,seg){
       return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
     });
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
     return;
   }
   if(ti===3){
     const rows=await trFetchDeleted(true);
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div class="toolbar" style="margin:16px 0"><div class="grow"></div><button class="btn btn-sm" onclick="trShowHistory()"><i class="fa-solid fa-clock-rotate-left"></i> Full history</button>'
       +(rows.length?'<button class="btn btn-sm btn-primary" onclick="trRestoreAll()"><i class="fa-solid fa-rotate-left"></i> Restore all</button>':'')+'</div>'
       +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Deleted by</th><th>Deleted at</th><th></th></tr></thead>'
@@ -12851,14 +12891,14 @@ VIEWS.transcription=async function(v,seg){
     const rows=await trFetch(true);
     const folder=seg[1]?decodeURIComponent(seg[1]):null;
     TR_FOLDER=folder;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trFolderArea">'+(folder?trFolderCallsHtml(rows,folder):trFolderGridHtml(rows))+'</div>';
     return;
   }
   TR_FOLDER=null;
   TR_SELECTED=new Set();
   const addTargetBanner=TR_ADD_TARGET?('<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><i class="fa-solid fa-folder-plus" style="color:#1d4ed8"></i><div style="flex:1;font-size:13.5px">Tick calls below to add them to <b>'+esc(TR_ADD_TARGET)+'</b></div><button class="btn btn-sm" onclick="trCancelAddTarget()">Cancel</button><button class="btn btn-sm btn-primary" onclick="trDoneAddTarget()">Done, back to folder</button></div>'):'';
-  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)+addTargetBanner
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+addTargetBanner
     +'<div class="card card-pad" style="margin:14px 0 0;font-size:13px;color:var(--slate)"><i class="fa-solid fa-circle-info" style="color:#0d9488"></i> Recordings uploaded by hand. The daily CRM import is on the <b>Automatic Processing</b> tab and is kept entirely separate from this one.</div>'
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
