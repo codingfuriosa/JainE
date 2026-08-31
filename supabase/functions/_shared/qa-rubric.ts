@@ -3,8 +3,12 @@
 // These rules are derived from the sales team's own WhatsApp assistant configurations - the funnel
 // (greet -> buying intent -> configuration -> budget -> match -> ask for the visit -> confirm time ->
 // share the address), the information the team is instructed never to give out over a message, and
-// the tone rules. The same funnel appears identically across every project's configuration, which is
-// what makes it a company standard rather than one project's habit.
+// the tone rules. The same funnel appears identically across every RESIDENTIAL project's
+// configuration, which is what makes it a company standard rather than one project's habit.
+// Durbaar Banquets is the one venue that runs a different funnel, and the handful of other rules
+// that genuinely vary by project - servant quarters, pick-up and drop, Dream Valley's 3BHK-only
+// range, Dream One's fixed per-sqft rate - are carried in PROJECT_EXCEPTIONS in qa-prompt.ts, NOT
+// here. That is deliberate: they name projects and figures, and this file must stay free of both.
 //
 // WHY THERE ARE NO FIGURES IN THIS FILE, AND WHY THERE MUST NEVER BE ANY. Every rule below is about
 // what the AGENT DID - asked, answered, confirmed, disclosed - and none of it is a fact about a

@@ -68,14 +68,49 @@ function stripIvr(t: string): string {
   for (const re of IVR_PATTERNS) out = out.replace(re, " ");
   return out.replace(/\s{2,}/g, " ").trim();
 }
+/* Priming the transcriber with the right spellings raises the odds; it does not guarantee them, so
+   the ones that come back wrong every time are corrected here as well. The list has to cover what is
+   actually MISHEARD - a rule mapping a word to itself only normalises capitalisation. */
 const SPELLINGS: [RegExp, string][] = [
-  [/\bpoylan\b/gi, "Pailan"], [/\bpoilan\b/gi, "Pailan"],
-  [/\bjems\s+group\b/gi, "Jain Group"], [/\bgems\s+group\b/gi, "Jain Group"],
-  [/\bjoka\b/gi, "Joka"], [/\bmadhyamgram\b/gi, "Madhyamgram"],
+  [/\bpoylan\b/gi, "Pailan"], [/\bpoilan\b/gi, "Pailan"], [/\bpailaan\b/gi, "Pailan"],
+  [/\bjems?\s+group\b/gi, "Jain Group"], [/\bgems?\s+group\b/gi, "Jain Group"],
+  [/\bjoka\b/gi, "Joka"], [/\bjhoka\b/gi, "Joka"], [/\bjokha\b/gi, "Joka"],
+  [/\bmadhyamgra?am\b/gi, "Madhyamgram"], [/\bmodhyomgram\b/gi, "Madhyamgram"],
+  [/\bdoltola\b/gi, "Doltala"], [/\bdoltalla\b/gi, "Doltala"],
+  [/\brajarhaat\b/gi, "Rajarhat"], [/\brajarhut\b/gi, "Rajarhat"],
+  [/\bbarasaat\b/gi, "Barasat"], [/\bbarashat\b/gi, "Barasat"],
+  [/\bnarendrapore\b/gi, "Narendrapur"],
+  [/\bdream\s+gurukoo?l\b/gi, "Dream Gurukul"],
+  [/\bdream\s+exotika\b/gi, "Dream Exotica"],
+  [/\bdream\s+[ao]n[oa]nt[oa]\b/gi, "Dream Ananta"],
+  [/\bdream\s+diamon[dt]\b/gi, "Dream Diamond"],
+  [/\bdurba+r\s+banquets?\b/gi, "Durbaar Banquets"],
+];
+/* PROJECT SHORT FORMS, WRITTEN OUT. Agents say "DWC" on the call far more often than they say
+   "Dream World City", and the judge downstream cannot match a two-letter token to a business unit.
+   Note what this is: NOT a spelling correction but a rewrite of what was said, and it lands in the
+   stored transcript. That is a deliberate trade and it is why the list is short.
+
+   CASE-SENSITIVE, deliberately - these are initialisms and lowercase matches are ordinary words.
+   FOUR SHORT FORMS ARE ABSENT ON PURPOSE, because each is a real word in these calls and expanding
+   it would corrupt the transcript rather than clarify it:
+     DD - a demand draft, said constantly on payment calls, not Dream Diamond.
+     DO - the English "do".
+     DA - "da"/"dada", and dearness allowance.
+     DEC/DG - kept, but only behind a guard: "DEC 2027" is a date and a "DG set" is a generator.
+   These four are handled in the QA prompt's glossary instead, where the judge can resolve them from
+   context without anything being rewritten. */
+const ABBREVIATIONS: [RegExp, string][] = [
+  [/\bDWC\b/g, "Dream World City"],
+  [/\bDV\b/g, "Dream Valley"],
+  [/\bDRM\b/g, "Dream Residency Manor"],
+  [/\bDEC\b(?!\s*\d)/g, "Dream Eco City"],
+  [/\bDG\b(?!\s+[Ss]ets?\b)/g, "Dream Gurukul"],
 ];
 function fixSpellings(t: string): string {
   let out = String(t || "");
   for (const [re, to] of SPELLINGS) out = out.replace(re, to);
+  for (const [re, to] of ABBREVIATIONS) out = out.replace(re, to);
   return out;
 }
 function degenerateRepeat(text: string): { word: string; count: number; total: number } | null {
