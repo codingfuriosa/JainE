@@ -7556,6 +7556,7 @@ async function usbLoad(){
    can leak into another screen. */
 const USB_CSS='<style id="usbCss">'
   +'.usb-bar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:14px}'
+  +'.usb-xl{margin-left:auto;height:38px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}'
   +'.usb-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
   +'.usb-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
   +'.usb-f .sel,.usb-f input[type=date]{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 11px;'
@@ -7597,6 +7598,7 @@ function usbControlsHtml(){
         +ppl.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
+    +'<button class="btn btn-primary usb-xl" id="usbXl" onclick="usbExport(this)"><i class="fa-solid fa-file-excel"></i> Extract to Excel</button>'
   +'</div>';
 }
 /* Picking a preset writes its dates into From/To as well, so the two boxes always agree with the
@@ -7604,6 +7606,148 @@ function usbControlsHtml(){
 window.usbSetPreset=function(v){ USB.preset=v; const r=usbRange(v==='custom'?'30d':v); USB.from=r.from; USB.to=r.to; renderPage(); };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
 window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
+/* ---- Extract to Excel -------------------------------------------------------------------
+   A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
+   as numbers that actually sum, the date as a date, and each feature's activity in the same colour
+   it wears on screen. A CSV would have been three lines of code and would have arrived as grey
+   text needing to be formatted by hand every single time.
+   The library is fetched only when the button is pressed. In the page head it would have made all
+   thirty-odd pages carry 270KB for one button on one screen. It comes from jsdelivr, which the app
+   already depends on for Supabase and Chart.js, so it is not a new host to trust - and if it cannot
+   be reached the export falls back to CSV and says so rather than failing silently. */
+function usbLoadXlsx(){
+  if(window.ExcelJS) return Promise.resolve(true);
+  if(window._usbXlP) return window._usbXlP;
+  window._usbXlP=new Promise(function(res){
+    const el=document.createElement('script');
+    el.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    el.onload=function(){ res(!!window.ExcelJS); };
+    el.onerror=function(){ window._usbXlP=null; res(false); };   // cleared, so a later click retries
+    document.head.appendChild(el);
+  });
+  return window._usbXlP;
+}
+// the four activity bands in the same colours the screen uses: [ink, fill]
+const USB_XL_BAND={'Very Active':['FF166534','FFDCFCE7'],'Active':['FF0369A1','FFE0F2FE'],
+                   'Less':['FFB45309','FFFEF3C7'],'Inactive':['FF64748B','FFF1F5F9']};
+function usbExportName(r){
+  return 'Usability '+r.from+' to '+r.to+(USB.email?(' - '+USB.email.split('@')[0]):'');
+}
+function usbSaveBlob(blob,name){
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); },2000);
+}
+/* Only reached if the library could not be loaded. Same rows, same order, no formatting - and the
+   toast says why, so nobody is left wondering why this one came out plain. */
+function usbExportCsv(rows,r,who){
+  const q=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  const out=[['Portal Usability'],[fmtDate(r.from)+' to '+fmtDate(r.to),who],[],
+    ['Module','Tab','Feature','Uses','People','Last used','Activity']];
+  rows.forEach(function(x){ out.push([x.module_label||x.module_id||'',x.tab||'',x.feature||'',
+    Number(x.uses||0),Number(x.users||0),
+    x.last_used?fmtDate(String(x.last_used).slice(0,10)):'',x.band||'Inactive']); });
+  usbSaveBlob(new Blob(['﻿'+out.map(function(l){return l.map(q).join(',');}).join('\r\n')],
+    {type:'text/csv;charset=utf-8'}), usbExportName(r)+'.csv');
+  toast('Could not reach the spreadsheet library - exported as a plain CSV instead','warn');
+}
+window.usbExport=async function(btn){
+  const rows=(USB.rows||[]).slice();
+  if(!rows.length){ toast('Nothing to extract for this period','warn'); return; }
+  const r=usbCurrentRange();
+  const who=USB.email
+    ? (((USB.people||[]).find(function(p){return p.email===USB.email;})||{}).name||USB.email)
+    : 'Everyone';
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    if(!(await usbLoadXlsx())){ usbExportCsv(rows,r,who); return; }
+
+    const wb=new ExcelJS.Workbook();
+    wb.creator='JAIN-E'; wb.created=new Date();
+
+    /* Sheet 1 - every feature. Freezing four rows keeps the title, the range line and the header
+       on screen while scrolling, which is the difference between a sheet you can read and one you
+       get lost in at row 300. */
+    const ws=wb.addWorksheet('Features',{views:[{state:'frozen',ySplit:4}]});
+    ws.columns=[{width:22},{width:20},{width:42},{width:9},{width:9},{width:15},{width:14}];
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value='Portal Usability';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:G2');
+    ws.getCell('A2').value=fmtDate(r.from)+'  →  '+fmtDate(r.to)
+      +'      ·      '+who
+      +'      ·      '+rows.length+' features'
+      +'      ·      '+rows.reduce(function(a,x){return a+Number(x.uses||0);},0)+' uses';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+
+    const head=ws.getRow(4);
+    head.values=['Module','Tab','Feature','Uses','People','Last used','Activity'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle',horizontal:'left'};
+    });
+
+    rows.forEach(function(x,i){
+      const row=ws.addRow([x.module_label||x.module_id||'', x.tab||'', x.feature||'',
+        Number(x.uses||0), Number(x.users||0),
+        x.last_used?new Date(x.last_used):null, x.band||'Inactive']);
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+      row.getCell(4).numFmt='#,##0';
+      row.getCell(5).numFmt='#,##0';
+      row.getCell(6).numFmt='dd mmm yyyy';
+      const b=USB_XL_BAND[x.band]||USB_XL_BAND.Inactive;
+      const bc=row.getCell(7);
+      bc.font={bold:true,color:{argb:b[0]},size:10};
+      bc.fill={type:'pattern',pattern:'solid',fgColor:{argb:b[1]}};
+      bc.alignment={horizontal:'center'};
+    });
+    // filter set on the header, so whoever opens it can slice by module or band without setting up
+    ws.autoFilter={from:{row:4,column:1},to:{row:4+rows.length,column:7}};
+
+    /* Sheet 2 - the same numbers rolled up per module, because "which module is actually being
+       used" is the question this report gets opened to answer, and totting that up by hand off two
+       hundred rows is exactly the work an export is supposed to remove. */
+    const by={};
+    rows.forEach(function(x){
+      const k=x.module_label||x.module_id||'(none)';
+      const m=by[k]||(by[k]={features:0,used:0,uses:0,people:0});
+      m.features++; m.uses+=Number(x.uses||0);
+      if(Number(x.uses||0)>0) m.used++;
+      m.people=Math.max(m.people,Number(x.users||0));
+    });
+    const ms=wb.addWorksheet('By module',{views:[{state:'frozen',ySplit:1}]});
+    ms.columns=[{width:26},{width:12},{width:12},{width:10},{width:14}];
+    const mh=ms.getRow(1);
+    mh.values=['Module','Features','Used','Uses','Most people'];
+    mh.height=22;
+    mh.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    Object.keys(by).sort(function(a,b){ return by[b].uses-by[a].uses || a.localeCompare(b); })
+      .forEach(function(k){
+        const m=by[k];
+        const row=ms.addRow([k,m.features,m.used,m.uses,m.people]);
+        row.getCell(4).numFmt='#,##0';
+        // a module nobody has touched is the finding, not a gap - so it is marked, not left blank
+        if(!m.used) row.eachCell(function(c){ c.font={color:{argb:'FF94A3B8'},italic:true}; });
+      });
+
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      usbExportName(r)+'.xlsx');
+    toast('Extracted '+rows.length+' features to Excel','ok');
+  }catch(e){
+    try{ console.error('usbExport',e); }catch(_e){}
+    toast('Could not build the spreadsheet: '+((e&&e.message)||e),'err');
+  }finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+
 // One bar showing how a set of features splits across the four bands.
 function usbBandBar(rows){
   const total=rows.length||1;
@@ -7765,13 +7909,1048 @@ async function psaFetchAll(){
     });
   }catch(e){ return []; }
 }
+/* ================================ UNIT (Post Sales) ================================
+   Cut a flat out of a floor plan and hand it over.
+
+   The plans are PHOTOGRAPHS of drawings - 4961x7016 JPEGs with no text and no CAD geometry - so
+   nothing in the file says which shape is unit A. Each unit's position is recorded once, by a
+   person, in Set up plans; everything else here is reading that back.
+
+   Boxes, not outlines. A cut-out of a unit IS a rectangular crop, so a more precise shape would
+   buy nothing and cost a lot of fiddly drawing.
+
+   NO FLOOR IS EVER CHOSEN. One sheet covers several floors - unit A is the same flat on the 1st,
+   3rd, 5th and 7th - so a floor is a decision that changes nothing about the picture. The address
+   is business unit, block, letter. Where a block has two sheets (odd floors and even floors) and
+   the same letter appears on both, BOTH come back, each labelled with the floors it covers: no
+   choice to make, and never ambiguous. */
+
+const PSU={project:'',block:'',plates:[],units:{},sel:{},basket:[],plans:null,busy:false,cards:null};
+
+/* Two units are joined when their boxes touch or overlap. The tolerance covers the wall drawn
+   between two flats - they share it, so their boxes stop a few pixels short of each other. */
+function psuTouch(a,b,tol){
+  tol=(tol==null)?14:tol;
+  return !(a.x > b.x+b.w+tol || b.x > a.x+a.w+tol ||
+           a.y > b.y+b.h+tol || b.y > a.y+a.h+tol);
+}
+/* Selected units collapsed into connected groups: everything that touches comes out as one image,
+   anything standing on its own comes out separately. Union-find, so a chain A-B-C groups even
+   though A and C never touch each other. */
+function psuGroups(list,tol){
+  const n=list.length, parent=list.map(function(_,i){ return i; });
+  function find(i){ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; }
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
+    if(psuTouch(list[i],list[j],tol)){ const a=find(i), b=find(j); if(a!==b) parent[b]=a; }
+  }
+  const by={};
+  list.forEach(function(u,i){ const r=find(i); (by[r]=by[r]||[]).push(u); });
+  // groups in reading order, and the units inside each one likewise - so the output follows the
+  // order an eye travels the plan rather than the order somebody happened to tap
+  return Object.keys(by).map(function(k){ return by[k]; })
+    .map(function(g){ g.sort(function(a,b){ return (a.y-b.y)||(a.x-b.x); }); return g; })
+    .sort(function(a,b){ return (a[0].y-b[0].y)||(a[0].x-b[0].x); });
+}
+// the crop for a group: everything it covers, plus a margin so the walls are not shaved off
+function psuBox(group,pad,imgW,imgH){
+  pad=(pad==null)?40:pad;
+  let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
+  group.forEach(function(u){
+    x1=Math.min(x1,u.x); y1=Math.min(y1,u.y);
+    x2=Math.max(x2,u.x+u.w); y2=Math.max(y2,u.y+u.h);
+  });
+  x1=Math.max(0,x1-pad); y1=Math.max(0,y1-pad);
+  x2=(imgW!=null)?Math.min(imgW,x2+pad):(x2+pad);
+  y2=(imgH!=null)?Math.min(imgH,y2+pad):(y2+pad);
+  return {x:Math.round(x1),y:Math.round(y1),w:Math.round(x2-x1),h:Math.round(y2-y1)};
+}
+function psuPlanUrl(path){
+  try{ return sb.storage.from('floor-plans').getPublicUrl(path).data.publicUrl; }catch(e){ return ''; }
+}
+function psuCanSetup(){
+  return !!(state.super || (state.profile&&(state.profile.department||[]).indexOf('Systems')>=0));
+}
+function psuOrdinal(n){
+  const s=['th','st','nd','rd'], v=n%100;
+  return n+(s[(v-20)%10]||s[v]||s[0]);
+}
+/* "1st, 3rd, 5th & 7th floors" - the floors a sheet covers, said the way a person would. This is
+   a LABEL, never a thing to pick. */
+function psuFloorsText(floors){
+  const f=(floors||[]).slice().sort(function(a,b){ return a-b; }).map(psuOrdinal);
+  if(!f.length) return '';
+  if(f.length===1) return f[0]+' floor';
+  return f.slice(0,-1).join(', ')+' & '+f[f.length-1]+' floors';
+}
+function psuSelKey(planId,name){ return planId+'|'+name; }
+
+async function psuLoadPlans(force){
+  if(PSU.plans && !force) return PSU.plans;
+  try{
+    const {data}=await sb.schema('cust').from('floor_plans').select('*')
+      .is('deleted_at',null).order('project').order('block');
+    PSU.plans=data||[];
+  }catch(e){ PSU.plans=[]; }
+  return PSU.plans;
+}
+async function psuLoadUnits(planId){
+  try{
+    const {data}=await sb.schema('cust').from('plan_units').select('*').eq('plan_id',planId);
+    return (data||[]).map(function(u){
+      return {id:u.id,plan_id:u.plan_id,unit_name:u.unit_name,unit_type:u.unit_type,
+              x:Number(u.x),y:Number(u.y),w:Number(u.w),h:Number(u.h)};
+    }).sort(function(a,b){ return String(a.unit_name).localeCompare(String(b.unit_name)); });
+  }catch(e){ return []; }
+}
+
+const PSU_CSS='<style id="psuCss">'
+ +'.psu-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}'
+ +'@media(max-width:1000px){.psu-wrap{grid-template-columns:1fr}}'
+ +'.psu-pick{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}'
+ +'.psu-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
+ +'.psu-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
+ +'.psu-f .sel{height:42px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font-size:14px;'
+   +'font-family:inherit;background:#fff;color:#334155;cursor:pointer;min-width:200px}'
+ +'.psu-letters{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}'
+ +'.psu-letter{min-width:52px;height:52px;padding:0 12px;border:2px solid var(--line);border-radius:12px;'
+   +'background:#fff;font-size:19px;font-weight:800;color:#334155;cursor:pointer;display:inline-flex;'
+   +'align-items:center;justify-content:center;gap:7px;transition:all .12s}'
+ +'.psu-letter:hover{border-color:#a78bfa}'
+ +'.psu-letter.on{background:#7c3aed;border-color:#5b21b6;color:#fff}'
+ +'.psu-letter small{font-size:10px;font-weight:700;opacity:.75}'
+ +'.psu-plate{margin-top:14px}'
+ +'.psu-plate h4{margin:0 0 7px;font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--slate);text-transform:uppercase}'
+ +'.psu-stage{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f8fafc}'
+ +'.psu-stage canvas{display:block;width:100%;height:auto;cursor:pointer;touch-action:manipulation}'
+ +'.psu-hint{padding:34px 20px;text-align:center;color:var(--slate);font-size:14px;line-height:1.6}'
+ +'.psu-sentence{font-size:15px;font-weight:600;color:var(--ink);line-height:1.6}'
+ +'.psu-sentence .m{color:var(--slate);font-weight:500}'
+ +'.psu-basket{position:sticky;top:14px}'
+ +'.psu-chip{display:inline-flex;align-items:center;gap:7px;background:#f1f5f9;border:1px solid var(--line);'
+   +'border-radius:20px;padding:5px 6px 5px 12px;font-size:13px;font-weight:600;margin:0 6px 6px 0}'
+ +'.psu-chip button{border:0;background:#e2e8f0;color:#475569;width:20px;height:20px;border-radius:50%;'
+   +'cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center}'
+ +'.psu-chip button:hover{background:#fecaca;color:#991b1b}'
+ +'.psu-card{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px;background:#fff}'
+ +'.psu-card img{display:block;width:100%;height:auto;background:#fff}'
+ +'.psu-card .cap{padding:9px 12px;font-size:13px;font-weight:600;border-top:1px solid var(--line)}'
+ +'.psu-card .cap small{display:block;font-weight:500;color:var(--slate);margin-top:2px}'
+ +'.psu-empty{padding:26px 16px;text-align:center;color:var(--slate);font-size:14px;line-height:1.6}'
+ +'.psu-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}'
+ +'</style>';
+
+/* ---- choosing ---------------------------------------------------------------------------- */
+window.psuSetProject=function(v){ PSU.project=v; PSU.block=''; PSU.sel={}; psuRender(); };
+window.psuSetBlock=async function(v){ PSU.block=v; PSU.sel={}; await psuLoadBlock(); psuRender(); };
+
+/* Every sheet for this block, and every flat marked on each. A block normally has two - odd floors
+   and even floors - and both are loaded together so a letter can be found without anybody being
+   asked which sheet it is on. */
+async function psuLoadBlock(){
+  const plans=await psuLoadPlans();
+  PSU.plates=plans.filter(function(p){ return p.project===PSU.project && p.block===PSU.block; })
+    .sort(function(a,b){ return (a.floors&&a.floors[0]||0)-(b.floors&&b.floors[0]||0); });
+  PSU.units={};
+  for(const p of PSU.plates) PSU.units[p.id]=await psuLoadUnits(p.id);
+}
+// every distinct letter in the block, with the sheets it appears on
+function psuLetters(){
+  const by={};
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      const k=String(u.unit_name||'').toUpperCase();
+      (by[k]=by[k]||[]).push({plate:p,unit:u});
+    });
+  });
+  return Object.keys(by).sort().map(function(k){ return {name:k,on:by[k]}; });
+}
+/* Tapping a letter takes it on EVERY sheet it appears on. That is what makes the floor question
+   disappear: the person asks for unit A and gets unit A, however many sheets carry one. */
+window.psuToggleLetter=function(name){
+  const rec=psuLetters().find(function(l){ return l.name===name; });
+  if(!rec) return;
+  const anyOn=rec.on.some(function(o){ return PSU.sel[psuSelKey(o.plate.id,o.unit.unit_name)]; });
+  rec.on.forEach(function(o){
+    const k=psuSelKey(o.plate.id,o.unit.unit_name);
+    if(anyOn) delete PSU.sel[k]; else PSU.sel[k]=true;
+  });
+  psuPaintAll(); psuSide(); psuLettersPaint();
+};
+window.psuClearSel=function(){ PSU.sel={}; psuPaintAll(); psuSide(); psuLettersPaint(); };
+
+window.psuAddToBasket=function(){
+  const picked=[];
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      if(PSU.sel[psuSelKey(p.id,u.unit_name)]) picked.push({plate:p,unit:u});
+    });
+  });
+  if(!picked.length){ toast('Choose a unit first','warn'); return; }
+  let added=0;
+  picked.forEach(function(o){
+    const key=o.plate.id+'|'+o.unit.unit_name;
+    if(PSU.basket.some(function(b){ return b.key===key; })) return;
+    PSU.basket.push({key:key,project:o.plate.project,block:o.plate.block,
+      floors:o.plate.floors||[],plan_id:o.plate.id,storage_path:o.plate.storage_path,
+      img_w:o.plate.img_w,img_h:o.plate.img_h,
+      unit_name:o.unit.unit_name,unit_type:o.unit.unit_type,
+      x:o.unit.x,y:o.unit.y,w:o.unit.w,h:o.unit.h});
+    added++;
+  });
+  PSU.sel={};
+  toast(added?('Added '+added+' to the list'):'Those are already on the list','ok');
+  psuRender();
+};
+window.psuDropFromBasket=function(key){
+  PSU.basket=PSU.basket.filter(function(b){ return b.key!==key; }); psuRender();
+};
+window.psuEmptyBasket=function(){ PSU.basket=[]; PSU.sel={}; psuRender(); };
+
+/* ---- drawing the plans -------------------------------------------------------------------- */
+function psuPaint(plate){
+  const cv=$('psuCv'+plate.id); if(!cv||!cv._img) return;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(cv._img,0,0,cv.width,cv.height);
+  const sx=cv.width/plate.img_w, sy=cv.height/plate.img_h;
+  (PSU.units[plate.id]||[]).forEach(function(u){
+    const on=!!PSU.sel[psuSelKey(plate.id,u.unit_name)];
+    const x=u.x*sx, y=u.y*sy, w=u.w*sx, h=u.h*sy;
+    ctx.lineWidth=on?3:1.5;
+    ctx.strokeStyle=on?'#7c3aed':'rgba(100,116,139,.55)';
+    ctx.fillStyle=on?'rgba(124,58,237,.20)':'rgba(148,163,184,.07)';
+    ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+    const cx=x+w/2, cy=y+h/2, r=Math.max(13,Math.min(w,h)*0.17);
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.fillStyle=on?'#7c3aed':'rgba(255,255,255,.92)'; ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle=on?'#5b21b6':'#64748b'; ctx.stroke();
+    // a tick as well as the colour, so it still reads for anyone who cannot tell the shades apart
+    ctx.fillStyle=on?'#fff':'#334155';
+    ctx.font='700 '+Math.round(r*1.15)+'px Inter,system-ui,sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(on?'\u2713':String(u.unit_name||'?'), cx, cy+1);
+  });
+}
+function psuPaintAll(){ PSU.plates.forEach(psuPaint); }
+function psuLettersPaint(){
+  const box=$('psuLetters'); if(!box) return;
+  box.innerHTML=psuLetters().map(function(l){
+    const on=l.on.some(function(o){ return PSU.sel[psuSelKey(o.plate.id,o.unit.unit_name)]; });
+    const many=l.on.length>1?('<small>\u00d7'+l.on.length+'</small>'):'';
+    return '<button class="psu-letter'+(on?' on':'')+'" onclick="psuToggleLetter(\''+esc(l.name)+'\')">'
+      +esc(l.name)+many+'</button>';
+  }).join('');
+}
+window.psuCanvasClick=function(ev,planId){
+  const plate=PSU.plates.find(function(p){ return String(p.id)===String(planId); }); if(!plate) return;
+  const cv=$('psuCv'+plate.id), r=cv.getBoundingClientRect();
+  const px=(ev.clientX-r.left)/r.width*plate.img_w;
+  const py=(ev.clientY-r.top)/r.height*plate.img_h;
+  let hit=null;
+  (PSU.units[plate.id]||[]).forEach(function(u){
+    if(px>=u.x&&px<=u.x+u.w&&py>=u.y&&py<=u.y+u.h){ if(!hit||(u.w*u.h)<(hit.w*hit.h)) hit=u; }
+  });
+  // tapping the drawing does the same as tapping the letter, so the two never disagree
+  if(hit) psuToggleLetter(String(hit.unit_name).toUpperCase());
+};
+
+/* ---- the cut-outs ------------------------------------------------------------------------- */
+function psuCropCanvas(img,box){
+  const c=document.createElement('canvas');
+  c.width=box.w; c.height=box.h;
+  c.getContext('2d').drawImage(img,box.x,box.y,box.w,box.h,0,0,box.w,box.h);
+  return c;
+}
+function psuLoadImg(url){
+  return new Promise(function(res,rej){
+    const im=new Image();
+    // the bucket is public and CORS-permissive; without this the canvas would be tainted and the
+    // cut-out could never be read back out again
+    im.crossOrigin='anonymous';
+    im.onload=function(){ res(im); };
+    im.onerror=function(){ rej(new Error('could not load the plan image')); };
+    im.src=url;
+  });
+}
+/* One image per connected group, per sheet. Grouping happens WITHIN a sheet - two flats on
+   different sheets are never joined however their boxes happen to line up. */
+async function psuBuild(){
+  const byPlan={};
+  PSU.basket.forEach(function(b){ (byPlan[b.plan_id]=byPlan[b.plan_id]||[]).push(b); });
+  const out=[];
+  for(const pid of Object.keys(byPlan)){
+    const items=byPlan[pid];
+    const img=await psuLoadImg(psuPlanUrl(items[0].storage_path));
+    psuGroups(items).forEach(function(g){
+      const box=psuBox(g,40,items[0].img_w,items[0].img_h);
+      out.push({canvas:psuCropCanvas(img,box),
+        units:g.map(function(u){ return u.unit_name; }), joined:g.length>1,
+        project:g[0].project, block:g[0].block, floors:g[0].floors, type:g[0].unit_type||''});
+    });
+  }
+  return out;
+}
+function psuCardTitle(c){ return c.units.length>1?('Units '+c.units.join(' + ')):('Unit '+c.units[0]); }
+function psuCardSub(c){
+  return c.project+' · Block '+c.block+' · '+psuFloorsText(c.floors)
+    +(c.type?(' · '+c.type):'')+(c.joined?' · joined, they share a wall':'');
+}
+window.psuMake=async function(){
+  if(!PSU.basket.length){ toast('Nothing on the list yet','warn'); return; }
+  if(PSU.busy) return; PSU.busy=true;
+  const host=$('psuOut');
+  if(host) host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cutting the images…</div>';
+  try{
+    const cards=await psuBuild(); PSU.cards=cards;
+    if(host) host.innerHTML=cards.map(function(c){
+      return '<div class="psu-card"><img src="'+c.canvas.toDataURL('image/png')+'" alt="'+esc(psuCardTitle(c))+'">'
+        +'<div class="cap">'+esc(psuCardTitle(c))+'<small>'+esc(psuCardSub(c))+'</small></div></div>';
+    }).join('')
+    +'<div class="psu-actions">'
+      +'<button class="btn btn-primary" onclick="psuDownload()"><i class="fa-solid fa-download"></i> Download</button>'
+      +'<button class="btn" onclick="psuPrint()"><i class="fa-solid fa-print"></i> Print</button></div>';
+    psuLog('viewed');
+    toast(cards.length+(cards.length===1?' image ready':' images ready'),'ok');
+  }catch(e){
+    if(host) host.innerHTML='<div class="psu-empty">Could not cut the images: '+esc((e&&e.message)||e)+'</div>';
+    toast('Could not cut the images','err');
+  }finally{ PSU.busy=false; }
+};
+window.psuDownload=function(){
+  const cards=PSU.cards||[];
+  if(!cards.length){ toast('Make the images first','warn'); return; }
+  psuLog('downloaded');
+  cards.forEach(function(c){
+    const name=c.project+' Block '+c.block+' - '+psuCardTitle(c)+' ('+psuFloorsText(c.floors)+').png';
+    c.canvas.toBlob(function(b){
+      const url=URL.createObjectURL(b), a=document.createElement('a');
+      a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(url); },2000);
+    },'image/png');
+  });
+};
+/* One flat per page, in its own tab - the same shape as the reimbursement printout, so a set can
+   be handed over or filed without anybody assembling it by hand. */
+window.psuPrint=function(){
+  const cards=PSU.cards||[];
+  if(!cards.length){ toast('Make the images first','warn'); return; }
+  psuLog('printed');
+  const w=window.open('','_blank');
+  if(!w){ toast('Please allow popups to print','err'); return; }
+  const pages=cards.map(function(c){
+    return '<section><h2>'+esc(psuCardTitle(c))+'</h2><div class="sub">'+esc(psuCardSub(c))+'</div>'
+      +'<img src="'+c.canvas.toDataURL('image/png')+'"></section>';
+  }).join('');
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'
+    +esc(cards[0].project+' – unit plans')+'</title><style>'
+    +'body{margin:22px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'
+    +'h2{margin:0 0 3px;font-size:19px}.sub{color:#64748b;font-size:13px;margin-bottom:12px}'
+    +'img{max-width:100%;height:auto;border:1px solid #e2e8f0;border-radius:8px}'
+    +'section{break-after:page;page-break-after:always}'
+    +'section:last-child{break-after:auto;page-break-after:auto}'
+    +'</style></head><body>'+pages+'</body></html>');
+  w.document.close();
+  let done=false; const go=function(){ if(done)return; done=true; try{ w.focus(); w.print(); }catch(_e){} };
+  w.addEventListener('load',go); setTimeout(go,600+cards.length*150);
+};
+
+/* ---- the right-hand column ---------------------------------------------------------------- */
+function psuSide(){
+  const el=$('psuSel'); if(!el) return;
+  const picked=[];
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      if(PSU.sel[psuSelKey(p.id,u.unit_name)]) picked.push({plate:p,unit:u});
+    });
+  });
+  if(!picked.length){ el.innerHTML='<div class="psu-empty">Choose a unit above, or tap a flat on the plan.</div>'; return; }
+  const names=Array.from(new Set(picked.map(function(o){ return o.unit.unit_name; })));
+  const sheets=Array.from(new Set(picked.map(function(o){ return psuFloorsText(o.plate.floors); })));
+  el.innerHTML='<div class="psu-sentence">'+esc(PSU.project)+' <span class="m">·</span> Block '+esc(PSU.block)
+      +' <span class="m">·</span> Unit'+(names.length>1?'s':'')+' '+esc(names.join(', '))+'</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-top:5px">'
+      +(sheets.length>1
+        ? ('Appears on '+sheets.length+' sheets — you will get one image of each: '+esc(sheets.join(' / ')))
+        : esc(sheets[0]||''))+'</div>'
+    +'<div class="psu-actions">'
+      +'<button class="btn btn-primary" onclick="psuAddToBasket()"><i class="fa-solid fa-plus"></i> Add to the list</button>'
+      +'<button class="btn" onclick="psuClearSel()">Clear</button></div>';
+}
+function psuBasketHtml(){
+  if(!PSU.basket.length) return '<div class="psu-empty">Nothing on the list yet.<br>Pick units and add them here. You can change block and keep adding.</div>';
+  const by={};
+  PSU.basket.forEach(function(b){
+    const k=b.project+' · Block '+b.block+' · '+psuFloorsText(b.floors);
+    (by[k]=by[k]||[]).push(b);
+  });
+  return Object.keys(by).map(function(k){
+    return '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:700;color:var(--slate);margin-bottom:6px">'+esc(k)+'</div>'
+      +by[k].map(function(b){
+        return '<span class="psu-chip">'+esc(b.unit_name)
+          +'<button title="Remove" onclick="psuDropFromBasket(\''+esc(b.key).replace(/'/g,"\\'")+'\')">&times;</button></span>';
+      }).join('')+'</div>';
+  }).join('')
+  +'<div class="psu-actions">'
+    +'<button class="btn btn-primary" onclick="psuMake()"><i class="fa-solid fa-scissors"></i> Get images</button>'
+    +'<button class="btn" onclick="psuEmptyBasket()">Start again</button></div>';
+}
+
+/* ---- the screen --------------------------------------------------------------------------- */
+async function psuRender(){
+  const host=$('psuBody'); if(!host) return;
+  const plans=await psuLoadPlans();
+  if(!plans.length){
+    host.innerHTML=PSU_CSS+'<div class="card card-pad psu-empty">'
+      +'<i class="fa-regular fa-image" style="font-size:26px;color:#94a3b8"></i>'
+      +'<div style="margin-top:10px;font-weight:600;color:var(--ink)">No floor plans have been set up yet.</div>'
+      +'<div>A plan has to be uploaded and its flats marked once, before units can be cut out of it.</div>'
+      +(psuCanSetup()?'<div class="psu-actions" style="justify-content:center"><button class="btn btn-primary" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button></div>':'')
+      +'</div>';
+    return;
+  }
+  const projects=Array.from(new Set(plans.map(function(p){return p.project;}))).sort();
+  if(!PSU.project||projects.indexOf(PSU.project)<0) PSU.project=window._psuLastProject||projects[0];
+  if(projects.indexOf(PSU.project)<0) PSU.project=projects[0];
+  window._psuLastProject=PSU.project;
+
+  const blocks=Array.from(new Set(plans.filter(function(p){return p.project===PSU.project;})
+    .map(function(p){return p.block;}))).sort();
+  const hadBlock=PSU.block;
+  if(!PSU.block||blocks.indexOf(PSU.block)<0) PSU.block=blocks[0]||'';
+  if(PSU.block && (PSU.block!==hadBlock || !PSU.plates.length)) await psuLoadBlock();
+
+  const opt=function(v,cur){ return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+esc(v)+'</option>'; };
+  const letters=psuLetters();
+  host.innerHTML=PSU_CSS
+   +'<div class="psu-wrap">'
+    +'<div><div class="card card-pad">'
+      +'<div class="psu-pick">'
+        +'<div class="psu-f"><label>Business unit</label><select class="sel" onchange="psuSetProject(this.value)">'
+          +projects.map(function(p){return opt(p,PSU.project);}).join('')+'</select></div>'
+        +'<div class="psu-f"><label>Block</label><select class="sel" onchange="psuSetBlock(this.value)">'
+          +blocks.map(function(b){return opt(b,PSU.block);}).join('')+'</select></div>'
+        +'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label><div style="display:flex;gap:8px">'
+          +'<button class="btn" style="height:42px" onclick="psuLogsOpen()"><i class="fa-solid fa-list-check"></i> Logs</button>'
+          +(psuCanSetup()?'<button class="btn" style="height:42px" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button>':'')
+        +'</div></div>'
+      +'</div>'
+      +'<div style="margin-top:16px;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--slate);text-transform:uppercase">Unit</div>'
+      +(letters.length
+        ? '<div class="psu-letters" id="psuLetters"></div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:10px">'
+          +'Tap a unit — or tap it straight on the plan below. No need to pick a floor: one plan covers several, and the flat is the same on each.</div>'
+        : '<div class="psu-empty">No flats have been marked on this block yet'
+          +(psuCanSetup()?' — open Set up plans to mark them.':'.')+'</div>')
+      +PSU.plates.map(function(p){
+        return '<div class="psu-plate"><h4>'+esc(psuFloorsText(p.floors))+'</h4>'
+          +'<div class="psu-stage"><canvas id="psuCv'+p.id+'" onclick="psuCanvasClick(event,'+p.id+')"></canvas></div></div>';
+      }).join('')
+    +'</div></div>'
+    +'<div class="psu-basket">'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">Your selection</div><div id="psuSel"></div></div>'
+      +'<div class="card card-pad" style="margin-top:14px"><div class="sec-title" style="margin:0 0 10px">On the list</div>'+psuBasketHtml()+'</div>'
+      +'<div id="psuOut" style="margin-top:14px"></div>'
+    +'</div>'
+   +'</div>';
+  psuLettersPaint(); psuSide();
+  for(const p of PSU.plates){
+    try{
+      const img=await psuLoadImg(psuPlanUrl(p.storage_path));
+      const cv=$('psuCv'+p.id); if(!cv) continue;
+      // drawn at a size the screen can handle; the CUT is always taken from the full-resolution
+      // original, so showing it smaller costs the output nothing
+      const sc=Math.min(1,1400/p.img_w);
+      cv.width=Math.round(p.img_w*sc); cv.height=Math.round(p.img_h*sc);
+      cv._img=img; psuPaint(p);
+    }catch(e){
+      const cv=$('psuCv'+p.id);
+      if(cv&&cv.parentNode) cv.parentNode.innerHTML='<div class="psu-hint">Could not load this plan.</div>';
+    }
+  }
+}
+
+/* ---- Set up plans -------------------------------------------------------------------------
+   Where the drawing is taught to the system. Upload a plan sheet once per block, then drag a box
+   round each flat and press Enter - the next letter is filled in, so most flats are drag-and-Enter.
+   Roughly five seconds a flat, once ever; every cut-out afterwards is instant and cannot be wrong.
+
+   Marking is done by hand because it CANNOT be done automatically on these drawings, which was
+   tested rather than assumed: the flats carry only two background tints, so colour separates flat
+   from corridor but not one flat from its neighbour; there are no solid blocks to anchor on, the
+   BHK tags being outlined text; every wall on the sheet is ONE connected shape; and a flood fill
+   from inside a flat escapes through the door gaps and takes 15%% of the sheet, or stops inside a
+   single toilet. Guessing wrong here shows a customer the wrong flat.
+
+   PDFs are accepted as supplied rather than asking anybody to export a JPEG first - the browser
+   renders page one and that becomes the plan. pdf.js is fetched only when a PDF is actually
+   chosen, from the CDN the app already uses. */
+
+const PSS={plan:null,units:[],draw:null,sel:null,scale:1};
+
+function pssLoadPdfLib(){
+  if(window.pdfjsLib) return Promise.resolve(true);
+  if(window._pssPdfP) return window._pssPdfP;
+  window._pssPdfP=new Promise(function(res){
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload=function(){
+      try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc=
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; }catch(_e){}
+      res(!!window.pdfjsLib);
+    };
+    s.onerror=function(){ window._pssPdfP=null; res(false); };
+    document.head.appendChild(s);
+  });
+  return window._pssPdfP;
+}
+/* Rendered at about 3500px across. The sheets are 600 DPI A2, which is more than a screen or a
+   printed cut-out can use, and a canvas of the full 4961x7016 is 35 million pixels - enough to
+   fail on a modest machine for no gain. */
+async function pssPdfToBlob(file){
+  if(!(await pssLoadPdfLib())) throw new Error('could not load the PDF reader');
+  const buf=await file.arrayBuffer();
+  const pdf=await window.pdfjsLib.getDocument({data:buf}).promise;
+  const page=await pdf.getPage(1);
+  const base=page.getViewport({scale:1});
+  const scale=Math.min(3.2, 3500/base.width);
+  const vp=page.getViewport({scale:scale});
+  const cv=document.createElement('canvas');
+  cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+  return await new Promise(function(res){ cv.toBlob(function(b){ res({blob:b,w:cv.width,h:cv.height}); },'image/jpeg',0.92); });
+}
+function pssImgToBlob(file){
+  return new Promise(function(res,rej){
+    const im=new Image(), url=URL.createObjectURL(file);
+    im.onload=function(){
+      const sc=Math.min(1,3500/im.naturalWidth);
+      const cv=document.createElement('canvas');
+      cv.width=Math.round(im.naturalWidth*sc); cv.height=Math.round(im.naturalHeight*sc);
+      cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(b){ res({blob:b,w:cv.width,h:cv.height}); },'image/jpeg',0.92);
+    };
+    im.onerror=function(){ URL.revokeObjectURL(url); rej(new Error('could not read that image')); };
+    im.src=url;
+  });
+}
+function pssSlug(s){ return String(s||'').trim().replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase(); }
+
+window.pssAddPlan=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-image"></i> Add a floor plan</h3>'
+    +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm" style="width:min(94vw,520px)">'
+      +'<label>Business unit</label><input id="pssProj" placeholder="Dream Ananta">'
+      +'<label>Block</label><input id="pssBlock" placeholder="D">'
+      +'<label>Floors this sheet covers</label>'
+      +'<input id="pssFloors" placeholder="1, 3, 5, 7">'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:4px">One sheet usually covers several floors. Type them separated by commas.</div>'
+      +'<label style="margin-top:12px">The plan (PDF or image)</label>'
+      +'<input type="file" id="pssFile" accept="application/pdf,image/*">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="pssGo" onclick="pssSavePlan()">Upload</button></div>','md');
+};
+window.pssSavePlan=async function(){
+  const proj=(($('pssProj')||{}).value||'').trim();
+  const block=(($('pssBlock')||{}).value||'').trim();
+  const floors=(($('pssFloors')||{}).value||'').split(',')
+    .map(function(x){ return parseInt(String(x).trim(),10); }).filter(function(n){ return !isNaN(n); });
+  const f=(($('pssFile')||{}).files||[])[0];
+  if(!proj||!block){ toast('Business unit and block are both needed','warn'); return; }
+  if(!floors.length){ toast('Say which floors this sheet covers','warn'); return; }
+  if(!f){ toast('Choose the plan file','warn'); return; }
+  const b=$('pssGo'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…'; }
+  try{
+    const out=/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name) ? await pssPdfToBlob(f) : await pssImgToBlob(f);
+    const path=pssSlug(proj)+'/'+pssSlug(block)+'/'+floors.join('-')+'-'+Date.now()+'.jpg';
+    const up=await sb.storage.from('floor-plans').upload(path,out.blob,{contentType:'image/jpeg',upsert:true});
+    if(up.error) throw up.error;
+    const ins=await sb.schema('cust').from('floor_plans').insert({
+      project:proj, block:block, floors:floors, storage_path:path,
+      img_w:out.w, img_h:out.h, source_name:f.name, created_by:state.email
+    }).select().single();
+    if(ins.error) throw ins.error;
+    closeModal(); PSU.plans=null;
+    toast('Plan uploaded — now mark the flats on it','ok');
+    pssOpen(ins.data.id);
+  }catch(e){
+    if(b){ b.disabled=false; b.innerHTML='Upload'; }
+    toast('Could not upload: '+((e&&e.message)||e),'err');
+  }
+};
+window.pssDeletePlan=function(id){
+  openModal('<div class="modal-head"><h3>Remove this plan?</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><p style="margin:0;color:var(--slate);font-size:13.5px;line-height:1.6">'
+    +'The plan and every flat marked on it are removed. Nothing already downloaded or printed is affected.</p></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-danger" onclick="pssDeleteGo('+id+')">Remove</button></div>','md');
+};
+window.pssDeleteGo=async function(id){
+  try{
+    const {error}=await sb.schema('cust').from('floor_plans')
+      .update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+    if(error) throw error;
+    closeModal(); PSU.plans=null; PSS.plan=null;
+    toast('Plan removed','ok'); pssRender();
+  }catch(e){ toast('Could not remove it: '+((e&&e.message)||e),'err'); }
+};
+
+/* ---- marking ------------------------------------------------------------------------------ */
+window.pssOpen=async function(id){
+  const plans=await psuLoadPlans(true);
+  PSS.plan=plans.find(function(p){ return String(p.id)===String(id); })||null;
+  PSS.units=PSS.plan?await psuLoadUnits(PSS.plan.id):[];
+  PSS.sel=null; PSS.draw=null;
+  pssRender();
+};
+window.pssBack=function(){ PSS.plan=null; pssRender(); };
+
+function pssPaint(){
+  const cv=$('pssCanvas'); if(!cv||!cv._img) return;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(cv._img,0,0,cv.width,cv.height);
+  const s=PSS.scale;
+  PSS.units.forEach(function(u){
+    const on=PSS.sel&&PSS.sel.id===u.id;
+    ctx.lineWidth=on?3:2; ctx.strokeStyle=on?'#dc2626':'#7c3aed';
+    ctx.fillStyle=on?'rgba(220,38,38,.16)':'rgba(124,58,237,.13)';
+    ctx.fillRect(u.x*s,u.y*s,u.w*s,u.h*s); ctx.strokeRect(u.x*s,u.y*s,u.w*s,u.h*s);
+    ctx.fillStyle=on?'#dc2626':'#5b21b6';
+    ctx.font='700 15px Inter,system-ui,sans-serif'; ctx.textBaseline='top';
+    ctx.fillText(String(u.unit_name||'?'),u.x*s+6,u.y*s+5);
+  });
+  if(PSS.draw){
+    const d=PSS.draw;
+    ctx.setLineDash([6,4]); ctx.lineWidth=2; ctx.strokeStyle='#0f766e';
+    ctx.fillStyle='rgba(15,118,110,.12)';
+    ctx.fillRect(d.x*s,d.y*s,d.w*s,d.h*s); ctx.strokeRect(d.x*s,d.y*s,d.w*s,d.h*s);
+    ctx.setLineDash([]);
+  }
+}
+function pssPt(ev){
+  const cv=$('pssCanvas'), r=cv.getBoundingClientRect();
+  const cx=(ev.touches?ev.touches[0].clientX:ev.clientX);
+  const cy=(ev.touches?ev.touches[0].clientY:ev.clientY);
+  return {x:(cx-r.left)/r.width*PSS.plan.img_w, y:(cy-r.top)/r.height*PSS.plan.img_h};
+}
+window.pssDown=function(ev){
+  ev.preventDefault();
+  const p=pssPt(ev);
+  const hit=PSS.units.filter(function(u){ return p.x>=u.x&&p.x<=u.x+u.w&&p.y>=u.y&&p.y<=u.y+u.h; })
+    .sort(function(a,b){ return (a.w*a.h)-(b.w*b.h); })[0];
+  if(hit){ PSS.sel=hit; PSS.draw=null; pssPaint(); pssSideMark(); return; }
+  PSS.sel=null; PSS.draw={x0:p.x,y0:p.y,x:p.x,y:p.y,w:0,h:0};
+  pssPaint(); pssSideMark();
+};
+window.pssMove=function(ev){
+  if(!PSS.draw) return;
+  ev.preventDefault();
+  const p=pssPt(ev), d=PSS.draw;
+  d.x=Math.min(d.x0,p.x); d.y=Math.min(d.y0,p.y);
+  d.w=Math.abs(p.x-d.x0); d.h=Math.abs(p.y-d.y0);
+  pssPaint();
+};
+window.pssUp=function(ev){
+  if(!PSS.draw) return;
+  const d=PSS.draw;
+  // a stray click is not a box - anything this small was somebody missing, not drawing
+  if(d.w<30||d.h<30){ PSS.draw=null; pssPaint(); return; }
+  pssAskName(d);
+};
+/* The letter after the highest already marked, so the usual case is drag, Enter, drag, Enter.
+   Only the flats that break the run need actually typing. */
+function pssNextLetter(){
+  const used=PSS.units.map(function(u){ return String(u.unit_name||'').toUpperCase(); })
+    .filter(function(n){ return /^[A-Z]$/.test(n); }).sort();
+  if(!used.length) return 'A';
+  const last=used[used.length-1];
+  const nxt=String.fromCharCode(last.charCodeAt(0)+1);
+  return (nxt>'Z')?'':nxt;
+}
+function pssAskName(box){
+  openModal('<div class="modal-head"><h3>Name this flat</h3><span class="x" onclick="pssCancelDraw()">&times;</span></div>'
+    +'<div class="modal-body frm" style="width:min(94vw,420px)">'
+      +'<label>Unit</label><input id="pssName" placeholder="A" maxlength="6" value="'+esc(pssNextLetter())+'" style="text-transform:uppercase" onkeydown="if(event.key===&quot;Enter&quot;){event.preventDefault();pssSaveUnit();}">'
+      +'<label style="margin-top:10px">Type <span style="font-weight:400;color:var(--slate)">(optional)</span></label>'
+      +'<input id="pssType" placeholder="3 BHK">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="pssCancelDraw()">Cancel</button>'
+      +'<button class="btn btn-primary" onclick="pssSaveUnit()">Save</button></div>','md');
+  setTimeout(function(){ const n=$('pssName'); if(n) try{ n.focus(); n.select(); }catch(_e){} },40);
+}
+window.pssCancelDraw=function(){ PSS.draw=null; closeModal(); pssPaint(); };
+window.pssSaveUnit=async function(){
+  const name=(($('pssName')||{}).value||'').trim().toUpperCase();
+  const type=(($('pssType')||{}).value||'').trim();
+  if(!name){ toast('Give the flat its letter','warn'); return; }
+  const d=PSS.draw; if(!d) { closeModal(); return; }
+  try{
+    const {error}=await sb.schema('cust').from('plan_units').insert({
+      plan_id:PSS.plan.id, unit_name:name, unit_type:type||null,
+      x:Math.round(d.x), y:Math.round(d.y), w:Math.round(d.w), h:Math.round(d.h)
+    });
+    if(error) throw error;
+    PSS.draw=null; closeModal();
+    PSS.units=await psuLoadUnits(PSS.plan.id);
+    pssPaint(); pssSideMark();
+    toast('Unit '+name+' marked','ok');
+  }catch(e){
+    const dup=/duplicate|unique/i.test((e&&e.message)||'');
+    toast(dup?('Unit '+name+' is already marked on this plan'):('Could not save: '+((e&&e.message)||e)),'err');
+  }
+};
+/* Block D's odd-floor and even-floor sheets are usually the same layout drawn twice, so marking
+   one and copying is the difference between doing this twice and doing it once. Anything already
+   marked on the other sheet is left alone rather than duplicated. */
+window.pssCopyToSibling=async function(){
+  const plans=await psuLoadPlans();
+  const sibs=plans.filter(function(p){
+    return p.project===PSS.plan.project && p.block===PSS.plan.block && p.id!==PSS.plan.id; });
+  if(!sibs.length){ toast('This block has only one sheet','warn'); return; }
+  if(!PSS.units.length){ toast('Mark some flats first','warn'); return; }
+  const target=sibs[0];
+  try{
+    const have=await psuLoadUnits(target.id);
+    const has={}; have.forEach(function(u){ has[String(u.unit_name).toUpperCase()]=1; });
+    const rows=PSS.units.filter(function(u){ return !has[String(u.unit_name).toUpperCase()]; })
+      .map(function(u){ return {plan_id:target.id,unit_name:u.unit_name,unit_type:u.unit_type,
+                                x:u.x,y:u.y,w:u.w,h:u.h}; });
+    if(!rows.length){ toast('The other sheet already has all of these','warn'); return; }
+    const {error}=await sb.schema('cust').from('plan_units').insert(rows);
+    if(error) throw error;
+    toast('Copied '+rows.length+' to '+psuFloorsText(target.floors)+' — check they line up','ok');
+  }catch(e){ toast('Could not copy: '+((e&&e.message)||e),'err'); }
+};
+window.pssRemoveUnit=async function(){
+  if(!PSS.sel) return;
+  try{
+    const {error}=await sb.schema('cust').from('plan_units').delete().eq('id',PSS.sel.id);
+    if(error) throw error;
+    const gone=PSS.sel.unit_name; PSS.sel=null;
+    PSS.units=await psuLoadUnits(PSS.plan.id);
+    pssPaint(); pssSideMark();
+    toast('Unit '+gone+' removed','ok');
+  }catch(e){ toast('Could not remove it: '+((e&&e.message)||e),'err'); }
+};
+function pssSideMark(){
+  const el=$('pssSide'); if(!el) return;
+  el.innerHTML=(PSS.sel
+      ? '<div class="psu-sentence">Unit '+esc(PSS.sel.unit_name)+(PSS.sel.unit_type?(' <span class="m">· '+esc(PSS.sel.unit_type)+'</span>'):'')+'</div>'
+        +'<div class="psu-actions"><button class="btn btn-danger" onclick="pssRemoveUnit()"><i class="fa-solid fa-trash"></i> Remove this flat</button></div>'
+      : '<div class="psu-empty">Drag a box round a flat, then press <b>Enter</b>.<br>The next letter is filled in for you, so most flats are just drag and Enter.<br>Tap a marked flat to remove it.</div>')
+    +'<div style="margin-top:14px;font-size:12px;font-weight:700;color:var(--slate)">MARKED ('+PSS.units.length+')</div>'
+    +'<div style="margin-top:8px">'+(PSS.units.length
+        ? PSS.units.map(function(u){ return '<span class="psu-chip">'+esc(u.unit_name)+'</span>'; }).join('')
+        : '<span style="color:var(--slate);font-size:13px">None yet</span>')+'</div>';
+}
+
+async function pssRender(){
+  const host=$('psuBody'); if(!host) return;
+  if(!psuCanSetup()){
+    host.innerHTML='<div class="card card-pad psu-empty">Setting up plans is for the Administrator and Systems.</div>';
+    return;
+  }
+  if(!PSS.plan){
+    const plans=await psuLoadPlans(true);
+    const counts={};
+    try{
+      const {data}=await sb.schema('cust').from('plan_units').select('plan_id');
+      (data||[]).forEach(function(r){ counts[r.plan_id]=(counts[r.plan_id]||0)+1; });
+    }catch(e){}
+    host.innerHTML=PSU_CSS
+      +'<div class="card card-pad">'
+        +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+          +'<div class="sec-title" style="margin:0">Floor plans</div>'
+          +'<button class="btn btn-primary" style="margin-left:auto" onclick="pssAddPlan()"><i class="fa-solid fa-plus"></i> Add a plan</button>'
+          +'<button class="btn" onclick="navTo(\'postsales/unit\')"><i class="fa-solid fa-arrow-left"></i> Back to units</button>'
+        +'</div>'
+        +(plans.length
+          ? '<div style="overflow-x:auto;margin-top:12px"><table class="tbl"><thead><tr>'
+            +'<th>Business unit</th><th>Block</th><th>Floors</th><th>Flats marked</th><th>File</th><th></th></tr></thead><tbody>'
+            +plans.map(function(p){
+              const n=counts[p.id]||0;
+              return '<tr><td>'+esc(p.project)+'</td><td>'+esc(p.block)+'</td>'
+                +'<td>'+(p.floors||[]).map(psuOrdinal).join(', ')+'</td>'
+                +'<td>'+(n?('<b>'+n+'</b>'):'<span style="color:#b45309">none yet</span>')+'</td>'
+                +'<td style="color:var(--slate);font-size:12px">'+esc(p.source_name||'')+'</td>'
+                +'<td style="text-align:right;white-space:nowrap">'
+                  +'<button class="btn" onclick="pssOpen('+p.id+')"><i class="fa-solid fa-pen"></i> Mark flats</button> '
+                  +'<button class="btn btn-danger" onclick="pssDeletePlan('+p.id+')"><i class="fa-solid fa-trash"></i></button>'
+                +'</td></tr>';
+            }).join('')+'</tbody></table></div>'
+          : '<div class="psu-empty">No plans yet. Add one and mark its flats.</div>')
+      +'</div>';
+    return;
+  }
+  const p=PSS.plan;
+  host.innerHTML=PSU_CSS
+   +'<div class="psu-wrap"><div><div class="card card-pad">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0">'+esc(p.project)+' · Block '+esc(p.block)+' · '
+        +(p.floors||[]).map(psuOrdinal).join(', ')+'</div>'
+      +'<button class="btn" style="margin-left:auto" onclick="pssCopyToSibling()"><i class="fa-solid fa-copy"></i> Copy to the other sheet</button>'
+      +'<button class="btn" onclick="pssBack()"><i class="fa-solid fa-arrow-left"></i> All plans</button>'
+    +'</div>'
+    +'<div class="psu-stage"><canvas id="pssCanvas"></canvas></div>'
+   +'</div></div>'
+   +'<div class="psu-basket"><div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">Marking</div>'
+     +'<div id="pssSide"></div></div></div></div>';
+  try{
+    const img=await psuLoadImg(psuPlanUrl(p.storage_path));
+    const cv=$('pssCanvas');
+    const maxW=1400; PSS.scale=Math.min(1,maxW/p.img_w);
+    cv.width=Math.round(p.img_w*PSS.scale); cv.height=Math.round(p.img_h*PSS.scale);
+    cv._img=img;
+    cv.addEventListener('mousedown',pssDown); cv.addEventListener('mousemove',pssMove);
+    window.addEventListener('mouseup',pssUp);
+    cv.addEventListener('touchstart',pssDown,{passive:false});
+    cv.addEventListener('touchmove',pssMove,{passive:false});
+    cv.addEventListener('touchend',pssUp);
+    pssPaint(); pssSideMark();
+  }catch(e){ toast('Could not load the plan image','err'); }
+}
+
+/* ---- Logs -----------------------------------------------------------------------------------
+   Two of them, and they answer different questions for different people.
+
+   WHAT HAS BEEN SET UP - every sheet uploaded per project and every flat marked on it. Open to
+   anyone who can use the screen, downloadable, and editable by whoever may change the plans. This
+   is the data itself.
+
+   WHO LOOKED WHAT UP - the Administrator only. Not the person who did the searching, not their
+   colleagues. Enforced in the database, not here: cust.unit_search_log accepts writes from anyone
+   and returns rows to nobody but the Administrator, so this screen showing it is a convenience
+   rather than the thing keeping it private. */
+
+function psuIsAdmin(){ return !!state.super; }
+
+/* Recording must never get in the way of the thing the person was doing, so this is fired and
+   forgotten - a log that could fail the request would be a worse bargain than a log with a gap. */
+function psuLog(action){
+  try{
+    const rows=(PSU.basket||[]).map(function(b){
+      return {email:state.email,project:b.project,block:b.block,unit_name:b.unit_name,
+              plan_id:b.plan_id,action:action,units_n:PSU.basket.length};
+    });
+    if(!rows.length) return;
+    sb.schema('cust').from('unit_search_log').insert(rows).then(function(){},function(){});
+  }catch(e){}
+}
+
+window.psuLogsOpen=function(){ navTo('postsales/unit/logs'); };
+
+/* ---- what has been set up ------------------------------------------------------------------ */
+async function psuDataRows(){
+  const plans=await psuLoadPlans(true);
+  let units=[];
+  try{
+    const {data}=await sb.schema('cust').from('plan_units').select('*');
+    units=data||[];
+  }catch(e){}
+  const byPlan={};
+  units.forEach(function(u){ (byPlan[u.plan_id]=byPlan[u.plan_id]||[]).push(u); });
+  return plans.map(function(p){
+    const list=(byPlan[p.id]||[]).slice().sort(function(a,b){
+      return String(a.unit_name).localeCompare(String(b.unit_name)); });
+    return {plan:p, units:list};
+  });
+}
+window.psuDataDownload=async function(btn){
+  const rows=await psuDataRows();
+  const flat=[];
+  rows.forEach(function(r){
+    if(!r.units.length){
+      flat.push([r.plan.project,r.plan.block,psuFloorsText(r.plan.floors),'(none marked yet)','','','','','']);
+      return;
+    }
+    r.units.forEach(function(u){
+      flat.push([r.plan.project,r.plan.block,psuFloorsText(r.plan.floors),
+        u.unit_name,u.unit_type||'',Number(u.x),Number(u.y),Number(u.w),Number(u.h)]);
+    });
+  });
+  if(!flat.length){ toast('Nothing set up yet','warn'); return; }
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    // the same spreadsheet writer the Usability export uses, fetched only when wanted
+    if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library');
+    const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+    const ws=wb.addWorksheet('Floor plans',{views:[{state:'frozen',ySplit:3}]});
+    ws.columns=[{width:22},{width:9},{width:26},{width:9},{width:12},{width:9},{width:9},{width:9},{width:9}];
+    ws.mergeCells('A1:I1');
+    ws.getCell('A1').value='Unit plans — what has been set up';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:I2');
+    ws.getCell('A2').value=rows.length+' sheet'+(rows.length===1?'':'s')+'   ·   '
+      +flat.filter(function(f){ return f[3]!=='(none marked yet)'; }).length+' flats marked';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+    const head=ws.getRow(3);
+    head.values=['Business unit','Block','Floors','Unit','Type','X','Y','Width','Height'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    flat.forEach(function(r,i){
+      const row=ws.addRow(r);
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+      // a sheet with nothing marked on it is the finding, not a gap - so it is called out
+      if(r[3]==='(none marked yet)') row.eachCell(function(c){ c.font={color:{argb:'FFB45309'},italic:true}; });
+    });
+    ws.autoFilter={from:{row:3,column:1},to:{row:3+flat.length,column:9}};
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'Unit plans — what has been set up.xlsx');
+    toast('Downloaded','ok');
+  }catch(e){ toast('Could not download: '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+
+/* ---- who looked what up -------------------------------------------------------------------- */
+const PSL={rows:null,days:30};
+window.psuLogDays=async function(v){ PSL.days=Number(v)||30; PSL.rows=null; pslRender(); };
+async function pslLoad(){
+  if(PSL.rows) return PSL.rows;
+  const since=new Date(Date.now()-PSL.days*86400000).toISOString();
+  try{
+    const {data,error}=await sb.schema('cust').from('unit_search_log').select('*')
+      .gte('created_at',since).order('created_at',{ascending:false}).limit(2000);
+    if(error) throw error;
+    PSL.rows=data||[];
+  }catch(e){ PSL.rows=[]; }
+  return PSL.rows;
+}
+window.psuLogDownload=async function(btn){
+  const rows=await pslLoad();
+  if(!rows.length){ toast('Nothing logged in this period','warn'); return; }
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library');
+    const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+    const ws=wb.addWorksheet('Lookups',{views:[{state:'frozen',ySplit:3}]});
+    ws.columns=[{width:17},{width:30},{width:22},{width:9},{width:9},{width:13},{width:9}];
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value='Unit lookups';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:G2');
+    ws.getCell('A2').value='Last '+PSL.days+' days   ·   '+rows.length+' lookups   ·   '
+      +new Set(rows.map(function(r){ return String(r.email||'').toLowerCase(); })).size+' people';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+    const head=ws.getRow(3);
+    head.values=['When','Who','Business unit','Block','Unit','What they did','In one go'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    rows.forEach(function(r,i){
+      const row=ws.addRow([new Date(r.created_at), r.email||'', r.project||'', r.block||'',
+        r.unit_name||'', r.action||'', Number(r.units_n||0)]);
+      row.getCell(1).numFmt='dd mmm yyyy hh:mm';
+      row.getCell(7).numFmt='#,##0';
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+    });
+    ws.autoFilter={from:{row:3,column:1},to:{row:3+rows.length,column:7}};
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'Unit lookups — last '+PSL.days+' days.xlsx');
+    toast('Downloaded','ok');
+  }catch(e){ toast('Could not download: '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+async function pslRender(){
+  const host=$('psuLogBody'); if(!host) return;
+  host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  const rows=await pslLoad();
+  const people=new Set(rows.map(function(r){ return String(r.email||'').toLowerCase(); })).size;
+  host.innerHTML=
+    '<div class="psu-pick" style="margin-bottom:12px">'
+      +'<div class="psu-f"><label>Period</label><select class="sel" onchange="psuLogDays(this.value)">'
+        +[7,30,90,365].map(function(d){ return '<option value="'+d+'"'+(PSL.days===d?' selected':'')+'>Last '+d+' days</option>'; }).join('')
+      +'</select></div>'
+      +'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label>'
+        +'<button class="btn" style="height:42px" onclick="psuLogDownload(this)"><i class="fa-solid fa-file-excel"></i> Download</button></div>'
+    +'</div>'
+    +(rows.length
+      ? '<div style="font-size:13px;color:var(--slate);margin-bottom:10px">'
+          +rows.length+' lookups by '+people+' '+(people===1?'person':'people')+'</div>'
+        +'<div style="overflow-x:auto"><table class="tbl"><thead><tr>'
+        +'<th>When</th><th>Who</th><th>Unit</th><th>What they did</th></tr></thead><tbody>'
+        +rows.slice(0,300).map(function(r){
+          return '<tr><td style="white-space:nowrap">'+esc(new Date(r.created_at).toLocaleString())+'</td>'
+            +'<td>'+esc(r.email||'')+'</td>'
+            +'<td>'+esc([r.project,r.block?('Block '+r.block):'',r.unit_name?('Unit '+r.unit_name):'']
+                 .filter(Boolean).join(' · '))+'</td>'
+            +'<td>'+esc(r.action||'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>'
+        +(rows.length>300?'<div style="font-size:12px;color:var(--slate);margin-top:8px">Showing the most recent 300 — the download has all '+rows.length+'.</div>':'')
+      : '<div class="psu-empty">No lookups recorded in this period.</div>');
+}
+
+async function psuLogsRender(){
+  const host=$('psuBody'); if(!host) return;
+  host.innerHTML=PSU_CSS+'<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  const rows=await psuDataRows();
+  const marked=rows.reduce(function(a,r){ return a+r.units.length; },0);
+  host.innerHTML=PSU_CSS
+   +'<div class="card card-pad">'
+     +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+       +'<div class="sec-title" style="margin:0">What has been set up</div>'
+       +'<button class="btn" style="margin-left:auto" onclick="psuDataDownload(this)"><i class="fa-solid fa-file-excel"></i> Download</button>'
+       +(psuCanSetup()?'<button class="btn" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-pen"></i> Edit</button>':'')
+       +'<button class="btn" onclick="navTo(\'postsales/unit\')"><i class="fa-solid fa-arrow-left"></i> Back to units</button>'
+     +'</div>'
+     +'<div style="font-size:13px;color:var(--slate);margin-top:6px">'
+       +rows.length+' sheet'+(rows.length===1?'':'s')+' uploaded · '+marked+' flats marked</div>'
+     +(rows.length
+       ? '<div style="overflow-x:auto;margin-top:12px"><table class="tbl"><thead><tr>'
+         +'<th>Business unit</th><th>Block</th><th>Floors</th><th>Flats marked</th><th>Uploaded</th></tr></thead><tbody>'
+         +rows.map(function(r){
+           const u=r.units;
+           return '<tr><td>'+esc(r.plan.project)+'</td><td>'+esc(r.plan.block)+'</td>'
+             +'<td>'+esc(psuFloorsText(r.plan.floors))+'</td>'
+             +'<td>'+(u.length
+                 ? u.map(function(z){ return '<span class="psu-chip" style="margin:0 4px 4px 0">'+esc(z.unit_name)+'</span>'; }).join('')
+                 : '<span style="color:#b45309">none yet</span>')+'</td>'
+             +'<td style="white-space:nowrap;color:var(--slate);font-size:12px">'
+               +esc((r.plan.created_by||'')+' · '+new Date(r.plan.created_at).toLocaleDateString())+'</td></tr>';
+         }).join('')+'</tbody></table></div>'
+       : '<div class="psu-empty">Nothing uploaded yet.</div>')
+   +'</div>'
+   +'<div class="card card-pad" style="margin-top:16px">'
+     +'<div class="sec-title" style="margin:0 0 4px">Who looked what up</div>'
+     +(psuIsAdmin()
+       ? '<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Visible to the Administrator only — not to the people it records, and not to their colleagues.</div>'
+         +'<div id="psuLogBody"></div>'
+       : '<div class="psu-empty"><i class="fa-solid fa-lock" style="font-size:22px;color:#94a3b8"></i>'
+         +'<div style="margin-top:8px">This log is kept for the Administrator only.</div></div>')
+   +'</div>';
+  if(psuIsAdmin()) pslRender();
+}
+
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC']];
+  const tabs=[['adhoc','ADHOC'],['unit','UNIT']];
   const tab=(seg&&seg[0])||'adhoc';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
     +'<div id="psaBody" style="margin-top:16px"></div>';
+  if(tab==='unit'){
+    // psuBody is what the Unit screens render into; psaBody stays as it was for ADHOC
+    const b=$('psaBody'); if(b) b.id='psuBody';
+    const sub=(seg&&seg[1])||'';
+    if(sub==='setup'){ pssRender(); }
+    else if(sub==='logs'){ psuLogsRender(); }
+    else { psuRender(); }
+    return;
+  }
   if(tab==='adhoc'){
     const host=$('psaBody'); if(host) loader(host);
     PSA.queue=await psaFetchAll();
@@ -13215,10 +14394,6 @@ function trcTrTag(r){
   const m = TRC_TR_META[String(r&&r.transcription_status||'')];
   return m ? trcTag(m.tag,m.icon,m.label) : trcTag('t-gray','','—');
 }
-function trcAccTag(v){
-  if(!v) return '<span style="color:var(--slate)">—</span>';
-  return trcTag(TRC_ACC_TAG[v]||'t-gray','',v);
-}
 function trcMismatchTag(r){
   if(!r || r.status_match===true) return trcTag('t-green','fa-equals','Agrees');
   if(r.status_match===false){
@@ -13241,9 +14416,11 @@ function trcWall(v, withTime){
   return day+', '+h12+':'+m[5]+' '+ap;
 }
 
-/* ---- state. One object, so the cards, the table and the filters cannot drift apart. ---- */
+/* ---- state. One object, so the cards, the table and the filters cannot drift apart. Defaults to
+   Previous day - the day whose calls actually finished processing overnight - rather than All time,
+   so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
-const TRC_F={from:null,to:null,proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all'};
+const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all'};
 
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
@@ -13330,6 +14507,7 @@ function trcLeads(rows){
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
     g.mismatches=g.rows.filter(function(r){return r.status_match===false;}).length;
+    g.ovHealth=trcOvHealth(g.status,g.rows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -13358,8 +14536,9 @@ function trcChrono(a,b){
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
   const n=function(st){return rows.filter(function(r){return r.transcription_status===st;}).length;};
+  const leadCount=new Set(rows.map(function(r){return r.lead_id;})).size;
   const cards=[
-    ['Total Calls',rows.length,'follow-ups in this range','var(--slate)','all','proc'],
+    ['Total Calls',rows.length,'follow-ups in '+leadCount+' lead'+(leadCount===1?'':'s'),'var(--slate)','all','proc'],
     ['Transcribed',n('completed'),'with a full transcript','#16a34a','completed','proc'],
     ['CRM Match',rows.filter(function(r){return r.status_match===true;}).length,'call agrees with the CRM','#16a34a','MATCH','match'],
     ['CRM Mismatch',rows.filter(function(r){return r.status_match===false;}).length,'call disagrees with the CRM','#dc2626','MISMATCH','match']
@@ -13420,10 +14599,16 @@ function trcMismatchPanel(rows){
   +'</div>';
 }
 
+/* The four KPI cards act as one set of tabs, not two independent filters - picking "CRM Mismatch"
+   while "Transcribed" was still active used to AND the two together and silently empty the table.
+   So every card click closes whichever of the other three was open before opening this one. */
 window.trcCard=function(kind,val){
-  if(kind==='proc'){TRC_F.proc=(TRC_F.proc===val?'all':val);}
-  else{
+  if(kind==='proc'){
+    TRC_F.proc=(TRC_F.proc===val?'all':val);
+    TRC_F.match='all';TRC_F.mismatch='all';
+  }else{
     TRC_F.match=(TRC_F.match===val?'all':val);
+    TRC_F.proc='all';
     // Leaving Mismatch must not leave its category filter behind, silently hiding rows.
     if(TRC_F.match!=='MISMATCH')TRC_F.mismatch='all';
   }
@@ -13493,10 +14678,19 @@ function trcTextCell(v,width){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=8, TRC_CALL_COLS=7;
+const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
+
+/* Stops the row's own onclick (navigate to the lead) from firing when the copy button inside it is
+   clicked - the button and the row share the same <tr>, so the click would otherwise bubble up. */
+window.trcCopyRec=function(ev,url){
+  ev.stopPropagation();
+  if(!url)return toast('No recording URL on the latest call','warn');
+  return traClip(url,'Recording URL copied');
+};
 
 function trcLeadRowHtml(g){
   const n=g.rows.length;
+  const last=g.last||{};
   return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+g.lead_id+'\')">'
     +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
     +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
@@ -13505,15 +14699,19 @@ function trcLeadRowHtml(g){
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
-    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.lastDate)||'—')+'</td>'
-    +'<td style="white-space:nowrap">'+(g.pitch===null?'<span style="color:var(--slate)">—</span>':'<b>'+g.pitch+'%</b>')
-      +(g.qa===null?'':'<div style="font-size:11px;color:var(--slate)">QA '+g.qa+'%</div>')+'</td>'
+    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
+      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')+'</td>'
+    +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
     +'<td>'+(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
+    +trcTextCell(g.bu,160)
+    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.lastDate)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
+    +trcTextCell(last.crm_remarks,220)
+    +'<td>'+(last.recording_url
+        ?'<button class="btn btn-sm" onclick="trcCopyRec(event,\''+esc(last.recording_url).replace(/'/g,"\\'")+'\')"><i class="fa-regular fa-copy"></i> Copy</button>'
+        :'<span style="color:var(--slate)">—</span>')+'</td>'
   +'</tr>';
 }
 
@@ -13545,7 +14743,8 @@ function trcTableHtml(rows){
 function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
-    : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>Business Unit</th><th>Last call</th><th>Pitch</th><th>Status check</th><th>Lost reason</th></tr>';
+    : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
+      +'<th>Business Unit</th><th>Last call</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
 }
 
 function trcRender(full){
@@ -13578,7 +14777,7 @@ async function trcView(v,seg){
     +'<div id="trcFilters"></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:64vh"><table class="tbl">'
       +'<thead id="trcHead"></thead>'
-      +'<tbody id="trcRows"><tr><td colspan="8"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
+      +'<tbody id="trcRows"><tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
     +'</table></div></div>';
   await trcFetch(true);
   trcRender(true);
@@ -13591,11 +14790,6 @@ function trcKV(label,value,mono){
     +'<div style="flex:1;min-width:0;font-size:13.5px;'+(mono?'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;':'')+'">'
     +(value===null||value===undefined||value===''?'<span style="color:var(--slate)">—</span>':esc(String(value)))+'</div></div>';
 }
-function trcSection(icon,title,inner,colour){
-  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid '+icon+'" style="color:'+(colour||'#0d9488')+'"></i> '+esc(title)+'</div>'+inner+'</div>';
-}
-
 /* The complete conversation, in order, with the MM:SS timestamps the transcriber returned. Never a
    summary - being able to read what was actually said is the point of the whole pipeline. */
 function trcTranscriptHtml(turns,fallback){
@@ -13616,49 +14810,69 @@ function trcTranscriptHtml(turns,fallback){
   }).join('')+'</div>';
 }
 
-/* One accuracy assessment. Every one of the four has the same three parts - what the CRM recorded,
-   what the conversation supports, and why the two were judged to agree or not - so they are rendered
-   by one function and read the same way down the page. */
-function trcAccuracyHtml(title,icon,a,fields){
-  if(!a||typeof a!=='object'){
-    return '<div class="card card-pad" style="margin:0"><div style="font-size:12.5px;font-weight:700;color:var(--slate)">'
-      +'<i class="fa-solid '+icon+'"></i> '+esc(title)+'</div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:8px">Not assessed.</div></div>';
-  }
-  const score=(a.score===null||a.score===undefined)?null:Number(a.score);
-  const issues=Array.isArray(a.issues)?a.issues.filter(Boolean):[];
-  return '<div class="card card-pad" style="margin:0">'
-    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      +'<div style="font-size:12.5px;font-weight:700"><i class="fa-solid '+icon+'" style="color:#0d9488"></i> '+esc(title)+'</div>'
-      +'<div class="grow"></div>'
-      +(score===null?'':'<span class="tag t-gray">'+score+'%</span>')
-      +trcAccTag(a.status)
-    +'</div>'
-    +fields.map(function(f){return trcKV(f[0],a[f[1]]);}).join('')
-    +(a.reason?'<div style="font-size:13px;line-height:1.6;margin-top:8px">'+esc(a.reason)+'</div>':'')
-    +(a.evidence?'<div style="font-size:12.5px;line-height:1.6;margin-top:8px;padding:8px 10px;background:var(--bg2,#f8fafc);border-left:3px solid #0d9488;border-radius:0 6px 6px 0">'
-      +'<i class="fa-solid fa-quote-left" style="font-size:10px;color:var(--slate)"></i> '+esc(a.evidence)+'</div>':'')
-    +(issues.length?'<ul style="margin:8px 0 0 18px;padding:0;font-size:12.5px;line-height:1.6">'
-      +issues.map(function(i){return '<li>'+esc(String(i))+'</li>';}).join('')+'</ul>':'')
-  +'</div>';
+/* ONE CONVERSATION, whole. CRM record, how it was processed, what was said, and the five judgements -
+   in that order, because that is the order someone checking the CRM reads them in. */
+/* One flat table per call - every QA topic (the four accuracy checks, the status check, and the
+   seven-point agent audit) as a row of its own, each with a result, marks where the topic carries a
+   number, and why. Deliberately not five cards plus a collapsible "seven-point audit" details tab:
+   one table, always visible, is what "marks and why for each" without separate tabs asked for. */
+function trcQaResultClass(s){
+  s=String(s||'');
+  return /^(accurate|pass|match)$/i.test(s)?'t-green'
+    :/^(inaccurate|fail|mismatch)$/i.test(s)?'t-red'
+    :/^(partial|partially accurate)$/i.test(s)?'t-amber':'t-gray';
 }
-
-function trcAgentQaHtml(qa){
-  const list=Array.isArray(qa)?qa:[];
-  if(!list.length)return '<div style="color:var(--slate);font-size:13px">No agent audit for this call.</div>';
-  return '<table class="tbl"><thead><tr><th>Point</th><th>Result</th><th>Evidence</th><th>Notes</th></tr></thead><tbody>'
-    +list.map(function(p){
-      const s=String(p&&p.status||'');
-      const cls=/^pass$/i.test(s)?'t-green':/^fail$/i.test(s)?'t-red':/^partial$/i.test(s)?'t-amber':'t-gray';
-      return '<tr><td style="font-weight:600">'+esc(p.point||'—')+'</td>'
-        +'<td><span class="tag '+cls+'">'+esc(s||'—')+'</span></td>'
-        +'<td style="font-size:12.5px">'+esc(p.evidence||'—')+'</td>'
-        +'<td style="font-size:12.5px;color:var(--slate)">'+esc(p.notes||'')+'</td></tr>';
+function trcQaTableHtml(r,m){
+  if(!r.qa_id){
+    return '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
+      +esc(r.transcription_status==='completed'
+            ? 'Transcribed, but the QA assessment has not run yet.'
+            : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
+  }
+  const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
+        rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+  const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
+  /* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match,
+     sqft mismatch, and so on - each judged independently against the catalogue rather than folded
+     into one overall pitch verdict, so a call correct on Budget and wrong on Area shows as both. */
+  const factRows=(Array.isArray(pitch.fact_checks)?pitch.fact_checks:[]).map(function(f){
+    return {topic:'— '+((f&&f.fact)||'Fact'),status:f&&f.status,score:null,
+      why:join([f&&f.what_was_said?'Said: '+f.what_was_said:null,
+                f&&f.what_is_correct?'Correct: '+f.what_is_correct:null,
+                f&&f.note])};
+  });
+  const topics=[
+    {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
+     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])}
+  ].concat(factRows).concat([
+    {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
+     why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
+               fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
+    {topic:'Lost reason accuracy',status:r.lost_reason_status,score:null,
+     why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
+    {topic:'Remarks accuracy',status:r.remarks_status,score:null,
+     why:join([rem.reason,rem.actual_conversation_summary])},
+    {topic:'Status check',status:r.ai_assessed_status,score:null,
+     why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
+               m?m.label:null,sa.reason])}
+  ]);
+  if(Array.isArray(r.agent_qa)){
+    r.agent_qa.forEach(function(a){
+      topics.push({topic:a&&a.point,status:a&&a.status,
+        score:(a&&a.score===null)||(a&&a.score===undefined)?null:Number(a.score),
+        why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
+    });
+  }
+  return '<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
+    +topics.map(function(x){
+      const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
+      return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
+        +'<td><span class="tag '+trcQaResultClass(x.status)+'">'+esc(x.status||'—')+'</span></td>'
+        +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
+        +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
-/* ONE CONVERSATION, whole. CRM record, how it was processed, what was said, and the five judgements -
-   in that order, because that is the order someone checking the CRM reads them in. */
 function trcCallHtml(r,i,total){
   const m=TRC_MISMATCH[String(r.mismatch_type||'')];
   const when=trcWall(r.call_start_text,true)||trcWall(r.communication_time&&String(r.communication_time).slice(0,16),true)||trcWall(trcRowDate(r))||'date not recorded';
@@ -13707,36 +14921,7 @@ function trcCallHtml(r,i,total){
     +(r.qa_error?trcKV('QA error',r.qa_error):'')
   +'</div>';
 
-  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:null;
-  const statusBlock='<div class="card card-pad" style="margin:0">'
-    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      +'<div style="font-size:12.5px;font-weight:700"><i class="fa-solid fa-code-compare" style="color:#0d9488"></i> Status check</div>'
-      +'<div class="grow"></div>'+trcMismatchTag(r)
-    +'</div>'
-    +trcKV('CRM recorded',r.crm_status)
-    +trcKV('The call reads as',r.ai_assessed_status)
-    +(m?trcKV('Category',m.label):'')
-    +(sa&&sa.reason?'<div style="font-size:13px;line-height:1.6;margin-top:8px">'+esc(sa.reason)+'</div>':'')
-    +(sa&&sa.derived_note?'<div style="font-size:12.5px;line-height:1.6;margin-top:6px;color:var(--slate)">'+esc(sa.derived_note)+'</div>':'')
-    +(sa&&sa.evidence?'<div style="font-size:12.5px;line-height:1.6;margin-top:8px;padding:8px 10px;background:var(--bg2,#f8fafc);border-left:3px solid #0d9488;border-radius:0 6px 6px 0">'
-      +'<i class="fa-solid fa-quote-left" style="font-size:10px;color:var(--slate)"></i> '+esc(sa.evidence)+'</div>':'')
-  +'</div>';
-
-  const accuracy=r.qa_id
-    ? '<div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">'
-      +trcAccuracyHtml('Pitch accuracy','fa-bullhorn',r.pitch_accuracy,[])
-      +trcAccuracyHtml('Follow-up date accuracy','fa-calendar-check',r.followup_date_accuracy,
-          [['CRM date','crm_date'],['Customer agreed to','customer_agreed_date']])
-      +trcAccuracyHtml('Lost reason accuracy','fa-circle-xmark',r.lost_reason_accuracy,
-          [['CRM reason','crm_reason'],['The call supports','actual_reason']])
-      +trcAccuracyHtml('Remarks accuracy','fa-pen-to-square',r.remarks_accuracy,
-          [['CRM remarks','crm_remarks'],['What the call contained','actual_conversation_summary']])
-      +statusBlock
-      +'</div>'
-    : '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
-      +esc(r.transcription_status==='completed'
-            ? 'Transcribed, but the QA assessment has not run yet.'
-            : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
+  const accuracy=trcQaTableHtml(r,m);
 
   return '<div class="card card-pad" style="margin-top:14px;border-left:3px solid '+(m?m.colour:'#0d9488')+'">'
     +head
@@ -13747,15 +14932,96 @@ function trcCallHtml(r,i,total){
     +'<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:8px">'
       +'<i class="fa-solid fa-quote-left" style="color:#0d9488"></i> The conversation</div>'
       +trcTranscriptHtml(r.transcript,r.transcript_text)+'</div>'
-    +(Array.isArray(r.agent_qa)&&r.agent_qa.length
-      ? '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12.5px;font-weight:700">Seven-point agent audit'
-        +(r.qa_score===null||r.qa_score===undefined?'':' — '+r.qa_score+'%')+'</summary>'
-        +'<div style="margin-top:10px">'+trcAgentQaHtml(r.agent_qa)+'</div></details>'
-      : '')
   +'</div>';
 }
 
 let TRC_LEAD=null;
+
+/* OV carries its scheduled date in next_follow_up_text (IST wall clock wearing a Z, so the first 10
+   characters are taken as-is - the same rule trcWall follows, never through new Date()). Once the
+   visit happens the CRM status becomes "Site Visited on DD/MM/YY" and the date moves to status_detail
+   instead. Either way: does this lead have a follow-up call actually logged on that exact day? */
+function trcVisitChecks(rows){
+  const seen={},out=[];
+  (rows||[]).forEach(function(r){
+    let date=null,kind=null;
+    if(r.crm_status==='Site Visited'&&r.status_detail){
+      const m=String(r.status_detail).match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+      if(m){date='20'+m[3]+'-'+m[2]+'-'+m[1];kind='Site visited on';}
+    }else if(r.crm_status==='OV'&&r.next_follow_up_text){
+      date=String(r.next_follow_up_text).slice(0,10);kind='Site visit organised for';
+    }
+    if(!date||seen[kind+date])return;
+    seen[kind+date]=true;
+    const hasCall=rows.some(function(r2){return trcRowDate(r2)===date;});
+    out.push({date:date,kind:kind,hasCall:hasCall});
+  });
+  return out.sort(function(a,b){return b.date.localeCompare(a.date);});
+}
+/* The two-part OV rule: enforced here, not just checked by hand.
+   (1) an OV lead must have had a follow-up call within the last two days - silence means nobody is
+       actually managing the scheduled visit, whatever the CRM status still says.
+   (2) once the visit date itself arrives, TWO follow-up calls must be logged on that exact day, not
+       one - a single call is under the bar here, not a pass.
+   Also flags an OV row that carries no parseable visit date at all as not properly marked, which is
+   what "is the organised-visit status marked properly" comes down to on the data this lead actually
+   has. Only evaluated for a lead whose CURRENT status is OV - a lead that has since moved on (Site
+   Visited, Lost, ...) is a different question this does not answer. Returns null for every other
+   status, which callers use to skip rendering entirely. */
+function trcOvHealth(status,rows){
+  if(status!=='OV')return null;
+  const ovRows=(rows||[]).filter(function(r){return r.crm_status==='OV';});
+  const latestOv=ovRows[ovRows.length-1];
+  const visitDate=latestOv&&latestOv.next_follow_up_text?String(latestOv.next_follow_up_text).slice(0,10):null;
+  const reasons=[];
+  if(!visitDate)reasons.push('Organised visit has no site-visit date recorded against it - not marked properly');
+
+  /* The CRM's lead-level status and its most recent follow-up's status are two separate fields, and
+     they can drift: a follow-up can move a lead on to "In Follow Up" or further without the
+     lead-level status being updated to match, leaving OV showing here after it stopped being true. */
+  const trueLatest=(rows||[])[((rows||[]).length-1)];
+  if(trueLatest&&trueLatest.crm_status&&trueLatest.crm_status!=='OV')
+    reasons.push('Lead status still shows OV but the latest follow-up ('+trueLatest.crm_status
+      +', '+(trcWall(trcRowDate(trueLatest))||'date not recorded')+') has already moved past it - not marked properly');
+
+  const today=traToday();
+  const twoDaysAgo=traLocalDate(new Date(Date.now()-2*864e5));
+  const recentCall=(rows||[]).some(function(r){const d=trcRowDate(r);return d&&d>=twoDaysAgo&&d<=today;});
+  if(!recentCall)reasons.push('No follow-up call logged in the last two days');
+
+  let onVisitDay=null;
+  if(visitDate&&visitDate<=today){
+    onVisitDay=(rows||[]).filter(function(r){return trcRowDate(r)===visitDate;}).length;
+    if(onVisitDay<2)reasons.push('Only '+onVisitDay+' follow-up call'+(onVisitDay===1?'':'s')
+      +' logged on the visit day ('+(trcWall(visitDate)||visitDate)+') - 2 required');
+  }
+  return {ok:reasons.length===0,visitDate:visitDate,onVisitDay:onVisitDay,reasons:reasons};
+}
+function trcOvHealthHtml(h){
+  if(!h)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid '+(h.ok?'#16a34a':'#dc2626')+'">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-triangle-exclamation" style="color:'+(h.ok?'#16a34a':'#dc2626')+'"></i> OV health check</div>'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +(h.ok?trcTag('t-green','fa-check','OK'):trcTag('t-red','fa-triangle-exclamation','Danger'))
+      +(h.visitDate?'<span style="font-size:12.5px;color:var(--slate)">Site visit organised for '+esc(trcWall(h.visitDate)||h.visitDate)+'</span>'
+                    :'<span style="font-size:12.5px;color:var(--slate)">No site-visit date on record</span>')
+    +'</div>'
+    +(h.reasons.length?'<ul style="margin:10px 0 0 18px;padding:0;font-size:12.5px;line-height:1.7;color:#dc2626">'
+      +h.reasons.map(function(r){return '<li>'+esc(r)+'</li>';}).join('')+'</ul>':'')
+  +'</div>';
+}
+
+function trcVisitCheckHtml(checks){
+  if(!checks.length)return '';
+  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
+    +'<i class="fa-solid fa-house-circle-check" style="color:#0d9488"></i> Site visit day check</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:10px">Every site visit this lead has organised or completed, and whether a follow-up call was actually logged on that exact day.</div>'
+    +'<table class="tbl"><thead><tr><th>Date</th><th>What the CRM recorded</th><th>Call logged that day</th></tr></thead><tbody>'
+    +checks.map(function(c){
+      return '<tr><td style="white-space:nowrap">'+esc(trcWall(c.date)||c.date)+'</td><td>'+esc(c.kind)+'</td>'
+        +'<td>'+(c.hasCall?trcTag('t-green','fa-check','Yes'):trcTag('t-red','fa-xmark','No - no call logged that day'))+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+}
 
 async function trcLeadDetail(v,leadId){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
@@ -13796,15 +15062,6 @@ async function trcLeadDetail(v,leadId){
   const trail=[];
   rows.forEach(function(r){const s=r.crm_status;if(s&&trail[trail.length-1]!==s)trail.push(s);});
 
-  const countOf=function(field,value){return rows.filter(function(r){return r[field]===value;}).length;};
-  const accRow=function(label,field){
-    const cells=['Accurate','Partially Accurate','Inaccurate','Not Verifiable'].map(function(s){
-      const n=countOf(field,s);
-      return '<td>'+(n?'<span class="tag '+TRC_ACC_TAG[s]+'">'+n+'</span>':'<span style="color:var(--slate)">—</span>')+'</td>';
-    }).join('');
-    return '<tr><td style="font-weight:600">'+esc(label)+'</td>'+cells+'</tr>';
-  };
-
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
@@ -13812,60 +15069,54 @@ async function trcLeadDetail(v,leadId){
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
+  /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
+     not per-lead, so they come off the latest follow-up - rows is chronological ascending, so the
+     last element is the most recent one. */
+  const latest=rows[rows.length-1]||{};
+
   const strip='<div class="card card-pad" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
     +((lead&&lead.status)?trcTag('t-blue','','CRM: '+lead.status):'')
+    +(latest.ai_assessed_status?trcTag(TRC_AI_TAG[latest.ai_assessed_status]||'t-gray','','AI: '+latest.ai_assessed_status):'')
+    +trcMismatchTag(latest)
     +trcTag('t-gray','fa-phone',recordings+' recording'+(recordings===1?'':'s'))
     +trcTag(transcribed?'t-green':'t-gray','fa-file-lines',transcribed+' transcribed')
     +trcTag(assessed?'t-green':'t-gray','fa-clipboard-check',assessed+' assessed')
     +(reused?trcTag('t-gray','fa-recycle',reused+' reused'):'')
-    +(mismatched.length?trcTag('t-red','fa-not-equal',mismatched.length+' mismatch'+(mismatched.length===1?'':'es'))
+    +(mismatched.length?trcTag('t-red','fa-not-equal',mismatched.length+' mismatch'+(mismatched.length===1?'':'es')+' overall')
                        :(assessed?trcTag('t-green','fa-equals','CRM agrees throughout'):''))
     +(trail.length>1?'<div style="font-size:13.5px">CRM verdict over time: <b>'
       +trail.map(esc).join('</b> <i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--slate)"></i> <b>')+'</b></div>':'')
   +'</div>';
-
   const leadCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid fa-address-card" style="color:#0d9488"></i> Lead, as the CRM has it today</div>'
-    +trcKV('Lead ID',id)+trcKV('Lead name',name)+trcKV('Current status',lead&&lead.status)
-    +trcKV('Business unit',bu)+trcKV('Lost reason',lead&&lead.lost_reason)
-    +trcKV('Follow-ups in the CRM',lead&&lead.followup_count)
-    +trcKV('First seen',lead&&trcWall(lead.first_seen_date))
-    +trcKV('Last seen',lead&&trcWall(lead.last_seen_date))
+    +'<i class="fa-solid fa-address-card" style="color:#0d9488"></i> Lead details</div>'
+    +'<div style="overflow:auto"><table class="tbl"><thead><tr>'
+      +'<th>Lead ID</th><th>Lead name</th><th>Current status</th><th>Lost reason</th>'
+      +'<th>Remarks</th><th>Project</th><th>Next follow-up</th></tr></thead><tbody><tr>'
+      +'<td>'+esc(String(id))+'</td>'
+      +'<td style="font-weight:600">'+esc(name)+'</td>'
+      +'<td>'+(lead&&lead.status?trcTag('t-blue','',lead.status):'<span style="color:var(--slate)">—</span>')+'</td>'
+      +'<td>'+esc((lead&&lead.lost_reason)||'—')+'</td>'
+      +'<td style="max-width:260px">'+esc(latest.crm_remarks||'—')+'</td>'
+      +'<td>'+esc(bu||'—')+'</td>'
+      +'<td style="white-space:nowrap">'+esc(trcWall(latest.next_follow_up_text,true)||'—')+'</td>'
+    +'</tr></tbody></table></div>'
   +'</div>';
 
-  const accCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid fa-ruler" style="color:#0d9488"></i> Accuracy across this lead\'s calls</div>'
-    +(assessed
-      ? '<table class="tbl"><thead><tr><th>What was checked</th><th>Accurate</th><th>Partial</th><th>Inaccurate</th><th>Not verifiable</th></tr></thead><tbody>'
-        +accRow('Pitch','pitch_status')
-        +accRow('Follow-up date','followup_date_status')
-        +accRow('Lost reason','lost_reason_status')
-        +accRow('Remarks','remarks_status')
-        +'</tbody></table>'
-        +(mismatched.length?'<div style="margin-top:10px;font-size:12.5px;line-height:1.6">'
-          +mismatched.map(function(r){
-            const mm=TRC_MISMATCH[String(r.mismatch_type||'')];
-            return '<div style="margin-top:4px"><i class="fa-solid fa-not-equal" style="color:#dc2626"></i> '
-              +esc(trcWall(r.call_start_text)||trcWall(trcRowDate(r))||'')+' — '+esc(mm?mm.label:'CRM and call disagree')+'</div>';
-          }).join('')+'</div>':'')
-      : '<div style="font-size:13px;color:var(--slate)">No call on this lead has been assessed yet.</div>')
-  +'</div>';
-
+  /* rows is chronological, oldest first (needed so trcChrono / trail / accuracy roll-ups above stay
+     correct). Display is newest first - the latest call is the one someone opens a lead to check -
+     so the "N of total" badge is computed from the chronological index, not the display position. */
   const calls=rows.length
-    ? rows.map(function(r,i){return trcCallHtml(r,i,rows.length);}).join('')
+    ? rows.slice().reverse().map(function(r,i){return trcCallHtml(r,rows.length-1-i,rows.length);}).join('')
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
+  const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
+  const visitChecks=trcVisitCheckHtml(trcVisitChecks(rows));
 
   v.innerHTML=head+strip
-    +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">'+leadCard+accCard+'</div>'
-    +'<div class="sec-title" style="margin:22px 0 0"><i class="fa-solid fa-timeline" style="color:#0d9488"></i> '
-      +'Every conversation, oldest first</div>'
-    +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">The lead\'s complete CRM history. A call whose recording was already transcribed keeps its place here and shows the transcript it reused — deduplication applies to the work, never to the history.</div>'
-    +calls
-    +trcSection('fa-code','The CRM response for this lead, verbatim',
-        '<details><summary style="cursor:pointer;font-size:12.5px;color:var(--slate)">Show the stored JSON</summary>'
-        +'<pre style="margin-top:10px;overflow:auto;max-height:420px;font-size:11.5px;background:var(--bg2,#f8fafc);padding:12px;border-radius:8px;white-space:pre-wrap">'
-        +esc(JSON.stringify((lead&&lead.raw)||rows.map(function(r){return r;}),null,2))+'</pre></details>');
+    +'<div style="margin-top:16px">'+leadCard+'</div>'
+    +ovHealth
+    +visitChecks
+    +calls;
 
   if(!document.getElementById('trcTwoCss')){
     const s=document.createElement('style');
