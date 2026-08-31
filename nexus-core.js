@@ -7336,6 +7336,7 @@ const VIDEOS=[
   {t:'Tele Caller Training Part 1',cat:'Training',yt:'nBp1DihUvsc',url:'https://youtu.be/nBp1DihUvsc'},
   {t:'Tele Caller Training Part 2',cat:'Training',yt:'iUR7r2nshAw',url:'https://youtu.be/iUR7r2nshAw'},
   {t:'ChatGPT Hindi',cat:'Training',yt:'Nz1MI8nsFTs',url:'https://youtu.be/Nz1MI8nsFTs'},
+  {t:'Conveyance payment',cat:'Training',yt:'5anvF_uEE7w',url:'https://youtu.be/5anvF_uEE7w'},
   // ── WalkThrough videos ───────────────────────────────────────────────────
   {t:'Dream Gurukul',cat:'WalkThrough',yt:'4bWFJfU5AYg',url:'https://youtu.be/4bWFJfU5AYg?list=PLYy3u2uXULpWE5EzepbEQ5IcBWJaCYUWE'},
   {t:'Dream World City',cat:'WalkThrough',yt:'2hUcUUbF_1k',url:'https://youtu.be/2hUcUUbF_1k?list=PLYy3u2uXULpVxlLWwmLfW36kHn8j2gKcr'},
