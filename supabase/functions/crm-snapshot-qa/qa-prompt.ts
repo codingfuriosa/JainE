@@ -170,7 +170,15 @@ Every key below must be present on every reply. Where you have nothing to say, u
                    | "in_followup_should_have_been_lost" | "in_followup_should_have_been_qualified"
                    | null,
     "evidence": "the lines that carry the decision, or null",
-    "reason": "why this verdict"
+    "reason": "why this verdict",
+    "signals": [
+      { "point": "one concrete thing the customer said or did, in a few words",
+        "direction": "Match" | "Mismatch" }
+      ... one to five of these, each "Match" if it supports the CRM's crm_status standing as it is,
+        "Mismatch" if it points the other way - both directions can appear together, and usually
+        should when the call is not clear-cut. Omit entirely (empty array) only for a call too short
+        to establish anything.
+    ]
   },
   "agent_qa": [
     { "point": "Script", "status": "Pass" | "Partial" | "Fail" | "Not Applicable",
@@ -296,6 +304,16 @@ DO NOT DECIDE FROM ONE KEYWORD. This is the most common way this judgement goes 
 - Politeness is not intent, and irritation is not rejection.
 - A call cut off after a few seconds establishes nothing. That is "Unclear".
 Weigh the whole conversation and say in "evidence" which lines carry the decision.
+
+Then give "signals": the individual things the customer said or did that this verdict was actually
+weighed against, one to five of them, each tagged "Match" (it supports crm_status standing as it is)
+or "Mismatch" (it points the other way). This is not a repeat of "evidence" in list form - each point
+is its own concrete fact ("asked for the site address", "said budget is fixed at 40 lakh and this
+project starts at 62"), not a restatement of the final verdict. Put both directions in when the call
+is genuinely mixed rather than picking only the side that matches the verdict - a real "Qualified"
+call usually still has a Mismatch point or two (hesitation, a budget question) and showing it is more
+honest than a clean sweep of Match. Leave it empty only when the call is too short to say anything
+concrete at all.
 
 Then set "mismatch_type" to EXACTLY one of these, or null:
 - "lost_should_not_have_been_lost"                  CRM Lost, but the lead is still live (your
