@@ -12876,10 +12876,6 @@ function trcTrTag(r){
   const m = TRC_TR_META[String(r&&r.transcription_status||'')];
   return m ? trcTag(m.tag,m.icon,m.label) : trcTag('t-gray','','—');
 }
-function trcAccTag(v){
-  if(!v) return '<span style="color:var(--slate)">—</span>';
-  return trcTag(TRC_ACC_TAG[v]||'t-gray','',v);
-}
 function trcMismatchTag(r){
   if(!r || r.status_match===true) return trcTag('t-green','fa-equals','Agrees');
   if(r.status_match===false){
@@ -12902,9 +12898,11 @@ function trcWall(v, withTime){
   return day+', '+h12+':'+m[5]+' '+ap;
 }
 
-/* ---- state. One object, so the cards, the table and the filters cannot drift apart. ---- */
+/* ---- state. One object, so the cards, the table and the filters cannot drift apart. Defaults to
+   Previous day - the day whose calls actually finished processing overnight - rather than All time,
+   so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
-const TRC_F={from:null,to:null,proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all'};
+const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all'};
 
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
@@ -13019,8 +13017,9 @@ function trcChrono(a,b){
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
   const n=function(st){return rows.filter(function(r){return r.transcription_status===st;}).length;};
+  const leadCount=new Set(rows.map(function(r){return r.lead_id;})).size;
   const cards=[
-    ['Total Calls',rows.length,'follow-ups in this range','var(--slate)','all','proc'],
+    ['Total Calls',rows.length,'follow-ups in '+leadCount+' lead'+(leadCount===1?'':'s'),'var(--slate)','all','proc'],
     ['Transcribed',n('completed'),'with a full transcript','#16a34a','completed','proc'],
     ['CRM Match',rows.filter(function(r){return r.status_match===true;}).length,'call agrees with the CRM','#16a34a','MATCH','match'],
     ['CRM Mismatch',rows.filter(function(r){return r.status_match===false;}).length,'call disagrees with the CRM','#dc2626','MISMATCH','match']
@@ -13081,10 +13080,16 @@ function trcMismatchPanel(rows){
   +'</div>';
 }
 
+/* The four KPI cards act as one set of tabs, not two independent filters - picking "CRM Mismatch"
+   while "Transcribed" was still active used to AND the two together and silently empty the table.
+   So every card click closes whichever of the other three was open before opening this one. */
 window.trcCard=function(kind,val){
-  if(kind==='proc'){TRC_F.proc=(TRC_F.proc===val?'all':val);}
-  else{
+  if(kind==='proc'){
+    TRC_F.proc=(TRC_F.proc===val?'all':val);
+    TRC_F.match='all';TRC_F.mismatch='all';
+  }else{
     TRC_F.match=(TRC_F.match===val?'all':val);
+    TRC_F.proc='all';
     // Leaving Mismatch must not leave its category filter behind, silently hiding rows.
     if(TRC_F.match!=='MISMATCH')TRC_F.mismatch='all';
   }
@@ -13154,10 +13159,19 @@ function trcTextCell(v,width){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=8, TRC_CALL_COLS=7;
+const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
+
+/* Stops the row's own onclick (navigate to the lead) from firing when the copy button inside it is
+   clicked - the button and the row share the same <tr>, so the click would otherwise bubble up. */
+window.trcCopyRec=function(ev,url){
+  ev.stopPropagation();
+  if(!url)return toast('No recording URL on the latest call','warn');
+  return traClip(url,'Recording URL copied');
+};
 
 function trcLeadRowHtml(g){
   const n=g.rows.length;
+  const last=g.last||{};
   return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+g.lead_id+'\')">'
     +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
     +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
@@ -13167,14 +13181,17 @@ function trcLeadRowHtml(g){
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
     +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.lastDate)||'—')+'</td>'
-    +'<td style="white-space:nowrap">'+(g.pitch===null?'<span style="color:var(--slate)">—</span>':'<b>'+g.pitch+'%</b>')
-      +(g.qa===null?'':'<div style="font-size:11px;color:var(--slate)">QA '+g.qa+'%</div>')+'</td>'
+    +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
     +'<td>'+(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
+    +trcTextCell(g.bu,160)
+    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.lastDate)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
+    +trcTextCell(last.crm_remarks,220)
+    +'<td>'+(last.recording_url
+        ?'<button class="btn btn-sm" onclick="trcCopyRec(event,\''+esc(last.recording_url).replace(/'/g,"\\'")+'\')"><i class="fa-regular fa-copy"></i> Copy</button>'
+        :'<span style="color:var(--slate)">—</span>')+'</td>'
   +'</tr>';
 }
 
@@ -13206,7 +13223,8 @@ function trcTableHtml(rows){
 function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
-    : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>Business Unit</th><th>Last call</th><th>Pitch</th><th>Status check</th><th>Lost reason</th></tr>';
+    : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
+      +'<th>Business Unit</th><th>Last call</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
 }
 
 function trcRender(full){
@@ -13239,7 +13257,7 @@ async function trcView(v,seg){
     +'<div id="trcFilters"></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:64vh"><table class="tbl">'
       +'<thead id="trcHead"></thead>'
-      +'<tbody id="trcRows"><tr><td colspan="8"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
+      +'<tbody id="trcRows"><tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
     +'</table></div></div>';
   await trcFetch(true);
   trcRender(true);
@@ -13252,11 +13270,6 @@ function trcKV(label,value,mono){
     +'<div style="flex:1;min-width:0;font-size:13.5px;'+(mono?'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;':'')+'">'
     +(value===null||value===undefined||value===''?'<span style="color:var(--slate)">—</span>':esc(String(value)))+'</div></div>';
 }
-function trcSection(icon,title,inner,colour){
-  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid '+icon+'" style="color:'+(colour||'#0d9488')+'"></i> '+esc(title)+'</div>'+inner+'</div>';
-}
-
 /* The complete conversation, in order, with the MM:SS timestamps the transcriber returned. Never a
    summary - being able to read what was actually said is the point of the whole pipeline. */
 function trcTranscriptHtml(turns,fallback){
@@ -13277,49 +13290,59 @@ function trcTranscriptHtml(turns,fallback){
   }).join('')+'</div>';
 }
 
-/* One accuracy assessment. Every one of the four has the same three parts - what the CRM recorded,
-   what the conversation supports, and why the two were judged to agree or not - so they are rendered
-   by one function and read the same way down the page. */
-function trcAccuracyHtml(title,icon,a,fields){
-  if(!a||typeof a!=='object'){
-    return '<div class="card card-pad" style="margin:0"><div style="font-size:12.5px;font-weight:700;color:var(--slate)">'
-      +'<i class="fa-solid '+icon+'"></i> '+esc(title)+'</div>'
-      +'<div style="font-size:12.5px;color:var(--slate);margin-top:8px">Not assessed.</div></div>';
-  }
-  const score=(a.score===null||a.score===undefined)?null:Number(a.score);
-  const issues=Array.isArray(a.issues)?a.issues.filter(Boolean):[];
-  return '<div class="card card-pad" style="margin:0">'
-    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      +'<div style="font-size:12.5px;font-weight:700"><i class="fa-solid '+icon+'" style="color:#0d9488"></i> '+esc(title)+'</div>'
-      +'<div class="grow"></div>'
-      +(score===null?'':'<span class="tag t-gray">'+score+'%</span>')
-      +trcAccTag(a.status)
-    +'</div>'
-    +fields.map(function(f){return trcKV(f[0],a[f[1]]);}).join('')
-    +(a.reason?'<div style="font-size:13px;line-height:1.6;margin-top:8px">'+esc(a.reason)+'</div>':'')
-    +(a.evidence?'<div style="font-size:12.5px;line-height:1.6;margin-top:8px;padding:8px 10px;background:var(--bg2,#f8fafc);border-left:3px solid #0d9488;border-radius:0 6px 6px 0">'
-      +'<i class="fa-solid fa-quote-left" style="font-size:10px;color:var(--slate)"></i> '+esc(a.evidence)+'</div>':'')
-    +(issues.length?'<ul style="margin:8px 0 0 18px;padding:0;font-size:12.5px;line-height:1.6">'
-      +issues.map(function(i){return '<li>'+esc(String(i))+'</li>';}).join('')+'</ul>':'')
-  +'</div>';
+/* ONE CONVERSATION, whole. CRM record, how it was processed, what was said, and the five judgements -
+   in that order, because that is the order someone checking the CRM reads them in. */
+/* One flat table per call - every QA topic (the four accuracy checks, the status check, and the
+   seven-point agent audit) as a row of its own, each with a result, marks where the topic carries a
+   number, and why. Deliberately not five cards plus a collapsible "seven-point audit" details tab:
+   one table, always visible, is what "marks and why for each" without separate tabs asked for. */
+function trcQaResultClass(s){
+  s=String(s||'');
+  return /^(accurate|pass)$/i.test(s)?'t-green'
+    :/^(inaccurate|fail)$/i.test(s)?'t-red'
+    :/^(partial|partially accurate)$/i.test(s)?'t-amber':'t-gray';
 }
-
-function trcAgentQaHtml(qa){
-  const list=Array.isArray(qa)?qa:[];
-  if(!list.length)return '<div style="color:var(--slate);font-size:13px">No agent audit for this call.</div>';
-  return '<table class="tbl"><thead><tr><th>Point</th><th>Result</th><th>Evidence</th><th>Notes</th></tr></thead><tbody>'
-    +list.map(function(p){
-      const s=String(p&&p.status||'');
-      const cls=/^pass$/i.test(s)?'t-green':/^fail$/i.test(s)?'t-red':/^partial$/i.test(s)?'t-amber':'t-gray';
-      return '<tr><td style="font-weight:600">'+esc(p.point||'—')+'</td>'
-        +'<td><span class="tag '+cls+'">'+esc(s||'—')+'</span></td>'
-        +'<td style="font-size:12.5px">'+esc(p.evidence||'—')+'</td>'
-        +'<td style="font-size:12.5px;color:var(--slate)">'+esc(p.notes||'')+'</td></tr>';
+function trcQaTableHtml(r,m){
+  if(!r.qa_id){
+    return '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
+      +esc(r.transcription_status==='completed'
+            ? 'Transcribed, but the QA assessment has not run yet.'
+            : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
+  }
+  const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
+        rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+  const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
+  const topics=[
+    {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
+     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
+    {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
+     why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
+               fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
+    {topic:'Lost reason accuracy',status:r.lost_reason_status,score:null,
+     why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
+    {topic:'Remarks accuracy',status:r.remarks_status,score:null,
+     why:join([rem.reason,rem.actual_conversation_summary])},
+    {topic:'Status check',status:r.ai_assessed_status,score:null,
+     why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
+               m?m.label:null,sa.reason])}
+  ];
+  if(Array.isArray(r.agent_qa)){
+    r.agent_qa.forEach(function(a){
+      topics.push({topic:a&&a.point,status:a&&a.status,
+        score:(a&&a.score===null)||(a&&a.score===undefined)?null:Number(a.score),
+        why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
+    });
+  }
+  return '<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
+    +topics.map(function(x){
+      const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
+      return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
+        +'<td><span class="tag '+trcQaResultClass(x.status)+'">'+esc(x.status||'—')+'</span></td>'
+        +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
+        +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
-/* ONE CONVERSATION, whole. CRM record, how it was processed, what was said, and the five judgements -
-   in that order, because that is the order someone checking the CRM reads them in. */
 function trcCallHtml(r,i,total){
   const m=TRC_MISMATCH[String(r.mismatch_type||'')];
   const when=trcWall(r.call_start_text,true)||trcWall(r.communication_time&&String(r.communication_time).slice(0,16),true)||trcWall(trcRowDate(r))||'date not recorded';
@@ -13368,36 +13391,7 @@ function trcCallHtml(r,i,total){
     +(r.qa_error?trcKV('QA error',r.qa_error):'')
   +'</div>';
 
-  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:null;
-  const statusBlock='<div class="card card-pad" style="margin:0">'
-    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      +'<div style="font-size:12.5px;font-weight:700"><i class="fa-solid fa-code-compare" style="color:#0d9488"></i> Status check</div>'
-      +'<div class="grow"></div>'+trcMismatchTag(r)
-    +'</div>'
-    +trcKV('CRM recorded',r.crm_status)
-    +trcKV('The call reads as',r.ai_assessed_status)
-    +(m?trcKV('Category',m.label):'')
-    +(sa&&sa.reason?'<div style="font-size:13px;line-height:1.6;margin-top:8px">'+esc(sa.reason)+'</div>':'')
-    +(sa&&sa.derived_note?'<div style="font-size:12.5px;line-height:1.6;margin-top:6px;color:var(--slate)">'+esc(sa.derived_note)+'</div>':'')
-    +(sa&&sa.evidence?'<div style="font-size:12.5px;line-height:1.6;margin-top:8px;padding:8px 10px;background:var(--bg2,#f8fafc);border-left:3px solid #0d9488;border-radius:0 6px 6px 0">'
-      +'<i class="fa-solid fa-quote-left" style="font-size:10px;color:var(--slate)"></i> '+esc(sa.evidence)+'</div>':'')
-  +'</div>';
-
-  const accuracy=r.qa_id
-    ? '<div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">'
-      +trcAccuracyHtml('Pitch accuracy','fa-bullhorn',r.pitch_accuracy,[])
-      +trcAccuracyHtml('Follow-up date accuracy','fa-calendar-check',r.followup_date_accuracy,
-          [['CRM date','crm_date'],['Customer agreed to','customer_agreed_date']])
-      +trcAccuracyHtml('Lost reason accuracy','fa-circle-xmark',r.lost_reason_accuracy,
-          [['CRM reason','crm_reason'],['The call supports','actual_reason']])
-      +trcAccuracyHtml('Remarks accuracy','fa-pen-to-square',r.remarks_accuracy,
-          [['CRM remarks','crm_remarks'],['What the call contained','actual_conversation_summary']])
-      +statusBlock
-      +'</div>'
-    : '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
-      +esc(r.transcription_status==='completed'
-            ? 'Transcribed, but the QA assessment has not run yet.'
-            : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
+  const accuracy=trcQaTableHtml(r,m);
 
   return '<div class="card card-pad" style="margin-top:14px;border-left:3px solid '+(m?m.colour:'#0d9488')+'">'
     +head
@@ -13408,15 +13402,43 @@ function trcCallHtml(r,i,total){
     +'<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:8px">'
       +'<i class="fa-solid fa-quote-left" style="color:#0d9488"></i> The conversation</div>'
       +trcTranscriptHtml(r.transcript,r.transcript_text)+'</div>'
-    +(Array.isArray(r.agent_qa)&&r.agent_qa.length
-      ? '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12.5px;font-weight:700">Seven-point agent audit'
-        +(r.qa_score===null||r.qa_score===undefined?'':' — '+r.qa_score+'%')+'</summary>'
-        +'<div style="margin-top:10px">'+trcAgentQaHtml(r.agent_qa)+'</div></details>'
-      : '')
   +'</div>';
 }
 
 let TRC_LEAD=null;
+
+/* OV carries its scheduled date in next_follow_up_text (IST wall clock wearing a Z, so the first 10
+   characters are taken as-is - the same rule trcWall follows, never through new Date()). Once the
+   visit happens the CRM status becomes "Site Visited on DD/MM/YY" and the date moves to status_detail
+   instead. Either way: does this lead have a follow-up call actually logged on that exact day? */
+function trcVisitChecks(rows){
+  const seen={},out=[];
+  (rows||[]).forEach(function(r){
+    let date=null,kind=null;
+    if(r.crm_status==='Site Visited'&&r.status_detail){
+      const m=String(r.status_detail).match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+      if(m){date='20'+m[3]+'-'+m[2]+'-'+m[1];kind='Site visited on';}
+    }else if(r.crm_status==='OV'&&r.next_follow_up_text){
+      date=String(r.next_follow_up_text).slice(0,10);kind='Site visit organised for';
+    }
+    if(!date||seen[kind+date])return;
+    seen[kind+date]=true;
+    const hasCall=rows.some(function(r2){return trcRowDate(r2)===date;});
+    out.push({date:date,kind:kind,hasCall:hasCall});
+  });
+  return out.sort(function(a,b){return b.date.localeCompare(a.date);});
+}
+function trcVisitCheckHtml(checks){
+  if(!checks.length)return '';
+  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
+    +'<i class="fa-solid fa-house-circle-check" style="color:#0d9488"></i> Site visit day check</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:10px">Every site visit this lead has organised or completed, and whether a follow-up call was actually logged on that exact day.</div>'
+    +'<table class="tbl"><thead><tr><th>Date</th><th>What the CRM recorded</th><th>Call logged that day</th></tr></thead><tbody>'
+    +checks.map(function(c){
+      return '<tr><td style="white-space:nowrap">'+esc(trcWall(c.date)||c.date)+'</td><td>'+esc(c.kind)+'</td>'
+        +'<td>'+(c.hasCall?trcTag('t-green','fa-check','Yes'):trcTag('t-red','fa-xmark','No - no call logged that day'))+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
+}
 
 async function trcLeadDetail(v,leadId){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
@@ -13457,15 +13479,6 @@ async function trcLeadDetail(v,leadId){
   const trail=[];
   rows.forEach(function(r){const s=r.crm_status;if(s&&trail[trail.length-1]!==s)trail.push(s);});
 
-  const countOf=function(field,value){return rows.filter(function(r){return r[field]===value;}).length;};
-  const accRow=function(label,field){
-    const cells=['Accurate','Partially Accurate','Inaccurate','Not Verifiable'].map(function(s){
-      const n=countOf(field,s);
-      return '<td>'+(n?'<span class="tag '+TRC_ACC_TAG[s]+'">'+n+'</span>':'<span style="color:var(--slate)">—</span>')+'</td>';
-    }).join('');
-    return '<tr><td style="font-weight:600">'+esc(label)+'</td>'+cells+'</tr>';
-  };
-
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
@@ -13473,60 +13486,52 @@ async function trcLeadDetail(v,leadId){
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
+  /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
+     not per-lead, so they come off the latest follow-up - rows is chronological ascending, so the
+     last element is the most recent one. */
+  const latest=rows[rows.length-1]||{};
+
   const strip='<div class="card card-pad" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
     +((lead&&lead.status)?trcTag('t-blue','','CRM: '+lead.status):'')
+    +(latest.ai_assessed_status?trcTag(TRC_AI_TAG[latest.ai_assessed_status]||'t-gray','','AI: '+latest.ai_assessed_status):'')
+    +trcMismatchTag(latest)
     +trcTag('t-gray','fa-phone',recordings+' recording'+(recordings===1?'':'s'))
     +trcTag(transcribed?'t-green':'t-gray','fa-file-lines',transcribed+' transcribed')
     +trcTag(assessed?'t-green':'t-gray','fa-clipboard-check',assessed+' assessed')
     +(reused?trcTag('t-gray','fa-recycle',reused+' reused'):'')
-    +(mismatched.length?trcTag('t-red','fa-not-equal',mismatched.length+' mismatch'+(mismatched.length===1?'':'es'))
+    +(mismatched.length?trcTag('t-red','fa-not-equal',mismatched.length+' mismatch'+(mismatched.length===1?'':'es')+' overall')
                        :(assessed?trcTag('t-green','fa-equals','CRM agrees throughout'):''))
     +(trail.length>1?'<div style="font-size:13.5px">CRM verdict over time: <b>'
       +trail.map(esc).join('</b> <i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--slate)"></i> <b>')+'</b></div>':'')
   +'</div>';
-
   const leadCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid fa-address-card" style="color:#0d9488"></i> Lead, as the CRM has it today</div>'
-    +trcKV('Lead ID',id)+trcKV('Lead name',name)+trcKV('Current status',lead&&lead.status)
-    +trcKV('Business unit',bu)+trcKV('Lost reason',lead&&lead.lost_reason)
-    +trcKV('Follow-ups in the CRM',lead&&lead.followup_count)
-    +trcKV('First seen',lead&&trcWall(lead.first_seen_date))
-    +trcKV('Last seen',lead&&trcWall(lead.last_seen_date))
+    +'<i class="fa-solid fa-address-card" style="color:#0d9488"></i> Lead details</div>'
+    +'<div style="overflow:auto"><table class="tbl"><thead><tr>'
+      +'<th>Lead ID</th><th>Lead name</th><th>Current status</th><th>Lost reason</th>'
+      +'<th>Remarks</th><th>Project</th><th>Next follow-up</th></tr></thead><tbody><tr>'
+      +'<td>'+esc(String(id))+'</td>'
+      +'<td style="font-weight:600">'+esc(name)+'</td>'
+      +'<td>'+(lead&&lead.status?trcTag('t-blue','',lead.status):'<span style="color:var(--slate)">—</span>')+'</td>'
+      +'<td>'+esc((lead&&lead.lost_reason)||'—')+'</td>'
+      +'<td style="max-width:260px">'+esc(latest.crm_remarks||'—')+'</td>'
+      +'<td>'+esc(bu||'—')+'</td>'
+      +'<td style="white-space:nowrap">'+esc(trcWall(latest.next_follow_up_text,true)||'—')+'</td>'
+    +'</tr></tbody></table></div>'
   +'</div>';
 
-  const accCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid fa-ruler" style="color:#0d9488"></i> Accuracy across this lead\'s calls</div>'
-    +(assessed
-      ? '<table class="tbl"><thead><tr><th>What was checked</th><th>Accurate</th><th>Partial</th><th>Inaccurate</th><th>Not verifiable</th></tr></thead><tbody>'
-        +accRow('Pitch','pitch_status')
-        +accRow('Follow-up date','followup_date_status')
-        +accRow('Lost reason','lost_reason_status')
-        +accRow('Remarks','remarks_status')
-        +'</tbody></table>'
-        +(mismatched.length?'<div style="margin-top:10px;font-size:12.5px;line-height:1.6">'
-          +mismatched.map(function(r){
-            const mm=TRC_MISMATCH[String(r.mismatch_type||'')];
-            return '<div style="margin-top:4px"><i class="fa-solid fa-not-equal" style="color:#dc2626"></i> '
-              +esc(trcWall(r.call_start_text)||trcWall(trcRowDate(r))||'')+' — '+esc(mm?mm.label:'CRM and call disagree')+'</div>';
-          }).join('')+'</div>':'')
-      : '<div style="font-size:13px;color:var(--slate)">No call on this lead has been assessed yet.</div>')
-  +'</div>';
-
+  /* rows is chronological, oldest first (needed so trcChrono / trail / accuracy roll-ups above stay
+     correct). Display is newest first - the latest call is the one someone opens a lead to check -
+     so the "N of total" badge is computed from the chronological index, not the display position. */
   const calls=rows.length
-    ? rows.map(function(r,i){return trcCallHtml(r,i,rows.length);}).join('')
+    ? rows.slice().reverse().map(function(r,i){return trcCallHtml(r,rows.length-1-i,rows.length);}).join('')
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
+  const visitChecks=trcVisitCheckHtml(trcVisitChecks(rows));
 
   v.innerHTML=head+strip
-    +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">'+leadCard+accCard+'</div>'
-    +'<div class="sec-title" style="margin:22px 0 0"><i class="fa-solid fa-timeline" style="color:#0d9488"></i> '
-      +'Every conversation, oldest first</div>'
-    +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">The lead\'s complete CRM history. A call whose recording was already transcribed keeps its place here and shows the transcript it reused — deduplication applies to the work, never to the history.</div>'
-    +calls
-    +trcSection('fa-code','The CRM response for this lead, verbatim',
-        '<details><summary style="cursor:pointer;font-size:12.5px;color:var(--slate)">Show the stored JSON</summary>'
-        +'<pre style="margin-top:10px;overflow:auto;max-height:420px;font-size:11.5px;background:var(--bg2,#f8fafc);padding:12px;border-radius:8px;white-space:pre-wrap">'
-        +esc(JSON.stringify((lead&&lead.raw)||rows.map(function(r){return r;}),null,2))+'</pre></details>');
+    +'<div style="margin-top:16px">'+leadCard+'</div>'
+    +visitChecks
+    +calls;
 
   if(!document.getElementById('trcTwoCss')){
     const s=document.createElement('style');

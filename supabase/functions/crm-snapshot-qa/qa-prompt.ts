@@ -91,7 +91,9 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "agent_qa": [
     { "point": "Script", "status": "Pass" | "Partial" | "Fail" | "Not Applicable",
-      "evidence": "quoted from the transcript", "notes": "" }
+      "score": 0-100, or null when status is "Not Applicable",
+      "evidence": "quoted from the transcript",
+      "reason": "why this verdict - what the agent did or did not do, in one or two sentences" }
     ... all seven points, in the order given above
   ],
   "summary_verdict": "several sentences"
@@ -204,15 +206,22 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
 when your assessment is Unclear - an unclear call is not a disagreement.
 
 ### 6. THE SEVEN-POINT AGENT AUDIT
-Return "agent_qa" as an array of seven objects, each {"point","status","evidence","notes"}, with
-"status" exactly "Pass", "Fail", "Partial" or "Not Applicable", and "evidence" quoting the
+Return "agent_qa" as an array of seven objects, each {"point","status","score","evidence","reason"},
+with "status" exactly "Pass", "Fail", "Partial" or "Not Applicable", and "evidence" quoting the
 transcript. Use these exact seven names, in this order:
 Script, Etiquette, Query Handling, Call to Action, Leakage Avoidance, Follow-up Accuracy,
 Hyper-personalization.
 
+For EVERY point, also give:
+- "score": a 0-100 accuracy number for how fully the agent met that point on this call - not a
+  restatement of "status" in digits. Pass is not automatically 100, and Partial is not automatically
+  50; score what actually happened. Use null only when "status" is "Not Applicable".
+- "reason": one or two sentences on WHY - what the agent said or failed to say that produced this
+  score, tied to the "evidence" quote. Never leave this as a restatement of the status word alone.
+
 ${QA_RUBRIC}
 
-Use "Not Applicable" only where the call ended before the point could arise, and say so in "notes".
+Use "Not Applicable" only where the call ended before the point could arise, and say so in "reason".
 
 ### 7. VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
