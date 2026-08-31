@@ -23,8 +23,8 @@
 //   select vault.create_secret('<secret>', 'ZOHO_CLIENT_SECRET', '...');
 //   select vault.create_secret('<token>', 'ZOHO_REFRESH_TOKEN', '...'); -- scope Desk.tickets.ALL,Desk.basic.READ
 //   select vault.create_secret('<org id>', 'ZOHO_ORG_ID', '...');
-// ZOHO_DEPARTMENT_ID (optional - which Desk department new tickets are filed under) is still read
-// from this function's own Secrets if set, since it's not sensitive enough to need Vault.
+//   select vault.create_secret('<dept id>', 'ZOHO_DEPARTMENT_ID', '...'); -- required by Zoho Desk to create a ticket;
+//     find valid ids via GET https://desk.zoho.<dc>/api/v1/departments
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -46,6 +46,15 @@ function normaliseStatus(zohoStatus: string): string {
   return "in_progress";
 }
 
+// Zoho's top-level `message` is often a generic "data is invalid" - the actionable detail lives in
+// `errors[].fieldName`/`errorMessage`, so surface that too rather than just the generic wrapper.
+function zohoErrorText(out: any, fallback: string | number): string {
+  const detail = Array.isArray(out?.errors)
+    ? out.errors.map((e: any) => `${e.fieldName || "field"}: ${e.errorMessage || e.errorType || "invalid"}`).join("; ")
+    : "";
+  return [out?.message || fallback, detail].filter(Boolean).join(" - ");
+}
+
 async function zohoAccessToken(dc: string, clientId: string, clientSecret: string, refreshToken: string) {
   const res = await fetch(`https://accounts.zoho.${dc}/oauth/v2/token?refresh_token=${encodeURIComponent(refreshToken)}&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&grant_type=refresh_token`, { method: "POST" });
   const out = await res.json().catch(() => ({}));
@@ -60,7 +69,6 @@ Deno.serve(async (req: Request) => {
   const SB = Deno.env.get("SUPABASE_URL")!;
   const SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const ANON = Deno.env.get("SUPABASE_ANON_KEY") || SRV;
-  const ZOHO_DEPARTMENT_ID = Deno.env.get("ZOHO_DEPARTMENT_ID");
 
   const db = createClient(SB, SRV);
   const { data: zohoSecrets, error: secretsErr } = await db.schema("app").rpc("get_zoho_secrets");
@@ -70,6 +78,7 @@ Deno.serve(async (req: Request) => {
   const ZOHO_CLIENT_SECRET = zohoSecrets?.ZOHO_CLIENT_SECRET;
   const ZOHO_REFRESH_TOKEN = zohoSecrets?.ZOHO_REFRESH_TOKEN;
   const ZOHO_ORG_ID = zohoSecrets?.ZOHO_ORG_ID;
+  const ZOHO_DEPARTMENT_ID = zohoSecrets?.ZOHO_DEPARTMENT_ID;
 
   if (!ZOHO_CLIENT_ID || !ZOHO_CLIENT_SECRET || !ZOHO_REFRESH_TOKEN || !ZOHO_ORG_ID) {
     return j({ error: "Zoho Desk is not configured yet - store ZOHO_CLIENT_ID/ZOHO_CLIENT_SECRET/ZOHO_REFRESH_TOKEN/ZOHO_ORG_ID in Vault (see the comment at the top of this file)" }, 500);
@@ -116,7 +125,7 @@ Deno.serve(async (req: Request) => {
 
       const res = await fetch(`https://desk.zoho.${ZOHO_DC}/api/v1/tickets`, { method: "POST", headers: zohoHeaders, body: JSON.stringify(payload) });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) return j({ error: "Zoho Desk create failed: " + (out.message || res.status) }, 500);
+      if (!res.ok) return j({ error: "Zoho Desk create failed: " + zohoErrorText(out, res.status) }, 500);
 
       const zohoStatus = out.status || "Open";
       const { error: updErr } = await db.schema("cust").from("support_tickets").update({
@@ -131,7 +140,7 @@ Deno.serve(async (req: Request) => {
       if (!ticket.zoho_ticket_id) return j({ error: "This ticket hasn't been created in Zoho Desk yet" }, 400);
       const res = await fetch(`https://desk.zoho.${ZOHO_DC}/api/v1/tickets/${ticket.zoho_ticket_id}`, { headers: zohoHeaders });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) return j({ error: "Zoho Desk fetch failed: " + (out.message || res.status) }, 500);
+      if (!res.ok) return j({ error: "Zoho Desk fetch failed: " + zohoErrorText(out, res.status) }, 500);
 
       const zohoStatus = out.status || "Open";
       const { error: updErr } = await db.schema("cust").from("support_tickets").update({

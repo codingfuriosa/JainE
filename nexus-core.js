@@ -12479,7 +12479,7 @@ async function cpaRenderSupport(host){
   const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
   const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
     tagFor[t.status]||esc(t.status),fmtDate(t.created_at),
-    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:'<span style="color:var(--slate);font-size:12px">Not yet in Zoho</span>']);
+    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`]);
   host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
     '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" just pulls its current status back here.</div>';
 }
@@ -12492,6 +12492,16 @@ window.cpaSyncTicket=async function(id){
     if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
     toast('Status updated','ok');route();
   }catch(e){toast('Refresh failed: '+e.message,'err');}
+};
+window.cpaRetryTicket=async function(id){
+  toast('Retrying Zoho Desk create…','');
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'create',ticketId:id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Retry failed: '+(out.error||res.status),'err');return;}
+    toast('Created in Zoho Desk','ok');route();
+  }catch(e){toast('Retry failed: '+e.message,'err');}
 };
 
 /* ---------- Tab 10: Referrals ---------- */
@@ -12656,7 +12666,7 @@ async function custTabSupport(unit){
   const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
   const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
   const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),tagFor[t.status]||esc(t.status),
-    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:'<span style="color:var(--slate);font-size:12px">Submitting…</span>']);
+    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`]);
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
     (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
 }
@@ -12690,6 +12700,16 @@ window.custSyncTicket=async function(id){
     if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
     toast('Status updated','ok');route();
   }catch(e){toast('Refresh failed: '+e.message,'err');}
+};
+window.custRetryTicket=async function(id){
+  toast('Retrying…','');
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'create',ticketId:id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Retry failed: '+(out.error||res.status),'err');return;}
+    toast('Ticket created','ok');route();
+  }catch(e){toast('Retry failed: '+e.message,'err');}
 };
 async function custTabAmenities(unit){
   if(unit.status!=='possession'){
