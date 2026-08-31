@@ -7556,6 +7556,7 @@ async function usbLoad(){
    can leak into another screen. */
 const USB_CSS='<style id="usbCss">'
   +'.usb-bar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:14px}'
+  +'.usb-xl{margin-left:auto;height:38px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}'
   +'.usb-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
   +'.usb-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
   +'.usb-f .sel,.usb-f input[type=date]{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 11px;'
@@ -7597,6 +7598,7 @@ function usbControlsHtml(){
         +ppl.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
+    +'<button class="btn btn-primary usb-xl" id="usbXl" onclick="usbExport(this)"><i class="fa-solid fa-file-excel"></i> Extract to Excel</button>'
   +'</div>';
 }
 /* Picking a preset writes its dates into From/To as well, so the two boxes always agree with the
@@ -7604,6 +7606,148 @@ function usbControlsHtml(){
 window.usbSetPreset=function(v){ USB.preset=v; const r=usbRange(v==='custom'?'30d':v); USB.from=r.from; USB.to=r.to; renderPage(); };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
 window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
+/* ---- Extract to Excel -------------------------------------------------------------------
+   A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
+   as numbers that actually sum, the date as a date, and each feature's activity in the same colour
+   it wears on screen. A CSV would have been three lines of code and would have arrived as grey
+   text needing to be formatted by hand every single time.
+   The library is fetched only when the button is pressed. In the page head it would have made all
+   thirty-odd pages carry 270KB for one button on one screen. It comes from jsdelivr, which the app
+   already depends on for Supabase and Chart.js, so it is not a new host to trust - and if it cannot
+   be reached the export falls back to CSV and says so rather than failing silently. */
+function usbLoadXlsx(){
+  if(window.ExcelJS) return Promise.resolve(true);
+  if(window._usbXlP) return window._usbXlP;
+  window._usbXlP=new Promise(function(res){
+    const el=document.createElement('script');
+    el.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    el.onload=function(){ res(!!window.ExcelJS); };
+    el.onerror=function(){ window._usbXlP=null; res(false); };   // cleared, so a later click retries
+    document.head.appendChild(el);
+  });
+  return window._usbXlP;
+}
+// the four activity bands in the same colours the screen uses: [ink, fill]
+const USB_XL_BAND={'Very Active':['FF166534','FFDCFCE7'],'Active':['FF0369A1','FFE0F2FE'],
+                   'Less':['FFB45309','FFFEF3C7'],'Inactive':['FF64748B','FFF1F5F9']};
+function usbExportName(r){
+  return 'Usability '+r.from+' to '+r.to+(USB.email?(' - '+USB.email.split('@')[0]):'');
+}
+function usbSaveBlob(blob,name){
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); },2000);
+}
+/* Only reached if the library could not be loaded. Same rows, same order, no formatting - and the
+   toast says why, so nobody is left wondering why this one came out plain. */
+function usbExportCsv(rows,r,who){
+  const q=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  const out=[['Portal Usability'],[fmtDate(r.from)+' to '+fmtDate(r.to),who],[],
+    ['Module','Tab','Feature','Uses','People','Last used','Activity']];
+  rows.forEach(function(x){ out.push([x.module_label||x.module_id||'',x.tab||'',x.feature||'',
+    Number(x.uses||0),Number(x.users||0),
+    x.last_used?fmtDate(String(x.last_used).slice(0,10)):'',x.band||'Inactive']); });
+  usbSaveBlob(new Blob(['﻿'+out.map(function(l){return l.map(q).join(',');}).join('\r\n')],
+    {type:'text/csv;charset=utf-8'}), usbExportName(r)+'.csv');
+  toast('Could not reach the spreadsheet library - exported as a plain CSV instead','warn');
+}
+window.usbExport=async function(btn){
+  const rows=(USB.rows||[]).slice();
+  if(!rows.length){ toast('Nothing to extract for this period','warn'); return; }
+  const r=usbCurrentRange();
+  const who=USB.email
+    ? (((USB.people||[]).find(function(p){return p.email===USB.email;})||{}).name||USB.email)
+    : 'Everyone';
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    if(!(await usbLoadXlsx())){ usbExportCsv(rows,r,who); return; }
+
+    const wb=new ExcelJS.Workbook();
+    wb.creator='JAIN-E'; wb.created=new Date();
+
+    /* Sheet 1 - every feature. Freezing four rows keeps the title, the range line and the header
+       on screen while scrolling, which is the difference between a sheet you can read and one you
+       get lost in at row 300. */
+    const ws=wb.addWorksheet('Features',{views:[{state:'frozen',ySplit:4}]});
+    ws.columns=[{width:22},{width:20},{width:42},{width:9},{width:9},{width:15},{width:14}];
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value='Portal Usability';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:G2');
+    ws.getCell('A2').value=fmtDate(r.from)+'  →  '+fmtDate(r.to)
+      +'      ·      '+who
+      +'      ·      '+rows.length+' features'
+      +'      ·      '+rows.reduce(function(a,x){return a+Number(x.uses||0);},0)+' uses';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+
+    const head=ws.getRow(4);
+    head.values=['Module','Tab','Feature','Uses','People','Last used','Activity'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle',horizontal:'left'};
+    });
+
+    rows.forEach(function(x,i){
+      const row=ws.addRow([x.module_label||x.module_id||'', x.tab||'', x.feature||'',
+        Number(x.uses||0), Number(x.users||0),
+        x.last_used?new Date(x.last_used):null, x.band||'Inactive']);
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+      row.getCell(4).numFmt='#,##0';
+      row.getCell(5).numFmt='#,##0';
+      row.getCell(6).numFmt='dd mmm yyyy';
+      const b=USB_XL_BAND[x.band]||USB_XL_BAND.Inactive;
+      const bc=row.getCell(7);
+      bc.font={bold:true,color:{argb:b[0]},size:10};
+      bc.fill={type:'pattern',pattern:'solid',fgColor:{argb:b[1]}};
+      bc.alignment={horizontal:'center'};
+    });
+    // filter set on the header, so whoever opens it can slice by module or band without setting up
+    ws.autoFilter={from:{row:4,column:1},to:{row:4+rows.length,column:7}};
+
+    /* Sheet 2 - the same numbers rolled up per module, because "which module is actually being
+       used" is the question this report gets opened to answer, and totting that up by hand off two
+       hundred rows is exactly the work an export is supposed to remove. */
+    const by={};
+    rows.forEach(function(x){
+      const k=x.module_label||x.module_id||'(none)';
+      const m=by[k]||(by[k]={features:0,used:0,uses:0,people:0});
+      m.features++; m.uses+=Number(x.uses||0);
+      if(Number(x.uses||0)>0) m.used++;
+      m.people=Math.max(m.people,Number(x.users||0));
+    });
+    const ms=wb.addWorksheet('By module',{views:[{state:'frozen',ySplit:1}]});
+    ms.columns=[{width:26},{width:12},{width:12},{width:10},{width:14}];
+    const mh=ms.getRow(1);
+    mh.values=['Module','Features','Used','Uses','Most people'];
+    mh.height=22;
+    mh.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    Object.keys(by).sort(function(a,b){ return by[b].uses-by[a].uses || a.localeCompare(b); })
+      .forEach(function(k){
+        const m=by[k];
+        const row=ms.addRow([k,m.features,m.used,m.uses,m.people]);
+        row.getCell(4).numFmt='#,##0';
+        // a module nobody has touched is the finding, not a gap - so it is marked, not left blank
+        if(!m.used) row.eachCell(function(c){ c.font={color:{argb:'FF94A3B8'},italic:true}; });
+      });
+
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      usbExportName(r)+'.xlsx');
+    toast('Extracted '+rows.length+' features to Excel','ok');
+  }catch(e){
+    try{ console.error('usbExport',e); }catch(_e){}
+    toast('Could not build the spreadsheet: '+((e&&e.message)||e),'err');
+  }finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+
 // One bar showing how a set of features splits across the four bands.
 function usbBandBar(rows){
   const total=rows.length||1;
