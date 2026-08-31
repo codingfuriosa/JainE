@@ -14503,6 +14503,13 @@ function trcLeads(rows){
     g.rows.sort(trcChrono);
     g.last=g.rows[g.rows.length-1];
     g.lastDate=trcRowDate(g.last);
+    /* When this lead is due next, taken from the newest call that actually left a date rather than
+       simply the newest call: a latest follow-up logged with the field blank would otherwise read as
+       "no date" on a lead that does have one standing. */
+    g.nextFollowUp=null;
+    for(let i=g.rows.length-1;i>=0&&!g.nextFollowUp;i--){
+      if(g.rows[i].next_follow_up_text)g.nextFollowUp=g.rows[i].next_follow_up_text;
+    }
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
@@ -14706,7 +14713,7 @@ function trcLeadRowHtml(g){
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
     +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(last.next_follow_up_text,true)||'—')+'</td>'
+    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     +'<td>'+(last.recording_url
@@ -14822,6 +14829,15 @@ function trcQaResultClass(s){
     :/^(inaccurate|fail|mismatch)$/i.test(s)?'t-red'
     :/^(partial|partially accurate)$/i.test(s)?'t-amber':'t-gray';
 }
+/* The same verdict as a mark: tick where the call backs the CRM up, cross where it contradicts it,
+   half-filled for partly, question mark where the call could not settle it. Colour alone was doing
+   this job, which is no help to anyone reading the page in greyscale or scanning it quickly. */
+function trcQaResultIcon(s){
+  s=String(s||'');
+  return /^(accurate|pass|match)$/i.test(s)?'fa-check'
+    :/^(inaccurate|fail|mismatch)$/i.test(s)?'fa-xmark'
+    :/^(partial|partially accurate)$/i.test(s)?'fa-circle-half-stroke':'fa-circle-question';
+}
 /* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match, sqft
    mismatch, and so on - as a row of small boxes side by side, a tick or a cross per fact, instead of
    another table row per fact. Each one carries the detail (what was said vs. what the catalogue says
@@ -14881,31 +14897,60 @@ function trcQaTableHtml(r,m){
     +topics.map(function(x){
       const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
-        +'<td><span class="tag '+trcQaResultClass(x.status)+'">'+esc(x.status||'—')+'</span></td>'
+        +'<td><span class="tag '+trcQaResultClass(x.status)+'"><i class="fa-solid '+trcQaResultIcon(x.status)+'"></i> '+esc(x.status||'—')+'</span></td>'
         +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
         +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
-/* Why this call landed the status it did, as a short list of concrete points rather than one
-   paragraph - each tagged Match (supports crm_status standing as it is) or Mismatch (points the
-   other way), so a mixed call shows as mixed instead of one blended verdict. Sits between the verdict
-   and the transcript: read the headline, read what it was actually weighed against, then go check the
-   words yourself if you want to. Falls back to the single evidence quote for a call scored before
-   "signals" existed, so nothing goes blank. */
-/* Exactly the point and a tick or a cross, side by side - same chip as the pitch fact check, nothing
-   added on top of it. */
+/* Sits between the verdict and the transcript, and this is where a tick or a cross per check
+   belongs: read the headline, see at a glance what the call agrees with the CRM about and what it
+   contradicts, then go read the words yourself. Two rows, because they answer different questions.
+
+   (1) What the customer actually said, when the model returned "signals" for it - each point tagged
+       Match (supports crm_status standing as it is) or Mismatch (points the other way), so a mixed
+       call shows as mixed instead of one blended verdict.
+   (2) How each of the five checks landed. ALWAYS rendered for an assessed call, which is the part
+       that was missing: signals are optional in the QA reply and absent entirely from every row
+       scored before they existed, and the whole block used to vanish with them - leaving a lead page
+       with a verdict, a transcript, and no marks anywhere between them. The five statuses are
+       always on the row, so this row can always be drawn.
+
+   Same chip as the pitch fact check, tick for match, cross for mismatch, nothing added on top. */
+function trcMarkChip(cls,icon,label,tip){
+  return '<span class="tag '+cls+'"'+(tip?' title="'+esc(tip)+'"':'')
+    +'><i class="fa-solid '+icon+'"></i> '+esc(label)+'</span>';
+}
+function trcMarkRowHtml(title,chips){
+  return '<div style="margin-top:10px"><div style="font-size:12.5px;font-weight:700;margin-bottom:6px">'
+    +esc(title)+'</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+chips+'</div></div>';
+}
 function trcStatusSignalsHtml(r){
-  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:null;
-  const signals=sa&&Array.isArray(sa.signals)?sa.signals.filter(function(s){return s&&s.point;}):[];
-  if(!signals.length)return '';
-  return '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px">'
-    +signals.map(function(s){
-      const isMatch=/^match$/i.test(String(s.direction||''));
-      return '<span class="tag '+(isMatch?'t-green':'t-red')+'"><i class="fa-solid '
-        +(isMatch?'fa-check':'fa-xmark')+'"></i> '+esc(s.point)+'</span>';
-    }).join('')
-  +'</div>';
+  if(!r.qa_id)return '';
+  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:{};
+  const signals=Array.isArray(sa.signals)?sa.signals.filter(function(s){return s&&s.point;}):[];
+  const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{},
+        lreason=r.lost_reason_accuracy||{}, rem=r.remarks_accuracy||{};
+  /* status_match is RE-DERIVED by the pipeline from the two statuses after the model replies, so it
+     is the one to trust for this chip - never the model's own status_match, which is asked for only
+     to make its reasoning legible. */
+  const checks=[
+    {label:'Pitch',status:r.pitch_status,why:pitch.reason},
+    {label:'Follow-up date',status:r.followup_date_status,why:fdate.reason},
+    {label:'Lost reason',status:r.lost_reason_status,why:lreason.reason},
+    {label:'Remarks',status:r.remarks_status,why:rem.reason},
+    {label:'CRM status',why:sa.reason,
+     status:r.status_match===true?'Match':r.status_match===false?'Mismatch':'Not Verifiable'}
+  ];
+  return (signals.length?trcMarkRowHtml('What the call says about the status',
+      signals.map(function(s){
+        const isMatch=/^match$/i.test(String(s.direction||''));
+        return trcMarkChip(isMatch?'t-green':'t-red',isMatch?'fa-check':'fa-xmark',s.point,null);
+      }).join('')):'')
+    +trcMarkRowHtml('Check by check',checks.map(function(c){
+        return trcMarkChip(trcQaResultClass(c.status),trcQaResultIcon(c.status),c.label,
+          [c.label+': '+(c.status||'not checked'),c.why].filter(function(x){return x;}).join(' — '));
+      }).join(''));
 }
 
 function trcCallHtml(r,i,total){
