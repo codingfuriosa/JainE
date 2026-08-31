@@ -7919,11 +7919,13 @@ async function psaFetchAll(){
    Boxes, not outlines. A cut-out of a unit IS a rectangular crop, so a more precise shape would
    buy nothing and cost a lot of fiddly drawing.
 
-   The whole screen is built so nobody has to remember anything: the plan is on show, the flats are
-   tapped rather than typed, the choice reads back as a sentence, and the actual cut-outs appear
-   before anything is committed to. */
+   NO FLOOR IS EVER CHOSEN. One sheet covers several floors - unit A is the same flat on the 1st,
+   3rd, 5th and 7th - so a floor is a decision that changes nothing about the picture. The address
+   is business unit, block, letter. Where a block has two sheets (odd floors and even floors) and
+   the same letter appears on both, BOTH come back, each labelled with the floors it covers: no
+   choice to make, and never ambiguous. */
 
-const PSU={project:'',block:'',floor:null,plan:null,units:[],sel:{},basket:[],plans:null,busy:false};
+const PSU={project:'',block:'',plates:[],units:{},sel:{},basket:[],plans:null,busy:false,cards:null};
 
 /* Two units are joined when their boxes touch or overlap. The tolerance covers the wall drawn
    between two flats - they share it, so their boxes stop a few pixels short of each other. */
@@ -7943,8 +7945,8 @@ function psuGroups(list,tol){
   }
   const by={};
   list.forEach(function(u,i){ const r=find(i); (by[r]=by[r]||[]).push(u); });
-  // groups in reading order, and the units inside each one likewise - so the output matches the
-  // order somebody's eye travels the plan rather than the order they happened to tap
+  // groups in reading order, and the units inside each one likewise - so the output follows the
+  // order an eye travels the plan rather than the order somebody happened to tap
   return Object.keys(by).map(function(k){ return by[k]; })
     .map(function(g){ g.sort(function(a,b){ return (a.y-b.y)||(a.x-b.x); }); return g; })
     .sort(function(a,b){ return (a[0].y-b[0].y)||(a[0].x-b[0].x); });
@@ -7958,8 +7960,8 @@ function psuBox(group,pad,imgW,imgH){
     x2=Math.max(x2,u.x+u.w); y2=Math.max(y2,u.y+u.h);
   });
   x1=Math.max(0,x1-pad); y1=Math.max(0,y1-pad);
-  if(imgW!=null) x2=Math.min(imgW,x2+pad); else x2=x2+pad;
-  if(imgH!=null) y2=Math.min(imgH,y2+pad); else y2=y2+pad;
+  x2=(imgW!=null)?Math.min(imgW,x2+pad):(x2+pad);
+  y2=(imgH!=null)?Math.min(imgH,y2+pad):(y2+pad);
   return {x:Math.round(x1),y:Math.round(y1),w:Math.round(x2-x1),h:Math.round(y2-y1)};
 }
 function psuPlanUrl(path){
@@ -7972,7 +7974,15 @@ function psuOrdinal(n){
   const s=['th','st','nd','rd'], v=n%100;
   return n+(s[(v-20)%10]||s[v]||s[0]);
 }
-function psuLabel(e){ return e.project+' · Block '+e.block+' · '+psuOrdinal(e.floor)+' floor · Unit '+e.unit_name; }
+/* "1st, 3rd, 5th & 7th floors" - the floors a sheet covers, said the way a person would. This is
+   a LABEL, never a thing to pick. */
+function psuFloorsText(floors){
+  const f=(floors||[]).slice().sort(function(a,b){ return a-b; }).map(psuOrdinal);
+  if(!f.length) return '';
+  if(f.length===1) return f[0]+' floor';
+  return f.slice(0,-1).join(', ')+' & '+f[f.length-1]+' floors';
+}
+function psuSelKey(planId,name){ return planId+'|'+name; }
 
 async function psuLoadPlans(force){
   if(PSU.plans && !force) return PSU.plans;
@@ -7987,7 +7997,7 @@ async function psuLoadUnits(planId){
   try{
     const {data}=await sb.schema('cust').from('plan_units').select('*').eq('plan_id',planId);
     return (data||[]).map(function(u){
-      return {id:u.id,unit_name:u.unit_name,unit_type:u.unit_type,
+      return {id:u.id,plan_id:u.plan_id,unit_name:u.unit_name,unit_type:u.unit_type,
               x:Number(u.x),y:Number(u.y),w:Number(u.w),h:Number(u.h)};
     }).sort(function(a,b){ return String(a.unit_name).localeCompare(String(b.unit_name)); });
   }catch(e){ return []; }
@@ -8000,10 +8010,19 @@ const PSU_CSS='<style id="psuCss">'
  +'.psu-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
  +'.psu-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
  +'.psu-f .sel{height:42px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font-size:14px;'
-   +'font-family:inherit;background:#fff;color:#334155;cursor:pointer;min-width:190px}'
- +'.psu-stage{position:relative;margin-top:14px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f8fafc}'
+   +'font-family:inherit;background:#fff;color:#334155;cursor:pointer;min-width:200px}'
+ +'.psu-letters{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}'
+ +'.psu-letter{min-width:52px;height:52px;padding:0 12px;border:2px solid var(--line);border-radius:12px;'
+   +'background:#fff;font-size:19px;font-weight:800;color:#334155;cursor:pointer;display:inline-flex;'
+   +'align-items:center;justify-content:center;gap:7px;transition:all .12s}'
+ +'.psu-letter:hover{border-color:#a78bfa}'
+ +'.psu-letter.on{background:#7c3aed;border-color:#5b21b6;color:#fff}'
+ +'.psu-letter small{font-size:10px;font-weight:700;opacity:.75}'
+ +'.psu-plate{margin-top:14px}'
+ +'.psu-plate h4{margin:0 0 7px;font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--slate);text-transform:uppercase}'
+ +'.psu-stage{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f8fafc}'
  +'.psu-stage canvas{display:block;width:100%;height:auto;cursor:pointer;touch-action:manipulation}'
- +'.psu-hint{padding:34px 20px;text-align:center;color:var(--slate);font-size:14px}'
+ +'.psu-hint{padding:34px 20px;text-align:center;color:var(--slate);font-size:14px;line-height:1.6}'
  +'.psu-sentence{font-size:15px;font-weight:600;color:var(--ink);line-height:1.6}'
  +'.psu-sentence .m{color:var(--slate);font-weight:500}'
  +'.psu-basket{position:sticky;top:14px}'
@@ -8018,39 +8037,64 @@ const PSU_CSS='<style id="psuCss">'
  +'.psu-card .cap small{display:block;font-weight:500;color:var(--slate);margin-top:2px}'
  +'.psu-empty{padding:26px 16px;text-align:center;color:var(--slate);font-size:14px;line-height:1.6}'
  +'.psu-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}'
- +'.psu-mark{position:absolute;border:2px solid #7c3aed;background:rgba(124,58,237,.14);border-radius:3px}'
  +'</style>';
 
-/* ---- the picker ------------------------------------------------------------------------- */
-window.psuSetProject=function(v){ PSU.project=v; PSU.block=''; PSU.floor=null; PSU.plan=null; PSU.units=[]; PSU.sel={}; psuRender(); };
-window.psuSetBlock=function(v){ PSU.block=v; PSU.floor=null; PSU.plan=null; PSU.units=[]; PSU.sel={}; psuRender(); };
-window.psuSetFloor=async function(v){
-  PSU.floor=Number(v)||null; PSU.sel={};
-  const plans=await psuLoadPlans();
-  PSU.plan=plans.find(function(p){
-    return p.project===PSU.project && p.block===PSU.block && (p.floors||[]).indexOf(PSU.floor)>=0;
-  })||null;
-  PSU.units=PSU.plan?await psuLoadUnits(PSU.plan.id):[];
-  psuRender();
-};
-window.psuToggleUnit=function(name){
-  if(PSU.sel[name]) delete PSU.sel[name]; else PSU.sel[name]=true;
-  psuPaint(); psuSide();
-};
-window.psuClearSel=function(){ PSU.sel={}; psuPaint(); psuSide(); };
+/* ---- choosing ---------------------------------------------------------------------------- */
+window.psuSetProject=function(v){ PSU.project=v; PSU.block=''; PSU.sel={}; psuRender(); };
+window.psuSetBlock=async function(v){ PSU.block=v; PSU.sel={}; await psuLoadBlock(); psuRender(); };
 
-/* Everything picked so far, kept as flat entries so one request can span blocks and floors -
-   pick from Block D, change the dropdowns, pick from Block E, and both are still in hand. */
+/* Every sheet for this block, and every flat marked on each. A block normally has two - odd floors
+   and even floors - and both are loaded together so a letter can be found without anybody being
+   asked which sheet it is on. */
+async function psuLoadBlock(){
+  const plans=await psuLoadPlans();
+  PSU.plates=plans.filter(function(p){ return p.project===PSU.project && p.block===PSU.block; })
+    .sort(function(a,b){ return (a.floors&&a.floors[0]||0)-(b.floors&&b.floors[0]||0); });
+  PSU.units={};
+  for(const p of PSU.plates) PSU.units[p.id]=await psuLoadUnits(p.id);
+}
+// every distinct letter in the block, with the sheets it appears on
+function psuLetters(){
+  const by={};
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      const k=String(u.unit_name||'').toUpperCase();
+      (by[k]=by[k]||[]).push({plate:p,unit:u});
+    });
+  });
+  return Object.keys(by).sort().map(function(k){ return {name:k,on:by[k]}; });
+}
+/* Tapping a letter takes it on EVERY sheet it appears on. That is what makes the floor question
+   disappear: the person asks for unit A and gets unit A, however many sheets carry one. */
+window.psuToggleLetter=function(name){
+  const rec=psuLetters().find(function(l){ return l.name===name; });
+  if(!rec) return;
+  const anyOn=rec.on.some(function(o){ return PSU.sel[psuSelKey(o.plate.id,o.unit.unit_name)]; });
+  rec.on.forEach(function(o){
+    const k=psuSelKey(o.plate.id,o.unit.unit_name);
+    if(anyOn) delete PSU.sel[k]; else PSU.sel[k]=true;
+  });
+  psuPaintAll(); psuSide(); psuLettersPaint();
+};
+window.psuClearSel=function(){ PSU.sel={}; psuPaintAll(); psuSide(); psuLettersPaint(); };
+
 window.psuAddToBasket=function(){
-  const picked=PSU.units.filter(function(u){ return PSU.sel[u.unit_name]; });
-  if(!picked.length){ toast('Tap a flat on the plan first','warn'); return; }
+  const picked=[];
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      if(PSU.sel[psuSelKey(p.id,u.unit_name)]) picked.push({plate:p,unit:u});
+    });
+  });
+  if(!picked.length){ toast('Choose a unit first','warn'); return; }
   let added=0;
-  picked.forEach(function(u){
-    const key=PSU.project+'|'+PSU.block+'|'+PSU.floor+'|'+u.unit_name;
+  picked.forEach(function(o){
+    const key=o.plate.id+'|'+o.unit.unit_name;
     if(PSU.basket.some(function(b){ return b.key===key; })) return;
-    PSU.basket.push({key:key,project:PSU.project,block:PSU.block,floor:PSU.floor,
-      plan_id:PSU.plan.id,storage_path:PSU.plan.storage_path,img_w:PSU.plan.img_w,img_h:PSU.plan.img_h,
-      unit_name:u.unit_name,unit_type:u.unit_type,x:u.x,y:u.y,w:u.w,h:u.h});
+    PSU.basket.push({key:key,project:o.plate.project,block:o.plate.block,
+      floors:o.plate.floors||[],plan_id:o.plate.id,storage_path:o.plate.storage_path,
+      img_w:o.plate.img_w,img_h:o.plate.img_h,
+      unit_name:o.unit.unit_name,unit_type:o.unit.unit_type,
+      x:o.unit.x,y:o.unit.y,w:o.unit.w,h:o.unit.h});
     added++;
   });
   PSU.sel={};
@@ -8058,54 +8102,59 @@ window.psuAddToBasket=function(){
   psuRender();
 };
 window.psuDropFromBasket=function(key){
-  PSU.basket=PSU.basket.filter(function(b){ return b.key!==key; });
-  psuRender();
+  PSU.basket=PSU.basket.filter(function(b){ return b.key!==key; }); psuRender();
 };
 window.psuEmptyBasket=function(){ PSU.basket=[]; PSU.sel={}; psuRender(); };
 
-/* ---- drawing the plan ------------------------------------------------------------------- */
-function psuPaint(){
-  const cv=$('psuCanvas'); if(!cv||!cv._img) return;
-  const img=cv._img, ctx=cv.getContext('2d');
+/* ---- drawing the plans -------------------------------------------------------------------- */
+function psuPaint(plate){
+  const cv=$('psuCv'+plate.id); if(!cv||!cv._img) return;
+  const ctx=cv.getContext('2d');
   ctx.clearRect(0,0,cv.width,cv.height);
-  ctx.drawImage(img,0,0,cv.width,cv.height);
-  const sx=cv.width/(PSU.plan.img_w||img.naturalWidth);
-  const sy=cv.height/(PSU.plan.img_h||img.naturalHeight);
-  PSU.units.forEach(function(u){
-    const on=!!PSU.sel[u.unit_name];
+  ctx.drawImage(cv._img,0,0,cv.width,cv.height);
+  const sx=cv.width/plate.img_w, sy=cv.height/plate.img_h;
+  (PSU.units[plate.id]||[]).forEach(function(u){
+    const on=!!PSU.sel[psuSelKey(plate.id,u.unit_name)];
     const x=u.x*sx, y=u.y*sy, w=u.w*sx, h=u.h*sy;
     ctx.lineWidth=on?3:1.5;
     ctx.strokeStyle=on?'#7c3aed':'rgba(100,116,139,.55)';
     ctx.fillStyle=on?'rgba(124,58,237,.20)':'rgba(148,163,184,.07)';
     ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
-    // the letter, and a tick when chosen - never colour alone, so it still reads for anyone who
-    // cannot tell the two shades apart
     const cx=x+w/2, cy=y+h/2, r=Math.max(13,Math.min(w,h)*0.17);
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
     ctx.fillStyle=on?'#7c3aed':'rgba(255,255,255,.92)'; ctx.fill();
     ctx.lineWidth=2; ctx.strokeStyle=on?'#5b21b6':'#64748b'; ctx.stroke();
+    // a tick as well as the colour, so it still reads for anyone who cannot tell the shades apart
     ctx.fillStyle=on?'#fff':'#334155';
     ctx.font='700 '+Math.round(r*1.15)+'px Inter,system-ui,sans-serif';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(on?'\u2713':String(u.unit_name||'?'), cx, cy+1);
   });
 }
-window.psuCanvasClick=function(ev){
-  const cv=$('psuCanvas'); if(!cv||!PSU.plan) return;
-  const r=cv.getBoundingClientRect();
-  const px=(ev.clientX-r.left)/r.width*(PSU.plan.img_w||cv.width);
-  const py=(ev.clientY-r.top)/r.height*(PSU.plan.img_h||cv.height);
-  // smallest box containing the tap, so a unit drawn inside another is still reachable
+function psuPaintAll(){ PSU.plates.forEach(psuPaint); }
+function psuLettersPaint(){
+  const box=$('psuLetters'); if(!box) return;
+  box.innerHTML=psuLetters().map(function(l){
+    const on=l.on.some(function(o){ return PSU.sel[psuSelKey(o.plate.id,o.unit.unit_name)]; });
+    const many=l.on.length>1?('<small>\u00d7'+l.on.length+'</small>'):'';
+    return '<button class="psu-letter'+(on?' on':'')+'" onclick="psuToggleLetter(\''+esc(l.name)+'\')">'
+      +esc(l.name)+many+'</button>';
+  }).join('');
+}
+window.psuCanvasClick=function(ev,planId){
+  const plate=PSU.plates.find(function(p){ return String(p.id)===String(planId); }); if(!plate) return;
+  const cv=$('psuCv'+plate.id), r=cv.getBoundingClientRect();
+  const px=(ev.clientX-r.left)/r.width*plate.img_w;
+  const py=(ev.clientY-r.top)/r.height*plate.img_h;
   let hit=null;
-  PSU.units.forEach(function(u){
-    if(px>=u.x&&px<=u.x+u.w&&py>=u.y&&py<=u.y+u.h){
-      if(!hit || (u.w*u.h)<(hit.w*hit.h)) hit=u;
-    }
+  (PSU.units[plate.id]||[]).forEach(function(u){
+    if(px>=u.x&&px<=u.x+u.w&&py>=u.y&&py<=u.y+u.h){ if(!hit||(u.w*u.h)<(hit.w*hit.h)) hit=u; }
   });
-  if(hit) psuToggleUnit(hit.unit_name);
+  // tapping the drawing does the same as tapping the letter, so the two never disagree
+  if(hit) psuToggleLetter(String(hit.unit_name).toUpperCase());
 };
 
-/* ---- the cut-outs ------------------------------------------------------------------------ */
+/* ---- the cut-outs ------------------------------------------------------------------------- */
 function psuCropCanvas(img,box){
   const c=document.createElement('canvas');
   c.width=box.w; c.height=box.h;
@@ -8123,8 +8172,8 @@ function psuLoadImg(url){
     im.src=url;
   });
 }
-/* One image per connected group, per plan. Grouping is done WITHIN a plan - two flats on different
-   floors are never joined however their boxes happen to line up. */
+/* One image per connected group, per sheet. Grouping happens WITHIN a sheet - two flats on
+   different sheets are never joined however their boxes happen to line up. */
 async function psuBuild(){
   const byPlan={};
   PSU.basket.forEach(function(b){ (byPlan[b.plan_id]=byPlan[b.plan_id]||[]).push(b); });
@@ -8134,32 +8183,32 @@ async function psuBuild(){
     const img=await psuLoadImg(psuPlanUrl(items[0].storage_path));
     psuGroups(items).forEach(function(g){
       const box=psuBox(g,40,items[0].img_w,items[0].img_h);
-      out.push({
-        canvas:psuCropCanvas(img,box),
-        units:g.map(function(u){ return u.unit_name; }),
-        joined:g.length>1,
-        project:g[0].project, block:g[0].block, floor:g[0].floor,
-        type:g[0].unit_type||''
-      });
+      out.push({canvas:psuCropCanvas(img,box),
+        units:g.map(function(u){ return u.unit_name; }), joined:g.length>1,
+        project:g[0].project, block:g[0].block, floors:g[0].floors, type:g[0].unit_type||''});
     });
   }
   return out;
 }
+function psuCardTitle(c){ return c.units.length>1?('Units '+c.units.join(' + ')):('Unit '+c.units[0]); }
+function psuCardSub(c){
+  return c.project+' · Block '+c.block+' · '+psuFloorsText(c.floors)
+    +(c.type?(' · '+c.type):'')+(c.joined?' · joined, they share a wall':'');
+}
 window.psuMake=async function(){
   if(!PSU.basket.length){ toast('Nothing on the list yet','warn'); return; }
   if(PSU.busy) return; PSU.busy=true;
-  const host=$('psuOut'); if(host) host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cutting the images…</div>';
+  const host=$('psuOut');
+  if(host) host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cutting the images…</div>';
   try{
-    const cards=await psuBuild();
-    PSU.cards=cards;
-    if(host) host.innerHTML=cards.map(function(c,i){
-      const title=(c.units.length>1?('Units '+c.units.join(' + ')):('Unit '+c.units[0]));
-      const sub=c.project+' · Block '+c.block+' · '+psuOrdinal(c.floor)+' floor'
-        +(c.type?(' · '+c.type):'')
-        +(c.joined?' · joined, they share a wall':'');
-      return '<div class="psu-card"><img src="'+c.canvas.toDataURL('image/png')+'" alt="'+esc(title)+'">'
-        +'<div class="cap">'+esc(title)+'<small>'+esc(sub)+'</small></div></div>';
-    }).join('');
+    const cards=await psuBuild(); PSU.cards=cards;
+    if(host) host.innerHTML=cards.map(function(c){
+      return '<div class="psu-card"><img src="'+c.canvas.toDataURL('image/png')+'" alt="'+esc(psuCardTitle(c))+'">'
+        +'<div class="cap">'+esc(psuCardTitle(c))+'<small>'+esc(psuCardSub(c))+'</small></div></div>';
+    }).join('')
+    +'<div class="psu-actions">'
+      +'<button class="btn btn-primary" onclick="psuDownload()"><i class="fa-solid fa-download"></i> Download</button>'
+      +'<button class="btn" onclick="psuPrint()"><i class="fa-solid fa-print"></i> Print</button></div>';
     toast(cards.length+(cards.length===1?' image ready':' images ready'),'ok');
   }catch(e){
     if(host) host.innerHTML='<div class="psu-empty">Could not cut the images: '+esc((e&&e.message)||e)+'</div>';
@@ -8169,9 +8218,8 @@ window.psuMake=async function(){
 window.psuDownload=function(){
   const cards=PSU.cards||[];
   if(!cards.length){ toast('Make the images first','warn'); return; }
-  cards.forEach(function(c,i){
-    const name=c.project+' Block '+c.block+' '+psuOrdinal(c.floor)+' floor - '
-      +(c.units.length>1?('Units '+c.units.join('+')):('Unit '+c.units[0]))+'.png';
+  cards.forEach(function(c){
+    const name=c.project+' Block '+c.block+' - '+psuCardTitle(c)+' ('+psuFloorsText(c.floors)+').png';
     c.canvas.toBlob(function(b){
       const url=URL.createObjectURL(b), a=document.createElement('a');
       a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
@@ -8179,18 +8227,15 @@ window.psuDownload=function(){
     },'image/png');
   });
 };
-/* One page per image, opened as its own tab - the same shape as the reimbursement printout, so a
-   set can be handed over or filed without anybody assembling it by hand. */
+/* One flat per page, in its own tab - the same shape as the reimbursement printout, so a set can
+   be handed over or filed without anybody assembling it by hand. */
 window.psuPrint=function(){
   const cards=PSU.cards||[];
   if(!cards.length){ toast('Make the images first','warn'); return; }
   const w=window.open('','_blank');
   if(!w){ toast('Please allow popups to print','err'); return; }
   const pages=cards.map(function(c){
-    const title=(c.units.length>1?('Units '+c.units.join(' + ')):('Unit '+c.units[0]));
-    const sub=c.project+' · Block '+c.block+' · '+psuOrdinal(c.floor)+' floor'
-      +(c.type?(' · '+c.type):'')+(c.joined?' · joined, they share a wall':'');
-    return '<section><h2>'+esc(title)+'</h2><div class="sub">'+esc(sub)+'</div>'
+    return '<section><h2>'+esc(psuCardTitle(c))+'</h2><div class="sub">'+esc(psuCardSub(c))+'</div>'
       +'<img src="'+c.canvas.toDataURL('image/png')+'"></section>';
   }).join('');
   w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'
@@ -8206,24 +8251,33 @@ window.psuPrint=function(){
   w.addEventListener('load',go); setTimeout(go,600+cards.length*150);
 };
 
-/* ---- the right-hand column --------------------------------------------------------------- */
+/* ---- the right-hand column ---------------------------------------------------------------- */
 function psuSide(){
   const el=$('psuSel'); if(!el) return;
-  const picked=PSU.units.filter(function(u){ return PSU.sel[u.unit_name]; });
-  el.innerHTML=picked.length
-    ? '<div class="psu-sentence">'+esc(PSU.project)+' <span class="m">·</span> Block '+esc(PSU.block)
-      +' <span class="m">·</span> '+psuOrdinal(PSU.floor)+' floor <span class="m">·</span> '
-      +'Unit'+(picked.length>1?'s':'')+' '+esc(picked.map(function(u){return u.unit_name;}).join(', '))+'</div>'
-      +'<div class="psu-actions">'
-        +'<button class="btn btn-primary" onclick="psuAddToBasket()"><i class="fa-solid fa-plus"></i> Add to the list</button>'
-        +'<button class="btn" onclick="psuClearSel()">Clear</button></div>'
-    : '<div class="psu-empty">Tap a flat on the plan to begin.</div>';
+  const picked=[];
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      if(PSU.sel[psuSelKey(p.id,u.unit_name)]) picked.push({plate:p,unit:u});
+    });
+  });
+  if(!picked.length){ el.innerHTML='<div class="psu-empty">Choose a unit above, or tap a flat on the plan.</div>'; return; }
+  const names=Array.from(new Set(picked.map(function(o){ return o.unit.unit_name; })));
+  const sheets=Array.from(new Set(picked.map(function(o){ return psuFloorsText(o.plate.floors); })));
+  el.innerHTML='<div class="psu-sentence">'+esc(PSU.project)+' <span class="m">·</span> Block '+esc(PSU.block)
+      +' <span class="m">·</span> Unit'+(names.length>1?'s':'')+' '+esc(names.join(', '))+'</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-top:5px">'
+      +(sheets.length>1
+        ? ('Appears on '+sheets.length+' sheets — you will get one image of each: '+esc(sheets.join(' / ')))
+        : esc(sheets[0]||''))+'</div>'
+    +'<div class="psu-actions">'
+      +'<button class="btn btn-primary" onclick="psuAddToBasket()"><i class="fa-solid fa-plus"></i> Add to the list</button>'
+      +'<button class="btn" onclick="psuClearSel()">Clear</button></div>';
 }
 function psuBasketHtml(){
-  if(!PSU.basket.length) return '<div class="psu-empty">Nothing on the list yet.<br>Pick flats on the plan and add them here. You can change block or floor and keep adding.</div>';
+  if(!PSU.basket.length) return '<div class="psu-empty">Nothing on the list yet.<br>Pick units and add them here. You can change block and keep adding.</div>';
   const by={};
   PSU.basket.forEach(function(b){
-    const k=b.project+' · Block '+b.block+' · '+psuOrdinal(b.floor)+' floor';
+    const k=b.project+' · Block '+b.block+' · '+psuFloorsText(b.floors);
     (by[k]=by[k]||[]).push(b);
   });
   return Object.keys(by).map(function(k){
@@ -8238,12 +8292,12 @@ function psuBasketHtml(){
     +'<button class="btn" onclick="psuEmptyBasket()">Start again</button></div>';
 }
 
-/* ---- the screen -------------------------------------------------------------------------- */
+/* ---- the screen --------------------------------------------------------------------------- */
 async function psuRender(){
   const host=$('psuBody'); if(!host) return;
   const plans=await psuLoadPlans();
   if(!plans.length){
-    host.innerHTML='<div class="card card-pad psu-empty">'
+    host.innerHTML=PSU_CSS+'<div class="card card-pad psu-empty">'
       +'<i class="fa-regular fa-image" style="font-size:26px;color:#94a3b8"></i>'
       +'<div style="margin-top:10px;font-weight:600;color:var(--ink)">No floor plans have been set up yet.</div>'
       +'<div>A plan has to be uploaded and its flats marked once, before units can be cut out of it.</div>'
@@ -8252,64 +8306,59 @@ async function psuRender(){
     return;
   }
   const projects=Array.from(new Set(plans.map(function(p){return p.project;}))).sort();
-  if(!PSU.project) PSU.project=window._psuLastProject||projects[0];
+  if(!PSU.project||projects.indexOf(PSU.project)<0) PSU.project=window._psuLastProject||projects[0];
   if(projects.indexOf(PSU.project)<0) PSU.project=projects[0];
   window._psuLastProject=PSU.project;
 
   const blocks=Array.from(new Set(plans.filter(function(p){return p.project===PSU.project;})
     .map(function(p){return p.block;}))).sort();
-  if(!PSU.block) PSU.block=blocks[0]||'';
-  if(blocks.indexOf(PSU.block)<0) PSU.block=blocks[0]||'';
-
-  const floors=Array.from(new Set(plans.filter(function(p){ return p.project===PSU.project&&p.block===PSU.block; })
-    .reduce(function(a,p){ return a.concat(p.floors||[]); },[]))).sort(function(a,b){return a-b;});
+  const hadBlock=PSU.block;
+  if(!PSU.block||blocks.indexOf(PSU.block)<0) PSU.block=blocks[0]||'';
+  if(PSU.block && (PSU.block!==hadBlock || !PSU.plates.length)) await psuLoadBlock();
 
   const opt=function(v,cur){ return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+esc(v)+'</option>'; };
+  const letters=psuLetters();
   host.innerHTML=PSU_CSS
    +'<div class="psu-wrap">'
-    +'<div>'
-      +'<div class="card card-pad">'
-        +'<div class="psu-pick">'
-          +'<div class="psu-f"><label>Business unit</label><select class="sel" onchange="psuSetProject(this.value)">'
-            +projects.map(function(p){return opt(p,PSU.project);}).join('')+'</select></div>'
-          +'<div class="psu-f"><label>Block</label><select class="sel" onchange="psuSetBlock(this.value)">'
-            +blocks.map(function(b){return opt(b,PSU.block);}).join('')+'</select></div>'
-          +'<div class="psu-f"><label>Floor</label><select class="sel" onchange="psuSetFloor(this.value)">'
-            +'<option value="">Choose a floor…</option>'
-            +floors.map(function(f){ return '<option value="'+f+'"'+(PSU.floor===f?' selected':'')+'>'+psuOrdinal(f)+' floor</option>'; }).join('')
-          +'</select></div>'
-          +(psuCanSetup()?'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label><button class="btn" style="height:42px" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button></div>':'')
-        +'</div>'
-        +'<div class="psu-stage" id="psuStage">'
-          +(PSU.plan
-            ? '<canvas id="psuCanvas" onclick="psuCanvasClick(event)"></canvas>'
-            : '<div class="psu-hint">Choose a floor and its plan will appear here.</div>')
-        +'</div>'
+    +'<div><div class="card card-pad">'
+      +'<div class="psu-pick">'
+        +'<div class="psu-f"><label>Business unit</label><select class="sel" onchange="psuSetProject(this.value)">'
+          +projects.map(function(p){return opt(p,PSU.project);}).join('')+'</select></div>'
+        +'<div class="psu-f"><label>Block</label><select class="sel" onchange="psuSetBlock(this.value)">'
+          +blocks.map(function(b){return opt(b,PSU.block);}).join('')+'</select></div>'
+        +(psuCanSetup()?'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label><button class="btn" style="height:42px" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button></div>':'')
       +'</div>'
-    +'</div>'
+      +'<div style="margin-top:16px;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--slate);text-transform:uppercase">Unit</div>'
+      +(letters.length
+        ? '<div class="psu-letters" id="psuLetters"></div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:10px">'
+          +'Tap a unit — or tap it straight on the plan below. No need to pick a floor: one plan covers several, and the flat is the same on each.</div>'
+        : '<div class="psu-empty">No flats have been marked on this block yet'
+          +(psuCanSetup()?' — open Set up plans to mark them.':'.')+'</div>')
+      +PSU.plates.map(function(p){
+        return '<div class="psu-plate"><h4>'+esc(psuFloorsText(p.floors))+'</h4>'
+          +'<div class="psu-stage"><canvas id="psuCv'+p.id+'" onclick="psuCanvasClick(event,'+p.id+')"></canvas></div></div>';
+      }).join('')
+    +'</div></div>'
     +'<div class="psu-basket">'
       +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">Your selection</div><div id="psuSel"></div></div>'
       +'<div class="card card-pad" style="margin-top:14px"><div class="sec-title" style="margin:0 0 10px">On the list</div>'+psuBasketHtml()+'</div>'
       +'<div id="psuOut" style="margin-top:14px"></div>'
     +'</div>'
    +'</div>';
-  psuSide();
-  if(PSU.plan){
-    const cv=$('psuCanvas');
+  psuLettersPaint(); psuSide();
+  for(const p of PSU.plates){
     try{
-      const img=await psuLoadImg(psuPlanUrl(PSU.plan.storage_path));
+      const img=await psuLoadImg(psuPlanUrl(p.storage_path));
+      const cv=$('psuCv'+p.id); if(!cv) continue;
       // drawn at a size the screen can handle; the CUT is always taken from the full-resolution
-      // original, so what is shown being smaller costs the output nothing
-      const maxW=1400, sc=Math.min(1,maxW/(PSU.plan.img_w||img.naturalWidth));
-      cv.width=Math.round((PSU.plan.img_w||img.naturalWidth)*sc);
-      cv.height=Math.round((PSU.plan.img_h||img.naturalHeight)*sc);
-      cv._img=img; psuPaint();
-      if(!PSU.units.length){
-        const st=$('psuStage');
-        if(st) st.insertAdjacentHTML('beforeend','<div class="psu-hint" style="border-top:1px solid var(--line)">This plan has no flats marked on it yet'+(psuCanSetup()?' — open Set up plans to mark them.':'.')+'</div>');
-      }
+      // original, so showing it smaller costs the output nothing
+      const sc=Math.min(1,1400/p.img_w);
+      cv.width=Math.round(p.img_w*sc); cv.height=Math.round(p.img_h*sc);
+      cv._img=img; psuPaint(p);
     }catch(e){
-      const st=$('psuStage'); if(st) st.innerHTML='<div class="psu-hint">Could not load this plan: '+esc((e&&e.message)||e)+'</div>';
+      const cv=$('psuCv'+p.id);
+      if(cv&&cv.parentNode) cv.parentNode.innerHTML='<div class="psu-hint">Could not load this plan.</div>';
     }
   }
 }
