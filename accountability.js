@@ -5378,7 +5378,11 @@
     .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
     .wf-pill.ok{background:#dcfce7;color:#166534}
     .wf-pill.cur{background:#dbeafe;color:#1e40af}
-    .wf-pill.wait{background:#f1f5f9;color:#cbd5e1;padding:3px 12px}
+    /* The dot for a step the instance has not reached yet. It was #cbd5e1 on #f1f5f9 - 1.36:1,
+       which is not a faint dot, it is an invisible one. On a three-step workflow nobody noticed;
+       Invoice Processing has twelve, so most of every row read as blank and the table looked
+       like it had simply failed to draw. Still quieter than the real statuses, but legible. */
+    .wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
     .wf-upd-sys i{opacity:.6;margin-right:4px}
