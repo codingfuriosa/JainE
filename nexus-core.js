@@ -13472,6 +13472,7 @@ function trcLeads(rows){
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
     g.mismatches=g.rows.filter(function(r){return r.status_match===false;}).length;
+    g.ovHealth=trcOvHealth(g.status,g.rows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -13663,7 +13664,8 @@ function trcLeadRowHtml(g){
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
-    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')+'</td>'
+    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
+      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')+'</td>'
     +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
     +'<td>'+(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
@@ -13911,6 +13913,59 @@ function trcVisitChecks(rows){
   });
   return out.sort(function(a,b){return b.date.localeCompare(a.date);});
 }
+/* The two-part OV rule: enforced here, not just checked by hand.
+   (1) an OV lead must have had a follow-up call within the last two days - silence means nobody is
+       actually managing the scheduled visit, whatever the CRM status still says.
+   (2) once the visit date itself arrives, TWO follow-up calls must be logged on that exact day, not
+       one - a single call is under the bar here, not a pass.
+   Also flags an OV row that carries no parseable visit date at all as not properly marked, which is
+   what "is the organised-visit status marked properly" comes down to on the data this lead actually
+   has. Only evaluated for a lead whose CURRENT status is OV - a lead that has since moved on (Site
+   Visited, Lost, ...) is a different question this does not answer. Returns null for every other
+   status, which callers use to skip rendering entirely. */
+function trcOvHealth(status,rows){
+  if(status!=='OV')return null;
+  const ovRows=(rows||[]).filter(function(r){return r.crm_status==='OV';});
+  const latestOv=ovRows[ovRows.length-1];
+  const visitDate=latestOv&&latestOv.next_follow_up_text?String(latestOv.next_follow_up_text).slice(0,10):null;
+  const reasons=[];
+  if(!visitDate)reasons.push('Organised visit has no site-visit date recorded against it - not marked properly');
+
+  /* The CRM's lead-level status and its most recent follow-up's status are two separate fields, and
+     they can drift: a follow-up can move a lead on to "In Follow Up" or further without the
+     lead-level status being updated to match, leaving OV showing here after it stopped being true. */
+  const trueLatest=(rows||[])[((rows||[]).length-1)];
+  if(trueLatest&&trueLatest.crm_status&&trueLatest.crm_status!=='OV')
+    reasons.push('Lead status still shows OV but the latest follow-up ('+trueLatest.crm_status
+      +', '+(trcWall(trcRowDate(trueLatest))||'date not recorded')+') has already moved past it - not marked properly');
+
+  const today=traToday();
+  const twoDaysAgo=traLocalDate(new Date(Date.now()-2*864e5));
+  const recentCall=(rows||[]).some(function(r){const d=trcRowDate(r);return d&&d>=twoDaysAgo&&d<=today;});
+  if(!recentCall)reasons.push('No follow-up call logged in the last two days');
+
+  let onVisitDay=null;
+  if(visitDate&&visitDate<=today){
+    onVisitDay=(rows||[]).filter(function(r){return trcRowDate(r)===visitDate;}).length;
+    if(onVisitDay<2)reasons.push('Only '+onVisitDay+' follow-up call'+(onVisitDay===1?'':'s')
+      +' logged on the visit day ('+(trcWall(visitDate)||visitDate)+') - 2 required');
+  }
+  return {ok:reasons.length===0,visitDate:visitDate,onVisitDay:onVisitDay,reasons:reasons};
+}
+function trcOvHealthHtml(h){
+  if(!h)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid '+(h.ok?'#16a34a':'#dc2626')+'">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-triangle-exclamation" style="color:'+(h.ok?'#16a34a':'#dc2626')+'"></i> OV health check</div>'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +(h.ok?trcTag('t-green','fa-check','OK'):trcTag('t-red','fa-triangle-exclamation','Danger'))
+      +(h.visitDate?'<span style="font-size:12.5px;color:var(--slate)">Site visit organised for '+esc(trcWall(h.visitDate)||h.visitDate)+'</span>'
+                    :'<span style="font-size:12.5px;color:var(--slate)">No site-visit date on record</span>')
+    +'</div>'
+    +(h.reasons.length?'<ul style="margin:10px 0 0 18px;padding:0;font-size:12.5px;line-height:1.7;color:#dc2626">'
+      +h.reasons.map(function(r){return '<li>'+esc(r)+'</li>';}).join('')+'</ul>':'')
+  +'</div>';
+}
+
 function trcVisitCheckHtml(checks){
   if(!checks.length)return '';
   return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
@@ -14009,10 +14064,12 @@ async function trcLeadDetail(v,leadId){
     ? rows.slice().reverse().map(function(r,i){return trcCallHtml(r,rows.length-1-i,rows.length);}).join('')
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
+  const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
   const visitChecks=trcVisitCheckHtml(trcVisitChecks(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
+    +ovHealth
     +visitChecks
     +calls;
 
