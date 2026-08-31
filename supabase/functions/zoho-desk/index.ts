@@ -15,13 +15,16 @@
 // all. Only the actual Zoho API calls and the write-back of zoho_* columns use the service role -
 // Zoho credentials, and writing a system-of-record status, are not something a customer's JWT does.
 //
-// Required Secrets (Zoho API Console > Self Client, or a server-based OAuth app with offline access):
-//   ZOHO_DC              - data center domain suffix: "com" (US/global), "in", "eu", "com.au", "jp"
-//   ZOHO_CLIENT_ID
-//   ZOHO_CLIENT_SECRET
-//   ZOHO_REFRESH_TOKEN   - from the one-time OAuth grant (scope: Desk.tickets.ALL, offline access)
-//   ZOHO_ORG_ID          - Zoho Desk > Setup > Developer Space > API > Org ID
-//   ZOHO_DEPARTMENT_ID   - optional; which Desk department new tickets are filed under
+// Zoho credentials (ZOHO_DC/CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN/ORG_ID) live in Supabase Vault,
+// read here via app.get_zoho_secrets() - a function grant()ed to service_role only - rather than as
+// this function's own Secrets. Set them once via SQL:
+//   select vault.create_secret('in', 'ZOHO_DC', '...');                 -- "com","in","eu","com.au","jp"
+//   select vault.create_secret('<id>', 'ZOHO_CLIENT_ID', '...');
+//   select vault.create_secret('<secret>', 'ZOHO_CLIENT_SECRET', '...');
+//   select vault.create_secret('<token>', 'ZOHO_REFRESH_TOKEN', '...'); -- scope Desk.tickets.ALL,Desk.basic.READ
+//   select vault.create_secret('<org id>', 'ZOHO_ORG_ID', '...');
+// ZOHO_DEPARTMENT_ID (optional - which Desk department new tickets are filed under) is still read
+// from this function's own Secrets if set, since it's not sensitive enough to need Vault.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -57,15 +60,19 @@ Deno.serve(async (req: Request) => {
   const SB = Deno.env.get("SUPABASE_URL")!;
   const SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const ANON = Deno.env.get("SUPABASE_ANON_KEY") || SRV;
-  const ZOHO_DC = Deno.env.get("ZOHO_DC") || "com";
-  const ZOHO_CLIENT_ID = Deno.env.get("ZOHO_CLIENT_ID");
-  const ZOHO_CLIENT_SECRET = Deno.env.get("ZOHO_CLIENT_SECRET");
-  const ZOHO_REFRESH_TOKEN = Deno.env.get("ZOHO_REFRESH_TOKEN");
-  const ZOHO_ORG_ID = Deno.env.get("ZOHO_ORG_ID");
   const ZOHO_DEPARTMENT_ID = Deno.env.get("ZOHO_DEPARTMENT_ID");
 
+  const db = createClient(SB, SRV);
+  const { data: zohoSecrets, error: secretsErr } = await db.schema("app").rpc("get_zoho_secrets");
+  if (secretsErr) return j({ error: "Could not read Zoho credentials from Vault: " + secretsErr.message }, 500);
+  const ZOHO_DC = zohoSecrets?.ZOHO_DC || "com";
+  const ZOHO_CLIENT_ID = zohoSecrets?.ZOHO_CLIENT_ID;
+  const ZOHO_CLIENT_SECRET = zohoSecrets?.ZOHO_CLIENT_SECRET;
+  const ZOHO_REFRESH_TOKEN = zohoSecrets?.ZOHO_REFRESH_TOKEN;
+  const ZOHO_ORG_ID = zohoSecrets?.ZOHO_ORG_ID;
+
   if (!ZOHO_CLIENT_ID || !ZOHO_CLIENT_SECRET || !ZOHO_REFRESH_TOKEN || !ZOHO_ORG_ID) {
-    return j({ error: "Zoho Desk is not configured yet - set ZOHO_CLIENT_ID/ZOHO_CLIENT_SECRET/ZOHO_REFRESH_TOKEN/ZOHO_ORG_ID in this function's Secrets" }, 500);
+    return j({ error: "Zoho Desk is not configured yet - store ZOHO_CLIENT_ID/ZOHO_CLIENT_SECRET/ZOHO_REFRESH_TOKEN/ZOHO_ORG_ID in Vault (see the comment at the top of this file)" }, 500);
   }
 
   const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -86,8 +93,6 @@ Deno.serve(async (req: Request) => {
     .select("id,unit_id,subject,description,zoho_ticket_id").eq("id", ticketId).is("deleted_at", null).maybeSingle();
   if (ticketErr) return j({ error: ticketErr.message }, 500);
   if (!ticket) return j({ error: "Ticket not found or not accessible" }, 404);
-
-  const db = createClient(SB, SRV);
 
   try {
     const accessToken = await zohoAccessToken(ZOHO_DC, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN);

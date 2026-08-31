@@ -18,15 +18,89 @@ import { QA_RUBRIC } from "../_shared/qa-rubric.ts";
 export const CATALOGUE = `APPROVED PROJECT INFORMATION (Jain Group). This is the reference for
 judging whether what the agent said was correct. Do not treat anything absent from this list as
 false - treat it as unverifiable.
-- Dream Gurukul: 3BHK from 80 lakh, 2BHK from 57 lakh. UNDER CONSTRUCTION. Doltala, Madhyamgram / near Airport. Possession 2027/2028.
-- Dream World City: 2BHK 29 lakh, 3BHK 36 lakh. READY TO MOVE. Near Joka Metro / Pailan More.
-- Dream Valley: 3BHK 73 lakh (no 2BHK). READY TO MOVE. Siliguri, Hill Cart Road, Dagapur.
-- Dream Eco City: 2BHK 34 lakh, 2.5BHK 39 lakh. READY TO MOVE. Durgapur, Muchipara, NH-2.
-- Dream Exotica: 2BHK 36 lakh, 3BHK 44 lakh. READY TO MOVE. Madhyamgram, Badu Road.
-- Dream One: Rajarhat, opposite Eco Park.
-- Dream Residency Manor.
-- Ecocity Bungalows.
-- Durbaar Banquets: a banquet venue, not a residential project.`;
+Every price is the "onwards" figure and excludes GST, registration and parking unless stated.
+Carpet area runs roughly 25-30% below the super built-up areas given here.
+
+- Dream Ananta - the project customers hear pitched as "the new project near the Airport".
+  UNDER CONSTRUCTION, launching 2026. Doltala, Old Jessore Rd, Madhyamgram / near the Airport;
+  landmark Fortune City / Julien Day School. Base rate 5,950/sft.
+  2BHK 62 lakh (940-1015 sqft) - 3BHK 68 lakh (1075-1405 sqft) - 4BHK 1.14 crore (1780-1805 sqft).
+  Parking: covered 5 lakh, open 4 lakh. 5.12 acres, 67% open space, 465 flats, 6 towers, G+8.
+  Possession date and RERA number are not yet announced - "not yet announced" is the correct answer.
+- Dream Gurukul - a SEPARATE project from Dream Ananta, on the same Doltala / Madhyamgram side near
+  the Airport. Do not treat the two as one. UNDER CONSTRUCTION. 2BHK from 57 lakh, 3BHK from
+  80 lakh. Possession 2027/2028.
+- Dream Diamond - UNDER CONSTRUCTION. 100 bungalows, G+1, 3 bed and 3 bath, on 3.06 acres.
+  Nepalgunge Rd, Daulatpur, Pailan; landmark near Joka Metro.
+  2006 sqft on 1.25 kattha 79 lakh - 2033 sqft on 1.30 kattha 82 lakh.
+  RERA WBRERA/P/SOU/2023/00729. Possession mid-2027.
+- Dream World City - READY TO MOVE. Nepalgunge Rd, Daulatpur, Pailan, about 10 minutes from Joka
+  Metro. 1BHK 25 lakh (560-575 sqft) - 2BHK 29 lakh (630-800 sqft) - 3BHK 36 lakh (795-930 sqft).
+  20 acres, 400+ flats, 6 towers.
+- Dream Valley - READY TO MOVE. Hill Cart Road, near Dagapur Tea Estate, Siliguri. 3BHK ONLY - there
+  is no 1BHK, 2BHK or 4BHK here: 72 lakh (1540-1645 sqft). Base rate 3,900/sft. Open parking
+  4.5 lakh. 7 acres, 258 flats, 4 towers.
+- Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur, beside NH-2; landmark Kalpana Inn.
+  2BHK 34 lakh (880 sqft) - 2BHK with study room 39 lakh (1045 sqft). 22 bighas, 198 flats, 3 towers.
+- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowrasta).
+  1BHK studio 16 lakh (one open kitchen and toilet, no car parking) - 2BHK 42 lakh (1015 sqft) -
+  3BHK 50 lakh (1235-1400 sqft). 2 acres, 154 flats, 7 towers.
+- Dream One - READY TO MOVE. Kadampukur-Jhalgachhi Rd, Patharghata, New Town / Rajarhat, beside the
+  Westin and opposite Eco Park Gate 1. Base rate 9,000/sft.
+  2BHK 98 lakh (945-1080 sqft) - 3BHK 1.30 crore (1325-2045 sqft in the G+14 towers, 1650-1655 sqft
+  in the G+7) - 4BHK 2.25 crore (2395 sqft) - Penthouse 3.75 crore (3770 sqft).
+  Parking: covered 7 lakh, open 5.25 lakh. 3.2 acres, 65% open space, 243 flats, 6 towers.
+- Dream Residency Manor - a live project in its own right. No approved figures are held here, so
+  nothing said about it can be marked wrong - treat every claim about it as unverifiable.
+- Ecocity Bungalows - a live project in its own right, and NOT another name for Dream Diamond or for
+  Dream Eco City. No approved figures are held here - treat every claim about it as unverifiable.
+- Durbaar Banquets - a banquet venue, not a residential project. Run by Jain Group inside the
+  Holiday Inn Kolkata Airport, Bishwa Bangla Sarani, near City Center 2, New Town. A 12,000 sqft
+  pillar-less banquet hall and a 10,000 sqft lawn, 137 hotel rooms, 200+ car parks with valet,
+  outdoor catering permitted. Exact pricing is never quoted on a call - it is settled at the venue.`;
+
+/* The short forms the sales floor actually speaks. The unambiguous ones are already written out in
+   the transcript before it reaches here; these four are not, because each is also an ordinary word
+   and rewriting them would have corrupted the transcript. So they are resolved HERE, by a reader
+   with the whole call in front of it, which is the right place for a judgement call. */
+export const ABBREVIATIONS = `PROJECT SHORT FORMS. Agents use these on calls. Read them as the
+project only where the surrounding conversation actually supports it - each of the last four is also
+an ordinary word, and NONE of them is evidence on its own that a project was named:
+- DWC = Dream World City · DV = Dream Valley · DRM = Dream Residency Manor
+- DEC = Dream Eco City, but "DEC 2027" and similar is a date.
+- DG = Dream Gurukul, but a "DG set" is a diesel generator.
+- DD = Dream Diamond, but on a payment call a DD is far more likely a demand draft.
+- DO = Dream One, but it is usually just the English word "do".
+- DA = Dream Ananta, but "da"/"dada" is a Bengali form of address.
+Where a short form is genuinely ambiguous, treat the project as unstated rather than guessing which
+one was meant.`;
+
+/* WHERE THE RIGHT ANSWER DEPENDS ON THE PROJECT. The rubric in _shared/qa-rubric.ts is deliberately
+   company-wide and figure-free, and it stays that way. These are the handful of rules that genuinely
+   differ project by project, so the same sentence from an agent is correct on one project and wrong
+   on another - a project-blind judge scores both identically and is wrong half the time. They live
+   here, beside the catalogue, because this is the prompt that never sees audio. */
+export const PROJECT_EXCEPTIONS = `PROJECT-SPECIFIC RULES. Apply only the line for the project this
+lead belongs to, and only where the subject actually came up on the call.
+- Servant quarter: Dream Valley and Dream One DO have this facility - saying so is correct there.
+  Dream Ananta, Dream Eco City and Dream Exotica do NOT, and the correct answer there is that the
+  project does not include one. On any other project this is unverifiable either way.
+- Pick-up and drop: Dream World City DOES offer it. Dream Ananta, Dream Eco City, Dream Exotica and
+  Dream Valley do NOT. On any other project this is unverifiable either way.
+- Dream One rate per square foot: the approved answer is the 9,000/sft base rate. A per-sqft figure
+  reached by dividing a flat's total price by its area is an error even when the arithmetic is
+  correct, because it is not the rate the company quotes.
+- Dream Valley configuration: only 3BHK exists. An agent who offers a 2BHK or a 4BHK there has given
+  wrong product information. An agent who says plainly that only 3BHK is available has not, and
+  should not be marked down for it.
+- Durbaar Banquets runs a DIFFERENT funnel, and point 1 of the rubric must be read against this one:
+  greet -> what kind of event -> expected guest count -> hall, lawn or both -> ask for the venue
+  visit. There is no configuration step and no BHK question, so their absence is not a skipped step.
+  Exact pricing, date availability, decoration packages, and the alcohol and DJ policies are all
+  venue-visit matters - quoting any of them on the call is leakage under point 5.
+- Possession date is not volunteered unless the customer asks for it. That only bites on the
+  under-construction projects - Dream Ananta, Dream Gurukul and Dream Diamond. On the ready-to-move
+  projects, saying it is ready to move is the pitch, not a disclosure.`;
 
 export const LOST_REASON_VOCABULARY = `CRM LOST REASON VOCABULARY - when naming the reason the
 conversation actually supports, use one of these exact strings wherever one fits:
@@ -57,7 +131,16 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "score": 0-100, or null when status is "Not Verifiable",
     "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Verifiable",
     "issues": ["one short line per specific problem, quoting the claim"],
-    "reason": "why this verdict"
+    "reason": "why this verdict",
+    "fact_checks": [
+      { "fact": "Project" | "Configuration" | "Budget" | "Area (sqft)" | "Location" | "Possession",
+        "status": "Match" | "Mismatch" | "Not Discussed",
+        "what_was_said": "what the call actually said about this fact, or null if Not Discussed",
+        "what_is_correct": "the approved value from the catalogue, or null if Not Discussed or the
+                             catalogue does not cover it",
+        "note": "one short line on why - required for Match and Mismatch, null for Not Discussed" }
+      ... all six facts, always in this order, always all six present
+    ]
   },
   "followup_date_accuracy": {
     "status": "Accurate" | "Inaccurate" | "Not Verifiable",
@@ -131,6 +214,30 @@ product information given.
 - "issues": one short line per specific problem, quoting the claim. Empty array if there are none.
 NEVER invent a project fact. If the agent stated something the approved information does not cover,
 that is not an error - say so in "reason" and do not count it against them.
+
+Then give "fact_checks": the same call, broken into the six facts a lead actually compares projects
+on, each one checked against CATALOGUE (and PROJECT_EXCEPTIONS where it applies) independently of the
+others - a call can be correct on Budget and wrong on Area in the same breath, and both must show.
+- Project - was the project this lead belongs to the one actually discussed, or a different one (see
+  the confusions listed under ABBREVIATIONS - "the new project near the Airport" spoken without a
+  name is not itself a mismatch, resolve it from context first).
+- Configuration - the BHK/type discussed, checked against what the project actually offers (Dream
+  Valley is 3BHK only; Durbaar Banquets has no configuration - use Not Discussed there, never Mismatch
+  for a question that does not apply to a venue).
+- Budget - any price quoted, checked against the catalogue's figure for that configuration. A total
+  price divided into a per-sqft rate is Dream One's own exception (PROJECT_EXCEPTIONS) - apply it only
+  there.
+- Area (sqft) - any square footage quoted, checked against the catalogue's range for that
+  configuration.
+- Location - the landmark or locality named, checked against the catalogue's.
+- Possession - ready-to-move vs under-construction, and any date given, checked against the catalogue
+  (see PROJECT_EXCEPTIONS on when a possession date should or should not have come up unprompted).
+"status" is "Not Discussed" whenever the topic never came up on the call - that is the honest answer,
+never "Mismatch" for silence, the same rule "issues" already follows for the topic as a whole. Put the
+actual quote or its substance in "what_was_said" and the catalogue's value in "what_is_correct"; leave
+both null together only for Not Discussed. Where the catalogue itself does not cover this project or
+this fact (Dream Residency Manor, Ecocity Bungalows, Durbaar Banquets pricing), that is also
+Not Discussed - unverifiable is not a mismatch.
 
 ### 2. FOLLOW-UP DATE ACCURACY
 Is the CRM's next_follow_up_date supported by the conversation?
@@ -229,6 +336,10 @@ agreed, where the CRM's record differs from the call, and what should happen to 
 call was a few words long, say that plainly instead of padding it out.
 
 ${CATALOGUE}
+
+${ABBREVIATIONS}
+
+${PROJECT_EXCEPTIONS}
 
 ${LOST_REASON_VOCABULARY}
 

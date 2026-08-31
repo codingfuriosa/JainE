@@ -7909,13 +7909,1048 @@ async function psaFetchAll(){
     });
   }catch(e){ return []; }
 }
+/* ================================ UNIT (Post Sales) ================================
+   Cut a flat out of a floor plan and hand it over.
+
+   The plans are PHOTOGRAPHS of drawings - 4961x7016 JPEGs with no text and no CAD geometry - so
+   nothing in the file says which shape is unit A. Each unit's position is recorded once, by a
+   person, in Set up plans; everything else here is reading that back.
+
+   Boxes, not outlines. A cut-out of a unit IS a rectangular crop, so a more precise shape would
+   buy nothing and cost a lot of fiddly drawing.
+
+   NO FLOOR IS EVER CHOSEN. One sheet covers several floors - unit A is the same flat on the 1st,
+   3rd, 5th and 7th - so a floor is a decision that changes nothing about the picture. The address
+   is business unit, block, letter. Where a block has two sheets (odd floors and even floors) and
+   the same letter appears on both, BOTH come back, each labelled with the floors it covers: no
+   choice to make, and never ambiguous. */
+
+const PSU={project:'',block:'',plates:[],units:{},sel:{},basket:[],plans:null,busy:false,cards:null};
+
+/* Two units are joined when their boxes touch or overlap. The tolerance covers the wall drawn
+   between two flats - they share it, so their boxes stop a few pixels short of each other. */
+function psuTouch(a,b,tol){
+  tol=(tol==null)?14:tol;
+  return !(a.x > b.x+b.w+tol || b.x > a.x+a.w+tol ||
+           a.y > b.y+b.h+tol || b.y > a.y+a.h+tol);
+}
+/* Selected units collapsed into connected groups: everything that touches comes out as one image,
+   anything standing on its own comes out separately. Union-find, so a chain A-B-C groups even
+   though A and C never touch each other. */
+function psuGroups(list,tol){
+  const n=list.length, parent=list.map(function(_,i){ return i; });
+  function find(i){ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; }
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
+    if(psuTouch(list[i],list[j],tol)){ const a=find(i), b=find(j); if(a!==b) parent[b]=a; }
+  }
+  const by={};
+  list.forEach(function(u,i){ const r=find(i); (by[r]=by[r]||[]).push(u); });
+  // groups in reading order, and the units inside each one likewise - so the output follows the
+  // order an eye travels the plan rather than the order somebody happened to tap
+  return Object.keys(by).map(function(k){ return by[k]; })
+    .map(function(g){ g.sort(function(a,b){ return (a.y-b.y)||(a.x-b.x); }); return g; })
+    .sort(function(a,b){ return (a[0].y-b[0].y)||(a[0].x-b[0].x); });
+}
+// the crop for a group: everything it covers, plus a margin so the walls are not shaved off
+function psuBox(group,pad,imgW,imgH){
+  pad=(pad==null)?40:pad;
+  let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
+  group.forEach(function(u){
+    x1=Math.min(x1,u.x); y1=Math.min(y1,u.y);
+    x2=Math.max(x2,u.x+u.w); y2=Math.max(y2,u.y+u.h);
+  });
+  x1=Math.max(0,x1-pad); y1=Math.max(0,y1-pad);
+  x2=(imgW!=null)?Math.min(imgW,x2+pad):(x2+pad);
+  y2=(imgH!=null)?Math.min(imgH,y2+pad):(y2+pad);
+  return {x:Math.round(x1),y:Math.round(y1),w:Math.round(x2-x1),h:Math.round(y2-y1)};
+}
+function psuPlanUrl(path){
+  try{ return sb.storage.from('floor-plans').getPublicUrl(path).data.publicUrl; }catch(e){ return ''; }
+}
+function psuCanSetup(){
+  return !!(state.super || (state.profile&&(state.profile.department||[]).indexOf('Systems')>=0));
+}
+function psuOrdinal(n){
+  const s=['th','st','nd','rd'], v=n%100;
+  return n+(s[(v-20)%10]||s[v]||s[0]);
+}
+/* "1st, 3rd, 5th & 7th floors" - the floors a sheet covers, said the way a person would. This is
+   a LABEL, never a thing to pick. */
+function psuFloorsText(floors){
+  const f=(floors||[]).slice().sort(function(a,b){ return a-b; }).map(psuOrdinal);
+  if(!f.length) return '';
+  if(f.length===1) return f[0]+' floor';
+  return f.slice(0,-1).join(', ')+' & '+f[f.length-1]+' floors';
+}
+function psuSelKey(planId,name){ return planId+'|'+name; }
+
+async function psuLoadPlans(force){
+  if(PSU.plans && !force) return PSU.plans;
+  try{
+    const {data}=await sb.schema('cust').from('floor_plans').select('*')
+      .is('deleted_at',null).order('project').order('block');
+    PSU.plans=data||[];
+  }catch(e){ PSU.plans=[]; }
+  return PSU.plans;
+}
+async function psuLoadUnits(planId){
+  try{
+    const {data}=await sb.schema('cust').from('plan_units').select('*').eq('plan_id',planId);
+    return (data||[]).map(function(u){
+      return {id:u.id,plan_id:u.plan_id,unit_name:u.unit_name,unit_type:u.unit_type,
+              x:Number(u.x),y:Number(u.y),w:Number(u.w),h:Number(u.h)};
+    }).sort(function(a,b){ return String(a.unit_name).localeCompare(String(b.unit_name)); });
+  }catch(e){ return []; }
+}
+
+const PSU_CSS='<style id="psuCss">'
+ +'.psu-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}'
+ +'@media(max-width:1000px){.psu-wrap{grid-template-columns:1fr}}'
+ +'.psu-pick{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}'
+ +'.psu-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
+ +'.psu-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
+ +'.psu-f .sel{height:42px;border:1px solid var(--line);border-radius:9px;padding:0 11px;font-size:14px;'
+   +'font-family:inherit;background:#fff;color:#334155;cursor:pointer;min-width:200px}'
+ +'.psu-letters{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}'
+ +'.psu-letter{min-width:52px;height:52px;padding:0 12px;border:2px solid var(--line);border-radius:12px;'
+   +'background:#fff;font-size:19px;font-weight:800;color:#334155;cursor:pointer;display:inline-flex;'
+   +'align-items:center;justify-content:center;gap:7px;transition:all .12s}'
+ +'.psu-letter:hover{border-color:#a78bfa}'
+ +'.psu-letter.on{background:#7c3aed;border-color:#5b21b6;color:#fff}'
+ +'.psu-letter small{font-size:10px;font-weight:700;opacity:.75}'
+ +'.psu-plate{margin-top:14px}'
+ +'.psu-plate h4{margin:0 0 7px;font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--slate);text-transform:uppercase}'
+ +'.psu-stage{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f8fafc}'
+ +'.psu-stage canvas{display:block;width:100%;height:auto;cursor:pointer;touch-action:manipulation}'
+ +'.psu-hint{padding:34px 20px;text-align:center;color:var(--slate);font-size:14px;line-height:1.6}'
+ +'.psu-sentence{font-size:15px;font-weight:600;color:var(--ink);line-height:1.6}'
+ +'.psu-sentence .m{color:var(--slate);font-weight:500}'
+ +'.psu-basket{position:sticky;top:14px}'
+ +'.psu-chip{display:inline-flex;align-items:center;gap:7px;background:#f1f5f9;border:1px solid var(--line);'
+   +'border-radius:20px;padding:5px 6px 5px 12px;font-size:13px;font-weight:600;margin:0 6px 6px 0}'
+ +'.psu-chip button{border:0;background:#e2e8f0;color:#475569;width:20px;height:20px;border-radius:50%;'
+   +'cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center}'
+ +'.psu-chip button:hover{background:#fecaca;color:#991b1b}'
+ +'.psu-card{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px;background:#fff}'
+ +'.psu-card img{display:block;width:100%;height:auto;background:#fff}'
+ +'.psu-card .cap{padding:9px 12px;font-size:13px;font-weight:600;border-top:1px solid var(--line)}'
+ +'.psu-card .cap small{display:block;font-weight:500;color:var(--slate);margin-top:2px}'
+ +'.psu-empty{padding:26px 16px;text-align:center;color:var(--slate);font-size:14px;line-height:1.6}'
+ +'.psu-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}'
+ +'</style>';
+
+/* ---- choosing ---------------------------------------------------------------------------- */
+window.psuSetProject=function(v){ PSU.project=v; PSU.block=''; PSU.sel={}; psuRender(); };
+window.psuSetBlock=async function(v){ PSU.block=v; PSU.sel={}; await psuLoadBlock(); psuRender(); };
+
+/* Every sheet for this block, and every flat marked on each. A block normally has two - odd floors
+   and even floors - and both are loaded together so a letter can be found without anybody being
+   asked which sheet it is on. */
+async function psuLoadBlock(){
+  const plans=await psuLoadPlans();
+  PSU.plates=plans.filter(function(p){ return p.project===PSU.project && p.block===PSU.block; })
+    .sort(function(a,b){ return (a.floors&&a.floors[0]||0)-(b.floors&&b.floors[0]||0); });
+  PSU.units={};
+  for(const p of PSU.plates) PSU.units[p.id]=await psuLoadUnits(p.id);
+}
+// every distinct letter in the block, with the sheets it appears on
+function psuLetters(){
+  const by={};
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      const k=String(u.unit_name||'').toUpperCase();
+      (by[k]=by[k]||[]).push({plate:p,unit:u});
+    });
+  });
+  return Object.keys(by).sort().map(function(k){ return {name:k,on:by[k]}; });
+}
+/* Tapping a letter takes it on EVERY sheet it appears on. That is what makes the floor question
+   disappear: the person asks for unit A and gets unit A, however many sheets carry one. */
+window.psuToggleLetter=function(name){
+  const rec=psuLetters().find(function(l){ return l.name===name; });
+  if(!rec) return;
+  const anyOn=rec.on.some(function(o){ return PSU.sel[psuSelKey(o.plate.id,o.unit.unit_name)]; });
+  rec.on.forEach(function(o){
+    const k=psuSelKey(o.plate.id,o.unit.unit_name);
+    if(anyOn) delete PSU.sel[k]; else PSU.sel[k]=true;
+  });
+  psuPaintAll(); psuSide(); psuLettersPaint();
+};
+window.psuClearSel=function(){ PSU.sel={}; psuPaintAll(); psuSide(); psuLettersPaint(); };
+
+window.psuAddToBasket=function(){
+  const picked=[];
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      if(PSU.sel[psuSelKey(p.id,u.unit_name)]) picked.push({plate:p,unit:u});
+    });
+  });
+  if(!picked.length){ toast('Choose a unit first','warn'); return; }
+  let added=0;
+  picked.forEach(function(o){
+    const key=o.plate.id+'|'+o.unit.unit_name;
+    if(PSU.basket.some(function(b){ return b.key===key; })) return;
+    PSU.basket.push({key:key,project:o.plate.project,block:o.plate.block,
+      floors:o.plate.floors||[],plan_id:o.plate.id,storage_path:o.plate.storage_path,
+      img_w:o.plate.img_w,img_h:o.plate.img_h,
+      unit_name:o.unit.unit_name,unit_type:o.unit.unit_type,
+      x:o.unit.x,y:o.unit.y,w:o.unit.w,h:o.unit.h});
+    added++;
+  });
+  PSU.sel={};
+  toast(added?('Added '+added+' to the list'):'Those are already on the list','ok');
+  psuRender();
+};
+window.psuDropFromBasket=function(key){
+  PSU.basket=PSU.basket.filter(function(b){ return b.key!==key; }); psuRender();
+};
+window.psuEmptyBasket=function(){ PSU.basket=[]; PSU.sel={}; psuRender(); };
+
+/* ---- drawing the plans -------------------------------------------------------------------- */
+function psuPaint(plate){
+  const cv=$('psuCv'+plate.id); if(!cv||!cv._img) return;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(cv._img,0,0,cv.width,cv.height);
+  const sx=cv.width/plate.img_w, sy=cv.height/plate.img_h;
+  (PSU.units[plate.id]||[]).forEach(function(u){
+    const on=!!PSU.sel[psuSelKey(plate.id,u.unit_name)];
+    const x=u.x*sx, y=u.y*sy, w=u.w*sx, h=u.h*sy;
+    ctx.lineWidth=on?3:1.5;
+    ctx.strokeStyle=on?'#7c3aed':'rgba(100,116,139,.55)';
+    ctx.fillStyle=on?'rgba(124,58,237,.20)':'rgba(148,163,184,.07)';
+    ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+    const cx=x+w/2, cy=y+h/2, r=Math.max(13,Math.min(w,h)*0.17);
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.fillStyle=on?'#7c3aed':'rgba(255,255,255,.92)'; ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle=on?'#5b21b6':'#64748b'; ctx.stroke();
+    // a tick as well as the colour, so it still reads for anyone who cannot tell the shades apart
+    ctx.fillStyle=on?'#fff':'#334155';
+    ctx.font='700 '+Math.round(r*1.15)+'px Inter,system-ui,sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(on?'\u2713':String(u.unit_name||'?'), cx, cy+1);
+  });
+}
+function psuPaintAll(){ PSU.plates.forEach(psuPaint); }
+function psuLettersPaint(){
+  const box=$('psuLetters'); if(!box) return;
+  box.innerHTML=psuLetters().map(function(l){
+    const on=l.on.some(function(o){ return PSU.sel[psuSelKey(o.plate.id,o.unit.unit_name)]; });
+    const many=l.on.length>1?('<small>\u00d7'+l.on.length+'</small>'):'';
+    return '<button class="psu-letter'+(on?' on':'')+'" onclick="psuToggleLetter(\''+esc(l.name)+'\')">'
+      +esc(l.name)+many+'</button>';
+  }).join('');
+}
+window.psuCanvasClick=function(ev,planId){
+  const plate=PSU.plates.find(function(p){ return String(p.id)===String(planId); }); if(!plate) return;
+  const cv=$('psuCv'+plate.id), r=cv.getBoundingClientRect();
+  const px=(ev.clientX-r.left)/r.width*plate.img_w;
+  const py=(ev.clientY-r.top)/r.height*plate.img_h;
+  let hit=null;
+  (PSU.units[plate.id]||[]).forEach(function(u){
+    if(px>=u.x&&px<=u.x+u.w&&py>=u.y&&py<=u.y+u.h){ if(!hit||(u.w*u.h)<(hit.w*hit.h)) hit=u; }
+  });
+  // tapping the drawing does the same as tapping the letter, so the two never disagree
+  if(hit) psuToggleLetter(String(hit.unit_name).toUpperCase());
+};
+
+/* ---- the cut-outs ------------------------------------------------------------------------- */
+function psuCropCanvas(img,box){
+  const c=document.createElement('canvas');
+  c.width=box.w; c.height=box.h;
+  c.getContext('2d').drawImage(img,box.x,box.y,box.w,box.h,0,0,box.w,box.h);
+  return c;
+}
+function psuLoadImg(url){
+  return new Promise(function(res,rej){
+    const im=new Image();
+    // the bucket is public and CORS-permissive; without this the canvas would be tainted and the
+    // cut-out could never be read back out again
+    im.crossOrigin='anonymous';
+    im.onload=function(){ res(im); };
+    im.onerror=function(){ rej(new Error('could not load the plan image')); };
+    im.src=url;
+  });
+}
+/* One image per connected group, per sheet. Grouping happens WITHIN a sheet - two flats on
+   different sheets are never joined however their boxes happen to line up. */
+async function psuBuild(){
+  const byPlan={};
+  PSU.basket.forEach(function(b){ (byPlan[b.plan_id]=byPlan[b.plan_id]||[]).push(b); });
+  const out=[];
+  for(const pid of Object.keys(byPlan)){
+    const items=byPlan[pid];
+    const img=await psuLoadImg(psuPlanUrl(items[0].storage_path));
+    psuGroups(items).forEach(function(g){
+      const box=psuBox(g,40,items[0].img_w,items[0].img_h);
+      out.push({canvas:psuCropCanvas(img,box),
+        units:g.map(function(u){ return u.unit_name; }), joined:g.length>1,
+        project:g[0].project, block:g[0].block, floors:g[0].floors, type:g[0].unit_type||''});
+    });
+  }
+  return out;
+}
+function psuCardTitle(c){ return c.units.length>1?('Units '+c.units.join(' + ')):('Unit '+c.units[0]); }
+function psuCardSub(c){
+  return c.project+' · Block '+c.block+' · '+psuFloorsText(c.floors)
+    +(c.type?(' · '+c.type):'')+(c.joined?' · joined, they share a wall':'');
+}
+window.psuMake=async function(){
+  if(!PSU.basket.length){ toast('Nothing on the list yet','warn'); return; }
+  if(PSU.busy) return; PSU.busy=true;
+  const host=$('psuOut');
+  if(host) host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Cutting the images…</div>';
+  try{
+    const cards=await psuBuild(); PSU.cards=cards;
+    if(host) host.innerHTML=cards.map(function(c){
+      return '<div class="psu-card"><img src="'+c.canvas.toDataURL('image/png')+'" alt="'+esc(psuCardTitle(c))+'">'
+        +'<div class="cap">'+esc(psuCardTitle(c))+'<small>'+esc(psuCardSub(c))+'</small></div></div>';
+    }).join('')
+    +'<div class="psu-actions">'
+      +'<button class="btn btn-primary" onclick="psuDownload()"><i class="fa-solid fa-download"></i> Download</button>'
+      +'<button class="btn" onclick="psuPrint()"><i class="fa-solid fa-print"></i> Print</button></div>';
+    psuLog('viewed');
+    toast(cards.length+(cards.length===1?' image ready':' images ready'),'ok');
+  }catch(e){
+    if(host) host.innerHTML='<div class="psu-empty">Could not cut the images: '+esc((e&&e.message)||e)+'</div>';
+    toast('Could not cut the images','err');
+  }finally{ PSU.busy=false; }
+};
+window.psuDownload=function(){
+  const cards=PSU.cards||[];
+  if(!cards.length){ toast('Make the images first','warn'); return; }
+  psuLog('downloaded');
+  cards.forEach(function(c){
+    const name=c.project+' Block '+c.block+' - '+psuCardTitle(c)+' ('+psuFloorsText(c.floors)+').png';
+    c.canvas.toBlob(function(b){
+      const url=URL.createObjectURL(b), a=document.createElement('a');
+      a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(url); },2000);
+    },'image/png');
+  });
+};
+/* One flat per page, in its own tab - the same shape as the reimbursement printout, so a set can
+   be handed over or filed without anybody assembling it by hand. */
+window.psuPrint=function(){
+  const cards=PSU.cards||[];
+  if(!cards.length){ toast('Make the images first','warn'); return; }
+  psuLog('printed');
+  const w=window.open('','_blank');
+  if(!w){ toast('Please allow popups to print','err'); return; }
+  const pages=cards.map(function(c){
+    return '<section><h2>'+esc(psuCardTitle(c))+'</h2><div class="sub">'+esc(psuCardSub(c))+'</div>'
+      +'<img src="'+c.canvas.toDataURL('image/png')+'"></section>';
+  }).join('');
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'
+    +esc(cards[0].project+' – unit plans')+'</title><style>'
+    +'body{margin:22px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'
+    +'h2{margin:0 0 3px;font-size:19px}.sub{color:#64748b;font-size:13px;margin-bottom:12px}'
+    +'img{max-width:100%;height:auto;border:1px solid #e2e8f0;border-radius:8px}'
+    +'section{break-after:page;page-break-after:always}'
+    +'section:last-child{break-after:auto;page-break-after:auto}'
+    +'</style></head><body>'+pages+'</body></html>');
+  w.document.close();
+  let done=false; const go=function(){ if(done)return; done=true; try{ w.focus(); w.print(); }catch(_e){} };
+  w.addEventListener('load',go); setTimeout(go,600+cards.length*150);
+};
+
+/* ---- the right-hand column ---------------------------------------------------------------- */
+function psuSide(){
+  const el=$('psuSel'); if(!el) return;
+  const picked=[];
+  PSU.plates.forEach(function(p){
+    (PSU.units[p.id]||[]).forEach(function(u){
+      if(PSU.sel[psuSelKey(p.id,u.unit_name)]) picked.push({plate:p,unit:u});
+    });
+  });
+  if(!picked.length){ el.innerHTML='<div class="psu-empty">Choose a unit above, or tap a flat on the plan.</div>'; return; }
+  const names=Array.from(new Set(picked.map(function(o){ return o.unit.unit_name; })));
+  const sheets=Array.from(new Set(picked.map(function(o){ return psuFloorsText(o.plate.floors); })));
+  el.innerHTML='<div class="psu-sentence">'+esc(PSU.project)+' <span class="m">·</span> Block '+esc(PSU.block)
+      +' <span class="m">·</span> Unit'+(names.length>1?'s':'')+' '+esc(names.join(', '))+'</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-top:5px">'
+      +(sheets.length>1
+        ? ('Appears on '+sheets.length+' sheets — you will get one image of each: '+esc(sheets.join(' / ')))
+        : esc(sheets[0]||''))+'</div>'
+    +'<div class="psu-actions">'
+      +'<button class="btn btn-primary" onclick="psuAddToBasket()"><i class="fa-solid fa-plus"></i> Add to the list</button>'
+      +'<button class="btn" onclick="psuClearSel()">Clear</button></div>';
+}
+function psuBasketHtml(){
+  if(!PSU.basket.length) return '<div class="psu-empty">Nothing on the list yet.<br>Pick units and add them here. You can change block and keep adding.</div>';
+  const by={};
+  PSU.basket.forEach(function(b){
+    const k=b.project+' · Block '+b.block+' · '+psuFloorsText(b.floors);
+    (by[k]=by[k]||[]).push(b);
+  });
+  return Object.keys(by).map(function(k){
+    return '<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:700;color:var(--slate);margin-bottom:6px">'+esc(k)+'</div>'
+      +by[k].map(function(b){
+        return '<span class="psu-chip">'+esc(b.unit_name)
+          +'<button title="Remove" onclick="psuDropFromBasket(\''+esc(b.key).replace(/'/g,"\\'")+'\')">&times;</button></span>';
+      }).join('')+'</div>';
+  }).join('')
+  +'<div class="psu-actions">'
+    +'<button class="btn btn-primary" onclick="psuMake()"><i class="fa-solid fa-scissors"></i> Get images</button>'
+    +'<button class="btn" onclick="psuEmptyBasket()">Start again</button></div>';
+}
+
+/* ---- the screen --------------------------------------------------------------------------- */
+async function psuRender(){
+  const host=$('psuBody'); if(!host) return;
+  const plans=await psuLoadPlans();
+  if(!plans.length){
+    host.innerHTML=PSU_CSS+'<div class="card card-pad psu-empty">'
+      +'<i class="fa-regular fa-image" style="font-size:26px;color:#94a3b8"></i>'
+      +'<div style="margin-top:10px;font-weight:600;color:var(--ink)">No floor plans have been set up yet.</div>'
+      +'<div>A plan has to be uploaded and its flats marked once, before units can be cut out of it.</div>'
+      +(psuCanSetup()?'<div class="psu-actions" style="justify-content:center"><button class="btn btn-primary" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button></div>':'')
+      +'</div>';
+    return;
+  }
+  const projects=Array.from(new Set(plans.map(function(p){return p.project;}))).sort();
+  if(!PSU.project||projects.indexOf(PSU.project)<0) PSU.project=window._psuLastProject||projects[0];
+  if(projects.indexOf(PSU.project)<0) PSU.project=projects[0];
+  window._psuLastProject=PSU.project;
+
+  const blocks=Array.from(new Set(plans.filter(function(p){return p.project===PSU.project;})
+    .map(function(p){return p.block;}))).sort();
+  const hadBlock=PSU.block;
+  if(!PSU.block||blocks.indexOf(PSU.block)<0) PSU.block=blocks[0]||'';
+  if(PSU.block && (PSU.block!==hadBlock || !PSU.plates.length)) await psuLoadBlock();
+
+  const opt=function(v,cur){ return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+esc(v)+'</option>'; };
+  const letters=psuLetters();
+  host.innerHTML=PSU_CSS
+   +'<div class="psu-wrap">'
+    +'<div><div class="card card-pad">'
+      +'<div class="psu-pick">'
+        +'<div class="psu-f"><label>Business unit</label><select class="sel" onchange="psuSetProject(this.value)">'
+          +projects.map(function(p){return opt(p,PSU.project);}).join('')+'</select></div>'
+        +'<div class="psu-f"><label>Block</label><select class="sel" onchange="psuSetBlock(this.value)">'
+          +blocks.map(function(b){return opt(b,PSU.block);}).join('')+'</select></div>'
+        +'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label><div style="display:flex;gap:8px">'
+          +'<button class="btn" style="height:42px" onclick="psuLogsOpen()"><i class="fa-solid fa-list-check"></i> Logs</button>'
+          +(psuCanSetup()?'<button class="btn" style="height:42px" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button>':'')
+        +'</div></div>'
+      +'</div>'
+      +'<div style="margin-top:16px;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--slate);text-transform:uppercase">Unit</div>'
+      +(letters.length
+        ? '<div class="psu-letters" id="psuLetters"></div>'
+          +'<div style="font-size:12.5px;color:var(--slate);margin-top:10px">'
+          +'Tap a unit — or tap it straight on the plan below. No need to pick a floor: one plan covers several, and the flat is the same on each.</div>'
+        : '<div class="psu-empty">No flats have been marked on this block yet'
+          +(psuCanSetup()?' — open Set up plans to mark them.':'.')+'</div>')
+      +PSU.plates.map(function(p){
+        return '<div class="psu-plate"><h4>'+esc(psuFloorsText(p.floors))+'</h4>'
+          +'<div class="psu-stage"><canvas id="psuCv'+p.id+'" onclick="psuCanvasClick(event,'+p.id+')"></canvas></div></div>';
+      }).join('')
+    +'</div></div>'
+    +'<div class="psu-basket">'
+      +'<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">Your selection</div><div id="psuSel"></div></div>'
+      +'<div class="card card-pad" style="margin-top:14px"><div class="sec-title" style="margin:0 0 10px">On the list</div>'+psuBasketHtml()+'</div>'
+      +'<div id="psuOut" style="margin-top:14px"></div>'
+    +'</div>'
+   +'</div>';
+  psuLettersPaint(); psuSide();
+  for(const p of PSU.plates){
+    try{
+      const img=await psuLoadImg(psuPlanUrl(p.storage_path));
+      const cv=$('psuCv'+p.id); if(!cv) continue;
+      // drawn at a size the screen can handle; the CUT is always taken from the full-resolution
+      // original, so showing it smaller costs the output nothing
+      const sc=Math.min(1,1400/p.img_w);
+      cv.width=Math.round(p.img_w*sc); cv.height=Math.round(p.img_h*sc);
+      cv._img=img; psuPaint(p);
+    }catch(e){
+      const cv=$('psuCv'+p.id);
+      if(cv&&cv.parentNode) cv.parentNode.innerHTML='<div class="psu-hint">Could not load this plan.</div>';
+    }
+  }
+}
+
+/* ---- Set up plans -------------------------------------------------------------------------
+   Where the drawing is taught to the system. Upload a plan sheet once per block, then drag a box
+   round each flat and press Enter - the next letter is filled in, so most flats are drag-and-Enter.
+   Roughly five seconds a flat, once ever; every cut-out afterwards is instant and cannot be wrong.
+
+   Marking is done by hand because it CANNOT be done automatically on these drawings, which was
+   tested rather than assumed: the flats carry only two background tints, so colour separates flat
+   from corridor but not one flat from its neighbour; there are no solid blocks to anchor on, the
+   BHK tags being outlined text; every wall on the sheet is ONE connected shape; and a flood fill
+   from inside a flat escapes through the door gaps and takes 15%% of the sheet, or stops inside a
+   single toilet. Guessing wrong here shows a customer the wrong flat.
+
+   PDFs are accepted as supplied rather than asking anybody to export a JPEG first - the browser
+   renders page one and that becomes the plan. pdf.js is fetched only when a PDF is actually
+   chosen, from the CDN the app already uses. */
+
+const PSS={plan:null,units:[],draw:null,sel:null,scale:1};
+
+function pssLoadPdfLib(){
+  if(window.pdfjsLib) return Promise.resolve(true);
+  if(window._pssPdfP) return window._pssPdfP;
+  window._pssPdfP=new Promise(function(res){
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload=function(){
+      try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc=
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; }catch(_e){}
+      res(!!window.pdfjsLib);
+    };
+    s.onerror=function(){ window._pssPdfP=null; res(false); };
+    document.head.appendChild(s);
+  });
+  return window._pssPdfP;
+}
+/* Rendered at about 3500px across. The sheets are 600 DPI A2, which is more than a screen or a
+   printed cut-out can use, and a canvas of the full 4961x7016 is 35 million pixels - enough to
+   fail on a modest machine for no gain. */
+async function pssPdfToBlob(file){
+  if(!(await pssLoadPdfLib())) throw new Error('could not load the PDF reader');
+  const buf=await file.arrayBuffer();
+  const pdf=await window.pdfjsLib.getDocument({data:buf}).promise;
+  const page=await pdf.getPage(1);
+  const base=page.getViewport({scale:1});
+  const scale=Math.min(3.2, 3500/base.width);
+  const vp=page.getViewport({scale:scale});
+  const cv=document.createElement('canvas');
+  cv.width=Math.round(vp.width); cv.height=Math.round(vp.height);
+  await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+  return await new Promise(function(res){ cv.toBlob(function(b){ res({blob:b,w:cv.width,h:cv.height}); },'image/jpeg',0.92); });
+}
+function pssImgToBlob(file){
+  return new Promise(function(res,rej){
+    const im=new Image(), url=URL.createObjectURL(file);
+    im.onload=function(){
+      const sc=Math.min(1,3500/im.naturalWidth);
+      const cv=document.createElement('canvas');
+      cv.width=Math.round(im.naturalWidth*sc); cv.height=Math.round(im.naturalHeight*sc);
+      cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(b){ res({blob:b,w:cv.width,h:cv.height}); },'image/jpeg',0.92);
+    };
+    im.onerror=function(){ URL.revokeObjectURL(url); rej(new Error('could not read that image')); };
+    im.src=url;
+  });
+}
+function pssSlug(s){ return String(s||'').trim().replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase(); }
+
+window.pssAddPlan=function(){
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-image"></i> Add a floor plan</h3>'
+    +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm" style="width:min(94vw,520px)">'
+      +'<label>Business unit</label><input id="pssProj" placeholder="Dream Ananta">'
+      +'<label>Block</label><input id="pssBlock" placeholder="D">'
+      +'<label>Floors this sheet covers</label>'
+      +'<input id="pssFloors" placeholder="1, 3, 5, 7">'
+      +'<div style="font-size:12px;color:var(--slate);margin-top:4px">One sheet usually covers several floors. Type them separated by commas.</div>'
+      +'<label style="margin-top:12px">The plan (PDF or image)</label>'
+      +'<input type="file" id="pssFile" accept="application/pdf,image/*">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="pssGo" onclick="pssSavePlan()">Upload</button></div>','md');
+};
+window.pssSavePlan=async function(){
+  const proj=(($('pssProj')||{}).value||'').trim();
+  const block=(($('pssBlock')||{}).value||'').trim();
+  const floors=(($('pssFloors')||{}).value||'').split(',')
+    .map(function(x){ return parseInt(String(x).trim(),10); }).filter(function(n){ return !isNaN(n); });
+  const f=(($('pssFile')||{}).files||[])[0];
+  if(!proj||!block){ toast('Business unit and block are both needed','warn'); return; }
+  if(!floors.length){ toast('Say which floors this sheet covers','warn'); return; }
+  if(!f){ toast('Choose the plan file','warn'); return; }
+  const b=$('pssGo'); if(b){ b.disabled=true; b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…'; }
+  try{
+    const out=/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name) ? await pssPdfToBlob(f) : await pssImgToBlob(f);
+    const path=pssSlug(proj)+'/'+pssSlug(block)+'/'+floors.join('-')+'-'+Date.now()+'.jpg';
+    const up=await sb.storage.from('floor-plans').upload(path,out.blob,{contentType:'image/jpeg',upsert:true});
+    if(up.error) throw up.error;
+    const ins=await sb.schema('cust').from('floor_plans').insert({
+      project:proj, block:block, floors:floors, storage_path:path,
+      img_w:out.w, img_h:out.h, source_name:f.name, created_by:state.email
+    }).select().single();
+    if(ins.error) throw ins.error;
+    closeModal(); PSU.plans=null;
+    toast('Plan uploaded — now mark the flats on it','ok');
+    pssOpen(ins.data.id);
+  }catch(e){
+    if(b){ b.disabled=false; b.innerHTML='Upload'; }
+    toast('Could not upload: '+((e&&e.message)||e),'err');
+  }
+};
+window.pssDeletePlan=function(id){
+  openModal('<div class="modal-head"><h3>Remove this plan?</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><p style="margin:0;color:var(--slate);font-size:13.5px;line-height:1.6">'
+    +'The plan and every flat marked on it are removed. Nothing already downloaded or printed is affected.</p></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-danger" onclick="pssDeleteGo('+id+')">Remove</button></div>','md');
+};
+window.pssDeleteGo=async function(id){
+  try{
+    const {error}=await sb.schema('cust').from('floor_plans')
+      .update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+    if(error) throw error;
+    closeModal(); PSU.plans=null; PSS.plan=null;
+    toast('Plan removed','ok'); pssRender();
+  }catch(e){ toast('Could not remove it: '+((e&&e.message)||e),'err'); }
+};
+
+/* ---- marking ------------------------------------------------------------------------------ */
+window.pssOpen=async function(id){
+  const plans=await psuLoadPlans(true);
+  PSS.plan=plans.find(function(p){ return String(p.id)===String(id); })||null;
+  PSS.units=PSS.plan?await psuLoadUnits(PSS.plan.id):[];
+  PSS.sel=null; PSS.draw=null;
+  pssRender();
+};
+window.pssBack=function(){ PSS.plan=null; pssRender(); };
+
+function pssPaint(){
+  const cv=$('pssCanvas'); if(!cv||!cv._img) return;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(cv._img,0,0,cv.width,cv.height);
+  const s=PSS.scale;
+  PSS.units.forEach(function(u){
+    const on=PSS.sel&&PSS.sel.id===u.id;
+    ctx.lineWidth=on?3:2; ctx.strokeStyle=on?'#dc2626':'#7c3aed';
+    ctx.fillStyle=on?'rgba(220,38,38,.16)':'rgba(124,58,237,.13)';
+    ctx.fillRect(u.x*s,u.y*s,u.w*s,u.h*s); ctx.strokeRect(u.x*s,u.y*s,u.w*s,u.h*s);
+    ctx.fillStyle=on?'#dc2626':'#5b21b6';
+    ctx.font='700 15px Inter,system-ui,sans-serif'; ctx.textBaseline='top';
+    ctx.fillText(String(u.unit_name||'?'),u.x*s+6,u.y*s+5);
+  });
+  if(PSS.draw){
+    const d=PSS.draw;
+    ctx.setLineDash([6,4]); ctx.lineWidth=2; ctx.strokeStyle='#0f766e';
+    ctx.fillStyle='rgba(15,118,110,.12)';
+    ctx.fillRect(d.x*s,d.y*s,d.w*s,d.h*s); ctx.strokeRect(d.x*s,d.y*s,d.w*s,d.h*s);
+    ctx.setLineDash([]);
+  }
+}
+function pssPt(ev){
+  const cv=$('pssCanvas'), r=cv.getBoundingClientRect();
+  const cx=(ev.touches?ev.touches[0].clientX:ev.clientX);
+  const cy=(ev.touches?ev.touches[0].clientY:ev.clientY);
+  return {x:(cx-r.left)/r.width*PSS.plan.img_w, y:(cy-r.top)/r.height*PSS.plan.img_h};
+}
+window.pssDown=function(ev){
+  ev.preventDefault();
+  const p=pssPt(ev);
+  const hit=PSS.units.filter(function(u){ return p.x>=u.x&&p.x<=u.x+u.w&&p.y>=u.y&&p.y<=u.y+u.h; })
+    .sort(function(a,b){ return (a.w*a.h)-(b.w*b.h); })[0];
+  if(hit){ PSS.sel=hit; PSS.draw=null; pssPaint(); pssSideMark(); return; }
+  PSS.sel=null; PSS.draw={x0:p.x,y0:p.y,x:p.x,y:p.y,w:0,h:0};
+  pssPaint(); pssSideMark();
+};
+window.pssMove=function(ev){
+  if(!PSS.draw) return;
+  ev.preventDefault();
+  const p=pssPt(ev), d=PSS.draw;
+  d.x=Math.min(d.x0,p.x); d.y=Math.min(d.y0,p.y);
+  d.w=Math.abs(p.x-d.x0); d.h=Math.abs(p.y-d.y0);
+  pssPaint();
+};
+window.pssUp=function(ev){
+  if(!PSS.draw) return;
+  const d=PSS.draw;
+  // a stray click is not a box - anything this small was somebody missing, not drawing
+  if(d.w<30||d.h<30){ PSS.draw=null; pssPaint(); return; }
+  pssAskName(d);
+};
+/* The letter after the highest already marked, so the usual case is drag, Enter, drag, Enter.
+   Only the flats that break the run need actually typing. */
+function pssNextLetter(){
+  const used=PSS.units.map(function(u){ return String(u.unit_name||'').toUpperCase(); })
+    .filter(function(n){ return /^[A-Z]$/.test(n); }).sort();
+  if(!used.length) return 'A';
+  const last=used[used.length-1];
+  const nxt=String.fromCharCode(last.charCodeAt(0)+1);
+  return (nxt>'Z')?'':nxt;
+}
+function pssAskName(box){
+  openModal('<div class="modal-head"><h3>Name this flat</h3><span class="x" onclick="pssCancelDraw()">&times;</span></div>'
+    +'<div class="modal-body frm" style="width:min(94vw,420px)">'
+      +'<label>Unit</label><input id="pssName" placeholder="A" maxlength="6" value="'+esc(pssNextLetter())+'" style="text-transform:uppercase" onkeydown="if(event.key===&quot;Enter&quot;){event.preventDefault();pssSaveUnit();}">'
+      +'<label style="margin-top:10px">Type <span style="font-weight:400;color:var(--slate)">(optional)</span></label>'
+      +'<input id="pssType" placeholder="3 BHK">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="pssCancelDraw()">Cancel</button>'
+      +'<button class="btn btn-primary" onclick="pssSaveUnit()">Save</button></div>','md');
+  setTimeout(function(){ const n=$('pssName'); if(n) try{ n.focus(); n.select(); }catch(_e){} },40);
+}
+window.pssCancelDraw=function(){ PSS.draw=null; closeModal(); pssPaint(); };
+window.pssSaveUnit=async function(){
+  const name=(($('pssName')||{}).value||'').trim().toUpperCase();
+  const type=(($('pssType')||{}).value||'').trim();
+  if(!name){ toast('Give the flat its letter','warn'); return; }
+  const d=PSS.draw; if(!d) { closeModal(); return; }
+  try{
+    const {error}=await sb.schema('cust').from('plan_units').insert({
+      plan_id:PSS.plan.id, unit_name:name, unit_type:type||null,
+      x:Math.round(d.x), y:Math.round(d.y), w:Math.round(d.w), h:Math.round(d.h)
+    });
+    if(error) throw error;
+    PSS.draw=null; closeModal();
+    PSS.units=await psuLoadUnits(PSS.plan.id);
+    pssPaint(); pssSideMark();
+    toast('Unit '+name+' marked','ok');
+  }catch(e){
+    const dup=/duplicate|unique/i.test((e&&e.message)||'');
+    toast(dup?('Unit '+name+' is already marked on this plan'):('Could not save: '+((e&&e.message)||e)),'err');
+  }
+};
+/* Block D's odd-floor and even-floor sheets are usually the same layout drawn twice, so marking
+   one and copying is the difference between doing this twice and doing it once. Anything already
+   marked on the other sheet is left alone rather than duplicated. */
+window.pssCopyToSibling=async function(){
+  const plans=await psuLoadPlans();
+  const sibs=plans.filter(function(p){
+    return p.project===PSS.plan.project && p.block===PSS.plan.block && p.id!==PSS.plan.id; });
+  if(!sibs.length){ toast('This block has only one sheet','warn'); return; }
+  if(!PSS.units.length){ toast('Mark some flats first','warn'); return; }
+  const target=sibs[0];
+  try{
+    const have=await psuLoadUnits(target.id);
+    const has={}; have.forEach(function(u){ has[String(u.unit_name).toUpperCase()]=1; });
+    const rows=PSS.units.filter(function(u){ return !has[String(u.unit_name).toUpperCase()]; })
+      .map(function(u){ return {plan_id:target.id,unit_name:u.unit_name,unit_type:u.unit_type,
+                                x:u.x,y:u.y,w:u.w,h:u.h}; });
+    if(!rows.length){ toast('The other sheet already has all of these','warn'); return; }
+    const {error}=await sb.schema('cust').from('plan_units').insert(rows);
+    if(error) throw error;
+    toast('Copied '+rows.length+' to '+psuFloorsText(target.floors)+' — check they line up','ok');
+  }catch(e){ toast('Could not copy: '+((e&&e.message)||e),'err'); }
+};
+window.pssRemoveUnit=async function(){
+  if(!PSS.sel) return;
+  try{
+    const {error}=await sb.schema('cust').from('plan_units').delete().eq('id',PSS.sel.id);
+    if(error) throw error;
+    const gone=PSS.sel.unit_name; PSS.sel=null;
+    PSS.units=await psuLoadUnits(PSS.plan.id);
+    pssPaint(); pssSideMark();
+    toast('Unit '+gone+' removed','ok');
+  }catch(e){ toast('Could not remove it: '+((e&&e.message)||e),'err'); }
+};
+function pssSideMark(){
+  const el=$('pssSide'); if(!el) return;
+  el.innerHTML=(PSS.sel
+      ? '<div class="psu-sentence">Unit '+esc(PSS.sel.unit_name)+(PSS.sel.unit_type?(' <span class="m">· '+esc(PSS.sel.unit_type)+'</span>'):'')+'</div>'
+        +'<div class="psu-actions"><button class="btn btn-danger" onclick="pssRemoveUnit()"><i class="fa-solid fa-trash"></i> Remove this flat</button></div>'
+      : '<div class="psu-empty">Drag a box round a flat, then press <b>Enter</b>.<br>The next letter is filled in for you, so most flats are just drag and Enter.<br>Tap a marked flat to remove it.</div>')
+    +'<div style="margin-top:14px;font-size:12px;font-weight:700;color:var(--slate)">MARKED ('+PSS.units.length+')</div>'
+    +'<div style="margin-top:8px">'+(PSS.units.length
+        ? PSS.units.map(function(u){ return '<span class="psu-chip">'+esc(u.unit_name)+'</span>'; }).join('')
+        : '<span style="color:var(--slate);font-size:13px">None yet</span>')+'</div>';
+}
+
+async function pssRender(){
+  const host=$('psuBody'); if(!host) return;
+  if(!psuCanSetup()){
+    host.innerHTML='<div class="card card-pad psu-empty">Setting up plans is for the Administrator and Systems.</div>';
+    return;
+  }
+  if(!PSS.plan){
+    const plans=await psuLoadPlans(true);
+    const counts={};
+    try{
+      const {data}=await sb.schema('cust').from('plan_units').select('plan_id');
+      (data||[]).forEach(function(r){ counts[r.plan_id]=(counts[r.plan_id]||0)+1; });
+    }catch(e){}
+    host.innerHTML=PSU_CSS
+      +'<div class="card card-pad">'
+        +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+          +'<div class="sec-title" style="margin:0">Floor plans</div>'
+          +'<button class="btn btn-primary" style="margin-left:auto" onclick="pssAddPlan()"><i class="fa-solid fa-plus"></i> Add a plan</button>'
+          +'<button class="btn" onclick="navTo(\'postsales/unit\')"><i class="fa-solid fa-arrow-left"></i> Back to units</button>'
+        +'</div>'
+        +(plans.length
+          ? '<div style="overflow-x:auto;margin-top:12px"><table class="tbl"><thead><tr>'
+            +'<th>Business unit</th><th>Block</th><th>Floors</th><th>Flats marked</th><th>File</th><th></th></tr></thead><tbody>'
+            +plans.map(function(p){
+              const n=counts[p.id]||0;
+              return '<tr><td>'+esc(p.project)+'</td><td>'+esc(p.block)+'</td>'
+                +'<td>'+(p.floors||[]).map(psuOrdinal).join(', ')+'</td>'
+                +'<td>'+(n?('<b>'+n+'</b>'):'<span style="color:#b45309">none yet</span>')+'</td>'
+                +'<td style="color:var(--slate);font-size:12px">'+esc(p.source_name||'')+'</td>'
+                +'<td style="text-align:right;white-space:nowrap">'
+                  +'<button class="btn" onclick="pssOpen('+p.id+')"><i class="fa-solid fa-pen"></i> Mark flats</button> '
+                  +'<button class="btn btn-danger" onclick="pssDeletePlan('+p.id+')"><i class="fa-solid fa-trash"></i></button>'
+                +'</td></tr>';
+            }).join('')+'</tbody></table></div>'
+          : '<div class="psu-empty">No plans yet. Add one and mark its flats.</div>')
+      +'</div>';
+    return;
+  }
+  const p=PSS.plan;
+  host.innerHTML=PSU_CSS
+   +'<div class="psu-wrap"><div><div class="card card-pad">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0">'+esc(p.project)+' · Block '+esc(p.block)+' · '
+        +(p.floors||[]).map(psuOrdinal).join(', ')+'</div>'
+      +'<button class="btn" style="margin-left:auto" onclick="pssCopyToSibling()"><i class="fa-solid fa-copy"></i> Copy to the other sheet</button>'
+      +'<button class="btn" onclick="pssBack()"><i class="fa-solid fa-arrow-left"></i> All plans</button>'
+    +'</div>'
+    +'<div class="psu-stage"><canvas id="pssCanvas"></canvas></div>'
+   +'</div></div>'
+   +'<div class="psu-basket"><div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">Marking</div>'
+     +'<div id="pssSide"></div></div></div></div>';
+  try{
+    const img=await psuLoadImg(psuPlanUrl(p.storage_path));
+    const cv=$('pssCanvas');
+    const maxW=1400; PSS.scale=Math.min(1,maxW/p.img_w);
+    cv.width=Math.round(p.img_w*PSS.scale); cv.height=Math.round(p.img_h*PSS.scale);
+    cv._img=img;
+    cv.addEventListener('mousedown',pssDown); cv.addEventListener('mousemove',pssMove);
+    window.addEventListener('mouseup',pssUp);
+    cv.addEventListener('touchstart',pssDown,{passive:false});
+    cv.addEventListener('touchmove',pssMove,{passive:false});
+    cv.addEventListener('touchend',pssUp);
+    pssPaint(); pssSideMark();
+  }catch(e){ toast('Could not load the plan image','err'); }
+}
+
+/* ---- Logs -----------------------------------------------------------------------------------
+   Two of them, and they answer different questions for different people.
+
+   WHAT HAS BEEN SET UP - every sheet uploaded per project and every flat marked on it. Open to
+   anyone who can use the screen, downloadable, and editable by whoever may change the plans. This
+   is the data itself.
+
+   WHO LOOKED WHAT UP - the Administrator only. Not the person who did the searching, not their
+   colleagues. Enforced in the database, not here: cust.unit_search_log accepts writes from anyone
+   and returns rows to nobody but the Administrator, so this screen showing it is a convenience
+   rather than the thing keeping it private. */
+
+function psuIsAdmin(){ return !!state.super; }
+
+/* Recording must never get in the way of the thing the person was doing, so this is fired and
+   forgotten - a log that could fail the request would be a worse bargain than a log with a gap. */
+function psuLog(action){
+  try{
+    const rows=(PSU.basket||[]).map(function(b){
+      return {email:state.email,project:b.project,block:b.block,unit_name:b.unit_name,
+              plan_id:b.plan_id,action:action,units_n:PSU.basket.length};
+    });
+    if(!rows.length) return;
+    sb.schema('cust').from('unit_search_log').insert(rows).then(function(){},function(){});
+  }catch(e){}
+}
+
+window.psuLogsOpen=function(){ navTo('postsales/unit/logs'); };
+
+/* ---- what has been set up ------------------------------------------------------------------ */
+async function psuDataRows(){
+  const plans=await psuLoadPlans(true);
+  let units=[];
+  try{
+    const {data}=await sb.schema('cust').from('plan_units').select('*');
+    units=data||[];
+  }catch(e){}
+  const byPlan={};
+  units.forEach(function(u){ (byPlan[u.plan_id]=byPlan[u.plan_id]||[]).push(u); });
+  return plans.map(function(p){
+    const list=(byPlan[p.id]||[]).slice().sort(function(a,b){
+      return String(a.unit_name).localeCompare(String(b.unit_name)); });
+    return {plan:p, units:list};
+  });
+}
+window.psuDataDownload=async function(btn){
+  const rows=await psuDataRows();
+  const flat=[];
+  rows.forEach(function(r){
+    if(!r.units.length){
+      flat.push([r.plan.project,r.plan.block,psuFloorsText(r.plan.floors),'(none marked yet)','','','','','']);
+      return;
+    }
+    r.units.forEach(function(u){
+      flat.push([r.plan.project,r.plan.block,psuFloorsText(r.plan.floors),
+        u.unit_name,u.unit_type||'',Number(u.x),Number(u.y),Number(u.w),Number(u.h)]);
+    });
+  });
+  if(!flat.length){ toast('Nothing set up yet','warn'); return; }
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    // the same spreadsheet writer the Usability export uses, fetched only when wanted
+    if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library');
+    const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+    const ws=wb.addWorksheet('Floor plans',{views:[{state:'frozen',ySplit:3}]});
+    ws.columns=[{width:22},{width:9},{width:26},{width:9},{width:12},{width:9},{width:9},{width:9},{width:9}];
+    ws.mergeCells('A1:I1');
+    ws.getCell('A1').value='Unit plans — what has been set up';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:I2');
+    ws.getCell('A2').value=rows.length+' sheet'+(rows.length===1?'':'s')+'   ·   '
+      +flat.filter(function(f){ return f[3]!=='(none marked yet)'; }).length+' flats marked';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+    const head=ws.getRow(3);
+    head.values=['Business unit','Block','Floors','Unit','Type','X','Y','Width','Height'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    flat.forEach(function(r,i){
+      const row=ws.addRow(r);
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+      // a sheet with nothing marked on it is the finding, not a gap - so it is called out
+      if(r[3]==='(none marked yet)') row.eachCell(function(c){ c.font={color:{argb:'FFB45309'},italic:true}; });
+    });
+    ws.autoFilter={from:{row:3,column:1},to:{row:3+flat.length,column:9}};
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'Unit plans — what has been set up.xlsx');
+    toast('Downloaded','ok');
+  }catch(e){ toast('Could not download: '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+
+/* ---- who looked what up -------------------------------------------------------------------- */
+const PSL={rows:null,days:30};
+window.psuLogDays=async function(v){ PSL.days=Number(v)||30; PSL.rows=null; pslRender(); };
+async function pslLoad(){
+  if(PSL.rows) return PSL.rows;
+  const since=new Date(Date.now()-PSL.days*86400000).toISOString();
+  try{
+    const {data,error}=await sb.schema('cust').from('unit_search_log').select('*')
+      .gte('created_at',since).order('created_at',{ascending:false}).limit(2000);
+    if(error) throw error;
+    PSL.rows=data||[];
+  }catch(e){ PSL.rows=[]; }
+  return PSL.rows;
+}
+window.psuLogDownload=async function(btn){
+  const rows=await pslLoad();
+  if(!rows.length){ toast('Nothing logged in this period','warn'); return; }
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library');
+    const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+    const ws=wb.addWorksheet('Lookups',{views:[{state:'frozen',ySplit:3}]});
+    ws.columns=[{width:17},{width:30},{width:22},{width:9},{width:9},{width:13},{width:9}];
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value='Unit lookups';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:G2');
+    ws.getCell('A2').value='Last '+PSL.days+' days   ·   '+rows.length+' lookups   ·   '
+      +new Set(rows.map(function(r){ return String(r.email||'').toLowerCase(); })).size+' people';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+    const head=ws.getRow(3);
+    head.values=['When','Who','Business unit','Block','Unit','What they did','In one go'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    rows.forEach(function(r,i){
+      const row=ws.addRow([new Date(r.created_at), r.email||'', r.project||'', r.block||'',
+        r.unit_name||'', r.action||'', Number(r.units_n||0)]);
+      row.getCell(1).numFmt='dd mmm yyyy hh:mm';
+      row.getCell(7).numFmt='#,##0';
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+    });
+    ws.autoFilter={from:{row:3,column:1},to:{row:3+rows.length,column:7}};
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'Unit lookups — last '+PSL.days+' days.xlsx');
+    toast('Downloaded','ok');
+  }catch(e){ toast('Could not download: '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+async function pslRender(){
+  const host=$('psuLogBody'); if(!host) return;
+  host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  const rows=await pslLoad();
+  const people=new Set(rows.map(function(r){ return String(r.email||'').toLowerCase(); })).size;
+  host.innerHTML=
+    '<div class="psu-pick" style="margin-bottom:12px">'
+      +'<div class="psu-f"><label>Period</label><select class="sel" onchange="psuLogDays(this.value)">'
+        +[7,30,90,365].map(function(d){ return '<option value="'+d+'"'+(PSL.days===d?' selected':'')+'>Last '+d+' days</option>'; }).join('')
+      +'</select></div>'
+      +'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label>'
+        +'<button class="btn" style="height:42px" onclick="psuLogDownload(this)"><i class="fa-solid fa-file-excel"></i> Download</button></div>'
+    +'</div>'
+    +(rows.length
+      ? '<div style="font-size:13px;color:var(--slate);margin-bottom:10px">'
+          +rows.length+' lookups by '+people+' '+(people===1?'person':'people')+'</div>'
+        +'<div style="overflow-x:auto"><table class="tbl"><thead><tr>'
+        +'<th>When</th><th>Who</th><th>Unit</th><th>What they did</th></tr></thead><tbody>'
+        +rows.slice(0,300).map(function(r){
+          return '<tr><td style="white-space:nowrap">'+esc(new Date(r.created_at).toLocaleString())+'</td>'
+            +'<td>'+esc(r.email||'')+'</td>'
+            +'<td>'+esc([r.project,r.block?('Block '+r.block):'',r.unit_name?('Unit '+r.unit_name):'']
+                 .filter(Boolean).join(' · '))+'</td>'
+            +'<td>'+esc(r.action||'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>'
+        +(rows.length>300?'<div style="font-size:12px;color:var(--slate);margin-top:8px">Showing the most recent 300 — the download has all '+rows.length+'.</div>':'')
+      : '<div class="psu-empty">No lookups recorded in this period.</div>');
+}
+
+async function psuLogsRender(){
+  const host=$('psuBody'); if(!host) return;
+  host.innerHTML=PSU_CSS+'<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  const rows=await psuDataRows();
+  const marked=rows.reduce(function(a,r){ return a+r.units.length; },0);
+  host.innerHTML=PSU_CSS
+   +'<div class="card card-pad">'
+     +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+       +'<div class="sec-title" style="margin:0">What has been set up</div>'
+       +'<button class="btn" style="margin-left:auto" onclick="psuDataDownload(this)"><i class="fa-solid fa-file-excel"></i> Download</button>'
+       +(psuCanSetup()?'<button class="btn" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-pen"></i> Edit</button>':'')
+       +'<button class="btn" onclick="navTo(\'postsales/unit\')"><i class="fa-solid fa-arrow-left"></i> Back to units</button>'
+     +'</div>'
+     +'<div style="font-size:13px;color:var(--slate);margin-top:6px">'
+       +rows.length+' sheet'+(rows.length===1?'':'s')+' uploaded · '+marked+' flats marked</div>'
+     +(rows.length
+       ? '<div style="overflow-x:auto;margin-top:12px"><table class="tbl"><thead><tr>'
+         +'<th>Business unit</th><th>Block</th><th>Floors</th><th>Flats marked</th><th>Uploaded</th></tr></thead><tbody>'
+         +rows.map(function(r){
+           const u=r.units;
+           return '<tr><td>'+esc(r.plan.project)+'</td><td>'+esc(r.plan.block)+'</td>'
+             +'<td>'+esc(psuFloorsText(r.plan.floors))+'</td>'
+             +'<td>'+(u.length
+                 ? u.map(function(z){ return '<span class="psu-chip" style="margin:0 4px 4px 0">'+esc(z.unit_name)+'</span>'; }).join('')
+                 : '<span style="color:#b45309">none yet</span>')+'</td>'
+             +'<td style="white-space:nowrap;color:var(--slate);font-size:12px">'
+               +esc((r.plan.created_by||'')+' · '+new Date(r.plan.created_at).toLocaleDateString())+'</td></tr>';
+         }).join('')+'</tbody></table></div>'
+       : '<div class="psu-empty">Nothing uploaded yet.</div>')
+   +'</div>'
+   +'<div class="card card-pad" style="margin-top:16px">'
+     +'<div class="sec-title" style="margin:0 0 4px">Who looked what up</div>'
+     +(psuIsAdmin()
+       ? '<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Visible to the Administrator only — not to the people it records, and not to their colleagues.</div>'
+         +'<div id="psuLogBody"></div>'
+       : '<div class="psu-empty"><i class="fa-solid fa-lock" style="font-size:22px;color:#94a3b8"></i>'
+         +'<div style="margin-top:8px">This log is kept for the Administrator only.</div></div>')
+   +'</div>';
+  if(psuIsAdmin()) pslRender();
+}
+
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC']];
+  const tabs=[['adhoc','ADHOC'],['unit','UNIT']];
   const tab=(seg&&seg[0])||'adhoc';
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
     +'<div id="psaBody" style="margin-top:16px"></div>';
+  if(tab==='unit'){
+    // psuBody is what the Unit screens render into; psaBody stays as it was for ADHOC
+    const b=$('psaBody'); if(b) b.id='psuBody';
+    const sub=(seg&&seg[1])||'';
+    if(sub==='setup'){ pssRender(); }
+    else if(sub==='logs'){ psuLogsRender(); }
+    else { psuRender(); }
+    return;
+  }
   if(tab==='adhoc'){
     const host=$('psaBody'); if(host) loader(host);
     PSA.queue=await psaFetchAll();
@@ -13472,6 +14507,7 @@ function trcLeads(rows){
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
     g.mismatches=g.rows.filter(function(r){return r.status_match===false;}).length;
+    g.ovHealth=trcOvHealth(g.status,g.rows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -13663,7 +14699,8 @@ function trcLeadRowHtml(g){
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
-    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')+'</td>'
+    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
+      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')+'</td>'
     +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
     +'<td>'+(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
@@ -13781,8 +14818,8 @@ function trcTranscriptHtml(turns,fallback){
    one table, always visible, is what "marks and why for each" without separate tabs asked for. */
 function trcQaResultClass(s){
   s=String(s||'');
-  return /^(accurate|pass)$/i.test(s)?'t-green'
-    :/^(inaccurate|fail)$/i.test(s)?'t-red'
+  return /^(accurate|pass|match)$/i.test(s)?'t-green'
+    :/^(inaccurate|fail|mismatch)$/i.test(s)?'t-red'
     :/^(partial|partially accurate)$/i.test(s)?'t-amber':'t-gray';
 }
 function trcQaTableHtml(r,m){
@@ -13795,9 +14832,19 @@ function trcQaTableHtml(r,m){
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
         rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
+  /* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match,
+     sqft mismatch, and so on - each judged independently against the catalogue rather than folded
+     into one overall pitch verdict, so a call correct on Budget and wrong on Area shows as both. */
+  const factRows=(Array.isArray(pitch.fact_checks)?pitch.fact_checks:[]).map(function(f){
+    return {topic:'— '+((f&&f.fact)||'Fact'),status:f&&f.status,score:null,
+      why:join([f&&f.what_was_said?'Said: '+f.what_was_said:null,
+                f&&f.what_is_correct?'Correct: '+f.what_is_correct:null,
+                f&&f.note])};
+  });
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
-     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
+     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])}
+  ].concat(factRows).concat([
     {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
      why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
@@ -13808,7 +14855,7 @@ function trcQaTableHtml(r,m){
     {topic:'Status check',status:r.ai_assessed_status,score:null,
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
                m?m.label:null,sa.reason])}
-  ];
+  ]);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -13911,6 +14958,59 @@ function trcVisitChecks(rows){
   });
   return out.sort(function(a,b){return b.date.localeCompare(a.date);});
 }
+/* The two-part OV rule: enforced here, not just checked by hand.
+   (1) an OV lead must have had a follow-up call within the last two days - silence means nobody is
+       actually managing the scheduled visit, whatever the CRM status still says.
+   (2) once the visit date itself arrives, TWO follow-up calls must be logged on that exact day, not
+       one - a single call is under the bar here, not a pass.
+   Also flags an OV row that carries no parseable visit date at all as not properly marked, which is
+   what "is the organised-visit status marked properly" comes down to on the data this lead actually
+   has. Only evaluated for a lead whose CURRENT status is OV - a lead that has since moved on (Site
+   Visited, Lost, ...) is a different question this does not answer. Returns null for every other
+   status, which callers use to skip rendering entirely. */
+function trcOvHealth(status,rows){
+  if(status!=='OV')return null;
+  const ovRows=(rows||[]).filter(function(r){return r.crm_status==='OV';});
+  const latestOv=ovRows[ovRows.length-1];
+  const visitDate=latestOv&&latestOv.next_follow_up_text?String(latestOv.next_follow_up_text).slice(0,10):null;
+  const reasons=[];
+  if(!visitDate)reasons.push('Organised visit has no site-visit date recorded against it - not marked properly');
+
+  /* The CRM's lead-level status and its most recent follow-up's status are two separate fields, and
+     they can drift: a follow-up can move a lead on to "In Follow Up" or further without the
+     lead-level status being updated to match, leaving OV showing here after it stopped being true. */
+  const trueLatest=(rows||[])[((rows||[]).length-1)];
+  if(trueLatest&&trueLatest.crm_status&&trueLatest.crm_status!=='OV')
+    reasons.push('Lead status still shows OV but the latest follow-up ('+trueLatest.crm_status
+      +', '+(trcWall(trcRowDate(trueLatest))||'date not recorded')+') has already moved past it - not marked properly');
+
+  const today=traToday();
+  const twoDaysAgo=traLocalDate(new Date(Date.now()-2*864e5));
+  const recentCall=(rows||[]).some(function(r){const d=trcRowDate(r);return d&&d>=twoDaysAgo&&d<=today;});
+  if(!recentCall)reasons.push('No follow-up call logged in the last two days');
+
+  let onVisitDay=null;
+  if(visitDate&&visitDate<=today){
+    onVisitDay=(rows||[]).filter(function(r){return trcRowDate(r)===visitDate;}).length;
+    if(onVisitDay<2)reasons.push('Only '+onVisitDay+' follow-up call'+(onVisitDay===1?'':'s')
+      +' logged on the visit day ('+(trcWall(visitDate)||visitDate)+') - 2 required');
+  }
+  return {ok:reasons.length===0,visitDate:visitDate,onVisitDay:onVisitDay,reasons:reasons};
+}
+function trcOvHealthHtml(h){
+  if(!h)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid '+(h.ok?'#16a34a':'#dc2626')+'">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-triangle-exclamation" style="color:'+(h.ok?'#16a34a':'#dc2626')+'"></i> OV health check</div>'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +(h.ok?trcTag('t-green','fa-check','OK'):trcTag('t-red','fa-triangle-exclamation','Danger'))
+      +(h.visitDate?'<span style="font-size:12.5px;color:var(--slate)">Site visit organised for '+esc(trcWall(h.visitDate)||h.visitDate)+'</span>'
+                    :'<span style="font-size:12.5px;color:var(--slate)">No site-visit date on record</span>')
+    +'</div>'
+    +(h.reasons.length?'<ul style="margin:10px 0 0 18px;padding:0;font-size:12.5px;line-height:1.7;color:#dc2626">'
+      +h.reasons.map(function(r){return '<li>'+esc(r)+'</li>';}).join('')+'</ul>':'')
+  +'</div>';
+}
+
 function trcVisitCheckHtml(checks){
   if(!checks.length)return '';
   return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
@@ -14009,10 +15109,12 @@ async function trcLeadDetail(v,leadId){
     ? rows.slice().reverse().map(function(r,i){return trcCallHtml(r,rows.length-1-i,rows.length);}).join('')
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
+  const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
   const visitChecks=trcVisitCheckHtml(trcVisitChecks(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
+    +ovHealth
     +visitChecks
     +calls;
 
