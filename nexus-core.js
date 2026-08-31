@@ -14550,6 +14550,28 @@ function trcQaResultClass(s){
     :/^(inaccurate|fail|mismatch)$/i.test(s)?'t-red'
     :/^(partial|partially accurate)$/i.test(s)?'t-amber':'t-gray';
 }
+/* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match, sqft
+   mismatch, and so on - as a row of small boxes side by side, a tick or a cross per fact, instead of
+   another table row per fact. Each one carries the detail (what was said vs. what the catalogue says
+   is correct) as a hover title rather than on the face of the box, so the row stays scannable at a
+   glance and the detail is still one hover away, not gone. */
+function trcFactChipsHtml(factChecks){
+  const list=(Array.isArray(factChecks)?factChecks:[]).filter(function(f){return f&&f.fact;});
+  if(!list.length)return '';
+  return '<div style="margin-top:10px"><div style="font-size:12.5px;font-weight:700;margin-bottom:6px">Pitch fact check</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px">'
+    +list.map(function(f){
+      const s=String(f.status||'');
+      const isMatch=/^match$/i.test(s), isMismatch=/^mismatch$/i.test(s);
+      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
+      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
+      const tip=[f.what_was_said?'Said: '+f.what_was_said:null,
+                 f.what_is_correct?'Correct: '+f.what_is_correct:null,
+                 f.note].filter(Boolean).join(' — ');
+      return '<span class="tag '+cls+'" title="'+esc(tip)+'"><i class="fa-solid '+icon+'"></i> '+esc(f.fact)+'</span>';
+    }).join('')
+  +'</div></div>';
+}
 function trcQaTableHtml(r,m){
   if(!r.qa_id){
     return '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
@@ -14560,19 +14582,10 @@ function trcQaTableHtml(r,m){
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
         rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
-  /* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match,
-     sqft mismatch, and so on - each judged independently against the catalogue rather than folded
-     into one overall pitch verdict, so a call correct on Budget and wrong on Area shows as both. */
-  const factRows=(Array.isArray(pitch.fact_checks)?pitch.fact_checks:[]).map(function(f){
-    return {topic:'— '+((f&&f.fact)||'Fact'),status:f&&f.status,score:null,
-      why:join([f&&f.what_was_said?'Said: '+f.what_was_said:null,
-                f&&f.what_is_correct?'Correct: '+f.what_is_correct:null,
-                f&&f.note])};
-  });
+  const factChips=trcFactChipsHtml(pitch.fact_checks);
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
-     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])}
-  ].concat(factRows).concat([
+     why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
     {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
      why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
@@ -14583,7 +14596,7 @@ function trcQaTableHtml(r,m){
     {topic:'Status check',status:r.ai_assessed_status,score:null,
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
                m?m.label:null,sa.reason])}
-  ]);
+  ];
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -14591,7 +14604,8 @@ function trcQaTableHtml(r,m){
         why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
     });
   }
-  return '<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
+  return factChips
+    +'<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
     +topics.map(function(x){
       const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
@@ -14599,6 +14613,27 @@ function trcQaTableHtml(r,m){
         +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
         +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
+}
+
+/* Why this call landed the status it did, as a short list of concrete points rather than one
+   paragraph - each tagged Match (supports crm_status standing as it is) or Mismatch (points the
+   other way), so a mixed call shows as mixed instead of one blended verdict. Sits between the verdict
+   and the transcript: read the headline, read what it was actually weighed against, then go check the
+   words yourself if you want to. Falls back to the single evidence quote for a call scored before
+   "signals" existed, so nothing goes blank. */
+/* Exactly the point and a tick or a cross, side by side - same chip as the pitch fact check, nothing
+   added on top of it. */
+function trcStatusSignalsHtml(r){
+  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:null;
+  const signals=sa&&Array.isArray(sa.signals)?sa.signals.filter(function(s){return s&&s.point;}):[];
+  if(!signals.length)return '';
+  return '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px">'
+    +signals.map(function(s){
+      const isMatch=/^match$/i.test(String(s.direction||''));
+      return '<span class="tag '+(isMatch?'t-green':'t-red')+'"><i class="fa-solid '
+        +(isMatch?'fa-check':'fa-xmark')+'"></i> '+esc(s.point)+'</span>';
+    }).join('')
+  +'</div>';
 }
 
 function trcCallHtml(r,i,total){
@@ -14657,6 +14692,7 @@ function trcCallHtml(r,i,total){
     +accuracy
     +(r.summary_verdict?'<div style="margin-top:12px;font-size:13.5px;line-height:1.65;white-space:pre-wrap">'
       +'<b style="font-size:12.5px">Verdict.</b> '+esc(r.summary_verdict)+'</div>':'')
+    +trcStatusSignalsHtml(r)
     +'<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:8px">'
       +'<i class="fa-solid fa-quote-left" style="color:#0d9488"></i> The conversation</div>'
       +trcTranscriptHtml(r.transcript,r.transcript_text)+'</div>'
