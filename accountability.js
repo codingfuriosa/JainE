@@ -1528,6 +1528,33 @@
     // entry is the point, and stacking it loses the comparison down each column.
     return '<div class="wf-dw">'+head+t+'</div>';
   }
+  /* What a task is CALLED, ordered for the people who have to act on it. A flow may name the
+     fields it wants first (flows.task_fields - Invoice Processing: Company, Bill Date, Amount);
+     everything else follows in the order the form asks for it, so nothing is hidden, just ranked.
+
+     Setting that order also drops the STEP NAME, on purpose: which step a task is sitting at is the
+     one thing its holder already knows, because it is in their list precisely because it is their
+     step. Leading with it spent the most valuable characters saying nothing.
+
+     Attachments are skipped - an s3 path is a file, not something to read in a title. */
+  function wfTaskLine(det,taskFields){
+    const order=Array.isArray(taskFields)?taskFields:[];
+    const rows=(det||[]).filter(function(d){
+      if(!d||!d.label) return false;
+      const v=String(d.value==null?'':d.value).trim();
+      return !!v && v.indexOf('s3:')!==0;
+    });
+    const rank=function(l){
+      for(let i=0;i<order.length;i++) if(eq(order[i],l)) return i;
+      return 999;                                    // not named: falls in behind, in form order
+    };
+    const seen={}; rows.forEach(function(d,i){ if(!(d.label in seen)) seen[d.label]=i; });
+    return rows.slice().sort(function(a,b){
+        return (rank(a.label)-rank(b.label)) || (seen[a.label]-seen[b.label]);
+      })
+      .map(function(d){ return d.label+': '+wfDetailDisp(d.value); })
+      .join(' \u00b7 ');
+  }
   /* What a workflow task is CALLED in a list. On a flow that names its tasks after the instance
      (one with a sum field, i.e. Reimbursement) that is the owner, the total, the date and the UPI id
      - and deliberately not the step name: which step it is sitting at is the one thing the person
@@ -1536,6 +1563,11 @@
   function wfRowTitle(wfInfo,list){
     if(!wfInfo) return '';
     const det=Array.isArray(wfInfo.details)?wfInfo.details:[];
+    // a flow that states its own naming order takes it, step name and all, and stops here
+    if(Array.isArray(wfInfo.taskFields)&&wfInfo.taskFields.length){
+      const t=wfTaskLine(det,wfInfo.taskFields);
+      if(t) return t;
+    }
     const line=wfDetailsInline(det);
     if(wfInfo.sumNamed){
       /* The task lists load the staff list into their own `list` and never populate WF_PEOPLE, so
@@ -4747,7 +4779,11 @@
     const wfDayTable=wfIsDaywise(flow,wfDetailsArr)?wfDaywiseHtml(wfDetailsArr,flow):'';
     const wfDescFmt=wfDayTable?'':wfDetailsFmt(wfDetailsArr);
     // Same on the task itself. The step is still named right below it, in "Step 1 of 2 - HR Review".
-    const wfHeadTitle=(flow&&flow.tracker_sum_field)
+    /* Named the same way the list names it, so opening a task does not rename it. */
+    const wfTaskFields=(Array.isArray(flow&&flow.task_fields)&&flow.task_fields.length)?flow.task_fields:null;
+    const wfHeadTitle=wfTaskFields
+      ? (wfTaskLine(wfDetailsArr,wfTaskFields)||t.title)
+      : (flow&&flow.tracker_sum_field)
       ? (wfInline||t.title)
       : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
     v.innerHTML='<div class="wf-tp"><div class="tp-head"><div><div class="tp-title"><i class="fa-solid fa-diagram-project" style="color:#1d4ed8"></i> '+esc2(wfHeadTitle)+'</div>'
@@ -4755,7 +4791,7 @@
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
       +A+'</div></div>'
-      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfInst+' - '+wfStepName)+'</b>'+(wfDayTable?wfDayTable:(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':''))+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTaskFields?wfInst:(wfInst+' - '+wfStepName))+'</b>'+(wfDayTable?wfDayTable:(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':''))+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
         +'<div class="tp-f"><div class="k">Due</div><div class="v">'+dueTxt+'</div></div>'
         +'<div class="tp-f"><div class="k">Owner</div><div class="v"><span class="wf-ownerchip"><i class="fa-solid fa-diagram-project"></i> WORKFLOW</span></div></div>'
@@ -7404,7 +7440,7 @@
         let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details,created_by').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -7448,7 +7484,7 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
