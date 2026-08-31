@@ -922,6 +922,8 @@ function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/un
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForInspectionChecklist(unitId,filename){return `customer-portal/units/${unitId}/inspection-checklist/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForInspectionUpdate(unitId,filename){return `customer-portal/units/${unitId}/inspection-updates/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForPaymentQR(filename){return `customer-portal/payment-qr/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForSubmeterInvoice(unitId,filename){return `customer-portal/units/${unitId}/submeter-invoice/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -7554,6 +7556,7 @@ async function usbLoad(){
    can leak into another screen. */
 const USB_CSS='<style id="usbCss">'
   +'.usb-bar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:14px}'
+  +'.usb-xl{margin-left:auto;height:38px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}'
   +'.usb-f{display:flex;flex-direction:column;gap:5px;min-width:0}'
   +'.usb-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}'
   +'.usb-f .sel,.usb-f input[type=date]{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 11px;'
@@ -7595,6 +7598,7 @@ function usbControlsHtml(){
         +ppl.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
+    +'<button class="btn btn-primary usb-xl" id="usbXl" onclick="usbExport(this)"><i class="fa-solid fa-file-excel"></i> Extract to Excel</button>'
   +'</div>';
 }
 /* Picking a preset writes its dates into From/To as well, so the two boxes always agree with the
@@ -7602,6 +7606,148 @@ function usbControlsHtml(){
 window.usbSetPreset=function(v){ USB.preset=v; const r=usbRange(v==='custom'?'30d':v); USB.from=r.from; USB.to=r.to; renderPage(); };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
 window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
+/* ---- Extract to Excel -------------------------------------------------------------------
+   A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
+   as numbers that actually sum, the date as a date, and each feature's activity in the same colour
+   it wears on screen. A CSV would have been three lines of code and would have arrived as grey
+   text needing to be formatted by hand every single time.
+   The library is fetched only when the button is pressed. In the page head it would have made all
+   thirty-odd pages carry 270KB for one button on one screen. It comes from jsdelivr, which the app
+   already depends on for Supabase and Chart.js, so it is not a new host to trust - and if it cannot
+   be reached the export falls back to CSV and says so rather than failing silently. */
+function usbLoadXlsx(){
+  if(window.ExcelJS) return Promise.resolve(true);
+  if(window._usbXlP) return window._usbXlP;
+  window._usbXlP=new Promise(function(res){
+    const el=document.createElement('script');
+    el.src='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    el.onload=function(){ res(!!window.ExcelJS); };
+    el.onerror=function(){ window._usbXlP=null; res(false); };   // cleared, so a later click retries
+    document.head.appendChild(el);
+  });
+  return window._usbXlP;
+}
+// the four activity bands in the same colours the screen uses: [ink, fill]
+const USB_XL_BAND={'Very Active':['FF166534','FFDCFCE7'],'Active':['FF0369A1','FFE0F2FE'],
+                   'Less':['FFB45309','FFFEF3C7'],'Inactive':['FF64748B','FFF1F5F9']};
+function usbExportName(r){
+  return 'Usability '+r.from+' to '+r.to+(USB.email?(' - '+USB.email.split('@')[0]):'');
+}
+function usbSaveBlob(blob,name){
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); },2000);
+}
+/* Only reached if the library could not be loaded. Same rows, same order, no formatting - and the
+   toast says why, so nobody is left wondering why this one came out plain. */
+function usbExportCsv(rows,r,who){
+  const q=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  const out=[['Portal Usability'],[fmtDate(r.from)+' to '+fmtDate(r.to),who],[],
+    ['Module','Tab','Feature','Uses','People','Last used','Activity']];
+  rows.forEach(function(x){ out.push([x.module_label||x.module_id||'',x.tab||'',x.feature||'',
+    Number(x.uses||0),Number(x.users||0),
+    x.last_used?fmtDate(String(x.last_used).slice(0,10)):'',x.band||'Inactive']); });
+  usbSaveBlob(new Blob(['﻿'+out.map(function(l){return l.map(q).join(',');}).join('\r\n')],
+    {type:'text/csv;charset=utf-8'}), usbExportName(r)+'.csv');
+  toast('Could not reach the spreadsheet library - exported as a plain CSV instead','warn');
+}
+window.usbExport=async function(btn){
+  const rows=(USB.rows||[]).slice();
+  if(!rows.length){ toast('Nothing to extract for this period','warn'); return; }
+  const r=usbCurrentRange();
+  const who=USB.email
+    ? (((USB.people||[]).find(function(p){return p.email===USB.email;})||{}).name||USB.email)
+    : 'Everyone';
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    if(!(await usbLoadXlsx())){ usbExportCsv(rows,r,who); return; }
+
+    const wb=new ExcelJS.Workbook();
+    wb.creator='JAIN-E'; wb.created=new Date();
+
+    /* Sheet 1 - every feature. Freezing four rows keeps the title, the range line and the header
+       on screen while scrolling, which is the difference between a sheet you can read and one you
+       get lost in at row 300. */
+    const ws=wb.addWorksheet('Features',{views:[{state:'frozen',ySplit:4}]});
+    ws.columns=[{width:22},{width:20},{width:42},{width:9},{width:9},{width:15},{width:14}];
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value='Portal Usability';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:G2');
+    ws.getCell('A2').value=fmtDate(r.from)+'  →  '+fmtDate(r.to)
+      +'      ·      '+who
+      +'      ·      '+rows.length+' features'
+      +'      ·      '+rows.reduce(function(a,x){return a+Number(x.uses||0);},0)+' uses';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+
+    const head=ws.getRow(4);
+    head.values=['Module','Tab','Feature','Uses','People','Last used','Activity'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle',horizontal:'left'};
+    });
+
+    rows.forEach(function(x,i){
+      const row=ws.addRow([x.module_label||x.module_id||'', x.tab||'', x.feature||'',
+        Number(x.uses||0), Number(x.users||0),
+        x.last_used?new Date(x.last_used):null, x.band||'Inactive']);
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+      row.getCell(4).numFmt='#,##0';
+      row.getCell(5).numFmt='#,##0';
+      row.getCell(6).numFmt='dd mmm yyyy';
+      const b=USB_XL_BAND[x.band]||USB_XL_BAND.Inactive;
+      const bc=row.getCell(7);
+      bc.font={bold:true,color:{argb:b[0]},size:10};
+      bc.fill={type:'pattern',pattern:'solid',fgColor:{argb:b[1]}};
+      bc.alignment={horizontal:'center'};
+    });
+    // filter set on the header, so whoever opens it can slice by module or band without setting up
+    ws.autoFilter={from:{row:4,column:1},to:{row:4+rows.length,column:7}};
+
+    /* Sheet 2 - the same numbers rolled up per module, because "which module is actually being
+       used" is the question this report gets opened to answer, and totting that up by hand off two
+       hundred rows is exactly the work an export is supposed to remove. */
+    const by={};
+    rows.forEach(function(x){
+      const k=x.module_label||x.module_id||'(none)';
+      const m=by[k]||(by[k]={features:0,used:0,uses:0,people:0});
+      m.features++; m.uses+=Number(x.uses||0);
+      if(Number(x.uses||0)>0) m.used++;
+      m.people=Math.max(m.people,Number(x.users||0));
+    });
+    const ms=wb.addWorksheet('By module',{views:[{state:'frozen',ySplit:1}]});
+    ms.columns=[{width:26},{width:12},{width:12},{width:10},{width:14}];
+    const mh=ms.getRow(1);
+    mh.values=['Module','Features','Used','Uses','Most people'];
+    mh.height=22;
+    mh.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    Object.keys(by).sort(function(a,b){ return by[b].uses-by[a].uses || a.localeCompare(b); })
+      .forEach(function(k){
+        const m=by[k];
+        const row=ms.addRow([k,m.features,m.used,m.uses,m.people]);
+        row.getCell(4).numFmt='#,##0';
+        // a module nobody has touched is the finding, not a gap - so it is marked, not left blank
+        if(!m.used) row.eachCell(function(c){ c.font={color:{argb:'FF94A3B8'},italic:true}; });
+      });
+
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      usbExportName(r)+'.xlsx');
+    toast('Extracted '+rows.length+' features to Excel','ok');
+  }catch(e){
+    try{ console.error('usbExport',e); }catch(_e){}
+    toast('Could not build the spreadsheet: '+((e&&e.message)||e),'err');
+  }finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+
 // One bar showing how a set of features splits across the four bands.
 function usbBandBar(rows){
   const total=rows.length||1;
@@ -10970,7 +11116,7 @@ const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigit
 // unescaped" rule getting in the way.
 function cpaTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
 
-const CPA={projects:null,units:null,customers:null};
+const CPA={projects:null,units:null,customers:null,amenities:null,paymentSettings:null};
 async function cpaProjects(force){
   if(CPA.projects&&!force)return CPA.projects;
   const {data}=await sb.schema('cust').from('projects').select('*').is('deleted_at',null).order('name');
@@ -10986,10 +11132,20 @@ async function cpaCustomers(force){
   const {data}=await sb.schema('cust').from('customers').select('*').is('deleted_at',null).order('full_name');
   CPA.customers=data||[];return CPA.customers;
 }
+async function cpaAmenities(force){
+  if(CPA.amenities&&!force)return CPA.amenities;
+  const {data}=await sb.schema('cust').from('amenities').select('*, projects(id,name)').is('deleted_at',null).order('name');
+  CPA.amenities=data||[];return CPA.amenities;
+}
+async function cpaPaymentSettings(force){
+  if(CPA.paymentSettings&&!force)return CPA.paymentSettings;
+  const {data}=await sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle();
+  CPA.paymentSettings=data||{id:1,upi_id:null,qr_storage_path:null};return CPA.paymentSettings;
+}
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents'];
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -10998,7 +11154,11 @@ VIEWS.custportal_admin=async function(v,seg){
   else if(ti===2) await cpaRenderImport(host,seg);
   else if(ti===3) await cpaRenderPhotos(host);
   else if(ti===4) await cpaRenderInspection(host);
-  else await cpaRenderDocuments(host);
+  else if(ti===5) await cpaRenderDocuments(host);
+  else if(ti===6) await cpaRenderAmenities(host);
+  else if(ti===7) await cpaRenderSubmeter(host);
+  else if(ti===8) await cpaRenderSupport(host);
+  else await cpaRenderReferrals(host);
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
@@ -11430,6 +11590,162 @@ window.cpaUploadCustomerDoc=async function(){
   toast('Document uploaded','ok');$('cpaCdFile').value='';
 };
 
+/* ---------- Tab 7: Amenities (booking calendar + manual QR/UPI payment, post-possession only) ---------- */
+async function cpaRenderAmenities(host){
+  const [projects,amenities,pay]=await Promise.all([cpaProjects(),cpaAmenities(true),cpaPaymentSettings(true)]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const amRows=amenities.map(a=>[esc(a.name),esc((a.projects&&a.projects.name)||'—'),a.rental_amount!=null?custInr(a.rental_amount):'—',
+    `<button class="btn btn-sm btn-danger" onclick="cpaDeleteAmenity(${a.id})">Delete</button>`]);
+  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+    <div class="card card-pad frm"><div class="sec-title">New amenity</div>
+    <label>Project</label><select id="cpaAmProject">${projOpts}</select>
+    <label>Name</label><input id="cpaAmName" placeholder="Banquet Hall">
+    <label>Description (optional)</label><textarea id="cpaAmDesc"></textarea>
+    <label>Rental amount (₹, optional)</label><input id="cpaAmAmount" type="number">
+    <div style="margin-top:12px"><button class="btn btn-primary" onclick="cpaAmenitySave()"><i class="fa-solid fa-plus"></i> Add amenity</button></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Payment QR / UPI <span style="font-weight:400;color:var(--slate);font-size:12px">— shared by amenities &amp; sub-meter</span></div>
+    <label>UPI ID</label><input id="cpaPayUpi" value="${esc(pay.upi_id||'')}" placeholder="jaingroup@upi">
+    <label>QR code image (optional)</label><input type="file" id="cpaPayQrFile" accept="image/*">
+    ${pay.qr_storage_path?`<div style="margin:8px 0"><button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View current QR</button></div>`:''}
+    <div style="margin-top:12px"><button class="btn btn-primary" onclick="cpaPaymentSettingsSave()"><i class="fa-solid fa-save"></i> Save</button></div>
+    </div></div>
+    <div class="sec-title" style="margin:20px 0 10px">Amenities</div>
+    ${amRows.length?cpaTable(['Name','Project','Rental amount','Delete'],amRows):'<div class="card card-pad empty">No amenities yet.</div>'}
+    <div class="sec-title" style="margin:20px 0 10px">Bookings</div>
+    <div id="cpaAmBookings"><div class="loader"><div class="spin"></div></div></div>`;
+  cpaRenderAmenityBookings();
+}
+window.cpaAmenitySave=async function(){
+  const project_id=Number($('cpaAmProject').value),name=$('cpaAmName').value.trim(),
+    description=$('cpaAmDesc').value.trim()||null,rental_amount=$('cpaAmAmount').value?Number($('cpaAmAmount').value):null;
+  if(!project_id||!name){toast('Project and name are required','err');return;}
+  const {error}=await sb.schema('cust').from('amenities').insert({project_id,name,description,rental_amount,created_by:state.email});
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  toast('Amenity added','ok');route();
+};
+window.cpaDeleteAmenity=async function(id){
+  if(!await confirmDialog('Remove this amenity? Existing bookings stay on record.',{okLabel:'Delete'}))return;
+  const {error}=await sb.schema('cust').from('amenities').update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Delete failed: '+error.message,'err');return;}
+  toast('Amenity removed','ok');route();
+};
+window.cpaPaymentSettingsSave=async function(){
+  const upi_id=$('cpaPayUpi').value.trim()||null;
+  const f=$('cpaPayQrFile').files[0];
+  const row={id:1,upi_id,updated_at:new Date().toISOString(),updated_by:state.email};
+  if(f){
+    const {data,error}=await uploadFileToS3(s3KeyForPaymentQR(f.name),f);
+    if(error){toast('QR upload failed: '+error.message,'err');return;}
+    row.qr_storage_path=data.path;
+  }
+  const {error}=await sb.schema('cust').from('payment_settings').upsert(row,{onConflict:'id'});
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  toast('Payment settings saved','ok');route();
+};
+async function cpaRenderAmenityBookings(){
+  const host=$('cpaAmBookings');if(!host)return;
+  const {data}=await sb.schema('cust').from('amenity_bookings').select('*, amenities(name), units(unit_code)').order('booking_date',{ascending:false}).limit(200);
+  const rows=(data||[]).map(b=>[esc((b.amenities&&b.amenities.name)||'—'),esc((b.units&&b.units.unit_code)||'—'),fmtDate(b.booking_date),
+    b.amount!=null?custInr(b.amount):'—',
+    b.status==='confirmed'?'<span class="tag t-green">Confirmed</span>':b.status==='cancelled'?'<span class="tag t-gray">Cancelled</span>':'<span class="tag t-amber">Pending payment</span>',
+    esc(b.payment_reference||'—'),
+    b.status==='pending_payment'?`<button class="btn btn-sm btn-primary" onclick="cpaConfirmBooking(${b.id})">Confirm</button> <button class="btn btn-sm btn-danger" onclick="cpaCancelBooking(${b.id})">Cancel</button>`:'—']);
+  host.innerHTML=rows.length?cpaTable(['Amenity','Unit','Date','Amount','Status','Payment ref','Actions'],rows):'<div class="card card-pad empty">No bookings yet.</div>';
+}
+window.cpaConfirmBooking=async function(id){
+  const {error}=await sb.schema('cust').from('amenity_bookings').update({status:'confirmed',marked_paid_by:state.email,marked_paid_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Booking confirmed','ok');cpaRenderAmenityBookings();
+};
+window.cpaCancelBooking=async function(id){
+  if(!await confirmDialog('Cancel this booking? The date becomes available again.',{okLabel:'Cancel booking'}))return;
+  const {error}=await sb.schema('cust').from('amenity_bookings').update({status:'cancelled'}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Booking cancelled','ok');cpaRenderAmenityBookings();
+};
+
+/* ---------- Tab 8: Sub-meter fixing requests ---------- */
+async function cpaRenderSubmeter(host){
+  const {data}=await sb.schema('cust').from('submeter_requests').select('*, units(unit_code, projects(name))').order('requested_at',{ascending:false}).limit(200);
+  const tagFor={requested:'<span class="tag t-amber">Requested</span>',invoiced:'<span class="tag t-blue">Invoiced</span>',paid:'<span class="tag t-green">Paid</span>',completed:'<span class="tag t-green">Completed</span>',cancelled:'<span class="tag t-gray">Cancelled</span>'};
+  const rows=(data||[]).map(r=>{
+    let actions='—';
+    if(r.status==='requested')actions=`<button class="btn btn-sm btn-primary" onclick="cpaSubmeterInvoiceModal(${r.id},${r.unit_id})">Invoice</button>`;
+    else if(r.status==='invoiced')actions=`<button class="btn btn-sm btn-primary" onclick="cpaSubmeterMarkPaid(${r.id})">Mark paid</button>`;
+    else if(r.status==='paid')actions=`<button class="btn btn-sm btn-primary" onclick="cpaSubmeterMarkCompleted(${r.id})">Mark completed</button>`;
+    return [esc((r.units&&r.units.unit_code)||'—'),esc((r.units&&r.units.projects&&r.units.projects.name)||'—'),fmtDate(r.requested_at),
+      r.invoice_amount!=null?custInr(r.invoice_amount):'—',tagFor[r.status]||esc(r.status),actions];
+  });
+  host.innerHTML=rows.length?cpaTable(['Unit','Project','Requested','Invoice amount','Status','Actions'],rows):'<div class="card card-pad empty">No sub-meter requests yet.</div>';
+}
+window.cpaSubmeterInvoiceModal=function(id,unitId){
+  openModal(`<div class="modal-head"><h3>Raise invoice</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Invoice amount (₹)</label><input id="cpaSmAmount" type="number">
+    <label>Invoice document (optional)</label><input type="file" id="cpaSmFile"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaSubmeterInvoiceSave(${id},${unitId})">Save</button></div>`);
+};
+window.cpaSubmeterInvoiceSave=async function(id,unitId){
+  const amount=Number($('cpaSmAmount').value||0);
+  if(!amount){toast('Enter an invoice amount','err');return;}
+  const f=$('cpaSmFile').files[0];
+  const row={status:'invoiced',invoice_amount:amount,invoiced_at:new Date().toISOString(),invoiced_by:state.email};
+  if(f){
+    const {data,error}=await uploadFileToS3(s3KeyForSubmeterInvoice(unitId,f.name),f);
+    if(error){toast('Invoice upload failed: '+error.message,'err');return;}
+    row.invoice_storage_path=data.path;
+  }
+  const {error}=await sb.schema('cust').from('submeter_requests').update(row).eq('id',id);
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  closeModal();toast('Invoice raised','ok');route();
+};
+window.cpaSubmeterMarkPaid=async function(id){
+  const {error}=await sb.schema('cust').from('submeter_requests').update({status:'paid',marked_paid_by:state.email,paid_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Marked paid','ok');route();
+};
+window.cpaSubmeterMarkCompleted=async function(id){
+  const {error}=await sb.schema('cust').from('submeter_requests').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Marked completed','ok');route();
+};
+
+/* ---------- Tab 9: Support tickets (local mirror of Zoho Desk) ---------- */
+async function cpaRenderSupport(host){
+  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
+  const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
+    tagFor[t.status]||esc(t.status),fmtDate(t.created_at),
+    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:'<span style="color:var(--slate);font-size:12px">Not yet in Zoho</span>']);
+  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
+    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" just pulls its current status back here.</div>';
+}
+window.cpaSyncTicket=async function(id){
+  toast('Refreshing status…','');
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
+    toast('Status updated','ok');route();
+  }catch(e){toast('Refresh failed: '+e.message,'err');}
+};
+
+/* ---------- Tab 10: Referrals ---------- */
+const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+async function cpaRenderReferrals(host){
+  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
+    fmtDate(r.created_at)]);
+  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
+}
+window.cpaReferralStatusChange=async function(id,status){
+  const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
+  if(error){toast('Update failed: '+error.message,'err');return;}
+  toast('Status updated','ok');
+};
+
 /* ============================ CUSTOMER-FACING PORTAL ============================ */
 let CUST_DATA=null,CUST_SELECTED_UNIT=null;
 async function custLoadData(customerId,force){
@@ -11573,10 +11889,173 @@ async function custTabVideos(){
       :'<div class="card card-pad empty">Not available yet.</div>')+'<div style="margin-bottom:20px"></div>';
   }).join('');
 }
+async function custTabSupport(unit){
+  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
+  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),tagFor[t.status]||esc(t.status),
+    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:'<span style="color:var(--slate);font-size:12px">Submitting…</span>']);
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
+    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
+}
+window.custNewTicketModal=function(){
+  openModal(`<div class="modal-head"><h3>Raise a support ticket</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Subject</label><input id="custTkSubject" placeholder="Brief summary">
+    <label>Details</label><textarea id="custTkDesc" placeholder="Describe the issue…"></textarea></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custTkBtn" onclick="custNewTicketSave()">Submit</button></div>`);
+};
+window.custNewTicketSave=async function(){
+  const subject=$('custTkSubject').value.trim(),description=$('custTkDesc').value.trim();
+  if(!subject){toast('Enter a subject','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const btn=$('custTkBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
+  const {data:ins,error}=await sb.schema('cust').from('support_tickets').insert({unit_id:unit.id,subject,description,created_by:state.email}).select('id').single();
+  if(error){toast('Could not raise ticket: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'create',ticketId:ins.id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Ticket saved, but Zoho Desk sync failed: '+(out.error||res.status),'err');}
+  }catch(e){toast('Ticket saved, but Zoho Desk sync failed: '+e.message,'err');}
+  closeModal();toast('Ticket raised','ok');route();
+};
+window.custSyncTicket=async function(id){
+  toast('Refreshing status…','');
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
+    toast('Status updated','ok');route();
+  }catch(e){toast('Refresh failed: '+e.message,'err');}
+};
+async function custTabAmenities(unit){
+  if(unit.status!=='possession'){
+    return '<div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="margin-top:6px">Amenity booking becomes available once you have taken possession of your flat.</div></div>';
+  }
+  const {data:amenities}=await sb.schema('cust').from('amenities').select('*').eq('project_id',unit.project_id);
+  const amenityIds=(amenities||[]).map(a=>a.id);
+  const [{data:bookings},{data:pay}]=await Promise.all([
+    amenityIds.length?sb.schema('cust').from('amenity_bookings').select('*').in('amenity_id',amenityIds).neq('status','cancelled'):Promise.resolve({data:[]}),
+    sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle()
+  ]);
+  if(!(amenities&&amenities.length))return '<div class="card card-pad empty">No amenities have been added for your project yet.</div>';
+  const takenByAmenity={};(bookings||[]).forEach(b=>{(takenByAmenity[b.amenity_id]=takenByAmenity[b.amenity_id]||[]).push(b.booking_date);});
+  const myBookings=(bookings||[]).filter(b=>b.unit_id===unit.id);
+  const amenityCards=amenities.map(a=>{
+    const taken=(takenByAmenity[a.id]||[]).map(d=>fmtDateShort(d)).join(', ')||'None yet';
+    return `<div class="card card-pad" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div><b>${esc(a.name)}</b>${a.description?`<div style="font-size:12.5px;color:var(--slate);margin-top:4px">${esc(a.description)}</div>`:''}
+      <div style="font-size:12px;color:var(--slate);margin-top:6px">Already booked: ${esc(taken)}</div></div>
+      <div style="text-align:right">${a.rental_amount!=null?`<div style="font-weight:700">${custInr(a.rental_amount)}</div>`:''}
+      <button class="btn btn-sm btn-primary" style="margin-top:6px" onclick="custBookAmenityModal(${a.id},'${esc(a.name).replace(/'/g,"\\'")}',${a.rental_amount==null?'null':a.rental_amount})">Book a date</button></div>
+      </div></div>`;
+  }).join('');
+  const myRows=myBookings.map(b=>{
+    const a=amenities.find(x=>x.id===b.amenity_id);
+    return [esc((a&&a.name)||'—'),fmtDate(b.booking_date),b.amount!=null?custInr(b.amount):'—',
+      b.status==='confirmed'?'<span class="tag t-green">Confirmed</span>':b.status==='cancelled'?'<span class="tag t-gray">Cancelled</span>':'<span class="tag t-amber">Pending payment</span>',
+      esc(b.payment_reference||'—'),
+      b.status==='pending_payment'?`<button class="btn btn-sm" onclick="custSetAmenityPaymentRef(${b.id},'${(b.payment_reference||'').replace(/'/g,"\\'")}')">Add reference</button>`:'—'];
+  });
+  return '<div class="sec-title" style="margin:0 0 10px">Amenities</div>'+amenityCards+
+    '<div class="sec-title" style="margin:20px 0 10px">My bookings</div>'+
+    (myRows.length?cpaTable(['Amenity','Date','Amount','Status','Payment ref','Action'],myRows):'<div class="card card-pad empty">You haven’t booked anything yet.</div>')+
+    (pay&&(pay.upi_id||pay.qr_storage_path)?`<div class="sec-title" style="margin:20px 0 10px">Payment</div><div class="card card-pad" style="font-size:13px">Pay via ${pay.upi_id?`UPI ID <b>${esc(pay.upi_id)}</b>`:''}${pay.upi_id&&pay.qr_storage_path?' or ':''}${pay.qr_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View QR code</button>`:''}, then let us know the reference — we’ll confirm your booking once we see it.</div>`:'');
+}
+window.custBookAmenityModal=function(amenityId,name,rentalAmount){
+  const today=new Date().toISOString().slice(0,10);
+  openModal(`<div class="modal-head"><h3>Book ${esc(name)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Date</label><input type="date" id="custAmDate" min="${today}">
+    ${rentalAmount!=null?`<p style="font-size:13px;color:var(--slate)">Rental amount: <b>${custInr(rentalAmount)}</b></p>`:''}
+    <label>Payment reference (optional — fill in after you pay)</label><input id="custAmRef" placeholder="UTR / transaction ID"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custAmBtn" onclick="custBookAmenitySave(${amenityId},${rentalAmount==null?'null':rentalAmount})">Book</button></div>`);
+};
+window.custBookAmenitySave=async function(amenityId,rentalAmount){
+  const bookingDate=$('custAmDate').value,paymentReference=$('custAmRef').value.trim()||null;
+  if(!bookingDate){toast('Choose a date','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const btn=$('custAmBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Booking…';
+  const {error}=await sb.schema('cust').from('amenity_bookings').insert({amenity_id:amenityId,unit_id:unit.id,booking_date:bookingDate,amount:rentalAmount,payment_reference:paymentReference,created_by:state.email});
+  if(error){toast(error.code==='23505'?'That date is already booked — pick another.':'Could not book: '+error.message,'err');btn.disabled=false;btn.innerHTML='Book';return;}
+  closeModal();toast('Booking submitted — pending payment confirmation','ok');route();
+};
+window.custSetAmenityPaymentRef=function(bookingId,current){
+  openModal(`<div class="modal-head"><h3>Payment reference</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>UTR / transaction ID</label><input id="custAmRefEdit" value="${esc(current)}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="custSetAmenityPaymentRefSave(${bookingId})">Save</button></div>`);
+};
+window.custSetAmenityPaymentRefSave=async function(bookingId){
+  const reference=$('custAmRefEdit').value.trim()||null;
+  const {error}=await sb.schema('cust').rpc('set_amenity_booking_payment_ref',{p_booking_id:bookingId,p_reference:reference});
+  if(error){toast('Could not save: '+error.message,'err');return;}
+  closeModal();toast('Payment reference saved','ok');route();
+};
+async function custTabSubmeter(unit){
+  const [{data:requests},{data:pay}]=await Promise.all([
+    sb.schema('cust').from('submeter_requests').select('*').eq('unit_id',unit.id).order('requested_at',{ascending:false}),
+    sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle()
+  ]);
+  const tagFor={requested:'<span class="tag t-amber">Requested</span>',invoiced:'<span class="tag t-blue">Invoiced — payment due</span>',paid:'<span class="tag t-green">Paid</span>',completed:'<span class="tag t-green">Completed</span>',cancelled:'<span class="tag t-gray">Cancelled</span>'};
+  const rows=(requests||[]).map(r=>[fmtDate(r.requested_at),r.invoice_amount!=null?custInr(r.invoice_amount):'—',tagFor[r.status]||esc(r.status),
+    r.invoice_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${r.invoice_storage_path.replace(/'/g,"\\'")}','invoice')"><i class="fa-solid fa-download"></i> Invoice</button>`:'—',
+    esc(r.payment_reference||'—'),
+    r.status==='invoiced'?`<button class="btn btn-sm" onclick="custSetSubmeterPaymentRef(${r.id},'${(r.payment_reference||'').replace(/'/g,"\\'")}')">Add reference</button>`:'—'
+  ]);
+  const canApply=!(requests||[]).some(r=>['requested','invoiced'].includes(r.status));
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Sub-meter fixing</div>${canApply?'<button class="btn btn-primary" onclick="custSubmeterApply()"><i class="fa-solid fa-plus"></i> Apply</button>':''}</div>`+
+    (rows.length?cpaTable(['Requested','Invoice amount','Status','Invoice','Payment ref','Action'],rows):'<div class="card card-pad empty">No requests yet.</div>')+
+    (pay&&(pay.upi_id||pay.qr_storage_path)?`<div class="sec-title" style="margin:20px 0 10px">Payment</div><div class="card card-pad" style="font-size:13px">Once invoiced, pay via ${pay.upi_id?`UPI ID <b>${esc(pay.upi_id)}</b>`:''}${pay.upi_id&&pay.qr_storage_path?' or ':''}${pay.qr_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View QR code</button>`:''}.</div>`:'');
+}
+window.custSubmeterApply=async function(){
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const {error}=await sb.schema('cust').from('submeter_requests').insert({unit_id:unit.id,requested_by:state.email});
+  if(error){toast('Could not submit request: '+error.message,'err');return;}
+  toast('Request submitted','ok');route();
+};
+window.custSetSubmeterPaymentRef=function(requestId,current){
+  openModal(`<div class="modal-head"><h3>Payment reference</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>UTR / transaction ID</label><input id="custSmRefEdit" value="${esc(current)}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="custSetSubmeterPaymentRefSave(${requestId})">Save</button></div>`);
+};
+window.custSetSubmeterPaymentRefSave=async function(requestId){
+  const reference=$('custSmRefEdit').value.trim()||null;
+  const {error}=await sb.schema('cust').rpc('set_submeter_payment_ref',{p_request_id:requestId,p_reference:reference});
+  if(error){toast('Could not save: '+error.message,'err');return;}
+  closeModal();toast('Payment reference saved','ok');route();
+};
+const CUST_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+async function custTabReferrals(unit){
+  const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const rows=(referrals||[]).map(r=>[esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    `<select onchange="custReferralStatusChange(${r.id},this.value)">${Object.keys(CUST_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CUST_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
+    fmtDate(r.created_at)]);
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Referrals</div><button class="btn btn-primary" onclick="custNewReferralModal()"><i class="fa-solid fa-plus"></i> Refer someone</button></div>`+
+    (rows.length?cpaTable(['Name','Phone','Email','Status','Referred on'],rows):'<div class="card card-pad empty">You haven’t referred anyone yet.</div>');
+}
+window.custNewReferralModal=function(){
+  openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Name</label><input id="custRefName">
+    <label>Phone</label><input id="custRefPhone">
+    <label>Email (optional)</label><input id="custRefEmail"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()">Submit</button></div>`);
+};
+window.custNewReferralSave=async function(){
+  const prospect_name=$('custRefName').value.trim(),prospect_phone=$('custRefPhone').value.trim()||null,prospect_email=$('custRefEmail').value.trim()||null;
+  if(!prospect_name){toast('Enter a name','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
+  if(error){toast('Could not submit: '+error.message,'err');return;}
+  closeModal();toast('Referral submitted — thank you!','ok');route();
+};
+window.custReferralStatusChange=async function(id,status){
+  const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
+  if(error){toast('Update failed: '+error.message,'err');return;}
+  toast('Status updated','ok');
+};
 VIEWS.customer=async function(v,seg){
   setCrumb(['Customer Portal']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos'];
+  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals'];
   const ti=mTab(seg,tabs.length);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
@@ -11598,7 +12077,11 @@ VIEWS.customer=async function(v,seg){
   else if(ti===3)body=await custTabProgress(unit);
   else if(ti===4)body=await custTabInspection(unit);
   else if(ti===5)body=await custTabDocuments(unit);
-  else body=await custTabVideos();
+  else if(ti===6)body=await custTabVideos();
+  else if(ti===7)body=await custTabSupport(unit);
+  else if(ti===8)body=await custTabAmenities(unit);
+  else if(ti===9)body=await custTabSubmeter(unit);
+  else body=await custTabReferrals(unit);
   v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
