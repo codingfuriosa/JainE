@@ -1,37 +1,46 @@
-# Lost-Call QA Pipeline
+# CRM Call QA Pipeline
 
-Every night the system takes yesterday's calls out of DreamCRM, listens to each recording with
-Gemini (see **Model availability**), grades the agent, and asks one question that nobody was asking before: **does what
-actually happened on the call agree with what the CRM says happened?**
+Every night the system takes yesterday's calls out of DreamCRM, listens to each recording, and asks
+the question nobody was asking before: **does what actually happened on the call agree with what the
+CRM says happened?**
 
 A lead marked *Lost* who spent the call asking for a site visit was written off while still buying.
-A lead still being chased who said "I have no requirement" is effort going nowhere. Both show up as
-a **MISMATCH**, and surfacing them is the point of the whole thing.
+A lead still being chased who said "I have no requirement" is effort going nowhere. Remarks that say
+"no req" against a call about budget. A callback booked for 12:30 today when the customer said next
+week. All four are things the CRM records and nobody re-reads, and surfacing them is the point of the
+whole thing.
 
 ```
 00:00 IST daily
       ↓
-Fetch yesterday from DreamCRM ──→ store the raw JSON response (audit)
+Fetch the CRM feed for yesterday
       ↓
-One durable row per lead, deduplicated on lead_id + callid
+STORE THE RESPONSE VERBATIM  ──→  acc.crm_snapshots.raw, never cleared
       ↓
-FIFO queue — strictly one call at a time
+Normalise the STORED copy → one row per lead, one row per follow-up
       ↓
-Fetch audio from Knowlarity into memory  ← never stored, only the URL is
+Build the queue from the STORED copy — only follow-ups with a recording
       ↓
-Gemini: is there a real conversation?
-      ↓                                    ↓
-     yes                                   no
-      ↓                                    ↓
-transcript + dashboard fields          non_transcribable
-+ QA audit + verdict                   with a specific reason
-      ↓                                    ↓
-validate the JSON                      terminal
+One recording at a time, in order:
       ↓
-compare against the CRM → MATCH / MISMATCH / NOT_COMPARABLE
+   already transcribed?  ──yes──→  reuse it. No model call, no second bill.
+      ↓ no
+   fetch audio into memory  ← never stored, only the URL is
       ↓
-next call
+   Gemini: transcribe, with diarization and MM:SS timestamps
+      ↓
+   Gemini: judge the transcript against the CRM's own record
+      ↓
+   pitch · follow-up date · lost reason · remarks · status
+      ↓
+   store, and count the mismatch by category
+      ↓
+next recording
 ```
+
+The CRM response is the **source-of-truth snapshot for that day's processing**. Everything after the
+first step reads the stored copy. Nothing re-asks the CRM mid-run, so the day cannot change underneath
+the work.
 
 ---
 
@@ -39,281 +48,260 @@ next call
 
 | Piece | Location |
 | --- | --- |
-| Pipeline (fetch, queue, Gemini, comparison) | [supabase/functions/transcription-sync/index.ts](supabase/functions/transcription-sync/index.ts) |
-| Schema + one-time data migration | [supabase/migrations/20260827090000_lost_call_pipeline.sql](supabase/migrations/20260827090000_lost_call_pipeline.sql) |
-| The two cron jobs | [supabase/migrations/20260827090100_lost_call_schedule.sql](supabase/migrations/20260827090100_lost_call_schedule.sql) |
-| Dashboard, table, detail view | [nexus-core.js](nexus-core.js) — the `tra*` functions |
+| Pipeline (snapshot, queue, transcribe, judge) | [supabase/functions/crm-snapshot-qa/index.ts](supabase/functions/crm-snapshot-qa/index.ts) |
+| The transcription prompt — listening only | [supabase/functions/crm-snapshot-qa/transcribe-prompt.ts](supabase/functions/crm-snapshot-qa/transcribe-prompt.ts) |
+| The QA prompt — judging only | [supabase/functions/crm-snapshot-qa/qa-prompt.ts](supabase/functions/crm-snapshot-qa/qa-prompt.ts) |
+| The seven-point agent rubric | [supabase/functions/_shared/qa-rubric.ts](supabase/functions/_shared/qa-rubric.ts) |
+| Schema, normaliser, queue builder, views | [supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql](supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql) |
+| The two cron jobs | [supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql](supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql) |
+| Dashboard, lead list, lead detail | [nexus-core.js](nexus-core.js) — the `trc*` functions |
 | Page shell | [transcription.html](transcription.html) |
-| Rows | `acc.transcriptions` where `source = 'lost_call_sync'` |
-| The day's raw feed, parked | `acc.transcription_jobs` |
-| Fetch audit log | `acc.lost_call_sync_runs` |
 
-Manual uploads are a **separate path** and always were: they go through the `transcription-analyze`
-function (Gladia), carry `source IS NULL`, and keep their own `done`/`error` statuses. Nothing here
-touches them.
+### The tables
+
+| Table | One row per | Holds |
+| --- | --- | --- |
+| `acc.crm_snapshots` | day (+ revision) | the API response verbatim. **Never cleared.** |
+| `acc.crm_snapshot_leads` / `_followups` | lead / follow-up, **per snapshot** | what the CRM claimed *that day* |
+| `acc.crm_leads` | lead | the CRM's current state, carried forward |
+| `acc.crm_followups` | follow-up | **the lead history.** Every follow-up ever seen |
+| `acc.call_transcripts` | **recording_url** | the transcript. This is the deduplication key |
+| `acc.followup_qa` | follow-up | the five assessments |
+| `acc.transcription_queue` | follow-up with a recording | FIFO state |
+| `acc.followup_timeline_v` | follow-up | all of the above joined — what the UI reads |
+| `acc.daily_qa_summary_v` | day | the day's numbers, including the four mismatch counts |
 
 ---
 
 ## Deploying (order matters)
 
-The function writes to columns the migration creates. **Deploy in this order or the running
-pipeline will start failing every call.**
+The function writes to columns the migration creates.
 
-**1. Apply the schema migration.** Supabase SQL editor, or:
+**1. Apply the schema.** Supabase SQL editor, or `supabase db push`. Both migrations are idempotent —
+applying them to a database that already has the pipeline changes nothing.
 
-```bash
-supabase db push
-```
-
-**2. Confirm the consolidation did what it should.** 13 leads held two rows each; they should now
-hold one row with the older call folded into `call_history`:
-
-```sql
-select count(*) as rows, count(distinct lead_id) as leads
-from acc.transcriptions where source='lost_call_sync' and deleted_at is null;
-```
-
-Those two numbers must now be equal. The folded rows are soft-deleted with
-`deleted_by = 'system: folded into the lead row'` and `merged_into` pointing at the survivor —
-nothing was destroyed, and the fold can be reversed.
-
-**3. Set the secrets** (Supabase → Edge Functions → Secrets). `GEMINI_API_KEY` is the only required
-one; the rest have working defaults:
+**2. Set the secrets** (Supabase → Edge Functions → Secrets). `GEMINI_API_KEY` is the only required
+one; every other has a working default.
 
 | Secret | Default | What it does |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | **Required.** Never reaches the browser. |
-| `GEMINI_MODEL` | `gemini-3.1-pro-preview` | See **Model availability** below. Change without touching cron. |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Transcription, and QA unless overridden below. |
+| `GEMINI_QA_MODEL` | *(same as `GEMINI_MODEL`)* | Set this to put the judge on a stronger tier than the transcriber. |
+| `QA_MAX_TOKENS` | `16000` | Output budget for the QA reply. On a thinking model the reasoning comes out of this too. |
 | `APP_TZ_OFFSET_MIN` | `330` | IST. Decides what "yesterday" means. |
 | `LOST_CALL_FEED` | the RealtyBucket URL | |
-| `WANTED_STATUSES` | *(empty — all)* | Comma-separated allow-list, e.g. `Lost,In Followup`. |
-| `MIN_DURATION_SECONDS` | `60` | Ring-out floor. `0` sends everything to Gemini. |
-| `MAX_ATTEMPTS` | `3` | Automatic retries before a call stays failed. |
+| `MIN_DURATION_SECONDS` | `20` | Ring-out floor, checked against the CRM's own duration before any audio is fetched. `0` sends everything. |
+| `MAX_ATTEMPTS` | `3` | Retries per phase. |
+| `MAX_STEPS_PER_TICK` | `2` | Phases advanced per cron tick. Still strictly one recording at a time. |
 
-**4. Deploy the function.**
-
-```bash
-supabase functions deploy transcription-sync --no-verify-jwt
-```
-
-`--no-verify-jwt` is required: the function does its own auth (see below) because pg_cron cannot
-present a user JWT.
-
-**5. Install the cron jobs** — run `20260827090100_lost_call_schedule.sql`.
-
-**6. Smoke-test before waiting a day:**
+**3. Deploy the function.**
 
 ```bash
-curl -s -X POST "$SUPABASE_URL/functions/v1/transcription-sync" \
-  -H "Content-Type: application/json" -H "apikey: $ANON_KEY" \
-  -H "Authorization: Bearer $YOUR_USER_JWT" \
-  -d '{"action":"status"}'
+supabase functions deploy crm-snapshot-qa --project-ref rkxsgtauigjrpcjkmccu --no-verify-jwt
 ```
 
-Then pull one specific day by hand and work a single call:
+`--no-verify-jwt` is **required**: the function does its own auth via `x-sync-secret`, because
+pg_cron cannot present a user JWT. Deploying without the flag breaks both cron jobs.
+
+**4. Smoke-test before waiting a day:**
 
 ```bash
-curl -s -X POST "$SUPABASE_URL/functions/v1/transcription-sync" \
-  -H "Content-Type: application/json" -H "apikey: $ANON_KEY" \
-  -H "Authorization: Bearer $YOUR_USER_JWT" \
-  -d '{"action":"pull","from":"2026-08-26","to":"2026-08-26"}'
+curl -s -X POST "$SUPABASE_URL/functions/v1/crm-snapshot-qa" -H "Content-Type: application/json" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $YOUR_USER_JWT" -d '{"action":"status"}'
 ```
+
+Then pull one specific day by hand and work a single recording:
+
+```bash
+curl -s -X POST "$SUPABASE_URL/functions/v1/crm-snapshot-qa" -H "Content-Type: application/json" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $YOUR_USER_JWT" -d '{"action":"run","from":"2026-08-30","to":"2026-08-30"}'
+```
+
+Actions: `snapshot` · `work` · `run` (both) · `retry` · `status`.
 
 ---
 
 ## The parts worth understanding
 
+### The response is stored before anything else happens
+
+`doSnapshot` writes `acc.crm_snapshots.raw` — the parsed JSON of exactly what came back — and only
+then calls `crm_normalise_snapshot` and `crm_build_queue`, both of which read that stored row and
+never the network. So a CRM that changes an hour later cannot alter the day being processed, and the
+day can be replayed from storage at any point.
+
+A re-fetch is safe. The response is hashed; identical bytes re-run the normalisation (a no-op) and
+change nothing. Different bytes create a **new revision** and mark the previous row `superseded_at`
+rather than overwriting it, so "what did the CRM say at midnight" stays answerable.
+
 ### Audio is never stored
 
-The recording is fetched from Knowlarity into memory, handed to Gemini as inline base64, and goes
-out of scope. The row keeps the ~90 byte `recording_url` and nothing else. Storing the audio would
-be roughly **4.7 GB a year** for no benefit — a retry just re-fetches it. There is no audio column,
-no bucket, no blob.
+The recording is fetched from Knowlarity into memory, handed to Gemini as inline base64, and goes out
+of scope. The row keeps the ~90 byte `recording_url` and nothing else. There is no audio column, no
+bucket, no blob — a retry simply re-fetches.
 
-The Knowlarity link 302s to a presigned S3 URL that expires in ~600 seconds, which is exactly why
-the *Knowlarity* link is what gets stored and never the redirect target.
+The Knowlarity link 302s to a presigned S3 URL that expires in ~600 seconds, which is exactly why the
+*Knowlarity* link is what gets stored and never the redirect target.
 
-### Model availability
+### A recording is transcribed once, ever
 
-The spec asked for **Gemini 2.5 Pro**. Google no longer serves it to this API project — a live call
-on 2026-08-27 returned:
+`acc.call_transcripts.recording_url` is **unique**. Before any audio is fetched, the pipeline looks
+the URL up:
 
-> 404 `models/gemini-2.5-pro is no longer available to new users. Please update your code to use
-> models/gemini-3.1-pro-preview`
+- a **completed** row → the queue entry jumps straight to QA, flagged `reused_transcription`. No
+  model call, no second bill, and the existing transcript is left untouched.
+- a **non_transcribable** row → the entry finishes as `skipped_existing`.
 
-So the default is `gemini-3.1-pro-preview`, which the same key reaches without a 404. `GEMINI_MODEL`
-in Secrets overrides it with no redeploy when this changes again — and it will.
+`callid` is stored and unique too, as the stable secondary identity if the URL is ever rewritten.
 
-**Billing.** The 36 pre-existing failures were all `429 Your prepayment credits are depleted`, and a
-test call on 2026-08-27 still returns 429. **The pipeline cannot transcribe anything until the Gemini
-project is topped up** at https://ai.studio/projects. Everything upstream of the model call is
-verified working; this is the only thing standing between the queue and results.
+### Deduplication applies to the work, never to the history
 
-### The day's raw response
+This is the distinction that matters. If lead 708998's follow-up 3192290 carries a recording that was
+transcribed yesterday, then today:
 
-An edge function has no filesystem between invocations, so "store the original response temporarily
-as JSON" means a row. `acc.transcription_jobs` existed for exactly this and had never been written
-to — the pull now fills it (`job_date`, `payload`, `feed_rows`, counters, `status`), and the worker
-clears `payload` once every call for that day has reached a terminal state. A day that fails to
-fetch gets a `status='failed'` job row, so a missing day is visible rather than simply absent.
+- the recording is **not** transcribed again, and
+- follow-up 3192290 **still gets its row** in `acc.crm_followups`, and still appears in the lead's
+  history on screen, showing the transcript it reused.
 
-The **durable** audit is per-row `original_crm_response`, which is never cleared. The parked payload
-is only the replayable copy of the whole array.
+`acc.crm_followups` is keyed on the CRM's own `follow_up_id` and is never touched by deduplication.
+The lead's complete history is *existing transcripts + the new CRM snapshot*, not one or the other.
 
-### One row per lead, with the history inside it
+### Two model calls, not one, and both on Gemini
 
-A lead called three times has **one** row. The newest call sits on the row's own columns; earlier
-calls are archived into `call_history`, each keeping its own transcript, QA evaluation, verdict and
-comparison. `status_trail` records how the CRM's verdict moved — the table renders it as
-**Qualified → Lost**.
+**Stage one transcribes.** It is given the audio and nothing else — no CRM data, no project figures,
+no name. That is deliberate: a model that has been told the answer can return it without listening.
 
-A call that arrives while another is still being processed waits in `pending_calls` and rotates in
-the moment the current one reaches a terminal state, so a second call is never lost and never
-clobbers work in flight. A unique index enforces the one-row rule at the database level:
+**Stage two judges.** It is given the transcript as text and the CRM's own record, side by side, and
+never sees audio. Because there is no audio in the room and no transcript field in its output, the
+project catalogue *can* safely be given to it — the transcript is already fixed by then.
 
-```sql
-create unique index transcriptions_one_row_per_lead
-  on acc.transcriptions (lead_id)
-  where source = 'lost_call_sync' and deleted_at is null and lead_id is not null;
-```
+Both run on Gemini as of 2026-08-31. The judge was OpenAI (`gpt-4.1`) until then; one model for both
+halves was asked for, and it removes a second vendor, a second key, and a failure mode that had
+already bitten — with no OpenAI key set the function refused `work` outright, so recordings were
+transcribed and then never assessed.
 
-### FIFO, and what makes it survive a restart
+The judge is asked for `application/json` and told the required shape in the prompt, the same
+arrangement the transcriber uses. Gemini's `responseSchema` cannot express this contract (nullable
+unions, a `null` member inside an enum) without quietly relaxing it, so the guarantee lives in
+`qaPhase`'s validation instead: a reply missing any of the five assessments is refused and retried,
+and nothing half-formed is ever saved.
 
-`queue_seq` comes from a Postgres sequence, handed out **in the order the CRM API returned the
-records**. The worker:
+### The content guards, and why they must stay
 
-1. Requeues anything eligible for automatic retry, and reclaims rows stuck in `processing` for over
-   15 minutes — that is a killed invocation, not work in flight.
-2. **Refuses to start** if any row is genuinely `processing`.
-3. Takes the single lowest `queue_seq` row and claims it with `update ... where status in
-   ('pending','retrying')`. The status predicate *is* the lock: two overlapping ticks cannot both
-   win, so a recording is never paid for twice.
-4. Processes it to a terminal state, then stops.
+An earlier design asked one model to listen and judge in a single call, and it quietly stopped
+transcribing and started composing. Across **175 calls, the name it claimed to hear matched the CRM's
+own record zero times out of the 20 it offered one** — Pradip Das was greeted as "Suman babu". Every
+check passed, because every check tested the *shape* of the output.
 
-Cron ticks every minute. That is a heartbeat, not parallelism — and it is what makes the queue
-self-healing, because a crashed invocation is picked up on the next tick instead of stalling the
-day.
+So shape validation is necessary and not sufficient. Three checks test the *content*:
 
-Nothing lives in memory between invocations, so "restart-safe" is free: the queue *is* the table.
-
-### Statuses
-
-| Status | Meaning | Terminal | Retry button |
-| --- | --- | --- | --- |
-| `pending` | queued, not started | no | no |
-| `processing` | in flight right now | no | no |
-| `retrying` | automatically requeued after a failure | no | no |
-| `completed` | transcript + QA saved | **yes** | no |
-| `failed` | the attempt did not produce a valid result | **yes** | **yes** |
-| `non_transcribable` | no human conversation in the recording | **yes** | no |
-
-Rows created before this rewrite used `queued`/`done`/`error`/`no_recording`/`too_short`. The
-migration maps them, and the UI normalises anything it missed, so old and new rows read the same.
-
-### Never "completed" on a failure
-
-A call reaches `completed` only after **all** of these pass:
-
-- Gemini returned HTTP 200 with non-empty text
-- the text parses as JSON
-- the JSON has `status: "Completed"`, a non-empty `transcript` array, and an array `qa_evaluation`
-- the transcript is not a stuck loop (one word repeated over 60% of the time)
-- the transcript is not too thin for the length of the audio (≥120 characters, and ≥1.5 characters
-  per second of audio)
-
-Anything else is `failed`, with the raw reply kept in `gemini_raw` for debugging and explicitly
-**not** saved as a transcript.
-
-### Why those last two content checks exist
-
-This matters, because the spec asks Gemini to both listen and judge in a single call, and that exact
-shape has failed here before.
-
-An earlier version quietly stopped transcribing and started composing. Across **175 calls, the name
-it claimed to hear matched the CRM's own record zero times out of the 20 it offered one** — Pradip
-Das was greeted as "Suman babu". Every check passed, because every check tested the *shape* of the
-output.
-
-So shape validation is necessary and not sufficient. Three checks test the *content* instead:
-
-- **`degenerateRepeat`** — one word repeated is a recogniser stuck in a loop, not a listen.
+- **`degenerateRepeat`** — one word repeated over 60% of the time is a recogniser stuck in a loop,
+  not a listen.
 - **the density floor** — real transcripts of these calls run 6–16 characters per second of audio.
   The failures cluster far below: "Hello." at 0.1, forty-character answers at 0.2 and 0.5. The
-  threshold of 1.5 sits in the empty gap, so a genuinely terse call passes and near-silence does
-  not.
-- **`name_matches_crm`** — the model is never told the CRM's name, so this stays an honest check.
-  One mismatch is a reason to look. **A run where it almost never agrees is the alarm** — check it
-  after any prompt or model change.
+  threshold of 1.5 sits in the empty gap, so a genuinely terse call passes and near-silence does not.
+- **`name_matches_crm`** — the transcriber is never told the CRM's name, so this stays honest. One
+  mismatch is a reason to look. **A run where it almost never agrees is the alarm** — check it after
+  any prompt or model change.
 
 Do not remove them.
 
-### The comparison
+### What the QA step measures
 
-`transcription_status` is derived from the conversation, in the CRM's own vocabulary so the two are
-comparable at all:
+Five assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
+and its reasoning. "Not Verifiable" is a real answer everywhere and is never penalised — guessing is
+the only wrong answer.
 
-| AI lead category | Derived |
-| --- | --- |
-| Not Interested | `lost` |
-| Qualified · Interested Site Visit · Interested in Booking | `qualified` |
-| Interested Not Qualified | `follow_up` if a callback was requested, else `lost` |
-
-| CRM says | Call says | Result |
+| | Statuses | The trap it is written to avoid |
 | --- | --- | --- |
-| Lost | lost | MATCH |
-| Lost | qualified | **MISMATCH** — written off while still active, re-open it |
-| Lost | follow_up | **MISMATCH** — pending, not closed |
-| In Followup | follow_up / qualified | MATCH |
-| In Followup | lost | **MISMATCH** — chasing a closed lead |
-| anything | not transcribed, failed, or unclear | NOT_COMPARABLE |
+| **Pitch accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | scoring a pitch that never happened. A call cut short is Not Verifiable and scores `null`, not 0 — a zero would drag the day's average down as though the agent had pitched badly. |
+| **Follow-up date accuracy** | Accurate · Inaccurate · Not Verifiable | marking a date wrong merely because the customer never named one. No discussion is **Not Verifiable**, never Inaccurate. Only a conversation that *contradicts* the CRM date is Inaccurate. |
+| **Lost reason accuracy** | Accurate · Inaccurate · Not Verifiable | inventing a specific reason. "Not interested, thank you" is not evidence of a budget problem. |
+| **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
+| **Status assessment** | Lost · Qualified · In Follow Up · Unclear | deciding from one keyword. "I'm not interested right now" is usually In Follow Up; "send me the details" is usually not Qualified. |
 
-`non_transcribable` is deliberately **NOT_COMPARABLE**, never MATCH. A recording with no conversation
-in it cannot agree with the CRM, and counting it as agreement would inflate the one number on the
-dashboard anyone acts on.
+Plus the **seven-point agent audit** — Script, Etiquette, Query Handling, Call to Action, Leakage
+Avoidance, Follow-up Accuracy, Hyper-personalization — scored Pass / Partial / Fail / Not Applicable
+against the explicit rubric in `_shared/qa-rubric.ts`.
+
+**The rubric holds no figures and must never hold any.** Every rule in it is about what the *agent
+did* — asked, answered, confirmed, disclosed — so there is no project fact in it for a transcript to
+absorb.
+
+### The four mismatch counts
+
+`status_match` and `mismatch_type` are **re-derived by the pipeline** from the CRM status and the
+assessed status after the reply arrives. The model is asked for them, because making it commit in
+writing is what makes its reasoning legible — but its answer is not what gets counted. A model that
+contradicts itself cannot corrupt the dashboard.
+
+| CRM says | The call says | Counted as |
+| --- | --- | --- |
+| Lost | Qualified or In Follow Up | `lost_should_not_have_been_lost` |
+| Qualified | anything else | `qualified_should_not_have_been_qualified` |
+| In Follow Up | Lost | `in_followup_should_have_been_lost` |
+| In Follow Up | Qualified | `in_followup_should_have_been_qualified` |
+| anything | Unclear | **not counted** — an unclear call is not a disagreement |
+| Site Visited, OV, … | anything | not counted — outside the four categories |
+
+A `check` constraint on `acc.followup_qa` refuses any other value, so a typo cannot become a fifth
+category that no card ever shows.
+
+### FIFO, and what survives a restart
+
+`queue_seq` comes from a Postgres sequence. The worker:
+
+1. Requeues anything eligible for retry — **at the phase that failed**. A QA call that rate-limited
+   never re-transcribes; that audio is already transcribed and already paid for.
+2. Reclaims rows stuck in `transcribing`/`qa_running` past 15 minutes — a killed invocation, not work
+   in flight. **Reclaiming counts as an attempt**, or a recording whose model call always overruns the
+   worker limit would be reclaimed and re-billed for ever.
+3. **Refuses to start** if anything is genuinely in flight.
+4. Claims the lowest `queue_seq` row with a status predicate — that predicate *is* the lock, so two
+   overlapping ticks cannot both win and a recording is never paid for twice.
+5. Advances it one phase, then stops.
+
+Nothing lives in memory between invocations: the queue *is* the table.
 
 ---
 
 ## The UI
 
-Six tabs on **Transcription**:
+**Transcription → Automatic Processing.** Four cards — Total Calls, Transcribed, CRM Match, CRM
+Mismatch — over the follow-ups in the selected range, with chips for Waiting, No recording, No
+conversation and Failed, and counts for QA assessed and *reused an existing transcript*. Filters
+combine: date range, CRM status, business unit, and a search over lead id, name and follow-up id.
 
-- **Automatic Processing** — the daily import. Four cards (Total Calls, Transcribed, CRM Match, CRM
-  Mismatch) plus a row of state chips (Pending, Processing, Retrying, Failed, Non-Transcribable).
-  Every count is a filter over real rows, so a card and the table under it cannot disagree.
-- **Manual Upload** — the existing hand-upload path, unchanged, just separated out.
-- **Folders**, **Deleted**, **Discrepancies**, **Compilation** — unchanged.
+**Clicking CRM Mismatch** opens the breakdown: the four categories by name, with counts and one line
+each on what the disagreement means. Clicking a category filters the table, which switches from one
+row per lead to **one row per call** — because a mismatch exists at the level of a conversation, not
+a lead — showing the CRM's verdict and the call's verdict side by side.
 
-Filters combine: date range (with *Previous day* / *Today* / *All time* presets and From/To inputs),
-processing status, match status, CRM status, and a search box over lead ID and name. Filtering is on
-`source_date` — the day the *call* belongs to, not the day the row happened to be written, which
-differ whenever a day is back-filled.
+**Clicking a lead** opens its complete story: the lead as the CRM has it today, an accuracy roll-up
+across all its calls, and then **every conversation in chronological order, oldest first**. Each one
+carries what the CRM recorded, how it was processed, the four accuracy assessments with their
+evidence, the status check, the verdict, the **full transcript** turn by turn with MM:SS timestamps
+and speaker labels, and the seven-point audit. A call that reused an existing transcript is marked as
+such and shows that transcript.
 
-Clicking a row opens the full detail: the complete CRM response rendered from the stored payload (so
-a field the API starts sending tomorrow appears on its own), processing timeline, the comparison with
-its reason, the **complete** transcript with MM:SS timestamps and speaker labels, dashboard fields,
-the qualification checklist, the seven-point QA table, the verdict, earlier calls on the lead, and
-the raw stored JSON.
+The lead list is newest-first. Inside a lead it is oldest-first: a history only reads forwards.
 
-**Copy Response** puts that row's original CRM record on the clipboard. There is no download button
-anywhere on this page, by requirement.
-
-**Retry** appears only on `failed` rows. It sends the call to the *back* of the FIFO queue so it
-cannot starve the day's own calls, increments `attempt_count`, and leaves the existing result alone
-until a new one replaces it. No row is duplicated.
+**Copy Response** puts the lead's stored CRM record on the clipboard. There is no download button
+anywhere on this page, by requirement. **Retry** appears on failed calls and resumes at the phase that
+failed.
 
 ---
 
-## Authentication
+## What happened to the old pipeline
 
-The function does its own auth and accepts three things:
+`transcription-sync` and `acc.transcriptions` are **still there and still work**. The Manual Upload,
+Folders, Deleted, Discrepancies and Compilation tabs read them, as does `transcription/auto/<id>`, so
+every row imported before the changeover still opens.
 
-1. `x-sync-secret` matching `acc.job_secrets` where `name = 'transcription_sync'` — a token the
-   **database generated for itself**. pg_cron reads it to build the header; the function reads it
-   with its service-role key. No human ever invents or pastes a password.
-2. `SYNC_SECRET` from Secrets (legacy).
-3. A signed-in user's bearer token — this is what the Retry button uses.
-
-`acc.job_secrets` has RLS on with no policies, so only the service role can read it.
+What changed is that its two cron jobs are unscheduled — both pipelines writing at once would
+transcribe every recording twice — and the Automatic Processing tab now reads the new tables. The old
+shape came from a CRM feed that returned one row per call; the feed now returns one object per lead
+with its complete `history` array, which is a different shape and needed a different schema, not a
+patch.
 
 ---
 
@@ -321,48 +309,52 @@ The function does its own auth and accepts three things:
 
 ```sql
 -- queue depth and state
-select status, count(*) from acc.transcriptions
-where source='lost_call_sync' and deleted_at is null group by status;
+select status, fail_phase, count(*) from acc.transcription_queue group by 1,2;
 
--- what the last few pulls did
-select created_at, from_date, trigger, feed_rows, inserted, duplicates,
-       appended_history, queued_behind, error_text
-from acc.lost_call_sync_runs order by created_at desc limit 10;
+-- the day's numbers, including the four mismatch counts
+select * from acc.daily_qa_summary_v order by date desc limit 7;
+
+-- what the last few snapshots did
+select id, snapshot_date, revision, status, lead_count, followup_count,
+       recording_count, new_recording_count, error_text, fetched_at
+from acc.crm_snapshots order by fetched_at desc limit 10;
+
+-- how much deduplication is actually saving
+select count(*) as followups_with_recording,
+       count(distinct recording_url) as distinct_recordings
+from acc.crm_followups where has_recording;
 
 -- is the content check holding up? run this after any prompt or model change
-select verification from acc.transcriptions
-where source='lost_call_sync' and status='completed'
-  and source_date = current_date - 1;
+select verification from acc.call_transcripts
+where status = 'completed' and first_seen_date = current_date - 1;
 
 -- did cron actually fire
 select * from cron.job_run_details order by start_time desc limit 10;
 ```
 
-**Back-fill a missed day:** `{"action":"pull","from":"2026-08-20","to":"2026-08-20"}`. Safe to run
-twice — deduplication is on `lead_id` + `callid`, so a repeat inserts nothing.
+**Back-fill a missed day:** `{"action":"run","from":"2026-08-20","to":"2026-08-20"}`. Safe to run
+twice — the queue builder skips follow-ups it already holds, and the transcript table skips recordings
+it already has.
 
-**Nothing is being worked.** Check, in order: `cron.job_run_details` for failures; whether a row is
-wedged in `processing` (it self-clears after 15 minutes); whether `GEMINI_API_KEY` is set;
-`{"action":"status"}`.
+**Nothing is being worked.** Check, in order: is it inside the worker's window (19:00–05:59 UTC);
+`cron.job_run_details` for failures; whether a row is wedged in `transcribing` (it self-clears after
+15 minutes); whether `GEMINI_API_KEY` is set; then `{"action":"status"}`.
 
-**Everything is failing at once.** Almost always the model name or the key. `gemini_raw` on a failed
-row holds the actual reply.
+**Everything is failing at once.** Almost always the model name or the key. `raw_reply` on a failed
+`call_transcripts` row holds the actual reply.
 
 ---
 
 ## Known trade-offs
 
-- **All CRM statuses are ingested**, not just Lost and In Followup. "Total Calls" has to be an honest
-  total, and a lead's *Qualified → Lost* trail cannot be built if the Qualified leg was never taken
-  in. This costs more in Gemini calls than the old Lost-only filter. Set `WANTED_STATUSES` to narrow
-  it if the bill argues back.
-- **Recordings under 60 seconds never reach Gemini.** They are ring-outs, and paying 2.5 Pro to be
-  told so is waste. They land as `non_transcribable` with an explicit reason, so they are visible and
-  not silently skipped. `MIN_DURATION_SECONDS=0` disables this.
-- **Some columns are duplicated** — `attempt_count`/`attempts`, `last_error`/`error_text`,
-  `source_date`/`report_date`. The new names are what the spec asked for; the old ones are still
-  read by the Folders, Deleted, Discrepancies and Compilation tabs. The pipeline writes both. Worth
-  collapsing once those tabs are revisited.
-- **`original_crm_response` on pre-migration rows is reconstructed** from the columns the payload was
-  unpacked into, and carries `"_reconstructed": true`. The detail view says so on screen. Rows
-  imported after the migration hold the real payload.
+- **All CRM statuses are ingested**, not just Lost. "Total Calls" has to be an honest total, and
+  `qualified_should_not_have_been_qualified` cannot be counted if Qualified leads are never taken in.
+- **Recordings at or under 20 seconds never reach a model.** They are ring-outs, and the CRM's own
+  `call_duration` is checked *before* any audio is fetched, so a ring-out costs nothing at all. They
+  land as `non_transcribable` with an explicit reason, so they are visible rather than silently
+  skipped.
+- **The worker only runs 19:00–05:59 UTC** (00:30–11:29 IST). Outside that window the queue does not
+  drain. Widen the schedule if a day is ever still going at 11:30 IST.
+- **`gemini-flash-latest` is an alias, not a pinned version.** Google repoints it as Flash changes, so
+  it cannot 404 the way a pinned name once did — but the model underneath can change with no deploy
+  and no warning. That is what the content guards are for.

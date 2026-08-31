@@ -922,6 +922,8 @@ function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/un
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForInspectionChecklist(unitId,filename){return `customer-portal/units/${unitId}/inspection-checklist/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForInspectionUpdate(unitId,filename){return `customer-portal/units/${unitId}/inspection-updates/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForPaymentQR(filename){return `customer-portal/payment-qr/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForSubmeterInvoice(unitId,filename){return `customer-portal/units/${unitId}/submeter-invoice/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -10970,7 +10972,7 @@ const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigit
 // unescaped" rule getting in the way.
 function cpaTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
 
-const CPA={projects:null,units:null,customers:null};
+const CPA={projects:null,units:null,customers:null,amenities:null,paymentSettings:null};
 async function cpaProjects(force){
   if(CPA.projects&&!force)return CPA.projects;
   const {data}=await sb.schema('cust').from('projects').select('*').is('deleted_at',null).order('name');
@@ -10986,10 +10988,20 @@ async function cpaCustomers(force){
   const {data}=await sb.schema('cust').from('customers').select('*').is('deleted_at',null).order('full_name');
   CPA.customers=data||[];return CPA.customers;
 }
+async function cpaAmenities(force){
+  if(CPA.amenities&&!force)return CPA.amenities;
+  const {data}=await sb.schema('cust').from('amenities').select('*, projects(id,name)').is('deleted_at',null).order('name');
+  CPA.amenities=data||[];return CPA.amenities;
+}
+async function cpaPaymentSettings(force){
+  if(CPA.paymentSettings&&!force)return CPA.paymentSettings;
+  const {data}=await sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle();
+  CPA.paymentSettings=data||{id:1,upi_id:null,qr_storage_path:null};return CPA.paymentSettings;
+}
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents'];
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -10998,7 +11010,11 @@ VIEWS.custportal_admin=async function(v,seg){
   else if(ti===2) await cpaRenderImport(host,seg);
   else if(ti===3) await cpaRenderPhotos(host);
   else if(ti===4) await cpaRenderInspection(host);
-  else await cpaRenderDocuments(host);
+  else if(ti===5) await cpaRenderDocuments(host);
+  else if(ti===6) await cpaRenderAmenities(host);
+  else if(ti===7) await cpaRenderSubmeter(host);
+  else if(ti===8) await cpaRenderSupport(host);
+  else await cpaRenderReferrals(host);
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
@@ -11430,6 +11446,162 @@ window.cpaUploadCustomerDoc=async function(){
   toast('Document uploaded','ok');$('cpaCdFile').value='';
 };
 
+/* ---------- Tab 7: Amenities (booking calendar + manual QR/UPI payment, post-possession only) ---------- */
+async function cpaRenderAmenities(host){
+  const [projects,amenities,pay]=await Promise.all([cpaProjects(),cpaAmenities(true),cpaPaymentSettings(true)]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const amRows=amenities.map(a=>[esc(a.name),esc((a.projects&&a.projects.name)||'—'),a.rental_amount!=null?custInr(a.rental_amount):'—',
+    `<button class="btn btn-sm btn-danger" onclick="cpaDeleteAmenity(${a.id})">Delete</button>`]);
+  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+    <div class="card card-pad frm"><div class="sec-title">New amenity</div>
+    <label>Project</label><select id="cpaAmProject">${projOpts}</select>
+    <label>Name</label><input id="cpaAmName" placeholder="Banquet Hall">
+    <label>Description (optional)</label><textarea id="cpaAmDesc"></textarea>
+    <label>Rental amount (₹, optional)</label><input id="cpaAmAmount" type="number">
+    <div style="margin-top:12px"><button class="btn btn-primary" onclick="cpaAmenitySave()"><i class="fa-solid fa-plus"></i> Add amenity</button></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Payment QR / UPI <span style="font-weight:400;color:var(--slate);font-size:12px">— shared by amenities &amp; sub-meter</span></div>
+    <label>UPI ID</label><input id="cpaPayUpi" value="${esc(pay.upi_id||'')}" placeholder="jaingroup@upi">
+    <label>QR code image (optional)</label><input type="file" id="cpaPayQrFile" accept="image/*">
+    ${pay.qr_storage_path?`<div style="margin:8px 0"><button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View current QR</button></div>`:''}
+    <div style="margin-top:12px"><button class="btn btn-primary" onclick="cpaPaymentSettingsSave()"><i class="fa-solid fa-save"></i> Save</button></div>
+    </div></div>
+    <div class="sec-title" style="margin:20px 0 10px">Amenities</div>
+    ${amRows.length?cpaTable(['Name','Project','Rental amount','Delete'],amRows):'<div class="card card-pad empty">No amenities yet.</div>'}
+    <div class="sec-title" style="margin:20px 0 10px">Bookings</div>
+    <div id="cpaAmBookings"><div class="loader"><div class="spin"></div></div></div>`;
+  cpaRenderAmenityBookings();
+}
+window.cpaAmenitySave=async function(){
+  const project_id=Number($('cpaAmProject').value),name=$('cpaAmName').value.trim(),
+    description=$('cpaAmDesc').value.trim()||null,rental_amount=$('cpaAmAmount').value?Number($('cpaAmAmount').value):null;
+  if(!project_id||!name){toast('Project and name are required','err');return;}
+  const {error}=await sb.schema('cust').from('amenities').insert({project_id,name,description,rental_amount,created_by:state.email});
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  toast('Amenity added','ok');route();
+};
+window.cpaDeleteAmenity=async function(id){
+  if(!await confirmDialog('Remove this amenity? Existing bookings stay on record.',{okLabel:'Delete'}))return;
+  const {error}=await sb.schema('cust').from('amenities').update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Delete failed: '+error.message,'err');return;}
+  toast('Amenity removed','ok');route();
+};
+window.cpaPaymentSettingsSave=async function(){
+  const upi_id=$('cpaPayUpi').value.trim()||null;
+  const f=$('cpaPayQrFile').files[0];
+  const row={id:1,upi_id,updated_at:new Date().toISOString(),updated_by:state.email};
+  if(f){
+    const {data,error}=await uploadFileToS3(s3KeyForPaymentQR(f.name),f);
+    if(error){toast('QR upload failed: '+error.message,'err');return;}
+    row.qr_storage_path=data.path;
+  }
+  const {error}=await sb.schema('cust').from('payment_settings').upsert(row,{onConflict:'id'});
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  toast('Payment settings saved','ok');route();
+};
+async function cpaRenderAmenityBookings(){
+  const host=$('cpaAmBookings');if(!host)return;
+  const {data}=await sb.schema('cust').from('amenity_bookings').select('*, amenities(name), units(unit_code)').order('booking_date',{ascending:false}).limit(200);
+  const rows=(data||[]).map(b=>[esc((b.amenities&&b.amenities.name)||'—'),esc((b.units&&b.units.unit_code)||'—'),fmtDate(b.booking_date),
+    b.amount!=null?custInr(b.amount):'—',
+    b.status==='confirmed'?'<span class="tag t-green">Confirmed</span>':b.status==='cancelled'?'<span class="tag t-gray">Cancelled</span>':'<span class="tag t-amber">Pending payment</span>',
+    esc(b.payment_reference||'—'),
+    b.status==='pending_payment'?`<button class="btn btn-sm btn-primary" onclick="cpaConfirmBooking(${b.id})">Confirm</button> <button class="btn btn-sm btn-danger" onclick="cpaCancelBooking(${b.id})">Cancel</button>`:'—']);
+  host.innerHTML=rows.length?cpaTable(['Amenity','Unit','Date','Amount','Status','Payment ref','Actions'],rows):'<div class="card card-pad empty">No bookings yet.</div>';
+}
+window.cpaConfirmBooking=async function(id){
+  const {error}=await sb.schema('cust').from('amenity_bookings').update({status:'confirmed',marked_paid_by:state.email,marked_paid_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Booking confirmed','ok');cpaRenderAmenityBookings();
+};
+window.cpaCancelBooking=async function(id){
+  if(!await confirmDialog('Cancel this booking? The date becomes available again.',{okLabel:'Cancel booking'}))return;
+  const {error}=await sb.schema('cust').from('amenity_bookings').update({status:'cancelled'}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Booking cancelled','ok');cpaRenderAmenityBookings();
+};
+
+/* ---------- Tab 8: Sub-meter fixing requests ---------- */
+async function cpaRenderSubmeter(host){
+  const {data}=await sb.schema('cust').from('submeter_requests').select('*, units(unit_code, projects(name))').order('requested_at',{ascending:false}).limit(200);
+  const tagFor={requested:'<span class="tag t-amber">Requested</span>',invoiced:'<span class="tag t-blue">Invoiced</span>',paid:'<span class="tag t-green">Paid</span>',completed:'<span class="tag t-green">Completed</span>',cancelled:'<span class="tag t-gray">Cancelled</span>'};
+  const rows=(data||[]).map(r=>{
+    let actions='—';
+    if(r.status==='requested')actions=`<button class="btn btn-sm btn-primary" onclick="cpaSubmeterInvoiceModal(${r.id},${r.unit_id})">Invoice</button>`;
+    else if(r.status==='invoiced')actions=`<button class="btn btn-sm btn-primary" onclick="cpaSubmeterMarkPaid(${r.id})">Mark paid</button>`;
+    else if(r.status==='paid')actions=`<button class="btn btn-sm btn-primary" onclick="cpaSubmeterMarkCompleted(${r.id})">Mark completed</button>`;
+    return [esc((r.units&&r.units.unit_code)||'—'),esc((r.units&&r.units.projects&&r.units.projects.name)||'—'),fmtDate(r.requested_at),
+      r.invoice_amount!=null?custInr(r.invoice_amount):'—',tagFor[r.status]||esc(r.status),actions];
+  });
+  host.innerHTML=rows.length?cpaTable(['Unit','Project','Requested','Invoice amount','Status','Actions'],rows):'<div class="card card-pad empty">No sub-meter requests yet.</div>';
+}
+window.cpaSubmeterInvoiceModal=function(id,unitId){
+  openModal(`<div class="modal-head"><h3>Raise invoice</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Invoice amount (₹)</label><input id="cpaSmAmount" type="number">
+    <label>Invoice document (optional)</label><input type="file" id="cpaSmFile"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaSubmeterInvoiceSave(${id},${unitId})">Save</button></div>`);
+};
+window.cpaSubmeterInvoiceSave=async function(id,unitId){
+  const amount=Number($('cpaSmAmount').value||0);
+  if(!amount){toast('Enter an invoice amount','err');return;}
+  const f=$('cpaSmFile').files[0];
+  const row={status:'invoiced',invoice_amount:amount,invoiced_at:new Date().toISOString(),invoiced_by:state.email};
+  if(f){
+    const {data,error}=await uploadFileToS3(s3KeyForSubmeterInvoice(unitId,f.name),f);
+    if(error){toast('Invoice upload failed: '+error.message,'err');return;}
+    row.invoice_storage_path=data.path;
+  }
+  const {error}=await sb.schema('cust').from('submeter_requests').update(row).eq('id',id);
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  closeModal();toast('Invoice raised','ok');route();
+};
+window.cpaSubmeterMarkPaid=async function(id){
+  const {error}=await sb.schema('cust').from('submeter_requests').update({status:'paid',marked_paid_by:state.email,paid_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Marked paid','ok');route();
+};
+window.cpaSubmeterMarkCompleted=async function(id){
+  const {error}=await sb.schema('cust').from('submeter_requests').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Marked completed','ok');route();
+};
+
+/* ---------- Tab 9: Support tickets (local mirror of Zoho Desk) ---------- */
+async function cpaRenderSupport(host){
+  const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
+  const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
+    tagFor[t.status]||esc(t.status),fmtDate(t.created_at),
+    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:'<span style="color:var(--slate);font-size:12px">Not yet in Zoho</span>']);
+  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
+    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" just pulls its current status back here.</div>';
+}
+window.cpaSyncTicket=async function(id){
+  toast('Refreshing status…','');
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
+    toast('Status updated','ok');route();
+  }catch(e){toast('Refresh failed: '+e.message,'err');}
+};
+
+/* ---------- Tab 10: Referrals ---------- */
+const CPA_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+async function cpaRenderReferrals(host){
+  const {data}=await sb.schema('cust').from('referrals').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const rows=(data||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    `<select onchange="cpaReferralStatusChange(${r.id},this.value)">${Object.keys(CPA_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CPA_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
+    fmtDate(r.created_at)]);
+  host.innerHTML=rows.length?cpaTable(['Unit','Prospect','Phone','Email','Status','Submitted'],rows):'<div class="card card-pad empty">No referrals submitted yet.</div>';
+}
+window.cpaReferralStatusChange=async function(id,status){
+  const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
+  if(error){toast('Update failed: '+error.message,'err');return;}
+  toast('Status updated','ok');
+};
+
 /* ============================ CUSTOMER-FACING PORTAL ============================ */
 let CUST_DATA=null,CUST_SELECTED_UNIT=null;
 async function custLoadData(customerId,force){
@@ -11573,10 +11745,173 @@ async function custTabVideos(){
       :'<div class="card card-pad empty">Not available yet.</div>')+'<div style="margin-bottom:20px"></div>';
   }).join('');
 }
+async function custTabSupport(unit){
+  const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
+  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),tagFor[t.status]||esc(t.status),
+    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:'<span style="color:var(--slate);font-size:12px">Submitting…</span>']);
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
+    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
+}
+window.custNewTicketModal=function(){
+  openModal(`<div class="modal-head"><h3>Raise a support ticket</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Subject</label><input id="custTkSubject" placeholder="Brief summary">
+    <label>Details</label><textarea id="custTkDesc" placeholder="Describe the issue…"></textarea></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custTkBtn" onclick="custNewTicketSave()">Submit</button></div>`);
+};
+window.custNewTicketSave=async function(){
+  const subject=$('custTkSubject').value.trim(),description=$('custTkDesc').value.trim();
+  if(!subject){toast('Enter a subject','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const btn=$('custTkBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
+  const {data:ins,error}=await sb.schema('cust').from('support_tickets').insert({unit_id:unit.id,subject,description,created_by:state.email}).select('id').single();
+  if(error){toast('Could not raise ticket: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'create',ticketId:ins.id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Ticket saved, but Zoho Desk sync failed: '+(out.error||res.status),'err');}
+  }catch(e){toast('Ticket saved, but Zoho Desk sync failed: '+e.message,'err');}
+  closeModal();toast('Ticket raised','ok');route();
+};
+window.custSyncTicket=async function(id){
+  toast('Refreshing status…','');
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
+    toast('Status updated','ok');route();
+  }catch(e){toast('Refresh failed: '+e.message,'err');}
+};
+async function custTabAmenities(unit){
+  if(unit.status!=='possession'){
+    return '<div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="margin-top:6px">Amenity booking becomes available once you have taken possession of your flat.</div></div>';
+  }
+  const {data:amenities}=await sb.schema('cust').from('amenities').select('*').eq('project_id',unit.project_id);
+  const amenityIds=(amenities||[]).map(a=>a.id);
+  const [{data:bookings},{data:pay}]=await Promise.all([
+    amenityIds.length?sb.schema('cust').from('amenity_bookings').select('*').in('amenity_id',amenityIds).neq('status','cancelled'):Promise.resolve({data:[]}),
+    sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle()
+  ]);
+  if(!(amenities&&amenities.length))return '<div class="card card-pad empty">No amenities have been added for your project yet.</div>';
+  const takenByAmenity={};(bookings||[]).forEach(b=>{(takenByAmenity[b.amenity_id]=takenByAmenity[b.amenity_id]||[]).push(b.booking_date);});
+  const myBookings=(bookings||[]).filter(b=>b.unit_id===unit.id);
+  const amenityCards=amenities.map(a=>{
+    const taken=(takenByAmenity[a.id]||[]).map(d=>fmtDateShort(d)).join(', ')||'None yet';
+    return `<div class="card card-pad" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div><b>${esc(a.name)}</b>${a.description?`<div style="font-size:12.5px;color:var(--slate);margin-top:4px">${esc(a.description)}</div>`:''}
+      <div style="font-size:12px;color:var(--slate);margin-top:6px">Already booked: ${esc(taken)}</div></div>
+      <div style="text-align:right">${a.rental_amount!=null?`<div style="font-weight:700">${custInr(a.rental_amount)}</div>`:''}
+      <button class="btn btn-sm btn-primary" style="margin-top:6px" onclick="custBookAmenityModal(${a.id},'${esc(a.name).replace(/'/g,"\\'")}',${a.rental_amount==null?'null':a.rental_amount})">Book a date</button></div>
+      </div></div>`;
+  }).join('');
+  const myRows=myBookings.map(b=>{
+    const a=amenities.find(x=>x.id===b.amenity_id);
+    return [esc((a&&a.name)||'—'),fmtDate(b.booking_date),b.amount!=null?custInr(b.amount):'—',
+      b.status==='confirmed'?'<span class="tag t-green">Confirmed</span>':b.status==='cancelled'?'<span class="tag t-gray">Cancelled</span>':'<span class="tag t-amber">Pending payment</span>',
+      esc(b.payment_reference||'—'),
+      b.status==='pending_payment'?`<button class="btn btn-sm" onclick="custSetAmenityPaymentRef(${b.id},'${(b.payment_reference||'').replace(/'/g,"\\'")}')">Add reference</button>`:'—'];
+  });
+  return '<div class="sec-title" style="margin:0 0 10px">Amenities</div>'+amenityCards+
+    '<div class="sec-title" style="margin:20px 0 10px">My bookings</div>'+
+    (myRows.length?cpaTable(['Amenity','Date','Amount','Status','Payment ref','Action'],myRows):'<div class="card card-pad empty">You haven’t booked anything yet.</div>')+
+    (pay&&(pay.upi_id||pay.qr_storage_path)?`<div class="sec-title" style="margin:20px 0 10px">Payment</div><div class="card card-pad" style="font-size:13px">Pay via ${pay.upi_id?`UPI ID <b>${esc(pay.upi_id)}</b>`:''}${pay.upi_id&&pay.qr_storage_path?' or ':''}${pay.qr_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View QR code</button>`:''}, then let us know the reference — we’ll confirm your booking once we see it.</div>`:'');
+}
+window.custBookAmenityModal=function(amenityId,name,rentalAmount){
+  const today=new Date().toISOString().slice(0,10);
+  openModal(`<div class="modal-head"><h3>Book ${esc(name)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Date</label><input type="date" id="custAmDate" min="${today}">
+    ${rentalAmount!=null?`<p style="font-size:13px;color:var(--slate)">Rental amount: <b>${custInr(rentalAmount)}</b></p>`:''}
+    <label>Payment reference (optional — fill in after you pay)</label><input id="custAmRef" placeholder="UTR / transaction ID"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custAmBtn" onclick="custBookAmenitySave(${amenityId},${rentalAmount==null?'null':rentalAmount})">Book</button></div>`);
+};
+window.custBookAmenitySave=async function(amenityId,rentalAmount){
+  const bookingDate=$('custAmDate').value,paymentReference=$('custAmRef').value.trim()||null;
+  if(!bookingDate){toast('Choose a date','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const btn=$('custAmBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Booking…';
+  const {error}=await sb.schema('cust').from('amenity_bookings').insert({amenity_id:amenityId,unit_id:unit.id,booking_date:bookingDate,amount:rentalAmount,payment_reference:paymentReference,created_by:state.email});
+  if(error){toast(error.code==='23505'?'That date is already booked — pick another.':'Could not book: '+error.message,'err');btn.disabled=false;btn.innerHTML='Book';return;}
+  closeModal();toast('Booking submitted — pending payment confirmation','ok');route();
+};
+window.custSetAmenityPaymentRef=function(bookingId,current){
+  openModal(`<div class="modal-head"><h3>Payment reference</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>UTR / transaction ID</label><input id="custAmRefEdit" value="${esc(current)}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="custSetAmenityPaymentRefSave(${bookingId})">Save</button></div>`);
+};
+window.custSetAmenityPaymentRefSave=async function(bookingId){
+  const reference=$('custAmRefEdit').value.trim()||null;
+  const {error}=await sb.schema('cust').rpc('set_amenity_booking_payment_ref',{p_booking_id:bookingId,p_reference:reference});
+  if(error){toast('Could not save: '+error.message,'err');return;}
+  closeModal();toast('Payment reference saved','ok');route();
+};
+async function custTabSubmeter(unit){
+  const [{data:requests},{data:pay}]=await Promise.all([
+    sb.schema('cust').from('submeter_requests').select('*').eq('unit_id',unit.id).order('requested_at',{ascending:false}),
+    sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle()
+  ]);
+  const tagFor={requested:'<span class="tag t-amber">Requested</span>',invoiced:'<span class="tag t-blue">Invoiced — payment due</span>',paid:'<span class="tag t-green">Paid</span>',completed:'<span class="tag t-green">Completed</span>',cancelled:'<span class="tag t-gray">Cancelled</span>'};
+  const rows=(requests||[]).map(r=>[fmtDate(r.requested_at),r.invoice_amount!=null?custInr(r.invoice_amount):'—',tagFor[r.status]||esc(r.status),
+    r.invoice_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${r.invoice_storage_path.replace(/'/g,"\\'")}','invoice')"><i class="fa-solid fa-download"></i> Invoice</button>`:'—',
+    esc(r.payment_reference||'—'),
+    r.status==='invoiced'?`<button class="btn btn-sm" onclick="custSetSubmeterPaymentRef(${r.id},'${(r.payment_reference||'').replace(/'/g,"\\'")}')">Add reference</button>`:'—'
+  ]);
+  const canApply=!(requests||[]).some(r=>['requested','invoiced'].includes(r.status));
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Sub-meter fixing</div>${canApply?'<button class="btn btn-primary" onclick="custSubmeterApply()"><i class="fa-solid fa-plus"></i> Apply</button>':''}</div>`+
+    (rows.length?cpaTable(['Requested','Invoice amount','Status','Invoice','Payment ref','Action'],rows):'<div class="card card-pad empty">No requests yet.</div>')+
+    (pay&&(pay.upi_id||pay.qr_storage_path)?`<div class="sec-title" style="margin:20px 0 10px">Payment</div><div class="card card-pad" style="font-size:13px">Once invoiced, pay via ${pay.upi_id?`UPI ID <b>${esc(pay.upi_id)}</b>`:''}${pay.upi_id&&pay.qr_storage_path?' or ':''}${pay.qr_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View QR code</button>`:''}.</div>`:'');
+}
+window.custSubmeterApply=async function(){
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const {error}=await sb.schema('cust').from('submeter_requests').insert({unit_id:unit.id,requested_by:state.email});
+  if(error){toast('Could not submit request: '+error.message,'err');return;}
+  toast('Request submitted','ok');route();
+};
+window.custSetSubmeterPaymentRef=function(requestId,current){
+  openModal(`<div class="modal-head"><h3>Payment reference</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>UTR / transaction ID</label><input id="custSmRefEdit" value="${esc(current)}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="custSetSubmeterPaymentRefSave(${requestId})">Save</button></div>`);
+};
+window.custSetSubmeterPaymentRefSave=async function(requestId){
+  const reference=$('custSmRefEdit').value.trim()||null;
+  const {error}=await sb.schema('cust').rpc('set_submeter_payment_ref',{p_request_id:requestId,p_reference:reference});
+  if(error){toast('Could not save: '+error.message,'err');return;}
+  closeModal();toast('Payment reference saved','ok');route();
+};
+const CUST_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+async function custTabReferrals(unit){
+  const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const rows=(referrals||[]).map(r=>[esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
+    `<select onchange="custReferralStatusChange(${r.id},this.value)">${Object.keys(CUST_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CUST_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
+    fmtDate(r.created_at)]);
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Referrals</div><button class="btn btn-primary" onclick="custNewReferralModal()"><i class="fa-solid fa-plus"></i> Refer someone</button></div>`+
+    (rows.length?cpaTable(['Name','Phone','Email','Status','Referred on'],rows):'<div class="card card-pad empty">You haven’t referred anyone yet.</div>');
+}
+window.custNewReferralModal=function(){
+  openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Name</label><input id="custRefName">
+    <label>Phone</label><input id="custRefPhone">
+    <label>Email (optional)</label><input id="custRefEmail"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custRefBtn" onclick="custNewReferralSave()">Submit</button></div>`);
+};
+window.custNewReferralSave=async function(){
+  const prospect_name=$('custRefName').value.trim(),prospect_phone=$('custRefPhone').value.trim()||null,prospect_email=$('custRefEmail').value.trim()||null;
+  if(!prospect_name){toast('Enter a name','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
+  if(error){toast('Could not submit: '+error.message,'err');return;}
+  closeModal();toast('Referral submitted — thank you!','ok');route();
+};
+window.custReferralStatusChange=async function(id,status){
+  const {error}=await sb.schema('cust').from('referrals').update({status,updated_at:new Date().toISOString(),updated_by:state.email}).eq('id',id);
+  if(error){toast('Update failed: '+error.message,'err');return;}
+  toast('Status updated','ok');
+};
 VIEWS.customer=async function(v,seg){
   setCrumb(['Customer Portal']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos'];
+  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals'];
   const ti=mTab(seg,tabs.length);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
@@ -11598,7 +11933,11 @@ VIEWS.customer=async function(v,seg){
   else if(ti===3)body=await custTabProgress(unit);
   else if(ti===4)body=await custTabInspection(unit);
   else if(ti===5)body=await custTabDocuments(unit);
-  else body=await custTabVideos();
+  else if(ti===6)body=await custTabVideos();
+  else if(ti===7)body=await custTabSupport(unit);
+  else if(ti===8)body=await custTabAmenities(unit);
+  else if(ti===9)body=await custTabSubmeter(unit);
+  else body=await custTabReferrals(unit);
   v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
@@ -12241,10 +12580,29 @@ VIEWS.organic=async function(v,seg){
    filter over real rows, so a card and the table under it cannot disagree, and an empty day reads
    as empty rather than as zero-of-something. */
 
+/* STOPGAP, 2026-08-28. The model a hand-triggered retry asks for.
+
+   Normally the browser should NOT name a model - the backend owns that choice, through GEMINI_MODEL
+   in Edge Function Secrets, precisely so it can change in one place. It is named here because the
+   DEPLOYED edge function still has the withdrawn gemini-2.5-pro compiled in as its default, and
+   Google now answers that with a 404. The nightly worker was already passing a model explicitly and
+   so kept working; Retry was the one caller that named none, fell through to that dead default, and
+   404'd. That is what failed 6 of the 2026-08-27 calls, all of them rows a human had retried by hand.
+
+   REMOVE this constant and the gemini_model key below once GEMINI_MODEL is set in Secrets, or the
+   current main is deployed (its default is already gemini-flash-latest). A per-request model beats
+   the secret, so leaving this here would silently pin the dashboard to this model forever and make
+   the next model change look like it had no effect.
+   See supabase/migrations/20260828060000_transcription_model_override.sql for the matching cron note. */
+const TRA_RETRY_MODEL='gemini-flash-latest';
+
 /* Rows written before the pipeline rewrite carry the old status words. Normalising in one place
    means the table, the cards and the filters all agree about what a row IS, whenever it was made. */
 const TRA_LEGACY_STATUS={queued:'pending',done:'completed',error:'failed',
   no_recording:'non_transcribable',too_short:'non_transcribable'};
+/* Normalised statuses that mean the call has not finished this attempt yet. Keyed rather than an
+   array so the lookups below read as a question about one row. */
+const TRA_IN_FLIGHT={pending:true,processing:true,retrying:true};
 const TRA_STATUS_META={
   pending:          {label:'Pending',          tag:'t-gray',  icon:'fa-clock'},
   processing:       {label:'Processing',       tag:'t-amber', icon:'fa-spinner fa-spin'},
@@ -12295,7 +12653,7 @@ function traCallCount(r){
 /* ---- filter state. One object so every control writes to the same place and the table, the cards
    and the URL can never drift apart. ---- */
 let TRA_ROWS=null;
-const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',q:''};
+const TRA_F={from:null,to:null,proc:'all',match:'all',crm:'all',bu:'all',q:''};
 
 function traLocalDate(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
 function traToday(){return traLocalDate(new Date());}
@@ -12326,15 +12684,16 @@ async function traFetch(force){
 
 /* Every filter, applied together. A row has to satisfy all of them, which is what makes
    "yesterday + failed + mismatch" mean what it looks like it means. */
-function traApply(rows){
+function traApply(rows,skipCards){
   const q=String(TRA_F.q||'').trim().toLowerCase();
   return (rows||[]).filter(function(r){
     const d=traRowDate(r);
     if(TRA_F.from&&(!d||d<TRA_F.from))return false;
     if(TRA_F.to&&(!d||d>TRA_F.to))return false;
-    if(TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
-    if(TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
+    if(!skipCards&&TRA_F.proc!=='all'&&traStatus(r)!==TRA_F.proc)return false;
+    if(!skipCards&&TRA_F.match!=='all'&&String(r.comparison_status||'')!==TRA_F.match)return false;
     if(TRA_F.crm!=='all'&&String(r.crm_status||'')!==TRA_F.crm)return false;
+    if(TRA_F.bu!=='all'&&String(r.business_unit_name||'')!==TRA_F.bu)return false;
     if(q){
       const hay=String(r.lead_id||'')+' '+String(r.customer_name||'')+' '+String(r.title||'');
       if(hay.toLowerCase().indexOf(q)<0)return false;
@@ -12344,8 +12703,9 @@ function traApply(rows){
 }
 
 /* The four cards the spec asks for, plus the states that explain the gap between them. Counted over
-   the FILTERED rows, so changing the date range changes the numbers. A failed call is never counted
-   as transcribed. */
+   the rows the date range, CRM status and search leave behind - but NOT over the card selection
+   itself, so clicking "CRM Mismatch" filters the table without collapsing every other card to a
+   number that only describes the mismatches. A failed call is never counted as transcribed. */
 function traKpiHtml(rows){
   const n=function(st){return rows.filter(function(r){return traStatus(r)===st;}).length;};
   const m=function(c){return rows.filter(function(r){return r.comparison_status===c;}).length;};
@@ -12402,12 +12762,9 @@ window.traSetRange=function(f,t){TRA_F.from=f||null;TRA_F.to=t||null;traRender(t
 
 function traFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
-    +'<select onchange="traSet(\'proc\',this.value)" style="padding:6px 8px">'
-      +opt('all','All processing states',TRA_F.proc)
-      +Object.keys(TRA_STATUS_META).map(function(k){return opt(k,TRA_STATUS_META[k].label,TRA_F.proc);}).join('')
-    +'</select>'
     +'<select onchange="traSet(\'match\',this.value)" style="padding:6px 8px">'
       +opt('all','All match results',TRA_F.match)
       +['MATCH','MISMATCH','NOT_COMPARABLE'].map(function(k){return opt(k,TRA_MATCH_META[k].label,TRA_F.match);}).join('')
@@ -12415,6 +12772,10 @@ function traFilterBar(all){
     +'<select onchange="traSet(\'crm\',this.value)" style="padding:6px 8px">'
       +opt('all','All CRM statuses',TRA_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRA_F.crm);}).join('')
+    +'</select>'
+    +'<select onchange="traSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRA_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRA_F.bu);}).join('')
     +'</select>'
     +'<input id="traQ" placeholder="Search lead ID or name…" value="'+esc(TRA_F.q||'')+'" oninput="traSet(\'q\',this.value)" style="padding:6px 10px;min-width:220px">'
     +'<div class="grow"></div>'
@@ -12427,7 +12788,7 @@ window.traSet=function(k,v){
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   traRender(k!=='q');
 };
-window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
+window.traClear=function(){TRA_F.proc='all';TRA_F.match='all';TRA_F.crm='all';TRA_F.bu='all';TRA_F.q='';TRA_F.from=null;TRA_F.to=null;traRender(true);};
 window.traRefresh=async function(){await traFetch(true);traRender(true);};
 
 /* A cell for free text the CRM typed. Clamped rather than truncated with a hard slice, so the full
@@ -12474,12 +12835,14 @@ function traTableHtml(rows){
 function traRender(full){
   const all=TRA_ROWS||[];
   const rows=traApply(all);
+  /* The cards are counted with the card filters LIFTED, so the four totals stay put while a tab is
+     active and clicking a second tab still shows a real number rather than the leftovers of the
+     first one. */
+  const scope=traApply(all,true);
+  const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(scope);
   if(full!==false){
-    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
     const f=$('traFilters');if(f)f.innerHTML=traFilterBar(all);
     const d=$('traDates');if(d)d.innerHTML=traDateBar();
-  }else{
-    const k=$('traKpis');if(k)k.innerHTML=traKpiHtml(rows);
   }
   const b=$('traRows');if(b)b.innerHTML=traTableHtml(rows);
   const c=$('traCount');if(c)c.textContent=rows.length+' of '+all.length+' call'+(all.length===1?'':'s');
@@ -12531,14 +12894,19 @@ window.traRetry=async function(id){
     const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/transcription-sync',{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({action:'retry',id:id})});
+      body:JSON.stringify({action:'retry',id:id,gemini_model:TRA_RETRY_MODEL})});
     const out=await res.json().catch(function(){return {};});
     if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
     toast('Back in the queue','ok');
   }catch(e){
     toast('Could not retry: '+((e&&e.message)||e),'err');
   }
-  await traFetch(true);traRender(true);
+  /* The re-render is what puts the button back, so it has to happen even if the refetch fails -
+     otherwise a dropped connection leaves a dead spinner where the Retry button used to be and the
+     only way out is reloading the page. */
+  try{ await traFetch(true); }
+  catch(e){ toast('Retry was sent, but the list could not be refreshed - reload to see it','warn'); }
+  traRender(true);
 };
 
 /* ---- the tab itself ---- */
@@ -12755,7 +13123,11 @@ async function traDetail(v,id){
         +traKV('Completed at',r.completed_at?fmtDate(r.completed_at)+' '+new Date(r.completed_at).toLocaleTimeString('en-IN'):null)
         +traKV('Queue position',r.queue_seq)
         +traKV('Model',r.gemini_model)
-        +traKV('Last error',r.last_error||r.error_text)
+        /* A requeued call KEEPS the error from the attempt that failed - it is the audit trail and
+           deliberately not cleared. But labelling it plain "Last error" while the row sits in the
+           queue reads as though it had just failed again, which is exactly how ten recovered calls
+           looked like ten still-broken ones. Say which attempt it belongs to instead. */
+        +traKV(TRA_IN_FLIGHT[st]?'Last error (previous attempt)':'Last error',r.last_error||r.error_text)
         +(r.non_transcribable_reason?traKV('Not transcribable',r.non_transcribable_reason):'')
         /* Kept only when a reply could not be parsed. Not the raw-result dump that used to sit at the
            bottom of this page — without this a failed row cannot be diagnosed at all. */
@@ -12788,18 +13160,782 @@ async function traDetail(v,id){
   document.head.appendChild(s);
 }
 
+/* ============================================================ CRM SNAPSHOT QA
+   The lead-wise view over the crm-snapshot-qa pipeline. Reads acc.followup_timeline_v, which is one
+   row per FOLLOW-UP with its transcript and its QA joined on - so the CRM's own history, what was
+   actually said, and where the two disagree all arrive together and cannot drift apart.
+
+   WHY THIS EXISTS ALONGSIDE THE tra* VIEW BELOW. The tra* code reads acc.transcriptions, one row per
+   LEAD with earlier calls folded into a JSON column. That shape came from a CRM feed that sent one
+   row per call. The feed now sends one object per lead with its complete `history` array, and the
+   pipeline stores every follow-up as its own durable row - so a lead's twelfth conversation is a row,
+   not an entry inside a blob, and a recording that was already transcribed is reused rather than
+   paid for twice while STILL appearing in the lead's history. Nothing here writes; the old view and
+   its tabs are untouched and still serve every row imported before the changeover. */
+
+const TRC_MISMATCH = {
+  lost_should_not_have_been_lost: {
+    label: 'Lost that should not have been Lost', short: 'Should not be Lost',
+    tag: 't-red', icon: 'fa-door-open', colour: '#dc2626',
+    blurb: 'The CRM marked the follow-up Lost, but the call reads as a lead that is still live. Re-open it.' },
+  qualified_should_not_have_been_qualified: {
+    label: 'Qualified that should not have been Qualified', short: 'Should not be Qualified',
+    tag: 't-amber', icon: 'fa-circle-question', colour: '#d97706',
+    blurb: 'The CRM marked the follow-up Qualified, but the conversation does not carry the evidence to qualify it.' },
+  in_followup_should_have_been_lost: {
+    label: 'In Follow Up that should have been Lost', short: 'Should be Lost',
+    tag: 't-red', icon: 'fa-phone-slash', colour: '#dc2626',
+    blurb: 'The CRM is still chasing this lead, but on the call the customer closed the door.' },
+  in_followup_should_have_been_qualified: {
+    label: 'In Follow Up that should have been Qualified', short: 'Should be Qualified',
+    tag: 't-green', icon: 'fa-circle-up', colour: '#16a34a',
+    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' }
+};
+const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
+
+/* Every accuracy field in the QA result uses this same four-word vocabulary, so one map colours all
+   of them and a new value shows up as itself rather than silently grey. */
+const TRC_ACC_TAG = {
+  'Accurate': 't-green', 'Partially Accurate': 't-amber',
+  'Inaccurate': 't-red', 'Not Verifiable': 't-gray'
+};
+const TRC_TR_META = {
+  completed:         {label:'Transcribed',      tag:'t-green', icon:'fa-circle-check'},
+  non_transcribable: {label:'No conversation',  tag:'t-gray',  icon:'fa-volume-xmark'},
+  failed:            {label:'Transcription failed', tag:'t-red', icon:'fa-circle-exclamation'},
+  not_transcribed:   {label:'Waiting',          tag:'t-amber', icon:'fa-clock'},
+  no_recording:      {label:'No recording',     tag:'t-gray',  icon:'fa-phone-slash'}
+};
+const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
+
+function trcTag(cls, icon, label){
+  return '<span class="tag '+cls+'">'+(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
+}
+function trcTrTag(r){
+  const m = TRC_TR_META[String(r&&r.transcription_status||'')];
+  return m ? trcTag(m.tag,m.icon,m.label) : trcTag('t-gray','','—');
+}
+function trcAccTag(v){
+  if(!v) return '<span style="color:var(--slate)">—</span>';
+  return trcTag(TRC_ACC_TAG[v]||'t-gray','',v);
+}
+function trcMismatchTag(r){
+  if(!r || r.status_match===true) return trcTag('t-green','fa-equals','Agrees');
+  if(r.status_match===false){
+    const m = TRC_MISMATCH[String(r.mismatch_type||'')];
+    return trcTag('t-red','fa-not-equal', m?m.short:'Disagrees');
+  }
+  return '<span style="color:var(--slate)">—</span>';
+}
+
+/* call_start_time and next_follow_up_date arrive from the CRM as IST WALL CLOCK wearing a Z. Putting
+   them through new Date() shifts every one of them by five and a half hours, which is how an 11 AM
+   callback becomes 5:30 AM. The components are read straight out of the string instead. */
+function trcWall(v, withTime){
+  const m = String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  if(!m) return null;
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const day = Number(m[3])+' '+MON[Number(m[2])-1]+' '+m[1];
+  if(!withTime || m[4]===undefined) return day;
+  const h=Number(m[4]), h12=(h%12===0?12:h%12), ap=(h<12?'AM':'PM');
+  return day+', '+h12+':'+m[5]+' '+ap;
+}
+
+/* ---- state. One object, so the cards, the table and the filters cannot drift apart. ---- */
+let TRC_ROWS=null;
+const TRC_F={from:null,to:null,proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all'};
+
+const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
+  +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
+  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
+  +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
+  +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
+  +'lost_reason_status,remarks_status,ai_assessed_status,status_match,mismatch_type,qa_score,qa_model,'
+  +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count';
+
+/* The list never asks for transcripts. A day of calls is a few hundred rows and every one of them
+   carries its full turn-by-turn transcript plus five QA blobs - fetching those to render a table of
+   names is megabytes for nothing. The detail view asks for `*` on one lead. */
+async function trcFetch(force){
+  if(TRC_ROWS&&!force)return TRC_ROWS;
+  const PAGE=1000;let out=[],from=0;
+  try{
+    for(;;){
+      const {data,error}=await sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
+        .order('call_date',{ascending:false,nullsFirst:false})
+        .order('communication_time',{ascending:false,nullsFirst:false})
+        .order('follow_up_id',{ascending:false})
+        .range(from,from+PAGE-1);
+      if(error)throw error;
+      const batch=data||[];out=out.concat(batch);
+      if(batch.length<PAGE)break;
+      from+=PAGE;if(from>50000)break;
+    }
+    TRC_ROWS=out;
+  }catch(e){
+    TRC_ROWS=out.length?out:[];
+    toast('Could not load the call history: '+((e&&e.message)||e),'err');
+  }
+  return TRC_ROWS;
+}
+
+function trcRowDate(r){
+  return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
+}
+
+/* Every filter, applied together. skipCards lifts the two card filters so the four totals stay put
+   while one of them is selected - clicking Mismatch must not collapse Transcribed to the mismatches. */
+function trcApply(rows,skipCards){
+  const q=String(TRC_F.q||'').trim().toLowerCase();
+  return (rows||[]).filter(function(r){
+    const d=trcRowDate(r);
+    if(TRC_F.from&&(!d||d<TRC_F.from))return false;
+    if(TRC_F.to&&(!d||d>TRC_F.to))return false;
+    if(TRC_F.crm!=='all'&&String(r.crm_status||'')!==TRC_F.crm)return false;
+    if(TRC_F.bu!=='all'&&String(r.business_unit_name||'')!==TRC_F.bu)return false;
+    if(!skipCards){
+      if(TRC_F.proc!=='all'&&String(r.transcription_status||'')!==TRC_F.proc)return false;
+      if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
+      if(TRC_F.match==='MISMATCH'&&r.status_match!==false)return false;
+      if(TRC_F.match==='NONE'&&r.status_match!==null&&r.status_match!==undefined)return false;
+      if(TRC_F.mismatch!=='all'&&String(r.mismatch_type||'')!==TRC_F.mismatch)return false;
+    }
+    if(q){
+      const hay=String(r.lead_id||'')+' '+String(r.lead_name||'')+' '+String(r.follow_up_id||'');
+      if(hay.toLowerCase().indexOf(q)<0)return false;
+    }
+    return true;
+  });
+}
+
+/* Follow-ups rolled up to the leads they belong to. Newest lead first (the day's own work is what
+   someone opens this page for); the follow-ups INSIDE a lead stay oldest-first, because a
+   conversation history only means anything read forwards. */
+function trcLeads(rows){
+  const by={};
+  (rows||[]).forEach(function(r){
+    const k=String(r.lead_id);
+    if(!by[k])by[k]={lead_id:r.lead_id,name:r.lead_name,bu:r.business_unit_name,
+                     status:r.lead_current_status,lost_reason:r.lead_current_lost_reason,rows:[]};
+    by[k].rows.push(r);
+    if(!by[k].name&&r.lead_name)by[k].name=r.lead_name;
+    if(!by[k].bu&&r.business_unit_name)by[k].bu=r.business_unit_name;
+  });
+  return Object.keys(by).map(function(k){
+    const g=by[k];
+    g.rows.sort(trcChrono);
+    g.last=g.rows[g.rows.length-1];
+    g.lastDate=trcRowDate(g.last);
+    g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
+    g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
+    g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
+    g.mismatches=g.rows.filter(function(r){return r.status_match===false;}).length;
+    g.trail=[];
+    g.rows.forEach(function(r){
+      const s=r.crm_status;
+      if(s&&g.trail[g.trail.length-1]!==s)g.trail.push(s);
+    });
+    const scored=g.rows.filter(function(r){return r.pitch_score!==null&&r.pitch_score!==undefined;});
+    g.pitch=scored.length?Math.round(scored.reduce(function(a,r){return a+Number(r.pitch_score);},0)/scored.length):null;
+    const qas=g.rows.filter(function(r){return r.qa_score!==null&&r.qa_score!==undefined;});
+    g.qa=qas.length?Math.round(qas.reduce(function(a,r){return a+Number(r.qa_score);},0)/qas.length):null;
+    return g;
+  }).sort(function(a,b){
+    return String(b.lastDate||'').localeCompare(String(a.lastDate||''))
+        || Number(b.last&&b.last.follow_up_id||0)-Number(a.last&&a.last.follow_up_id||0);
+  });
+}
+
+/* Chronological, and deliberately not by follow_up_id alone: the CRM's ids ascend with creation, but
+   communication_time is when the conversation actually happened, and a back-filled follow-up has the
+   higher id and the earlier time. Time first, id only to break a tie. */
+function trcChrono(a,b){
+  const ta=a.communication_time||a.call_date||'', tb=b.communication_time||b.call_date||'';
+  return String(ta).localeCompare(String(tb)) || Number(a.follow_up_id||0)-Number(b.follow_up_id||0);
+}
+
+/* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
+   a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
+function trcKpiHtml(rows){
+  const n=function(st){return rows.filter(function(r){return r.transcription_status===st;}).length;};
+  const cards=[
+    ['Total Calls',rows.length,'follow-ups in this range','var(--slate)','all','proc'],
+    ['Transcribed',n('completed'),'with a full transcript','#16a34a','completed','proc'],
+    ['CRM Match',rows.filter(function(r){return r.status_match===true;}).length,'call agrees with the CRM','#16a34a','MATCH','match'],
+    ['CRM Mismatch',rows.filter(function(r){return r.status_match===false;}).length,'call disagrees with the CRM','#dc2626','MISMATCH','match']
+  ];
+  const sub=[
+    ['Waiting','not_transcribed',n('not_transcribed'),'fa-clock'],
+    ['No recording','no_recording',n('no_recording'),'fa-phone-slash'],
+    ['No conversation','non_transcribable',n('non_transcribable'),'fa-volume-xmark'],
+    ['Failed','failed',n('failed'),'fa-circle-exclamation']
+  ];
+  const assessed=rows.filter(function(r){return r.qa_id;}).length;
+  const reused=rows.filter(function(r){return r.reused_transcription;}).length;
+  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
+      const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
+      return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
+        +'<div class="lbl" style="margin-bottom:7px">'+esc(c[0])+(active?' <i class="fa-solid fa-filter" style="font-size:10px"></i>':'')+'</div>'
+        +'<div class="val">'+c[1]+'</div>'
+        +'<div style="font-size:12px;color:'+c[3]+';margin-top:3px">'+esc(c[2])+'</div></div>';
+    }).join('')+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">'+sub.map(function(s){
+      const on=TRC_F.proc===s[1];
+      return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
+        +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
+    }).join('')
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
+    /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
+       transcript already paid for, which is the whole point of keying on recording_url. */
+    +'<span style="font-size:12.5px;color:var(--slate)">Reused an existing transcript <b style="color:var(--ink)">'+reused+'</b></span>'
+    +'</div>'
+    +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows):'');
+}
+
+/* The four counts the specification asks for, by name. Only rendered when Mismatch is the active
+   card, because that is the question they answer: of the calls where the CRM and the conversation
+   disagree, WHICH WAY do they disagree. Each one filters the table under it. */
+function trcMismatchPanel(rows){
+  const counts={};
+  TRC_MISMATCH_KEYS.forEach(function(k){
+    counts[k]=rows.filter(function(r){return r.status_match===false&&r.mismatch_type===k;}).length;
+  });
+  const other=rows.filter(function(r){return r.status_match===false&&TRC_MISMATCH_KEYS.indexOf(String(r.mismatch_type||''))<0;}).length;
+  return '<div class="card card-pad" style="margin-top:14px">'
+    +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Counted per follow-up, from the CRM status recorded against that call and what the conversation actually established.</div>'
+    +'<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px">'
+    +TRC_MISMATCH_KEYS.map(function(k){
+      const m=TRC_MISMATCH[k],on=TRC_F.mismatch===k;
+      return '<div class="card card-pad" style="margin:0;cursor:pointer'+(on?';box-shadow:inset 0 0 0 2px '+m.colour:'')+'" onclick="trcSet(\'mismatch\',\''+(on?'all':k)+'\')">'
+        +'<div style="display:flex;align-items:center;gap:8px"><i class="fa-solid '+m.icon+'" style="color:'+m.colour+'"></i>'
+        +'<div style="font-size:26px;font-weight:700;line-height:1">'+counts[k]+'</div></div>'
+        +'<div style="font-size:12.5px;font-weight:600;margin-top:8px">'+esc(m.label)+'</div>'
+        +'<div style="font-size:11.5px;color:var(--slate);line-height:1.5;margin-top:4px">'+esc(m.blurb)+'</div>'
+      +'</div>';
+    }).join('')+'</div>'
+    +(other?'<div style="margin-top:10px;font-size:12.5px;color:var(--slate)">'+other
+      +' further disagreement'+(other===1?'':'s')+' on a CRM status outside these four categories (Site Visited, OV and similar).</div>':'')
+  +'</div>';
+}
+
+window.trcCard=function(kind,val){
+  if(kind==='proc'){TRC_F.proc=(TRC_F.proc===val?'all':val);}
+  else{
+    TRC_F.match=(TRC_F.match===val?'all':val);
+    // Leaving Mismatch must not leave its category filter behind, silently hiding rows.
+    if(TRC_F.match!=='MISMATCH')TRC_F.mismatch='all';
+  }
+  trcRender(true);
+};
+
+function trcDateBar(){
+  const preset=function(label,f,t){
+    const on=TRC_F.from===f&&TRC_F.to===t;
+    return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
+  };
+  const y=traYesterday(),td=traToday();
+  return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +preset('Previous day',y,y)+preset('Today',td,td)+preset('All time',null,null)
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<label style="font-size:12px;color:var(--slate)">From</label>'
+    +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onchange="trcSetRange(this.value||null,(document.getElementById(\'trcTo\').value||this.value||null))" style="padding:5px 8px">'
+    +'<label style="font-size:12px;color:var(--slate)">To</label>'
+    +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onchange="trcSetRange((document.getElementById(\'trcFrom\').value||this.value||null),this.value||null)" style="padding:5px 8px">'
+  +'</div>';
+}
+window.trcSetRange=function(f,t){TRC_F.from=f||null;TRC_F.to=t||null;trcRender(true);};
+
+function trcFilterBar(all){
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
+  const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
+  return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
+    +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
+      +opt('all','All status checks',TRC_F.match)
+      +opt('MATCH','CRM and call agree',TRC_F.match)
+      +opt('MISMATCH','CRM and call disagree',TRC_F.match)
+      +opt('NONE','Not yet checked',TRC_F.match)
+    +'</select>'
+    +'<select onchange="trcSet(\'crm\',this.value)" style="padding:6px 8px">'
+      +opt('all','All CRM statuses',TRC_F.crm)
+      +crmValues.map(function(k){return opt(k,k,TRC_F.crm);}).join('')
+    +'</select>'
+    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRC_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
+    +'</select>'
+    +'<input id="trcQ" placeholder="Search lead ID, name or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
+    +'<div class="grow"></div>'
+    +'<button class="btn btn-sm" onclick="trcClear()"><i class="fa-solid fa-filter-circle-xmark"></i> Clear filters</button>'
+    +'<button class="btn btn-sm" onclick="trcRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+  +'</div>';
+}
+window.trcSet=function(k,v){
+  TRC_F[k]=v;
+  // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
+  trcRender(k!=='q');
+};
+window.trcClear=function(){
+  TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
+  TRC_F.q='';TRC_F.from=null;TRC_F.to=null;trcRender(true);
+};
+window.trcRefresh=async function(){await trcFetch(true);trcRender(true);};
+
+function trcTextCell(v,width){
+  if(!v)return '<td><span style="color:var(--slate)">—</span></td>';
+  return '<td style="max-width:'+(width||220)+'px"><div title="'+esc(String(v))+'" '
+    +'style="font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'
+    +esc(String(v))+'</div></td>';
+}
+
+/* ---- the two tables. A lead has many conversations, so which row means what depends on the
+   question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
+   a CALL per row, because that is the level a mismatch exists at. ---- */
+const TRC_LEAD_COLS=8, TRC_CALL_COLS=7;
+
+function trcLeadRowHtml(g){
+  const n=g.rows.length;
+  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+g.lead_id+'\')">'
+    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
+    +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
+      +'<div style="font-size:11.5px;color:var(--slate)">'+n+' follow-up'+(n===1?'':'s')
+        +' · '+g.recordings+' recording'+(g.recordings===1?'':'s')+' · '+g.transcribed+' transcribed</div>'
+      +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
+        +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
+    +'</td>'
+    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')+'</td>'
+    +trcTextCell(g.bu,160)
+    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.lastDate)||'—')+'</td>'
+    +'<td style="white-space:nowrap">'+(g.pitch===null?'<span style="color:var(--slate)">—</span>':'<b>'+g.pitch+'%</b>')
+      +(g.qa===null?'':'<div style="font-size:11px;color:var(--slate)">QA '+g.qa+'%</div>')+'</td>'
+    +'<td>'+(g.mismatches
+        ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
+        : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
+    +trcTextCell(g.lost_reason,180)
+  +'</tr>';
+}
+
+/* One CALL per row, for the mismatch drill-down: the CRM's verdict and the conversation's verdict
+   side by side, which is the comparison the count is made of. */
+function trcCallRowHtml(r){
+  const m=TRC_MISMATCH[String(r.mismatch_type||'')];
+  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+r.lead_id+'\')">'
+    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(r.lead_id))+'</td>'
+    +'<td><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
+      +'<div style="font-size:11.5px;color:var(--slate)">follow-up '+esc(String(r.follow_up_id))+'</div></td>'
+    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||'—')+'</td>'
+    +'<td>'+(r.crm_status?trcTag('t-blue','',r.crm_status):'<span style="color:var(--slate)">—</span>')+'</td>'
+    +'<td>'+(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',r.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
+    +'<td>'+(m?trcTag(m.tag,m.icon,m.short):trcMismatchTag(r))+'</td>'
+    +trcTextCell(r.crm_remarks,260)
+  +'</tr>';
+}
+
+function trcTableHtml(rows){
+  const callLevel=TRC_F.match==='MISMATCH';
+  if(!rows.length){
+    return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:TRC_LEAD_COLS)+'"><div class="empty" style="padding:40px">'
+      +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
+  }
+  if(callLevel)return rows.slice().sort(function(a,b){return trcChrono(b,a);}).map(trcCallRowHtml).join('');
+  return trcLeads(rows).map(trcLeadRowHtml).join('');
+}
+function trcHeadHtml(){
+  return TRC_F.match==='MISMATCH'
+    ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
+    : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>Business Unit</th><th>Last call</th><th>Pitch</th><th>Status check</th><th>Lost reason</th></tr>';
+}
+
+function trcRender(full){
+  const all=TRC_ROWS||[];
+  const rows=trcApply(all);
+  const scope=trcApply(all,true);
+  const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope);
+  if(full!==false){
+    const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
+    const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
+  }
+  const h=$('trcHead');if(h)h.innerHTML=trcHeadHtml();
+  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(rows);
+  const c=$('trcCount');
+  if(c){
+    const leads=TRC_F.match==='MISMATCH'?null:trcLeads(rows).length;
+    c.textContent=(leads===null?rows.length+' call'+(rows.length===1?'':'s')
+                               :leads+' lead'+(leads===1?'':'s')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s'))
+      +' of '+all.length;
+  }
+}
+
+async function trcView(v,seg){
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
+    +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
+      +'<div id="trcCount" style="font-size:12.5px;color:var(--slate)"></div></div>'
+      +'<div id="trcDates" style="margin-top:12px"></div></div>'
+    +'<div id="trcKpis" style="margin-top:16px"></div>'
+    +'<div id="trcFilters"></div>'
+    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:64vh"><table class="tbl">'
+      +'<thead id="trcHead"></thead>'
+      +'<tbody id="trcRows"><tr><td colspan="8"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
+    +'</table></div></div>';
+  await trcFetch(true);
+  trcRender(true);
+}
+
+/* ================================================ ONE LEAD, THE WHOLE STORY */
+function trcKV(label,value,mono){
+  return '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">'
+    +'<div style="min-width:170px;font-size:12.5px;color:var(--slate)">'+esc(label)+'</div>'
+    +'<div style="flex:1;min-width:0;font-size:13.5px;'+(mono?'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;':'')+'">'
+    +(value===null||value===undefined||value===''?'<span style="color:var(--slate)">—</span>':esc(String(value)))+'</div></div>';
+}
+function trcSection(icon,title,inner,colour){
+  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
+    +'<i class="fa-solid '+icon+'" style="color:'+(colour||'#0d9488')+'"></i> '+esc(title)+'</div>'+inner+'</div>';
+}
+
+/* The complete conversation, in order, with the MM:SS timestamps the transcriber returned. Never a
+   summary - being able to read what was actually said is the point of the whole pipeline. */
+function trcTranscriptHtml(turns,fallback){
+  const list=Array.isArray(turns)?turns:[];
+  if(!list.length){
+    return fallback
+      ? '<div style="font-size:13.5px;white-space:pre-wrap;line-height:1.65">'+esc(fallback)+'</div>'
+      : '<div style="color:var(--slate);font-size:13px;padding:8px 0">No transcript for this call.</div>';
+  }
+  return '<div style="display:flex;flex-direction:column;gap:10px">'+list.map(function(t){
+    const agent=/agent/i.test(String(t.speaker||''));
+    return '<div style="display:flex;gap:12px">'
+      +'<div style="min-width:52px;font-variant-numeric:tabular-nums;font-size:12px;color:var(--slate);padding-top:2px">'+esc(t.timestamp||'')+'</div>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:11.5px;font-weight:700;color:'+(agent?'#0d9488':'#7c3aed')+';letter-spacing:.02em">'+esc(t.speaker||'Speaker')+'</div>'
+        +'<div style="font-size:14px;line-height:1.6;white-space:pre-wrap">'+esc(t.text||'')+'</div>'
+      +'</div></div>';
+  }).join('')+'</div>';
+}
+
+/* One accuracy assessment. Every one of the four has the same three parts - what the CRM recorded,
+   what the conversation supports, and why the two were judged to agree or not - so they are rendered
+   by one function and read the same way down the page. */
+function trcAccuracyHtml(title,icon,a,fields){
+  if(!a||typeof a!=='object'){
+    return '<div class="card card-pad" style="margin:0"><div style="font-size:12.5px;font-weight:700;color:var(--slate)">'
+      +'<i class="fa-solid '+icon+'"></i> '+esc(title)+'</div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:8px">Not assessed.</div></div>';
+  }
+  const score=(a.score===null||a.score===undefined)?null:Number(a.score);
+  const issues=Array.isArray(a.issues)?a.issues.filter(Boolean):[];
+  return '<div class="card card-pad" style="margin:0">'
+    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      +'<div style="font-size:12.5px;font-weight:700"><i class="fa-solid '+icon+'" style="color:#0d9488"></i> '+esc(title)+'</div>'
+      +'<div class="grow"></div>'
+      +(score===null?'':'<span class="tag t-gray">'+score+'%</span>')
+      +trcAccTag(a.status)
+    +'</div>'
+    +fields.map(function(f){return trcKV(f[0],a[f[1]]);}).join('')
+    +(a.reason?'<div style="font-size:13px;line-height:1.6;margin-top:8px">'+esc(a.reason)+'</div>':'')
+    +(a.evidence?'<div style="font-size:12.5px;line-height:1.6;margin-top:8px;padding:8px 10px;background:var(--bg2,#f8fafc);border-left:3px solid #0d9488;border-radius:0 6px 6px 0">'
+      +'<i class="fa-solid fa-quote-left" style="font-size:10px;color:var(--slate)"></i> '+esc(a.evidence)+'</div>':'')
+    +(issues.length?'<ul style="margin:8px 0 0 18px;padding:0;font-size:12.5px;line-height:1.6">'
+      +issues.map(function(i){return '<li>'+esc(String(i))+'</li>';}).join('')+'</ul>':'')
+  +'</div>';
+}
+
+function trcAgentQaHtml(qa){
+  const list=Array.isArray(qa)?qa:[];
+  if(!list.length)return '<div style="color:var(--slate);font-size:13px">No agent audit for this call.</div>';
+  return '<table class="tbl"><thead><tr><th>Point</th><th>Result</th><th>Evidence</th><th>Notes</th></tr></thead><tbody>'
+    +list.map(function(p){
+      const s=String(p&&p.status||'');
+      const cls=/^pass$/i.test(s)?'t-green':/^fail$/i.test(s)?'t-red':/^partial$/i.test(s)?'t-amber':'t-gray';
+      return '<tr><td style="font-weight:600">'+esc(p.point||'—')+'</td>'
+        +'<td><span class="tag '+cls+'">'+esc(s||'—')+'</span></td>'
+        +'<td style="font-size:12.5px">'+esc(p.evidence||'—')+'</td>'
+        +'<td style="font-size:12.5px;color:var(--slate)">'+esc(p.notes||'')+'</td></tr>';
+    }).join('')+'</tbody></table>';
+}
+
+/* ONE CONVERSATION, whole. CRM record, how it was processed, what was said, and the five judgements -
+   in that order, because that is the order someone checking the CRM reads them in. */
+function trcCallHtml(r,i,total){
+  const m=TRC_MISMATCH[String(r.mismatch_type||'')];
+  const when=trcWall(r.call_start_text,true)||trcWall(r.communication_time&&String(r.communication_time).slice(0,16),true)||trcWall(trcRowDate(r))||'date not recorded';
+  const langs=Array.isArray(r.languages)?r.languages.map(function(l){
+    return {hi:'Hindi',en:'English',bn:'Bengali'}[l]||l;}).join(', '):'';
+
+  const head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +'<span style="font-size:12px;font-weight:700;color:#fff;background:#0d9488;border-radius:999px;padding:3px 10px">'
+      +(i+1)+' of '+total+'</span>'
+    +'<span style="font-size:14px;font-weight:600">'+esc(when)+'</span>'
+    +(r.crm_status?trcTag('t-blue','',r.crm_status):'')
+    +trcTrTag(r)
+    +(r.reused_transcription?trcTag('t-gray','fa-recycle','Transcript reused'):'')
+    +(r.call_duration?trcTag('t-gray','fa-stopwatch',trFmtDur(r.call_duration)):'')
+    +(m?trcTag(m.tag,m.icon,m.short):'')
+    +'<div class="grow"></div>'
+    +(r.recording_url?'<button class="btn btn-sm" onclick="trcCopy(\'url\','+r.follow_up_id+')"><i class="fa-regular fa-copy"></i> Copy URL</button>':'')
+    +((r.queue_status==='failed')?'<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'')
+  +'</div>';
+
+  const crm='<div class="card card-pad" style="margin:0">'
+    +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
+    +trcKV('Follow-up ID',r.follow_up_id)
+    +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
+    +trcKV('Call started',trcWall(r.call_start_text,true))
+    +trcKV('Logged at',r.communication_time?trcWall(String(r.communication_time).slice(0,16),true):null)
+    +trcKV('Next follow-up',trcWall(r.next_follow_up_text,true)||r.next_follow_up_text)
+    +trcKV('Remarks',r.crm_remarks)
+    +trcKV('Lost reason',r.crm_lost_reason)
+    +trcKV('Call duration',r.call_duration?Math.round(Number(r.call_duration))+' seconds':null)
+    +trcKV('Recording',r.recording_url,true)
+  +'</div>';
+
+  const proc='<div class="card card-pad" style="margin:0">'
+    +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-gears" style="color:#0d9488"></i> How it was processed</div>'
+    +trcKV('Transcription',(TRC_TR_META[String(r.transcription_status||'')]||{}).label||r.transcription_status)
+    +trcKV('Queue state',r.queue_status)
+    +trcKV('Transcription model',r.transcription_model)
+    +trcKV('QA model',r.qa_model)
+    +trcKV('Turns',r.turn_count)
+    +trcKV('Languages',langs)
+    +trcKV('Audio length',r.duration_seconds?trFmtDur(r.duration_seconds):null)
+    +trcKV('Attempts',(r.attempt_count||0)+' transcription · '+(r.qa_attempt_count||0)+' QA')
+    +(r.non_transcribable_reason?trcKV('No conversation because',r.non_transcribable_reason):'')
+    +(r.queue_error?trcKV('Last error',r.queue_error):'')
+    +(r.qa_error?trcKV('QA error',r.qa_error):'')
+  +'</div>';
+
+  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:null;
+  const statusBlock='<div class="card card-pad" style="margin:0">'
+    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      +'<div style="font-size:12.5px;font-weight:700"><i class="fa-solid fa-code-compare" style="color:#0d9488"></i> Status check</div>'
+      +'<div class="grow"></div>'+trcMismatchTag(r)
+    +'</div>'
+    +trcKV('CRM recorded',r.crm_status)
+    +trcKV('The call reads as',r.ai_assessed_status)
+    +(m?trcKV('Category',m.label):'')
+    +(sa&&sa.reason?'<div style="font-size:13px;line-height:1.6;margin-top:8px">'+esc(sa.reason)+'</div>':'')
+    +(sa&&sa.derived_note?'<div style="font-size:12.5px;line-height:1.6;margin-top:6px;color:var(--slate)">'+esc(sa.derived_note)+'</div>':'')
+    +(sa&&sa.evidence?'<div style="font-size:12.5px;line-height:1.6;margin-top:8px;padding:8px 10px;background:var(--bg2,#f8fafc);border-left:3px solid #0d9488;border-radius:0 6px 6px 0">'
+      +'<i class="fa-solid fa-quote-left" style="font-size:10px;color:var(--slate)"></i> '+esc(sa.evidence)+'</div>':'')
+  +'</div>';
+
+  const accuracy=r.qa_id
+    ? '<div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">'
+      +trcAccuracyHtml('Pitch accuracy','fa-bullhorn',r.pitch_accuracy,[])
+      +trcAccuracyHtml('Follow-up date accuracy','fa-calendar-check',r.followup_date_accuracy,
+          [['CRM date','crm_date'],['Customer agreed to','customer_agreed_date']])
+      +trcAccuracyHtml('Lost reason accuracy','fa-circle-xmark',r.lost_reason_accuracy,
+          [['CRM reason','crm_reason'],['The call supports','actual_reason']])
+      +trcAccuracyHtml('Remarks accuracy','fa-pen-to-square',r.remarks_accuracy,
+          [['CRM remarks','crm_remarks'],['What the call contained','actual_conversation_summary']])
+      +statusBlock
+      +'</div>'
+    : '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
+      +esc(r.transcription_status==='completed'
+            ? 'Transcribed, but the QA assessment has not run yet.'
+            : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
+
+  return '<div class="card card-pad" style="margin-top:14px;border-left:3px solid '+(m?m.colour:'#0d9488')+'">'
+    +head
+    +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:12px">'+crm+proc+'</div>'
+    +accuracy
+    +(r.summary_verdict?'<div style="margin-top:12px;font-size:13.5px;line-height:1.65;white-space:pre-wrap">'
+      +'<b style="font-size:12.5px">Verdict.</b> '+esc(r.summary_verdict)+'</div>':'')
+    +'<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:8px">'
+      +'<i class="fa-solid fa-quote-left" style="color:#0d9488"></i> The conversation</div>'
+      +trcTranscriptHtml(r.transcript,r.transcript_text)+'</div>'
+    +(Array.isArray(r.agent_qa)&&r.agent_qa.length
+      ? '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12.5px;font-weight:700">Seven-point agent audit'
+        +(r.qa_score===null||r.qa_score===undefined?'':' — '+r.qa_score+'%')+'</summary>'
+        +'<div style="margin-top:10px">'+trcAgentQaHtml(r.agent_qa)+'</div></details>'
+      : '')
+  +'</div>';
+}
+
+let TRC_LEAD=null;
+
+async function trcLeadDetail(v,leadId){
+  setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
+  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  const id=Number(leadId);
+  let lead=null,rows=[];
+  try{
+    const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
+    lead=r1.data||null;
+    /* `*` here, unlike the list: this is the one place the transcripts and the five QA blobs are
+       actually read, and asking for them by name would silently drop whatever the pipeline starts
+       storing tomorrow. */
+    const r2=await sb.schema('acc').from('followup_timeline_v').select('*').eq('lead_id',id);
+    rows=(r2.data||[]).slice().sort(trcChrono);
+  }catch(e){
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
+      +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i>'
+      +'<div>Could not load this lead: '+esc((e&&e.message)||String(e))+'</div>'
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+    return;
+  }
+  if(!lead&&!rows.length){
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
+      +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div>'
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+    return;
+  }
+  TRC_LEAD={lead:lead,rows:rows};
+
+  const name=(lead&&lead.lead_name)||(rows[0]&&rows[0].lead_name)||('Lead '+id);
+  const bu=(lead&&lead.business_unit_name)||(rows[0]&&rows[0].business_unit_name)||null;
+  const recordings=rows.filter(function(r){return r.has_recording;}).length;
+  const transcribed=rows.filter(function(r){return r.transcription_status==='completed';}).length;
+  const assessed=rows.filter(function(r){return r.qa_id;}).length;
+  const reused=rows.filter(function(r){return r.reused_transcription;}).length;
+  const mismatched=rows.filter(function(r){return r.status_match===false;});
+
+  const trail=[];
+  rows.forEach(function(r){const s=r.crm_status;if(s&&trail[trail.length-1]!==s)trail.push(s);});
+
+  const countOf=function(field,value){return rows.filter(function(r){return r[field]===value;}).length;};
+  const accRow=function(label,field){
+    const cells=['Accurate','Partially Accurate','Inaccurate','Not Verifiable'].map(function(s){
+      const n=countOf(field,s);
+      return '<td>'+(n?'<span class="tag '+TRC_ACC_TAG[s]+'">'+n+'</span>':'<span style="color:var(--slate)">—</span>')+'</td>';
+    }).join('');
+    return '<tr><td style="font-weight:600">'+esc(label)+'</td>'+cells+'</tr>';
+  };
+
+  const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
+      +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        +'<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
+        +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
+      +'</div></div>';
+
+  const strip='<div class="card card-pad" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
+    +((lead&&lead.status)?trcTag('t-blue','','CRM: '+lead.status):'')
+    +trcTag('t-gray','fa-phone',recordings+' recording'+(recordings===1?'':'s'))
+    +trcTag(transcribed?'t-green':'t-gray','fa-file-lines',transcribed+' transcribed')
+    +trcTag(assessed?'t-green':'t-gray','fa-clipboard-check',assessed+' assessed')
+    +(reused?trcTag('t-gray','fa-recycle',reused+' reused'):'')
+    +(mismatched.length?trcTag('t-red','fa-not-equal',mismatched.length+' mismatch'+(mismatched.length===1?'':'es'))
+                       :(assessed?trcTag('t-green','fa-equals','CRM agrees throughout'):''))
+    +(trail.length>1?'<div style="font-size:13.5px">CRM verdict over time: <b>'
+      +trail.map(esc).join('</b> <i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--slate)"></i> <b>')+'</b></div>':'')
+  +'</div>';
+
+  const leadCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
+    +'<i class="fa-solid fa-address-card" style="color:#0d9488"></i> Lead, as the CRM has it today</div>'
+    +trcKV('Lead ID',id)+trcKV('Lead name',name)+trcKV('Current status',lead&&lead.status)
+    +trcKV('Business unit',bu)+trcKV('Lost reason',lead&&lead.lost_reason)
+    +trcKV('Follow-ups in the CRM',lead&&lead.followup_count)
+    +trcKV('First seen',lead&&trcWall(lead.first_seen_date))
+    +trcKV('Last seen',lead&&trcWall(lead.last_seen_date))
+  +'</div>';
+
+  const accCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
+    +'<i class="fa-solid fa-ruler" style="color:#0d9488"></i> Accuracy across this lead\'s calls</div>'
+    +(assessed
+      ? '<table class="tbl"><thead><tr><th>What was checked</th><th>Accurate</th><th>Partial</th><th>Inaccurate</th><th>Not verifiable</th></tr></thead><tbody>'
+        +accRow('Pitch','pitch_status')
+        +accRow('Follow-up date','followup_date_status')
+        +accRow('Lost reason','lost_reason_status')
+        +accRow('Remarks','remarks_status')
+        +'</tbody></table>'
+        +(mismatched.length?'<div style="margin-top:10px;font-size:12.5px;line-height:1.6">'
+          +mismatched.map(function(r){
+            const mm=TRC_MISMATCH[String(r.mismatch_type||'')];
+            return '<div style="margin-top:4px"><i class="fa-solid fa-not-equal" style="color:#dc2626"></i> '
+              +esc(trcWall(r.call_start_text)||trcWall(trcRowDate(r))||'')+' — '+esc(mm?mm.label:'CRM and call disagree')+'</div>';
+          }).join('')+'</div>':'')
+      : '<div style="font-size:13px;color:var(--slate)">No call on this lead has been assessed yet.</div>')
+  +'</div>';
+
+  const calls=rows.length
+    ? rows.map(function(r,i){return trcCallHtml(r,i,rows.length);}).join('')
+    : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
+      +'<div>The CRM sent no follow-up history for this lead</div></div>';
+
+  v.innerHTML=head+strip
+    +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">'+leadCard+accCard+'</div>'
+    +'<div class="sec-title" style="margin:22px 0 0"><i class="fa-solid fa-timeline" style="color:#0d9488"></i> '
+      +'Every conversation, oldest first</div>'
+    +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">The lead\'s complete CRM history. A call whose recording was already transcribed keeps its place here and shows the transcript it reused — deduplication applies to the work, never to the history.</div>'
+    +calls
+    +trcSection('fa-code','The CRM response for this lead, verbatim',
+        '<details><summary style="cursor:pointer;font-size:12.5px;color:var(--slate)">Show the stored JSON</summary>'
+        +'<pre style="margin-top:10px;overflow:auto;max-height:420px;font-size:11.5px;background:var(--bg2,#f8fafc);padding:12px;border-radius:8px;white-space:pre-wrap">'
+        +esc(JSON.stringify((lead&&lead.raw)||rows.map(function(r){return r;}),null,2))+'</pre></details>');
+
+  if(!document.getElementById('trcTwoCss')){
+    const s=document.createElement('style');
+    s.id='trcTwoCss';
+    s.textContent='@media(max-width:900px){.trc-two{grid-template-columns:1fr!important}}';
+    document.head.appendChild(s);
+  }
+}
+
+/* Copy, never download - the same rule the rest of this page follows. */
+window.trcCopy=async function(what,id){
+  if(!TRC_LEAD)return toast('Nothing loaded to copy','warn');
+  if(what==='lead'){
+    const payload=(TRC_LEAD.lead&&TRC_LEAD.lead.raw)||null;
+    if(!payload)return toast('No CRM response stored for this lead','warn');
+    return traClip(JSON.stringify(payload,null,2),'CRM response copied');
+  }
+  const r=TRC_LEAD.rows.find(function(x){return Number(x.follow_up_id)===Number(id);});
+  if(!r||!r.recording_url)return toast('No recording URL on this call','warn');
+  /* The Knowlarity link, which is the STABLE one - it 302s to a presigned S3 URL that expires in
+     about ten minutes, so copying the redirect target hands over a link already dead on arrival. */
+  return traClip(r.recording_url,'Recording URL copied');
+};
+
+/* Retry sends the follow-up back to the pipeline, which resumes at the PHASE that failed: a QA
+   failure never re-transcribes and never re-bills the audio call. */
+window.trcRetry=async function(followUpId){
+  const btns=document.querySelectorAll('[onclick="trcRetry('+followUpId+')"]');
+  btns.forEach(function(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Queued';});
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/crm-snapshot-qa',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({action:'retry',follow_up_id:followUpId})});
+    const out=await res.json().catch(function(){return {};});
+    if(!res.ok||out.error)throw new Error(out.error||('HTTP '+res.status));
+    toast('Back in the queue','ok');
+  }catch(e){
+    toast('Could not retry: '+((e&&e.message)||e),'err');
+  }
+  /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
+     otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
+  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
+  TRC_ROWS=null;
+  if(lead)await trcLeadDetail($('view'),lead);
+};
+
 /* One tab strip, shared by every branch, so adding a tab cannot leave one view showing the old set. */
 const TRA_TABS=['Automatic Processing','Manual Upload','Folders','Deleted','Discrepancies','Compilation'];
-function TRA_TABS_HTML(ti){return mTabs('transcription',TRA_TABS,ti);}
+/* Tabs kept out of the strip. The views below stay exactly where they are and keep their indexes,
+   so dropping a label from this list is all it takes to put its tab back. */
+const TRA_TABS_HIDDEN=['Folders','Deleted','Discrepancies','Compilation'];
+function TRA_TABS_HTML(ti){
+  return '<div class="tabs">'+TRA_TABS.map(function(t,i){
+    return TRA_TABS_HIDDEN.indexOf(t)>=0?'':'<div class="tab '+(i===ti?'active':'')+'" onclick="navTo(\'transcription/'+i+'\')">'+esc(t)+'</div>';
+  }).join('')+'</div>';
+}
 
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
-  // Automatic-processing detail. Checked before the tab index, because 'auto' is not a number.
+  /* Detail routes, checked before the tab index because neither 'lead' nor 'auto' is a number.
+     'lead' is the snapshot pipeline, keyed on the CRM's own lead_id. 'auto' still serves rows
+     imported by the previous pipeline into acc.transcriptions, so an old link still resolves. */
+  if(seg[0]==='lead'&&seg[1]){return trcLeadDetail(v,seg[1]);}
   if(seg[0]==='auto'&&seg[1]){return traDetail(v,seg[1]);}
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
   const tabs=TRA_TABS;
   const ti=mTab(seg,tabs.length);
-  if(ti===0){return traView(v,seg);}
+  if(ti===0){return trcView(v,seg);}
   /* No banner. This page is for watching calls move through the pipeline, and a paragraph of
      product copy above the numbers is not that. */
   const banner='';
@@ -12814,7 +13950,7 @@ VIEWS.transcription=async function(v,seg){
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
     });
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>What disagrees</th></tr></thead>'
       +'<tbody>'+(rows.length?rows.map(trDiscrepancyRowHtml).join(''):'<tr><td colspan="5"><div class="empty" style="padding:34px"><i class="fa-solid fa-circle-check"></i><div>No discrepancies right now</div></div></td></tr>')+'</tbody></table></div></div>';
     return;
@@ -12834,13 +13970,13 @@ VIEWS.transcription=async function(v,seg){
       return new Date(lb.report_date||lb.created_at) - new Date(la.report_date||la.created_at);
     });
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
     return;
   }
   if(ti===3){
     const rows=await trFetchDeleted(true);
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div class="toolbar" style="margin:16px 0"><div class="grow"></div><button class="btn btn-sm" onclick="trShowHistory()"><i class="fa-solid fa-clock-rotate-left"></i> Full history</button>'
       +(rows.length?'<button class="btn btn-sm btn-primary" onclick="trRestoreAll()"><i class="fa-solid fa-rotate-left"></i> Restore all</button>':'')+'</div>'
       +'<div class="card"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th>Recording</th><th>Status</th><th>Deleted by</th><th>Deleted at</th><th></th></tr></thead>'
@@ -12851,14 +13987,14 @@ VIEWS.transcription=async function(v,seg){
     const rows=await trFetch(true);
     const folder=seg[1]?decodeURIComponent(seg[1]):null;
     TR_FOLDER=folder;
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)
+    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trFolderArea">'+(folder?trFolderCallsHtml(rows,folder):trFolderGridHtml(rows))+'</div>';
     return;
   }
   TR_FOLDER=null;
   TR_SELECTED=new Set();
   const addTargetBanner=TR_ADD_TARGET?('<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin:0 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><i class="fa-solid fa-folder-plus" style="color:#1d4ed8"></i><div style="flex:1;font-size:13.5px">Tick calls below to add them to <b>'+esc(TR_ADD_TARGET)+'</b></div><button class="btn btn-sm" onclick="trCancelAddTarget()">Cancel</button><button class="btn btn-sm btn-primary" onclick="trDoneAddTarget()">Done, back to folder</button></div>'):'';
-  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+mTabs('transcription',tabs,ti)+addTargetBanner
+  v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)+addTargetBanner
     +'<div class="card card-pad" style="margin:14px 0 0;font-size:13px;color:var(--slate)"><i class="fa-solid fa-circle-info" style="color:#0d9488"></i> Recordings uploaded by hand. The daily CRM import is on the <b>Automatic Processing</b> tab and is kept entirely separate from this one.</div>'
     +'<div id="trKpis"></div>'
     +'<div id="trSelBar"></div>'
