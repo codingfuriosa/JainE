@@ -1211,7 +1211,8 @@
       // Being OFFERED a step counts too, not just having claimed one. A step shared between people
       // has nobody in `person` until somebody takes it, so matching on person alone hid the
       // workflow from everybody it was waiting on.
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,person,candidates');
+      const mine=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+        .select('case_id,person,candidates').order('id',{ascending:true}); });
       const caseIds=Array.from(new Set((mine||[])
         .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
         .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
@@ -1986,6 +1987,27 @@
   // action buttons — Revert and Reject live on the person's own task page, and the received/done
   // timestamps are on the status pills in the table. Keeps the card short on a phone even when
   // somebody has a very long name.
+  /* PostgREST caps how many rows a single request may return - 1000 by default on Supabase - and
+     it does it SILENTLY: no error, no flag, just a short array. Invoice Processing has twelve steps
+     across a hundred-odd bills, so asking for every step row of every instance at once wants 1380
+     and gets 1000. The rows that fell off the end were finished steps, and a finished step whose
+     row never arrived is indistinguishable from one the instance has not reached - so the tracker
+     drew the blank "not yet" dot over work that was actually done.
+     Nothing here should ever depend on a result set happening to fit. Callers pass a builder rather
+     than a query so each page is a fresh request, and an explicit order makes the pages stable -
+     without one PostgREST may return rows in any order and pages can overlap or skip. */
+  async function wfFetchPaged(build, pageSize){
+    pageSize = pageSize || 1000;
+    const out=[];
+    for(let from=0;;from+=pageSize){
+      const {data,error}=await build().range(from, from+pageSize-1);
+      if(error||!data) break;
+      out.push.apply(out,data);
+      if(data.length<pageSize) break;   // a short page is the last page
+    }
+    return out;
+  }
+
   function wfTimelineHtml(steps,opt){
     opt=opt||{};
     return steps.map(function(s,i){
@@ -2477,7 +2499,9 @@
     try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
-    if(cases.length){ try{ const {data}=await ACC().from('flow_case_steps').select('*').in('case_id',cases.map(function(c){return c.id;})); fcs=data||[]; }catch(e){} }
+    if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
+      fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
+        .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
     let forms=[];
     try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
     window._wfForms=forms; window._wfSteps=steps;
@@ -4013,6 +4037,7 @@
     if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
     if(!flow){ toast('Workflow not found','err'); return; }
     const N=wfNounOf(flow); window._wfNoun=N; window._wfIsBill=wfIsBillFlow(flow);
+    window._wfEvtSumKey=(flow.tracker_sum_field||'').trim();   // 'Amount' on Reimbursement
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
@@ -4265,10 +4290,13 @@
           : '<div id="wfEvtDetails">'+rowsHtml+'</div>'
             +(locked?'':'<div class="wf-addstep-ghost" onclick="wfEvtAdd()"><i class="fa-solid fa-plus"></i> Add detail</div>'))
       +'</div>'
-      +'<div class="modal-foot"><button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<div class="modal-foot">'
+      +(window._wfEvtSumKey?'<div id="wfEvtTotal" class="wf-evt-total"></div>':'')
+      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfPhoneHydrate();
     wfShowWhenSyncAll();
+    wfEvtTotalWatch();
     /* Draw the Amount boxes from what is already chosen, and shut them if the description is still
        empty. One delegated listener keeps the gate honest as things are typed - cheaper and less
        invasive than an oninput on every field, and it cannot clash with the handlers the fields
@@ -4281,6 +4309,49 @@
       } })();
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
   };
+
+  /* A claim is a stack of expenses across several days, and until now the only way to know what
+     it came to was to add them up by hand - or submit and read the total off the tracker. The
+     footer is sticky, so this stays on screen while the form is scrolled.
+     Read from the SAME place the save reads: each row's hidden label and value inputs, skipping
+     rows hidden by showWhen exactly as the save does. Summing the visible amount boxes instead
+     would drift from the stored figure the moment the two disagreed - and the number a person
+     checks before submitting has to be the number that gets submitted. */
+  function wfEvtTotalCalc(){
+    const wrap=$('wfEvtDetails'), key=(window._wfEvtSumKey||'').trim();
+    if(!wrap||!key) return null;
+    let total=0, blanks=0;
+    [].slice.call(wrap.querySelectorAll('.wf-evt-row')).forEach(function(r){
+      if(r.getAttribute('data-hidden')==='1') return;
+      const label=((r.querySelector('.wf-evt-label')||{}).value||'').trim();
+      if(!eq(label,key)) return;
+      // one row may hold several slots - "Auto, Lunch" gives "30, 120" - and every number counts
+      const nums=String(((r.querySelector('.wf-evt-value')||{}).value||''))
+        .split(',').map(function(x){ return parseFloat(String(x).trim()); })
+        .filter(function(n){ return !isNaN(n); });
+      if(nums.length) total+=nums.reduce(function(a,b){ return a+b; },0); else blanks++;
+    });
+    return {total:total, blanks:blanks};
+  }
+  window.wfEvtTotalRefresh=function(){
+    const el=$('wfEvtTotal'); if(!el) return;
+    const t=wfEvtTotalCalc(); if(!t){ el.innerHTML=''; return; }
+    el.innerHTML='<span class="wf-evt-total-k">Total '+esc2(window._wfEvtSumKey||'')+'</span>'
+      +'<b>'+wfMoney(t.total)+'</b>'
+      // said plainly rather than left to be noticed: a total is misleading while a box is empty
+      +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'');
+  };
+  /* Typing fires input; adding or removing a date or an expense does not, and those change the
+     total just as much. One observer on the container catches every add and remove whichever
+     function did it, rather than hooking each of them and missing the next one added. */
+  function wfEvtTotalWatch(){
+    const wrap=$('wfEvtDetails'); if(!wrap||wrap._wfTotalWired) return;
+    wrap._wfTotalWired=true;
+    wrap.addEventListener('input', wfEvtTotalRefresh);
+    wrap.addEventListener('change', wfEvtTotalRefresh);
+    try{ new MutationObserver(wfEvtTotalRefresh).observe(wrap,{childList:true,subtree:true}); }catch(_e){}
+    wfEvtTotalRefresh();
+  }
 
   window.wfEventSave=async function(flowId, caseId){
     // A fast double-click (or a click landing right as Enter also fires) could send this twice
@@ -5378,7 +5449,15 @@
     .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
     .wf-pill.ok{background:#dcfce7;color:#166534}
     .wf-pill.cur{background:#dbeafe;color:#1e40af}
-    .wf-pill.wait{background:#f1f5f9;color:#cbd5e1;padding:3px 12px}
+    /* The dot for a step the instance has not reached yet. It was #cbd5e1 on #f1f5f9 - 1.36:1,
+       which is not a faint dot, it is an invisible one. On a three-step workflow nobody noticed;
+       Invoice Processing has twelve, so most of every row read as blank and the table looked
+       like it had simply failed to draw. Still quieter than the real statuses, but legible. */
+    .wf-evt-total{display:flex;align-items:center;gap:9px;margin-right:auto;font-size:13px;color:var(--slate)}
+    .wf-evt-total b{font-size:17px;color:var(--ink);font-weight:800;letter-spacing:-.2px}
+    .wf-evt-total-k{font-weight:600}
+    .wf-evt-total-miss{font-size:11px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 9px;border-radius:20px}
+    .wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
     .wf-upd-sys i{opacity:.6;margin-right:4px}
@@ -7302,7 +7381,9 @@
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
         // person/candidates/owner_from_trigger come along so the Forward button can name who the
         // step is about to go to, rather than saying "the next person".
-        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+          .select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title')
+          .in('case_id',caseIds).order('id',{ascending:true}); }); }
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
