@@ -1211,7 +1211,8 @@
       // Being OFFERED a step counts too, not just having claimed one. A step shared between people
       // has nobody in `person` until somebody takes it, so matching on person alone hid the
       // workflow from everybody it was waiting on.
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,person,candidates');
+      const mine=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+        .select('case_id,person,candidates').order('id',{ascending:true}); });
       const caseIds=Array.from(new Set((mine||[])
         .filter(function(s){ return eq(s.person,me()) || (Array.isArray(s.candidates)&&s.candidates.some(function(e){return eq(e,me());})); })
         .map(function(s){return s.case_id;}).filter(function(x){return x!=null;})));
@@ -1986,6 +1987,27 @@
   // action buttons — Revert and Reject live on the person's own task page, and the received/done
   // timestamps are on the status pills in the table. Keeps the card short on a phone even when
   // somebody has a very long name.
+  /* PostgREST caps how many rows a single request may return - 1000 by default on Supabase - and
+     it does it SILENTLY: no error, no flag, just a short array. Invoice Processing has twelve steps
+     across a hundred-odd bills, so asking for every step row of every instance at once wants 1380
+     and gets 1000. The rows that fell off the end were finished steps, and a finished step whose
+     row never arrived is indistinguishable from one the instance has not reached - so the tracker
+     drew the blank "not yet" dot over work that was actually done.
+     Nothing here should ever depend on a result set happening to fit. Callers pass a builder rather
+     than a query so each page is a fresh request, and an explicit order makes the pages stable -
+     without one PostgREST may return rows in any order and pages can overlap or skip. */
+  async function wfFetchPaged(build, pageSize){
+    pageSize = pageSize || 1000;
+    const out=[];
+    for(let from=0;;from+=pageSize){
+      const {data,error}=await build().range(from, from+pageSize-1);
+      if(error||!data) break;
+      out.push.apply(out,data);
+      if(data.length<pageSize) break;   // a short page is the last page
+    }
+    return out;
+  }
+
   function wfTimelineHtml(steps,opt){
     opt=opt||{};
     return steps.map(function(s,i){
@@ -2477,7 +2499,9 @@
     try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
-    if(cases.length){ try{ const {data}=await ACC().from('flow_case_steps').select('*').in('case_id',cases.map(function(c){return c.id;})); fcs=data||[]; }catch(e){} }
+    if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
+      fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
+        .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
     let forms=[];
     try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
     window._wfForms=forms; window._wfSteps=steps;
@@ -7306,7 +7330,9 @@
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
         // person/candidates/owner_from_trigger come along so the Forward button can name who the
         // step is about to go to, rather than saying "the next person".
-        let allc=[]; if(caseIds.length){ const r=await ACC().from('flow_case_steps').select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title').in('case_id',caseIds); allc=(r&&r.data)||[]; }
+        let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
+          .select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title')
+          .in('case_id',caseIds).order('id',{ascending:true}); }); }
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
