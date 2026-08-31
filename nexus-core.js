@@ -8209,6 +8209,7 @@ window.psuMake=async function(){
     +'<div class="psu-actions">'
       +'<button class="btn btn-primary" onclick="psuDownload()"><i class="fa-solid fa-download"></i> Download</button>'
       +'<button class="btn" onclick="psuPrint()"><i class="fa-solid fa-print"></i> Print</button></div>';
+    psuLog('viewed');
     toast(cards.length+(cards.length===1?' image ready':' images ready'),'ok');
   }catch(e){
     if(host) host.innerHTML='<div class="psu-empty">Could not cut the images: '+esc((e&&e.message)||e)+'</div>';
@@ -8218,6 +8219,7 @@ window.psuMake=async function(){
 window.psuDownload=function(){
   const cards=PSU.cards||[];
   if(!cards.length){ toast('Make the images first','warn'); return; }
+  psuLog('downloaded');
   cards.forEach(function(c){
     const name=c.project+' Block '+c.block+' - '+psuCardTitle(c)+' ('+psuFloorsText(c.floors)+').png';
     c.canvas.toBlob(function(b){
@@ -8232,6 +8234,7 @@ window.psuDownload=function(){
 window.psuPrint=function(){
   const cards=PSU.cards||[];
   if(!cards.length){ toast('Make the images first','warn'); return; }
+  psuLog('printed');
   const w=window.open('','_blank');
   if(!w){ toast('Please allow popups to print','err'); return; }
   const pages=cards.map(function(c){
@@ -8326,7 +8329,10 @@ async function psuRender(){
           +projects.map(function(p){return opt(p,PSU.project);}).join('')+'</select></div>'
         +'<div class="psu-f"><label>Block</label><select class="sel" onchange="psuSetBlock(this.value)">'
           +blocks.map(function(b){return opt(b,PSU.block);}).join('')+'</select></div>'
-        +(psuCanSetup()?'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label><button class="btn" style="height:42px" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button></div>':'')
+        +'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label><div style="display:flex;gap:8px">'
+          +'<button class="btn" style="height:42px" onclick="psuLogsOpen()"><i class="fa-solid fa-list-check"></i> Logs</button>'
+          +(psuCanSetup()?'<button class="btn" style="height:42px" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-sliders"></i> Set up plans</button>':'')
+        +'</div></div>'
       +'</div>'
       +'<div style="margin-top:16px;font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--slate);text-transform:uppercase">Unit</div>'
       +(letters.length
@@ -8365,8 +8371,15 @@ async function psuRender(){
 
 /* ---- Set up plans -------------------------------------------------------------------------
    Where the drawing is taught to the system. Upload a plan sheet once per block, then drag a box
-   round each flat and give it its letter. An hour per block, once; every cut-out afterwards is
-   instant and cannot be got wrong.
+   round each flat and press Enter - the next letter is filled in, so most flats are drag-and-Enter.
+   Roughly five seconds a flat, once ever; every cut-out afterwards is instant and cannot be wrong.
+
+   Marking is done by hand because it CANNOT be done automatically on these drawings, which was
+   tested rather than assumed: the flats carry only two background tints, so colour separates flat
+   from corridor but not one flat from its neighbour; there are no solid blocks to anchor on, the
+   BHK tags being outlined text; every wall on the sheet is ONE connected shape; and a flood fill
+   from inside a flat escapes through the door gaps and takes 15%% of the sheet, or stops inside a
+   single toilet. Guessing wrong here shows a customer the wrong flat.
 
    PDFs are accepted as supplied rather than asking anybody to export a JPEG first - the browser
    renders page one and that becomes the plan. pdf.js is fetched only when a PDF is actually
@@ -8546,16 +8559,26 @@ window.pssUp=function(ev){
   if(d.w<30||d.h<30){ PSS.draw=null; pssPaint(); return; }
   pssAskName(d);
 };
+/* The letter after the highest already marked, so the usual case is drag, Enter, drag, Enter.
+   Only the flats that break the run need actually typing. */
+function pssNextLetter(){
+  const used=PSS.units.map(function(u){ return String(u.unit_name||'').toUpperCase(); })
+    .filter(function(n){ return /^[A-Z]$/.test(n); }).sort();
+  if(!used.length) return 'A';
+  const last=used[used.length-1];
+  const nxt=String.fromCharCode(last.charCodeAt(0)+1);
+  return (nxt>'Z')?'':nxt;
+}
 function pssAskName(box){
   openModal('<div class="modal-head"><h3>Name this flat</h3><span class="x" onclick="pssCancelDraw()">&times;</span></div>'
     +'<div class="modal-body frm" style="width:min(94vw,420px)">'
-      +'<label>Unit</label><input id="pssName" placeholder="A" maxlength="6" style="text-transform:uppercase">'
+      +'<label>Unit</label><input id="pssName" placeholder="A" maxlength="6" value="'+esc(pssNextLetter())+'" style="text-transform:uppercase" onkeydown="if(event.key===&quot;Enter&quot;){event.preventDefault();pssSaveUnit();}">'
       +'<label style="margin-top:10px">Type <span style="font-weight:400;color:var(--slate)">(optional)</span></label>'
       +'<input id="pssType" placeholder="3 BHK">'
     +'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="pssCancelDraw()">Cancel</button>'
       +'<button class="btn btn-primary" onclick="pssSaveUnit()">Save</button></div>','md');
-  setTimeout(function(){ const n=$('pssName'); if(n) try{ n.focus(); }catch(_e){} },40);
+  setTimeout(function(){ const n=$('pssName'); if(n) try{ n.focus(); n.select(); }catch(_e){} },40);
 }
 window.pssCancelDraw=function(){ PSS.draw=null; closeModal(); pssPaint(); };
 window.pssSaveUnit=async function(){
@@ -8578,6 +8601,28 @@ window.pssSaveUnit=async function(){
     toast(dup?('Unit '+name+' is already marked on this plan'):('Could not save: '+((e&&e.message)||e)),'err');
   }
 };
+/* Block D's odd-floor and even-floor sheets are usually the same layout drawn twice, so marking
+   one and copying is the difference between doing this twice and doing it once. Anything already
+   marked on the other sheet is left alone rather than duplicated. */
+window.pssCopyToSibling=async function(){
+  const plans=await psuLoadPlans();
+  const sibs=plans.filter(function(p){
+    return p.project===PSS.plan.project && p.block===PSS.plan.block && p.id!==PSS.plan.id; });
+  if(!sibs.length){ toast('This block has only one sheet','warn'); return; }
+  if(!PSS.units.length){ toast('Mark some flats first','warn'); return; }
+  const target=sibs[0];
+  try{
+    const have=await psuLoadUnits(target.id);
+    const has={}; have.forEach(function(u){ has[String(u.unit_name).toUpperCase()]=1; });
+    const rows=PSS.units.filter(function(u){ return !has[String(u.unit_name).toUpperCase()]; })
+      .map(function(u){ return {plan_id:target.id,unit_name:u.unit_name,unit_type:u.unit_type,
+                                x:u.x,y:u.y,w:u.w,h:u.h}; });
+    if(!rows.length){ toast('The other sheet already has all of these','warn'); return; }
+    const {error}=await sb.schema('cust').from('plan_units').insert(rows);
+    if(error) throw error;
+    toast('Copied '+rows.length+' to '+psuFloorsText(target.floors)+' — check they line up','ok');
+  }catch(e){ toast('Could not copy: '+((e&&e.message)||e),'err'); }
+};
 window.pssRemoveUnit=async function(){
   if(!PSS.sel) return;
   try{
@@ -8594,7 +8639,7 @@ function pssSideMark(){
   el.innerHTML=(PSS.sel
       ? '<div class="psu-sentence">Unit '+esc(PSS.sel.unit_name)+(PSS.sel.unit_type?(' <span class="m">· '+esc(PSS.sel.unit_type)+'</span>'):'')+'</div>'
         +'<div class="psu-actions"><button class="btn btn-danger" onclick="pssRemoveUnit()"><i class="fa-solid fa-trash"></i> Remove this flat</button></div>'
-      : '<div class="psu-empty">Drag a box round a flat to mark it.<br>Tap a marked flat to remove it.</div>')
+      : '<div class="psu-empty">Drag a box round a flat, then press <b>Enter</b>.<br>The next letter is filled in for you, so most flats are just drag and Enter.<br>Tap a marked flat to remove it.</div>')
     +'<div style="margin-top:14px;font-size:12px;font-weight:700;color:var(--slate)">MARKED ('+PSS.units.length+')</div>'
     +'<div style="margin-top:8px">'+(PSS.units.length
         ? PSS.units.map(function(u){ return '<span class="psu-chip">'+esc(u.unit_name)+'</span>'; }).join('')
@@ -8645,7 +8690,8 @@ async function pssRender(){
     +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0">'+esc(p.project)+' · Block '+esc(p.block)+' · '
         +(p.floors||[]).map(psuOrdinal).join(', ')+'</div>'
-      +'<button class="btn" style="margin-left:auto" onclick="pssBack()"><i class="fa-solid fa-arrow-left"></i> All plans</button>'
+      +'<button class="btn" style="margin-left:auto" onclick="pssCopyToSibling()"><i class="fa-solid fa-copy"></i> Copy to the other sheet</button>'
+      +'<button class="btn" onclick="pssBack()"><i class="fa-solid fa-arrow-left"></i> All plans</button>'
     +'</div>'
     +'<div class="psu-stage"><canvas id="pssCanvas"></canvas></div>'
    +'</div></div>'
@@ -8666,6 +8712,229 @@ async function pssRender(){
   }catch(e){ toast('Could not load the plan image','err'); }
 }
 
+/* ---- Logs -----------------------------------------------------------------------------------
+   Two of them, and they answer different questions for different people.
+
+   WHAT HAS BEEN SET UP - every sheet uploaded per project and every flat marked on it. Open to
+   anyone who can use the screen, downloadable, and editable by whoever may change the plans. This
+   is the data itself.
+
+   WHO LOOKED WHAT UP - the Administrator only. Not the person who did the searching, not their
+   colleagues. Enforced in the database, not here: cust.unit_search_log accepts writes from anyone
+   and returns rows to nobody but the Administrator, so this screen showing it is a convenience
+   rather than the thing keeping it private. */
+
+function psuIsAdmin(){ return !!state.super; }
+
+/* Recording must never get in the way of the thing the person was doing, so this is fired and
+   forgotten - a log that could fail the request would be a worse bargain than a log with a gap. */
+function psuLog(action){
+  try{
+    const rows=(PSU.basket||[]).map(function(b){
+      return {email:state.email,project:b.project,block:b.block,unit_name:b.unit_name,
+              plan_id:b.plan_id,action:action,units_n:PSU.basket.length};
+    });
+    if(!rows.length) return;
+    sb.schema('cust').from('unit_search_log').insert(rows).then(function(){},function(){});
+  }catch(e){}
+}
+
+window.psuLogsOpen=function(){ navTo('postsales/unit/logs'); };
+
+/* ---- what has been set up ------------------------------------------------------------------ */
+async function psuDataRows(){
+  const plans=await psuLoadPlans(true);
+  let units=[];
+  try{
+    const {data}=await sb.schema('cust').from('plan_units').select('*');
+    units=data||[];
+  }catch(e){}
+  const byPlan={};
+  units.forEach(function(u){ (byPlan[u.plan_id]=byPlan[u.plan_id]||[]).push(u); });
+  return plans.map(function(p){
+    const list=(byPlan[p.id]||[]).slice().sort(function(a,b){
+      return String(a.unit_name).localeCompare(String(b.unit_name)); });
+    return {plan:p, units:list};
+  });
+}
+window.psuDataDownload=async function(btn){
+  const rows=await psuDataRows();
+  const flat=[];
+  rows.forEach(function(r){
+    if(!r.units.length){
+      flat.push([r.plan.project,r.plan.block,psuFloorsText(r.plan.floors),'(none marked yet)','','','','','']);
+      return;
+    }
+    r.units.forEach(function(u){
+      flat.push([r.plan.project,r.plan.block,psuFloorsText(r.plan.floors),
+        u.unit_name,u.unit_type||'',Number(u.x),Number(u.y),Number(u.w),Number(u.h)]);
+    });
+  });
+  if(!flat.length){ toast('Nothing set up yet','warn'); return; }
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    // the same spreadsheet writer the Usability export uses, fetched only when wanted
+    if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library');
+    const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+    const ws=wb.addWorksheet('Floor plans',{views:[{state:'frozen',ySplit:3}]});
+    ws.columns=[{width:22},{width:9},{width:26},{width:9},{width:12},{width:9},{width:9},{width:9},{width:9}];
+    ws.mergeCells('A1:I1');
+    ws.getCell('A1').value='Unit plans — what has been set up';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:I2');
+    ws.getCell('A2').value=rows.length+' sheet'+(rows.length===1?'':'s')+'   ·   '
+      +flat.filter(function(f){ return f[3]!=='(none marked yet)'; }).length+' flats marked';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+    const head=ws.getRow(3);
+    head.values=['Business unit','Block','Floors','Unit','Type','X','Y','Width','Height'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    flat.forEach(function(r,i){
+      const row=ws.addRow(r);
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+      // a sheet with nothing marked on it is the finding, not a gap - so it is called out
+      if(r[3]==='(none marked yet)') row.eachCell(function(c){ c.font={color:{argb:'FFB45309'},italic:true}; });
+    });
+    ws.autoFilter={from:{row:3,column:1},to:{row:3+flat.length,column:9}};
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'Unit plans — what has been set up.xlsx');
+    toast('Downloaded','ok');
+  }catch(e){ toast('Could not download: '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+
+/* ---- who looked what up -------------------------------------------------------------------- */
+const PSL={rows:null,days:30};
+window.psuLogDays=async function(v){ PSL.days=Number(v)||30; PSL.rows=null; pslRender(); };
+async function pslLoad(){
+  if(PSL.rows) return PSL.rows;
+  const since=new Date(Date.now()-PSL.days*86400000).toISOString();
+  try{
+    const {data,error}=await sb.schema('cust').from('unit_search_log').select('*')
+      .gte('created_at',since).order('created_at',{ascending:false}).limit(2000);
+    if(error) throw error;
+    PSL.rows=data||[];
+  }catch(e){ PSL.rows=[]; }
+  return PSL.rows;
+}
+window.psuLogDownload=async function(btn){
+  const rows=await pslLoad();
+  if(!rows.length){ toast('Nothing logged in this period','warn'); return; }
+  const restore=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Preparing…'; }
+  try{
+    if(!(await usbLoadXlsx())) throw new Error('could not load the spreadsheet library');
+    const wb=new ExcelJS.Workbook(); wb.creator='JAIN-E'; wb.created=new Date();
+    const ws=wb.addWorksheet('Lookups',{views:[{state:'frozen',ySplit:3}]});
+    ws.columns=[{width:17},{width:30},{width:22},{width:9},{width:9},{width:13},{width:9}];
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value='Unit lookups';
+    ws.getCell('A1').font={size:16,bold:true,color:{argb:'FF5B21B6'}};
+    ws.getRow(1).height=26;
+    ws.mergeCells('A2:G2');
+    ws.getCell('A2').value='Last '+PSL.days+' days   ·   '+rows.length+' lookups   ·   '
+      +new Set(rows.map(function(r){ return String(r.email||'').toLowerCase(); })).size+' people';
+    ws.getCell('A2').font={size:11,color:{argb:'FF64748B'}};
+    const head=ws.getRow(3);
+    head.values=['When','Who','Business unit','Block','Unit','What they did','In one go'];
+    head.height=22;
+    head.eachCell(function(c){
+      c.font={bold:true,color:{argb:'FFFFFFFF'},size:11};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF7C3AED'}};
+      c.alignment={vertical:'middle'};
+    });
+    rows.forEach(function(r,i){
+      const row=ws.addRow([new Date(r.created_at), r.email||'', r.project||'', r.block||'',
+        r.unit_name||'', r.action||'', Number(r.units_n||0)]);
+      row.getCell(1).numFmt='dd mmm yyyy hh:mm';
+      row.getCell(7).numFmt='#,##0';
+      if(i%2) row.eachCell(function(c){ c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAFAFC'}}; });
+    });
+    ws.autoFilter={from:{row:3,column:1},to:{row:3+rows.length,column:7}};
+    const buf=await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),
+      'Unit lookups — last '+PSL.days+' days.xlsx');
+    toast('Downloaded','ok');
+  }catch(e){ toast('Could not download: '+((e&&e.message)||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=restore; } }
+};
+async function pslRender(){
+  const host=$('psuLogBody'); if(!host) return;
+  host.innerHTML='<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  const rows=await pslLoad();
+  const people=new Set(rows.map(function(r){ return String(r.email||'').toLowerCase(); })).size;
+  host.innerHTML=
+    '<div class="psu-pick" style="margin-bottom:12px">'
+      +'<div class="psu-f"><label>Period</label><select class="sel" onchange="psuLogDays(this.value)">'
+        +[7,30,90,365].map(function(d){ return '<option value="'+d+'"'+(PSL.days===d?' selected':'')+'>Last '+d+' days</option>'; }).join('')
+      +'</select></div>'
+      +'<div class="psu-f" style="margin-left:auto"><label>&nbsp;</label>'
+        +'<button class="btn" style="height:42px" onclick="psuLogDownload(this)"><i class="fa-solid fa-file-excel"></i> Download</button></div>'
+    +'</div>'
+    +(rows.length
+      ? '<div style="font-size:13px;color:var(--slate);margin-bottom:10px">'
+          +rows.length+' lookups by '+people+' '+(people===1?'person':'people')+'</div>'
+        +'<div style="overflow-x:auto"><table class="tbl"><thead><tr>'
+        +'<th>When</th><th>Who</th><th>Unit</th><th>What they did</th></tr></thead><tbody>'
+        +rows.slice(0,300).map(function(r){
+          return '<tr><td style="white-space:nowrap">'+esc(new Date(r.created_at).toLocaleString())+'</td>'
+            +'<td>'+esc(r.email||'')+'</td>'
+            +'<td>'+esc([r.project,r.block?('Block '+r.block):'',r.unit_name?('Unit '+r.unit_name):'']
+                 .filter(Boolean).join(' · '))+'</td>'
+            +'<td>'+esc(r.action||'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>'
+        +(rows.length>300?'<div style="font-size:12px;color:var(--slate);margin-top:8px">Showing the most recent 300 — the download has all '+rows.length+'.</div>':'')
+      : '<div class="psu-empty">No lookups recorded in this period.</div>');
+}
+
+async function psuLogsRender(){
+  const host=$('psuBody'); if(!host) return;
+  host.innerHTML=PSU_CSS+'<div class="psu-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>';
+  const rows=await psuDataRows();
+  const marked=rows.reduce(function(a,r){ return a+r.units.length; },0);
+  host.innerHTML=PSU_CSS
+   +'<div class="card card-pad">'
+     +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+       +'<div class="sec-title" style="margin:0">What has been set up</div>'
+       +'<button class="btn" style="margin-left:auto" onclick="psuDataDownload(this)"><i class="fa-solid fa-file-excel"></i> Download</button>'
+       +(psuCanSetup()?'<button class="btn" onclick="navTo(\'postsales/unit/setup\')"><i class="fa-solid fa-pen"></i> Edit</button>':'')
+       +'<button class="btn" onclick="navTo(\'postsales/unit\')"><i class="fa-solid fa-arrow-left"></i> Back to units</button>'
+     +'</div>'
+     +'<div style="font-size:13px;color:var(--slate);margin-top:6px">'
+       +rows.length+' sheet'+(rows.length===1?'':'s')+' uploaded · '+marked+' flats marked</div>'
+     +(rows.length
+       ? '<div style="overflow-x:auto;margin-top:12px"><table class="tbl"><thead><tr>'
+         +'<th>Business unit</th><th>Block</th><th>Floors</th><th>Flats marked</th><th>Uploaded</th></tr></thead><tbody>'
+         +rows.map(function(r){
+           const u=r.units;
+           return '<tr><td>'+esc(r.plan.project)+'</td><td>'+esc(r.plan.block)+'</td>'
+             +'<td>'+esc(psuFloorsText(r.plan.floors))+'</td>'
+             +'<td>'+(u.length
+                 ? u.map(function(z){ return '<span class="psu-chip" style="margin:0 4px 4px 0">'+esc(z.unit_name)+'</span>'; }).join('')
+                 : '<span style="color:#b45309">none yet</span>')+'</td>'
+             +'<td style="white-space:nowrap;color:var(--slate);font-size:12px">'
+               +esc((r.plan.created_by||'')+' · '+new Date(r.plan.created_at).toLocaleDateString())+'</td></tr>';
+         }).join('')+'</tbody></table></div>'
+       : '<div class="psu-empty">Nothing uploaded yet.</div>')
+   +'</div>'
+   +'<div class="card card-pad" style="margin-top:16px">'
+     +'<div class="sec-title" style="margin:0 0 4px">Who looked what up</div>'
+     +(psuIsAdmin()
+       ? '<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Visible to the Administrator only — not to the people it records, and not to their colleagues.</div>'
+         +'<div id="psuLogBody"></div>'
+       : '<div class="psu-empty"><i class="fa-solid fa-lock" style="font-size:22px;color:#94a3b8"></i>'
+         +'<div style="margin-top:8px">This log is kept for the Administrator only.</div></div>')
+   +'</div>';
+  if(psuIsAdmin()) pslRender();
+}
+
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
   const tabs=[['adhoc','ADHOC'],['unit','UNIT']];
@@ -8676,7 +8945,10 @@ VIEWS.postsales=async function(v,seg){
   if(tab==='unit'){
     // psuBody is what the Unit screens render into; psaBody stays as it was for ADHOC
     const b=$('psaBody'); if(b) b.id='psuBody';
-    if((seg&&seg[1])==='setup'){ pssRender(); } else { psuRender(); }
+    const sub=(seg&&seg[1])||'';
+    if(sub==='setup'){ pssRender(); }
+    else if(sub==='logs'){ psuLogsRender(); }
+    else { psuRender(); }
     return;
   }
   if(tab==='adhoc'){
