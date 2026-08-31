@@ -1051,10 +1051,20 @@
     if(!Array.isArray(v))return false;
     return v.some(function(x){ return x && eq(x.viewer||'', me()); });
   }
+  // A case_viewers entry watching '__ALL__' (not one named person) is a whole-flow observer —
+  // the Tracker is just another read-only view of that same data, so they should see it too.
+  // A narrow single-person watch stays narrow: the Tracker has no per-viewer filtering, so
+  // granting it off a one-person watch would leak every other bill to someone scoped to just one.
+  function wfIsFullFlowViewer(f){
+    const v=f&&f.case_viewers;
+    if(!Array.isArray(v))return false;
+    return v.some(function(x){ return x && eq(x.viewer||'', me()) && String(x.watches||'')==='__ALL__'; });
+  }
   /* Who may see the People row and the Tracker on a workflow.
      Both answer the same question — who is handling these, and where has each one reached — and on
      Invoice Processing that is the business of the people who raise bills, the two people a bill may
-     be handed to, and Systems. Not of everyone who can open the page.
+     be handed to, Systems, and anyone granted a whole-flow read-only watch (wfIsFullFlowViewer).
+     Not of everyone who can open the page.
      Deliberately keyed on trigger_step_assignable_to: a flow that restricts WHO its instances may be
      given to is one where the handling roster is sensitive. Every other workflow has no such list and
      is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
@@ -1063,6 +1073,7 @@
       .split(',').map(function(x){return x.trim();}).filter(Boolean);
     if(!assign.length) return true;                       // flow doesn't restrict handover — unchanged
     if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
+    if(wfIsFullFlowViewer(f)) return true;
     const trig=String((f&&f.trigger_owner)||'');
     if(trig==='__ALL__') return true;                     // an everyone-may-raise flow hides nothing
     const trigList=trig.split(',').map(function(x){return x.trim();}).filter(Boolean);
@@ -2202,7 +2213,9 @@
     // A flow that opts into a sum field gets the SIMPLIFIED tracker: just Owner + Total Amount,
     // not every individual detail field as well (those already show inside each instance itself).
     const sumField=(flow.tracker_sum_field||'').trim();
-    const fixed=[{k:'No.'},{k:'Timestamp'}].concat(sumField?[{k:'Owner'},{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
+    // an instance should always be visible, alongside whatever detail columns that flow already shows.
+    const fixed=[{k:'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2264,9 +2277,10 @@
     const cellText=function(v){ v=wfDetailDisp(v); return v.length>60 ? esc2(v.slice(0,59))+'…' : esc2(v); };
     const body=cases.map(function(c){
       const by={}; (Array.isArray(c.trigger_details)?c.trigger_details:[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
-      const extraTds=sumField
-        ? '<td>'+esc2(wfNm(c.created_by)||'')+'</td><td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
-        : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join('');
+      const ownerTd='<td>'+esc2(wfNm(c.created_by)||'')+'</td>';
+      const extraTds=ownerTd+(sumField
+        ? '<td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
+        : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
         const cs=byCase[c.id]&&byCase[c.id][s.seq];
