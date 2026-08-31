@@ -945,6 +945,15 @@ async function s3OpenSigned(storagePath,downloadName){
   if(downloadName){const a=document.createElement('a');a.href=data.url;a.download=downloadName;document.body.appendChild(a);a.click();a.remove();}
   else window.open(data.url,'_blank');
 }
+// Signed URL for inline display (an <img src>, not a click-to-open/download) — used by the
+// customer-portal photo galleries so a thumbnail actually shows the photo instead of a placeholder
+// icon. Returns null on failure so callers can fall back to a placeholder rather than a broken <img>.
+async function s3SignedUrl(storagePath){
+  if(!isS3Path(storagePath))return null;
+  const key=storagePath.slice(3);
+  const {data,error}=await s3Sign('get',key);
+  return error?null:data.url;
+}
 async function s3Delete(storagePath){
   const key=storagePath.slice(3);
   const {data,error}=await s3Sign('delete',key);
@@ -11497,16 +11506,23 @@ async function custTabProgress(unit){
     sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
     unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
   ]);
-  const photoGrid=list=>'<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
-    list.map(p=>`<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"><div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid fa-image fa-lg"></i></div></div>
-      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`).join('')+'</div>';
+  const photoGrid=async list=>{
+    const urls=await Promise.all(list.map(p=>s3SignedUrl(p.storage_path)));
+    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
+      list.map((p,i)=>{const url=urls[i];
+        const thumb=url
+          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
+          :'<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid fa-image fa-lg"></i></div>';
+        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
+      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
+  };
   let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
-    ((pPhotos&&pPhotos.length)?photoGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
+    ((pPhotos&&pPhotos.length)?await photoGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
   out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
   if(!unit.floor_casting_completed_at){
-    out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat\u2019s construction will appear here once the floor slab for your unit has been cast.</div></div>';
+    out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
   }else{
-    out+=(uPhotos&&uPhotos.length)?photoGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+    out+=(uPhotos&&uPhotos.length)?await photoGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
   }
   return out;
 }
@@ -11532,12 +11548,18 @@ async function custTabInspection(unit){
     (checklist?
       `<div class="card card-pad" style="display:flex;justify-content:space-between;align-items:center">${fileIcon(checklist.file_type||'')} ${esc(checklist.file_name||'Inspection checklist')}<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${checklist.storage_path.replace(/'/g,"\\'")}','${(checklist.file_name||'checklist').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button></div>`:
       '<div class="card card-pad empty">Your inspection checklist hasn\u2019t been uploaded yet.</div>');
-  const mediaGrid=list=>'<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
-    list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;
-      return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"><div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div></div>
+  const mediaGrid=async list=>{
+    const urls=await Promise.all(list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;return isVideo?Promise.resolve(null):s3SignedUrl(p.storage_path);}));
+    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
+      list.map((p,i)=>{const isVideo=(p.file_type||'').indexOf('video')===0;const url=urls[i];
+        const thumb=url
+          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
+          :`<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div>`;
+        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
       <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
+  };
   const updatesSection='<div class="sec-title" style="margin:20px 0 10px">Updates against the checklist</div>'+
-    ((updates&&updates.length)?mediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
+    ((updates&&updates.length)?await mediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
   return checklistSection+updatesSection;
 }
 async function custTabVideos(){
