@@ -11832,6 +11832,14 @@ async function cpaRenderSupport(host){
   host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
     '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" pulls its current status and conversation back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
 }
+function cpaBuildBubbles(t,threads,comments){
+  const msgs=[{time:t.created_at,author:'Customer',content:t.description||t.subject}]
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,author:m.direction==='out'?'Support team':(m.author_name||'Customer'),content:m.content})))
+    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,author:m.posted_by_customer?(m.commenter_name||'Customer'):'Support team (comment)',content:m.content})));
+  msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
+  return msgs.map(m=>`<div style="margin-bottom:10px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
+}
+let CPA_TICKET_POLL_TIMER=null;
 window.cpaTicketDetail=async function(id){
   openModal('<div class="loader"><div class="spin"></div></div>');
   const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
@@ -11839,14 +11847,32 @@ window.cpaTicketDetail=async function(id){
     sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
     sb.schema('cust').from('support_ticket_comments').select('*').eq('ticket_id',id)
   ]);
-  const msgs=[{time:t.created_at,mine:false,author:'Customer',content:t.description||t.subject}]
-    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction==='out',author:m.direction==='out'?'Support team':(m.author_name||'Customer'),content:m.content})))
-    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:false,author:m.posted_by_customer?(m.commenter_name||'Customer'):'Support team (comment)',content:m.content})));
-  msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
-  const bubbles=msgs.map(m=>`<div style="margin-bottom:10px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px">${esc(m.content||'')}</div></div>`).join('');
-  openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body">${bubbles||'<div class="card card-pad empty">No messages yet.</div>'}</div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`,'lg');
+  openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="cpaTicketDetailClose()">&times;</span></div>
+    <div class="modal-body"><div id="cpaMsgsContainer">${cpaBuildBubbles(t,threads,comments)}</div></div>
+    <div class="modal-foot"><button class="btn" onclick="cpaTicketDetailClose()">Close</button></div>`,'lg');
+  if(CPA_TICKET_POLL_TIMER)clearInterval(CPA_TICKET_POLL_TIMER);
+  CPA_TICKET_POLL_TIMER=setInterval(()=>cpaTicketPollTick(id),20000);
+};
+window.cpaTicketDetailClose=function(){
+  if(CPA_TICKET_POLL_TIMER){clearInterval(CPA_TICKET_POLL_TIMER);CPA_TICKET_POLL_TIMER=null;}
+  closeModal();
+};
+async function cpaTicketPollTick(id){
+  const container=$('cpaMsgsContainer');
+  if(!container){if(CPA_TICKET_POLL_TIMER){clearInterval(CPA_TICKET_POLL_TIMER);CPA_TICKET_POLL_TIMER=null;}return;}
+  if(document.hidden)return; // don't burn Zoho API calls on a backgrounded tab
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+  }catch(e){/* silent - next tick retries */}
+  const stillThere=$('cpaMsgsContainer');if(!stillThere)return;
+  const [{data:t},{data:threads},{data:comments}]=await Promise.all([
+    sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle(),
+    sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
+    sb.schema('cust').from('support_ticket_comments').select('*').eq('ticket_id',id)
+  ]);
+  const container2=$('cpaMsgsContainer');
+  if(container2&&t)container2.innerHTML=cpaBuildBubbles(t,threads,comments);
 };
 window.cpaSyncTicket=async function(id){
   toast('Refreshing status…','');
@@ -12163,6 +12189,20 @@ async function custTabSupport(unit){
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
     (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Attachments','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
 }
+function custBuildBubbles(t,threads,comments){
+  const msgs=[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}]
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?'Support team':'You',content:m.content})))
+    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:m.posted_by_customer,author:m.posted_by_customer?'You':'Support team',content:m.content})));
+  msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
+  return msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.mine?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:85%;background:${m.mine?'var(--brand-50)':'#fff'}">${esc(m.content||'')}</div></div>`).join('')||'<div class="card card-pad empty">No messages yet.</div>';
+}
+// While this modal is open, silently re-syncs from Zoho every 20s so a customer sees a new agent
+// reply without needing to click Refresh - the customer typed their own reply into cust.support_
+// ticket_comments already via 'reply', so the only thing a tick can surface that they don't already
+// have is something Zoho-side (an agent's reply, or a status change). Paused when the tab is hidden
+// so a background tab doesn't keep burning Zoho API calls, and self-stops the moment the container
+// it writes into is gone (modal closed, or replaced by a different one).
+let CUST_TICKET_POLL_TIMER=null;
 window.custTicketDetail=async function(id){
   openModal('<div class="loader"><div class="spin"></div></div>');
   const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
@@ -12170,17 +12210,35 @@ window.custTicketDetail=async function(id){
     sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
     sb.schema('cust').from('support_ticket_comments').select('*').eq('ticket_id',id)
   ]);
-  const msgs=[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}]
-    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?'Support team':'You',content:m.content})))
-    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:m.posted_by_customer,author:m.posted_by_customer?'You':'Support team',content:m.content})));
-  msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
-  const bubbles=msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.mine?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:85%;background:${m.mine?'var(--brand-50)':'#fff'}">${esc(m.content||'')}</div></div>`).join('');
-  openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="custTicketDetailClose()">&times;</span></div>
     <div class="modal-body frm">
-    <div style="max-height:340px;overflow-y:auto;padding-right:4px">${bubbles||'<div class="card card-pad empty">No messages yet.</div>'}</div>
+    <div id="custMsgsContainer" style="max-height:340px;overflow-y:auto;padding-right:4px">${custBuildBubbles(t,threads,comments)}</div>
     <label>Reply</label><textarea id="custReplyMsg" placeholder="Type your reply…"></textarea></div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" id="custReplyBtn" onclick="custSendReply(${id})">Send</button></div>`,'lg');
+    <div class="modal-foot"><button class="btn" onclick="custTicketDetailClose()">Close</button><button class="btn btn-primary" id="custReplyBtn" onclick="custSendReply(${id})">Send</button></div>`,'lg');
+  if(CUST_TICKET_POLL_TIMER)clearInterval(CUST_TICKET_POLL_TIMER);
+  CUST_TICKET_POLL_TIMER=setInterval(()=>custTicketPollTick(id),20000);
 };
+window.custTicketDetailClose=function(){
+  if(CUST_TICKET_POLL_TIMER){clearInterval(CUST_TICKET_POLL_TIMER);CUST_TICKET_POLL_TIMER=null;}
+  closeModal();
+};
+async function custTicketPollTick(id){
+  const container=$('custMsgsContainer');
+  if(!container){if(CUST_TICKET_POLL_TIMER){clearInterval(CUST_TICKET_POLL_TIMER);CUST_TICKET_POLL_TIMER=null;}return;}
+  if(document.hidden)return;
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
+  }catch(e){/* silent - next tick retries */}
+  const stillThere=$('custMsgsContainer');if(!stillThere)return;
+  const [{data:t},{data:threads},{data:comments}]=await Promise.all([
+    sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle(),
+    sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
+    sb.schema('cust').from('support_ticket_comments').select('*').eq('ticket_id',id)
+  ]);
+  const container2=$('custMsgsContainer');
+  if(container2&&t)container2.innerHTML=custBuildBubbles(t,threads,comments);
+}
 window.custSendReply=async function(id){
   const message=$('custReplyMsg').value.trim();
   if(!message){toast('Type a message first','err');return;}
