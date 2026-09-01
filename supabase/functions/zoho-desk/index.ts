@@ -8,6 +8,11 @@
 //      same local row.
 //   3. Later, {action:'sync', ticketId} re-fetches that ticket's current status from Zoho Desk and
 //      updates the local mirror again - this is what "current status ... reflected here" means.
+//   4. Any rows the client already inserted into cust.support_ticket_attachments for this ticket
+//      (uploaded to S3, then a metadata row - same pattern as every other upload in this app) get
+//      pushed to the matching Zoho Desk ticket as real attachments at the end of step 2, one file at
+//      a time via Zoho's own attachments endpoint - best-effort, so one bad file doesn't fail the
+//      whole create.
 //
 // Authorization is delegated to Postgres RLS wherever possible rather than reimplemented here: every
 // lookup of the ticket row itself runs AS THE CALLER (their own JWT), so cust.support_tickets' own
@@ -53,6 +58,47 @@ function zohoErrorText(out: any, fallback: string | number): string {
     ? out.errors.map((e: any) => `${e.fieldName || "field"}: ${e.errorMessage || e.errorType || "invalid"}`).join("; ")
     : "";
   return [out?.message || fallback, detail].filter(Boolean).join(" - ");
+}
+
+// Zoho's contact record has separate firstName/lastName fields - handing the whole name to lastName
+// alone (the old behaviour here) left the contact showing as just one blob with no first name, which
+// is why "show the customer's name properly" was asked for. Split on the last space so a full name
+// still reads naturally either way Zoho displays it (and a single-word name just becomes lastName).
+function splitName(fullName: string): { firstName?: string; lastName: string } {
+  const parts = (fullName || "Customer").trim().split(/\s+/);
+  if (parts.length < 2) return { lastName: parts[0] || "Customer" };
+  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
+}
+
+// Fetches a file via a presigned GET from the s3-sign function (same one the client uses, called
+// here with the same caller bearer token) and re-posts it to Zoho Desk as a ticket attachment.
+async function pushAttachmentToZoho(
+  sb: string, anonKey: string, bearer: string, dc: string, accessToken: string,
+  zohoTicketId: string, storagePath: string, fileName: string,
+): Promise<{ ok: true; zohoAttachmentId: string } | { ok: false; error: string }> {
+  const key = storagePath.replace(/^s3:/, "");
+  const signRes = await fetch(`${sb}/functions/v1/s3-sign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + bearer, apikey: anonKey },
+    body: JSON.stringify({ action: "get", key }),
+  });
+  const signOut = await signRes.json().catch(() => ({}));
+  if (!signRes.ok || !signOut?.url) return { ok: false, error: "Could not sign download URL: " + (signOut?.error || signRes.status) };
+
+  const fileRes = await fetch(signOut.url);
+  if (!fileRes.ok) return { ok: false, error: "Could not fetch the uploaded file (" + fileRes.status + ")" };
+  const blob = await fileRes.blob();
+
+  const form = new FormData();
+  form.append("file", blob, fileName || "attachment");
+  const upRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/attachments`, {
+    method: "POST",
+    headers: { Authorization: "Zoho-oauthtoken " + accessToken },
+    body: form,
+  });
+  const upOut = await upRes.json().catch(() => ({}));
+  if (!upRes.ok) return { ok: false, error: zohoErrorText(upOut, upRes.status) };
+  return { ok: true, zohoAttachmentId: upOut.id };
 }
 
 async function zohoAccessToken(dc: string, clientId: string, clientSecret: string, refreshToken: string) {
@@ -115,11 +161,12 @@ Deno.serve(async (req: Request) => {
         ? await db.schema("cust").from("customers").select("full_name,email,phone").eq("id", unit.customer_id).maybeSingle()
         : { data: null };
 
+      const { firstName, lastName } = splitName(customer?.full_name || "Customer");
       const payload: any = {
         subject: ticket.subject,
         description: ticket.description || "",
         channel: "Web",
-        contact: { email: customer?.email, lastName: customer?.full_name || "Customer", phone: customer?.phone || undefined },
+        contact: { email: customer?.email, firstName, lastName, phone: customer?.phone || undefined },
       };
       if (ZOHO_DEPARTMENT_ID) payload.departmentId = ZOHO_DEPARTMENT_ID;
 
@@ -133,7 +180,26 @@ Deno.serve(async (req: Request) => {
         status: normaliseStatus(zohoStatus), last_synced_at: new Date().toISOString(),
       }).eq("id", ticketId);
       if (updErr) return j({ error: updErr.message }, 500);
-      return j({ ok: true, zoho_ticket_number: out.ticketNumber, status: normaliseStatus(zohoStatus) });
+
+      // Push any attachments the customer added when raising the ticket (client inserts these rows
+      // right after the ticket row, before ever calling this function) - best-effort per file, since
+      // one bad file shouldn't block the ticket itself from having been created successfully.
+      const { data: attachments } = await db.schema("cust").from("support_ticket_attachments")
+        .select("id,storage_path,file_name").eq("ticket_id", ticketId).is("zoho_attachment_id", null).is("deleted_at", null);
+      let attachmentsSynced = 0;
+      const attachmentErrors: string[] = [];
+      for (const a of attachments || []) {
+        const pushed = await pushAttachmentToZoho(SB, ANON, bearer, ZOHO_DC, accessToken, out.id, a.storage_path, a.file_name || "attachment");
+        if (pushed.ok) {
+          await db.schema("cust").from("support_ticket_attachments")
+            .update({ zoho_attachment_id: pushed.zohoAttachmentId, zoho_synced_at: new Date().toISOString() }).eq("id", a.id);
+          attachmentsSynced++;
+        } else {
+          attachmentErrors.push((a.file_name || "attachment") + ": " + pushed.error);
+        }
+      }
+
+      return j({ ok: true, zoho_ticket_number: out.ticketNumber, status: normaliseStatus(zohoStatus), attachmentsSynced, attachmentErrors });
     }
 
     if (action === "sync") {
@@ -147,7 +213,26 @@ Deno.serve(async (req: Request) => {
         zoho_status: zohoStatus, status: normaliseStatus(zohoStatus), last_synced_at: new Date().toISOString(),
       }).eq("id", ticketId);
       if (updErr) return j({ error: updErr.message }, 500);
-      return j({ ok: true, status: normaliseStatus(zohoStatus), zoho_status: zohoStatus });
+
+      // The ticket itself only ever gets created once, but an attachment can fail independently of
+      // that (a flaky upload, a Zoho-side hiccup) - "Refresh" is the only button a ticket with a
+      // zoho_ticket_id still shows, so it doubles as the retry path for any attachment left pending.
+      const { data: attachments } = await db.schema("cust").from("support_ticket_attachments")
+        .select("id,storage_path,file_name").eq("ticket_id", ticketId).is("zoho_attachment_id", null).is("deleted_at", null);
+      let attachmentsSynced = 0;
+      const attachmentErrors: string[] = [];
+      for (const a of attachments || []) {
+        const pushed = await pushAttachmentToZoho(SB, ANON, bearer, ZOHO_DC, accessToken, ticket.zoho_ticket_id, a.storage_path, a.file_name || "attachment");
+        if (pushed.ok) {
+          await db.schema("cust").from("support_ticket_attachments")
+            .update({ zoho_attachment_id: pushed.zohoAttachmentId, zoho_synced_at: new Date().toISOString() }).eq("id", a.id);
+          attachmentsSynced++;
+        } else {
+          attachmentErrors.push((a.file_name || "attachment") + ": " + pushed.error);
+        }
+      }
+
+      return j({ ok: true, status: normaliseStatus(zohoStatus), zoho_status: zohoStatus, attachmentsSynced, attachmentErrors });
     }
 
     return j({ error: "Unknown action - expected 'create' or 'sync'" }, 400);

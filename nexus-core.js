@@ -926,6 +926,7 @@ function s3KeyForPaymentQR(filename){return `customer-portal/payment-qr/${s3Stam
 function s3KeyForSubmeterInvoice(unitId,filename){return `customer-portal/units/${unitId}/submeter-invoice/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForMaintenanceReceipt(unitId,filename){return `customer-portal/units/${unitId}/maintenance-payment-receipt/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForModificationRequest(unitId,filename){return `customer-portal/units/${unitId}/modification-request/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForSupportAttachment(ticketId,filename){return `customer-portal/support-tickets/${ticketId}/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -11732,12 +11733,17 @@ window.cpaSubmeterMarkCompleted=async function(id){
 /* ---------- Tab 9: Support tickets (local mirror of Zoho Desk) ---------- */
 async function cpaRenderSupport(host){
   const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
+  const ticketIds=(data||[]).map(t=>t.id);
+  const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
+  const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
   const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
   const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
-    tagFor[t.status]||esc(t.status),fmtDate(t.created_at),
+    tagFor[t.status]||esc(t.status),
+    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
+    fmtDate(t.created_at),
     t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`]);
-  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
-    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" just pulls its current status back here.</div>';
+  host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
+    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" just pulls its current status back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
 }
 window.cpaSyncTicket=async function(id){
   toast('Refreshing status…','');
@@ -11746,7 +11752,9 @@ window.cpaSyncTicket=async function(id){
     const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
-    toast('Status updated','ok');route();
+    if(out.attachmentErrors&&out.attachmentErrors.length)toast('Status updated, but some attachments still haven’t reached Zoho Desk: '+out.attachmentErrors.join('; '),'err');
+    else toast('Status updated','ok');
+    route();
   }catch(e){toast('Refresh failed: '+e.message,'err');}
 };
 window.cpaRetryTicket=async function(id){
@@ -12043,30 +12051,45 @@ async function custTabVideos(){
 }
 async function custTabSupport(unit){
   const {data:tickets}=await sb.schema('cust').from('support_tickets').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const ticketIds=(tickets||[]).map(t=>t.id);
+  const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
+  const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
   const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
   const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),tagFor[t.status]||esc(t.status),
+    (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
     t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`]);
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
-    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
+    (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Attachments','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
 }
 window.custNewTicketModal=function(){
   openModal(`<div class="modal-head"><h3>Raise a support ticket</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm"><label>Subject</label><input id="custTkSubject" placeholder="Brief summary">
-    <label>Details</label><textarea id="custTkDesc" placeholder="Describe the issue…"></textarea></div>
+    <label>Details</label><textarea id="custTkDesc" placeholder="Describe the issue…"></textarea>
+    <label>Attachments (optional — photo, PDF, etc.)</label><input type="file" id="custTkFiles" multiple accept="application/pdf,image/*"></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custTkBtn" onclick="custNewTicketSave()">Submit</button></div>`);
 };
 window.custNewTicketSave=async function(){
   const subject=$('custTkSubject').value.trim(),description=$('custTkDesc').value.trim();
   if(!subject){toast('Enter a subject','err');return;}
+  const files=[...$('custTkFiles').files];
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
   const btn=$('custTkBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
   const {data:ins,error}=await sb.schema('cust').from('support_tickets').insert({unit_id:unit.id,subject,description,created_by:state.email}).select('id').single();
   if(error){toast('Could not raise ticket: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+  for(const f of files){
+    btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading attachment…';
+    const {data,error:upErr}=await uploadFileToS3(s3KeyForSupportAttachment(ins.id,f.name),f);
+    if(upErr){toast('Ticket raised, but attachment "'+f.name+'" failed to upload: '+upErr.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('support_ticket_attachments').insert({ticket_id:ins.id,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr)toast('Ticket raised, but attachment "'+f.name+'" failed to save: '+insErr.message,'err');
+  }
   try{
+    btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending to Zoho Desk…';
     const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
     const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'create',ticketId:ins.id})});
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error){toast('Ticket saved, but Zoho Desk sync failed: '+(out.error||res.status),'err');}
+    else if(out.attachmentErrors&&out.attachmentErrors.length){toast('Ticket raised, but some attachments did not reach Zoho Desk: '+out.attachmentErrors.join('; '),'err');}
   }catch(e){toast('Ticket saved, but Zoho Desk sync failed: '+e.message,'err');}
   closeModal();toast('Ticket raised','ok');route();
 };
@@ -12077,7 +12100,9 @@ window.custSyncTicket=async function(id){
     const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'sync',ticketId:id})});
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error){toast('Refresh failed: '+(out.error||res.status),'err');return;}
-    toast('Status updated','ok');route();
+    if(out.attachmentErrors&&out.attachmentErrors.length)toast('Status updated, but some attachments still haven’t reached Zoho Desk: '+out.attachmentErrors.join('; '),'err');
+    else toast('Status updated','ok');
+    route();
   }catch(e){toast('Refresh failed: '+e.message,'err');}
 };
 window.custRetryTicket=async function(id){
