@@ -7551,6 +7551,7 @@ function usbRange(preset){
   return {from:iso(new Date(y,m,d-29)), to:iso(now)};                                                          // past 30 days
 }
 function usbCurrentRange(){
+  if(USB.preset==='custom'&&USB.from&&USB.to) return {from:USB.from,to:USB.to};
   return usbRange(USB.preset);
 }
 async function usbLoad(){
@@ -7631,8 +7632,16 @@ function usbControlsHtml(){
     +'<div class="card card-pad usb-bar">'
     +'<div class="usb-f"><label for="usbPreset">Period</label>'
       +'<select class="sel" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:180px">'
-        +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')
+        +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')+opt('custom','Custom range…')
       +'</select></div>'
+    /* Only shown once Custom is actually picked — the four fixed presets need no date fields of
+       their own, and showing them unconditionally was the exact clutter that got these removed
+       before. Editing either field keeps the dropdown's own "Custom range…" option correctly
+       selected, since usbSetCustom sets USB.preset itself. */
+    +(USB.preset==='custom'
+      ? '<div class="usb-f"><label for="usbFrom">From</label><input type="date" id="usbFrom" value="'+esc(r.from)+'" max="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
+        +'<div class="usb-f"><label for="usbTo">To</label><input type="date" id="usbTo" value="'+esc(r.to)+'" min="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
+      : '')
     +'<div class="usb-f"><label for="usbPerson">Person</label>'
       +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
         +'<option value="">Everyone</option>'
@@ -7642,7 +7651,13 @@ function usbControlsHtml(){
     +'<button class="btn btn-primary usb-xl" id="usbXl" onclick="usbExport(this)"><i class="fa-solid fa-file-excel"></i> Extract to Excel</button>'
   +'</div>';
 }
-window.usbSetPreset=function(v){ USB.preset=v; renderPage(); };
+window.usbSetPreset=function(v){
+  // Switching into Custom starts the two date fields from whatever range was already showing,
+  // not blank — the whole point is to nudge an existing window, not start from nothing.
+  if(v==='custom'&&!(USB.from&&USB.to)){ const r=usbRange(USB.preset); USB.from=r.from; USB.to=r.to; }
+  USB.preset=v; renderPage();
+};
+window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
 window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
 /* ---- Extract to Excel -------------------------------------------------------------------
    A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
