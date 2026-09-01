@@ -613,7 +613,9 @@
   async function computeUrgent(){
     URGENT=[];
     try{
-      const {data:aRows}=await ACC().from('ptask_assignees').select('task_id').eq('email',me());
+      // filtered to one person so far smaller, but the same cap applies and the same silence
+      const aRows=await wfFetchPaged(function(){ return ACC().from('ptask_assignees')
+        .select('task_id').eq('email',me()).order('id',{ascending:true}); });
       const ids=[...new Set((aRows||[]).map(r=>r.task_id))]; if(!ids.length)return;
       const {data:ts}=await ACC().from('ptasks').select('id,title,due_date,order_index,approval_state').in('id',ids);
       const open=(ts||[]).filter(t=>t.approval_state!=='approved');
@@ -645,13 +647,22 @@
   async function loadProjectsMap(){ try{const {data}=await ACC().from('projects').select('id,name');const m={};(data||[]).forEach(p=>m[p.id]=p.name);return m;}catch(e){return {};} }
   async function loadAll(){
     const my=me();
-    const [tR,aR,pR]=await Promise.all([
-      ACC().from('ptasks').select('*').order('order_index',{ascending:true}),
-      ACC().from('ptask_assignees').select('*'),
+    /* PostgREST caps one response at 1000 rows, silently. Both of these had passed it: 892 tasks
+       and 1008 assignee rows. The assignee list is the damaging one, because the filter below
+       DROPS any task whose assignee rows did not arrive - so the newest eight assignments were
+       invisible to everybody, including the person who created them, and every new task pushed
+       another one out. A task that had plainly been created simply was not in the list.
+       Ordered explicitly as well: without a sort, pages can overlap or skip. order_index is 0 on
+       every row today, so id is what actually makes the paging stable. */
+    const [tasksRaw,asgRaw,pR]=await Promise.all([
+      wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
+        .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
+      wfFetchPaged(function(){ return ACC().from('ptask_assignees').select('*')
+        .order('id',{ascending:true}); }),
       ACC().from('projects').select('id,name')
     ]);
-    let tasks=tR.data||[]; const pm={}; (pR.data||[]).forEach(x=>pm[x.id]=x.name);
-    const asg={}; (aR.data||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
+    let tasks=tasksRaw||[]; const pm={}; (pR.data||[]).forEach(x=>pm[x.id]=x.name);
+    const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
     tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))) && (asg[t.id]||[]).length>0);
     tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
     return {tasks,asg,pm};
