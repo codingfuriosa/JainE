@@ -6,6 +6,11 @@ const $=id=>document.getElementById(id);
 const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const state={user:null,email:null,profile:null,roles:null,super:false};
+// The access token, kept current from boot() and every onAuthStateChange firing. Usage telemetry's
+// unload-time flush needs it synchronously (a pagehide handler can't safely await getSession()) —
+// declared up here, by state, rather than down by the telemetry code that's its only reader, so
+// boot() setting it doesn't read as a forward reference to something declared hundreds of lines later.
+let USAGE_TOKEN=null;
 const PAGE=window.PAGE||'dashboard';
 // A customer session never signs in through login.html and must never be sent back to it — see
 // the customer-detection block in boot() below and the isolation-retrofit migration.
@@ -100,6 +105,10 @@ async function boot(){
   }
   if(!sess){ location.replace(LOGIN_PAGE); return; }
   state.user=sess.user; state.email=state.user.email;
+  // Cached for usageFlushOnUnload's hand-built fetch — getSession() itself only reads a local
+  // cache, but a tab-close/hide handler can't safely await anything, so the token is kept ready
+  // ahead of time instead of being fetched at the moment it's needed.
+  USAGE_TOKEN=sess.access_token||null;
 
   // Every existing staff table's RLS was `using(true)` until a real customer login existed
   // (see 20260828090100_customer_portal_isolation_retrofit.sql), so the ONLY safe place to keep a
@@ -292,7 +301,10 @@ function startSessionGuard(){
   setInterval(kickHard, 45000);
   kickHard();
 }
-sb.auth.onAuthStateChange((ev)=>{if(ev==='SIGNED_OUT')location.replace(LOGIN_PAGE); else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }});
+sb.auth.onAuthStateChange((ev,session)=>{
+  if(session&&session.access_token) USAGE_TOKEN=session.access_token;   // stays current across TOKEN_REFRESHED, not just the initial boot()
+  if(ev==='SIGNED_OUT')location.replace(LOGIN_PAGE); else if(ev==='PASSWORD_RECOVERY'){ if(typeof resetPasswordModal==='function') resetPasswordModal(); }
+});
 
 /* ============================ NAV ============================ */
 const NAV=[
@@ -7525,10 +7537,8 @@ const USB_BANDS=[
   ['Inactive',   '#64748b','#f1f5f9']
 ];
 function usbBandStyle(b){ const f=USB_BANDS.find(function(x){return x[0]===b;})||USB_BANDS[3]; return {ink:f[1],bg:f[2]}; }
-/* Opens on Custom, with the last 30 days already filled in. The dates are therefore ALWAYS on
-   screen, which is the point: the bar used to grow and shrink as Custom was picked and unpicked,
-   shoving the Person dropdown sideways under the pointer. */
-const USB={preset:'custom',from:null,to:null,email:'',rows:null,people:null};
+// Opens on the past 30 days — one of the four fixed presets, no custom entry to fall back to.
+const USB={preset:'30d',from:null,to:null,email:'',rows:null,people:null};
 /* The presets the user asked for, resolved against IST because a "month" is a month where the
    people using this actually are. Kept as pure date maths so the same range is produced whatever
    the browser's own timezone happens to be set to. */
@@ -7541,7 +7551,6 @@ function usbRange(preset){
   return {from:iso(new Date(y,m,d-29)), to:iso(now)};                                                          // past 30 days
 }
 function usbCurrentRange(){
-  if(USB.preset==='custom'&&USB.from&&USB.to) return {from:USB.from,to:USB.to};
   return usbRange(USB.preset);
 }
 async function usbLoad(){
@@ -7552,7 +7561,12 @@ async function usbLoad(){
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
   if(!USB.people){ try{ USB.people=await getPeople(); }catch(e){ USB.people=[]; } }
+  // A per-feature drill-down cached under the old range/person would show stale names against the
+  // new filters, so any change here throws it out rather than risk a misleading answer.
+  USB_FEAT_CACHE={}; USB_FEAT_OPEN.clear();
 }
+let USB_FEAT_CACHE={};
+const USB_FEAT_OPEN=new Set();
 /* The filter bar had class "inp" on its controls, which is styled NOWHERE in this codebase — so the
    dropdowns rendered as raw browser widgets of differing heights next to properly styled cards. The
    styled select in this app is .sel; these use it, with the rest scoped under .usb- so nothing here
@@ -7570,11 +7584,40 @@ const USB_CSS='<style id="usbCss">'
   +'.usb-range{margin-left:auto;display:flex;align-items:center;gap:8px;height:38px;padding:0 13px;border-radius:9px;'
     +'background:#faf5ff;border:1px solid #e9d5ff;color:#6b21a8;font-size:12.5px;font-weight:600;white-space:nowrap}'
   +'@media(max-width:720px){.usb-range{margin-left:0;width:100%;justify-content:center}.usb-f{flex:1 1 44%}}'
+  +'.usb-feat-row{cursor:pointer}'
+  +'.usb-feat-row:hover td{background:#faf5ff}'
+  +'.usb-feat-chev{color:var(--slate);font-size:10px;margin-right:8px;display:inline-block;width:10px;transition:transform .15s}'
+  +'.usb-feat-chev.open{transform:rotate(90deg)}'
+  +'.usb-users-row td{background:#fbfaff;border-top:none;padding:0}'
+  +'.usb-users-wrap{padding:4px 14px 12px 34px}'
+  +'.usb-user-line{display:flex;justify-content:space-between;gap:14px;padding:6px 0;font-size:12.5px;border-bottom:1px solid #f1eefc}'
+  +'.usb-user-line:last-child{border-bottom:none}'
+  +'.usb-user-name{color:var(--ink)}'
+  +'.usb-user-meta{color:var(--slate);white-space:nowrap}'
   +'</style>';
+/* Grouped by department (a person's first listed one) rather than one flat A-Z list of everyone in
+   the company — with dozens of names, "who's Reception again?" was the whole problem. Anyone with no
+   department lands in one "Unassigned" group at the end, never mixed silently into the rest. */
+function usbPersonOptionsHtml(){
+  const byDept={};
+  (USB.people||[]).forEach(function(p){
+    const dept=(Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'Unassigned';
+    (byDept[dept]=byDept[dept]||[]).push(p);
+  });
+  const depts=Object.keys(byDept).sort(function(a,b){
+    if(a==='Unassigned')return 1; if(b==='Unassigned')return -1;
+    return a.localeCompare(b);
+  });
+  return depts.map(function(dept){
+    const list=byDept[dept].slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));});
+    return '<optgroup label="'+esc(dept)+'">'
+      +list.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
+    +'</optgroup>';
+  }).join('');
+}
 function usbControlsHtml(){
   const r=usbCurrentRange();
   const opt=function(v,l){ return '<option value="'+v+'"'+(USB.preset===v?' selected':'')+'>'+esc(l)+'</option>'; };
-  const ppl=(USB.people||[]).slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));});
   /* Always emitted, never guarded behind "is #usbCss already in the DOM?" — every caller sets it via
      v.innerHTML=..., which fully replaces v's subtree (style tag included) on each render. The old
      document.getElementById('usbCss') check read that OUTGOING subtree a moment before it was
@@ -7588,26 +7631,18 @@ function usbControlsHtml(){
     +'<div class="card card-pad usb-bar">'
     +'<div class="usb-f"><label for="usbPreset">Period</label>'
       +'<select class="sel" id="usbPreset" onchange="usbSetPreset(this.value)" style="min-width:180px">'
-        +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')+opt('custom','Custom range…')
+        +opt('week','This Week')+opt('month','This Month')+opt('prev','Previous Month')+opt('30d','Past 30 Days')
       +'</select></div>'
-    /* Always rendered, never conditionally. They show whatever the chosen preset works out to, and
-       editing either one simply becomes the custom range — so the row never changes width and a
-       preset stays readable as actual dates rather than a word. */
-    +'<div class="usb-f"><label for="usbFrom">From</label><input type="date" id="usbFrom" value="'+esc(r.from)+'" max="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
-    +'<div class="usb-f"><label for="usbTo">To</label><input type="date" id="usbTo" value="'+esc(r.to)+'" min="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
     +'<div class="usb-f"><label for="usbPerson">Person</label>'
       +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
         +'<option value="">Everyone</option>'
-        +ppl.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
+        +usbPersonOptionsHtml()
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
     +'<button class="btn btn-primary usb-xl" id="usbXl" onclick="usbExport(this)"><i class="fa-solid fa-file-excel"></i> Extract to Excel</button>'
   +'</div>';
 }
-/* Picking a preset writes its dates into From/To as well, so the two boxes always agree with the
-   dropdown instead of showing a stale range beside it. */
-window.usbSetPreset=function(v){ USB.preset=v; const r=usbRange(v==='custom'?'30d':v); USB.from=r.from; USB.to=r.to; renderPage(); };
-window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
+window.usbSetPreset=function(v){ USB.preset=v; renderPage(); };
 window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
 /* ---- Extract to Excel -------------------------------------------------------------------
    A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
@@ -7811,15 +7846,58 @@ function usbModuleDetailHtml(moduleId){
       +'</tr></thead><tbody>'
       +list.map(function(r){
           const s=usbBandStyle(r.band);
-          return '<tr><td>'+esc(r.feature)+'</td>'
+          const open=USB_FEAT_OPEN.has(r.feature_key);
+          const clickable=Number(r.uses||0)>0;   // nobody used it — nothing to expand into
+          const chev=clickable?'<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>':'<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
+          const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'+(clickable?' onclick="usbToggleFeature(\''+esc(r.feature_key)+'\')"':'')+'>'
+            +'<td>'+chev+esc(r.feature)+'</td>'
             +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
             +'<td>'+Number(r.users||0)+'</td>'
             +'<td style="color:var(--slate);font-size:12px">'+(r.last_used?esc(fmtDate(r.last_used)):'—')+'</td>'
             +'<td><span class="badge" style="background:'+s.bg+';color:'+s.ink+';white-space:nowrap">'+esc(r.band)+'</span></td></tr>';
+          return row+(open?usbFeatureUsersRowHtml(r):'');
         }).join('')
       +'</tbody></table></div></div>';
   }).join('');
   return head+usbControlsHtml()+body;
+}
+/* The sub-row a clicked feature expands into: who actually used it, most recent first. Loads once
+   per feature per filter set (usbLoad clears the cache on any range/person change) and is cached
+   after that, so re-collapsing and re-expanding the same feature costs nothing more. */
+function usbFeatureUsersRowHtml(r){
+  const cached=USB_FEAT_CACHE[r.feature_key];
+  let inner;
+  if(cached===undefined){
+    inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</span></div>';
+  }else if(!cached.length){
+    inner='<div class="usb-users-wrap"><span style="color:var(--slate);font-size:12.5px">Nobody used this in the selected range.</span></div>';
+  }else{
+    inner='<div class="usb-users-wrap">'
+      +cached.map(function(u){
+        return '<div class="usb-user-line"><span class="usb-user-name">'+esc(nameOf(u.email))+'</span>'
+          +'<span class="usb-user-meta">'+u.uses+' use'+(u.uses===1?'':'s')+' · last '+esc(fmtDate(u.last_used))+'</span></div>';
+      }).join('')
+    +'</div>';
+  }
+  return '<tr class="usb-users-row"><td colspan="5">'+inner+'</td></tr>';
+}
+window.usbToggleFeature=async function(key){
+  if(USB_FEAT_OPEN.has(key)){ USB_FEAT_OPEN.delete(key); usbRerenderDetail(); return; }
+  USB_FEAT_OPEN.add(key);
+  usbRerenderDetail();
+  if(!(key in USB_FEAT_CACHE)){
+    const r=usbCurrentRange();
+    try{
+      const {data,error}=await sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:USB.email||null});
+      if(error)throw error;
+      USB_FEAT_CACHE[key]=data||[];
+    }catch(e){ USB_FEAT_CACHE[key]=[]; }
+    usbRerenderDetail();
+  }
+};
+function usbRerenderDetail(){
+  const box=$('usbDetailWrap'); if(!box||!USB.moduleId)return;
+  box.innerHTML=usbModuleDetailHtml(USB.moduleId);
 }
 VIEWS.usability=async function(v,seg){
   setCrumb(['Administration','Usability']);
@@ -7832,7 +7910,8 @@ VIEWS.usability=async function(v,seg){
     return;
   }
   const moduleId=seg&&seg[0]?decodeURIComponent(seg[0]):null;
-  if(moduleId){ v.innerHTML=mHead('fa-chart-simple','#7c3aed','Usability')+usbModuleDetailHtml(moduleId); return; }
+  USB.moduleId=moduleId;
+  if(moduleId){ v.innerHTML=mHead('fa-chart-simple','#7c3aed','Usability')+'<div id="usbDetailWrap">'+usbModuleDetailHtml(moduleId)+'</div>'; return; }
   const rows=USB.rows;
   const totalUses=rows.reduce(function(a,r){return a+Number(r.uses||0);},0);
   const used=rows.filter(function(r){return Number(r.uses||0)>0;}).length;
@@ -15713,29 +15792,72 @@ function usageAction(fn){
   return 'view';
 }
 let USAGE_Q=[], USAGE_TIMER=null;
+// During an extended outage the queue would otherwise grow without bound; past this it's the
+// freshest activity that's kept, not the oldest, since an approximate recent picture beats an
+// exact but ancient one for a report read in terms of "the last 30 days".
+const USAGE_MAX_Q=600;
 function usageQueue(featureKey, action){
   if(!featureKey || !(state&&state.email)) return;
   USAGE_Q.push({module_id:String(featureKey).split('.')[0], feature_key:featureKey,
                 action:action||'view', occurred_at:new Date().toISOString()});
+  if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
   else if(!USAGE_TIMER){ USAGE_TIMER=setTimeout(usageFlush, 8000); }
 }
+/* A failed send used to just discard its batch — one network blip during the retry window silently
+   erased that activity from the report, with nothing anywhere to show it had ever happened. A failed
+   batch now goes back on the front of the queue, tagged with a try count, so the next flush (8s later,
+   or the next click that tops up the queue) has another go — capped at 5 tries so a batch that's
+   failing for a real reason (malformed row, RPC actually broken) can't retry forever. */
 async function usageFlush(){
   if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
   if(!USAGE_Q.length) return;
   const batch=USAGE_Q.splice(0, 60);
-  try{ await sb.rpc('erp_log_usage',{p_events:batch}); }catch(e){ /* telemetry never interrupts work */ }
+  try{
+    const {error}=await sb.rpc('erp_log_usage',{p_events:batch});
+    if(error) throw error;
+  }catch(e){
+    batch.forEach(function(ev){ ev._tries=(ev._tries||0)+1; });
+    USAGE_Q=batch.filter(function(ev){ return ev._tries<5; }).concat(USAGE_Q);
+    if(!USAGE_TIMER && USAGE_Q.length) USAGE_TIMER=setTimeout(usageFlush, 8000);
+  }
+}
+/* pagehide/visibilitychange used to point straight at usageFlush — an async function whose promise
+   the browser never waits for, so the request it kicks off can be, and regularly was, cut off
+   mid-flight by the very unload it was reacting to. The last few seconds of activity before every
+   tab close or navigation-away were silently lost this way, with no error anywhere to show it.
+   A keepalive fetch is the one request type a browser guarantees to actually send even after the
+   page has started unloading. It can't go through supabase-js — that's a plain async call under the
+   hood, the same problem all over again — so it's built here from the token boot() already keeps
+   cached for exactly this: a fetch fired from an unload handler can't safely await getSession(). */
+function usageFlushOnUnload(){
+  if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
+  if(!USAGE_Q.length || !USAGE_TOKEN) return;
+  const batch=USAGE_Q.splice(0, 60);
+  fetch(SUPABASE_URL+'/rest/v1/rpc/erp_log_usage',{
+    method:'POST', keepalive:true,
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+USAGE_TOKEN,'apikey':SUPABASE_KEY},
+    body:JSON.stringify({p_events:batch})
+  }).catch(function(){
+    // Only reachable if this context is still alive to see it — a hidden-but-not-closing tab.
+    // An actual unload destroys the page before this callback could ever run either way.
+    batch.forEach(function(ev){ ev._tries=(ev._tries||0)+1; });
+    USAGE_Q=batch.filter(function(ev){ return ev._tries<5; }).concat(USAGE_Q);
+  });
 }
 function usageInstall(){
   let n=0;
   /* Navigation is the event for a view feature, and renderPage is the one place every navigation
-     goes through — the hashchange listener, boot, and each in-page tab click all land here. */
+     goes through — the hashchange listener, boot, and each in-page tab click all land here. Also
+     used to re-run usageInstall on every navigation (below), not just twice near page load: a
+     function defined later than that — a slow connection, a tab whose handlers only exist once it's
+     first opened — would otherwise go permanently untracked with no sign anything was missed. */
   if(typeof window.renderPage==='function' && !window.renderPage.__usageViewWrapped){
     const origRender=window.renderPage;
     const wrappedRender=function(){
       const r=origRender.apply(this,arguments);
-      try{ usageViewTick(); }catch(e){}
+      try{ usageViewTick(); usageInstall(); }catch(e){}
       return r;
     };
     wrappedRender.__usageViewWrapped=true;
@@ -15754,10 +15876,11 @@ function usageInstall(){
   });
   return n;
 }
-/* Installed twice on purpose: accountability.js loads AFTER this file and defines its own globals,
-   so a single pass here would wrap only half the map. The __usageWrapped guard makes the second
-   pass free and idempotent. */
+/* Installed twice near load on purpose: accountability.js loads AFTER this file and defines its own
+   globals, so a single pass here would wrap only half the map. Every navigation re-runs it too (see
+   usageInstall's own wrap of renderPage above) — the __usageWrapped guard makes every pass past the
+   first free and idempotent, so this costs nothing and closes the gap a fixed timeout can't. */
 window.addEventListener('load', function(){ usageInstall(); setTimeout(usageInstall, 2000); });
 // Anything still queued when the tab goes away would otherwise be lost.
-window.addEventListener('pagehide', usageFlush);
-document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden') usageFlush(); });
+window.addEventListener('pagehide', usageFlushOnUnload);
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='hidden') usageFlushOnUnload(); });
