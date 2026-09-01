@@ -11992,8 +11992,8 @@ async function cpaRenderModificationRequests(host){
   ]);
   const staffNameByEmail={};staff.forEach(s=>{staffNameByEmail[(s.email||'').toLowerCase()]=s.full_name;});
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const staffOpts=staff.map(s=>`<option value="${esc(s.email)}">${esc(s.full_name||s.email)} (${esc(s.email)})</option>`).join('');
-  const pmRows=pms.map(pm=>[esc((pm.projects&&pm.projects.name)||'—'),esc(staffNameByEmail[(pm.staff_email||'').toLowerCase()]||'—'),esc(pm.staff_email),
+  const staffOpts=staff.map(s=>`<option value="${esc(s.email)}">${esc(s.full_name||s.email)}</option>`).join('');
+  const pmRows=pms.map(pm=>[esc((pm.projects&&pm.projects.name)||'—'),esc(staffNameByEmail[(pm.staff_email||'').toLowerCase()]||pm.staff_email||'—'),
     `<button class="btn btn-sm btn-danger" onclick="cpaRemoveProjectManager(${pm.id})"><i class="fa-solid fa-xmark"></i> Remove</button>`]);
   const tagFor={submitted:'<span class="tag t-amber">Awaiting PM response</span>',pm_responded:'<span class="tag t-blue">Awaiting customer decision</span>',accepted:'<span class="tag t-blue">Accepted — awaiting acknowledgement</span>',rejected:'<span class="tag t-gray">Rejected by customer</span>',acknowledged:'<span class="tag t-green">Acknowledged</span>'};
   const reqRows=(reqs||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc((r.units&&r.units.customers&&r.units.customers.full_name)||'—'),esc(r.title),tagFor[r.status]||esc(r.status),
@@ -12002,7 +12002,7 @@ async function cpaRenderModificationRequests(host){
   host.innerHTML=`<div class="sec-title" style="margin:0 0 10px">Project Managers</div>
     <div class="card card-pad frm" style="margin-bottom:16px"><div class="two"><div><label>Project</label><select id="cpaPmProject">${projOpts}</select></div><div><label>Staff</label><select id="cpaPmEmail">${staffOpts}</select></div></div>
     <div style="margin-top:10px"><button class="btn btn-primary" onclick="cpaAssignProjectManager()"><i class="fa-solid fa-plus"></i> Assign</button></div></div>
-    ${pmRows.length?cpaTable(['Project','Staff name','Staff email',''],pmRows):'<div class="card card-pad empty" style="margin-bottom:16px">No project managers assigned yet.</div>'}
+    ${pmRows.length?cpaTable(['Project','Staff name',''],pmRows):'<div class="card card-pad empty" style="margin-bottom:16px">No project managers assigned yet.</div>'}
     <div class="sec-title" style="margin:22px 0 10px">Requests</div>
     ${reqRows.length?cpaTable(['Unit','Customer','Title','Status','Estimate','Submitted',''],reqRows):'<div class="card card-pad empty">No modification requests yet.</div>'}`;
 }
