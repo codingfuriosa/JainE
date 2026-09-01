@@ -11308,12 +11308,13 @@ window.cpaSetPasswordSave=async function(id){
 const CPA_IMPORT_COLUMNS={
   demand:{required:['unit_code','demand_no','milestone','demand_date','amount'],optional:['due_date','gst_amount','total_amount','status']},
   receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_demand_no']},
-  cost_sheet:{required:['unit_code','component','amount'],optional:['milestone','percentage','sort_order']},
   contacts:{required:['unit_code','contact_name'],optional:['contact_phone','contact_email','contact_address','booking_date','agreement_date']},
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',cost_sheet:'Cost Sheet',contacts:'Contacts & Dates',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts'};
+// Cost sheet is NOT here - it's per-unit and differs enough per flat that it isn't a CSV-shaped
+// import; it's uploaded as a document instead (Documents tab, doc type "Cost Sheet").
+const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -11390,12 +11391,6 @@ window.cpaImportConfirm=async function(btn){
     }else if(st.type==='maintenance_receipts'){
       const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_bill_no:m.row.against_bill_no||null,raw:m.row,import_batch_id:batchId}));
       const {error}=await sb.schema('cust').from('maintenance_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
-      if(error)throw error;
-    }else if(st.type==='cost_sheet'){
-      const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
-      await sb.schema('cust').from('cost_sheet_items').update({is_current:false}).in('unit_id',unitIds).eq('is_current',true);
-      const rows=st.matched.map((m,i)=>({unit_id:m.unit.id,component:m.row.component,milestone:m.row.milestone||null,percentage:m.row.percentage?Number(m.row.percentage):null,amount:m.row.amount?Number(m.row.amount):null,sort_order:m.row.sort_order?Number(m.row.sort_order):i,is_current:true,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('cost_sheet_items').insert(rows);
       if(error)throw error;
     }else{
       const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
@@ -11533,7 +11528,7 @@ window.cpaUploadInspectionUpdate=async function(){
 
 /* ---------- Tab 6: Documents (+ company-wide process videos) ---------- */
 const CPA_PROJECT_DOC_TYPES={brochure:'Brochure',legal:'Legal documentation'};
-const CPA_CUSTOMER_DOC_TYPES={celebration_photo:'Celebration photo',celebration_video:'Celebration video',draft_agreement:'Draft Agreement for Sale',possession_letter:'Possession Letter',parking_allotment:'Parking Allotment Letter'};
+const CPA_CUSTOMER_DOC_TYPES={cost_sheet:'Cost Sheet',celebration_photo:'Celebration photo',celebration_video:'Celebration video',draft_agreement:'Draft Agreement for Sale',possession_letter:'Possession Letter',parking_allotment:'Parking Allotment Letter'};
 const CPA_VIDEO_CATEGORIES={registry:'Registry Process',agreement:'Agreement Process',nomination:'Nomination Process'};
 async function cpaRenderDocuments(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
@@ -12022,10 +12017,13 @@ async function custTabLedger(unit){
     '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>';
 }
 async function custTabCostSheet(unit){
-  const {data}=await sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order');
-  const rows=(data||[]).map(i=>[esc(i.component),esc(i.milestone||'—'),i.percentage!=null?i.percentage+'%':'—',custInr(i.amount)]);
-  return rows.length?mTable(['Component','Milestone','%','Amount'],rows):
-    '<div class="card card-pad empty">No cost sheet has been shared for this unit yet.</div>';
+  // Cost sheets differ enough per unit that they aren't structured/imported data - they're a
+  // document, shown here the same way the Documents tab shows any other per-unit file.
+  const {data}=await sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false});
+  if(!data||!data.length)return '<div class="card card-pad empty">Your cost sheet hasn’t been shared yet.</div>';
+  const rows=data.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
+    `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
+  return cpaTable(['Document','Shared on','Download'],rows);
 }
 async function custTabProgress(unit){
   const [{data:pPhotos},{data:uPhotos}]=await Promise.all([
