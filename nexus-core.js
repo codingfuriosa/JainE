@@ -12097,8 +12097,9 @@ window.custTicketDetail=async function(id){
   msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
   const bubbles=msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.mine?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:85%;background:${m.mine?'var(--brand-50)':'#fff'}">${esc(m.content||'')}</div></div>`).join('');
   openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-    <div class="modal-body">${bubbles||'<div class="card card-pad empty">No messages yet.</div>'}
-    <label style="margin-top:14px">Reply</label><textarea id="custReplyMsg" placeholder="Type your reply…"></textarea></div>
+    <div class="modal-body frm">
+    <div style="max-height:340px;overflow-y:auto;padding-right:4px">${bubbles||'<div class="card card-pad empty">No messages yet.</div>'}</div>
+    <label>Reply</label><textarea id="custReplyMsg" placeholder="Type your reply…"></textarea></div>
     <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" id="custReplyBtn" onclick="custSendReply(${id})">Send</button></div>`,'lg');
 };
 window.custSendReply=async function(id){
