@@ -678,8 +678,21 @@
   async function loadMyRanks(){
     try{ const {data}=await ACC().from('task_rank').select('task_id,rank').eq('viewer_email',me()); const m={}; (data||[]).forEach(r=>{m[r.task_id]=r.rank;}); return m; }catch(e){ return {}; }
   }
-  async function nextRankForMe(){
-    try{ const {data}=await ACC().from('task_rank').select('rank').eq('viewer_email',me()).order('rank',{ascending:false}).limit(1); return (data&&data.length?data[0].rank:0)+1; }catch(e){ return 1; }
+  /* Reading the highest rank and writing the next one were two separate round trips, so two tasks
+     created seconds apart both read the same maximum and both landed on the same number. The
+     database now does both in one transaction, under a lock held per person - see
+     acc.task_rank_append. appendRankForMe both allocates the position AND stores it, so callers no
+     longer need setMyRank for a new task. */
+  async function appendRankForMe(taskId){
+    try{
+      const {data,error}=await ACC().rpc('task_rank_append',{p_task_id:taskId});
+      if(error) throw error;
+      return data;
+    }catch(e){
+      // the position is a convenience, never a reason to fail a task that was already created
+      try{ console.error('task_rank_append',e); }catch(_e){}
+      return null;
+    }
   }
   async function setMyRank(taskId,rank){
     try{ await ACC().from('task_rank').upsert({task_id:taskId,viewer_email:me(),rank:rank},{onConflict:'task_id,viewer_email'}); }catch(e){}
@@ -696,12 +709,20 @@
   async function rankBetweenIds(allOrderIds,beforeId,afterId){
     const my=me();
     try{
-      const {data:existing}=await ACC().from('task_rank').select('task_id,rank').eq('viewer_email',my).in('task_id',allOrderIds);
-      const haveMap={}; (existing||[]).forEach(r=>{haveMap[r.task_id]=r.rank;});
-      if(allOrderIds.some(id=>!haveMap.hasOwnProperty(id))){
-        const rows=allOrderIds.map((id,i)=>({task_id:id,viewer_email:my,rank:i+1}));
+      /* Read EVERY rank this person holds, not just the ones on screen. Numbering the visible
+         subset 1..N was the second source of collisions: those numbers are already in use by
+         tasks that happen not to be on screen, and tasks 112, 198, 467 and 890 all ended up at
+         rank 1 that way, having never been shown together. */
+      const {data:mine}=await ACC().from('task_rank').select('task_id,rank').eq('viewer_email',my);
+      const haveMap={}; (mine||[]).forEach(r=>{haveMap[r.task_id]=r.rank;});
+      const missing=allOrderIds.filter(id=>!haveMap.hasOwnProperty(id));
+      if(missing.length){
+        /* Unranked tasks are given numbers ABOVE everything already in use, keeping the order they
+           are shown in. Nothing that already had a position moves, and nothing collides. */
+        let next=(mine||[]).reduce((m,r)=>Math.max(m,Number(r.rank)||0),0);
+        const rows=missing.map(id=>({task_id:id,viewer_email:my,rank:(++next)}));
         await ACC().from('task_rank').upsert(rows,{onConflict:'task_id,viewer_email'});
-        allOrderIds.forEach((id,i)=>{haveMap[id]=i+1;});
+        rows.forEach(r=>{haveMap[r.task_id]=r.rank;});
       }
       const before=beforeId!=null?haveMap[beforeId]:null;
       const after=afterId!=null?haveMap[afterId]:null;
@@ -7504,7 +7525,13 @@
        tasks you haven't touched yet — untouched ones default to top priority ("A"),
        sorted alphabetically by title among themselves, until you drag one. */
     function effectiveOrder(arr){
-      const ranked=arr.filter(t=>myRanks.hasOwnProperty(t.id)).sort((a,b)=>myRanks[a.id]-myRanks[b.id]);
+      /* Ties break NEWEST FIRST, never left to chance. Two tasks could hold the same rank, and
+         with nothing to separate them their order came down to whatever the database happened to
+         return - so a task somebody had just made could surface anywhere in a long list, which
+         reads as "it was never created". Now a new task always appears at the top of its group,
+         which is where the person who just made it is looking. */
+      const ranked=arr.filter(t=>myRanks.hasOwnProperty(t.id))
+        .sort((a,b)=>(myRanks[a.id]-myRanks[b.id]) || (b.id-a.id));
       const unranked=arr.filter(t=>!myRanks.hasOwnProperty(t.id)).sort((a,b)=>String(a.title||'').localeCompare(String(b.title||''),undefined,{sensitivity:'base'}));
       return {order:unranked.concat(ranked), unrankedCount:unranked.length};
     }
@@ -7829,8 +7856,8 @@
       await ACC().from('ptask_assignees').insert(sel.map(e=>({task_id:t.id,email:e})));
       let r;
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
-      else { r=await nextRankForMe(); }
-      await setMyRank(t.id,r);
+      else { r=null; await appendRankForMe(t.id); }
+      if(r!=null) await setMyRank(t.id,r);
       INS_STAGE={due:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
@@ -7847,8 +7874,8 @@
       await ACC().from('ptask_assignees').insert({task_id:t.id,email:me()});
       let r;
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
-      else { r=await nextRankForMe(); }
-      await setMyRank(t.id,r);
+      else { r=null; await appendRankForMe(t.id); }
+      if(r!=null) await setMyRank(t.id,r);
       SELF_INS_STAGE={due:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
@@ -8324,7 +8351,7 @@
       if(error)throw error;
       await ACC().from('ptask_assignees').insert(sel.map(e=>({task_id:t.id,email:e})));
       if(parentFiles&&parentFiles.length){ await ACC().from('ptask_files').insert(parentFiles.map(f=>({task_id:t.id,file_name:f.file_name,storage_path:f.storage_path,file_size:f.file_size,uploaded_by:f.uploaded_by}))); }
-      const r=await nextRankForMe(); await setMyRank(t.id,r);
+      await appendRankForMe(t.id);
       await ACC().from('ptask_activity').insert({task_id:pid,action:'delegated',detail:'Delegated to '+sel.length+' person(s)'});
       closeModal(); toast('Delegated','ok'); renderPage();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
