@@ -11886,13 +11886,13 @@ window.cpaMaintenanceUpcomingSave=async function(unitId){
 async function cpaRenderModificationRequests(host){
   const [projects,pms,{data:reqs}]=await Promise.all([
     cpaProjects(),cpaProjectManagers(true),
-    sb.schema('cust').from('modification_requests').select('*, units(unit_code,project_id)').order('created_at',{ascending:false}).limit(200)
+    sb.schema('cust').from('modification_requests').select('*, units(unit_code,project_id,customers(full_name))').order('created_at',{ascending:false}).limit(200)
   ]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const pmRows=pms.map(pm=>[esc((pm.projects&&pm.projects.name)||'—'),esc(pm.staff_email),
     `<button class="btn btn-sm btn-danger" onclick="cpaRemoveProjectManager(${pm.id})"><i class="fa-solid fa-xmark"></i> Remove</button>`]);
   const tagFor={submitted:'<span class="tag t-amber">Awaiting PM response</span>',pm_responded:'<span class="tag t-blue">Awaiting customer decision</span>',accepted:'<span class="tag t-blue">Accepted — awaiting acknowledgement</span>',rejected:'<span class="tag t-gray">Rejected by customer</span>',acknowledged:'<span class="tag t-green">Acknowledged</span>'};
-  const reqRows=(reqs||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.title),tagFor[r.status]||esc(r.status),
+  const reqRows=(reqs||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc((r.units&&r.units.customers&&r.units.customers.full_name)||'—'),esc(r.title),tagFor[r.status]||esc(r.status),
     r.estimate_amount!=null?custInr(r.estimate_amount):'—',fmtDate(r.created_at),
     `<button class="btn btn-sm" onclick="cpaModReqDetail(${r.id})"><i class="fa-solid fa-eye"></i> Open</button>`]);
   host.innerHTML=`<div class="sec-title" style="margin:0 0 10px">Project Managers</div>
@@ -11900,7 +11900,7 @@ async function cpaRenderModificationRequests(host){
     <div style="margin-top:10px"><button class="btn btn-primary" onclick="cpaAssignProjectManager()"><i class="fa-solid fa-plus"></i> Assign</button></div></div>
     ${pmRows.length?cpaTable(['Project','Staff email',''],pmRows):'<div class="card card-pad empty" style="margin-bottom:16px">No project managers assigned yet.</div>'}
     <div class="sec-title" style="margin:22px 0 10px">Requests</div>
-    ${reqRows.length?cpaTable(['Unit','Title','Status','Estimate','Submitted',''],reqRows):'<div class="card card-pad empty">No modification requests yet.</div>'}`;
+    ${reqRows.length?cpaTable(['Unit','Customer','Title','Status','Estimate','Submitted',''],reqRows):'<div class="card card-pad empty">No modification requests yet.</div>'}`;
 }
 window.cpaAssignProjectManager=async function(){
   const project_id=Number($('cpaPmProject').value),staff_email=$('cpaPmEmail').value.trim();
@@ -11916,13 +11916,13 @@ window.cpaRemoveProjectManager=async function(id){
   toast('Removed','ok');route();
 };
 window.cpaModReqDetail=async function(id){
-  const {data:r}=await sb.schema('cust').from('modification_requests').select('*, units(unit_code)').eq('id',id).maybeSingle();
+  const {data:r}=await sb.schema('cust').from('modification_requests').select('*, units(unit_code,customers(full_name))').eq('id',id).maybeSingle();
   if(!r){toast('Not found','err');return;}
   const canRespond=r.status==='submitted';
   const canAcknowledge=r.status==='accepted';
   openModal(`<div class="modal-head"><h3>${esc(r.title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm">
-    <p style="font-size:12.5px;color:var(--slate);margin:0 0 4px">Unit ${esc((r.units&&r.units.unit_code)||'—')} · submitted ${fmtDate(r.created_at)}</p>
+    <p style="font-size:12.5px;color:var(--slate);margin:0 0 4px">${esc((r.units&&r.units.customers&&r.units.customers.full_name)||'—')} · Unit ${esc((r.units&&r.units.unit_code)||'—')} · submitted ${fmtDate(r.created_at)}</p>
     <p style="font-size:13.5px">${esc(r.description||'—')}</p>
     ${r.attachment_storage_path?`<button class="btn btn-sm" style="margin-bottom:10px" onclick="s3OpenSigned('${r.attachment_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-paperclip"></i> View attachment</button>`:''}
     ${r.pm_response_text?`<div class="card card-pad" style="margin:10px 0"><b>Response:</b> ${esc(r.pm_response_text)}${r.estimate_amount!=null?`<div style="margin-top:6px"><b>Estimate:</b> ${custInr(r.estimate_amount)}</div>`:''}</div>`:''}
