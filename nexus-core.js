@@ -14214,14 +14214,24 @@ function trcQaTableHtml(r,m){
         why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
     });
   }
+  /* "Why" can run to several sentences (reason + issues/evidence joined together) - keep the row
+     scannable by showing a short lead-in on the face and the rest on hover, same idiom as the fact
+     chips above, instead of a full paragraph wrapping in every row. */
+  const WHY_MAX=130;
+  const compressWhy=function(s){
+    s=String(s||'');
+    if(s.length<=WHY_MAX)return {short:s,full:null};
+    return {short:s.slice(0,WHY_MAX).replace(/\s+\S*$/,'')+'…',full:s};
+  };
   return factChips
     +'<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
     +topics.map(function(x){
       const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
+      const why=compressWhy(x.why);
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
         +'<td><span class="tag '+trcQaResultClass(x.status)+'"><i class="fa-solid '+trcQaResultIcon(x.status)+'"></i> '+esc(x.status||'—')+'</span></td>'
         +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
-        +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
+        +'<td style="font-size:12.5px;line-height:1.5"'+(why.full?' title="'+esc(why.full)+'"':'')+'>'+esc(why.short||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
@@ -14249,8 +14259,11 @@ function trcStatusSignalsHtml(r){
   if(!signals.length)return '';
   return trcMarkRowHtml('What the call says about the status',
     signals.map(function(s){
-      const isMatch=/^match$/i.test(String(s.direction||''));
-      return trcMarkChip(isMatch?'t-green':'t-red',isMatch?'fa-check':'fa-xmark',s.point,null);
+      const dir=String(s.direction||'');
+      const isMatch=/^match$/i.test(dir), isMismatch=/^mismatch$/i.test(dir);
+      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
+      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
+      return trcMarkChip(cls,icon,s.point,null);
     }).join(''));
 }
 
