@@ -924,6 +924,8 @@ function s3KeyForInspectionChecklist(unitId,filename){return `customer-portal/un
 function s3KeyForInspectionUpdate(unitId,filename){return `customer-portal/units/${unitId}/inspection-updates/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForPaymentQR(filename){return `customer-portal/payment-qr/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForSubmeterInvoice(unitId,filename){return `customer-portal/units/${unitId}/submeter-invoice/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForMaintenanceReceipt(unitId,filename){return `customer-portal/units/${unitId}/maintenance-payment-receipt/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForModificationRequest(unitId,filename){return `customer-portal/units/${unitId}/modification-request/${s3Stamp()}_${s3SafeName(filename)}`;}
 async function uploadFileToS3(key,file,onProgress){
   const {data,error}=await s3Sign('put',key);
   if(error)return {error};
@@ -11116,7 +11118,7 @@ const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigit
 // unescaped" rule getting in the way.
 function cpaTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
 
-const CPA={projects:null,units:null,customers:null,amenities:null,paymentSettings:null};
+const CPA={projects:null,units:null,customers:null,amenities:null,paymentSettings:null,projectManagers:null};
 async function cpaProjects(force){
   if(CPA.projects&&!force)return CPA.projects;
   const {data}=await sb.schema('cust').from('projects').select('*').is('deleted_at',null).order('name');
@@ -11142,10 +11144,15 @@ async function cpaPaymentSettings(force){
   const {data}=await sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle();
   CPA.paymentSettings=data||{id:1,upi_id:null,qr_storage_path:null};return CPA.paymentSettings;
 }
+async function cpaProjectManagers(force){
+  if(CPA.projectManagers&&!force)return CPA.projectManagers;
+  const {data}=await sb.schema('cust').from('project_managers').select('*, projects(id,name)').is('deleted_at',null).order('assigned_at',{ascending:false});
+  CPA.projectManagers=data||[];return CPA.projectManagers;
+}
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals'];
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -11158,7 +11165,9 @@ VIEWS.custportal_admin=async function(v,seg){
   else if(ti===6) await cpaRenderAmenities(host);
   else if(ti===7) await cpaRenderSubmeter(host);
   else if(ti===8) await cpaRenderSupport(host);
-  else await cpaRenderReferrals(host);
+  else if(ti===9) await cpaRenderReferrals(host);
+  else if(ti===10) await cpaRenderMaintenance(host,seg);
+  else await cpaRenderModificationRequests(host);
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
@@ -11299,9 +11308,11 @@ const CPA_IMPORT_COLUMNS={
   demand:{required:['unit_code','demand_no','milestone','demand_date','amount'],optional:['due_date','gst_amount','total_amount','status']},
   receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_demand_no']},
   cost_sheet:{required:['unit_code','component','amount'],optional:['milestone','percentage','sort_order']},
-  contacts:{required:['unit_code','contact_name'],optional:['contact_phone','contact_email','contact_address','booking_date','agreement_date']}
+  contacts:{required:['unit_code','contact_name'],optional:['contact_phone','contact_email','contact_address','booking_date','agreement_date']},
+  maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
+  maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',cost_sheet:'Cost Sheet',contacts:'Contacts & Dates'};
+const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',cost_sheet:'Cost Sheet',contacts:'Contacts & Dates',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -11370,6 +11381,14 @@ window.cpaImportConfirm=async function(btn){
     }else if(st.type==='receipts'){
       const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_demand_no:m.row.against_demand_no||null,raw:m.row,import_batch_id:batchId}));
       const {error}=await sb.schema('cust').from('farvision_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
+      if(error)throw error;
+    }else if(st.type==='maintenance_bills'){
+      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,bill_no:String(m.row.bill_no),bill_period:m.row.bill_period||null,bill_date:m.row.bill_date||null,due_date:m.row.due_date||null,amount:m.row.amount?Number(m.row.amount):null,gst_amount:m.row.gst_amount?Number(m.row.gst_amount):null,total_amount:m.row.total_amount?Number(m.row.total_amount):null,status:m.row.status||null,raw:m.row,import_batch_id:batchId}));
+      const {error}=await sb.schema('cust').from('maintenance_bills').upsert(rows,{onConflict:'unit_id,bill_no'});
+      if(error)throw error;
+    }else if(st.type==='maintenance_receipts'){
+      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_bill_no:m.row.against_bill_no||null,raw:m.row,import_batch_id:batchId}));
+      const {error}=await sb.schema('cust').from('maintenance_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
       if(error)throw error;
     }else if(st.type==='cost_sheet'){
       const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
@@ -11756,6 +11775,129 @@ window.cpaReferralStatusChange=async function(id,status){
   toast('Status updated','ok');
 };
 
+/* ---------- Tab 11: Maintenance (post-possession QR payments to confirm, upcoming demand preview) ---------- */
+async function cpaRenderMaintenance(host,seg){
+  if(seg&&seg[1]==='upcoming'){ await cpaRenderMaintenanceUpcoming(host); return; }
+  const {data}=await sb.schema('cust').from('maintenance_payments').select('*, units(unit_code)').order('submitted_at',{ascending:false}).limit(200);
+  const tagFor={submitted:'<span class="tag t-amber">Awaiting confirmation</span>',confirmed:'<span class="tag t-green">Confirmed</span>',rejected:'<span class="tag t-gray">Rejected</span>'};
+  const rows=(data||[]).map(p=>[esc((p.units&&p.units.unit_code)||'—'),custInr(p.amount),esc(p.payment_reference||'—'),
+    p.receipt_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${p.receipt_storage_path.replace(/'/g,"\\'")}','receipt')"><i class="fa-solid fa-receipt"></i> View</button>`:'—',
+    fmtDate(p.submitted_at),tagFor[p.status]||esc(p.status),
+    p.status==='submitted'?`<button class="btn btn-sm btn-primary" onclick="cpaConfirmMaintenancePayment(${p.id})">Confirm</button> <button class="btn btn-sm btn-danger" onclick="cpaRejectMaintenancePayment(${p.id})">Reject</button>`:'—']);
+  host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Payments</div><div class="tab" onclick="navTo('custportal_admin/10/upcoming')">Upcoming Demand</div></div>`+
+    `<p style="font-size:12.5px;color:var(--slate);margin:0 0 12px">Maintenance bills/receipts import under Farvision Import (types "Maintenance Bills" / "Maintenance Receipts"). This tab is for the customer-submitted QR payment proofs — confirming here does not itself create a receipt row; record the actual receipt via the next Farvision import once the money is verified.</p>`+
+    (rows.length?cpaTable(['Unit','Amount','Reference','Receipt','Submitted','Status','Actions'],rows):'<div class="card card-pad empty">No payments submitted yet.</div>');
+}
+window.cpaConfirmMaintenancePayment=async function(id){
+  const {error}=await sb.schema('cust').from('maintenance_payments').update({status:'confirmed',confirmed_at:new Date().toISOString(),confirmed_by:state.email}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Payment confirmed','ok');route();
+};
+window.cpaRejectMaintenancePayment=async function(id){
+  if(!await confirmDialog('Reject this payment submission? The customer will need to submit again.',{okLabel:'Reject'}))return;
+  const {error}=await sb.schema('cust').from('maintenance_payments').update({status:'rejected',confirmed_at:new Date().toISOString(),confirmed_by:state.email}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Payment rejected','ok');route();
+};
+async function cpaRenderMaintenanceUpcoming(host){
+  const {data:upcoming}=await sb.schema('cust').from('maintenance_upcoming').select('*, units(unit_code)').order('expected_date',{ascending:true});
+  const rows=(upcoming||[]).map(u=>[esc((u.units&&u.units.unit_code)||'—'),custInr(u.amount),fmtDate(u.expected_date),esc(u.note||'—'),
+    `<button class="btn btn-sm" onclick="cpaMaintenanceUpcomingModal(${u.unit_id})"><i class="fa-solid fa-pen"></i> Edit</button>`]);
+  host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab" onclick="navTo('custportal_admin/10')">Payments</div><div class="tab active">Upcoming Demand</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Upcoming maintenance demand — shown to customers as a preview</div><button class="btn btn-primary" onclick="cpaMaintenanceUpcomingModal()"><i class="fa-solid fa-plus"></i> Set preview</button></div>`+
+    (rows.length?cpaTable(['Unit','Amount','Expected date','Note',''],rows):'<div class="card card-pad empty">No previews set yet.</div>');
+}
+window.cpaMaintenanceUpcomingModal=async function(unitId){
+  const units=await cpaUnits();
+  let row=null;
+  if(unitId){const {data}=await sb.schema('cust').from('maintenance_upcoming').select('*').eq('unit_id',unitId).maybeSingle();row=data;}
+  const unitOpts=units.map(u=>`<option value="${u.id}" ${unitId===u.id?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('');
+  openModal(`<div class="modal-head"><h3>Upcoming maintenance demand</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Unit</label><select id="cpaMuUnit" ${unitId?'disabled':''}>${unitOpts}</select>
+    <label>Amount (₹)</label><input id="cpaMuAmount" type="number" value="${row&&row.amount!=null?row.amount:''}">
+    <label>Expected date</label><input type="date" id="cpaMuDate" value="${row&&row.expected_date?row.expected_date:''}">
+    <label>Note (optional)</label><input id="cpaMuNote" value="${row?esc(row.note||''):''}"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaMaintenanceUpcomingSave(${unitId||'null'})">Save</button></div>`);
+};
+window.cpaMaintenanceUpcomingSave=async function(unitId){
+  const uid=unitId||Number($('cpaMuUnit').value);
+  const amount=$('cpaMuAmount').value?Number($('cpaMuAmount').value):null;
+  const expected_date=$('cpaMuDate').value||null;
+  const note=$('cpaMuNote').value.trim()||null;
+  const {error}=await sb.schema('cust').from('maintenance_upcoming').upsert({unit_id:uid,amount,expected_date,note,updated_at:new Date().toISOString(),updated_by:state.email},{onConflict:'unit_id'});
+  if(error){toast('Save failed: '+error.message,'err');return;}
+  closeModal();toast('Preview saved','ok');route();
+};
+
+/* ---------- Tab 12: Modification Requests (routed to the Project Manager assigned to that project) ---------- */
+async function cpaRenderModificationRequests(host){
+  const [projects,pms,{data:reqs}]=await Promise.all([
+    cpaProjects(),cpaProjectManagers(true),
+    sb.schema('cust').from('modification_requests').select('*, units(unit_code,project_id)').order('created_at',{ascending:false}).limit(200)
+  ]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const pmRows=pms.map(pm=>[esc((pm.projects&&pm.projects.name)||'—'),esc(pm.staff_email),
+    `<button class="btn btn-sm btn-danger" onclick="cpaRemoveProjectManager(${pm.id})"><i class="fa-solid fa-xmark"></i> Remove</button>`]);
+  const tagFor={submitted:'<span class="tag t-amber">Awaiting PM response</span>',pm_responded:'<span class="tag t-blue">Awaiting customer decision</span>',accepted:'<span class="tag t-blue">Accepted — awaiting acknowledgement</span>',rejected:'<span class="tag t-gray">Rejected by customer</span>',acknowledged:'<span class="tag t-green">Acknowledged</span>'};
+  const reqRows=(reqs||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc(r.title),tagFor[r.status]||esc(r.status),
+    r.estimate_amount!=null?custInr(r.estimate_amount):'—',fmtDate(r.created_at),
+    `<button class="btn btn-sm" onclick="cpaModReqDetail(${r.id})"><i class="fa-solid fa-eye"></i> Open</button>`]);
+  host.innerHTML=`<div class="sec-title" style="margin:0 0 10px">Project Managers</div>
+    <div class="card card-pad frm" style="margin-bottom:16px"><div class="two"><div><label>Project</label><select id="cpaPmProject">${projOpts}</select></div><div><label>Staff email</label><input id="cpaPmEmail" placeholder="name@thejaingroup.com"></div></div>
+    <div style="margin-top:10px"><button class="btn btn-primary" onclick="cpaAssignProjectManager()"><i class="fa-solid fa-plus"></i> Assign</button></div></div>
+    ${pmRows.length?cpaTable(['Project','Staff email',''],pmRows):'<div class="card card-pad empty" style="margin-bottom:16px">No project managers assigned yet.</div>'}
+    <div class="sec-title" style="margin:22px 0 10px">Requests</div>
+    ${reqRows.length?cpaTable(['Unit','Title','Status','Estimate','Submitted',''],reqRows):'<div class="card card-pad empty">No modification requests yet.</div>'}`;
+}
+window.cpaAssignProjectManager=async function(){
+  const project_id=Number($('cpaPmProject').value),staff_email=$('cpaPmEmail').value.trim();
+  if(!project_id||!staff_email){toast('Choose a project and enter a staff email','err');return;}
+  const {error}=await sb.schema('cust').from('project_managers').insert({project_id,staff_email,assigned_by:state.email});
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Project manager assigned','ok');route();
+};
+window.cpaRemoveProjectManager=async function(id){
+  if(!await confirmDialog('Remove this project manager assignment?',{okLabel:'Remove'}))return;
+  const {error}=await sb.schema('cust').from('project_managers').update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Failed: '+error.message,'err');return;}
+  toast('Removed','ok');route();
+};
+window.cpaModReqDetail=async function(id){
+  const {data:r}=await sb.schema('cust').from('modification_requests').select('*, units(unit_code)').eq('id',id).maybeSingle();
+  if(!r){toast('Not found','err');return;}
+  const canRespond=r.status==='submitted';
+  const canAcknowledge=r.status==='accepted';
+  openModal(`<div class="modal-head"><h3>${esc(r.title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <p style="font-size:12.5px;color:var(--slate);margin:0 0 4px">Unit ${esc((r.units&&r.units.unit_code)||'—')} · submitted ${fmtDate(r.created_at)}</p>
+    <p style="font-size:13.5px">${esc(r.description||'—')}</p>
+    ${r.attachment_storage_path?`<button class="btn btn-sm" style="margin-bottom:10px" onclick="s3OpenSigned('${r.attachment_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-paperclip"></i> View attachment</button>`:''}
+    ${r.pm_response_text?`<div class="card card-pad" style="margin:10px 0"><b>Response:</b> ${esc(r.pm_response_text)}${r.estimate_amount!=null?`<div style="margin-top:6px"><b>Estimate:</b> ${custInr(r.estimate_amount)}</div>`:''}</div>`:''}
+    ${r.decision?`<p style="font-size:13px">Customer <b>${esc(r.decision)}</b> this${r.decided_at?' on '+fmtDate(r.decided_at):''}.</p>`:''}
+    ${r.acknowledged_at?`<p style="font-size:13px;color:#16a34a">Acknowledged ${fmtDate(r.acknowledged_at)} by ${esc(r.acknowledged_by||'—')}</p>`:''}
+    ${canRespond?`<label>Your response — what can and cannot be done</label><textarea id="cpaMrResponse"></textarea><label>Estimate (₹, optional)</label><input id="cpaMrEstimate" type="number">`:''}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>
+    ${canRespond?`<button class="btn btn-primary" onclick="cpaModReqRespond(${r.id})">Send response</button>`:''}
+    ${canAcknowledge?`<button class="btn btn-primary" onclick="cpaModReqAcknowledge(${r.id})">Acknowledge acceptance</button>`:''}
+    </div>`,'lg');
+};
+window.cpaModReqRespond=async function(id){
+  const pm_response_text=$('cpaMrResponse').value.trim();
+  const estimate_amount=$('cpaMrEstimate').value?Number($('cpaMrEstimate').value):null;
+  if(!pm_response_text){toast('Enter your response','err');return;}
+  const {data,error}=await sb.schema('cust').from('modification_requests').update({pm_response_text,estimate_amount,status:'pm_responded',responded_at:new Date().toISOString(),responded_by:state.email}).eq('id',id).select('id');
+  if(error){toast('Failed: '+error.message,'err');return;}
+  if(!data||!data.length){toast('You are not the assigned Project Manager for this unit’s project','err');return;}
+  closeModal();toast('Response sent to the customer','ok');route();
+};
+window.cpaModReqAcknowledge=async function(id){
+  const {data,error}=await sb.schema('cust').from('modification_requests').update({status:'acknowledged',acknowledged_at:new Date().toISOString(),acknowledged_by:state.email}).eq('id',id).select('id');
+  if(error){toast('Failed: '+error.message,'err');return;}
+  if(!data||!data.length){toast('You are not the assigned Project Manager for this unit’s project','err');return;}
+  closeModal();toast('Acknowledged','ok');route();
+};
+
 /* ============================ CUSTOMER-FACING PORTAL ============================ */
 let CUST_DATA=null,CUST_SELECTED_UNIT=null;
 async function custLoadData(customerId,force){
@@ -12072,10 +12214,124 @@ window.custReferralStatusChange=async function(id,status){
   if(error){toast('Update failed: '+error.message,'err');return;}
   toast('Status updated','ok');
 };
+async function custTabMaintenance(unit){
+  if(unit.status!=='possession'){
+    return '<div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="margin-top:6px">Maintenance billing becomes available once you have taken possession of your flat.</div></div>';
+  }
+  const [{data:bills},{data:receipts},{data:upcoming},{data:payments},{data:pay}]=await Promise.all([
+    sb.schema('cust').from('maintenance_bills').select('*').eq('unit_id',unit.id),
+    sb.schema('cust').from('maintenance_receipts').select('*').eq('unit_id',unit.id),
+    sb.schema('cust').from('maintenance_upcoming').select('*').eq('unit_id',unit.id).maybeSingle(),
+    sb.schema('cust').from('maintenance_payments').select('*').eq('unit_id',unit.id).order('submitted_at',{ascending:false}),
+    sb.schema('cust').from('payment_settings').select('*').eq('id',1).maybeSingle()
+  ]);
+  const entries=[].concat((bills||[]).map(b=>({date:b.bill_date,type:'Bill',ref:b.bill_no,desc:b.bill_period,amount:Number(b.total_amount||b.amount||0)})))
+    .concat((receipts||[]).map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  let bal=0;
+  const ledgerRows=entries.map(e=>{bal+=e.amount;
+    return [fmtDate(e.date),e.type==='Bill'?'<span class="tag t-amber">Bill</span>':'<span class="tag t-green">Receipt</span>',
+      esc(e.ref||'—'),esc(e.desc||'—'),custInr(Math.abs(e.amount)),custInr(bal)];});
+  const outstanding=bal;
+  const kpis=[['Outstanding',custInr(outstanding),outstanding>0?'due':'nothing pending'],
+    ['Next bill',upcoming&&upcoming.amount!=null?custInr(upcoming.amount):'—','estimate'],
+    ['Expected on',upcoming&&upcoming.expected_date?fmtDateShort(upcoming.expected_date):'—','']];
+  const payTagFor={submitted:'<span class="tag t-amber">Awaiting confirmation</span>',confirmed:'<span class="tag t-green">Confirmed</span>',rejected:'<span class="tag t-gray">Rejected</span>'};
+  const payRows=(payments||[]).map(p=>[fmtDate(p.submitted_at),custInr(p.amount),esc(p.payment_reference||'—'),
+    p.receipt_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${p.receipt_storage_path.replace(/'/g,"\\'")}','receipt')"><i class="fa-solid fa-receipt"></i> View</button>`:'—',
+    payTagFor[p.status]||esc(p.status)]);
+  return mKpis(kpis)+
+    '<div class="sec-title" style="margin:16px 0 10px">Bills &amp; receipts</div>'+
+    (ledgerRows.length?mTable(['Date','Type','Reference','Details','Amount','Running balance'],ledgerRows):'<div class="card card-pad empty">No maintenance bills or receipts yet.</div>')+
+    (upcoming&&upcoming.note?`<div class="card card-pad" style="margin-top:12px;font-size:13px"><i class="fa-solid fa-circle-info"></i> ${esc(upcoming.note)}</div>`:'')+
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px"><div class="sec-title" style="margin:0">My payments</div><button class="btn btn-primary" onclick="custMaintenancePayModal()"><i class="fa-solid fa-qrcode"></i> Make a payment</button></div>`+
+    (payRows.length?cpaTable(['Submitted','Amount','Reference','Receipt','Status'],payRows):'<div class="card card-pad empty">No payments submitted yet.</div>')+
+    (pay&&(pay.upi_id||pay.qr_storage_path)?`<div class="card card-pad" style="margin-top:12px;font-size:13px">Pay via ${pay.upi_id?`UPI ID <b>${esc(pay.upi_id)}</b>`:''}${pay.upi_id&&pay.qr_storage_path?' or ':''}${pay.qr_storage_path?`<button class="btn btn-sm" onclick="s3OpenSigned('${pay.qr_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-qrcode"></i> View QR code</button>`:''}, then submit the amount, reference and a screenshot of the payment below.</div>`:'');
+}
+window.custMaintenancePayModal=function(){
+  openModal(`<div class="modal-head"><h3>Submit a maintenance payment</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Amount paid (₹)</label><input id="custMpAmount" type="number">
+    <label>Payment reference</label><input id="custMpRef" placeholder="UTR / transaction ID">
+    <label>Payment receipt (screenshot / PDF)</label><input type="file" id="custMpFile"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custMpBtn" onclick="custMaintenancePaySave()">Submit</button></div>`);
+};
+window.custMaintenancePaySave=async function(){
+  const amount=Number($('custMpAmount').value||0),payment_reference=$('custMpRef').value.trim()||null;
+  const f=$('custMpFile').files[0];
+  if(!amount){toast('Enter the amount paid','err');return;}
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const btn=$('custMpBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
+  const row={unit_id:unit.id,amount,payment_reference,submitted_by:state.email};
+  if(f){
+    const {data,error}=await uploadFileToS3(s3KeyForMaintenanceReceipt(unit.id,f.name),f);
+    if(error){toast('Receipt upload failed: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+    row.receipt_storage_path=data.path;
+  }
+  const {error}=await sb.schema('cust').from('maintenance_payments').insert(row);
+  if(error){toast('Could not submit: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+  closeModal();toast('Payment submitted — pending confirmation','ok');route();
+};
+const CUST_MODREQ_STATUS_LABELS={submitted:'Awaiting response',pm_responded:'Awaiting your decision',accepted:'Accepted — awaiting acknowledgement',rejected:'Rejected',acknowledged:'Acknowledged'};
+async function custTabModificationRequests(unit){
+  if(unit.status!=='possession'){
+    return '<div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="margin-top:6px">Modification requests become available once you have taken possession of your flat.</div></div>';
+  }
+  const {data:reqs}=await sb.schema('cust').from('modification_requests').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
+  const tagFor={submitted:'<span class="tag t-amber">Awaiting response</span>',pm_responded:'<span class="tag t-blue">Awaiting your decision</span>',accepted:'<span class="tag t-blue">Accepted</span>',rejected:'<span class="tag t-gray">Rejected</span>',acknowledged:'<span class="tag t-green">Acknowledged</span>'};
+  const rows=(reqs||[]).map(r=>[esc(r.title),tagFor[r.status]||esc(r.status),r.estimate_amount!=null?custInr(r.estimate_amount):'—',fmtDate(r.created_at),
+    `<button class="btn btn-sm" onclick="custModReqDetail(${r.id})"><i class="fa-solid fa-eye"></i> Open</button>`]);
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Modification requests</div><button class="btn btn-primary" onclick="custModReqModal()"><i class="fa-solid fa-plus"></i> Raise a request</button></div>`+
+    (rows.length?cpaTable(['Title','Status','Estimate','Raised',''],rows):'<div class="card card-pad empty">No modification requests yet.</div>');
+}
+window.custModReqModal=function(){
+  openModal(`<div class="modal-head"><h3>Raise a modification request</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm"><label>Title</label><input id="custMrTitle" placeholder="Brief summary">
+    <label>Details</label><textarea id="custMrDesc" placeholder="Describe what you'd like changed…"></textarea>
+    <label>Photo/reference (optional)</label><input type="file" id="custMrFile"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="custMrBtn" onclick="custModReqSave()">Submit</button></div>`);
+};
+window.custModReqSave=async function(){
+  const title=$('custMrTitle').value.trim(),description=$('custMrDesc').value.trim()||null;
+  if(!title){toast('Enter a title','err');return;}
+  const f=$('custMrFile').files[0];
+  const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
+  const btn=$('custMrBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';
+  const row={unit_id:unit.id,title,description,created_by:state.email};
+  if(f){
+    const {data,error}=await uploadFileToS3(s3KeyForModificationRequest(unit.id,f.name),f);
+    if(error){toast('Attachment upload failed: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+    row.attachment_storage_path=data.path;
+  }
+  const {error}=await sb.schema('cust').from('modification_requests').insert(row);
+  if(error){toast('Could not submit: '+error.message,'err');btn.disabled=false;btn.innerHTML='Submit';return;}
+  closeModal();toast('Request submitted','ok');route();
+};
+window.custModReqDetail=async function(id){
+  const {data:r}=await sb.schema('cust').from('modification_requests').select('*').eq('id',id).maybeSingle();
+  if(!r){toast('Not found','err');return;}
+  const canDecide=r.status==='pm_responded';
+  openModal(`<div class="modal-head"><h3>${esc(r.title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <p style="font-size:12.5px;color:var(--slate);margin:0 0 4px">Status: ${CUST_MODREQ_STATUS_LABELS[r.status]||esc(r.status)}</p>
+    <p style="font-size:13.5px">${esc(r.description||'—')}</p>
+    ${r.attachment_storage_path?`<button class="btn btn-sm" style="margin-bottom:10px" onclick="s3OpenSigned('${r.attachment_storage_path.replace(/'/g,"\\'")}')"><i class="fa-solid fa-paperclip"></i> View attachment</button>`:''}
+    ${r.pm_response_text?`<div class="card card-pad" style="margin:10px 0"><b>Response from the project management team:</b> ${esc(r.pm_response_text)}${r.estimate_amount!=null?`<div style="margin-top:6px"><b>Estimate:</b> ${custInr(r.estimate_amount)}</div>`:''}</div>`:''}
+    ${r.decision?`<p style="font-size:13px">You <b>${esc(r.decision)}</b> this${r.decided_at?' on '+fmtDate(r.decided_at):''}.</p>`:''}
+    ${r.acknowledged_at?`<p style="font-size:13px;color:#16a34a">Acknowledged by the project management team on ${fmtDate(r.acknowledged_at)}</p>`:''}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>
+    ${canDecide?`<button class="btn btn-danger" onclick="custModReqDecide(${r.id},'rejected')">Reject</button><button class="btn btn-primary" onclick="custModReqDecide(${r.id},'accepted')">Accept</button>`:''}
+    </div>`,'lg');
+};
+window.custModReqDecide=async function(id,decision){
+  const {error}=await sb.schema('cust').rpc('decide_modification_request',{p_request_id:id,p_decision:decision});
+  if(error){toast('Could not save: '+error.message,'err');return;}
+  closeModal();toast(decision==='accepted'?'Accepted':'Rejected','ok');route();
+};
 VIEWS.customer=async function(v,seg){
   setCrumb(['Customer Portal']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals'];
+  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
@@ -12101,7 +12357,9 @@ VIEWS.customer=async function(v,seg){
   else if(ti===7)body=await custTabSupport(unit);
   else if(ti===8)body=await custTabAmenities(unit);
   else if(ti===9)body=await custTabSubmeter(unit);
-  else body=await custTabReferrals(unit);
+  else if(ti===10)body=await custTabReferrals(unit);
+  else if(ti===11)body=await custTabMaintenance(unit);
+  else body=await custTabModificationRequests(unit);
   v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
