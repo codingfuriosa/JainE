@@ -14272,24 +14272,19 @@ function trcQaTableHtml(r,m){
         why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
     });
   }
-  /* "Why" can run to several sentences (reason + issues/evidence joined together) - keep the row
-     scannable by showing a short lead-in on the face and the rest on hover, same idiom as the fact
-     chips above, instead of a full paragraph wrapping in every row. */
-  const WHY_MAX=130;
-  const compressWhy=function(s){
-    s=String(s||'');
-    if(s.length<=WHY_MAX)return {short:s,full:null};
-    return {short:s.slice(0,WHY_MAX).replace(/\s+\S*$/,'')+'…',full:s};
-  };
+  /* "Why" is the whole point of the row - it is the reasoning behind the mark, and it is read, not
+     scanned. It runs to several sentences (reason + issues/evidence joined together) and it wraps
+     in full on the face of the row. Never truncate it into a hover title: a tooltip is unreadable
+     at that length, cannot be copied, and does not exist at all on touch. */
   return factChips
     +'<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
     +topics.map(function(x){
       const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
-      const why=compressWhy(x.why);
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
         +'<td><span class="tag '+trcQaResultClass(x.status)+'"><i class="fa-solid '+trcQaResultIcon(x.status)+'"></i> '+esc(x.status||'—')+'</span></td>'
         +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
-        +'<td style="font-size:12.5px;line-height:1.5"'+(why.full?' title="'+esc(why.full)+'"':'')+'>'+esc(why.short||'—')+'</td></tr>';
+        +'<td style="font-size:12.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere">'
+          +esc(x.why||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
