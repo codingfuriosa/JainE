@@ -11402,12 +11402,13 @@ window.cpaSetPasswordSave=async function(id){
 const CPA_IMPORT_COLUMNS={
   demand:{required:['unit_code','demand_no','milestone','demand_date','amount'],optional:['due_date','gst_amount','total_amount','status']},
   receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_demand_no']},
-  cost_sheet:{required:['unit_code','component','amount'],optional:['milestone','percentage','sort_order']},
   contacts:{required:['unit_code','contact_name'],optional:['contact_phone','contact_email','contact_address','booking_date','agreement_date']},
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',cost_sheet:'Cost Sheet',contacts:'Contacts & Dates',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts'};
+// Cost sheet is NOT here - it's per-unit and differs enough per flat that it isn't a CSV-shaped
+// import; it's uploaded as a document instead (Documents tab, doc type "Cost Sheet").
+const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -11484,12 +11485,6 @@ window.cpaImportConfirm=async function(btn){
     }else if(st.type==='maintenance_receipts'){
       const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_bill_no:m.row.against_bill_no||null,raw:m.row,import_batch_id:batchId}));
       const {error}=await sb.schema('cust').from('maintenance_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
-      if(error)throw error;
-    }else if(st.type==='cost_sheet'){
-      const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
-      await sb.schema('cust').from('cost_sheet_items').update({is_current:false}).in('unit_id',unitIds).eq('is_current',true);
-      const rows=st.matched.map((m,i)=>({unit_id:m.unit.id,component:m.row.component,milestone:m.row.milestone||null,percentage:m.row.percentage?Number(m.row.percentage):null,amount:m.row.amount?Number(m.row.amount):null,sort_order:m.row.sort_order?Number(m.row.sort_order):i,is_current:true,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('cost_sheet_items').insert(rows);
       if(error)throw error;
     }else{
       const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
@@ -11627,7 +11622,7 @@ window.cpaUploadInspectionUpdate=async function(){
 
 /* ---------- Tab 6: Documents (+ company-wide process videos) ---------- */
 const CPA_PROJECT_DOC_TYPES={brochure:'Brochure',legal:'Legal documentation'};
-const CPA_CUSTOMER_DOC_TYPES={celebration_photo:'Celebration photo',celebration_video:'Celebration video',draft_agreement:'Draft Agreement for Sale',possession_letter:'Possession Letter',parking_allotment:'Parking Allotment Letter'};
+const CPA_CUSTOMER_DOC_TYPES={cost_sheet:'Cost Sheet',celebration_photo:'Celebration photo',celebration_video:'Celebration video',draft_agreement:'Draft Agreement for Sale',possession_letter:'Possession Letter',parking_allotment:'Parking Allotment Letter'};
 const CPA_VIDEO_CATEGORIES={registry:'Registry Process',agreement:'Agreement Process',nomination:'Nomination Process'};
 async function cpaRenderDocuments(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
@@ -12116,10 +12111,13 @@ async function custTabLedger(unit){
     '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>';
 }
 async function custTabCostSheet(unit){
-  const {data}=await sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order');
-  const rows=(data||[]).map(i=>[esc(i.component),esc(i.milestone||'—'),i.percentage!=null?i.percentage+'%':'—',custInr(i.amount)]);
-  return rows.length?mTable(['Component','Milestone','%','Amount'],rows):
-    '<div class="card card-pad empty">No cost sheet has been shared for this unit yet.</div>';
+  // Cost sheets differ enough per unit that they aren't structured/imported data - they're a
+  // document, shown here the same way the Documents tab shows any other per-unit file.
+  const {data}=await sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false});
+  if(!data||!data.length)return '<div class="card card-pad empty">Your cost sheet hasn’t been shared yet.</div>';
+  const rows=data.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
+    `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
+  return cpaTable(['Document','Shared on','Download'],rows);
 }
 async function custTabProgress(unit){
   const [{data:pPhotos},{data:uPhotos}]=await Promise.all([
@@ -14366,6 +14364,10 @@ function trcQaTableHtml(r,m){
         why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
     });
   }
+  /* "Why" is the whole point of the row - it is the reasoning behind the mark, and it is read, not
+     scanned. It runs to several sentences (reason + issues/evidence joined together) and it wraps
+     in full on the face of the row. Never truncate it into a hover title: a tooltip is unreadable
+     at that length, cannot be copied, and does not exist at all on touch. */
   return factChips
     +'<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
     +topics.map(function(x){
@@ -14373,22 +14375,18 @@ function trcQaTableHtml(r,m){
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
         +'<td><span class="tag '+trcQaResultClass(x.status)+'"><i class="fa-solid '+trcQaResultIcon(x.status)+'"></i> '+esc(x.status||'—')+'</span></td>'
         +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
-        +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
+        +'<td style="font-size:12.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere">'
+          +esc(x.why||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
-/* Sits between the verdict and the transcript, and this is where a tick or a cross per check
-   belongs: read the headline, see at a glance what the call agrees with the CRM about and what it
-   contradicts, then go read the words yourself. Two rows, because they answer different questions.
+/* Sits between the verdict and the transcript: read the headline, see at a glance what the call
+   agrees with the CRM about and what it contradicts, then go read the words yourself.
 
-   (1) What the customer actually said, when the model returned "signals" for it - each point tagged
-       Match (supports crm_status standing as it is) or Mismatch (points the other way), so a mixed
-       call shows as mixed instead of one blended verdict.
-   (2) How each of the five checks landed. ALWAYS rendered for an assessed call, which is the part
-       that was missing: signals are optional in the QA reply and absent entirely from every row
-       scored before they existed, and the whole block used to vanish with them - leaving a lead page
-       with a verdict, a transcript, and no marks anywhere between them. The five statuses are
-       always on the row, so this row can always be drawn.
+   One row - what the customer actually said, when the model returned "signals" for it. Each point
+   is tagged Match (supports crm_status standing as it is) or Mismatch (points the other way), so a
+   mixed call shows as mixed instead of one blended verdict. How each individual check landed is
+   already spelled out row by row in the QA table below, so it is not repeated as chips here.
 
    Same chip as the pitch fact check, tick for match, cross for mismatch, nothing added on top. */
 function trcMarkChip(cls,icon,label,tip){
@@ -14403,28 +14401,15 @@ function trcStatusSignalsHtml(r){
   if(!r.qa_id)return '';
   const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:{};
   const signals=Array.isArray(sa.signals)?sa.signals.filter(function(s){return s&&s.point;}):[];
-  const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{},
-        lreason=r.lost_reason_accuracy||{}, rem=r.remarks_accuracy||{};
-  /* status_match is RE-DERIVED by the pipeline from the two statuses after the model replies, so it
-     is the one to trust for this chip - never the model's own status_match, which is asked for only
-     to make its reasoning legible. */
-  const checks=[
-    {label:'Pitch',status:r.pitch_status,why:pitch.reason},
-    {label:'Follow-up date',status:r.followup_date_status,why:fdate.reason},
-    {label:'Lost reason',status:r.lost_reason_status,why:lreason.reason},
-    {label:'Remarks',status:r.remarks_status,why:rem.reason},
-    {label:'CRM status',why:sa.reason,
-     status:r.status_match===true?'Match':r.status_match===false?'Mismatch':'Not Verifiable'}
-  ];
-  return (signals.length?trcMarkRowHtml('What the call says about the status',
-      signals.map(function(s){
-        const isMatch=/^match$/i.test(String(s.direction||''));
-        return trcMarkChip(isMatch?'t-green':'t-red',isMatch?'fa-check':'fa-xmark',s.point,null);
-      }).join('')):'')
-    +trcMarkRowHtml('Check by check',checks.map(function(c){
-        return trcMarkChip(trcQaResultClass(c.status),trcQaResultIcon(c.status),c.label,
-          [c.label+': '+(c.status||'not checked'),c.why].filter(function(x){return x;}).join(' — '));
-      }).join(''));
+  if(!signals.length)return '';
+  return trcMarkRowHtml('What the call says about the status',
+    signals.map(function(s){
+      const dir=String(s.direction||'');
+      const isMatch=/^match$/i.test(dir), isMismatch=/^mismatch$/i.test(dir);
+      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
+      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
+      return trcMarkChip(cls,icon,s.point,null);
+    }).join(''));
 }
 
 function trcCallHtml(r,i,total){
