@@ -51,7 +51,7 @@ the work.
 | Pipeline (snapshot, queue, transcribe, judge) | [supabase/functions/crm-snapshot-qa/index.ts](supabase/functions/crm-snapshot-qa/index.ts) |
 | The transcription prompt — listening only | [supabase/functions/crm-snapshot-qa/transcribe-prompt.ts](supabase/functions/crm-snapshot-qa/transcribe-prompt.ts) |
 | The QA prompt — judging only | [supabase/functions/crm-snapshot-qa/qa-prompt.ts](supabase/functions/crm-snapshot-qa/qa-prompt.ts) |
-| The seven-point agent rubric | [supabase/functions/_shared/qa-rubric.ts](supabase/functions/_shared/qa-rubric.ts) |
+| The six-point agent rubric | [supabase/functions/_shared/qa-rubric.ts](supabase/functions/_shared/qa-rubric.ts) |
 | Schema, normaliser, queue builder, views | [supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql](supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql) |
 | The two cron jobs | [supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql](supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql) |
 | Dashboard, lead list, lead detail | [nexus-core.js](nexus-core.js) — the `trc*` functions |
@@ -219,9 +219,9 @@ the only wrong answer.
 | **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
 | **Status assessment** | Lost · Qualified · In Follow Up · Unclear | deciding from one keyword. "I'm not interested right now" is usually In Follow Up; "send me the details" is usually not Qualified. |
 
-Plus the **seven-point agent audit** — Script, Etiquette, Query Handling, Call to Action, Leakage
-Avoidance, Follow-up Accuracy, Hyper-personalization — scored Pass / Partial / Fail / Not Applicable
-against the explicit rubric in `_shared/qa-rubric.ts`.
+Plus the **six-point agent audit** — Script, Etiquette, Query Handling, Call to Action, Leakage
+Avoidance, Hyper-personalization — scored Pass / Partial / Fail / Not Applicable against the explicit
+rubric in `_shared/qa-rubric.ts`.
 
 **The rubric holds no figures and must never hold any.** Every rule in it is about what the *agent
 did* — asked, answered, confirmed, disclosed — so there is no project fact in it for a transcript to
@@ -280,7 +280,7 @@ a lead — showing the CRM's verdict and the call's verdict side by side.
 across all its calls, and then **every conversation in chronological order, oldest first**. Each one
 carries what the CRM recorded, how it was processed, the four accuracy assessments with their
 evidence, the status check, the verdict, the **full transcript** turn by turn with MM:SS timestamps
-and speaker labels, and the seven-point audit. A call that reused an existing transcript is marked as
+and speaker labels, and the six-point audit. A call that reused an existing transcript is marked as
 such and shows that transcript.
 
 The lead list is newest-first. Inside a lead it is oldest-first: a history only reads forwards.

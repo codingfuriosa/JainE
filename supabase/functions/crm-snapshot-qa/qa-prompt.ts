@@ -185,7 +185,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
       "score": 0-100, or null when status is "Not Applicable",
       "evidence": "quoted from the transcript",
       "reason": "why this verdict - what the agent did or did not do, in one or two sentences" }
-    ... all seven points, in the order given above
+    ... all six points, in the order given above
   ],
   "summary_verdict": "several sentences"
 }`;
@@ -330,12 +330,11 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
 "status_match" is true when your assessment agrees with the CRM, false when it does not, and null
 when your assessment is Unclear - an unclear call is not a disagreement.
 
-### 6. THE SEVEN-POINT AGENT AUDIT
-Return "agent_qa" as an array of seven objects, each {"point","status","score","evidence","reason"},
+### 6. THE SIX-POINT AGENT AUDIT
+Return "agent_qa" as an array of six objects, each {"point","status","score","evidence","reason"},
 with "status" exactly "Pass", "Fail", "Partial" or "Not Applicable", and "evidence" quoting the
-transcript. Use these exact seven names, in this order:
-Script, Etiquette, Query Handling, Call to Action, Leakage Avoidance, Follow-up Accuracy,
-Hyper-personalization.
+transcript. Use these exact six names, in this order:
+Script, Etiquette, Query Handling, Call to Action, Leakage Avoidance, Hyper-personalization.
 
 For EVERY point, also give:
 - "score": a 0-100 accuracy number for how fully the agent met that point on this call - not a
