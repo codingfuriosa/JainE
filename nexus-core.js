@@ -11810,20 +11810,44 @@ window.cpaSubmeterMarkCompleted=async function(id){
 };
 
 /* ---------- Tab 9: Support tickets (local mirror of Zoho Desk) ---------- */
+// Buckets (open/in_progress/on_hold/closed) only ever drive the tag's colour - the label itself is
+// always Zoho's own literal status text, since orgs add custom statuses a fixed set of labels can't
+// predict ("show the same status as Zoho" was the explicit ask).
+const SUPPORT_STATUS_CLASS={open:'t-amber',in_progress:'t-blue',on_hold:'t-gray',closed:'t-green'};
+function supportStatusTag(t){
+  const cls=SUPPORT_STATUS_CLASS[t.status]||'t-blue';
+  const label=t.zoho_status||(t.zoho_ticket_id?t.status:'Not yet in Zoho');
+  return `<span class="tag ${cls}">${esc(label)}</span>`;
+}
 async function cpaRenderSupport(host){
   const {data}=await sb.schema('cust').from('support_tickets').select('*, units(unit_code)').order('created_at',{ascending:false}).limit(200);
   const ticketIds=(data||[]).map(t=>t.id);
   const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
   const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
   const rows=(data||[]).map(t=>[esc((t.units&&t.units.unit_code)||'—'),esc(t.subject),esc(t.zoho_ticket_number||'—'),
-    tagFor[t.status]||esc(t.status),
+    supportStatusTag(t),
     (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}${a.zoho_attachment_id?' (in Zoho)':' (not in Zoho)'}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
     fmtDate(t.created_at),
-    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`]);
+    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="cpaTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="cpaSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="cpaRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
   host.innerHTML=(rows.length?cpaTable(['Unit','Subject','Zoho #','Status','Attachments','Raised','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>')+
-    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" just pulls its current status back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
+    '<div style="font-size:12px;color:var(--slate);margin-top:10px">Zoho Desk is the system of record for tickets — resolve/reply from Zoho Desk itself; "Refresh" pulls its current status and conversation back here. Attachment icons show whether that file made it to the Zoho ticket yet — "Retry" also re-attempts any that didn\'t.</div>';
 }
+window.cpaTicketDetail=async function(id){
+  openModal('<div class="loader"><div class="spin"></div></div>');
+  const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
+  const [{data:threads},{data:comments}]=await Promise.all([
+    sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
+    sb.schema('cust').from('support_ticket_comments').select('*').eq('ticket_id',id)
+  ]);
+  const msgs=[{time:t.created_at,mine:false,author:'Customer',content:t.description||t.subject}]
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction==='out',author:m.direction==='out'?'Support team':(m.author_name||'Customer'),content:m.content})))
+    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:false,author:m.posted_by_customer?(m.commenter_name||'Customer'):'Support team (comment)',content:m.content})));
+  msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
+  const bubbles=msgs.map(m=>`<div style="margin-bottom:10px"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px">${esc(m.content||'')}</div></div>`).join('');
+  openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body">${bubbles||'<div class="card card-pad empty">No messages yet.</div>'}</div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`,'lg');
+};
 window.cpaSyncTicket=async function(id){
   toast('Refreshing status…','');
   try{
@@ -12133,13 +12157,43 @@ async function custTabSupport(unit){
   const ticketIds=(tickets||[]).map(t=>t.id);
   const {data:atts}=ticketIds.length?await sb.schema('cust').from('support_ticket_attachments').select('*').in('ticket_id',ticketIds).is('deleted_at',null):{data:[]};
   const attsByTicket={};(atts||[]).forEach(a=>{(attsByTicket[a.ticket_id]=attsByTicket[a.ticket_id]||[]).push(a);});
-  const tagFor={open:'<span class="tag t-amber">Open</span>',in_progress:'<span class="tag t-blue">In Progress</span>',on_hold:'<span class="tag t-gray">On Hold</span>',closed:'<span class="tag t-green">Closed</span>'};
-  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),tagFor[t.status]||esc(t.status),
+  const rows=(tickets||[]).map(t=>[esc(t.subject),fmtDate(t.created_at),esc(t.zoho_ticket_number||'—'),supportStatusTag(t),
     (attsByTicket[t.id]||[]).map(a=>`<button class="btn btn-sm" onclick="s3OpenSigned('${a.storage_path.replace(/'/g,"\\'")}','${esc(a.file_name||'file').replace(/'/g,"\\'")}')" title="${esc(a.file_name||'')}"><i class="fa-solid fa-paperclip"></i></button>`).join(' ')||'—',
-    t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`]);
+    (t.zoho_ticket_id?`<button class="btn btn-sm" onclick="custTicketDetail(${t.id})"><i class="fa-solid fa-comments"></i> Conversation</button> <button class="btn btn-sm" onclick="custSyncTicket(${t.id})"><i class="fa-solid fa-rotate"></i> Refresh</button>`:`<button class="btn btn-sm" onclick="custRetryTicket(${t.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>`)]);
   return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Support tickets</div><button class="btn btn-primary" onclick="custNewTicketModal()"><i class="fa-solid fa-plus"></i> Raise a ticket</button></div>`+
     (rows.length?cpaTable(['Subject','Raised','Ticket #','Status','Attachments','Actions'],rows):'<div class="card card-pad empty">No support tickets yet.</div>');
 }
+window.custTicketDetail=async function(id){
+  openModal('<div class="loader"><div class="spin"></div></div>');
+  const {data:t}=await sb.schema('cust').from('support_tickets').select('*').eq('id',id).maybeSingle();
+  const [{data:threads},{data:comments}]=await Promise.all([
+    sb.schema('cust').from('support_ticket_threads').select('*').eq('ticket_id',id),
+    sb.schema('cust').from('support_ticket_comments').select('*').eq('ticket_id',id)
+  ]);
+  const msgs=[{time:t.created_at,mine:true,author:'You',content:t.description||t.subject}]
+    .concat((threads||[]).map(m=>({time:m.zoho_created_time||m.created_at,mine:m.direction!=='out',author:m.direction==='out'?'Support team':'You',content:m.content})))
+    .concat((comments||[]).map(m=>({time:m.zoho_commented_time||m.created_at,mine:m.posted_by_customer,author:m.posted_by_customer?'You':'Support team',content:m.content})));
+  msgs.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
+  const bubbles=msgs.map(m=>`<div style="margin-bottom:10px;display:flex;flex-direction:column;align-items:${m.mine?'flex-end':'flex-start'}"><div style="font-size:11.5px;color:var(--slate);margin-bottom:2px">${esc(m.author)} · ${fmtDate(m.time)}</div><div class="card card-pad" style="white-space:pre-wrap;font-size:13.5px;max-width:85%;background:${m.mine?'var(--brand-50)':'#fff'}">${esc(m.content||'')}</div></div>`).join('');
+  openModal(`<div class="modal-head"><h3>${esc(t.subject)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+    <div class="modal-body frm">
+    <div style="max-height:340px;overflow-y:auto;padding-right:4px">${bubbles||'<div class="card card-pad empty">No messages yet.</div>'}</div>
+    <label>Reply</label><textarea id="custReplyMsg" placeholder="Type your reply…"></textarea></div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" id="custReplyBtn" onclick="custSendReply(${id})">Send</button></div>`,'lg');
+};
+window.custSendReply=async function(id){
+  const message=$('custReplyMsg').value.trim();
+  if(!message){toast('Type a message first','err');return;}
+  const btn=$('custReplyBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';
+  try{
+    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/zoho-desk',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify({action:'reply',ticketId:id,message})});
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error){toast('Could not send: '+(out.error||res.status),'err');btn.disabled=false;btn.innerHTML='Send';return;}
+    toast('Reply sent','ok');
+    custTicketDetail(id);
+  }catch(e){toast('Could not send: '+e.message,'err');btn.disabled=false;btn.innerHTML='Send';}
+};
 window.custNewTicketModal=function(){
   openModal(`<div class="modal-head"><h3>Raise a support ticket</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm"><label>Subject</label><input id="custTkSubject" placeholder="Brief summary">

@@ -6,13 +6,21 @@
 //   2. Client calls this function with {action:'create', ticketId} - it creates the matching ticket
 //      in Zoho Desk and writes zoho_ticket_id/zoho_ticket_number/zoho_status/status back onto that
 //      same local row.
-//   3. Later, {action:'sync', ticketId} re-fetches that ticket's current status from Zoho Desk and
-//      updates the local mirror again - this is what "current status ... reflected here" means.
+//   3. Later, {action:'sync', ticketId} re-fetches that ticket's current status (its literal Zoho
+//      label, kept verbatim in zoho_status precisely because orgs add their own custom statuses a
+//      fixed enum can't predict), pulls down the conversation (see 5 below), and re-attempts any
+//      attachment that's still unsynced - a ticket with a zoho_ticket_id only ever shows a "Refresh"
+//      button, so that one button covers all three.
 //   4. Any rows the client already inserted into cust.support_ticket_attachments for this ticket
 //      (uploaded to S3, then a metadata row - same pattern as every other upload in this app) get
 //      pushed to the matching Zoho Desk ticket as real attachments at the end of step 2, one file at
 //      a time via Zoho's own attachments endpoint - best-effort, so one bad file doesn't fail the
 //      whole create.
+//   5. {action:'reply', ticketId, message} lets the customer add to the conversation from the portal.
+//      Zoho's public API has no way to post an inbound thread attributed to the contact (confirmed
+//      against the live API - POST .../threads is flat-out rejected), so this posts a public comment
+//      instead, with the customer's name spelled out in the text since Zoho's own commenter metadata
+//      will show whichever agent identity this integration is connected as, not the customer.
 //
 // Authorization is delegated to Postgres RLS wherever possible rather than reimplemented here: every
 // lookup of the ticket row itself runs AS THE CALLER (their own JWT), so cust.support_tickets' own
@@ -99,6 +107,65 @@ async function pushAttachmentToZoho(
   const upOut = await upRes.json().catch(() => ({}));
   if (!upRes.ok) return { ok: false, error: zohoErrorText(upOut, upRes.status) };
   return { ok: true, zohoAttachmentId: upOut.id };
+}
+
+// Zoho's thread/comment content is HTML - strip it down to plain text for the portal's chat-style
+// display rather than rendering raw HTML from an external system inside our own page.
+function htmlToText(html: string): string {
+  return (html || "")
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// When an agent replies by email, Zoho's own compose window appends "---- on <date>, <name> wrote
+// ----" followed by the entire quoted original message - useful in an email client, just noise in a
+// chat-style view where the original is already its own bubble. Split on that separator and keep
+// only what's before it. A message with no quote (the customer's original description thread, a
+// reply with the quote manually cleared) just passes through unchanged - no match, no-op.
+function stripQuotedReply(text: string): string {
+  return (text || "").split(/-{2,}\s*on\s+.+?\s+wrote\s*-{2,}/is)[0].trim();
+}
+
+// Pulls both Zoho conversation surfaces down into their mirror tables. Threads always get their
+// content re-fetched and upserted (not just inserted-if-missing) so a row synced before this quote
+// -stripping existed self-corrects the next time someone clicks Refresh, rather than staying wrong
+// forever. Comments are NOT re-inserted wholesale, because a portal-posted comment already has
+// posted_by_customer=true set locally the moment it was created, and a blind upsert would need to
+// know not to clobber that back to false - so those really are insert-if-missing.
+async function syncConversation(db: any, dc: string, accessToken: string, zohoTicketId: string, ticketId: number) {
+  const zohoHeaders = { Authorization: "Zoho-oauthtoken " + accessToken };
+
+  const threadsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/threads`, { headers: zohoHeaders });
+  const threadsOut = await threadsRes.json().catch(() => ({}));
+  const threads = (threadsOut?.data || []).filter((t: any) => t.visibility === "public");
+  for (const t of threads) {
+    // The list endpoint only gives a `summary` preview, not the real content - fetching each
+    // thread's own detail (with include=plainText) is what actually lets the quote get stripped.
+    const detailRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/threads/${t.id}?include=plainText`, { headers: zohoHeaders });
+    const detail = await detailRes.json().catch(() => ({}));
+    const text = stripQuotedReply(detail.plainText || t.summary || "");
+    await db.schema("cust").from("support_ticket_threads").upsert({
+      ticket_id: ticketId, zoho_thread_id: t.id, direction: t.direction,
+      author_name: (t.author && t.author.name) || null, author_type: (t.author && t.author.type) || null,
+      content: text, zoho_created_time: t.createdTime || null,
+    }, { onConflict: "ticket_id,zoho_thread_id" });
+  }
+
+  const commentsRes = await fetch(`https://desk.zoho.${dc}/api/v1/tickets/${zohoTicketId}/comments`, { headers: zohoHeaders });
+  const commentsOut = await commentsRes.json().catch(() => ({}));
+  const comments = (commentsOut?.data || []).filter((c: any) => c.isPublic);
+  if (comments.length) {
+    const { data: existing } = await db.schema("cust").from("support_ticket_comments").select("zoho_comment_id").eq("ticket_id", ticketId);
+    const known = new Set((existing || []).map((r: any) => r.zoho_comment_id));
+    const toInsert = comments.filter((c: any) => !known.has(c.id)).map((c: any) => ({
+      ticket_id: ticketId, zoho_comment_id: c.id, commenter_name: (c.commenter && c.commenter.name) || null,
+      content: htmlToText(c.content || ""), posted_by_customer: false, zoho_commented_time: c.commentedTime || null,
+    }));
+    if (toInsert.length) await db.schema("cust").from("support_ticket_comments").insert(toInsert);
+  }
 }
 
 async function zohoAccessToken(dc: string, clientId: string, clientSecret: string, refreshToken: string) {
@@ -232,10 +299,44 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      await syncConversation(db, ZOHO_DC, accessToken, ticket.zoho_ticket_id, ticketId);
+
       return j({ ok: true, status: normaliseStatus(zohoStatus), zoho_status: zohoStatus, attachmentsSynced, attachmentErrors });
     }
 
-    return j({ error: "Unknown action - expected 'create' or 'sync'" }, 400);
+    if (action === "reply") {
+      if (!ticket.zoho_ticket_id) return j({ error: "This ticket hasn't been created in Zoho Desk yet" }, 400);
+      const message = String(body.message || "").trim();
+      if (!message) return j({ error: "message is required" }, 400);
+
+      const { data: unit } = await db.schema("cust").from("units").select("customer_id").eq("id", ticket.unit_id).maybeSingle();
+      const { data: customer } = unit?.customer_id
+        ? await db.schema("cust").from("customers").select("full_name").eq("id", unit.customer_id).maybeSingle()
+        : { data: null };
+      const customerName = customer?.full_name || "Customer";
+
+      // See the note at the top of this file: Zoho's API has no way to post this as the contact, so
+      // it goes in as a public comment (visible in the ticket's Comments panel) with the customer's
+      // name spelled out in the text itself, and the local mirror row is what actually carries "this
+      // was the customer" for our own UI - Zoho's own commenter metadata will show our connected agent.
+      const escaped = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+      const res = await fetch(`https://desk.zoho.${ZOHO_DC}/api/v1/tickets/${ticket.zoho_ticket_id}/comments`, {
+        method: "POST", headers: zohoHeaders,
+        body: JSON.stringify({ content: `Customer reply (${customerName}): ${escaped}`, isPublic: true }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) return j({ error: "Could not send reply to Zoho Desk: " + zohoErrorText(out, res.status) }, 500);
+
+      const { error: insErr } = await db.schema("cust").from("support_ticket_comments").insert({
+        ticket_id: ticketId, zoho_comment_id: out.id, commenter_name: customerName,
+        content: message, posted_by_customer: true, zoho_commented_time: out.commentedTime || new Date().toISOString(),
+      });
+      if (insErr) return j({ error: insErr.message }, 500);
+
+      return j({ ok: true });
+    }
+
+    return j({ error: "Unknown action - expected 'create', 'sync' or 'reply'" }, 400);
   } catch (e) {
     return j({ error: String((e as Error).message || e) }, 500);
   }
