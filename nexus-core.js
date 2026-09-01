@@ -14270,29 +14270,34 @@ function trcQaTableHtml(r,m){
         why:join([a&&(a.reason||a.notes),a&&a.evidence?'"'+a.evidence+'"':null])});
     });
   }
+  /* "Why" can run to several sentences (reason + issues/evidence joined together) - keep the row
+     scannable by showing a short lead-in on the face and the rest on hover, same idiom as the fact
+     chips above, instead of a full paragraph wrapping in every row. */
+  const WHY_MAX=130;
+  const compressWhy=function(s){
+    s=String(s||'');
+    if(s.length<=WHY_MAX)return {short:s,full:null};
+    return {short:s.slice(0,WHY_MAX).replace(/\s+\S*$/,'')+'…',full:s};
+  };
   return factChips
     +'<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
     +topics.map(function(x){
       const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
+      const why=compressWhy(x.why);
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
         +'<td><span class="tag '+trcQaResultClass(x.status)+'"><i class="fa-solid '+trcQaResultIcon(x.status)+'"></i> '+esc(x.status||'—')+'</span></td>'
         +'<td style="white-space:nowrap">'+(score===null?'<span style="color:var(--slate)">—</span>':'<b>'+score+'%</b>')+'</td>'
-        +'<td style="font-size:12.5px;line-height:1.5">'+esc(x.why||'—')+'</td></tr>';
+        +'<td style="font-size:12.5px;line-height:1.5"'+(why.full?' title="'+esc(why.full)+'"':'')+'>'+esc(why.short||'—')+'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
-/* Sits between the verdict and the transcript, and this is where a tick or a cross per check
-   belongs: read the headline, see at a glance what the call agrees with the CRM about and what it
-   contradicts, then go read the words yourself. Two rows, because they answer different questions.
+/* Sits between the verdict and the transcript: read the headline, see at a glance what the call
+   agrees with the CRM about and what it contradicts, then go read the words yourself.
 
-   (1) What the customer actually said, when the model returned "signals" for it - each point tagged
-       Match (supports crm_status standing as it is) or Mismatch (points the other way), so a mixed
-       call shows as mixed instead of one blended verdict.
-   (2) How each of the five checks landed. ALWAYS rendered for an assessed call, which is the part
-       that was missing: signals are optional in the QA reply and absent entirely from every row
-       scored before they existed, and the whole block used to vanish with them - leaving a lead page
-       with a verdict, a transcript, and no marks anywhere between them. The five statuses are
-       always on the row, so this row can always be drawn.
+   One row - what the customer actually said, when the model returned "signals" for it. Each point
+   is tagged Match (supports crm_status standing as it is) or Mismatch (points the other way), so a
+   mixed call shows as mixed instead of one blended verdict. How each individual check landed is
+   already spelled out row by row in the QA table below, so it is not repeated as chips here.
 
    Same chip as the pitch fact check, tick for match, cross for mismatch, nothing added on top. */
 function trcMarkChip(cls,icon,label,tip){
@@ -14307,28 +14312,15 @@ function trcStatusSignalsHtml(r){
   if(!r.qa_id)return '';
   const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:{};
   const signals=Array.isArray(sa.signals)?sa.signals.filter(function(s){return s&&s.point;}):[];
-  const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{},
-        lreason=r.lost_reason_accuracy||{}, rem=r.remarks_accuracy||{};
-  /* status_match is RE-DERIVED by the pipeline from the two statuses after the model replies, so it
-     is the one to trust for this chip - never the model's own status_match, which is asked for only
-     to make its reasoning legible. */
-  const checks=[
-    {label:'Pitch',status:r.pitch_status,why:pitch.reason},
-    {label:'Follow-up date',status:r.followup_date_status,why:fdate.reason},
-    {label:'Lost reason',status:r.lost_reason_status,why:lreason.reason},
-    {label:'Remarks',status:r.remarks_status,why:rem.reason},
-    {label:'CRM status',why:sa.reason,
-     status:r.status_match===true?'Match':r.status_match===false?'Mismatch':'Not Verifiable'}
-  ];
-  return (signals.length?trcMarkRowHtml('What the call says about the status',
-      signals.map(function(s){
-        const isMatch=/^match$/i.test(String(s.direction||''));
-        return trcMarkChip(isMatch?'t-green':'t-red',isMatch?'fa-check':'fa-xmark',s.point,null);
-      }).join('')):'')
-    +trcMarkRowHtml('Check by check',checks.map(function(c){
-        return trcMarkChip(trcQaResultClass(c.status),trcQaResultIcon(c.status),c.label,
-          [c.label+': '+(c.status||'not checked'),c.why].filter(function(x){return x;}).join(' — '));
-      }).join(''));
+  if(!signals.length)return '';
+  return trcMarkRowHtml('What the call says about the status',
+    signals.map(function(s){
+      const dir=String(s.direction||'');
+      const isMatch=/^match$/i.test(dir), isMismatch=/^mismatch$/i.test(dir);
+      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
+      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
+      return trcMarkChip(cls,icon,s.point,null);
+    }).join(''));
 }
 
 function trcCallHtml(r,i,total){
