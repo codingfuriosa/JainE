@@ -14302,8 +14302,8 @@ function trcTranscriptHtml(turns,fallback){
 /* ONE CONVERSATION, whole. CRM record, how it was processed, what was said, and the five judgements -
    in that order, because that is the order someone checking the CRM reads them in. */
 /* One flat table per call - every QA topic (the four accuracy checks, the status check, and the
-   seven-point agent audit) as a row of its own, each with a result, marks where the topic carries a
-   number, and why. Deliberately not five cards plus a collapsible "seven-point audit" details tab:
+   six-point agent audit) as a row of its own, each with a result, marks where the topic carries a
+   number, and why. Deliberately not five cards plus a collapsible "six-point audit" details tab:
    one table, always visible, is what "marks and why for each" without separate tabs asked for. */
 function trcQaResultClass(s){
   s=String(s||'');

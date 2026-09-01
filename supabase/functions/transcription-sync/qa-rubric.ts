@@ -1,4 +1,4 @@
-// THE SEVEN QA POINTS, WRITTEN DOWN.
+// THE SIX QA POINTS, WRITTEN DOWN.
 //
 // Until now the prompt named the seven points and stopped there, so the model invented a rubric on
 // every call and two calls were never scored against the same standard. These rules are derived
@@ -76,14 +76,7 @@ refused to engage, say so in "notes" and do not fail the agent for it.
    Offering a virtual or video site visit in place of a real one is also a Fail. Headline price and
    size range are NOT leakage - those are the agent's job.
 
-6. Follow-up Accuracy - was what was agreed actually pinned down?
-   Pass    - a visit was agreed with a specific day and time, confirmed back to the customer, and
-             the address given; or a callback was agreed with a specific day and time and confirmed.
-   Partial - a commitment was made but left vague ("sometime this weekend", "I will call you back").
-   Fail    - the agent claimed something was agreed that the customer did not agree to, promised a
-             callback with no time attached, or agreed a visit and never gave the address.
-
-7. Hyper-personalization - did the agent use what the customer told them?
+6. Hyper-personalization - did the agent use what the customer told them?
    Pass    - used the customer's name, and worked with at least one thing they volunteered - where
              they live or work, children (schools nearby), elderly parents (hospitals nearby), a
              budget shortfall (the home-loan route), or something from an earlier conversation.

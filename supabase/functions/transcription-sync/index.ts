@@ -262,11 +262,11 @@ ${CATALOGUE}
 "languages": which of "Hindi", "Bengali", "English" actually appear
 
 ### TASK 3 - AGENT QA AUDIT
-Evaluate the Agent against the seven QA points configured in this application. Return
-"qa_evaluation" as an array of seven objects, each {"point","status","evidence","notes"}, where
+Evaluate the Agent against the six QA points configured in this application. Return
+"qa_evaluation" as an array of six objects, each {"point","status","evidence","notes"}, where
 "status" is exactly "Pass", "Fail" or "Partial" and "evidence" quotes the conversation.
-Use these exact seven names, in this order: Script, Etiquette, Query Handling, Call to Action,
-Leakage Avoidance, Follow-up Accuracy, Hyper-personalization.
+Use these exact six names, in this order: Script, Etiquette, Query Handling, Call to Action,
+Leakage Avoidance, Hyper-personalization.
 
 ${QA_RUBRIC}
 
