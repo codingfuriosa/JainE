@@ -11213,7 +11213,7 @@ const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigit
 // unescaped" rule getting in the way.
 function cpaTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
 
-const CPA={projects:null,units:null,customers:null,amenities:null,paymentSettings:null,projectManagers:null};
+const CPA={projects:null,units:null,customers:null,amenities:null,paymentSettings:null,projectManagers:null,staffOptions:null};
 async function cpaProjects(force){
   if(CPA.projects&&!force)return CPA.projects;
   const {data}=await sb.schema('cust').from('projects').select('*').is('deleted_at',null).order('name');
@@ -11243,6 +11243,14 @@ async function cpaProjectManagers(force){
   if(CPA.projectManagers&&!force)return CPA.projectManagers;
   const {data}=await sb.schema('cust').from('project_managers').select('*, projects(id,name)').is('deleted_at',null).order('assigned_at',{ascending:false});
   CPA.projectManagers=data||[];return CPA.projectManagers;
+}
+// adm.users only lets a staff member read their own row via RLS, so a "pick a Project Manager"
+// dropdown can't just query it directly - app.list_custportal_staff() is the narrow function that
+// returns name+email for anyone eligible, same trust boundary as app.is_custportal_staff() itself.
+async function cpaStaffOptions(force){
+  if(CPA.staffOptions&&!force)return CPA.staffOptions;
+  const {data}=await sb.schema('app').rpc('list_custportal_staff');
+  CPA.staffOptions=data||[];return CPA.staffOptions;
 }
 
 VIEWS.custportal_admin=async function(v,seg){
@@ -11978,27 +11986,29 @@ window.cpaMaintenanceUpcomingSave=async function(unitId){
 
 /* ---------- Tab 12: Modification Requests (routed to the Project Manager assigned to that project) ---------- */
 async function cpaRenderModificationRequests(host){
-  const [projects,pms,{data:reqs}]=await Promise.all([
-    cpaProjects(),cpaProjectManagers(true),
+  const [projects,pms,staff,{data:reqs}]=await Promise.all([
+    cpaProjects(),cpaProjectManagers(true),cpaStaffOptions(),
     sb.schema('cust').from('modification_requests').select('*, units(unit_code,project_id,customers(full_name))').order('created_at',{ascending:false}).limit(200)
   ]);
+  const staffNameByEmail={};staff.forEach(s=>{staffNameByEmail[(s.email||'').toLowerCase()]=s.full_name;});
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const pmRows=pms.map(pm=>[esc((pm.projects&&pm.projects.name)||'—'),esc(pm.staff_email),
+  const staffOpts=staff.map(s=>`<option value="${esc(s.email)}">${esc(s.full_name||s.email)} (${esc(s.email)})</option>`).join('');
+  const pmRows=pms.map(pm=>[esc((pm.projects&&pm.projects.name)||'—'),esc(staffNameByEmail[(pm.staff_email||'').toLowerCase()]||'—'),esc(pm.staff_email),
     `<button class="btn btn-sm btn-danger" onclick="cpaRemoveProjectManager(${pm.id})"><i class="fa-solid fa-xmark"></i> Remove</button>`]);
   const tagFor={submitted:'<span class="tag t-amber">Awaiting PM response</span>',pm_responded:'<span class="tag t-blue">Awaiting customer decision</span>',accepted:'<span class="tag t-blue">Accepted — awaiting acknowledgement</span>',rejected:'<span class="tag t-gray">Rejected by customer</span>',acknowledged:'<span class="tag t-green">Acknowledged</span>'};
   const reqRows=(reqs||[]).map(r=>[esc((r.units&&r.units.unit_code)||'—'),esc((r.units&&r.units.customers&&r.units.customers.full_name)||'—'),esc(r.title),tagFor[r.status]||esc(r.status),
     r.estimate_amount!=null?custInr(r.estimate_amount):'—',fmtDate(r.created_at),
     `<button class="btn btn-sm" onclick="cpaModReqDetail(${r.id})"><i class="fa-solid fa-eye"></i> Open</button>`]);
   host.innerHTML=`<div class="sec-title" style="margin:0 0 10px">Project Managers</div>
-    <div class="card card-pad frm" style="margin-bottom:16px"><div class="two"><div><label>Project</label><select id="cpaPmProject">${projOpts}</select></div><div><label>Staff email</label><input id="cpaPmEmail" placeholder="name@thejaingroup.com"></div></div>
+    <div class="card card-pad frm" style="margin-bottom:16px"><div class="two"><div><label>Project</label><select id="cpaPmProject">${projOpts}</select></div><div><label>Staff</label><select id="cpaPmEmail">${staffOpts}</select></div></div>
     <div style="margin-top:10px"><button class="btn btn-primary" onclick="cpaAssignProjectManager()"><i class="fa-solid fa-plus"></i> Assign</button></div></div>
-    ${pmRows.length?cpaTable(['Project','Staff email',''],pmRows):'<div class="card card-pad empty" style="margin-bottom:16px">No project managers assigned yet.</div>'}
+    ${pmRows.length?cpaTable(['Project','Staff name','Staff email',''],pmRows):'<div class="card card-pad empty" style="margin-bottom:16px">No project managers assigned yet.</div>'}
     <div class="sec-title" style="margin:22px 0 10px">Requests</div>
     ${reqRows.length?cpaTable(['Unit','Customer','Title','Status','Estimate','Submitted',''],reqRows):'<div class="card card-pad empty">No modification requests yet.</div>'}`;
 }
 window.cpaAssignProjectManager=async function(){
   const project_id=Number($('cpaPmProject').value),staff_email=$('cpaPmEmail').value.trim();
-  if(!project_id||!staff_email){toast('Choose a project and enter a staff email','err');return;}
+  if(!project_id||!staff_email){toast('Choose a project and a staff member','err');return;}
   const {error}=await sb.schema('cust').from('project_managers').insert({project_id,staff_email,assigned_by:state.email});
   if(error){toast('Failed: '+error.message,'err');return;}
   toast('Project manager assigned','ok');route();
