@@ -4864,8 +4864,8 @@
         // all of that (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
         // "real" one, so both get equal weight rather than one reading as a fallback of the other.
         else if(flow&&flow.id===26&&fcs.seq===5){
-          A+='<button class="ac-btn primary" title="Cheque — continue through the normal cheque steps" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check"></i> Cheque</button>'
-           +'<button class="ac-btn primary" title="No Cheque — skip Cheque Preparation through Bill Filing" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
+          A+='<button class="ac-btn primary" title="Cheque — continue through the normal cheque steps" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check-dollar"></i> Cheque</button>'
+           +'<button class="ac-btn primary" title="No Cheque — skip Cheque Preparation through Bill Filing" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-money-bill-transfer"></i> No Cheque</button>';
         }
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
