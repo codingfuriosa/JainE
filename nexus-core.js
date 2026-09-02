@@ -13922,10 +13922,12 @@ function trcWall(v, withTime){
    so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',team:'all'};
-/* The lead most recently opened from this list, so coming back from its detail page (the in-app
-   Back button, or the browser's own back button - both re-run trcView the same way) highlights and
-   scrolls to the exact row someone came from instead of dropping them back at the top of the table. */
+/* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
+   recently opened from this list, so coming back from its detail page (the in-app Back button, or
+   the browser's own back button - both re-run trcView the same way) highlights and scrolls to the
+   exact row someone came from instead of dropping them back at the top of the table. */
 let TRC_LAST_LEAD_ID=null;
+let TRC_LAST_FOLLOWUP_ID=null;
 
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
@@ -14275,7 +14277,8 @@ function trcLeadRowHtml(g,sl){
    side by side, which is the comparison the count is made of. */
 function trcCallRowHtml(r){
   const m=TRC_MISMATCH[String(r.mismatch_type||'')];
-  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+r.lead_id+'/'+r.follow_up_id+'\')">'
+  const wasOpened=TRC_LAST_FOLLOWUP_ID!=null&&String(r.follow_up_id)===String(TRC_LAST_FOLLOWUP_ID);
+  return '<tr id="trcCallRow'+esc(String(r.follow_up_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+r.lead_id+'/'+r.follow_up_id+'\')">'
     +'<td style="font-variant-numeric:tabular-nums">'+esc(String(r.lead_id))+'</td>'
     +'<td><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">follow-up '+esc(String(r.follow_up_id))+'</div></td>'
@@ -14324,10 +14327,11 @@ function trcRender(full){
 }
 
 async function trcView(v,seg){
-  /* The lead id a "Back"/"All leads" link carried in the route itself (transcription/0/<leadId>) -
+  /* The lead id (and, if the click came off the call-level Mismatch table, the follow-up id too) a
+     "Back"/"All leads" link carried in the route itself (transcription/0/<leadId>/<followUpId>) -
      this is what lets the exact row survive not just an in-app back click but a full page reload or
-     someone pasting the URL, which the in-memory TRC_LAST_LEAD_ID alone never could. */
-  if(seg&&seg[1])TRC_LAST_LEAD_ID=seg[1];
+     someone pasting the URL, which the in-memory TRC_LAST_LEAD_ID/TRC_LAST_FOLLOWUP_ID alone never could. */
+  if(seg&&seg[1]){TRC_LAST_LEAD_ID=seg[1];TRC_LAST_FOLLOWUP_ID=seg[2]||null;}
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
@@ -14345,10 +14349,12 @@ async function trcView(v,seg){
      forces a reload when the data itself might actually be stale. */
   await trcFetch(false);
   trcRender(true);
-  if(TRC_LAST_LEAD_ID!=null){
-    const row=$('trcLeadRow'+TRC_LAST_LEAD_ID);
-    if(row)row.scrollIntoView({block:'center'});
-  }
+  /* The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one
+     row per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to. */
+  const row=(TRC_F.match==='MISMATCH'&&TRC_LAST_FOLLOWUP_ID!=null)
+    ? $('trcCallRow'+TRC_LAST_FOLLOWUP_ID)
+    : (TRC_LAST_LEAD_ID!=null ? $('trcLeadRow'+TRC_LAST_LEAD_ID) : null);
+  if(row)row.scrollIntoView({block:'center'});
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
@@ -14662,6 +14668,10 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const id=Number(leadId);
   TRC_LAST_LEAD_ID=id;
+  TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
+  /* Carried on every "Back"/"All leads" link below, so the list can restore the exact row - the lead
+     row it left from, or, if this page was opened off the call-level Mismatch table, that call row. */
+  const backRoute='transcription/0/'+id+(targetFollowUpId?'/'+targetFollowUpId:'');
   let lead=null,rows=[];
   try{
     const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
@@ -14675,13 +14685,13 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i>'
       +'<div>Could not load this lead: '+esc((e&&e.message)||String(e))+'</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0/'+id+'\')">Back</button></div>';
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
     return;
   }
   if(!lead&&!rows.length){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0/'+id+'\')">Back</button></div>';
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
     return;
   }
   TRC_LEAD={lead:lead,rows:rows};
@@ -14700,7 +14710,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn btn-sm" onclick="navTo(\'transcription/0/'+id+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
+        +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
