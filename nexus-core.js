@@ -14418,14 +14418,14 @@ function trcQaTableHtml(r,m){
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
      why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
-    {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
+    {topic:'Follow-up date accuracy',status:r.followup_date_status,score:fdate.score,
      why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
-    {topic:'Lost reason accuracy',status:r.lost_reason_status,score:null,
+    {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
-    {topic:'Remarks accuracy',status:r.remarks_status,score:null,
+    {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
-    {topic:'Status check',status:r.ai_assessed_status,score:null,
+    {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
                m?m.label:null,sa.reason])}
   ];

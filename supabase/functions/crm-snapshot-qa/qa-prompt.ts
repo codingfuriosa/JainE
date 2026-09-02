@@ -144,6 +144,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "followup_date_accuracy": {
     "status": "Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Verifiable",
     "crm_date": "the CRM value exactly as given, or null",
     "customer_agreed_date": "what the customer actually agreed to, in their own terms, or null",
     "evidence": "the line from the transcript that settles it, or null",
@@ -151,6 +152,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "lost_reason_accuracy": {
     "status": "Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Verifiable",
     "crm_reason": "the CRM value exactly as given, or null",
     "actual_reason": "the reason the conversation actually supports, or null",
     "evidence": "the line from the transcript that settles it, or null",
@@ -158,6 +160,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "remarks_accuracy": {
     "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Verifiable",
     "crm_remarks": "the CRM value exactly as given, or null",
     "actual_conversation_summary": "two or three factual sentences on what the call contained",
     "reason": "why this verdict"
@@ -165,6 +168,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
   "status_assessment": {
     "crm_status": "the CRM status you were given, unchanged",
     "ai_assessed_status": "Lost" | "Qualified" | "In Follow Up" | "Unclear",
+    "score": 0-100, or null when ai_assessed_status is "Unclear",
     "status_match": true | false | null,
     "mismatch_type": "lost_should_not_have_been_lost" | "qualified_should_not_have_been_qualified"
                    | "in_followup_should_have_been_lost" | "in_followup_should_have_been_qualified"
@@ -261,6 +265,10 @@ DO NOT mark a date inaccurate merely because the customer did not state one. Abs
 (c), not a fault.
 Put the CRM's value in "crm_date" exactly as given, and what the customer actually agreed to - in
 their own terms, e.g. "tomorrow around 11 AM" - in "customer_agreed_date" (null if none).
+Also give "score", 0-100: 100 when the CRM date matches exactly, scaling down the further the actual
+agreement drifts from it (a few hours off scores high, a different day lower, a flatly contradicted
+date lower still). Null only when status is "Not Verifiable" - never invent a number for a date that
+was never discussed.
 
 ### 3. LOST REASON ACCURACY
 Only meaningful when the CRM status for this follow-up is Lost. If it is not Lost, return
@@ -272,6 +280,9 @@ Where the status is Lost: compare the CRM's lost_reason with the reason the cust
                    way. Leave "actual_reason" null.
 Do not infer a specific lost reason the conversation does not support. "Not interested, thank you" is
 not evidence of a budget problem or a location problem.
+Also give "score", 0-100: 100 when the CRM's lost_reason is exactly the reason the customer gave,
+scaling down for a reason that is only partly right. Null whenever status is "Not Verifiable" -
+including every follow-up that is not marked Lost, since the question does not apply there.
 
 ### 4. REMARKS ACCURACY
 Do the CRM's remarks represent what actually happened on the call?
@@ -285,6 +296,10 @@ commitment, any site-visit commitment, the outcome of the call, and the reason f
 - Not Verifiable     - the CRM left the remarks empty, or the transcript is too thin to judge.
 Put a two or three sentence factual summary of what the call actually contained in
 "actual_conversation_summary" - that is the CONVERSATION FACT the reader compares against.
+Also give "score", 0-100, on the same scale as pitch accuracy: how fully the remarks represent what
+happened, not a restatement of "status" in digits - Accurate is not automatically 100 and Partially
+Accurate is not automatically 50, score what the remarks actually get right and leave out. Null only
+when status is "Not Verifiable".
 
 ### 5. STATUS ASSESSMENT
 Decide, from the whole conversation, what the status of this lead SHOULD be, and compare it with what
@@ -304,6 +319,9 @@ DO NOT DECIDE FROM ONE KEYWORD. This is the most common way this judgement goes 
 - Politeness is not intent, and irritation is not rejection.
 - A call cut off after a few seconds establishes nothing. That is "Unclear".
 Weigh the whole conversation and say in "evidence" which lines carry the decision.
+Also give "score", 0-100: how clearly the conversation supports ai_assessed_status - several
+consistent signals and no contradictions scores high, a genuinely mixed call scores lower even when
+you still land on a verdict. Score is null only when ai_assessed_status is "Unclear".
 
 Then give "signals": the individual things the customer said or did that this verdict was actually
 weighed against, one to five of them, each tagged "Match" (it supports crm_status standing as it is)
