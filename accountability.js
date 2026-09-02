@@ -1024,8 +1024,8 @@
   // How an instance's number reads on screen. Invoice Processing calls it the "JainE id" and
   // prefixes it with J (J1, J2, J3…) — every ordinary workflow keeps the plain No. — 1, 2, 3.
   function wfCaseNoText(c){
-    const n=String((c&&c.case_no)||0);
-    return (c&&c.flow_id===26) ? ('J'+n) : n;
+    if(c && c.flow_id===26) return 'J'+String(c.jaine_id||c.case_no||0);
+    return String((c&&c.case_no)||0);
   }
   // Is this the bill-style workflow (Invoice Processing)? Decided from the workflow's OWN detail
   // fields — only that one carries a "Wheredoc Id" — so nothing here is hard-wired to a
@@ -7560,7 +7560,7 @@
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details,created_by,skipped_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
