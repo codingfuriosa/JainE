@@ -14598,11 +14598,26 @@ function trcVisitChecks(rows){
   });
   return out.sort(function(a,b){return b.date.localeCompare(a.date);});
 }
+/* Pure calendar arithmetic on a YYYY-MM-DD string - deliberately through Date.UTC with every
+   component supplied explicitly, so the result never drifts a day depending on the server's or
+   browser's own timezone the way new Date('2026-09-05') interpreted then read back in local time can. */
+function trcAddDays(dateStr,delta){
+  const p=String(dateStr).split('-').map(Number);
+  const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]));
+  dt.setUTCDate(dt.getUTCDate()+delta);
+  return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+}
 /* The two-part OV rule: enforced here, not just checked by hand.
-   (1) an OV lead must have had a follow-up call within the last two days - silence means nobody is
-       actually managing the scheduled visit, whatever the CRM status still says.
+   (1) each of the two days immediately BEFORE the visit day needs its own follow-up call logged on
+       that exact day - not merely some call somewhere in the last two days, which could just as
+       easily be a call about a different lead's older business and say nothing about this visit.
    (2) once the visit date itself arrives, TWO follow-up calls must be logged on that exact day, not
        one - a single call is under the bar here, not a pass.
+   Both only apply to a day that has actually happened - a pre-visit day or the visit day itself that
+   is still in the future has nothing to check yet. And both are always computed off the CURRENT visit
+   date (the latest OV row's next_follow_up_text): a lead that tells the agent "I'll come another day"
+   gets a fresh OV follow-up logged with the new date, which becomes latestOv here automatically, so
+   the two days being checked move with it rather than staying pinned to whatever day was first booked.
    Also flags an OV row that carries no parseable visit date at all as not properly marked, which is
    what "is the organised-visit status marked properly" comes down to on the data this lead actually
    has. Only evaluated for a lead whose CURRENT status is OV - a lead that has since moved on (Site
@@ -14625,9 +14640,18 @@ function trcOvHealth(status,rows){
       +', '+(trcWall(trcRowDate(trueLatest))||'date not recorded')+') has already moved past it - not marked properly');
 
   const today=traToday();
-  const twoDaysAgo=traLocalDate(new Date(Date.now()-2*864e5));
-  const recentCall=(rows||[]).some(function(r){const d=trcRowDate(r);return d&&d>=twoDaysAgo&&d<=today;});
-  if(!recentCall)reasons.push('No follow-up call logged in the last two days');
+
+  const missingPreDays=[];
+  if(visitDate){
+    [2,1].forEach(function(back){
+      const day=trcAddDays(visitDate,-back);
+      if(day>today)return;
+      const hasCall=(rows||[]).some(function(r){return trcRowDate(r)===day;});
+      if(!hasCall)missingPreDays.push(day);
+    });
+  }
+  if(missingPreDays.length)reasons.push('No follow-up call logged on '
+    +missingPreDays.map(function(d){return trcWall(d)||d;}).join(' or ')+' - the two days before the visit');
 
   let onVisitDay=null;
   if(visitDate&&visitDate<=today){
