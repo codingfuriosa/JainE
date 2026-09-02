@@ -14735,7 +14735,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   const leadCard='<div class="card card-pad"><div class="sec-title" style="margin:0 0 10px">'
     +'<i class="fa-solid fa-address-card" style="color:#0d9488"></i> Lead details</div>'
     +'<div style="overflow:auto"><table class="tbl"><thead><tr>'
-      +'<th>SL NO </th><th>Lead ID</th><th>Lead name</th><th>Current status</th><th>Lost reason</th>'
+      +'<th>Lead ID</th><th>Lead name</th><th>Current status</th><th>Lost reason</th>'
       +'<th>Remarks</th><th>Project</th><th>Next follow-up</th></tr></thead><tbody><tr>'
       +'<td>'+esc(String(id))+'</td>'
       +'<td style="font-weight:600">'+esc(name)+'</td>'
