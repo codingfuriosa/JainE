@@ -1021,10 +1021,12 @@
   function wfDTFull(iso){ return wfDT(iso); }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
-  // How an instance's number reads on screen. The bill workflow pads to a 5-digit Id (00042),
-  // because that is how the bill register has always numbered them. Every ordinary workflow just
-  // shows a plain No. — 42, not 00042.
-  function wfCaseNoText(c){ return String((c&&c.case_no)||0); }
+  // How an instance's number reads on screen. Invoice Processing calls it the "JainE id" and
+  // prefixes it with J (J1, J2, J3…) — every ordinary workflow keeps the plain No. — 1, 2, 3.
+  function wfCaseNoText(c){
+    const n=String((c&&c.case_no)||0);
+    return (c&&c.flow_id===26) ? ('J'+n) : n;
+  }
   // Is this the bill-style workflow (Invoice Processing)? Decided from the workflow's OWN detail
   // fields — only that one carries a "Wheredoc Id" — so nothing here is hard-wired to a
   // particular workflow row. Everything gated on this stays off ordinary workflows, which keep
@@ -1092,26 +1094,58 @@
     if(!Array.isArray(v))return false;
     return v.some(function(x){ return x && eq(x.viewer||'', me()) && String(x.watches||'')==='__ALL__'; });
   }
-  /* Who may see the People row and the Tracker on a workflow.
-     Both answer the same question — who is handling these, and where has each one reached — and on
-     Invoice Processing that is the business of the people who raise bills, the two people a bill may
-     be handed to, Systems, and anyone granted a whole-flow read-only watch (wfIsFullFlowViewer).
-     Not of everyone who can open the page.
+  // Every owner_email/owner_emails actually configured on any of the flow's own steps — the fixed
+  // handlers, as opposed to trigger_owner (who raises) or a step resolved per-case at runtime.
+  function wfFixedStepOwners(steps){
+    const set={};
+    (steps||[]).forEach(function(s){
+      if(s.owner_email) set[String(s.owner_email).toLowerCase()]=true;
+      if(Array.isArray(s.owner_emails)) s.owner_emails.forEach(function(e){ if(e) set[String(e).toLowerCase()]=true; });
+    });
+    return set;
+  }
+  // Whether email was ever the resolved person (or a listed candidate) on any step-instance row of
+  // THIS SPECIFIC case — how a step like Invoice Processing's "Dept Check" or "Sign Cheque Sent
+  // Back" names the actual department per bill, rather than one fixed owner for every bill.
+  function wfIsCaseStepPerson(fcsForFlow, caseId, email){
+    const e=String(email||'').toLowerCase();
+    return (fcsForFlow||[]).some(function(x){
+      if(x.case_id!==caseId) return false;
+      if(x.person && String(x.person).toLowerCase()===e) return true;
+      return Array.isArray(x.candidates) && x.candidates.some(function(c){ return c && String(c).toLowerCase()===e; });
+    });
+  }
+  function wfIsAnyCaseStepPerson(fcsForFlow, email){
+    const e=String(email||'').toLowerCase();
+    return (fcsForFlow||[]).some(function(x){
+      if(x.person && String(x.person).toLowerCase()===e) return true;
+      return Array.isArray(x.candidates) && x.candidates.some(function(c){ return c && String(c).toLowerCase()===e; });
+    });
+  }
+  /* Who may see the People row and the Tracker on a workflow, and how much of the Tracker's own
+     bill list they get — three tiers, not one on/off switch:
+       - a fixed step owner (configured on any step, e.g. Accounts/Audit/CFO on Invoice Processing)
+         sees every bill, since whichever ones reach their step could come from anyone;
+       - a trigger_owner (someone allowed to raise bills) sees only the ones they themselves raised;
+       - anyone else only appears here because some case actually named them as the resolved
+         department/person on one of its own steps (a "Dept Check"-style step, resolved per bill,
+         not fixed like the others) — Systems, wfInDept, and Administrator still see everything.
      Deliberately keyed on trigger_step_assignable_to: a flow that restricts WHO its instances may be
      given to is one where the handling roster is sensitive. Every other workflow has no such list and
      is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
-  function wfMaySeeRoster(f){
+  function wfRosterAccess(f, steps, fcs){
     const assign=String((f&&f.trigger_step_assignable_to)||'')
       .split(',').map(function(x){return x.trim();}).filter(Boolean);
-    if(!assign.length) return true;                       // flow doesn't restrict handover — unchanged
-    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
-    if(wfIsFullFlowViewer(f)) return true;
+    if(!assign.length) return {show:true,scope:'all'};    // flow doesn't restrict handover — unchanged
+    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems') || wfIsFullFlowViewer(f)) return {show:true,scope:'all'};
+    if(wfFixedStepOwners(steps)[String(me()||'').toLowerCase()]) return {show:true,scope:'all'};
     const trig=String((f&&f.trigger_owner)||'');
-    if(trig==='__ALL__') return true;                     // an everyone-may-raise flow hides nothing
     const trigList=trig.split(',').map(function(x){return x.trim();}).filter(Boolean);
-    return trigList.some(function(e){return eq(e,me());})
-        || assign.some(function(e){return eq(e,me());});
+    if(trig==='__ALL__' || trigList.some(function(e){return eq(e,me());})) return {show:true,scope:'own-created'};
+    if(assign.some(function(e){return eq(e,me());}) || wfIsAnyCaseStepPerson(fcs,me())) return {show:true,scope:'own-assigned'};
+    return {show:false,scope:'none'};
   }
+  function wfMaySeeRoster(f,steps,fcs){ return wfRosterAccess(f,steps||[],fcs||[]).show; }
   // A flow can curate which detail fields summarize an instance (flow.card_fields, e.g.
   // Reimbursement -> Date/Conveyance/Food, then Total Amount) instead of showing every field it has.
   // Sums a comma-joined multi-entry value (e.g. "500, 300, 200") into a single number.
@@ -1613,11 +1647,13 @@
     return [step,line].filter(Boolean).join(' - ');
   }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
-  // Curated instance summary — Wheredoc Id/Bill No./Bill Date/Company/Amount (+ the instance No.),
+  // Curated instance summary — Bill No./Bill Date/Company/Amount (+ the instance No./JainE id),
   // explicitly WITHOUT User. Falls back to null (caller shows
   // the generic full detail list instead) for any workflow that doesn't have these field labels,
   // so other workflows (Leave approval, etc.) are unaffected.
-  var WF_SUMMARY_FIELDS=['Wheredoc Id','Bill No.','Bill Date','Company','Amount'];
+  // Wheredoc Id deliberately left out: it's gone from the form, but old instances still carry one
+  // in their stored trigger_details, and listing the label here would surface it again regardless.
+  var WF_SUMMARY_FIELDS=['Bill No.','Bill Date','Company','Amount'];
   function wfCaseSummaryHtml(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
@@ -1651,8 +1687,14 @@
        Nothing is widened just for being last: an odd count used to push the final item — usually
        Total Amount — onto a stretched row of its own, which read as a mistake rather than as
        emphasis. Only a field the flow actually declares wide (Remarks) spans the row. */
+    // Invoice Processing shows just the value, leading with the JainE id — "Bill No.", "Company"
+    // etc. don't need repeating on screen once the item order itself already reads as: id, then
+    // bill no., then date, then company, then amount.
+    const bareValues=flow&&flow.id===26;
     const gridItems=items.map(function(it){
-      return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
+      return bareValues
+        ? '<div class="tp-f"><div class="v">'+esc2(it.v)+'</div></div>'
+        : '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
     }).join('')
       +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v,flow)+'</div></div>'):'');
     return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
@@ -2279,7 +2321,7 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    const fixed=[{k:flow.id===26?'JainE id':'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2347,6 +2389,13 @@
         : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
+        // Deliberately bypassed for this one instance (Invoice Processing's No-Cheque path) — a
+        // real "did not happen", not just empty because it hasn't been reached yet, so it gets an
+        // unmistakable mark rather than a blank the eye could read as missing data.
+        if(Array.isArray(c.skipped_seqs)&&c.skipped_seqs.indexOf(s.seq)!==-1){
+          const dash='<td class="wf-tk-gap" style="color:var(--slate);text-align:center">—</td>';
+          return s.is_manual_date?dash:(dash+'<td style="color:var(--slate);text-align:center">—</td><td style="color:var(--slate);text-align:center">—</td>');
+        }
         const cs=byCase[c.id]&&byCase[c.id][s.seq];
         if(s.is_manual_date){
           /* This step is a date somebody schedules, not one that gets forwarded on. Only the step's
@@ -2665,8 +2714,16 @@
        are actually handled — kept as a single flag rather than ripped out so the pane below and its
        loader stay intact and it is one word to put back. */
     const showForms=false;
-    // Who may see the handling roster (the People row) and the Tracker on this workflow.
-    const maySeeRoster=wfMaySeeRoster(flow);
+    // Who may see the handling roster (the People row), and how much of the Tracker's own bill
+    // list they get — 'all' / 'own-created' / 'own-assigned' (see wfRosterAccess).
+    const rosterAccess=wfRosterAccess(flow,steps,fcs);
+    const maySeeRoster=rosterAccess.show;
+    // The Tracker's actual rows, scoped to whichever tier rosterAccess resolved to. wfTrackerHtml
+    // itself stays unaware of any of this — it just gets fewer cases to draw.
+    const trackerCases=rosterAccess.scope==='all' ? cases
+      : rosterAccess.scope==='own-created' ? cases.filter(function(c){ return eq(c&&c.created_by, mySelf); })
+      : rosterAccess.scope==='own-assigned' ? cases.filter(function(c){ return wfIsCaseStepPerson(fcs,c.id,mySelf); })
+      : [];
     /* Who may do what, per instance:
          EDIT   — the triggering event owner only (whoever started it) — not the workflow-management
                   admins, and not step members: changing the details changes what everyone
@@ -2695,12 +2752,17 @@
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
       const head=(showChk?'<th class="wf-chk-col"></th>':'')
-        // On the bill workflow the number IS the Wheredoc Id it was filed under; ordinary
-        // workflows just count their instances.
-        +'<th>No.</th>'+(isBill?'<th>Wheredoc Id</th>':'')
+        // Invoice Processing calls its instance number the "JainE id"; ordinary workflows just
+        // count their instances under a plain "No.".
+        +'<th>'+(flow&&flow.id===26?'JainE id':'No.')+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
         +'<th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
+          // This instance deliberately bypassed this step (Invoice Processing's No-Cheque path) —
+          // it never happened for this bill, which is a different thing from not-yet-reached.
+          if(Array.isArray(c.skipped_seqs)&&c.skipped_seqs.indexOf(s.seq)!==-1){
+            return '<td><span class="wf-pill" style="background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0">Nil</span></td>';
+          }
           const cs=(byCase[c.id]||{})[s.seq];
           if(cs&&(cs.status==='done'||cs.forwarded_at)){ var rcv=cs.received_at?wfDT(cs.received_at):'—'; var don=cs.forwarded_at?wfDT(cs.forwarded_at):'—'; return '<td><span class="wf-pill ok wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-check"></i> Done<span class="wf-tip-txt">Received: '+esc2(rcv)+'<br>Done: '+esc2(don)+'</span></span></td>'; }
           if(c.status==='Pending' && c.current_step===s.seq){
@@ -2759,7 +2821,7 @@
     /* Built up front rather than inline below: rendering the tracker is what works out whether it
        has an Owner column worth searching, and the tab strip - which carries the search box - is
        concatenated before it in the same expression. */
-    const trackerHtml=wfTrackerHtml(flow,steps,cases,fcs);
+    const trackerHtml=wfTrackerHtml(flow,steps,trackerCases,fcs);
     v.innerHTML='<div class="wf-page">'
       /* An observer sees a page with no buttons on it, which reads as something being broken rather
          than as something being deliberate. Say so once, plainly, next to the title. */
@@ -2793,7 +2855,7 @@
       // Gated as well as the tab: a hidden pane still ships its rows to the browser, and "you cannot
       // click to it" is not the same as "you were not sent it".
       +(maySeeRoster?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
-          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
+          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+trackerCases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
           +trackerHtml
         +'</div></div>'):'')
@@ -4783,6 +4845,15 @@
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
+        // Invoice Processing's RTP / Schedule Payment step decides HOW the bill gets paid, and that
+        // choice is what decides which later steps even apply — Cheque runs the normal cheque
+        // prep/checking/signing/handover/filing chain; No Cheque still needs GST Approval but skips
+        // all of that (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
+        // "real" one, so both get equal weight rather than one reading as a fallback of the other.
+        else if(flow&&flow.id===26&&fcs.seq===5){
+          A+='<button class="ac-btn primary" title="Cheque — continue through the normal cheque steps" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check"></i> Cheque</button>'
+           +'<button class="ac-btn primary" title="No Cheque — skip Cheque Preparation through Bill Filing" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
+        }
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
           const fwd=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
@@ -4885,6 +4956,13 @@
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
     toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
+  };
+
+  window.wfForwardChequeChoice=async function(fcsId,cheque){
+    try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
+    catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
+    navTo('tasks/work');
   };
 
   window.wfDone=async function(fcsId){
@@ -7469,7 +7547,7 @@
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details,created_by').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details,created_by,skipped_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
@@ -7507,9 +7585,17 @@
           const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
           const nextStep=wfNextOf(s.case_id,s.seq);
           // A step is the last one only if the WORKFLOW says nothing follows it. Seeing no next
-          // step among the rows we loaded is not proof there isn't one.
+          // step among the rows we loaded is not proof there isn't one — UNLESS this instance
+          // deliberately skipped every remaining seq (Invoice Processing's No-Cheque path), which
+          // is a real "nothing follows", not a visibility gap.
           const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
-          const moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
+          let moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
+          if(moreToCome && !nextStep && Array.isArray(c.skipped_seqs) && c.skipped_seqs.length){
+            const skipSet=new Set(c.skipped_seqs);
+            let stillPossible=false;
+            for(let sq=s.seq+1; sq<=defMax; sq++){ if(!skipSet.has(sq)){ stillPossible=true; break; } }
+            if(!stillPossible) moreToCome=false;
+          }
           /* Same for the FIRST step, which is what decides whether Reject is offered - only the
              very first step of a workflow cannot be rejected, because there is nobody to send it
              back to. Taken from the rows we could read, a step whose predecessors were invisible
