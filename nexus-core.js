@@ -14146,9 +14146,9 @@ function trcDateBar(){
     const on=TRC_F.from===f&&TRC_F.to===t;
     return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
   };
-  const y=traYesterday(),td=traToday();
+  const y=traYesterday();
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-    +preset('Previous day',y,y)+preset('Today',td,td)+preset('All time',null,null)
+    +preset('Previous day',y,y)+preset('All time',null,null)
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onchange="trcSetRange(this.value||null,(document.getElementById(\'trcTo\').value||this.value||null))" style="padding:5px 8px">'
@@ -14511,7 +14511,6 @@ function trcCallHtml(r,i,total){
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
     +trcKV('Follow-up ID',r.follow_up_id)
     +trcKV('Personnel',r.personnel_name?r.personnel_name+(r.personnel_email?' ('+r.personnel_email+')':''):null)
-    +trcKV('Role',r.personnel_role)
     +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
     +(trcIsRegression(r)?trcKV('Went back from',r.prev_status+' - not a legitimate step back'):'')
     +trcKV('Call started',trcWall(r.call_start_text,true))
