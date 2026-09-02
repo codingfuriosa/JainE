@@ -1603,6 +1603,23 @@
      step. Leading with it spent the most valuable characters saying nothing.
 
      Attachments are skipped - an s3 path is a file, not something to read in a title. */
+  /* A CANCELLED CHEQUE: the same cheque as the Cheque button, with a cancel badge on it, so the
+     two buttons read as one object in two states rather than two unrelated pictures. That is what
+     "No Cheque" actually means - this bill is being paid, just not by cheque.
+     What it replaced was a prohibition sign, which reads as "blocked" or "not allowed".
+     Built from position alone - no text-stroke, no colour hard-coded to the button - so it renders
+     the same wherever it is put. A slash laid over the cheque was tried first and is invisible:
+     both glyphs are the same colour, so it just looked like an ordinary cheque, which is the
+     opposite meaning. */
+  function wfNoChequeIcon(px){
+    const f=px||13;
+    return '<span class="fa-stack" style="font-size:'+f+'px;width:1.5em;height:1.35em;'
+      +'line-height:1.35em;vertical-align:middle">'
+      +'<i class="fa-solid fa-money-check fa-stack-1x" style="left:-.1em"></i>'
+      +'<i class="fa-solid fa-circle-xmark" style="position:absolute;font-size:.62em;'
+        +'right:-.12em;bottom:-.14em"></i>'
+    +'</span>';
+  }
   function wfTaskLine(det,taskFields){
     const order=Array.isArray(taskFields)?taskFields:[];
     const rows=(det||[]).filter(function(d){
@@ -4874,7 +4891,7 @@
         // "real" one, so both get equal weight rather than one reading as a fallback of the other.
         else if(flow&&flow.id===26&&fcs.seq===5){
           A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check"></i> Cheque</button>'
-           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-money-bill-transfer"></i> No Cheque</button>';
+           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)">'+wfNoChequeIcon(13)+' No Cheque</button>';
         }
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
@@ -8032,7 +8049,7 @@
         wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${
           wfInfo.chequeChoice
           ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-money-check"></i></button>`
-            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)"><i class="fa-solid fa-money-bill-transfer"></i></button>`
+            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)">${wfNoChequeIcon(13)}</button>`
           : wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
