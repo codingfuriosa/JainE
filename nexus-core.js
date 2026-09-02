@@ -11278,7 +11278,7 @@ async function cpaRenderProjectsUnits(host){
   const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true)]);
   const projRows=projects.map(p=>[esc(p.name),esc(p.farvision_project_code||'—'),String(units.filter(u=>u.project_id===p.id).length),
     `<button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`]);
-  const unitRows=units.map(u=>[esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_type||'—'),
+  const unitRows=units.map(u=>[esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
     `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
     u.customer_id?'<span class="tag t-green">Assigned</span>':'<span class="tag t-gray">Unassigned</span>',
     u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
@@ -11287,7 +11287,7 @@ async function cpaRenderProjectsUnits(host){
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
     cpaTable(['Project','Farvision code','Units',''],projRows.length?projRows:[['No projects yet','','','']])+
     `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>`+
-    cpaTable(['Unit code','Project','Tower','Type','Status','Customer','Floor casting',''],unitRows.length?unitRows:[['No units yet','','','','','','','']]);
+    cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],unitRows.length?unitRows:[['No units yet','','','','','','','','']]);
 }
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
@@ -11305,28 +11305,47 @@ window.cpaProjectSave=async function(id){
   if(error){toast('Save failed: '+error.message,'err');return;}
   closeModal();toast('Project saved','ok');route();
 };
+// Mirrors Farvision's own Unit master form (Unit Specification / Basic Specification / Area
+// Specification / Secondary Area Specification) - see the migration this shipped alongside for the
+// exact field mapping. Still one row per saleable flat, not Farvision's Tower/Floor/Flat hierarchy.
 window.cpaUnitModal=async function(id){
   const [projects,customers,units]=await Promise.all([cpaProjects(),cpaCustomers(),cpaUnits()]);
   const u=id?units.find(x=>x.id===id):null;
   const projOpts=projects.map(p=>`<option value="${p.id}" ${u&&u.project_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('');
   const custOpts='<option value="">— Unassigned —</option>'+customers.map(c=>`<option value="${c.id}" ${u&&u.customer_id===c.id?'selected':''}>${esc(c.full_name)}</option>`).join('');
   const statusOpts=['booked','registered','possession','cancelled'].map(s=>`<option ${u&&u.status===s?'selected':''}>${s}</option>`).join('');
+  const area=(id,val)=>`<input id="${id}" type="number" value="${val!=null?val:''}">`;
   openModal(`<div class="modal-head"><h3>${u?'Edit unit':'New unit'}</h3><span class="x" onclick="closeModal()">&times;</span></div>
     <div class="modal-body frm">
-    <label>Project</label><select id="cpaUProject">${projOpts}</select>
-    <div class="two"><div><label>Unit code (Farvision — CSV import key)</label><input id="cpaUCode" value="${u?esc(u.unit_code):''}"></div><div><label>Unit type</label><input id="cpaUType" value="${u?esc(u.unit_type||''):''}" placeholder="3BHK"></div></div>
-    <div class="two"><div><label>Tower</label><input id="cpaUTower" value="${u?esc(u.tower||''):''}"></div><div><label>Floor no.</label><input id="cpaUFloor" value="${u?esc(u.floor_no||''):''}"></div></div>
-    <div class="two"><div><label>Carpet area (sqft)</label><input id="cpaUArea" type="number" value="${u&&u.carpet_area_sqft!=null?u.carpet_area_sqft:''}"></div><div><label>Agreement value (₹)</label><input id="cpaUAgVal" type="number" value="${u&&u.agreement_value!=null?u.agreement_value:''}"></div></div>
-    <label>Status</label><select id="cpaUStatus">${statusOpts}</select>
-    <label>Customer</label><select id="cpaUCustomer">${custOpts}</select>
+    <div class="sec-title" style="margin:0 0 8px">Unit Specification</div>
+    <label>Business Unit (Project)</label><select id="cpaUProject">${projOpts}</select>
+    <div class="two"><div><label>Code</label><input id="cpaUCode" value="${u?esc(u.unit_code):''}"></div><div><label>Unit Type</label><input id="cpaUCategory" value="${u?esc(u.unit_category||''):''}" placeholder="Flat / Shop / Office / Parking"></div></div>
+    <div class="two"><div><label>Sub-Unit Type</label><input id="cpaUType" value="${u?esc(u.unit_type||''):''}" placeholder="3BHK"></div><div><label>Tower</label><input id="cpaUTower" value="${u?esc(u.tower||''):''}"></div></div>
+    <label>Floor no.</label><input id="cpaUFloor" value="${u?esc(u.floor_no||''):''}">
+
+    <div class="sec-title" style="margin:18px 0 8px">Basic Specification</div>
+    <div class="two"><div><label>Allotted To</label><select id="cpaUCustomer">${custOpts}</select></div><div><label>Status</label><select id="cpaUStatus">${statusOpts}</select></div></div>
+    <label>Agreement value (₹)</label><input id="cpaUAgVal" type="number" value="${u&&u.agreement_value!=null?u.agreement_value:''}">
+
+    <div class="sec-title" style="margin:18px 0 8px">Area Specification (Sq. Feet)</div>
+    <div class="two"><div><label>Super Built-up</label>${area('cpaUSuperBuiltUp',u&&u.super_built_up_area_sqft)}</div><div><label>Built-up</label>${area('cpaUBuiltUp',u&&u.built_up_area_sqft)}</div></div>
+    <div class="two"><div><label>Carpet</label>${area('cpaUArea',u&&u.carpet_area_sqft)}</div><div><label>Land</label>${area('cpaULand',u&&u.land_area_sqft)}</div></div>
+
+    <div class="sec-title" style="margin:18px 0 8px">Secondary Area Specification (Sq. Feet — optional)</div>
+    <div class="two"><div><label>Super Built-up</label>${area('cpaUSecSuperBuiltUp',u&&u.secondary_super_built_up_area_sqft)}</div><div><label>Built-up</label>${area('cpaUSecBuiltUp',u&&u.secondary_built_up_area_sqft)}</div></div>
+    <div class="two"><div><label>Carpet</label>${area('cpaUSecCarpet',u&&u.secondary_carpet_area_sqft)}</div><div><label>Land</label>${area('cpaUSecLand',u&&u.secondary_land_area_sqft)}</div></div>
     </div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="cpaUnitSave(${u?u.id:'null'})">Save</button></div>`,'lg');
 };
 window.cpaUnitSave=async function(id){
   const project_id=Number($('cpaUProject').value);const unit_code=$('cpaUCode').value.trim();
   if(!project_id||!unit_code){toast('Project and unit code are required','err');return;}
+  const num=elId=>$(elId).value?Number($(elId).value):null;
   const row={project_id,unit_code,
-    unit_type:$('cpaUType').value.trim()||null,tower:$('cpaUTower').value.trim()||null,floor_no:$('cpaUFloor').value.trim()||null,
-    carpet_area_sqft:$('cpaUArea').value?Number($('cpaUArea').value):null,agreement_value:$('cpaUAgVal').value?Number($('cpaUAgVal').value):null,
+    unit_category:$('cpaUCategory').value.trim()||null,unit_type:$('cpaUType').value.trim()||null,
+    tower:$('cpaUTower').value.trim()||null,floor_no:$('cpaUFloor').value.trim()||null,
+    carpet_area_sqft:num('cpaUArea'),super_built_up_area_sqft:num('cpaUSuperBuiltUp'),built_up_area_sqft:num('cpaUBuiltUp'),land_area_sqft:num('cpaULand'),
+    secondary_carpet_area_sqft:num('cpaUSecCarpet'),secondary_super_built_up_area_sqft:num('cpaUSecSuperBuiltUp'),secondary_built_up_area_sqft:num('cpaUSecBuiltUp'),secondary_land_area_sqft:num('cpaUSecLand'),
+    agreement_value:num('cpaUAgVal'),
     status:$('cpaUStatus').value,customer_id:$('cpaUCustomer').value?Number($('cpaUCustomer').value):null};
   let error;
   if(id){({error}=await sb.schema('cust').from('units').update(row).eq('id',id));}
