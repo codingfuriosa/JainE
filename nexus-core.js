@@ -13922,6 +13922,10 @@ function trcWall(v, withTime){
    so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',team:'all'};
+/* The lead most recently opened from this list, so coming back from its detail page (the in-app
+   Back button, or the browser's own back button - both re-run trcView the same way) highlights and
+   scrolls to the exact row someone came from instead of dropping them back at the top of the table. */
+let TRC_LAST_LEAD_ID=null;
 
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
@@ -14240,7 +14244,8 @@ function trcLeadRowHtml(g,sl){
      before trcLeads), so when a personnel filter is on, g.last IS that person's most recent
      matching call - jumping straight to it instead of the top of the lead's whole history. */
   const jumpTo=TRC_F.personnel!=='all'&&last.follow_up_id?'/'+last.follow_up_id:'';
-  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'\')">'
+  const wasOpened=TRC_LAST_LEAD_ID!=null&&String(g.lead_id)===String(TRC_LAST_LEAD_ID);
+  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'\')">'
     +'<td style="font-variant-numeric:tabular-nums;color:var(--slate)">'+sl+'</td>'
     +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
     +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
@@ -14319,6 +14324,10 @@ function trcRender(full){
 }
 
 async function trcView(v,seg){
+  /* The lead id a "Back"/"All leads" link carried in the route itself (transcription/0/<leadId>) -
+     this is what lets the exact row survive not just an in-app back click but a full page reload or
+     someone pasting the URL, which the in-memory TRC_LAST_LEAD_ID alone never could. */
+  if(seg&&seg[1])TRC_LAST_LEAD_ID=seg[1];
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
@@ -14330,8 +14339,16 @@ async function trcView(v,seg){
       +'<thead id="trcHead"></thead>'
       +'<tbody id="trcRows"><tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
     +'</table></div></div>';
-  await trcFetch(true);
+  /* Not a forced refetch: coming back here from a lead's detail page (the in-app Back button, or the
+     browser's own back button) must not re-download the whole day's rows and drop someone at the top
+     of the table while it loads - trcFetch already caches, and the explicit Refresh button still
+     forces a reload when the data itself might actually be stale. */
+  await trcFetch(false);
   trcRender(true);
+  if(TRC_LAST_LEAD_ID!=null){
+    const row=$('trcLeadRow'+TRC_LAST_LEAD_ID);
+    if(row)row.scrollIntoView({block:'center'});
+  }
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
@@ -14644,6 +14661,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const id=Number(leadId);
+  TRC_LAST_LEAD_ID=id;
   let lead=null,rows=[];
   try{
     const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
@@ -14657,13 +14675,13 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i>'
       +'<div>Could not load this lead: '+esc((e&&e.message)||String(e))+'</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0/'+id+'\')">Back</button></div>';
     return;
   }
   if(!lead&&!rows.length){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0/'+id+'\')">Back</button></div>';
     return;
   }
   TRC_LEAD={lead:lead,rows:rows};
@@ -14682,7 +14700,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
+        +'<button class="btn btn-sm" onclick="navTo(\'transcription/0/'+id+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
