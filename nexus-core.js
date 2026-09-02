@@ -14577,27 +14577,6 @@ function trcCallHtml(r,i,total){
 
 let TRC_LEAD=null;
 
-/* OV carries its scheduled date in next_follow_up_text (IST wall clock wearing a Z, so the first 10
-   characters are taken as-is - the same rule trcWall follows, never through new Date()). Once the
-   visit happens the CRM status becomes "Site Visited on DD/MM/YY" and the date moves to status_detail
-   instead. Either way: does this lead have a follow-up call actually logged on that exact day? */
-function trcVisitChecks(rows){
-  const seen={},out=[];
-  (rows||[]).forEach(function(r){
-    let date=null,kind=null;
-    if(r.crm_status==='Site Visited'&&r.status_detail){
-      const m=String(r.status_detail).match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
-      if(m){date='20'+m[3]+'-'+m[2]+'-'+m[1];kind='Site visited on';}
-    }else if(r.crm_status==='OV'&&r.next_follow_up_text){
-      date=String(r.next_follow_up_text).slice(0,10);kind='Site visit organised for';
-    }
-    if(!date||seen[kind+date])return;
-    seen[kind+date]=true;
-    const hasCall=rows.some(function(r2){return trcRowDate(r2)===date;});
-    out.push({date:date,kind:kind,hasCall:hasCall});
-  });
-  return out.sort(function(a,b){return b.date.localeCompare(a.date);});
-}
 /* Pure calendar arithmetic on a YYYY-MM-DD string - deliberately through Date.UTC with every
    component supplied explicitly, so the result never drifts a day depending on the server's or
    browser's own timezone the way new Date('2026-09-05') interpreted then read back in local time can. */
@@ -14673,18 +14652,6 @@ function trcOvHealthHtml(h){
     +(h.reasons.length?'<ul style="margin:10px 0 0 18px;padding:0;font-size:12.5px;line-height:1.7;color:#dc2626">'
       +h.reasons.map(function(r){return '<li>'+esc(r)+'</li>';}).join('')+'</ul>':'')
   +'</div>';
-}
-
-function trcVisitCheckHtml(checks){
-  if(!checks.length)return '';
-  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid fa-house-circle-check" style="color:#0d9488"></i> Site visit day check</div>'
-    +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:10px">Every site visit this lead has organised or completed, and whether a follow-up call was actually logged on that exact day.</div>'
-    +'<table class="tbl"><thead><tr><th>Date</th><th>What the CRM recorded</th><th>Call logged that day</th></tr></thead><tbody>'
-    +checks.map(function(c){
-      return '<tr><td style="white-space:nowrap">'+esc(trcWall(c.date)||c.date)+'</td><td>'+esc(c.kind)+'</td>'
-        +'<td>'+(c.hasCall?trcTag('t-green','fa-check','Yes'):trcTag('t-red','fa-xmark','No - no call logged that day'))+'</td></tr>';
-    }).join('')+'</tbody></table></div>';
 }
 
 async function trcLeadDetail(v,leadId,targetFollowUpId){
@@ -14779,12 +14746,10 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
-  const visitChecks=trcVisitCheckHtml(trcVisitChecks(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
-    +visitChecks
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
