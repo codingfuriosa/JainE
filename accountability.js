@@ -4869,12 +4869,12 @@
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
         // Invoice Processing's RTP / Schedule Payment step decides HOW the bill gets paid, and that
         // choice is what decides which later steps even apply — Cheque runs the normal cheque
-        // prep/checking/signing/handover/filing chain; No Cheque still needs GST Approval but skips
-        // all of that (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
+        // prep/checking/signing/handover chain; No Cheque still needs GST Approval and still
+        // gets filed, but skips the rest (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
         // "real" one, so both get equal weight rather than one reading as a fallback of the other.
         else if(flow&&flow.id===26&&fcs.seq===5){
-          A+='<button class="ac-btn primary" title="Cheque — continue through the normal cheque steps" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check"></i> Cheque</button>'
-           +'<button class="ac-btn primary" title="No Cheque — skip Cheque Preparation through Bill Filing" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
+          A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check"></i> Cheque</button>'
+           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-money-bill-transfer"></i> No Cheque</button>';
         }
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
@@ -7624,7 +7624,7 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -8024,7 +8024,16 @@
         // Hovering names the person it is going to, so you know who you are handing it to before
         // you press it — "Forward to the next person" told you nothing.
         const fwdTip=wfForwardLabel(wfInfo);
-        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfIsLastStep
+        /* A step answered with a CHOICE cannot be answered with Forward. Invoice Processing's RTP
+           step decides how the bill is paid, and that decision is what settles which later steps
+           apply - so the exterior list offers the same two buttons the step's own page does. A
+           paper-plane here forwarded nothing and simply failed, because the database refuses a
+           plain forward on that step. */
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${
+          wfInfo.chequeChoice
+          ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-money-check"></i></button>`
+            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)"><i class="fa-solid fa-money-bill-transfer"></i></button>`
+          : wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
       }
