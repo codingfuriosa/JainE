@@ -6,7 +6,7 @@
 --
 -- Neither job passes a secret in the clear: pg_cron reads acc.job_secrets, a token the DATABASE
 -- generated for itself, and the edge function checks it with its service-role key. No human ever
--- invents or pastes a password, and the Gemini key never leaves Edge Function Secrets.
+-- invents or pastes a password, and neither model key ever leaves Edge Function Secrets.
 --
 -- These REPLACE the two transcription-sync jobs of 20260827090100_lost_call_schedule.sql. Both
 -- pipelines writing at once would transcribe every recording twice, so the old pair is unscheduled
@@ -55,10 +55,11 @@ select cron.schedule('crm-snapshot-qa-work', '* 19-23,0-5 * * *', $job$
                  'Content-Type','application/json',
                  'apikey','sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n',
                  'x-sync-secret',(select value from acc.job_secrets where name='transcription_sync')),
-    -- No model named here on purpose: both halves read GEMINI_MODEL (and optionally GEMINI_QA_MODEL)
-    -- from Edge Function Secrets, so changing the model is a secret change and not a cron edit. A
-    -- model pinned in this body would silently override the secret and make the next change look
-    -- like it had no effect.
+    -- No model named here on purpose: the transcriber reads GEMINI_MODEL and the judge reads
+    -- OPENAI_QA_MODEL from Edge Function Secrets, so changing either model is a secret change and not
+    -- a cron edit. A model pinned in this body would silently override the secret and make the next
+    -- change look like it had no effect. This is comment only - the schedule, the body and the
+    -- timeout are exactly as first applied, and the QA vendor move needed no change here.
     body    := '{"action":"work"}'::jsonb,
     timeout_milliseconds := 300000);
 $job$);
