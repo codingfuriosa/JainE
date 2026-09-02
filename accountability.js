@@ -1603,22 +1603,27 @@
      step. Leading with it spent the most valuable characters saying nothing.
 
      Attachments are skipped - an s3 path is a file, not something to read in a title. */
-  /* A CHEQUE AND A CROSS: the same cheque the Cheque button uses, with a cross against it, so the
+  /* A CHEQUE WITH A CROSS THROUGH IT: the same cheque the Cheque button uses, crossed out, so the
      two buttons read as one object in two states rather than two unrelated pictures. That is what
-     "No Cheque" actually means - this bill is being paid, just not by cheque.
-     What it replaced was a prohibition sign, which reads as "blocked" or "not allowed".
-     The cross sits CLEAR of the cheque's corner, which is not fussiness: laid over the cheque it
-     disappears, because both glyphs are the same colour and simply merge into one shape - the same
-     reason a slash across it was tried first and came out looking like an ordinary cheque, which is
-     the opposite meaning. Position alone does the work here, with no text-stroke and no colour
-     hard-coded to the button, so it renders the same wherever it is put. */
+     "No Cheque" actually means - this bill is being paid, just not by cheque. What it replaced was
+     a prohibition sign, which reads as "blocked" or "not allowed".
+
+     The cross is RED, and that is what makes it work rather than decoration. Drawn in the icon's
+     own colour it vanishes: both glyphs are then the same colour and merge into one shape, so it
+     comes out looking like an ordinary cheque - the exact opposite meaning. A slash across it, and
+     a larger cross whose arms overhang, were both tried and both failed the same way, with only the
+     parts outside the cheque surviving. A contrasting colour is the only thing that keeps a mark
+     legible ON TOP of a solid glyph, and red is what cancellation already means here.
+
+     Sized in em against the stack, so it scales with whatever font-size the caller passes - 13px in
+     a task-list button, larger inline - without needing separate artwork per size. */
   function wfNoChequeIcon(px){
     const f=px||13;
     return '<span class="fa-stack" style="font-size:'+f+'px;width:1.5em;height:1.35em;'
       +'line-height:1.35em;vertical-align:middle">'
-      +'<i class="fa-solid fa-money-check fa-stack-1x" style="left:-.1em"></i>'
-      +'<i class="fa-solid fa-xmark" style="position:absolute;font-size:.68em;'
-        +'right:-.2em;bottom:-.22em"></i>'
+      +'<i class="fa-solid fa-money-check fa-stack-1x"></i>'
+      +'<i class="fa-solid fa-xmark" style="position:absolute;left:50%;top:50%;'
+        +'transform:translate(-50%,-50%);font-size:.95em;color:#dc2626"></i>'
     +'</span>';
   }
   function wfTaskLine(det,taskFields){
