@@ -643,6 +643,34 @@
   window.__accQ1=true;
 
   /* ---------- data (parallelized) ---------- */
+  /* ACTING ON SOMEBODY ELSE'S BEHALF.
+     A department person can have a stand-in who receives and forwards their bills for them. The
+     step still BELONGS to the owner: their name is what every screen shows, the task is still
+     theirs, and the members on it are untouched. Only the permission to press the buttons is
+     shared, and the timeline still records who actually pressed them.
+     Deliberately not done by adding the stand-in to the task's members - that list drives the
+     avatars, the approval route, the member editor and the assignee emails, so a stand-in placed
+     in it would have appeared as a second owner on all four. Which tasks a stand-in may act on is
+     answered by the database (acc.wf_proxy_task_ids), so the list here and the permission the
+     action functions will actually grant come from one definition and cannot drift apart. */
+  let WF_ACT_FOR=[];      // [{principal_email, flow_id}] - whose work I may act on
+  let WF_ACT_TASKS={};    // task_id -> whose it is, for the steps open to me right now
+  const wfActForPerson=(email,flowId)=>WF_ACT_FOR.some(function(x){
+    return eq(x.principal_email,email)
+        && (x.flow_id==null || flowId==null || Number(x.flow_id)===Number(flowId));
+  });
+  const wfActTask=t=>!!(t && t.id!=null && WF_ACT_TASKS[t.id]);
+  async function wfActLoad(){
+    try{
+      const [pr,tk]=await Promise.all([
+        ACC().rpc('wf_proxy_principals',{}),
+        ACC().rpc('wf_proxy_task_ids')
+      ]);
+      WF_ACT_FOR=(pr&&pr.data)||[];
+      WF_ACT_TASKS={};
+      (((tk&&tk.data))||[]).forEach(function(r){ WF_ACT_TASKS[r.task_id]=r.principal_email; });
+    }catch(_e){ WF_ACT_FOR=[]; WF_ACT_TASKS={}; }   // no stand-in arrangement is the normal case
+  }
   async function loadAssignees(ids){ if(!ids.length)return {}; try{const {data}=await ACC().from('ptask_assignees').select('*').in('task_id',ids);const m={};(data||[]).forEach(a=>{(m[a.task_id]=m[a.task_id]||[]).push(a.email);});return m;}catch(e){return {};} }
   async function loadProjectsMap(){ try{const {data}=await ACC().from('projects').select('id,name');const m={};(data||[]).forEach(p=>m[p.id]=p.name);return m;}catch(e){return {};} }
   async function loadAll(){
@@ -654,6 +682,7 @@
        another one out. A task that had plainly been created simply was not in the list.
        Ordered explicitly as well: without a sort, pages can overlap or skip. order_index is 0 on
        every row today, so id is what actually makes the paging stable. */
+    await wfActLoad();   // before the filter below, which asks what I may act on
     const [tasksRaw,asgRaw,pR]=await Promise.all([
       wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
         .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
@@ -663,12 +692,16 @@
     ]);
     let tasks=tasksRaw||[]; const pm={}; (pR.data||[]).forEach(x=>pm[x.id]=x.name);
     const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
-    tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))) && (asg[t.id]||[]).length>0);
+    tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
     tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
     return {tasks,asg,pm};
   }
   const isOwner = t => eq(t.delegator,me());
-  const isMemb  = (t,asg)=>(asg[t.id]||[]).some(e=>eq(e,me()));
+  /* A step I am standing in on counts as mine for WHERE IT IS LISTED and WHETHER I GET BUTTONS,
+     which is the whole point - it has to reach me to be actionable. It deliberately does NOT make
+     me a member: isSelf stays false, so the row still shows whoever raised the bill, and the
+     detail page still lists the owner alone. */
+  const isMemb  = (t,asg)=>(asg[t.id]||[]).some(e=>eq(e,me()))||wfActTask(t);
   const isSelf  = (t,asg)=>isOwner(t)&&isMemb(t,asg);
   const stOf    = t => t.approval_state==='approved'?'approved':(t.approval_state==='awaiting_approval'?'await':'open');
   const iDeleg  = (t,tasks)=> tasks.some(c=>c.parent_task_id===t.id && eq(c.delegator,me()));
@@ -4848,7 +4881,9 @@
       .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
     const prevExists=allSteps.some(function(s){ return s.seq<mySeq; });
     const isFirst=!prevExists, isLast=!nextStep;
-    const amAssignee=(members||[]).some(function(e){return eq(e,me());});
+    const amAssignee=(members||[]).some(function(e){
+      return eq(e,me())||wfActForPerson(e,flow&&flow.id);   // mine, or I stand in for them
+    });
     const received=!!fcs.received_at, forwarded=!!fcs.forwarded_at;
     const caseActive=caseRow && caseRow.status!=='Done';
     let A='';
