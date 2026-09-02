@@ -1024,7 +1024,7 @@
   // How an instance's number reads on screen. Invoice Processing calls it the "JainE id" and
   // prefixes it with J (J1, J2, J3…) — every ordinary workflow keeps the plain No. — 1, 2, 3.
   function wfCaseNoText(c){
-    if(c && c.flow_id===26) return 'J'+String(c.jaine_id||c.case_no||0);
+    if(c && c.flow_id===26) return String(c.jaine_id||c.case_no||0);
     return String((c&&c.case_no)||0);
   }
   // Is this the bill-style workflow (Invoice Processing)? Decided from the workflow's OWN detail
