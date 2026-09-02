@@ -1603,21 +1603,22 @@
      step. Leading with it spent the most valuable characters saying nothing.
 
      Attachments are skipped - an s3 path is a file, not something to read in a title. */
-  /* A CANCELLED CHEQUE: the same cheque as the Cheque button, with a cancel badge on it, so the
+  /* A CHEQUE AND A CROSS: the same cheque the Cheque button uses, with a cross against it, so the
      two buttons read as one object in two states rather than two unrelated pictures. That is what
      "No Cheque" actually means - this bill is being paid, just not by cheque.
      What it replaced was a prohibition sign, which reads as "blocked" or "not allowed".
-     Built from position alone - no text-stroke, no colour hard-coded to the button - so it renders
-     the same wherever it is put. A slash laid over the cheque was tried first and is invisible:
-     both glyphs are the same colour, so it just looked like an ordinary cheque, which is the
-     opposite meaning. */
+     The cross sits CLEAR of the cheque's corner, which is not fussiness: laid over the cheque it
+     disappears, because both glyphs are the same colour and simply merge into one shape - the same
+     reason a slash across it was tried first and came out looking like an ordinary cheque, which is
+     the opposite meaning. Position alone does the work here, with no text-stroke and no colour
+     hard-coded to the button, so it renders the same wherever it is put. */
   function wfNoChequeIcon(px){
     const f=px||13;
     return '<span class="fa-stack" style="font-size:'+f+'px;width:1.5em;height:1.35em;'
       +'line-height:1.35em;vertical-align:middle">'
       +'<i class="fa-solid fa-money-check fa-stack-1x" style="left:-.1em"></i>'
-      +'<i class="fa-solid fa-circle-xmark" style="position:absolute;font-size:.62em;'
-        +'right:-.12em;bottom:-.14em"></i>'
+      +'<i class="fa-solid fa-xmark" style="position:absolute;font-size:.68em;'
+        +'right:-.2em;bottom:-.22em"></i>'
     +'</span>';
   }
   function wfTaskLine(det,taskFields){
