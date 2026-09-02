@@ -811,7 +811,7 @@
     // Workflow rows show the full concatenated title (step + filled-in details), same as taskRow, and
     // in Completed This Week (showDoneDate) the title wraps in full instead of clipping.
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
-    const wfCombined=wfRowTitle(wfInfo,list);
+    const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const titleHtml=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
@@ -1618,7 +1618,9 @@
     return rows.slice().sort(function(a,b){
         return (rank(a.label)-rank(b.label)) || (seen[a.label]-seen[b.label]);
       })
-      .map(function(d){ return d.label+': '+wfDetailDisp(d.value); })
+      /* Just the value. "Company: X · Bill Date: Y" spent half the line repeating words the
+         reader already knows from position - the company is obviously the company. */
+      .map(function(d){ return wfDetailDisp(d.value); })
       .join(' \u00b7 ');
   }
   /* What a workflow task is CALLED in a list. On a flow that names its tasks after the instance
@@ -1626,12 +1628,19 @@
      - and deliberately not the step name: which step it is sitting at is the one thing the person
      opening it already knows, since it is in their list because it is their step. Every other
      workflow keeps step-name-first, as before. */
-  function wfRowTitle(wfInfo,list){
+  function wfRowTitle(wfInfo,list,storedDesc){
     if(!wfInfo) return '';
     const det=Array.isArray(wfInfo.details)?wfInfo.details:[];
-    // a flow that states its own naming order takes it, step name and all, and stops here
+    /* A flow that states its own naming order is named from the description the DATABASE built
+       (acc.wf_task_desc, kept current by a trigger) rather than rebuilt here. Two places
+       computing the same name is how they drifted apart: the stored one led with the JainE id
+       and carried no labels, while this one led with the Company and repeated every label.
+       One source of truth, so the list, the task page, the calendar and the email cannot
+       disagree - and every task already created is already correct, with nothing to migrate. */
     if(Array.isArray(wfInfo.taskFields)&&wfInfo.taskFields.length){
-      const t=wfTaskLine(det,wfInfo.taskFields);
+      const stored=String(storedDesc==null?'':storedDesc).trim();
+      if(stored) return stored;
+      const t=wfTaskLine(det,wfInfo.taskFields);   // only if the stored one is somehow missing
       if(t) return t;
     }
     const line=wfDetailsInline(det);
@@ -4898,7 +4907,7 @@
     /* Named the same way the list names it, so opening a task does not rename it. */
     const wfTaskFields=(Array.isArray(flow&&flow.task_fields)&&flow.task_fields.length)?flow.task_fields:null;
     const wfHeadTitle=wfTaskFields
-      ? (wfTaskLine(wfDetailsArr,wfTaskFields)||t.title)
+      ? (String(t.description||'').trim()||wfTaskLine(wfDetailsArr,wfTaskFields)||t.title)
       : (flow&&flow.tracker_sum_field)
       ? (wfInline||t.title)
       : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
@@ -8039,7 +8048,7 @@
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    const wfCombined=wfRowTitle(wfInfo,list);
+    const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
