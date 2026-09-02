@@ -1603,29 +1603,6 @@
      step. Leading with it spent the most valuable characters saying nothing.
 
      Attachments are skipped - an s3 path is a file, not something to read in a title. */
-  /* A CHEQUE WITH A CROSS THROUGH IT: the same cheque the Cheque button uses, crossed out, so the
-     two buttons read as one object in two states rather than two unrelated pictures. That is what
-     "No Cheque" actually means - this bill is being paid, just not by cheque. What it replaced was
-     a prohibition sign, which reads as "blocked" or "not allowed".
-
-     The cross is RED, and that is what makes it work rather than decoration. Drawn in the icon's
-     own colour it vanishes: both glyphs are then the same colour and merge into one shape, so it
-     comes out looking like an ordinary cheque - the exact opposite meaning. A slash across it, and
-     a larger cross whose arms overhang, were both tried and both failed the same way, with only the
-     parts outside the cheque surviving. A contrasting colour is the only thing that keeps a mark
-     legible ON TOP of a solid glyph, and red is what cancellation already means here.
-
-     Sized in em against the stack, so it scales with whatever font-size the caller passes - 13px in
-     a task-list button, larger inline - without needing separate artwork per size. */
-  function wfNoChequeIcon(px){
-    const f=px||13;
-    return '<span class="fa-stack" style="font-size:'+f+'px;width:1.5em;height:1.35em;'
-      +'line-height:1.35em;vertical-align:middle">'
-      +'<i class="fa-solid fa-money-check fa-stack-1x"></i>'
-      +'<i class="fa-solid fa-xmark" style="position:absolute;left:50%;top:50%;'
-        +'transform:translate(-50%,-50%);font-size:.95em;color:#dc2626"></i>'
-    +'</span>';
-  }
   function wfTaskLine(det,taskFields){
     const order=Array.isArray(taskFields)?taskFields:[];
     const rows=(det||[]).filter(function(d){
@@ -2806,7 +2783,7 @@
           // This instance deliberately bypassed this step (Invoice Processing's No-Cheque path) —
           // it never happened for this bill, which is a different thing from not-yet-reached.
           if(Array.isArray(c.skipped_seqs)&&c.skipped_seqs.indexOf(s.seq)!==-1){
-            return '<td><span class="wf-pill" style="background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0">Nil</span></td>';
+            return '<td><span class="wf-pill" style="background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0" title="Not applicable to this bill — the No Cheque path skips this step">NA</span></td>';
           }
           const cs=(byCase[c.id]||{})[s.seq];
           if(cs&&(cs.status==='done'||cs.forwarded_at)){ var rcv=cs.received_at?wfDT(cs.received_at):'—'; var don=cs.forwarded_at?wfDT(cs.forwarded_at):'—'; return '<td><span class="wf-pill ok wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-check"></i> Done<span class="wf-tip-txt">Received: '+esc2(rcv)+'<br>Done: '+esc2(don)+'</span></span></td>'; }
@@ -4716,13 +4693,30 @@
           if(!v.length){ toast('Please choose who does '+(seqs.length>1?'these steps':'this step'),'warn'); return; }
           seqs.forEach(function(sq){ members[sq]=v.slice(); });
         }
-        const {error}=await ACC().rpc('wf_create_instance',
+        const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
           {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
         if(error)throw error;
         // same on creation: attached, thought better of it, then created
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
-        toast(N.one+' created — first step assigned','ok');
+        /* Say WHICH id it got. Numbers are handed out at the moment of saving, so two people
+           filing bills at the same time do not get the numbers they expected - somebody who has
+           just entered up to 140 assumes the next is 141 and it is 142, because a colleague saved
+           one in between. The only cure is to state the id that was actually assigned, at the
+           moment it is assigned, rather than leaving it to be inferred. Read back from the created
+           row so it is the real stored value and not a guess made here. */
+        let newIdText='';
+        try{
+          if(newCaseId!=null){
+            const {data:mk}=await ACC().from('flow_cases').select('jaine_id,case_no')
+              .eq('id',newCaseId).maybeSingle();
+            const v=mk&&(mk.jaine_id!=null?mk.jaine_id:mk.case_no);
+            if(v!=null&&String(v).trim()!=='') newIdText=String(v);
+          }
+        }catch(_e){}    // the bill exists either way; a missing id is no reason to look like a failure
+        toast(newIdText
+          ? ('New '+N.one+' created — Id: '+newIdText)
+          : (N.one+' created — first step assigned'),'ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
     }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
@@ -4896,8 +4890,8 @@
         // gets filed, but skips the rest (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
         // "real" one, so both get equal weight rather than one reading as a fallback of the other.
         else if(flow&&flow.id===26&&fcs.seq===5){
-          A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-money-check"></i> Cheque</button>'
-           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)">'+wfNoChequeIcon(13)+' No Cheque</button>';
+          A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Cheque</button>'
+           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
         }
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
@@ -8054,8 +8048,8 @@
            plain forward on that step. */
         wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${
           wfInfo.chequeChoice
-          ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-money-check"></i></button>`
-            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)">${wfNoChequeIcon(13)}</button>`
+          ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-indian-rupee-sign"></i></button>`
+            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)"><i class="fa-solid fa-ban"></i></button>`
           : wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
