@@ -1699,6 +1699,19 @@
       +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v,flow)+'</div></div>'):'');
     return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
   }
+  /* The Step Task page's own Description block — a separate render path from wfCaseSummaryHtml
+     above (that one is the case-timeline panel), so fixing one was never going to touch the other.
+     Same rule, same field list (WF_SUMMARY_FIELDS, already without Wheredoc Id): just the value,
+     leading with the JainE id, no "Company"/"Bill No."/"Bill Date" labels repeated on screen. */
+  function wfInvoiceTaskDetailsHtml(details,caseRow){
+    const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    const lines=[esc2(wfCaseNoText(caseRow))];
+    WF_SUMMARY_FIELDS.forEach(function(k){
+      const v=by[k];
+      if(v!=null && String(v).trim()) lines.push(esc2(wfDetailDisp(v)));
+    });
+    return lines.join('<br>');
+  }
   // A repeated-set (multi-entry) field's value is stored as one comma-joined string, one segment
   // per set. Only actually split & labeled per-set when this flow IS multi-entry
   // (flow.multiple_fields) — otherwise a value that just happens to contain a comma (e.g. someone
@@ -4880,7 +4893,7 @@
        "Label: value, value, value" lines, where nothing tells you which amount belongs to which
        date. Everything else keeps the plain list. */
     const wfDayTable=wfIsDaywise(flow,wfDetailsArr)?wfDaywiseHtml(wfDetailsArr,flow):'';
-    const wfDescFmt=wfDayTable?'':wfDetailsFmt(wfDetailsArr);
+    const wfDescFmt=wfDayTable?'':(flow&&flow.id===26?wfInvoiceTaskDetailsHtml(wfDetailsArr,caseRow):wfDetailsFmt(wfDetailsArr));
     // Same on the task itself. The step is still named right below it, in "Step 1 of 2 - HR Review".
     /* Named the same way the list names it, so opening a task does not rename it. */
     const wfTaskFields=(Array.isArray(flow&&flow.task_fields)&&flow.task_fields.length)?flow.task_fields:null;
