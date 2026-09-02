@@ -33,11 +33,16 @@ const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
 
    The failure mode this split had the first time round is handled and must stay handled: with no
    OpenAI key the function used to refuse `work` outright, so nothing was transcribed either. Now a
-   missing OPENAI_API_KEY only PAUSES THE JUDGE - see oneStep, which drops qa_pending out of the
+   missing CHATGPT_API_KEY only PAUSES THE JUDGE - see oneStep, which drops qa_pending out of the
    claimable set so transcription keeps draining and the assessments queue up until the key is set.
    No attempt is consumed and no row is failed for a key that simply is not there yet. */
 const OPENAI_URL = Deno.env.get("OPENAI_BASE_URL") || "https://api.openai.com/v1";
-const OPENAI_QA_MODEL = Deno.env.get("OPENAI_QA_MODEL") || Deno.env.get("QA_MODEL") || "gpt-4.1";
+/* CHATGPT_API_KEY is the name the secret actually carries in this project's Edge Function Secrets, so
+   it is the name read first. OPENAI_API_KEY is accepted as a fallback for the conventional name, and
+   the model override takes either spelling for the same reason - whichever is set wins, and setting
+   neither leaves the documented default. */
+const OPENAI_QA_MODEL = Deno.env.get("CHATGPT_QA_MODEL") || Deno.env.get("OPENAI_QA_MODEL")
+  || Deno.env.get("QA_MODEL") || "gpt-4.1";
 /* Generous, because on a reasoning model the thinking tokens come out of this same budget and a reply
    that runs out mid-string is not valid JSON. */
 const QA_MAX_TOKENS = Number(Deno.env.get("QA_MAX_TOKENS") || 16000);
@@ -890,7 +895,7 @@ async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel
       const { count: waiting } = await db.schema("acc").from("transcription_queue")
         .select("id", { count: "exact", head: true }).eq("status", "qa_pending");
       if ((waiting ?? 0) > 0) {
-        return { done: false, skipped: `OPENAI_API_KEY is not set - ${waiting} transcript(s) are ` +
+        return { done: false, skipped: `CHATGPT_API_KEY is not set - ${waiting} transcript(s) are ` +
                  "waiting to be assessed. Nothing is lost; set the secret and they are judged in order." };
       }
     }
@@ -960,7 +965,7 @@ async function doWork(db: DB, geminiKey: string, openaiKey: string, geminiModel:
   return { processed: steps.length, remaining: remaining ?? 0, note,
            transcription_model: geminiModel, transcription_vendor: "gemini",
            qa_model: qaModel, qa_vendor: "openai",
-           ...(openaiKey ? {} : { qa_paused: "OPENAI_API_KEY is not set", qa_waiting: qaWaiting }),
+           ...(openaiKey ? {} : { qa_paused: "CHATGPT_API_KEY is not set", qa_waiting: qaWaiting }),
            ...promoted, steps };
 }
 
@@ -972,9 +977,10 @@ Deno.serve(async (req: Request) => {
   const SRV = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const SECRET = Deno.env.get("SYNC_SECRET");
   const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || "";
-  const OPENAI_KEY = Deno.env.get("OPENAI_API_KEY") || "";
-  /* ONE KEY PER HALF. GEMINI_API_KEY transcribes, OPENAI_API_KEY judges. Neither is ever logged,
-     returned or written to a row - only whether it is present. */
+  const OPENAI_KEY = Deno.env.get("CHATGPT_API_KEY") || Deno.env.get("OPENAI_API_KEY") || "";
+  /* ONE KEY PER HALF. GEMINI_API_KEY transcribes, CHATGPT_API_KEY judges - that is the name this
+     project's secret already carries, with OPENAI_API_KEY honoured as a fallback. Neither key is ever
+     logged, returned or written to a row - only whether it is present. */
 
   const secretHeader = req.headers.get("x-sync-secret") || "";
   const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
@@ -1019,7 +1025,7 @@ Deno.serve(async (req: Request) => {
   const geminiModel = reqGemini || GEMINI_MODEL;
   const qaModel = reqQa || OPENAI_QA_MODEL;
 
-  /* ONLY THE TRANSCRIBER'S KEY BLOCKS THE RUN. A missing OPENAI_API_KEY is reported and the judge is
+  /* ONLY THE TRANSCRIBER'S KEY BLOCKS THE RUN. A missing CHATGPT_API_KEY is reported and the judge is
      paused (oneStep), because refusing `work` over it is precisely the regression that left
      recordings transcribed and never assessed the last time these two halves were split. */
   const needsModels = action === "work" || action === "run" || action === "retry";
@@ -1058,8 +1064,8 @@ Deno.serve(async (req: Request) => {
                  transcription_model: geminiModel, transcription_vendor: "gemini",
                  qa_model: qaModel, qa_vendor: "openai",
                  timezone: APP_TZ_NAME, next_snapshot_for: appYesterday(),
-                 gemini_key_present: !!GEMINI_KEY, openai_key_present: !!OPENAI_KEY,
-                 ...(OPENAI_KEY ? {} : { qa_paused: "OPENAI_API_KEY is not set - transcripts are queued for QA, not lost" }) });
+                 gemini_key_present: !!GEMINI_KEY, chatgpt_key_present: !!OPENAI_KEY,
+                 ...(OPENAI_KEY ? {} : { qa_paused: "CHATGPT_API_KEY is not set - transcripts are queued for QA, not lost" }) });
     }
 
     if (action === "retry") {

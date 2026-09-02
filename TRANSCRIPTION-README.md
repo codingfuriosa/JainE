@@ -81,14 +81,14 @@ The function writes to columns the migration creates.
 applying them to a database that already has the pipeline changes nothing.
 
 **2. Set the secrets** (Supabase → Edge Functions → Secrets). **Two keys, one per half:**
-`GEMINI_API_KEY` transcribes and `OPENAI_API_KEY` judges. Every other secret has a working default.
+`GEMINI_API_KEY` transcribes and `CHATGPT_API_KEY` judges. Every other secret has a working default.
 
 | Secret | Default | What it does |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | **Required.** Transcription. Never reaches the browser. |
-| `OPENAI_API_KEY` | — | **Required for QA.** Without it recordings still transcribe and the assessments queue up — see below. Never reaches the browser. |
+| `CHATGPT_API_KEY` | — | **Required for QA.** The OpenAI key, under the name this project's secret already uses (`OPENAI_API_KEY` is read as a fallback). Without it recordings still transcribe and the assessments queue up — see below. Never reaches the browser. |
 | `GEMINI_MODEL` | `gemini-flash-latest` | The transcriber. |
-| `OPENAI_QA_MODEL` | `gpt-4.1` | The judge. |
+| `CHATGPT_QA_MODEL` | `gpt-4.1` | The judge. `OPENAI_QA_MODEL` and `QA_MODEL` are accepted too. |
 | `QA_MAX_TOKENS` | `16000` | Output budget for the QA reply. On a reasoning model the thinking comes out of this too. |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Only for an Azure or gateway endpoint. |
 | `APP_TZ_OFFSET_MIN` | `330` | IST. Decides what "yesterday" means. |
@@ -188,7 +188,7 @@ phases. The QA phase calls a different vendor and that is the whole of it — th
 model, so there was nothing to edit there.
 
 **The failure mode this split had the first time is handled.** With no OpenAI key the function used to
-refuse `work` outright, so recordings were not even transcribed. Now a missing `OPENAI_API_KEY` only
+refuse `work` outright, so recordings were not even transcribed. Now a missing `CHATGPT_API_KEY` only
 **pauses the judge**: `oneStep` drops `qa_pending` out of the claimable set, so transcription keeps
 draining in order and the assessments bank up until the key is set. No attempt is consumed and no row
 is failed over a key that is simply absent. Both `status` and every `work` reply carry `qa_paused` and
@@ -207,7 +207,7 @@ express it either, so this is unchanged by the move.) The guarantee therefore li
 validation: a reply missing any of the five assessments is refused and retried, and nothing
 half-formed is ever saved.
 
-`OPENAI_QA_MODEL` moves the judge. An o-series or gpt-5 name is detected and sent
+`CHATGPT_QA_MODEL` moves the judge. An o-series or gpt-5 name is detected and sent
 `max_completion_tokens` with no `temperature`; the 4.x chat models get `max_tokens` and
 `temperature: 0`, which is what makes two runs over the same call comparable.
 
@@ -367,7 +367,7 @@ it already has.
 15 minutes); whether `GEMINI_API_KEY` is set; then `{"action":"status"}`.
 
 **Recordings are transcribing but nothing is being assessed.** `{"action":"status"}`, then look at
-`openai_key_present` and `qa_paused`. This is the deliberate behaviour when `OPENAI_API_KEY` is not
+`chatgpt_key_present` and `qa_paused`. This is the deliberate behaviour when `CHATGPT_API_KEY` is not
 set — the transcripts are queued at `qa_pending`, not lost. Set the secret and they are judged in
 order on the next tick, with no re-transcription and no second audio bill.
 
