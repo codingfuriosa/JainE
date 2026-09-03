@@ -6,7 +6,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 import { TRANSCRIBE_PROMPT } from "./transcribe-prompt.ts";
 import { QA_SYSTEM_PROMPT, buildQaUserMessage } from "./qa-prompt.ts";
-import type { QaContext } from "./qa-prompt.ts";
+import type { QaContext, PriorCall, PriorQualification } from "./qa-prompt.ts";
 
 type DB = ReturnType<typeof createClient>;
 
@@ -564,38 +564,181 @@ async function transcribePhase(db: DB, item: any, geminiKey: string, geminiModel
            transcript_id: tid, turns: turns.length, characters: body.length };
 }
 
+/* THE LEAD'S EARLIER CALLS, assembled from the two tables that already hold them: crm_followups is
+   the full lead history (a repeated recording is never transcribed twice, but its follow-up still has
+   a row there, so nothing drops out of the story) and followup_qa carries whatever this pipeline has
+   already concluded about those same calls.
+
+   EARLIER means earlier, not "lower id". Rows are ordered on communication_time where both rows have
+   one and on follow_up_id otherwise, so a back-dated follow-up entered late cannot smuggle itself in
+   as history for a call that happened before it. */
+async function priorCallsFor(db: DB, leadId: number, current: {
+  follow_up_id: number; communication_time?: string | null; call_date?: string | null;
+}): Promise<PriorCall[]> {
+  const { data: rows } = await db.schema("acc").from("crm_followups")
+    .select("follow_up_id, communication_time, call_date, call_start_text, status, remarks")
+    .eq("lead_id", leadId).limit(200);
+  if (!rows || !rows.length) return [];
+
+  /* THE SAME ORDER acc.lead_level_progress_v USES - communication_time with nulls FIRST, then
+     follow_up_id. It has to be the same: that view is where prior_max_status comes from, and a
+     history list ordered differently from the ladder it is quoted beside would contradict it. */
+  const ms = (r: any) => {
+    const t = r.communication_time || null;
+    if (!t) return -Infinity;
+    const n = Date.parse(String(t));
+    return Number.isFinite(n) ? n : -Infinity;
+  };
+  const before = (r: any, cur: any) => {
+    const a = ms(r), b = ms(cur);
+    return a !== b ? a < b : Number(r.follow_up_id) < Number(cur.follow_up_id);
+  };
+  const earlier = (rows as any[])
+    .filter((r) => Number(r.follow_up_id) !== Number(current.follow_up_id) && before(r, current))
+    .sort((x, y) => ms(x) - ms(y) || Number(x.follow_up_id) - Number(y.follow_up_id));
+  if (!earlier.length) return [];
+
+  const ids = earlier.map((r) => Number(r.follow_up_id));
+  const { data: qa } = await db.schema("acc").from("followup_qa")
+    .select("follow_up_id, ai_assessed_status, mismatch_type").in("follow_up_id", ids);
+  const byId = new Map<number, any>();
+  for (const q of (qa || []) as any[]) byId.set(Number(q.follow_up_id), q);
+
+  return earlier.map((r) => {
+    const q = byId.get(Number(r.follow_up_id));
+    return {
+      follow_up_id: Number(r.follow_up_id),
+      call_date_label: fmtWallDate(r.call_start_text)
+        ?? (r.call_date ? fmtWallDate(String(r.call_date) + "T00:00") : null),
+      crm_status: r.status ?? null,
+      ai_assessed_status: q?.ai_assessed_status ?? null,
+      mismatch_type: q?.mismatch_type ?? null,
+      remarks: r.remarks ?? null,
+    } as PriorCall;
+  });
+}
+
+/* STATUSES THAT MEAN THE LEAD HAS ALREADY CLEARED THE QUALIFICATION BAR. The database ranks these
+   for us - acc.crm_status_rank puts Fresh 1, In Follow Up 2, Qualified 3, Site Visited 4, OV 5,
+   Booked 6 - and rank >= 3 is the bar. This function is the fallback for the handful of statuses the
+   ranker returns null for because they are written per visit date ("Repeat Site Visited on 11/04/26")
+   and so cannot be a fixed enum entry. A lead that has been to the site has plainly qualified. */
+const QUALIFIED_RANK = 3;
+function isQualifiedOnwards(status: string | null): boolean {
+  const s = String(status || "").trim();
+  if (!s) return false;
+  return s === "Qualified" || s === "OV" || s === "Booked"
+    || /^(repeat\s+)?site visit(ed)?\b/i.test(s);
+}
+
+/* THE RATCHET, READ OFF THE LEAD'S OWN HISTORY. Qualification only moves forward: once a lead has
+   met the bar, a later call can carry it on as Qualified or close it as Lost, but it cannot put it
+   back to In Follow Up. In real life the agent keeps working a qualified lead - a new callback date
+   and fresh remarks are the correct way to do that - and the audit was reading that as the lead
+   slipping back, which is what produced the false "qualified but should not have been qualified"
+   flags this change exists to remove.
+
+   WHETHER the lead was already qualified comes from acc.followup_timeline_v's prior_max_status: the
+   highest rank this lead reached BEFORE this follow-up, computed by the same view the dashboard's
+   own "Status regressed" tag is derived from, so the two cannot disagree. The per-call list is only
+   consulted for the statuses that view ranks null, and for what an earlier AUDIT concluded.
+
+   `sound` is the guard that keeps this from laundering bad qualifications: a prior Qualified that an
+   earlier audit already flagged as unsupported does NOT earn the ratchet, so a lead qualified on no
+   evidence stays catchable on every call after it. Only a qualification that stood up protects the
+   ones that follow. An earlier AUDIT verdict of Qualified is sound by construction - that is this
+   pipeline's own reading of the conversation, not the CRM's claim about it. Note the one honest gap:
+   an earlier Qualified that has not been audited yet is taken at face value, because the CRM record
+   is all there is to go on at that point. The queue runs oldest-first, so it is rarely the case. */
+function priorQualificationFrom(prior: PriorCall[],
+                                progress: { prior_max_rank?: number | null; prior_max_status?: string | null } | null):
+  PriorQualification | null {
+  const ladderRank = Number(progress?.prior_max_rank ?? NaN);
+  const byLadder = Number.isFinite(ladderRank) && ladderRank >= QUALIFIED_RANK;
+
+  /* Newest first: the most recent qualification is the one that governs this call. */
+  let unsound: PriorQualification | null = null;
+  for (let i = prior.length - 1; i >= 0; i--) {
+    const p = prior[i];
+    const byAudit = String(p.ai_assessed_status || "").trim() === "Qualified";
+    const byCrm = isQualifiedOnwards(p.crm_status);
+    if (!byAudit && !byCrm) continue;
+    const flagged = p.mismatch_type === "qualified_should_not_have_been_qualified";
+    if (byAudit || !flagged) {
+      return { qualified: true, sound: true, follow_up_id: p.follow_up_id,
+        call_date_label: p.call_date_label, source: byAudit ? "audit" : "crm",
+        note: byAudit
+          ? "the audit of that call read it as Qualified on the conversation's own evidence"
+          : `the CRM logged that follow-up as "${p.crm_status}" and no audit has overturned it` };
+    }
+    unsound = unsound || { qualified: true, sound: false, follow_up_id: p.follow_up_id,
+      call_date_label: p.call_date_label, source: "crm",
+      note: "the audit of that call found the qualification unsupported" };
+  }
+  if (unsound) return unsound;
+
+  /* The ladder says the bar was cleared but no individual row matched - a status this function's
+     fallback does not name, on a lead whose history rows were trimmed. Trust the ladder. */
+  if (byLadder) {
+    return { qualified: true, sound: true, follow_up_id: null, call_date_label: null,
+      source: "ladder",
+      note: `the CRM's own history has this lead reaching "${progress?.prior_max_status || "Qualified"}" before this call` };
+  }
+  return prior.length ? { qualified: false, sound: false, follow_up_id: null, call_date_label: null,
+    source: null, note: "no earlier call took this lead past In Follow Up" } : null;
+}
+
 /* The four mismatch categories, derived HERE from the two statuses rather than trusted from the
-   model's own field. */
-function deriveStatusMatch(crmStatus: string | null, ai: string | null):
-  { status_match: boolean | null; mismatch_type: string | null; note: string } {
+   model's own field - and now with the ratchet applied to the model's verdict first. The prompt
+   states the rule as well, but a prompt is a request and this is the guarantee: an "In Follow Up"
+   verdict on a soundly qualified lead is lifted back to Qualified before anything is compared or
+   counted, so the dashboard cannot show the downgrade the CRM is not allowed to make. Lost is
+   untouched - a qualified lead CAN die, and closing the door is the one move that still counts. */
+function deriveStatusMatch(crmStatus: string | null, ai: string | null,
+                           prior: PriorQualification | null):
+  { status_match: boolean | null; mismatch_type: string | null; note: string;
+    effective_status: string | null; ratcheted: boolean } {
   const crm = String(crmStatus || "").trim();
-  const a = String(ai || "").trim();
+  const model = String(ai || "").trim();
+  const ratcheted = model === "In Follow Up" && !!prior && prior.qualified && prior.sound;
+  const a = ratcheted ? "Qualified" : model;
+  const ratchetNote = ratcheted
+    ? ` The call itself read as "In Follow Up", but this lead was already qualified on ${
+        prior?.call_date_label || "an earlier call"} and a qualified lead is not put back into
+follow-up - a next follow-up date and remarks are the normal way to work one - so the assessment is
+carried forward as Qualified.`.replace(/\s+/g, " ")
+    : "";
+  const done = (r: { status_match: boolean | null; mismatch_type: string | null; note: string }) =>
+    ({ ...r, note: r.note + ratchetNote, effective_status: a || null, ratcheted });
+
   if (!a || a === "Unclear") {
-    return { status_match: null, mismatch_type: null,
-      note: "The conversation did not establish an outcome, so it neither agrees nor disagrees with the CRM." };
+    return done({ status_match: null, mismatch_type: null,
+      note: "The conversation did not establish an outcome, so it neither agrees nor disagrees with the CRM." });
   }
   if (!["Lost", "Qualified", "In Follow Up"].includes(crm)) {
-    return { status_match: null, mismatch_type: null,
-      note: `CRM status "${crm || "(none)"}" is outside the four mismatch categories, so no status verdict was counted.` };
+    return done({ status_match: null, mismatch_type: null,
+      note: `CRM status "${crm || "(none)"}" is outside the four mismatch categories, so no status verdict was counted.` });
   }
   if (crm === a) {
-    return { status_match: true, mismatch_type: null,
-      note: `The CRM has this follow-up as "${crm}" and the call agrees.` };
+    return done({ status_match: true, mismatch_type: null,
+      note: `The CRM has this follow-up as "${crm}" and the call agrees.` });
   }
   if (crm === "Lost") {
-    return { status_match: false, mismatch_type: "lost_should_not_have_been_lost",
-      note: `The CRM marked this follow-up Lost, but the call reads as "${a}" - the lead was written off while still live.` };
+    return done({ status_match: false, mismatch_type: "lost_should_not_have_been_lost",
+      note: `The CRM marked this follow-up Lost, but the call reads as "${a}" - the lead was written off while still live.` });
   }
   if (crm === "Qualified") {
-    return { status_match: false, mismatch_type: "qualified_should_not_have_been_qualified",
-      note: `The CRM marked this follow-up Qualified, but the call does not carry the evidence to qualify the lead (it reads as "${a}").` };
+    return done({ status_match: false, mismatch_type: "qualified_should_not_have_been_qualified",
+      note: `The CRM marked this follow-up Qualified, but the call does not carry the evidence to qualify the lead (it reads as "${a}").` });
   }
   if (a === "Lost") {
-    return { status_match: false, mismatch_type: "in_followup_should_have_been_lost",
-      note: "The CRM still has this lead In Follow Up, but on the call the customer closed the door - the team is chasing a closed lead." };
+    return done({ status_match: false, mismatch_type: "in_followup_should_have_been_lost",
+      note: "The CRM still has this lead In Follow Up, but on the call the customer closed the door - the team is chasing a closed lead." });
   }
-  return { status_match: false, mismatch_type: "in_followup_should_have_been_qualified",
-    note: "The CRM has this lead In Follow Up, but the call meets the qualification test - it should be moved on." };
+  return done({ status_match: false, mismatch_type: "in_followup_should_have_been_qualified",
+    note: ratcheted
+      ? "The CRM logged this follow-up as In Follow Up on a lead that had already been qualified - a qualified lead is worked with a callback date, not put back into follow-up."
+      : "The CRM has this lead In Follow Up, but the call meets the qualification test - it should be moved on." });
 }
 
 function qaScoreFor(qa: unknown): number | null {
@@ -726,6 +869,22 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
              transcription_status: tr?.status || "missing" };
   }
 
+  /* THE HISTORY, READ BEFORE THE JUDGE IS CALLED. It goes into the prompt as CRM FACT so the model
+     can honour the ratchet in its own reasoning, and the same computed value is applied
+     deterministically to whatever comes back - see deriveStatusMatch. */
+  const priorCalls = await priorCallsFor(db, Number(fu.lead_id), {
+    follow_up_id: Number(fu.follow_up_id),
+    communication_time: fu.communication_time ?? null,
+    call_date: fu.call_date ?? null,
+  });
+  /* prior_max_status is the highest rung this lead reached BEFORE this follow-up, straight from the
+     view that already computes it for the dashboard's regression tag. Read separately from the call
+     list so the two can be cross-checked rather than one being inferred from the other. */
+  const { data: progress } = await db.schema("acc").from("followup_timeline_v")
+    .select("prior_max_rank, prior_max_status, prev_status, level_regression_severity")
+    .eq("follow_up_id", Number(fu.follow_up_id)).maybeSingle();
+  const priorQual = priorQualificationFrom(priorCalls, progress as any);
+
   const ctx: QaContext = {
     lead_id: Number(fu.lead_id),
     lead_name: fu.lead_name ?? lead?.lead_name ?? null,
@@ -744,6 +903,8 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
     call_duration: fu.call_duration === null || fu.call_duration === undefined ? null : Number(fu.call_duration),
     languages: Array.isArray(tr.languages) ? tr.languages.map((l: string) => LANG_LABEL[l] || l) : null,
     transcript: String(tr.transcript_text),
+    prior_calls: priorCalls,
+    prior_qualification: priorQual,
   };
 
   let raw = "";
@@ -768,9 +929,11 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
     return failQueue("the QA reply was missing one of the five required assessments");
   }
 
-  const derived = deriveStatusMatch(ctx.crm_status, String(sa.ai_assessed_status || ""));
+  const derived = deriveStatusMatch(ctx.crm_status, String(sa.ai_assessed_status || ""), priorQual);
   /* A pitch that never happened has no score. Storing 0 would drag the day's average down as though
      the agent had pitched badly. */
+  const modelStatus = String(sa.ai_assessed_status || "").trim() || null;
+  const aiStatus = derived.effective_status ?? modelStatus;
   const pitchStatus = String(pitch.status || "").trim() || null;
   const pitchScore = pitchStatus === "Not Verifiable" || pitch.score === null || pitch.score === undefined
     ? null : Math.max(0, Math.min(100, Math.round(Number(pitch.score))));
@@ -796,13 +959,24 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
 
     pitch_accuracy: pitch, followup_date_accuracy: fdate,
     lost_reason_accuracy: lreason, remarks_accuracy: rem,
-    status_assessment: { ...sa, derived_status_match: derived.status_match,
+    /* The stored ai_assessed_status is the EFFECTIVE one - the model's verdict after the ratchet has
+       been applied to it - because that is the verdict the dashboard's counters and the mismatch
+       category are derived from, and a stored status that disagreed with them would read as a bug.
+       The model's own untouched answer is kept beside it in model_assessed_status, with the history
+       it was lifted against, so the lift is always auditable rather than silent. */
+    status_assessment: { ...sa,
+                         ai_assessed_status: aiStatus,
+                         model_assessed_status: modelStatus,
+                         qualification_ratcheted: derived.ratcheted,
+                         prior_qualification: priorQual,
+                         prior_calls_considered: priorCalls.length,
+                         derived_status_match: derived.status_match,
                          derived_mismatch_type: derived.mismatch_type, derived_note: derived.note },
     pitch_score: pitchScore, pitch_status: pitchStatus,
     followup_date_status: String(fdate.status || "").trim() || null,
     lost_reason_status: String(lreason.status || "").trim() || null,
     remarks_status: String(rem.status || "").trim() || null,
-    ai_assessed_status: String(sa.ai_assessed_status || "").trim() || null,
+    ai_assessed_status: aiStatus,
     status_match: derived.status_match,
     mismatch_type: derived.mismatch_type,
     agent_qa: Array.isArray(p.agent_qa) ? p.agent_qa : null,
@@ -818,7 +992,8 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
   return { follow_up_id: item.follow_up_id, phase: "qa", status: "completed", qa_id: saved.id,
            pitch: pitchStatus, pitch_score: pitchScore,
            followup_date: fdate.status, lost_reason: lreason.status, remarks: rem.status,
-           crm_status: ctx.crm_status, ai_assessed_status: sa.ai_assessed_status,
+           crm_status: ctx.crm_status, ai_assessed_status: aiStatus,
+           model_assessed_status: modelStatus, qualification_ratcheted: derived.ratcheted,
            status_match: derived.status_match, mismatch_type: derived.mismatch_type };
 }
 
