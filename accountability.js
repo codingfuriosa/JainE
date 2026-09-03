@@ -1488,7 +1488,28 @@
     if(descKey&&String(by[descKey]||'').trim()){
       desc.push(String(by[descKey]).replace(/\|/g,' '));
     }
-    return { amount: amt.join(' ').toLowerCase(), desc: desc.join(' ').toLowerCase() };
+    /* EVERYTHING ELSE THE INSTANCE WAS FILLED IN WITH.
+       Only the amount and the description were indexed, so on Invoice Processing a bill could not
+       be found by the one thing anybody actually looks for - the company it is from. The Tracker
+       indexed it and the list beside it did not, which is why the same search worked on one tab and
+       not the other.
+       Built from the fields generally rather than by naming Company: a workflow calls its parties
+       whatever it likes (Company, Vendor, Party), and listing names here would leave the next one
+       unsearchable for the same reason. Amounts are already handled above, dates are searched by
+       the date range, and an attachment is a file path nobody types. */
+    const skipKeys=new Set([amtKey, descKey].filter(Boolean));
+    const txt=[];
+    Object.keys(by).forEach(function(l){
+      if(skipKeys.has(l)) return;
+      const v=String(by[l]==null?'':by[l]).trim();
+      if(!v) return;
+      if(v.indexOf('s3:')===0) return;                  // a stored file, not text
+      if(/^\d{4}-\d{2}-\d{2}/.test(v)) return;          // a date - the date range covers those
+      txt.push(v.replace(/\|/g,' '));
+    });
+    return { amount: amt.join(' ').toLowerCase(),
+             desc: desc.join(' ').toLowerCase(),
+             text: txt.join(' ').toLowerCase() };
   }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(wfDetailDisp(v)); }).filter(Boolean).join('<br>'); }
 
@@ -2426,6 +2447,47 @@
     if(route==='cheque')    return 'Cheque: every step in the normal order';
     return 'The route is chosen at Bill Booking (Payment) or at RTP (Cheque / No Cheque)';
   }
+  /* A draft, summarised by what has actually been filled in. Deliberately not the instance table:
+     a draft has no number, no step and no owner to show, so the columns of that table would be
+     mostly empty. What matters is what is in it and when it was last touched. */
+  function wfDraftsHtml(flow, drafts){
+    const N=wfNounOf(flow);
+    if(!drafts.length){
+      return '<div class="ac-empty" style="cursor:default">'
+        +'No drafts. Start a '+esc2(N.lc)+' and press <b>Save draft</b> to keep it here '
+        +'until you are ready to send it.</div>';
+    }
+    const sumKey=(flow.tracker_sum_field||'').trim();
+    const rows=drafts.map(function(d){
+      const det=Array.isArray(d.details)?d.details:[];
+      const filled=det.filter(function(x){ return x && String(x.value==null?'':x.value).trim(); });
+      const tot=sumKey?wfSumField((det.filter(function(x){ return x&&eq(x.label,sumKey); })[0]||{}).value):0;
+      const what=filled.filter(function(x){ return !eq(x.label,sumKey) && String(x.value).indexOf('s3:')!==0; })
+        .slice(0,3).map(function(x){ return esc2(wfDetailDisp(x.value)); }).join(' \u00b7 ');
+      return '<tr>'
+        +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
+        +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
+        +'<td>'+filled.length+' of '+det.length+' filled</td>'
+        +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
+        +'<td style="white-space:nowrap">'
+          +'<button class="ac-btn primary" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
+            +'<i class="fa-solid fa-pen"></i> Open</button> '
+          +'<button class="ac-btn danger ic" title="Delete this draft" onclick="wfDraftDelete('+d.id+')">'
+            +'<i class="fa-solid fa-trash"></i></button>'
+        +'</td></tr>';
+    }).join('');
+    return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
+      +'<th>'+esc2(sumKey||'Total')+'</th><th>What is in it</th><th>Filled</th>'
+      +'<th>Last saved</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+  window.wfDraftDelete=function(id){
+    wfConfirm({ title:'Delete this draft?', body:'It has not been sent to anyone, so nothing else is affected. This cannot be undone.',
+      okLabel:'Delete', okClass:'danger', onOk:async function(){
+        try{ const {error}=await ACC().from('flow_drafts').delete().eq('id',id); if(error)throw error; }
+        catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+        toast('Draft deleted','ok'); renderPage();
+      }});
+  };
   function wfTrackerHtml(flow, steps, cases, fcs){
     if(!steps.length) return '<div class="ac-empty" style="cursor:default">Add steps to this workflow to track them</div>';
     if(!cases.length) return '<div class="ac-empty" style="cursor:default">Nothing recorded yet</div>';
@@ -2727,11 +2789,11 @@
     /* Archive is not a pane of its own - it is the main pane showing its other half. Panes and
        buttons are therefore toggled against different keys. */
     const pane=(which==='archive')?'main':which;
-    ['main','tracker','forms'].forEach(function(k){
+    ['main','tracker','forms','drafts'].forEach(function(k){
       const p=$('wfPane_'+k);
       if(p) p.style.display=(k===pane)?'':'none';
     });
-    ['main','tracker','forms','archive'].forEach(function(k){
+    ['main','tracker','forms','archive','drafts'].forEach(function(k){
       const b=$('wfTabBtn_'+k);
       if(b) b.classList.toggle('on', k===which);
     });
@@ -2763,6 +2825,11 @@
     try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
+    /* Only ever this person's own - the row-level rule enforces it, and asking for everyone's
+       would return nothing anyway. A draft is working-out, not something colleagues should read. */
+    let drafts=[];
+    try{ const {data}=await ACC().from('flow_drafts').select('*').eq('flow_id',id)
+           .order('updated_at',{ascending:false}); drafts=data||[]; }catch(e){}
     if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
@@ -2935,7 +3002,7 @@
         // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
         const ownerKey=wfOwnerKey(c, byCase);
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
-        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
       }).join('');
@@ -2946,7 +3013,7 @@
           +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
         +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, anyone it is with, amount or description…':'Search by No., anyone it is with, amount or description…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Company, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -2996,6 +3063,11 @@
           +(maySeeRoster?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
           /* Archive sits next to the list it came out of. Shown only where the workflow asked for
              it, so no other workflow's tab strip changes. */
+          /* Drafts sit beside the list they will join. Only where the workflow offers them, and
+             the count is this person's own - nobody sees anybody else's. */
+          +(flow.allow_drafts?('<button class="wf-tab" id="wfTabBtn_drafts" onclick="wfTabShow(\'drafts\')">'
+              +'<i class="fa-regular fa-floppy-disk"></i> Drafts'
+              +(drafts.length?(' <span class="cnt">'+drafts.length+'</span>'):'')+'</button>'):'')
           +(archiveOn?('<button class="wf-tab" id="wfTabBtn_archive" onclick="wfTabShow(\'archive\')">'
               +'<i class="fa-solid fa-box-archive"></i> Archive'
               +(doneCount?(' <span class="cnt">'+doneCount+'</span>'):'')+'</button>'):'')
@@ -3013,6 +3085,15 @@
           +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+trackerCases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
           +trackerHtml
+        +'</div></div>'):'')
+      +(flow.allow_drafts?('<div id="wfPane_drafts" style="display:none"><div class="wf-card">'
+          +'<div class="wf-card-hd"><i class="fa-regular fa-floppy-disk"></i> Drafts'
+            +(drafts.length?(' <span class="cnt">'+drafts.length+'</span>'):'')
+            +tip('Your own unfinished '+N.lcMany+'. A draft is not sent to anyone, takes no '
+                 +esc2(N.lc)+' number, and the minimum does not apply to it. It becomes a real '
+                 +esc2(N.lc)+' when you open it and submit it.')
+          +'</div>'
+          +wfDraftsHtml(flow, drafts)
         +'</div></div>'):'')
       +(showForms?('<div id="wfPane_forms" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-clipboard-list"></i> Forms'
@@ -3054,6 +3135,8 @@
       // The claim's own contents, so a row is findable by what it was for and what it cost - see wfFindExtra.
       const amount=r.getAttribute('data-amount')||'';
       const desc=r.getAttribute('data-desc')||'';
+      // Company / Vendor / Bill No. - whatever this workflow calls the things it was raised about.
+      const text=r.getAttribute('data-text')||'';
       let ok=true;
       /* Finished or running, before anything else is considered - so a search inside the Archive
          searches the archive, and a date range on the main list never turns up a completed one. */
@@ -3062,7 +3145,8 @@
         if(done !== (window._wfArchView==='archive')) ok=false;
       }
       if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1 && owner.indexOf(qLower)===-1
-           && amount.indexOf(qLower)===-1 && desc.indexOf(qLower)===-1) ok=false;
+           && amount.indexOf(qLower)===-1 && desc.indexOf(qLower)===-1
+           && text.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
       if(ok && to && created && created>to) ok=false;
       r.style.display=ok?'':'none';
@@ -4331,7 +4415,7 @@
       } else if(gs.length<2 && x){ x.remove(); }
     });
   }
-  window.wfEventOpen=async function(flowId, caseId){
+  window.wfEventOpen=async function(flowId, caseId, draftId){
     wfInjectCss();
     /* Anything left over from a previous session that was closed without Cancel - the overlay,
        Escape, navigating away - is swept now. Doing it on the way IN covers every exit, without
@@ -4342,6 +4426,15 @@
     try{ const {data}=await ACC().from('flows').select('*').eq('id',flowId).maybeSingle(); flow=data; }catch(e){}
     try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
     if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
+    /* A draft reopens into the same form, prefilled from what was saved. It is still a CREATION -
+       editing stays false - because the draft has never been an instance. */
+    window._wfDraftId=null; let draftRow=null;
+    if(draftId){
+      try{ const {data}=await ACC().from('flow_drafts').select('*').eq('id',draftId).maybeSingle();
+           draftRow=data; }catch(e){}
+      if(draftRow){ window._wfDraftId=draftRow.id; }
+      else { toast('That draft could not be opened','err'); return; }
+    }
     if(!flow){ toast('Workflow not found','err'); return; }
     const N=wfNounOf(flow); window._wfNoun=N; window._wfIsBill=wfIsBillFlow(flow);
     window._wfEvtSumKey=(flow.tracker_sum_field||'').trim();   // 'Amount' on Reimbursement
@@ -4392,7 +4485,7 @@
     let src=[];
     let groupsSrc;
     if(editing){
-      const savedDetails=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
+      const savedDetails=Array.isArray(draftRow&&draftRow.details)?draftRow.details:(Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
       if(locked){
         const byGroup={};
         savedDetails.forEach(function(d){ if(!d||!d.label) return; const g=(d.group|0); (byGroup[g]=byGroup[g]||{})[d.label]=d.value; });
@@ -4601,7 +4694,7 @@
       +'</div>'
       +'<div class="modal-foot">'
       +(window._wfEvtSumKey?'<div id="wfEvtTotal" class="wf-evt-total"></div>':'')
-      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn" title="Keep this and finish it later. It is not sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i> Save draft</button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfPhoneHydrate();
     wfShowWhenSyncAll();
@@ -4669,6 +4762,13 @@
     wfEvtTotalRefresh();
   }
 
+  /* Save draft and Create are the same gathering with a different destination, so they share one
+     path rather than two that could drift. */
+  window.wfEventSaveDraft=async function(flowId){
+    window._wfEvtDraftMode=true;
+    try{ await wfEventSaveInner(flowId, null); }
+    finally{ window._wfEvtDraftMode=false; }
+  };
   window.wfEventSave=async function(flowId, caseId){
     // A fast double-click (or a click landing right as Enter also fires) could send this twice
     // before the modal closed, creating two real instances a few dozen milliseconds apart for the
@@ -4686,6 +4786,12 @@
     } finally { window._wfSaving=false; if(saveBtn) saveBtn.disabled=false; }
   };
   async function wfEventSaveInner(flowId, caseId){
+    /* A DRAFT IS NOT A SUBMISSION.
+       Everything below gathers the form exactly as a real save does, so a draft holds precisely
+       what would have been sent. What it skips is every rule about SENDING: the minimum total, the
+       required fields, the date checks, the step members. A claim still being written is allowed to
+       be incomplete - that is the whole point of saving one. */
+    const DRAFT=!!window._wfEvtDraftMode;
     const wrap=$('wfEvtDetails'); const details=[]; let missing='';
     if(wrap){
       // Multi-entry workflows wrap each filled-in set in its own .wf-evt-group; a normal
@@ -4702,14 +4808,14 @@
         for(const g of dgroups){
           const dRow=g.querySelector('.wf-evt-daterow .wf-evt-row');
           const dVal=((dRow&&dRow.querySelector('.wf-evt-value'))||{}).value||'';
-          if(!String(dVal).trim()){ toast('Please pick a date for every date section','warn'); return; }
+          if(!DRAFT && !String(dVal).trim()){ toast('Please pick a date for every date section','warn'); return; }
           // typed dates get past the picker's own cap, so the rule is enforced here too
-          if((window._wfEvtDateField||{}).maxToday && String(dVal) > wfTodayISO()){
+          if(!DRAFT && (window._wfEvtDateField||{}).maxToday && String(dVal) > wfTodayISO()){
             toast(dVal+' is in the future — an expense can only be claimed once it has happened','warn'); return;
           }
           // Two containers for the same day would split one day's expenses in two and read as
           // duplicates further down the line, so the second one is refused rather than merged.
-          if(seenDates.indexOf(dVal)!==-1){ toast('The date '+dVal+' is used twice — put those expenses in the same date section','warn'); return; }
+          if(!DRAFT && seenDates.indexOf(dVal)!==-1){ toast('The date '+dVal+' is used twice — put those expenses in the same date section','warn'); return; }
           seenDates.push(dVal);
           const exps=[].slice.call(g.querySelectorAll('.wf-evt-exp'));
           for(const b of (exps.length?exps:[g])){
@@ -4729,7 +4835,7 @@
          NEW claims only. Eight of the claims already raised are under this figure, and applying it
          to edits would leave nobody able to open those again to correct anything else about them. */
       const minT=Number(window._wfEvtMinTotal||0);
-      if(minT>0 && !caseId){
+      if(minT>0 && !caseId && !DRAFT){
         const tt=wfEvtTotalCalc();
         if(tt && tt.total<minT){
           toast('A '+N.lc+' must come to at least '+wfMoney(minT)
@@ -4781,7 +4887,7 @@
       if(upiField){
         const re=new RegExp(upiField.pattern);
         const bad=(byLabel[upiField.label]||[]).filter(function(v){ const t=String(v||'').trim(); return t && !re.test(t); });
-        if(bad.length){
+        if(bad.length && !DRAFT){
           toast('"'+bad[0]+'" is not a valid UPI id. '+(upiField.patternHint||'Expected 10 digits, then @, then letters.'),'warn');
           return;
         }
@@ -4798,7 +4904,7 @@
       if(phoneField){
         const vals=(byLabel[phoneField.label]||[]).map(function(v){ return String(v||'').trim(); });
         const re=new RegExp(phoneField.pattern||'^[0-9]{10}$');
-        if(!phoneField.optional && !vals.some(Boolean)){
+        if(!DRAFT && !phoneField.optional && !vals.some(Boolean)){
           toast('Please enter your phone number — Accounts need it to reach you about this payment.','warn');
           return;
         }
@@ -4823,7 +4929,30 @@
         }
       }
     }
-    if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
+    if(missing && !DRAFT){ toast('Please fill in "'+missing+'"','warn'); return; }
+
+      /* Saved and editable, and NOT an instance: no number, no steps, nobody assigned, nothing
+         waiting on anyone. It becomes a real claim - and takes its number - only when submitted. */
+      if(DRAFT){
+        const body={flow_id:flowId, created_by:me(), details:details,
+                    updated_at:new Date().toISOString()};
+        try{
+          if(window._wfDraftId){
+            const {error}=await ACC().from('flow_drafts')
+              .update({details:details, updated_at:body.updated_at}).eq('id',window._wfDraftId);
+            if(error)throw error;
+          }else{
+            const {data,error}=await ACC().from('flow_drafts')
+              .insert(body).select('id').single();
+            if(error)throw error;
+            window._wfDraftId=data&&data.id;
+          }
+        }catch(e){ toast('Could not save the draft: '+((e&&e.message)||e),'err'); return; }
+        try{ closeModal(); }catch(_e){}
+        toast('Draft saved','ok');
+        renderPage();
+        return;
+      }
     const N=wfN();
     try{
       if(caseId){
@@ -4866,6 +4995,12 @@
         if(error)throw error;
         // same on creation: attached, thought better of it, then created
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
+        /* It has entered the workflow, so the draft it came from has done its job. Removed only
+           after the instance is safely created - the other order loses the work if creation fails. */
+        if(window._wfDraftId){
+          try{ await ACC().from('flow_drafts').delete().eq('id',window._wfDraftId); }catch(_e){}
+          window._wfDraftId=null;
+        }
         try{ closeModal(); }catch(e){}
         /* Say WHICH id it got. Numbers are handed out at the moment of saving, so two people
            filing bills at the same time do not get the numbers they expected - somebody who has
