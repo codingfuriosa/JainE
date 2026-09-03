@@ -3205,11 +3205,22 @@
     catch(_e){ toast('Could not build the printout','err'); return; }
     let printed=false;
     const doPrint=function(){ if(printed)return; printed=true; try{ w.focus(); w.print(); }catch(_e){} };
-    // Images (the QR codes) may still be loading when the document write finishes - load fires once
-    // they have all resolved; the timeout is a fallback if it never does. Scaled to the number of
-    // pages, since thirty QR images do not arrive as fast as one.
-    w.addEventListener('load', doPrint);
-    setTimeout(doPrint, 600+Math.min(parts.length,30)*120);
+    /* The QR images (the one thing on this page that matters most) used to be gambled on: the
+       window's own 'load' event after a document.write() is not reliable across browsers, and the
+       flat per-page timeout that backed it up was a guess that a slow S3 fetch or a big bulk print
+       could easily outrun - print would fire with the images still blank boxes, which is exactly
+       what a printed sheet of QR codes cannot afford to be. Waiting on each <img> directly removes
+       the guesswork; 'error' resolves too; a truly hung image cannot block printing forever. */
+    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
+    const imgReady=function(img){ return new Promise(function(res){
+      if(img.complete) return res();
+      img.addEventListener('load',res,{once:true});
+      img.addEventListener('error',res,{once:true});
+    }); };
+    Promise.race([
+      Promise.all(imgs.map(imgReady)),
+      new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
+    ]).then(doPrint);
   };
   window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
 
