@@ -2375,6 +2375,33 @@
      Arun Pandey the bill was going to Tapan when it was going to Soumyadeep.
      Returns routed:false when the instance has no route, or is standing somewhere off it, so every
      other bill and every other workflow keep the old behaviour untouched. */
+  /* IS THIS THE LAST STEP?
+     Answered from the ROUTE ITSELF - "is this the final entry in the path" - and never from
+     whether a following step's row happens to be in front of us. That distinction is the whole
+     bug: a Done flag appears wherever the page concludes nothing follows, and Done ENDS THE WHOLE
+     BILL. Deciding that from rows we may or may not have loaded means one missing row turns a
+     Forward into a button that closes a live bill, which is not a risk worth carrying for a
+     cosmetic saving.
+     Returns null when the instance has no route (or is standing off it), so the caller keeps its
+     old behaviour for every ordinary bill and every other workflow. */
+  function wfRouteIsLast(routeSeqs, curSeq){
+    const r=Array.isArray(routeSeqs)?routeSeqs:null;
+    if(!r || !r.length) return null;
+    const i=r.indexOf(curSeq);
+    if(i<0) return null;
+    return (i+1) >= r.length;
+  }
+  /* The steps of an instance in the order IT actually visits them, for anything that reads as a
+     sequence of events. On the Payment route that is Bill Booking, RTP, the cheque, then checking -
+     which is what happened, and what the timeline should show. Anything not on the route keeps its
+     numeric place at the end, so nothing is ever dropped. */
+  function wfStepsInRouteOrder(list, routeSeqs){
+    const arr=(list||[]).slice();
+    const r=(Array.isArray(routeSeqs)&&routeSeqs.length)?routeSeqs:null;
+    if(!r) return arr;
+    const pos=function(x){ const i=r.indexOf(x.seq); return i<0 ? (r.length + x.seq) : i; };
+    return arr.sort(function(a,b){ return pos(a)-pos(b) || a.seq-b.seq; });
+  }
   function wfRouteNext(routeSeqs, curSeq){
     const r=Array.isArray(routeSeqs)?routeSeqs:null;
     if(!r || !r.length) return {routed:false, seq:null};
@@ -3233,7 +3260,7 @@
           })()
         : '')
       +detHtml
-      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(wfStepsInRouteOrder(fcs, c&&c.route_seqs),{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
       // Same Updates & Feedback section every step-task page already has (post a note, attach a
       // file) — this panel used to only ever show past updates read-only, with no way to add one,
       // so anyone who only ever sees an instance from the Tracker (never gets a step task of their
@@ -4992,7 +5019,10 @@
       : allSteps.filter(function(s){ return s.seq>mySeq; })
           .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
     const prevExists=allSteps.some(function(s){ return s.seq<mySeq; });
-    const isFirst=!prevExists, isLast=!nextStep;
+    /* Same rule as the list: on a routed bill only the route's final entry is the last step.
+       Read from the path so the page and the list can never disagree about who gets a Done. */
+    const _dLast=wfRouteIsLast(caseRow&&caseRow.route_seqs, mySeq);
+    const isFirst=!prevExists, isLast=(_dLast!==null)?_dLast:!nextStep;
     const amAssignee=(members||[]).some(function(e){
       return eq(e,me())||wfActForPerson(e,flow&&flow.id);   // mine, or I stand in for them
     });
@@ -7808,13 +7838,13 @@
           // deliberately skipped every remaining seq (Invoice Processing's No-Cheque path), which
           // is a real "nothing follows", not a visibility gap.
           const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
-          /* On a routed bill the route is the whole truth about what is left - the guess below,
-             which assumes the highest-numbered step is the last one, does not hold when the path
-             does not run in number order. */
-          const _routed=Array.isArray(c.route_seqs)&&c.route_seqs.length
-                        && c.route_seqs.indexOf(s.seq)>=0;
-          let moreToCome=_routed ? !!nextStep
-                                 : (!!nextStep || (defMax!=null && s.seq<defMax));
+          /* On a routed bill the route is the whole truth about what is left. Asked of the path,
+             not of the rows in hand: the old version inferred it from having found a next row,
+             so a step whose successor had not been loaded turned into a Done flag that would
+             have closed the bill. */
+          const _rLast=wfRouteIsLast(c.route_seqs, s.seq);
+          let moreToCome=(_rLast!==null) ? !_rLast
+                                        : (!!nextStep || (defMax!=null && s.seq<defMax));
           if(moreToCome && !nextStep && Array.isArray(c.skipped_seqs) && c.skipped_seqs.length){
             const skipSet=new Set(c.skipped_seqs);
             let stillPossible=false;
