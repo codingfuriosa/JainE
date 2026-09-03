@@ -2461,24 +2461,28 @@
     const rows=drafts.map(function(d,i){
       const det=Array.isArray(d.details)?d.details:[];
       const filled=det.filter(function(x){ return x && String(x.value==null?'':x.value).trim(); });
+      // what it comes to so far - a draft is mostly about the running figure
+      const tot=sumKey?wfSumField((det.filter(function(x){ return x&&eq(x.label,sumKey); })[0]||{}).value):0;
       const what=filled.filter(function(x){ return !eq(x.label,sumKey) && String(x.value).indexOf('s3:')!==0; })
         .slice(0,3).map(function(x){ return esc2(wfDetailDisp(x.value)); }).join(' \u00b7 ');
-      return '<tr>'
+      /* The whole row opens it, the way a bill's row opens the bill. A button that repeats what
+         clicking the row already does is a second thing to aim at for no gain. Delete stops the
+         click travelling, or tidying up would open the draft on the way past. */
+      return '<tr class="wf-draft-row" title="Open this draft" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
         /* Numbered, not priced. A draft has no "reimbursement number" - it takes one only when it
            is submitted - so this is simply its place in the list, newest first. */
         +'<td><b>'+(i+1)+'</b></td>'
+        +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
         +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
         +'<td>'+filled.length+' of '+det.length+' filled</td>'
         +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
-        +'<td style="white-space:nowrap">'
-          +'<button class="ac-btn primary" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
-            +'<i class="fa-solid fa-pen"></i> Open</button> '
+        +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
           +'<button class="ac-btn danger ic" title="Delete this draft" onclick="wfDraftDelete('+d.id+')">'
             +'<i class="fa-solid fa-trash"></i></button>'
         +'</td></tr>';
     }).join('');
     return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
-      +'<th>No.</th><th>What is in it</th><th>Filled</th>'
+      +'<th>No.</th><th>'+esc2(sumKey||'Total')+'</th><th>What is in it</th><th>Filled</th>'
       +'<th>Last saved</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   window.wfDraftDelete=function(id){
@@ -5992,6 +5996,8 @@
     .wf-tktable{min-width:100%;font-size:12px}
     .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
     .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row:hover{background:var(--bg-subtle,#f1f5f9)}
     .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
     .wf-tktable tbody tr:hover{background:var(--brand-a10,#eef2ff)}
     /* Each step's three columns are banded together with a heavier divider, so at a glance you
