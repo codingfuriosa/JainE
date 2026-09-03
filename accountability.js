@@ -3033,6 +3033,10 @@
       +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
+      // Reimbursement only: everything Accounts (step 2) has just received and this tool has not
+      // already printed - a running month-end pile, not a fixed selection, so it is its own button
+      // rather than another item in the checkbox-driven "Print selected" flow above.
+      +(id===39?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Receipts</span></button>':'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
@@ -3416,17 +3420,17 @@
      first, so Accounts were doing thirty of these by hand at month end. */
   window.wfPrintCases=async function(caseIds){
     const ids=(caseIds||[]).filter(function(x){ return x!=null; });
-    if(!ids.length){ toast('Nothing selected','warn'); return; }
+    if(!ids.length){ toast('Nothing selected','warn'); return false; }
     /* The tab is opened BEFORE anything is awaited. A window.open() that happens after an await is
        no longer attributable to the click that asked for it, and every browser blocks it - which
        is why this cannot simply build the HTML first and open the tab at the end. */
     const w=window.open('','_blank');
-    if(!w){ toast('Please allow popups to print','err'); return; }
+    if(!w){ toast('Please allow popups to print','err'); return false; }
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
-    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return; }
+    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
     const css=(($('wfCss')||{}).textContent)||'';
     const title=(parts.length===1)?parts[0].title:(wfN().many+' — '+parts.length+' selected');
     const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc2(title)+'</title><style>'+css
@@ -3441,7 +3445,7 @@
       +parts.map(function(p){ return p.html; }).join('')
       +'</body></html>';
     try{ w.document.open(); w.document.write(html); w.document.close(); }
-    catch(_e){ toast('Could not build the printout','err'); return; }
+    catch(_e){ toast('Could not build the printout','err'); return false; }
     let printed=false;
     const doPrint=function(){ if(printed)return; printed=true; try{ w.focus(); w.print(); }catch(_e){} };
     /* The QR images (the one thing on this page that matters most) used to be gambled on: the
@@ -3460,8 +3464,35 @@
       Promise.all(imgs.map(imgReady)),
       new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
     ]).then(doPrint);
+    return true;
   };
   window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
+  /* Reimbursement's "Print New Receipts": everything Accounts (step 2) currently has as received,
+     minus whatever this button has already sent to print before - so running it again next week
+     only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
+     eye to find what changed. Marking done happens AFTER the print job is actually handed to the
+     browser, not before - a popup blocked or a build failure must leave every claim eligible for
+     the next attempt, not silently drop it from every future run. */
+  window.wfBulkPrintNewReceipts=async function(){
+    let cases=[];
+    try{
+      const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).is('bulk_printed_at',null);
+      cases=data||[];
+    }catch(e){ toast('Could not load claims','err'); return; }
+    if(!cases.length){ toast('Nothing new to print','warn'); return; }
+    const ids=cases.map(function(c){ return c.id; });
+    let steps=[];
+    try{
+      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
+      steps=data||[];
+    }catch(e){ toast('Could not check receipt status','err'); return; }
+    const eligible=steps.map(function(s){ return s.case_id; });
+    if(!eligible.length){ toast('Nothing new to print','warn'); return; }
+    const ok=await window.wfPrintCases(eligible);
+    if(!ok) return;
+    try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
+    catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+  };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
     const ae=document.activeElement, tag=(ae&&ae.tagName)||'';
@@ -8444,6 +8475,12 @@
      matching its current order, then the drag swap is applied on top. ---- */
   async function crystallizeAndSwap(draggedId,targetId,orderIds){
     if(!targetId||draggedId===targetId) return;
+    // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
+    // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can never
+    // see it - the "Insert a task at a specific position" feature was mapped to a different,
+    // long-dead global (taskReorderDrop) instead, which is why real drag-reorder usage never showed.
+    // usageQueue is nexus-core.js's own global helper, reachable here like any other global.
+    try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
     try{
       const my=me();
       const {data:existing}=await ACC().from('task_rank').select('task_id').eq('viewer_email',my).in('task_id',orderIds);
