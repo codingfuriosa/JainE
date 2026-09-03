@@ -2458,14 +2458,15 @@
         +'until you are ready to send it.</div>';
     }
     const sumKey=(flow.tracker_sum_field||'').trim();
-    const rows=drafts.map(function(d){
+    const rows=drafts.map(function(d,i){
       const det=Array.isArray(d.details)?d.details:[];
       const filled=det.filter(function(x){ return x && String(x.value==null?'':x.value).trim(); });
-      const tot=sumKey?wfSumField((det.filter(function(x){ return x&&eq(x.label,sumKey); })[0]||{}).value):0;
       const what=filled.filter(function(x){ return !eq(x.label,sumKey) && String(x.value).indexOf('s3:')!==0; })
         .slice(0,3).map(function(x){ return esc2(wfDetailDisp(x.value)); }).join(' \u00b7 ');
       return '<tr>'
-        +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
+        /* Numbered, not priced. A draft has no "reimbursement number" - it takes one only when it
+           is submitted - so this is simply its place in the list, newest first. */
+        +'<td><b>'+(i+1)+'</b></td>'
         +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
         +'<td>'+filled.length+' of '+det.length+' filled</td>'
         +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
@@ -2477,7 +2478,7 @@
         +'</td></tr>';
     }).join('');
     return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
-      +'<th>'+esc2(sumKey||'Total')+'</th><th>What is in it</th><th>Filled</th>'
+      +'<th>No.</th><th>What is in it</th><th>Filled</th>'
       +'<th>Last saved</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   window.wfDraftDelete=function(id){
@@ -4694,7 +4695,7 @@
       +'</div>'
       +'<div class="modal-foot">'
       +(window._wfEvtSumKey?'<div id="wfEvtTotal" class="wf-evt-total"></div>':'')
-      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn" title="Keep this and finish it later. It is not sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i> Save draft</button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn ic" style="height:34px;width:34px" title="Save as draft \u2014 keep this and finish it later. Nothing is sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i></button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfPhoneHydrate();
     wfShowWhenSyncAll();
@@ -4738,17 +4739,15 @@
   window.wfEvtTotalRefresh=function(){
     const el=$('wfEvtTotal'); if(!el) return;
     const t=wfEvtTotalCalc(); if(!t){ el.innerHTML=''; return; }
-    const min=Number(window._wfEvtMinTotal||0);
     el.innerHTML='<span class="wf-evt-total-k">Total '+esc2(window._wfEvtSumKey||'')+'</span>'
       +'<b>'+wfMoney(t.total)+'</b>'
       // said plainly rather than left to be noticed: a total is misleading while a box is empty
       +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'')
-      /* Below the minimum is said HERE, beside the total, while it is being typed - not held back
-         until Save. The person can see the number and the rule in the same place, and does not
-         fill the rest of the form before being told it cannot be sent. */
-      +((min>0 && t.total<min)
-          ? ('<span class="wf-evt-total-warn">Below the '+wfMoney(min)+' minimum \u2014 cannot be submitted</span>')
-          : '');
+      ;
+      /* The minimum is NOT announced here. A line beside the total saying the claim cannot be sent
+         crowded the form and was read on every keystroke while somebody was still typing the first
+         figure. The rule is enforced on submit instead, where it is actually relevant, and said
+         once in the corner. */
   };
   /* Typing fires input; adding or removing a date or an expense does not, and those change the
      total just as much. One observer on the container catches every add and remove whichever
@@ -5994,8 +5993,6 @@
     .wf-evt-total b{font-size:17px;color:var(--ink);font-weight:800;letter-spacing:-.2px}
     .wf-evt-total-k{font-weight:600}
     .wf-evt-total-miss{font-size:11px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 9px;border-radius:20px}
-    /* Red, not amber: "still to fill" is a note in passing, this one stops the claim being sent. */
-    .wf-evt-total-warn{font-size:11px;font-weight:700;color:#991b1b;background:#fee2e2;padding:2px 9px;border-radius:20px}
     .wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
