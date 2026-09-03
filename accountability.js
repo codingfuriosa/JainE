@@ -3062,6 +3062,11 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
           +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
+          // Reimbursement only: sits right beside the disabled "print selected" icon it is an
+          // alternative to - one prints whatever you've ticked, this one prints the whole running
+          // new-and-unprinted pile without having to select anything. Hidden while selCaseId is set
+          // (opened focused on one particular reimbursement) same as before.
+          +(id===39&&!selCaseId?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Reimbursements</span></button>':'')
           +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
         +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
@@ -3084,12 +3089,6 @@
       +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      // Reimbursement only: everything Accounts (step 2) has just received and this tool has not
-      // already printed - a running month-end pile, not a fixed selection, so it is its own button
-      // rather than another item in the checkbox-driven "Print selected" flow above. Hidden while
-      // selCaseId is set (the page was opened focused on one particular reimbursement, e.g. from a
-      // task link) - a bulk action over the whole pile makes no sense from inside just one of them.
-      +(id===39&&!selCaseId?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Reimbursements</span></button>':'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
