@@ -2818,6 +2818,53 @@
     window.addEventListener('resize',function(){ if(document.querySelector('.wf-tktable')) wfTrackerSticky(); });
   }
 
+  /* ---------- Reimbursement claimant/bill lookup (jaingrouppc2.ankita@/pc.thejaingroup1@ only) ----
+     Same .ms/.ms-field/.ms-panel/.ms-list/.ms-dept/.ms-opt component and msOpen/msFieldClick open-
+     close mechanics as the reporting-manager picker (nexus-core.js) - just its own state and render
+     functions, since that picker's own state (RM_STATE) is single-purpose and not keyed generically. */
+  function wfPcAvatar(nm){ try{ return (typeof avatar==='function')?avatar(nm):('<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'); }catch(e){ return ''; } }
+  function wfPcSearchHtml(){
+    return '<div class="wf-card card-pad" style="margin-bottom:14px">'
+      +'<label style="display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:6px"><i class="fa-solid fa-magnifying-glass"></i> Find a claimant\'s bills</label>'
+      +'<div class="ms" id="ms_wfpc">'
+        +'<div class="ms-field" onclick="msFieldClick(\'wfpc\',event)">'
+          +'<span class="ms-chips" id="ms_wfpc_chips"><span style="color:#94a3b8;font-size:13px">Search by name or department…</span></span>'
+          +'<input class="ms-typein" id="ms_wfpc_in" placeholder="Type a name or department…" autocomplete="off" oninput="msOpen(\'wfpc\');wfPcRenderList()" onfocus="msOpen(\'wfpc\')" onclick="event.stopPropagation()">'
+          +'<i class="fa-solid fa-chevron-down" style="color:#94a3b8;font-size:12px"></i>'
+        +'</div>'
+        +'<div class="ms-panel" id="ms_wfpc_panel"><div class="ms-list" id="ms_wfpc_list">'+wfPcListHtml('')+'</div></div>'
+      +'</div>'
+    +'</div>';
+  }
+  function wfPcListHtml(q){
+    const selEmail=window._wfPcSelEmail;
+    if(selEmail){
+      const person=(window._wfPcPeople||[]).find(function(p){return p.email===selEmail;});
+      if(!person){ window._wfPcSelEmail=null; return wfPcListHtml(q); }
+      const back='<div class="ms-opt" onclick="wfPcBack()"><i class="fa-solid fa-arrow-left" style="width:22px;text-align:center"></i><span style="flex:1">Back to people</span></div>';
+      if(!person.bills.length) return back+'<div style="padding:10px;color:#94a3b8;font-size:13px">No bills</div>';
+      const sorted=person.bills.slice().sort(function(a,b){return (b.overdue?1:0)-(a.overdue?1:0);});
+      return back+sorted.map(function(b){
+        return '<div class="ms-opt" onclick="wfPcOpenBill('+b.id+')"><span style="flex:1">'+esc2(b.caseNo)+' · '+esc2(b.status)+'</span>'
+          +(b.overdue?'<span class="wf-pill" style="background:#fef2f2;color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</span>':'')+'</div>';
+      }).join('');
+    }
+    q=(q||'').toLowerCase();
+    const people=(window._wfPcPeople||[]).filter(function(p){return !q||(p.name||'').toLowerCase().indexOf(q)!==-1||(p.dept||'').toLowerCase().indexOf(q)!==-1;});
+    if(!people.length) return '<div style="padding:10px;color:#94a3b8;font-size:13px">No matches</div>';
+    return groupByDept(people).map(function(g){
+      return '<div class="ms-dept">'+esc2(g.dept)+'</div>'+g.people.map(function(p){
+        const overdueCount=p.bills.filter(function(b){return b.overdue;}).length;
+        return '<div class="ms-opt" onclick="wfPcPickPerson(\''+esc2(p.email).replace(/'/g,"\\'")+'\')">'+wfPcAvatar(p.name)+'<span style="flex:1">'+esc2(p.name)+'</span>'
+          +(overdueCount?'<span class="wf-pill" style="background:#fef2f2;color:#dc2626">'+overdueCount+' overdue</span>':'')+'</div>';
+      }).join('');
+    }).join('');
+  }
+  window.wfPcRenderList=function(){ const list=document.getElementById('ms_wfpc_list'); if(!list)return; const q=(document.getElementById('ms_wfpc_in')||{}).value||''; list.innerHTML=wfPcListHtml(q); };
+  window.wfPcPickPerson=function(email){ window._wfPcSelEmail=email; const inp=document.getElementById('ms_wfpc_in'); if(inp)inp.value=''; wfPcRenderList(); };
+  window.wfPcBack=function(){ window._wfPcSelEmail=null; wfPcRenderList(); };
+  window.wfPcOpenBill=function(caseId){ const panel=document.getElementById('ms_wfpc_panel'); if(panel)panel.classList.remove('show'); wfTabShow('main'); wfShowCase(caseId,null); };
+
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -3044,6 +3091,32 @@
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
+    // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
+    // general feature, so it is a hardcoded pair the same way canManage above is): find a claimant
+    // by name or department, then jump straight to one of their bills. The people list is built
+    // from `cases` itself (whoever has actually raised a claim), not the full staff directory, so
+    // it never offers someone with nothing to look up. "Overdue" here means the bill's current
+    // step is still pending and its own due_at has passed — reading flow_steps.no_overdue so the
+    // claimant-confirmation step (which is deliberately exempt) is never flagged, the same rule
+    // the original migration set it up for.
+    const pcSearchOn = id===39 && (eq(mySelf,'jaingrouppc2.ankita@gmail.com') || eq(mySelf,'pc.thejaingroup1@gmail.com'));
+    let pcSearchHtml='';
+    if(pcSearchOn){
+      const pcMap={};
+      cases.forEach(function(cc){
+        const email=cc.created_by; if(!email) return;
+        const key=String(email).toLowerCase();
+        if(!pcMap[key]) pcMap[key]={email:email,name:wfNm(email)||email,dept:wfDeptOf(email)||'',bills:[]};
+        const cs=fcs.find(function(x){return x.case_id===cc.id && x.seq===cc.current_step;});
+        const stepDef=cs?steps.find(function(s){return s.seq===cs.seq;}):null;
+        const overdue=!!(cc.status==='Pending' && cs && !cs.forwarded_at && cs.due_at
+          && !(stepDef&&stepDef.no_overdue) && new Date(cs.due_at)<new Date());
+        pcMap[key].bills.push({id:cc.id,caseNo:wfCaseNoText(cc),status:cc.status,overdue:overdue});
+      });
+      window._wfPcPeople=Object.keys(pcMap).map(function(k){return pcMap[k];}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      pcSearchHtml=wfPcSearchHtml();
+    }
+
     /* Built up front rather than inline below: rendering the tracker is what works out whether it
        has an Owner column worth searching, and the tab strip - which carries the search box - is
        concatenated before it in the same expression. */
@@ -3056,6 +3129,7 @@
         ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
         : '')
       +headActs+'</div>'
+      +pcSearchHtml
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'

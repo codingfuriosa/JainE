@@ -7313,14 +7313,28 @@ VIEWS.security=async function(v,seg){
   if(seg[0]==='user'){return secUserDetail(v,decodeURIComponent(seg[1]||''));}
   return secList(v);
 };
+let SEC_USERS=[];
+function secRowsHtml(list){
+  if(!list.length)return '<div class="empty">No matches</div>';
+  return `<table class="tbl sec-tbl"><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Level</th><th>Tabs</th><th></th></tr></thead><tbody>`+
+    list.map(u=>{const pending=u.onboarded&&!u.super_admin&&!(Array.isArray(u.modules)&&u.modules.length);const valid=Array.isArray(u.modules)?u.modules.filter(m=>MODSET.has(m)):[];const noRestrict=u.modules===null||u.modules===undefined;const tabsCell=u.super_admin?'All':noRestrict?DEFAULT_MODULES.length+' (default)':valid.length===0?'0 — needs setup':valid.length>=MODLIST.length?'All':String(valid.length);return `<tr class="rowlink${pending?' pending-row':''}" onclick="navTo('security/user/'+encodeURIComponent('${esc(u.email)}'))"><td>${avatar(u.full_name)} <b>${esc(u.full_name)}</b>${u.super_admin?' <span class="tag t-purple">Admin</span>':''}${pending?' <span class="tag t-amber">New · needs setup</span>':''}</td><td style="color:var(--slate)">${esc(u.email)}</td><td>${(Array.isArray(u.department)&&u.department.length)?u.department.map(d=>avatar(d)).join(''):'—'}</td><td>${esc(u.lvl||'Employee')}</td><td>${tabsCell}</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>`;}).join('')+`</tbody></table>`;
+}
+window.secFilterUsers=function(){
+  const q=(($('secSearch')||{}).value||'').trim().toLowerCase();
+  const list=!q?SEC_USERS:SEC_USERS.filter(u=>{
+    const dept=Array.isArray(u.department)?u.department.join(' ').toLowerCase():'';
+    return (u.full_name||'').toLowerCase().includes(q)||(u.email||'').toLowerCase().includes(q)||dept.includes(q);
+  });
+  const host=$('secRows');if(host)host.innerHTML=secRowsHtml(list);
+};
 async function secList(v){
   setCrumb(['Control Panel']);
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-sliders" style="color:#7c3aed"></i> Control Panel</h1><p>Approve new people and manage everyone's department, level and tab access</p></div></div><div class="card card-pad" id="secRows"><div class="loader"><div class="spin"></div></div></div>`;
-  let users=[];
-  try{const {data,error}=await sb.schema('adm').rpc('admin_list_users');if(error)throw error;users=data||[];}
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-sliders" style="color:#7c3aed"></i> Control Panel</h1><p>Approve new people and manage everyone's department, level and tab access</p></div>`
+    +`<div class="search-box" style="max-width:320px"><i class="fa-solid fa-magnifying-glass"></i><input id="secSearch" placeholder="Search by name, email or department…" oninput="secFilterUsers()"></div></div>`
+    +`<div class="card card-pad" id="secRows"><div class="loader"><div class="spin"></div></div></div>`;
+  try{const {data,error}=await sb.schema('adm').rpc('admin_list_users');if(error)throw error;SEC_USERS=data||[];}
   catch(e){$('secRows').innerHTML='<div class="empty">Could not load users: '+esc(e.message||String(e))+'</div>';return;}
-  $('secRows').innerHTML=`<table class="tbl sec-tbl"><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Level</th><th>Tabs</th><th></th></tr></thead><tbody>`+
-    users.map(u=>{const pending=u.onboarded&&!u.super_admin&&!(Array.isArray(u.modules)&&u.modules.length);const valid=Array.isArray(u.modules)?u.modules.filter(m=>MODSET.has(m)):[];const noRestrict=u.modules===null||u.modules===undefined;const tabsCell=u.super_admin?'All':noRestrict?DEFAULT_MODULES.length+' (default)':valid.length===0?'0 — needs setup':valid.length>=MODLIST.length?'All':String(valid.length);return `<tr class="rowlink${pending?' pending-row':''}" onclick="navTo('security/user/'+encodeURIComponent('${esc(u.email)}'))"><td>${avatar(u.full_name)} <b>${esc(u.full_name)}</b>${u.super_admin?' <span class="tag t-purple">Admin</span>':''}${pending?' <span class="tag t-amber">New · needs setup</span>':''}</td><td style="color:var(--slate)">${esc(u.email)}</td><td>${(Array.isArray(u.department)&&u.department.length)?u.department.map(d=>avatar(d)).join(''):'—'}</td><td>${esc(u.lvl||'Employee')}</td><td>${tabsCell}</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>`;}).join('')+`</tbody></table>`;
+  $('secRows').innerHTML=secRowsHtml(SEC_USERS);
 }
 async function secUserDetail(v,email){
   setCrumb(['Control Panel',email]);
@@ -7331,7 +7345,7 @@ async function secUserDetail(v,email){
   const mods=Array.isArray(u.modules)?u.modules:DEFAULT_MODULES.slice();
   SEC_DEPTS=Array.isArray(u.department)?u.department.slice():[];
   v.innerHTML=`<div class="page-head"><div><h1>${avatar(u.full_name)} ${esc(u.full_name)}</h1><p>${esc(u.email)}${u.super_admin?' · <span class="tag t-purple">Administrator</span>':''}</p></div><button class="btn" onclick="navTo('security')"><i class="fa-solid fa-arrow-left"></i> Back</button></div>
-  <div class="card card-pad frm" style="max-width:780px">
+  <div class="card card-pad frm">
     <div class="two"><div><label>Name</label><input value="${esc(u.full_name)}" disabled></div><div><label>Email</label><input value="${esc(u.email)}" disabled></div></div>
     <div class="two"><div><label>Department</label>${deptPickerHtml(SEC_DEPTS)}</div><div><label>Level</label><select id="secLevel" ${u.super_admin?'disabled':''}>${LEVELS.map(l=>'<option '+(l===(u.lvl||'Employee')?'selected':'')+'>'+l+'</option>').join('')}</select></div></div>
     <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:14px">
