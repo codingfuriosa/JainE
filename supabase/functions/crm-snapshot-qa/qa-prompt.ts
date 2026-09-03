@@ -1,10 +1,13 @@
-// STAGE 2 OF TWO: JUDGE. Gemini does this - the SAME model family that transcribed the call in stage
-// one - reading the TEXT of the call and the CRM's own record of it, side by side. It never sees
-// audio and never writes a transcript.
+// STAGE 2 OF TWO: JUDGE. OPENAI does this, reading the TEXT of the call and the CRM's own record of
+// it, side by side. It never sees audio and never writes a transcript. Gemini transcribed the call in
+// stage one and has no part in this one.
 //
-// It was OpenAI until 2026-08-31. One model for both halves was asked for, and it removes a second
-// vendor, a second key and a second way for the night to stall: the QA half used to refuse to start
-// at all when no OpenAI key was set, which left transcripts stored and never assessed.
+// Both halves ran on Gemini between 2026-08-31 and 2026-09-02; QA is on OpenAI again by requirement.
+// The prompt below did not have to change for the move, and that is the point: it names no vendor,
+// asks for JSON on its own terms, and states its own contract. The one thing that must stay handled
+// is the failure mode this split had the first time - a missing OpenAI key made the QA half refuse to
+// start at all, which left transcripts stored and never assessed. It now pauses the judge and lets
+// transcription carry on; see the claimable set in oneStep().
 //
 // THREE LAYERS, NEVER MIXED: CRM FACT (handed over verbatim) - CONVERSATION FACT (the transcript) -
 // AI ASSESSMENT (the only thing the model may write).
@@ -111,12 +114,14 @@ If the conversation supports a reason that is genuinely not in this list, name i
 words instead of forcing it into one that does not fit.`;
 
 /* THE OUTPUT CONTRACT, stated in the prompt rather than enforced by the API.
-   OpenAI took this as a `json_schema` response_format and guaranteed the shape. Gemini is asked for
-   `application/json` and told the shape here, which is exactly how the transcriber in stage one is
-   driven - the same arrangement, already proven on this workload.
-   The guarantee therefore moves to qaPhase(), which refuses any reply missing one of the five
+   OpenAI is asked for `json_object`, NOT `json_schema`. Structured Outputs would mean restating this
+   contract in strict JSON Schema, and this contract is nullable unions and a `null` member inside an
+   enum - expressible only by relaxing it, which trades a real guarantee for a nominal one. The same
+   was true of Gemini's responseSchema, so the arrangement here is unchanged by the vendor move.
+   The guarantee therefore lives in qaPhase(), which refuses any reply missing one of the five
    assessments and retries it. Nothing half-formed is ever saved: that is the same rule the
-   transcriber follows, and it is why a weaker guarantee here is not a weaker result.
+   transcriber follows, and it is why a weaker guarantee here is not a weaker result. `json_object`
+   still removes the failure this pipeline actually sees - prose or a code fence around the JSON.
    Note what is NOT trusted from the model either way - the pipeline RE-DERIVES status_match and
    mismatch_type from the two statuses after the reply arrives, so a model that fills those in
    inconsistently cannot corrupt the dashboard's counters. They are asked for only because making the
@@ -144,6 +149,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "followup_date_accuracy": {
     "status": "Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Verifiable",
     "crm_date": "the CRM value exactly as given, or null",
     "customer_agreed_date": "what the customer actually agreed to, in their own terms, or null",
     "evidence": "the line from the transcript that settles it, or null",
@@ -151,6 +157,7 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "lost_reason_accuracy": {
     "status": "Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Verifiable",
     "crm_reason": "the CRM value exactly as given, or null",
     "actual_reason": "the reason the conversation actually supports, or null",
     "evidence": "the line from the transcript that settles it, or null",
@@ -158,13 +165,31 @@ Every key below must be present on every reply. Where you have nothing to say, u
   },
   "remarks_accuracy": {
     "status": "Accurate" | "Partially Accurate" | "Inaccurate" | "Not Verifiable",
+    "score": 0-100, or null when status is "Not Verifiable",
     "crm_remarks": "the CRM value exactly as given, or null",
     "actual_conversation_summary": "two or three factual sentences on what the call contained",
     "reason": "why this verdict"
   },
+  "agent_qa": [
+    { "point": "Script", "status": "Pass" | "Partial" | "Fail" | "Not Applicable",
+      "score": 0-100, or null when status is "Not Applicable",
+      "evidence": "quoted from the transcript",
+      "reason": "why this verdict - what the agent did or did not do, in one or two sentences" }
+    ... all six points, in the order given above
+  ],
   "status_assessment": {
     "crm_status": "the CRM status you were given, unchanged",
+    "qualification_check": {
+      "location": "Match" | "Mismatch" | "Not Established",
+      "budget": "Match" | "Mismatch" | "Not Established",
+      "area_sqft": "Match" | "Mismatch" | "Not Established",
+      "position": "Match" | "Mismatch" | "Not Established",
+      "note": "one line on what settled these four - never null"
+    },
+    "prior_qualification_note": "what the LEAD HISTORY told you about an earlier qualification and
+                                 what it means for this call, or null when there is no earlier one",
     "ai_assessed_status": "Lost" | "Qualified" | "In Follow Up" | "Unclear",
+    "score": 0-100, or null when ai_assessed_status is "Unclear",
     "status_match": true | false | null,
     "mismatch_type": "lost_should_not_have_been_lost" | "qualified_should_not_have_been_qualified"
                    | "in_followup_should_have_been_lost" | "in_followup_should_have_been_qualified"
@@ -180,13 +205,6 @@ Every key below must be present on every reply. Where you have nothing to say, u
         to establish anything.
     ]
   },
-  "agent_qa": [
-    { "point": "Script", "status": "Pass" | "Partial" | "Fail" | "Not Applicable",
-      "score": 0-100, or null when status is "Not Applicable",
-      "evidence": "quoted from the transcript",
-      "reason": "why this verdict - what the agent did or did not do, in one or two sentences" }
-    ... all six points, in the order given above
-  ],
   "summary_verdict": "several sentences"
 }`;
 
@@ -261,6 +279,10 @@ DO NOT mark a date inaccurate merely because the customer did not state one. Abs
 (c), not a fault.
 Put the CRM's value in "crm_date" exactly as given, and what the customer actually agreed to - in
 their own terms, e.g. "tomorrow around 11 AM" - in "customer_agreed_date" (null if none).
+Also give "score", 0-100: 100 when the CRM date matches exactly, scaling down the further the actual
+agreement drifts from it (a few hours off scores high, a different day lower, a flatly contradicted
+date lower still). Null only when status is "Not Verifiable" - never invent a number for a date that
+was never discussed.
 
 ### 3. LOST REASON ACCURACY
 Only meaningful when the CRM status for this follow-up is Lost. If it is not Lost, return
@@ -272,6 +294,9 @@ Where the status is Lost: compare the CRM's lost_reason with the reason the cust
                    way. Leave "actual_reason" null.
 Do not infer a specific lost reason the conversation does not support. "Not interested, thank you" is
 not evidence of a budget problem or a location problem.
+Also give "score", 0-100: 100 when the CRM's lost_reason is exactly the reason the customer gave,
+scaling down for a reason that is only partly right. Null whenever status is "Not Verifiable" -
+including every follow-up that is not marked Lost, since the question does not apply there.
 
 ### 4. REMARKS ACCURACY
 Do the CRM's remarks represent what actually happened on the call?
@@ -285,52 +310,17 @@ commitment, any site-visit commitment, the outcome of the call, and the reason f
 - Not Verifiable     - the CRM left the remarks empty, or the transcript is too thin to judge.
 Put a two or three sentence factual summary of what the call actually contained in
 "actual_conversation_summary" - that is the CONVERSATION FACT the reader compares against.
+Also give "score", 0-100, on the same scale as pitch accuracy: how fully the remarks represent what
+happened, not a restatement of "status" in digits - Accurate is not automatically 100 and Partially
+Accurate is not automatically 50, score what the remarks actually get right and leave out. Null only
+when status is "Not Verifiable".
 
-### 5. STATUS ASSESSMENT
-Decide, from the whole conversation, what the status of this lead SHOULD be, and compare it with what
-the CRM recorded. Use these definitions:
-- Lost         - the customer has closed the door: no requirement, already bought elsewhere, a wrong
-                 or prank enquiry, a broker, or a clear refusal to proceed.
-- Qualified    - the requirement matches what the project offers (location, configuration, budget,
-                 possession) AND the customer showed real buying intent - agreed to a site visit,
-                 asked to proceed, or asked to book.
-- In Follow Up - genuinely undecided, or unavailable, but still open: asked to be called back, wants
-                 to discuss with family, is busy, wants time to think.
-- Unclear      - the conversation does not establish any of the three. Use it rather than guessing.
+### 5. THE SIX-POINT AGENT AUDIT - DO THIS BEFORE YOU DECIDE THE STATUS
+This audit comes first on purpose, and section 6 depends on it. What the agent asked decides what
+the call is even capable of establishing: an agent who never asked the budget cannot have
+established that the budget matches, and a status resting on a question nobody asked is a guess
+dressed up as a verdict. Work through all six points, then carry what you found into section 6.
 
-DO NOT DECIDE FROM ONE KEYWORD. This is the most common way this judgement goes wrong.
-- "I am not interested right now" is NOT automatically Lost - it is often In Follow Up.
-- "Send me the details" is NOT automatically Qualified - it is usually In Follow Up.
-- Politeness is not intent, and irritation is not rejection.
-- A call cut off after a few seconds establishes nothing. That is "Unclear".
-Weigh the whole conversation and say in "evidence" which lines carry the decision.
-
-Then give "signals": the individual things the customer said or did that this verdict was actually
-weighed against, one to five of them, each tagged "Match" (it supports crm_status standing as it is)
-or "Mismatch" (it points the other way). This is not a repeat of "evidence" in list form - each point
-is its own concrete fact ("asked for the site address", "said budget is fixed at 40 lakh and this
-project starts at 62"), not a restatement of the final verdict. Put both directions in when the call
-is genuinely mixed rather than picking only the side that matches the verdict - a real "Qualified"
-call usually still has a Mismatch point or two (hesitation, a budget question) and showing it is more
-honest than a clean sweep of Match. Leave it empty only when the call is too short to say anything
-concrete at all.
-
-Then set "mismatch_type" to EXACTLY one of these, or null:
-- "lost_should_not_have_been_lost"                  CRM Lost, but the lead is still live (your
-                                                    assessment is Qualified or In Follow Up).
-- "qualified_should_not_have_been_qualified"        CRM Qualified, but the conversation does not
-                                                    provide the evidence to qualify the lead.
-- "in_followup_should_have_been_lost"               CRM In Follow Up, but the customer clearly closed
-                                                    the door.
-- "in_followup_should_have_been_qualified"          CRM In Follow Up, but the conversation clearly
-                                                    meets the qualification test.
-- null                                              the two agree, the CRM status is one this scheme
-                                                    does not cover (Site Visited, OV, and similar),
-                                                    or your assessment is Unclear.
-"status_match" is true when your assessment agrees with the CRM, false when it does not, and null
-when your assessment is Unclear - an unclear call is not a disagreement.
-
-### 6. THE SIX-POINT AGENT AUDIT
 Return "agent_qa" as an array of six objects, each {"point","status","score","evidence","reason"},
 with "status" exactly "Pass", "Fail", "Partial" or "Not Applicable", and "evidence" quoting the
 transcript. Use these exact six names, in this order:
@@ -347,6 +337,138 @@ ${QA_RUBRIC}
 
 Use "Not Applicable" only where the call ended before the point could arise, and say so in "reason".
 
+### 6. STATUS ASSESSMENT - BUILT ON SECTION 5, NEVER DECIDED BEFORE IT
+Decide, from the whole conversation and from what section 5 established, what the status of this
+lead SHOULD be, and compare it with what the CRM recorded.
+
+THE QUALIFICATION TEST - FOUR REQUIREMENT GATES.
+A follow-up lead is Qualified when what the CUSTOMER WANTS matches what the project offers on all
+four of these:
+- Location    - the locality, landmark or area they want is the one this project is in.
+- Budget      - the money they are willing to spend reaches the project's range for what they want.
+- Area (sqft) - the size they want exists in this project. A configuration this project does not
+                offer at all (a 4BHK where only 3BHK is built) fails this gate.
+- Position    - ready-to-move versus under-construction: what they said they need is what this
+                project is. A customer who must move in within months does not match a project
+                launching in 2026, and one happy to wait matches either.
+Fill in "qualification_check" with "Match", "Mismatch" or "Not Established" for each of the four,
+plus a one-line "note" on what settled it. "Not Established" is for a gate the call never reached -
+usually because the agent never asked, which section 5 will already have marked down under Script.
+All four Match is Qualified. Any Mismatch fails the test. Gates left Not Established do not qualify
+a lead, but they do not disqualify it either - that call is In Follow Up or Unclear, not Lost.
+
+DO NOT CONFUSE THIS WITH "fact_checks" IN SECTION 1. fact_checks asks whether what the AGENT SAID
+about the project was TRUE. qualification_check asks whether what the CUSTOMER WANTS FITS the
+project. They answer different questions and are filled in independently: a call can be pitched
+perfectly (every fact_check a Match) to a customer who wants something this project does not have
+(every gate a Mismatch), and the reverse happens just as often.
+
+A SITE VISIT IS NOT THE QUALIFICATION TEST. Agreeing to a site visit, asking to book, or asking to
+proceed all qualify a lead on their own - they are the customer settling the question themselves.
+But a customer who passes the four gates and still will not come to the site - busy, out of town,
+travelling, wants to send a family member, asks to be called after the puja - IS STILL QUALIFIED.
+They want to buy a flat; only the visit is unsettled. Reading that as a downgrade is the single most
+common error this audit exists to catch, so check yourself against it before you write a verdict.
+
+RESETTING THE SITE VISIT DATE KEEPS THE LEAD QUALIFIED. THIS IS THE SINGLE MOST IMPORTANT LINE IN
+THIS SECTION. A customer who has a visit arranged and calls to MOVE it - "not Sunday, make it next
+Sunday", "I am out of town this week, fix it after the 20th", "my wife cannot come that day, let us
+do another day", "call me next month and we will go" - has RESCHEDULED A VISIT, NOT CANCELLED ONE.
+A date being moved is a visit that is still on. The lead STAYS QUALIFIED. The agent's correct and
+expected response is to write the new date into next_follow_up_date and note it in the remarks, and
+that entry is the visit being re-fixed - it is NEVER the lead sliding back into follow-up.
+- Read a new date on a qualified lead as CONFIRMATION, not as hesitation. It is evidence FOR the
+  qualification standing, and it belongs in "signals" tagged "Match", never "Mismatch".
+- This holds however many times the date moves. A customer who has postponed three times is a
+  customer who has agreed three times; a repeatedly moved visit is a slow lead, not a lost one and
+  not an unqualified one.
+- It holds even when the customer names no new date at all ("I will let you know when I am free").
+  The visit is pending, not withdrawn.
+- The ONLY thing that undoes it is the customer closing the door in words - no requirement any more,
+  bought elsewhere, do not call me again. That is Lost, and it is the only other place to go.
+So: "In Follow Up" is the WRONG answer for a qualified lead who moved their visit date, and
+"qualified_should_not_have_been_qualified" is the WRONG mismatch to raise on that call.
+
+Use these definitions:
+- Lost         - the customer has closed the door: no requirement, already bought elsewhere, a wrong
+                 or prank enquiry, a broker, or a clear refusal to proceed.
+- Qualified    - the four gates are met, or the customer agreed to a site visit, asked to proceed or
+                 asked to book - and they have not closed the door.
+- In Follow Up - the gates are not settled and the lead is still open: genuinely undecided, or
+                 unavailable, asked to be called back, wants to discuss with family, is busy, wants
+                 time to think. This is for a lead that has NEVER cleared the bar. A lead that has
+                 already qualified does not come back here - a moved site visit or a fresh callback
+                 date on one of those is Qualified, not this.
+- Unclear      - the conversation does not establish any of the three. Use it rather than guessing.
+
+QUALIFICATION ONLY EVER MOVES FORWARD. THIS IS A HARD RULE, NOT A PREFERENCE.
+The LEAD HISTORY block in the message below tells you whether this lead was ALREADY QUALIFIED on an
+earlier call. Read it before you decide anything. Where it says the lead was already qualified:
+- Your assessment for this call may be "Qualified" or "Lost". It may NOT be "In Follow Up".
+- A next follow-up date and fresh remarks on a qualified lead are the normal and correct way to work
+  one. They are NOT evidence that the lead slipped back, and a callback date is never a downgrade.
+- Only the customer closing the door - no requirement, bought elsewhere, a flat refusal to proceed -
+  moves a qualified lead at all, and it moves it to Lost. There is no route back to In Follow Up.
+- A customer who RESETS OR POSTPONES THEIR SITE VISIT DATE stays Qualified. The visit moved; the
+  lead did not. Log the new date and keep the status where it is.
+- A customer who cannot attend the site visit at all but still wants a flat and asks the agent to
+  call later stays Qualified. So does one who has gone quiet, or who is only negotiating on the day.
+- THE ONE EXCEPTION: a prior qualification that was never sound. The history block says so in as many
+  words where an earlier audit found the qualification unsupported. Only then may this call read
+  lower than Qualified.
+Restate what the history told you in "prior_qualification_note", or leave it null when the lead has
+no earlier qualification. If you find yourself about to write "In Follow Up" for a lead the history
+says was qualified, the answer is Qualified unless the door was actually closed on this call.
+
+DO NOT DECIDE FROM ONE KEYWORD. This is the other common way this judgement goes wrong.
+- "I am not interested right now" is NOT automatically Lost - it is often In Follow Up.
+- "Send me the details" is NOT automatically Qualified - it is usually In Follow Up.
+- Politeness is not intent, and irritation is not rejection.
+- A call cut off after a few seconds establishes nothing. That is "Unclear".
+Weigh the whole conversation and say in "evidence" which lines carry the decision.
+Also give "score", 0-100: how clearly the conversation supports ai_assessed_status - several
+consistent signals and no contradictions scores high, a genuinely mixed call scores lower even when
+you still land on a verdict. Score is null only when ai_assessed_status is "Unclear".
+
+Then give "signals": the individual things the customer said or did that this verdict was actually
+weighed against, one to five of them, each tagged "Match" (it supports crm_status standing as it is)
+or "Mismatch" (it points the other way). This is not a repeat of "evidence" in list form - each point
+is its own concrete fact ("asked for the site address", "said budget is fixed at 40 lakh and this
+project starts at 62"), not a restatement of the final verdict. Put both directions in when the call
+is genuinely mixed rather than picking only the side that matches the verdict - a real "Qualified"
+call usually still has a Mismatch point or two (hesitation, a budget question) and showing it is more
+honest than a clean sweep of Match. Leave it empty only when the call is too short to say anything
+concrete at all.
+
+Then set "mismatch_type" to EXACTLY one of these, or null:
+- "lost_should_not_have_been_lost"                  CRM Lost, but the lead is still live (your
+                                                    assessment is Qualified or In Follow Up).
+- "qualified_should_not_have_been_qualified"        CRM Qualified, but the conversation does not
+                                                    provide the evidence to qualify the lead.
+                                                    THIS IS THE MOST OVER-USED CATEGORY HERE AND THE
+                                                    ONE TO BE STRICTEST WITH. NEVER use it because
+                                                    the customer moved or reset their site visit
+                                                    date, NEVER because they declined or postponed
+                                                    the visit while still wanting a flat, and NEVER
+                                                    for a lead the history already records as soundly
+                                                    qualified. In every one of those the CRM is
+                                                    right and raising this would be the error, not
+                                                    the finding. Use it ONLY where the four gates
+                                                    fail or were never established, on a lead being
+                                                    qualified for the FIRST time on this call.
+- "in_followup_should_have_been_lost"               CRM In Follow Up, but the customer clearly closed
+                                                    the door.
+- "in_followup_should_have_been_qualified"          CRM In Follow Up, but the conversation clearly
+                                                    meets the qualification test - including a lead
+                                                    the history says was already qualified and that
+                                                    the agent has now logged back as In Follow Up.
+                                                    That downgrade is a CRM error and belongs here.
+- null                                              the two agree, the CRM status is one this scheme
+                                                    does not cover (Site Visited, OV, and similar),
+                                                    or your assessment is Unclear.
+"status_match" is true when your assessment agrees with the CRM, false when it does not, and null
+when your assessment is Unclear - an unclear call is not a disagreement.
+
 ### 7. VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
 agreed, where the CRM's record differs from the call, and what should happen to this lead now. If the
@@ -361,6 +483,34 @@ ${PROJECT_EXCEPTIONS}
 ${LOST_REASON_VOCABULARY}
 
 ${QA_OUTPUT_SHAPE}`;
+
+/* THE LEAD'S EARLIER CALLS, and the one thing the judge must know about them: was this lead ALREADY
+   QUALIFIED before today. Qualification is a ratchet - a lead that has met the bar once cannot be
+   logged back to In Follow Up on a later call, only carried on as Qualified or closed as Lost - and a
+   judge that reads each call in isolation cannot see that. So the history is handed over as CRM FACT,
+   in the same block as the rest of the record under audit, and it is the only past the judge gets.
+
+   `sound` is what stops this becoming a laundering machine: an earlier qualification that a previous
+   audit already flagged as qualified_should_not_have_been_qualified does NOT earn the ratchet. The
+   bad qualification stays catchable on every later call; only a qualification that stood up protects
+   the ones after it. */
+export type PriorCall = {
+  follow_up_id: number;
+  call_date_label: string | null;
+  crm_status: string | null;
+  ai_assessed_status: string | null;
+  mismatch_type: string | null;
+  remarks: string | null;
+};
+
+export type PriorQualification = {
+  qualified: boolean;
+  sound: boolean;
+  follow_up_id: number | null;
+  call_date_label: string | null;
+  source: string | null;
+  note: string;
+};
 
 export type QaContext = {
   lead_id: number;
@@ -380,12 +530,56 @@ export type QaContext = {
   call_duration: number | null;
   languages: string[] | null;
   transcript: string;
+  prior_calls: PriorCall[];
+  prior_qualification: PriorQualification | null;
 };
 
 const or = (v: unknown, fallback = "(the CRM left this empty)") => {
   const s = v === null || v === undefined ? "" : String(v).trim();
   return s ? s : fallback;
 };
+
+/* The history as the judge reads it: the earlier calls in date order, then the ratchet stated in one
+   plain sentence. The sentence is written HERE, from data, rather than left for the model to infer
+   from the list - an inference is exactly what goes wrong on the calls this rule exists to fix. */
+function historyBlock(c: QaContext): string {
+  if (!c.prior_calls.length) {
+    return `## LEAD HISTORY - the earlier calls on this same lead. Also CRM FACT.
+This is the FIRST call on this lead, or the first one with a recording. There is no earlier
+qualification to respect, so judge this call on its own evidence.`;
+  }
+  const rows = c.prior_calls.map((p) => {
+    const ai = p.ai_assessed_status
+      ? `, earlier audit read it as ${p.ai_assessed_status}${
+          p.mismatch_type === "qualified_should_not_have_been_qualified"
+            ? " AND FOUND THE QUALIFICATION UNSUPPORTED" : ""}`
+      : ", not assessed";
+    const rem = p.remarks && p.remarks.trim() ? `  remarks: ${p.remarks.trim()}` : "";
+    return `- ${or(p.call_date_label, "(date not recorded)")} - CRM logged it ${
+      or(p.crm_status, "(no status)")}${ai}${rem}`;
+  }).join("\n");
+
+  const q = c.prior_qualification;
+  const verdict = !q || !q.qualified
+    ? `THIS LEAD HAS NEVER BEEN QUALIFIED. Nothing above meets the bar, so judge this call on its own
+evidence and the four gates.`
+    : q.sound
+    ? `THIS LEAD WAS ALREADY QUALIFIED on ${or(q.call_date_label, "an earlier call")} (${q.note}).
+THE RATCHET APPLIES. Your assessment for this call may be "Qualified" or "Lost" and MUST NOT be
+"In Follow Up". A next follow-up date and new remarks are the normal way to work a qualified lead
+and are not a downgrade - and if this call moved or re-fixed a site visit date, that is the visit
+being rescheduled, which keeps the lead Qualified. Only the customer closing the door in words moves
+this lead at all, and it moves it to Lost.`
+    : `This lead was logged Qualified on ${or(q.call_date_label, "an earlier call")}, BUT AN EARLIER AUDIT
+FOUND THAT QUALIFICATION UNSUPPORTED (${q.note}).
+THE RATCHET DOES NOT APPLY. Judge this call on its own evidence and the four gates, and say lower
+than Qualified if that is what the call shows.`;
+
+  return `## LEAD HISTORY - the earlier calls on this same lead. Also CRM FACT.
+${rows}
+
+${verdict}`;
+}
 
 /* CRM fact first, clearly labelled as the thing under audit; the conversation second, clearly
    labelled as the only evidence. The two are never interleaved. */
@@ -412,12 +606,15 @@ Call duration: ${c.call_duration !== null && c.call_duration !== undefined ? Mat
 Use the call date above to resolve anything relative the customer said - "tomorrow", "next week",
 "Monday" - before comparing it with the CRM's next_follow_up_date.
 
+${historyBlock(c)}
+
 ## CONVERSATION FACT - the transcript of the recording of this call. Your only evidence.
 Languages detected: ${c.languages && c.languages.length ? c.languages.join(", ") : "(not detected)"}
 
 ${c.transcript}
 
 ## YOUR TASK
-Assess the five things in the order given in your instructions, quoting the transcript for each.
+Work through the assessments in the order your instructions give them - the six-point agent audit
+before the status assessment, never the other way round - quoting the transcript for each.
 Return only the JSON structure required.`;
 }
