@@ -16143,7 +16143,7 @@ const USAGE_MAP={
   // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
   // view (already implied by simply landing on the tab), so only the other two are worth a feature
   // of their own; returning nothing for 'priority' means switching back to it logs no event.
-  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':null; },
+  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':k==='workflow'?'tasks.tasks.view_tasks_grouped_by_workflow':null; },
   /* Accountability — Meetings. Missed entirely on the first pass: the whole tab reported nothing,
      which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
      scheduling rather than editing because it saves both and scheduling is the act it usually is;

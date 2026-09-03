@@ -8055,6 +8055,14 @@
       const {order}=effectiveOrder(arr);
       return order.map((t,i)=>({t, letter:letterFor(i+1)}));
     }
+    // Which workflow a task came from, for the Workflow grouping tab — read from window._wfStepInfo
+    // (populated just above, keyed by flow_case_step_id), the same cache the task rows themselves
+    // already use to show a workflow's name. A task with no flow_case_step_id is a manual task.
+    function wfNameFor(t){
+      if(t.flow_case_step_id==null) return 'No Workflow';
+      const info=(window._wfStepInfo||{})[t.flow_case_step_id];
+      return (info&&info.flowName)||'Workflow';
+    }
     /* Project/Person view: group order is fully derived from the current priority order above —
        whichever project/person contains the very top task appears first, and so on. No manual
        drag-and-drop of groups or of tasks within a group; only the Priority tab can be dragged. */
@@ -8065,6 +8073,11 @@
         const seen=[],seenSet=new Set(),g={};
         wl.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',items:[]};} g[k].items.push(x); });
         return {mode:'project',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
+      }
+      if(P3==='workflow'){
+        const seen=[],seenSet=new Set(),g={};
+        wl.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,items:[]};} g[k].items.push(x); });
+        return {mode:'workflow',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
       }
       const isOwnerRole = type==='toMe';
       const seen=[],seenSet=new Set(),g={};
@@ -8140,6 +8153,10 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         byMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        // No metaType/metaVal preset here — a task added through this gap has no sensible way to
+        // land inside a specific workflow (those only ever come from the workflow engine itself).
+        byMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
       } else {
         byMeFlat.forEach(x=>{ const mem=(asg[x.t.id]||[]); const ks=mem.length?mem.map(e=>e.toLowerCase()):[(x.t.delegator||'').toLowerCase()]; ks.forEach(k=>{ if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); }); });
       }
@@ -8178,6 +8195,8 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         toMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        toMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
       } else {
         toMeFlat.forEach(x=>{ const k=(x.t.delegator||'').toLowerCase(); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); });
       }
@@ -8198,7 +8217,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>
