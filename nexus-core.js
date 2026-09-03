@@ -14405,28 +14405,6 @@ function trcQaResultIcon(s){
     :/^(inaccurate|fail|mismatch)$/i.test(s)?'fa-xmark'
     :/^(partial|partially accurate)$/i.test(s)?'fa-circle-half-stroke':'fa-circle-question';
 }
-/* Pitch accuracy broken into the six facts a lead actually compares projects on - budget match, sqft
-   mismatch, and so on - as a row of small boxes side by side, a tick or a cross per fact, instead of
-   another table row per fact. Each one carries the detail (what was said vs. what the catalogue says
-   is correct) as a hover title rather than on the face of the box, so the row stays scannable at a
-   glance and the detail is still one hover away, not gone. */
-function trcFactChipsHtml(factChecks){
-  const list=(Array.isArray(factChecks)?factChecks:[]).filter(function(f){return f&&f.fact;});
-  if(!list.length)return '';
-  return '<div style="margin-top:10px"><div style="font-size:12.5px;font-weight:700;margin-bottom:6px">Pitch fact check</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:8px">'
-    +list.map(function(f){
-      const s=String(f.status||'');
-      const isMatch=/^match$/i.test(s), isMismatch=/^mismatch$/i.test(s);
-      const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
-      const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
-      const tip=[f.what_was_said?'Said: '+f.what_was_said:null,
-                 f.what_is_correct?'Correct: '+f.what_is_correct:null,
-                 f.note].filter(Boolean).join(' — ');
-      return '<span class="tag '+cls+'" title="'+esc(tip)+'"><i class="fa-solid '+icon+'"></i> '+esc(f.fact)+'</span>';
-    }).join('')
-  +'</div></div>';
-}
 function trcQaTableHtml(r,m){
   if(!r.qa_id){
     return '<div style="margin-top:12px;font-size:13px;color:var(--slate)">'
@@ -14437,7 +14415,6 @@ function trcQaTableHtml(r,m){
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
         rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
-  const factChips=trcFactChipsHtml(pitch.fact_checks);
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
      why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
@@ -14463,8 +14440,7 @@ function trcQaTableHtml(r,m){
      scanned. It runs to several sentences (reason + issues/evidence joined together) and it wraps
      in full on the face of the row. Never truncate it into a hover title: a tooltip is unreadable
      at that length, cannot be copied, and does not exist at all on touch. */
-  return factChips
-    +'<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
+  return '<table class="tbl" style="margin-top:12px"><thead><tr><th>QA topic</th><th>Result</th><th>Marks</th><th>Why</th></tr></thead><tbody>'
     +topics.map(function(x){
       const score=(x.score===null||x.score===undefined||isNaN(x.score))?null:x.score;
       return '<tr><td style="font-weight:600;white-space:nowrap">'+esc(x.topic||'—')+'</td>'
@@ -14518,8 +14494,7 @@ function trcCallHtml(r,i,total){
       +(i+1)+' of '+total+'</span>'
     +'<span style="font-size:14px;font-weight:600">'+esc(when)+'</span>'
     +(r.crm_status?trcTag('t-blue','',r.crm_status):'')
-    +(r.personnel_name?trcTag(r.personnel_team==='Pre-Sales'?'t-purple':'t-blue','fa-user',
-        r.personnel_name+(r.personnel_team?' · '+r.personnel_team:'')):'')
+    +(r.personnel_name?trcTag('t-blue','fa-user',r.personnel_name):'')
     +trcTrTag(r)
     +(r.reused_transcription?trcTag('t-gray','fa-recycle','Transcript reused'):'')
     +(r.call_duration?trcTag('t-gray','fa-stopwatch',trFmtDur(r.call_duration)):'')
@@ -14533,11 +14508,9 @@ function trcCallHtml(r,i,total){
   const crm='<div class="card card-pad" style="margin:0">'
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
     +trcKV('Follow-up ID',r.follow_up_id)
-    +trcKV('Personnel',r.personnel_name?r.personnel_name+(r.personnel_email?' ('+r.personnel_email+')':''):null)
+    +trcKV('Personnel',r.personnel_name||null)
     +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
     +(trcIsRegression(r)?trcKV('Went back from',r.prev_status+' - not a legitimate step back'):'')
-    +trcKV('Call started',trcWall(r.call_start_text,true))
-    +trcKV('Logged at',r.communication_time?trcWall(String(r.communication_time).slice(0,16),true):null)
     +trcKV('Next follow-up',trcWall(r.next_follow_up_text,true)||r.next_follow_up_text)
     +trcKV('Remarks',r.crm_remarks)
     +trcKV('Lost reason',r.crm_lost_reason)
