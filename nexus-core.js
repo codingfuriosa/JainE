@@ -1748,7 +1748,8 @@ async function legalOcrBarPaint(){
         +'<div style="height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
           +'<div style="height:100%;width:'+pct+'%;background:'+(pct>=100?'#16a34a':'#2563eb')+'"></div></div>'
         +'<div style="font-size:11px;color:var(--slate);margin-top:3px">'
-          +(r.remaining?(r.remaining+' still to read'):'all read')+'</div>'
+          +(r.remaining?(r.remaining+' still to read'):'all read')
+          +(r.unreadable?(' · '+r.unreadable+' could not be read'):'')+'</div>'
       +'</div>';
     }).join('');
   const pctAll=Math.round(100*all.done/all.total);
@@ -1757,7 +1758,10 @@ async function legalOcrBarPaint(){
       +'<b style="font-size:13px"><i class="fa-solid fa-magnifying-glass-chart" style="color:#1e3a8a"></i> Searchable text</b>'
       +'<span style="font-size:12px;color:var(--slate)">'
         +all.done+' of '+all.total+' documents read ('+pctAll+'%)'
-        +(all.remaining?(' \u00b7 '+all.remaining+' still to go'):' \u00b7 complete')+'</span>'
+        +(all.remaining?(' \u00b7 '+all.remaining+' still to go'):' \u00b7 complete')
+        /* A scan Gemini cannot get text out of is retired after three tries and counted here.
+           Left unsaid, the figure sits just short of complete for ever and reads as a stalled job. */
+        +(all.unreadable?(' \u00b7 '+all.unreadable+' unreadable'):'')+'</span>'
       +'<button class="btn-sm" style="margin-left:auto" onclick="legalOcrBarPaint()">'
         +'<i class="fa-solid fa-rotate"></i> Refresh</button>'
     +'</div>'
