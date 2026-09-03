@@ -2367,6 +2367,21 @@
      cheque. The route is the one thing that explains both, so it is stated outright.
      Colour separates them at a glance rather than making anyone read: the ordinary path is quiet,
      and the two exceptions are not. */
+  /* WHAT ACTUALLY COMES NEXT FOR THIS INSTANCE.
+     "The step with the next highest number" is right on every ordinary route, and wrong on one
+     that reorders: Invoice Processing's Payment path visits Bill Checking AFTER Cheque Preparation,
+     so at the cheque the next step by number is Bill Filing while the bill really goes back to
+     checking. That matters because the Forward button names whoever is next - it would have told
+     Arun Pandey the bill was going to Tapan when it was going to Soumyadeep.
+     Returns routed:false when the instance has no route, or is standing somewhere off it, so every
+     other bill and every other workflow keep the old behaviour untouched. */
+  function wfRouteNext(routeSeqs, curSeq){
+    const r=Array.isArray(routeSeqs)?routeSeqs:null;
+    if(!r || !r.length) return {routed:false, seq:null};
+    const i=r.indexOf(curSeq);
+    if(i<0) return {routed:false, seq:null};
+    return {routed:true, seq:(i+1<r.length)?r[i+1]:null};   // seq null = end of the route
+  }
   const WF_ROUTE_PILL={
     cheque:   {label:'Cheque',    bg:'#eef2ff', fg:'#4338ca', bd:'#c7d2fe'},
     no_cheque:{label:'No Cheque', bg:'#fef3c7', fg:'#92400e', bd:'#fde68a'},
@@ -4970,8 +4985,12 @@
        forward it to whoever happened to be first in the list. Falling back to fcs.seq keeps the
        two views saying the same thing. */
     const mySeq=(idx>=0?allSteps[idx].seq:fcs.seq);
-    const nextStep=allSteps.filter(function(s){ return s.seq>mySeq; })
-      .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
+    const _rNext=wfRouteNext(caseRow&&caseRow.route_seqs, mySeq);
+    const nextStep=_rNext.routed
+      ? (_rNext.seq==null ? null
+          : (allSteps.filter(function(s){ return s.seq===_rNext.seq; })[0]||null))
+      : allSteps.filter(function(s){ return s.seq>mySeq; })
+          .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
     const prevExists=allSteps.some(function(s){ return s.seq<mySeq; });
     const isFirst=!prevExists, isLast=!nextStep;
     const amAssignee=(members||[]).some(function(e){
@@ -7742,7 +7761,7 @@
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
@@ -7771,6 +7790,11 @@
            last one and offered Done while the step's own page correctly offered Forward. This is
            the same "next" the database itself uses when forwarding. */
         function wfNextOf(caseId, seq){
+          const rn=wfRouteNext((caseMap[caseId]||{}).route_seqs, seq);
+          if(rn.routed){
+            if(rn.seq==null) return null;   // the route ends here
+            return (byCase[caseId]||[]).filter(function(x){ return x.seq===rn.seq; })[0]||null;
+          }
           const list=(byCase[caseId]||[]).filter(function(x){ return x.seq>seq; });
           if(!list.length) return null;
           return list.reduce(function(a,b){ return b.seq<a.seq?b:a; });
@@ -7784,7 +7808,13 @@
           // deliberately skipped every remaining seq (Invoice Processing's No-Cheque path), which
           // is a real "nothing follows", not a visibility gap.
           const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
-          let moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
+          /* On a routed bill the route is the whole truth about what is left - the guess below,
+             which assumes the highest-numbered step is the last one, does not hold when the path
+             does not run in number order. */
+          const _routed=Array.isArray(c.route_seqs)&&c.route_seqs.length
+                        && c.route_seqs.indexOf(s.seq)>=0;
+          let moreToCome=_routed ? !!nextStep
+                                 : (!!nextStep || (defMax!=null && s.seq<defMax));
           if(moreToCome && !nextStep && Array.isArray(c.skipped_seqs) && c.skipped_seqs.length){
             const skipSet=new Set(c.skipped_seqs);
             let stillPossible=false;
