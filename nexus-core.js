@@ -1703,6 +1703,52 @@ window.docUploadSave=async function(){
 };
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
+/* HOW MUCH OF THE ARCHIVE IS SEARCHABLE.
+   Reading a document means Gemini extracting its text, and until that has happened the file can be
+   found by its NAME but nothing inside it can be searched - so "1,349 documents" and "1,349
+   searchable documents" are very different claims. This says which is true, per section, because
+   Litigation and Projects are at completely different stages.
+   Counted by the same rule the OCR job selects work with, so the bar and the job can never
+   disagree. Word and Excel files are left out of the total as well as the backlog - OCR reads PDFs
+   and images, so counting files it will never open would leave this permanently short of 100% and
+   looking stuck. */
+async function legalOcrBarPaint(){
+  const host=document.getElementById('legalOcrBar'); if(!host) return;
+  let rows=[];
+  try{ const {data}=await sb.schema('doc').rpc('legal_ocr_progress'); rows=data||[]; }catch(_e){ return; }
+  const all=rows.filter(r=>r.section==='All Legal')[0];
+  if(!all||!all.total) { host.innerHTML=''; return; }
+  const parts=rows.filter(r=>r.section!=='All Legal')
+    .sort((a,b)=>a.section<b.section?-1:1)
+    .map(r=>{
+      const pct=r.total?Math.round(100*r.done/r.total):0;
+      return '<div style="flex:1;min-width:190px">'
+        +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">'
+          +'<span style="font-weight:600">'+esc(r.section)+'</span>'
+          +'<span style="color:var(--slate)">'+r.done+' of '+r.total+'</span></div>'
+        +'<div style="height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
+          +'<div style="height:100%;width:'+pct+'%;background:'+(pct>=100?'#16a34a':'#2563eb')+'"></div></div>'
+        +'<div style="font-size:11px;color:var(--slate);margin-top:3px">'
+          +(r.remaining?(r.remaining+' still to read'):'all read')+'</div>'
+      +'</div>';
+    }).join('');
+  const pctAll=Math.round(100*all.done/all.total);
+  host.innerHTML='<div style="border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:13px 15px;margin:14px 0;background:var(--bg-card,#fff)">'
+    +'<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:11px;flex-wrap:wrap">'
+      +'<b style="font-size:13px"><i class="fa-solid fa-magnifying-glass-chart" style="color:#1e3a8a"></i> Searchable text</b>'
+      +'<span style="font-size:12px;color:var(--slate)">'
+        +all.done+' of '+all.total+' documents read ('+pctAll+'%)'
+        +(all.remaining?(' \u00b7 '+all.remaining+' still to go'):' \u00b7 complete')+'</span>'
+      +'<button class="btn-sm" style="margin-left:auto" onclick="legalOcrBarPaint()">'
+        +'<i class="fa-solid fa-rotate"></i> Refresh</button>'
+    +'</div>'
+    +'<div style="display:flex;gap:18px;flex-wrap:wrap">'+parts+'</div>'
+    +(all.remaining?('<div style="font-size:11px;color:var(--slate);margin-top:9px">'
+        +'Reading runs in the background, a few documents at a time. Until a document is read you '
+        +'can find it by name, but not by what is written inside it.</div>'):'')
+  +'</div>';
+}
+window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
   const known={mis:1,scoreboard:1,actions:1,advocates:1};
   const tab=known[seg[0]]?seg[0]:'docs';
@@ -1715,7 +1761,9 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
+    <div id="legalOcrBar"></div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
+  legalOcrBarPaint();
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
