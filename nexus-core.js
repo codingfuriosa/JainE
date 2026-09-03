@@ -617,6 +617,25 @@ function renderPage(){
 }
 function route(){renderPage();}
 window.addEventListener('hashchange',renderPage);
+// Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
+// tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
+// otherwise a page with enough tabs to overflow (e.g. the 13-tab customer portal) leaves the active
+// one wherever the row was last scrolled to, sometimes off-screen with no visual sign which tab is
+// actually selected. Runs off a MutationObserver rather than only at navigation time because several
+// views replace just their own tab row's innerHTML after loading data, not the whole page.
+(function(){
+  const viewEl=document.getElementById('view');
+  if(!viewEl)return;
+  const scrollActiveTabIntoView=function(){
+    const active=viewEl.querySelector('.tabs .tab.active');
+    if(active)active.scrollIntoView({inline:'nearest',block:'nearest'});
+  };
+  // No setTimeout/rAF wrapper needed - MutationObserver already batches a burst of DOM changes
+  // (e.g. rendering a whole page) into one callback call, so calling straight from it still fires
+  // once per render, not once per node. (rAF was tried here first and verified to sometimes never
+  // fire at all for a backgrounded tab - direct is both simpler and more reliable.)
+  new MutationObserver(scrollActiveTabIntoView).observe(viewEl,{childList:true,subtree:true});
+})();
 
 /* ============================ VIEWS ============================ */
 const VIEWS={};
@@ -12587,10 +12606,13 @@ window.custModReqDecide=async function(id,decision){
   closeModal();toast(decision==='accepted'?'Accepted':'Rejected','ok');route();
 };
 VIEWS.customer=async function(v,seg){
-  setCrumb(['Customer Portal']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
+  // Names the active tab in the breadcrumb too - with 13 tabs in a horizontally-scrolling row,
+  // the active one isn't always visible in the row itself, so this is the one place that always
+  // says which section you're actually looking at.
+  setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
   // WHO it's a preview of, or the empty state and the profile menu tell two different stories.
