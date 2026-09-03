@@ -8763,12 +8763,16 @@ window.procEditSave=async function(id,cat,oldPath,dept){
 };
 
 /* ===== VENDOR TREND ANALYSIS (Procurement → Vendor Trends) =====
-   Backed by kraya.vtrend_vendors / vtrend_purchases (dummy data for now — see the migration note)
-   and read entirely through kraya.vtrend_* RPCs, which already compute every classification
-   (New / Growing / Stable / Declining / Inactive). Nothing here re-derives that logic client-side,
-   so swapping the dummy tables for a real feed later is a data change, not a report rewrite. */
+   Backed by kraya.vtrend_vendors / vtrend_purchases (real Farvision PO-register data, one row per
+   invoice line) and read entirely through kraya.vtrend_* RPCs, which already compute every
+   classification (New / Growing / Stable / Declining / Inactive). Nothing here re-derives that
+   logic client-side. Every RPC takes an optional p_business_units text[] filter — null means "all
+   units" — so a fresh business unit's data just needs importing into vtrend_purchases; no report
+   changes are needed for it to show up in the filter. */
 const VT_PALETTE=['#0369a1','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#64748b'];
 let VT_CACHE=null;   // {vendors:{id:{...summary, monthly:[{month,amount}]}}, catColor:{category:hex}}
+let VT_BU_ALL=null;  // [{business_unit,vendor_count,tx_count,total_spend}] — every unit that has data, loaded once
+let VT_BU_SEL=null;  // Set of currently-selected business_unit strings (defaults to "all selected")
 
 function vtEmptyNote(msg){ return '<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">'+esc(msg)+'</div>'; }
 function vtHhiLabel(h){ h=Number(h)||0; return h<1500?'unconcentrated':h<2500?'moderate concentration':'high concentration'; }
@@ -8783,16 +8787,52 @@ function vtDot(color){ return '<span style="display:inline-block;width:8px;heigh
 function vtCatCell(cat){ return vtDot((VT_CACHE&&VT_CACHE.catColor[cat])||'#94a3b8')+esc(cat); }
 function vtVendorLink(id,name){ return '<a href="javascript:void(0)" onclick="vtOpenVendor('+id+')" style="font-weight:600;color:var(--brand);text-decoration:none" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'+esc(name)+'</a>'; }
 
+function vtBuFilterHtml(){
+  if(!VT_BU_ALL||VT_BU_ALL.length<2) return ''; // one unit (or none yet) - a filter has nothing to filter
+  const opts=VT_BU_ALL.map(function(b){
+    const on=VT_BU_SEL.has(b.business_unit);
+    return '<div class="ms-opt'+(on?' on':'')+'" onclick="vtBuToggle(\''+esc(b.business_unit).replace(/'/g,"\\'")+'\')">'+
+      '<i class="fa-solid fa-'+(on?'square-check':'square')+'" style="width:18px;color:'+(on?'var(--brand)':'#94a3b8')+'"></i>'+
+      '<span style="flex:1">'+esc(b.business_unit)+'</span>'+
+      '<span style="color:var(--slate);font-size:11.5px">'+vtInr(b.total_spend)+'</span></div>';
+  }).join('');
+  const label=VT_BU_SEL.size===VT_BU_ALL.length?'All business units':VT_BU_SEL.size+' of '+VT_BU_ALL.length+' business units';
+  return '<div class="card card-pad" style="margin-bottom:16px">'+
+    '<label style="display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:6px"><i class="fa-solid fa-building"></i> Business unit</label>'+
+    '<div class="ms" id="ms_vtbu">'+
+      '<div class="ms-field" onclick="msFieldClick(\'vtbu\',event)">'+
+        '<span class="ms-chips">'+esc(label)+'</span>'+
+        '<i class="fa-solid fa-chevron-down" style="color:#94a3b8;font-size:12px"></i>'+
+      '</div>'+
+      '<div class="ms-panel" id="ms_vtbu_panel"><div class="ms-list">'+opts+'</div></div>'+
+    '</div></div>';
+}
+window.vtBuToggle=function(bu){
+  if(VT_BU_SEL.has(bu)){ if(VT_BU_SEL.size>1) VT_BU_SEL.delete(bu); } // always keep at least one selected
+  else VT_BU_SEL.add(bu);
+  procVendorTrendsRender();
+};
+
 async function procVendorTrendsRender(){
   const host=$('vtHost');if(!host)return;
   host.innerHTML='<div class="card card-pad empty" style="padding:48px;text-align:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;display:block"></i>Crunching vendor data…</div>';
   const K=sb.schema('kraya');
+  if(!VT_BU_ALL){
+    const bu=await K.rpc('vtrend_business_units');
+    if(bu.error){ host.innerHTML=vtEmptyNote('Could not load business units: '+bu.error.message); return; }
+    VT_BU_ALL=bu.data||[];
+    VT_BU_SEL=new Set(VT_BU_ALL.map(function(b){return b.business_unit;})); // default: every unit selected
+  }
+  const buFilterHtml=vtBuFilterHtml();
+  // null = "all units" (matches every RPC's default and lets the DB skip the filter entirely)
+  const selBu=VT_BU_SEL.size===VT_BU_ALL.length?null:Array.from(VT_BU_SEL);
+  const rpcArgs=selBu?{p_business_units:selBu}:{};
   const [ov,mo,cat,vs,an,vm]=await Promise.all([
-    K.rpc('vtrend_overview'), K.rpc('vtrend_monthly'), K.rpc('vtrend_category_monthly'),
-    K.rpc('vtrend_vendor_summary'), K.rpc('vtrend_anomalies'), K.rpc('vtrend_vendor_monthly_all')
+    K.rpc('vtrend_overview',rpcArgs), K.rpc('vtrend_monthly',rpcArgs), K.rpc('vtrend_category_monthly',rpcArgs),
+    K.rpc('vtrend_vendor_summary',rpcArgs), K.rpc('vtrend_anomalies',rpcArgs), K.rpc('vtrend_vendor_monthly_all',rpcArgs)
   ]);
   const firstErr=ov.error||mo.error||cat.error||vs.error||an.error||vm.error;
-  if(firstErr){ host.innerHTML=vtEmptyNote('Could not load vendor trend data: '+firstErr.message); return; }
+  if(firstErr){ host.innerHTML=buFilterHtml+vtEmptyNote('Could not load vendor trend data: '+firstErr.message); return; }
 
   const O=ov.data||{}, MO=mo.data||[], CAT=cat.data||[], VS=vs.data||[], AN=an.data||[], VM=vm.data||[];
 
@@ -8849,6 +8889,7 @@ async function procVendorTrendsRender(){
   }).join('');
 
   host.innerHTML=
+    buFilterHtml+
     kpiHtml+
     '<div class="grid" id="vt-sec-trend" style="grid-template-columns:1.4fr 1fr;gap:16px;margin-top:20px;scroll-margin-top:16px">'+
       '<div class="card card-pad"><h3 style="margin:0 0 12px"><i class="fa-solid fa-chart-line" style="color:#0369a1"></i> Monthly Spend Trend</h3><div style="height:260px"><canvas id="vtChMonthly"></canvas></div></div>'+
@@ -8871,7 +8912,7 @@ async function procVendorTrendsRender(){
       '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:520px"><table class="tbl"><thead><tr><th>Vendor</th><th>Category</th><th>Total Spend</th><th>Share</th><th>Status</th><th>Last Purchase</th></tr></thead><tbody id="vtAllBody">'+allBody+'</tbody></table></div></div>'+
       '<div id="vtSearchEmpty" style="display:none">'+vtEmptyNote('No vendor matches that search.')+'</div>'+
     '</div>'+
-    '<div style="margin-top:14px;font-size:11.5px;color:var(--slate)">Demo data for the time being — '+VS.length+' vendors, '+(O.total_transactions||0)+' invoices, as of '+vtDfmt(O.as_of)+'. Swap in a real vendor feed later without changing this report.</div>';
+    '<div style="margin-top:14px;font-size:11.5px;color:var(--slate)">'+VS.length+' vendors, '+(O.total_transactions||0)+' invoices, as of '+vtDfmt(O.as_of)+(selBu?' · filtered to '+selBu.length+' of '+VT_BU_ALL.length+' business units':'')+'.</div>';
 
   setTimeout(function(){
     if(!window.Chart)return;
