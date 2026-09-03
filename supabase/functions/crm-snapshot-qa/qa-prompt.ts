@@ -1,10 +1,13 @@
-// STAGE 2 OF TWO: JUDGE. Gemini does this - the SAME model family that transcribed the call in stage
-// one - reading the TEXT of the call and the CRM's own record of it, side by side. It never sees
-// audio and never writes a transcript.
+// STAGE 2 OF TWO: JUDGE. OPENAI does this, reading the TEXT of the call and the CRM's own record of
+// it, side by side. It never sees audio and never writes a transcript. Gemini transcribed the call in
+// stage one and has no part in this one.
 //
-// It was OpenAI until 2026-08-31. One model for both halves was asked for, and it removes a second
-// vendor, a second key and a second way for the night to stall: the QA half used to refuse to start
-// at all when no OpenAI key was set, which left transcripts stored and never assessed.
+// Both halves ran on Gemini between 2026-08-31 and 2026-09-02; QA is on OpenAI again by requirement.
+// The prompt below did not have to change for the move, and that is the point: it names no vendor,
+// asks for JSON on its own terms, and states its own contract. The one thing that must stay handled
+// is the failure mode this split had the first time - a missing OpenAI key made the QA half refuse to
+// start at all, which left transcripts stored and never assessed. It now pauses the judge and lets
+// transcription carry on; see the claimable set in oneStep().
 //
 // THREE LAYERS, NEVER MIXED: CRM FACT (handed over verbatim) - CONVERSATION FACT (the transcript) -
 // AI ASSESSMENT (the only thing the model may write).
@@ -111,12 +114,14 @@ If the conversation supports a reason that is genuinely not in this list, name i
 words instead of forcing it into one that does not fit.`;
 
 /* THE OUTPUT CONTRACT, stated in the prompt rather than enforced by the API.
-   OpenAI took this as a `json_schema` response_format and guaranteed the shape. Gemini is asked for
-   `application/json` and told the shape here, which is exactly how the transcriber in stage one is
-   driven - the same arrangement, already proven on this workload.
-   The guarantee therefore moves to qaPhase(), which refuses any reply missing one of the five
+   OpenAI is asked for `json_object`, NOT `json_schema`. Structured Outputs would mean restating this
+   contract in strict JSON Schema, and this contract is nullable unions and a `null` member inside an
+   enum - expressible only by relaxing it, which trades a real guarantee for a nominal one. The same
+   was true of Gemini's responseSchema, so the arrangement here is unchanged by the vendor move.
+   The guarantee therefore lives in qaPhase(), which refuses any reply missing one of the five
    assessments and retries it. Nothing half-formed is ever saved: that is the same rule the
-   transcriber follows, and it is why a weaker guarantee here is not a weaker result.
+   transcriber follows, and it is why a weaker guarantee here is not a weaker result. `json_object`
+   still removes the failure this pipeline actually sees - prose or a code fence around the JSON.
    Note what is NOT trusted from the model either way - the pipeline RE-DERIVES status_match and
    mismatch_type from the two statuses after the reply arrives, so a model that fills those in
    inconsistently cannot corrupt the dashboard's counters. They are asked for only because making the
