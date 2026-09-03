@@ -4303,6 +4303,8 @@
     if(!flow){ toast('Workflow not found','err'); return; }
     const N=wfNounOf(flow); window._wfNoun=N; window._wfIsBill=wfIsBillFlow(flow);
     window._wfEvtSumKey=(flow.tracker_sum_field||'').trim();   // 'Amount' on Reimbursement
+    // The least a claim may come to, if this workflow sets one (Reimbursement: 200).
+    window._wfEvtMinTotal=Number(flow.min_total||0)||0;
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
@@ -4601,10 +4603,17 @@
   window.wfEvtTotalRefresh=function(){
     const el=$('wfEvtTotal'); if(!el) return;
     const t=wfEvtTotalCalc(); if(!t){ el.innerHTML=''; return; }
+    const min=Number(window._wfEvtMinTotal||0);
     el.innerHTML='<span class="wf-evt-total-k">Total '+esc2(window._wfEvtSumKey||'')+'</span>'
       +'<b>'+wfMoney(t.total)+'</b>'
       // said plainly rather than left to be noticed: a total is misleading while a box is empty
-      +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'');
+      +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'')
+      /* Below the minimum is said HERE, beside the total, while it is being typed - not held back
+         until Save. The person can see the number and the rule in the same place, and does not
+         fill the rest of the form before being told it cannot be sent. */
+      +((min>0 && t.total<min)
+          ? ('<span class="wf-evt-total-warn">Below the '+wfMoney(min)+' minimum \u2014 cannot be submitted</span>')
+          : '');
   };
   /* Typing fires input; adding or removing a date or an expense does not, and those change the
      total just as much. One observer on the container catches every add and remove whichever
@@ -4672,6 +4681,20 @@
       /* Fields marked `common` live outside the entry groups and are read once, so they are stored
          as a single value rather than the same answer repeated per entry. Read LAST so the entry
          fields keep their template order ahead of them. */
+      /* THE MINIMUM, ENFORCED.
+         Refused here rather than accepted and sent round the workflow for somebody further down to
+         reject: the only person who can actually fix it is the one filling the form in.
+         NEW claims only. Eight of the claims already raised are under this figure, and applying it
+         to edits would leave nobody able to open those again to correct anything else about them. */
+      const minT=Number(window._wfEvtMinTotal||0);
+      if(minT>0 && !caseId){
+        const tt=wfEvtTotalCalc();
+        if(tt && tt.total<minT){
+          toast('A '+N.lc+' must come to at least '+wfMoney(minT)
+            +' \u2014 this one totals '+wfMoney(tt.total),'warn');
+          return;
+        }
+      }
       const commonBox=$('wfEvtCommon');
       if(commonBox) rowSets.push([].slice.call(commonBox.querySelectorAll('.wf-evt-row')));
       const byLabel={}; const order=[];
@@ -5787,6 +5810,8 @@
     .wf-evt-total b{font-size:17px;color:var(--ink);font-weight:800;letter-spacing:-.2px}
     .wf-evt-total-k{font-weight:600}
     .wf-evt-total-miss{font-size:11px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 9px;border-radius:20px}
+    /* Red, not amber: "still to fill" is a note in passing, this one stops the claim being sent. */
+    .wf-evt-total-warn{font-size:11px;font-weight:700;color:#991b1b;background:#fee2e2;padding:2px 9px;border-radius:20px}
     .wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
