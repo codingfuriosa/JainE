@@ -1722,6 +1722,56 @@ window.docUploadSave=async function(){
 };
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
+/* HOW MUCH OF THE ARCHIVE IS SEARCHABLE.
+   Reading a document means Gemini extracting its text, and until that has happened the file can be
+   found by its NAME but nothing inside it can be searched - so "1,349 documents" and "1,349
+   searchable documents" are very different claims. This says which is true, per section, because
+   Litigation and Projects are at completely different stages.
+   Counted by the same rule the OCR job selects work with, so the bar and the job can never
+   disagree. Word and Excel files are left out of the total as well as the backlog - OCR reads PDFs
+   and images, so counting files it will never open would leave this permanently short of 100% and
+   looking stuck. */
+async function legalOcrBarPaint(){
+  const host=document.getElementById('legalOcrBar'); if(!host) return;
+  let rows=[];
+  try{ const {data}=await sb.schema('doc').rpc('legal_ocr_progress'); rows=data||[]; }catch(_e){ return; }
+  const all=rows.filter(r=>r.section==='All Legal')[0];
+  if(!all||!all.total) { host.innerHTML=''; return; }
+  const parts=rows.filter(r=>r.section!=='All Legal')
+    .sort((a,b)=>a.section<b.section?-1:1)
+    .map(r=>{
+      const pct=r.total?Math.round(100*r.done/r.total):0;
+      return '<div style="flex:1;min-width:190px">'
+        +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">'
+          +'<span style="font-weight:600">'+esc(r.section)+'</span>'
+          +'<span style="color:var(--slate)">'+r.done+' of '+r.total+'</span></div>'
+        +'<div style="height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
+          +'<div style="height:100%;width:'+pct+'%;background:'+(pct>=100?'#16a34a':'#2563eb')+'"></div></div>'
+        +'<div style="font-size:11px;color:var(--slate);margin-top:3px">'
+          +(r.remaining?(r.remaining+' still to read'):'all read')
+          +(r.unreadable?(' · '+r.unreadable+' could not be read'):'')+'</div>'
+      +'</div>';
+    }).join('');
+  const pctAll=Math.round(100*all.done/all.total);
+  host.innerHTML='<div style="border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:13px 15px;margin:14px 0;background:var(--bg-card,#fff)">'
+    +'<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:11px;flex-wrap:wrap">'
+      +'<b style="font-size:13px"><i class="fa-solid fa-magnifying-glass-chart" style="color:#1e3a8a"></i> Searchable text</b>'
+      +'<span style="font-size:12px;color:var(--slate)">'
+        +all.done+' of '+all.total+' documents read ('+pctAll+'%)'
+        +(all.remaining?(' \u00b7 '+all.remaining+' still to go'):' \u00b7 complete')
+        /* A scan Gemini cannot get text out of is retired after three tries and counted here.
+           Left unsaid, the figure sits just short of complete for ever and reads as a stalled job. */
+        +(all.unreadable?(' \u00b7 '+all.unreadable+' unreadable'):'')+'</span>'
+      +'<button class="btn-sm" style="margin-left:auto" onclick="legalOcrBarPaint()">'
+        +'<i class="fa-solid fa-rotate"></i> Refresh</button>'
+    +'</div>'
+    +'<div style="display:flex;gap:18px;flex-wrap:wrap">'+parts+'</div>'
+    +(all.remaining?('<div style="font-size:11px;color:var(--slate);margin-top:9px">'
+        +'Reading runs in the background, a few documents at a time. Until a document is read you '
+        +'can find it by name, but not by what is written inside it.</div>'):'')
+  +'</div>';
+}
+window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
   const known={mis:1,scoreboard:1,actions:1,advocates:1};
   const tab=known[seg[0]]?seg[0]:'docs';
@@ -1734,7 +1784,9 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
+    <div id="legalOcrBar"></div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
+  legalOcrBarPaint();
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
@@ -4039,6 +4091,12 @@ window.taskSave=async function(kind){
   const btn=$('tkSave');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
   const {data,error}=await sb.schema('acc').from('tasks').insert(row).select().single();
   if(error){toast(error.message,'err');btn.disabled=false;return;}
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - the title only
+  // exists as a value read off the form here, which a generic wrapper around this function could
+  // never see. On success only, so a failed save (bad due date, no permission) is never counted as
+  // a task that was created.
+  try{ usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create',
+    {title:title, assignee:isDel?(nameOf(row.assigned_to)||row.assigned_to):undefined}); }catch(_e){}
   if(!isDel&&mem.length)await sb.schema('acc').from('task_members').insert(mem.map(e=>({task_id:data.id,email:e})));
   if(projectId||goalId)await syncParentMembership(projectId,goalId,[row.owner,...mem]);
   if(projectId)await insertDelegationEdges(data.id,state.email,[row.owner,...mem]);
@@ -7986,15 +8044,24 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Project</th></tr></thead><tbody>'
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Project</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
 };
+// "Customized per feature" without a hand-written renderer per feature: what shows up here is
+// whatever that feature chose to capture (a task's title, a search query, who a claim went to) -
+// features that capture nothing yet just show a dash, same as before this existed.
+function usbMetaHtml(meta){
+  if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
+  const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
+    .map(function(k){ return '<b style="font-weight:600">'+esc(k.charAt(0).toUpperCase()+k.slice(1))+':</b> '+esc(String(meta[k])); });
+  return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
+}
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
    widened to everything they did, across every feature, in one chronological list — for when the
    question is "what has this person actually been doing", not "how many times did they use X". */
@@ -8021,11 +8088,11 @@ window.usbOpenUserActivity=async function(){
   const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th></tr></thead><tbody>'
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td></tr>';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -16191,9 +16258,9 @@ window.trDownload=async function(id){
    are queued and sent in batches, never one request per click. */
 const USAGE_MAP={
   // Accountability — Tasks
-  // taskSave(kind) is one Save button behind both "New Task" and "Delegate work" (kind==='delegation')
-  // - a plain string here would count every delegation made this way as a create instead.
-  taskSave:function(kind){ return kind==='delegation' ? 'tasks.tasks.delegate_task_to_someone' : 'tasks.tasks.create_task'; },
+  // taskSave itself is NOT mapped here (see the direct usageQueue call inside it) - the title it
+  // creates only exists as a DOM value read inside the function body, which a wrapper here can never
+  // see; only the function itself can capture it.
   taskUpdateDue:'tasks.tasks.edit_task_due_date',
   taskDelegateSave:'tasks.tasks.delegate_task_to_someone',
   // taskMarkComplete(id, makeComplete) toggles both ways from the same button pair - makeComplete
@@ -16216,11 +16283,12 @@ const USAGE_MAP={
   accEditDueSave:'tasks.tasks.edit_task_due_date', accDelegateSave:'tasks.tasks.delegate_task_to_someone',
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
-  accSubDel:'tasks.tasks.delete_sub_task', accTaskSearch:'tasks.tasks.search_tasks',
+  accSubDel:'tasks.tasks.delete_sub_task',
+  accTaskSearch:{key:'tasks.tasks.search_tasks', meta:function(val){ return val?{query:String(val)}:null; }},
   // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
   // view (already implied by simply landing on the tab), so only the other two are worth a feature
   // of their own; returning nothing for 'priority' means switching back to it logs no event.
-  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':null; },
+  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':k==='workflow'?'tasks.tasks.view_tasks_grouped_by_workflow':null; },
   /* Accountability — Meetings. Missed entirely on the first pass: the whole tab reported nothing,
      which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
      scheduling rather than editing because it saves both and scheduling is the act it usually is;
@@ -16407,10 +16475,16 @@ let USAGE_Q=[], USAGE_TIMER=null;
 // freshest activity that's kept, not the oldest, since an approximate recent picture beats an
 // exact but ancient one for a report read in terms of "the last 30 days".
 const USAGE_MAX_Q=600;
-function usageQueue(featureKey, action){
+// meta is the specific thing the action was ABOUT - a task's title, a search query, who a claim
+// was delegated to - not just that the feature fired. Optional and feature-by-feature: most call
+// sites still pass nothing, same as before this existed. erp_log_usage only keeps it when it is a
+// plain object, so anything else here is silently dropped rather than corrupting the row.
+function usageQueue(featureKey, action, meta){
   if(!featureKey || !(state&&state.email)) return;
-  USAGE_Q.push({module_id:String(featureKey).split('.')[0], feature_key:featureKey,
-                action:action||'view', occurred_at:new Date().toISOString()});
+  const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
+                action:action||'view', occurred_at:new Date().toISOString()};
+  if(meta && typeof meta==='object') ev.meta=meta;
+  USAGE_Q.push(ev);
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
@@ -16483,10 +16557,21 @@ function usageInstall(){
     // modal and Save button), and a fixed string would count every delegation as "create task" while
     // "delegate a task" itself never fired. Those entries are a resolver instead: called with the
     // same arguments as the wrapped function, returning whichever feature key actually happened.
+    // A THIRD shape, {key, meta}, additionally captures the specific thing the action was about -
+    // only usable when that thing is itself one of the wrapped function's own arguments (a search
+    // box's typed value, say); anything read from the DOM inside the function's own body is outside
+    // what a wrapper can see, and is logged directly at the source instead (see crystallizeAndSwap).
+    const isDescriptor=mapped&&typeof mapped==='object'&&('key' in mapped);
+    const keySrc=isDescriptor?mapped.key:mapped;
+    const metaFn=isDescriptor?mapped.meta:null;
     const wrapped=function(){
       try{
-        const key=(typeof mapped==='function') ? mapped.apply(this, arguments) : mapped;
-        if(key) usageQueue(key, act);
+        const key=(typeof keySrc==='function') ? keySrc.apply(this, arguments) : keySrc;
+        if(key){
+          let meta=null;
+          if(metaFn){ try{ meta=metaFn.apply(this, arguments); }catch(_e){} }
+          usageQueue(key, act, meta);
+        }
       }catch(e){}
       return orig.apply(this, arguments);      // called through no matter what happened above
     };

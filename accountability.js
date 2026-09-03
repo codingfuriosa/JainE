@@ -3062,6 +3062,11 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
           +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
+          // Reimbursement only: sits right beside the disabled "print selected" icon it is an
+          // alternative to - one prints whatever you've ticked, this one prints the whole running
+          // new-and-unprinted pile without having to select anything. Hidden while selCaseId is set
+          // (opened focused on one particular reimbursement) same as before.
+          +(id===39&&!selCaseId?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Reimbursements</span></button>':'')
           +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
         +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
@@ -3084,10 +3089,6 @@
       +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      // Reimbursement only: everything Accounts (step 2) has just received and this tool has not
-      // already printed - a running month-end pile, not a fixed selection, so it is its own button
-      // rather than another item in the checkbox-driven "Print selected" flow above.
-      +(id===39?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Receipts</span></button>':'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
@@ -3531,9 +3532,14 @@
        flat per-page timeout that backed it up was a guess that a slow S3 fetch or a big bulk print
        could easily outrun - print would fire with the images still blank boxes, which is exactly
        what a printed sheet of QR codes cannot afford to be. Waiting on each <img> directly removes
-       the guesswork; 'error' resolves too; a truly hung image cannot block printing forever. */
+       the guesswork - but 'load'/img.complete only mean the bytes have arrived, not that the browser
+       has finished DECODING the image, which is what a synchronous print render actually needs
+       already done. decode() resolves only once the image can actually be painted; falls back to
+       load/error for the rare browser without it. Either way 'error' resolves too, so one broken
+       image can never hang the rest of the printout. */
     const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
     const imgReady=function(img){ return new Promise(function(res){
+      if(typeof img.decode==='function'){ img.decode().then(res,res); return; }
       if(img.complete) return res();
       img.addEventListener('load',res,{once:true});
       img.addEventListener('error',res,{once:true});
@@ -3545,7 +3551,7 @@
     return true;
   };
   window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
-  /* Reimbursement's "Print New Receipts": everything Accounts (step 2) currently has as received,
+  /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
      eye to find what changed. Marking done happens AFTER the print job is actually handed to the
@@ -8129,6 +8135,23 @@
       const {order}=effectiveOrder(arr);
       return order.map((t,i)=>({t, letter:letterFor(i+1)}));
     }
+    // Which workflow a task came from, for the Workflow grouping tab — read from window._wfStepInfo
+    // (populated just above, keyed by flow_case_step_id), the same cache the task rows themselves
+    // already use to show a workflow's name. A task with no flow_case_step_id is a manual task.
+    function wfNameFor(t){
+      if(t.flow_case_step_id==null) return 'No Workflow';
+      const info=(window._wfStepInfo||{})[t.flow_case_step_id];
+      return (info&&info.flowName)||'Workflow';
+    }
+    // Group order otherwise follows priority order (whichever group holds the top task comes
+    // first) - fine for Tags/Person, where every group is equally "a task", but for Workflow a
+    // manual task sorting ahead of every real workflow just because it happens to be top priority
+    // reads as the workflows being buried under stray tasks. No Workflow always sinks to the end.
+    function wfSinkNoWorkflow(seen){
+      const i=seen.indexOf('No Workflow');
+      if(i!==-1){ seen.splice(i,1); seen.push('No Workflow'); }
+      return seen;
+    }
     /* Project/Person view: group order is fully derived from the current priority order above —
        whichever project/person contains the very top task appears first, and so on. No manual
        drag-and-drop of groups or of tasks within a group; only the Priority tab can be dragged. */
@@ -8139,6 +8162,11 @@
         const seen=[],seenSet=new Set(),g={};
         wl.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',items:[]};} g[k].items.push(x); });
         return {mode:'project',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
+      }
+      if(P3==='workflow'){
+        const seen=[],seenSet=new Set(),g={};
+        wl.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,items:[]};} g[k].items.push(x); });
+        return {mode:'workflow',secs:wfSinkNoWorkflow(seen).map(k=>({key:k,label:g[k].label,items:g[k].items}))};
       }
       const isOwnerRole = type==='toMe';
       const seen=[],seenSet=new Set(),g={};
@@ -8214,6 +8242,11 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         byMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        // No metaType/metaVal preset here — a task added through this gap has no sensible way to
+        // land inside a specific workflow (those only ever come from the workflow engine itself).
+        byMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
+        wfSinkNoWorkflow(seen);
       } else {
         byMeFlat.forEach(x=>{ const mem=(asg[x.t.id]||[]); const ks=mem.length?mem.map(e=>e.toLowerCase()):[(x.t.delegator||'').toLowerCase()]; ks.forEach(k=>{ if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); }); });
       }
@@ -8252,6 +8285,9 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         toMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        toMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
+        wfSinkNoWorkflow(seen);
       } else {
         toMeFlat.forEach(x=>{ const k=(x.t.delegator||'').toLowerCase(); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); });
       }
@@ -8272,7 +8308,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>
