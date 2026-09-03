@@ -249,6 +249,50 @@ Plus the **six-point agent audit** — Script, Etiquette, Query Handling, Call t
 Avoidance, Hyper-personalization — scored Pass / Partial / Fail / Not Applicable against the explicit
 rubric in `_shared/qa-rubric.ts`.
 
+**The audit is done BEFORE the status, not after.** What the agent asked decides what the call is
+capable of establishing: an agent who never asked the budget cannot have established that the budget
+matches, and a status resting on a question nobody asked is a guess. The prompt is ordered that way
+and says so.
+
+### What qualifies a lead
+
+Four requirement gates, recorded in `status_assessment.qualification_check`: **location**, **budget**,
+**area (sqft)** and **position** (ready to move vs under construction). All four Match is Qualified;
+any Mismatch fails; a gate the call never reached is `Not Established`, which does not qualify a lead
+but does not lose it either.
+
+These are not the pitch's `fact_checks`. `fact_checks` asks whether what the **agent said** about the
+project was true; `qualification_check` asks whether what the **customer wants** fits the project. A
+call can be pitched perfectly to someone who wants a flat this project does not build.
+
+**A site visit is not the test.** Agreeing to one qualifies a lead on its own — but a customer who
+passes the four gates and still will not come (busy, travelling, sending a family member, "call me
+after the puja") is *still Qualified*. They want to buy; only the visit is unsettled.
+
+### Qualification only moves forward
+
+Once a lead has cleared the bar, a later call can carry it on as **Qualified** or close it as **Lost**.
+It cannot go back to **In Follow Up**. Working a qualified lead means a fresh callback date and new
+remarks — that is the normal way to do it, and reading it as a downgrade is what produced most of the
+false `qualified_should_not_have_been_qualified` flags.
+
+The rule is enforced twice. The prompt is handed a **LEAD HISTORY** block — the lead's earlier calls,
+what the CRM logged for each and what any earlier audit concluded — and told the rule in plain words.
+Then `deriveStatusMatch` applies it deterministically: an "In Follow Up" verdict on a lead that was
+already qualified is lifted back to Qualified before anything is compared or counted. The model's own
+untouched answer is kept in `status_assessment.model_assessed_status`, with
+`qualification_ratcheted: true` beside it, so the lift is always auditable.
+
+Whether the lead had already qualified comes from `acc.followup_timeline_v.prior_max_status` — the
+highest rung it reached *before* this follow-up, from the same view the dashboard's "Status regressed"
+tag is derived from, so the two cannot disagree.
+
+**The guard that keeps this honest:** a prior Qualified that an earlier audit already flagged as
+`qualified_should_not_have_been_qualified` does **not** earn the ratchet. A lead qualified on no
+evidence stays catchable on every call after it; only a qualification that stood up protects the ones
+that follow. (One honest gap: an earlier Qualified not yet audited is taken at face value, because
+the CRM record is all there is at that point. The queue runs oldest-first, so it is rarely the case.)
+
 **The rubric holds no figures and must never hold any.** Every rule in it is about what the *agent
 did* — asked, answered, confirmed, disclosed — so there is no project fact in it for a transcript to
 absorb.
@@ -263,9 +307,9 @@ contradicts itself cannot corrupt the dashboard.
 | CRM says | The call says | Counted as |
 | --- | --- | --- |
 | Lost | Qualified or In Follow Up | `lost_should_not_have_been_lost` |
-| Qualified | anything else | `qualified_should_not_have_been_qualified` |
+| Qualified | anything else | `qualified_should_not_have_been_qualified` — but never when the lead was already soundly qualified and the call merely set a new callback date; that is lifted to Qualified first and agrees |
 | In Follow Up | Lost | `in_followup_should_have_been_lost` |
-| In Follow Up | Qualified | `in_followup_should_have_been_qualified` |
+| In Follow Up | Qualified | `in_followup_should_have_been_qualified` — including a lead already qualified that the agent has logged back as In Follow Up |
 | anything | Unclear | **not counted** — an unclear call is not a disagreement |
 | Site Visited, OV, … | anything | not counted — outside the four categories |
 
