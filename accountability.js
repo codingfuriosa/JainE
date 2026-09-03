@@ -643,6 +643,34 @@
   window.__accQ1=true;
 
   /* ---------- data (parallelized) ---------- */
+  /* ACTING ON SOMEBODY ELSE'S BEHALF.
+     A department person can have a stand-in who receives and forwards their bills for them. The
+     step still BELONGS to the owner: their name is what every screen shows, the task is still
+     theirs, and the members on it are untouched. Only the permission to press the buttons is
+     shared, and the timeline still records who actually pressed them.
+     Deliberately not done by adding the stand-in to the task's members - that list drives the
+     avatars, the approval route, the member editor and the assignee emails, so a stand-in placed
+     in it would have appeared as a second owner on all four. Which tasks a stand-in may act on is
+     answered by the database (acc.wf_proxy_task_ids), so the list here and the permission the
+     action functions will actually grant come from one definition and cannot drift apart. */
+  let WF_ACT_FOR=[];      // [{principal_email, flow_id}] - whose work I may act on
+  let WF_ACT_TASKS={};    // task_id -> whose it is, for the steps open to me right now
+  const wfActForPerson=(email,flowId)=>WF_ACT_FOR.some(function(x){
+    return eq(x.principal_email,email)
+        && (x.flow_id==null || flowId==null || Number(x.flow_id)===Number(flowId));
+  });
+  const wfActTask=t=>!!(t && t.id!=null && WF_ACT_TASKS[t.id]);
+  async function wfActLoad(){
+    try{
+      const [pr,tk]=await Promise.all([
+        ACC().rpc('wf_proxy_principals',{}),
+        ACC().rpc('wf_proxy_task_ids')
+      ]);
+      WF_ACT_FOR=(pr&&pr.data)||[];
+      WF_ACT_TASKS={};
+      (((tk&&tk.data))||[]).forEach(function(r){ WF_ACT_TASKS[r.task_id]=r.principal_email; });
+    }catch(_e){ WF_ACT_FOR=[]; WF_ACT_TASKS={}; }   // no stand-in arrangement is the normal case
+  }
   async function loadAssignees(ids){ if(!ids.length)return {}; try{const {data}=await ACC().from('ptask_assignees').select('*').in('task_id',ids);const m={};(data||[]).forEach(a=>{(m[a.task_id]=m[a.task_id]||[]).push(a.email);});return m;}catch(e){return {};} }
   async function loadProjectsMap(){ try{const {data}=await ACC().from('projects').select('id,name');const m={};(data||[]).forEach(p=>m[p.id]=p.name);return m;}catch(e){return {};} }
   async function loadAll(){
@@ -654,6 +682,7 @@
        another one out. A task that had plainly been created simply was not in the list.
        Ordered explicitly as well: without a sort, pages can overlap or skip. order_index is 0 on
        every row today, so id is what actually makes the paging stable. */
+    await wfActLoad();   // before the filter below, which asks what I may act on
     const [tasksRaw,asgRaw,pR]=await Promise.all([
       wfFetchPaged(function(){ return ACC().from('ptasks').select('*')
         .order('order_index',{ascending:true}).order('id',{ascending:true}); }),
@@ -663,12 +692,16 @@
     ]);
     let tasks=tasksRaw||[]; const pm={}; (pR.data||[]).forEach(x=>pm[x.id]=x.name);
     const asg={}; (asgRaw||[]).forEach(a=>{(asg[a.task_id]=asg[a.task_id]||[]).push(a.email);});
-    tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))) && (asg[t.id]||[]).length>0);
+    tasks=tasks.filter(t=>(eq(t.delegator,my)||(asg[t.id]||[]).some(e=>eq(e,my))||wfActTask(t)) && (asg[t.id]||[]).length>0);
     tasks.forEach(t=>t._projName=t.project_id?pm[t.project_id]:'');
     return {tasks,asg,pm};
   }
   const isOwner = t => eq(t.delegator,me());
-  const isMemb  = (t,asg)=>(asg[t.id]||[]).some(e=>eq(e,me()));
+  /* A step I am standing in on counts as mine for WHERE IT IS LISTED and WHETHER I GET BUTTONS,
+     which is the whole point - it has to reach me to be actionable. It deliberately does NOT make
+     me a member: isSelf stays false, so the row still shows whoever raised the bill, and the
+     detail page still lists the owner alone. */
+  const isMemb  = (t,asg)=>(asg[t.id]||[]).some(e=>eq(e,me()))||wfActTask(t);
   const isSelf  = (t,asg)=>isOwner(t)&&isMemb(t,asg);
   const stOf    = t => t.approval_state==='approved'?'approved':(t.approval_state==='awaiting_approval'?'await':'open');
   const iDeleg  = (t,tasks)=> tasks.some(c=>c.parent_task_id===t.id && eq(c.delegator,me()));
@@ -811,7 +844,7 @@
     // Workflow rows show the full concatenated title (step + filled-in details), same as taskRow, and
     // in Completed This Week (showDoneDate) the title wraps in full instead of clipping.
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
-    const wfCombined=wfRowTitle(wfInfo,list);
+    const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const titleHtml=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
@@ -1021,10 +1054,12 @@
   function wfDTFull(iso){ return wfDT(iso); }
   function wfHms(ms){ if(ms==null||isNaN(ms))return ''; let m=Math.max(0,Math.round(ms/60000)); const h=Math.floor(m/60); m=m%60; return (h?h+'h ':'')+m+'m'; }
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
-  // How an instance's number reads on screen. The bill workflow pads to a 5-digit Id (00042),
-  // because that is how the bill register has always numbered them. Every ordinary workflow just
-  // shows a plain No. — 42, not 00042.
-  function wfCaseNoText(c){ return String((c&&c.case_no)||0); }
+  // How an instance's number reads on screen. Invoice Processing calls it the "JainE id" and
+  // prefixes it with J (J1, J2, J3…) — every ordinary workflow keeps the plain No. — 1, 2, 3.
+  function wfCaseNoText(c){
+    if(c && c.flow_id===26) return String(c.jaine_id||c.case_no||0);
+    return String((c&&c.case_no)||0);
+  }
   // Is this the bill-style workflow (Invoice Processing)? Decided from the workflow's OWN detail
   // fields — only that one carries a "Wheredoc Id" — so nothing here is hard-wired to a
   // particular workflow row. Everything gated on this stays off ordinary workflows, which keep
@@ -1092,26 +1127,58 @@
     if(!Array.isArray(v))return false;
     return v.some(function(x){ return x && eq(x.viewer||'', me()) && String(x.watches||'')==='__ALL__'; });
   }
-  /* Who may see the People row and the Tracker on a workflow.
-     Both answer the same question — who is handling these, and where has each one reached — and on
-     Invoice Processing that is the business of the people who raise bills, the two people a bill may
-     be handed to, Systems, and anyone granted a whole-flow read-only watch (wfIsFullFlowViewer).
-     Not of everyone who can open the page.
+  // Every owner_email/owner_emails actually configured on any of the flow's own steps — the fixed
+  // handlers, as opposed to trigger_owner (who raises) or a step resolved per-case at runtime.
+  function wfFixedStepOwners(steps){
+    const set={};
+    (steps||[]).forEach(function(s){
+      if(s.owner_email) set[String(s.owner_email).toLowerCase()]=true;
+      if(Array.isArray(s.owner_emails)) s.owner_emails.forEach(function(e){ if(e) set[String(e).toLowerCase()]=true; });
+    });
+    return set;
+  }
+  // Whether email was ever the resolved person (or a listed candidate) on any step-instance row of
+  // THIS SPECIFIC case — how a step like Invoice Processing's "Dept Check" or "Sign Cheque Sent
+  // Back" names the actual department per bill, rather than one fixed owner for every bill.
+  function wfIsCaseStepPerson(fcsForFlow, caseId, email){
+    const e=String(email||'').toLowerCase();
+    return (fcsForFlow||[]).some(function(x){
+      if(x.case_id!==caseId) return false;
+      if(x.person && String(x.person).toLowerCase()===e) return true;
+      return Array.isArray(x.candidates) && x.candidates.some(function(c){ return c && String(c).toLowerCase()===e; });
+    });
+  }
+  function wfIsAnyCaseStepPerson(fcsForFlow, email){
+    const e=String(email||'').toLowerCase();
+    return (fcsForFlow||[]).some(function(x){
+      if(x.person && String(x.person).toLowerCase()===e) return true;
+      return Array.isArray(x.candidates) && x.candidates.some(function(c){ return c && String(c).toLowerCase()===e; });
+    });
+  }
+  /* Who may see the People row and the Tracker on a workflow, and how much of the Tracker's own
+     bill list they get — three tiers, not one on/off switch:
+       - a fixed step owner (configured on any step, e.g. Accounts/Audit/CFO on Invoice Processing)
+         sees every bill, since whichever ones reach their step could come from anyone;
+       - a trigger_owner (someone allowed to raise bills) sees only the ones they themselves raised;
+       - anyone else only appears here because some case actually named them as the resolved
+         department/person on one of its own steps (a "Dept Check"-style step, resolved per bill,
+         not fixed like the others) — Systems, wfInDept, and Administrator still see everything.
      Deliberately keyed on trigger_step_assignable_to: a flow that restricts WHO its instances may be
      given to is one where the handling roster is sensitive. Every other workflow has no such list and
      is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
-  function wfMaySeeRoster(f){
+  function wfRosterAccess(f, steps, fcs){
     const assign=String((f&&f.trigger_step_assignable_to)||'')
       .split(',').map(function(x){return x.trim();}).filter(Boolean);
-    if(!assign.length) return true;                       // flow doesn't restrict handover — unchanged
-    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
-    if(wfIsFullFlowViewer(f)) return true;
+    if(!assign.length) return {show:true,scope:'all'};    // flow doesn't restrict handover — unchanged
+    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems') || wfIsFullFlowViewer(f)) return {show:true,scope:'all'};
+    if(wfFixedStepOwners(steps)[String(me()||'').toLowerCase()]) return {show:true,scope:'all'};
     const trig=String((f&&f.trigger_owner)||'');
-    if(trig==='__ALL__') return true;                     // an everyone-may-raise flow hides nothing
     const trigList=trig.split(',').map(function(x){return x.trim();}).filter(Boolean);
-    return trigList.some(function(e){return eq(e,me());})
-        || assign.some(function(e){return eq(e,me());});
+    if(trig==='__ALL__' || trigList.some(function(e){return eq(e,me());})) return {show:true,scope:'own-created'};
+    if(assign.some(function(e){return eq(e,me());}) || wfIsAnyCaseStepPerson(fcs,me())) return {show:true,scope:'own-assigned'};
+    return {show:false,scope:'none'};
   }
+  function wfMaySeeRoster(f,steps,fcs){ return wfRosterAccess(f,steps||[],fcs||[]).show; }
   // A flow can curate which detail fields summarize an instance (flow.card_fields, e.g.
   // Reimbursement -> Date/Conveyance/Food, then Total Amount) instead of showing every field it has.
   // Sums a comma-joined multi-entry value (e.g. "500, 300, 200") into a single number.
@@ -1421,7 +1488,28 @@
     if(descKey&&String(by[descKey]||'').trim()){
       desc.push(String(by[descKey]).replace(/\|/g,' '));
     }
-    return { amount: amt.join(' ').toLowerCase(), desc: desc.join(' ').toLowerCase() };
+    /* EVERYTHING ELSE THE INSTANCE WAS FILLED IN WITH.
+       Only the amount and the description were indexed, so on Invoice Processing a bill could not
+       be found by the one thing anybody actually looks for - the company it is from. The Tracker
+       indexed it and the list beside it did not, which is why the same search worked on one tab and
+       not the other.
+       Built from the fields generally rather than by naming Company: a workflow calls its parties
+       whatever it likes (Company, Vendor, Party), and listing names here would leave the next one
+       unsearchable for the same reason. Amounts are already handled above, dates are searched by
+       the date range, and an attachment is a file path nobody types. */
+    const skipKeys=new Set([amtKey, descKey].filter(Boolean));
+    const txt=[];
+    Object.keys(by).forEach(function(l){
+      if(skipKeys.has(l)) return;
+      const v=String(by[l]==null?'':by[l]).trim();
+      if(!v) return;
+      if(v.indexOf('s3:')===0) return;                  // a stored file, not text
+      if(/^\d{4}-\d{2}-\d{2}/.test(v)) return;          // a date - the date range covers those
+      txt.push(v.replace(/\|/g,' '));
+    });
+    return { amount: amt.join(' ').toLowerCase(),
+             desc: desc.join(' ').toLowerCase(),
+             text: txt.join(' ').toLowerCase() };
   }
   function wfDetailsFmt(details){ return (details||[]).map(function(d){ var l=(d&&d.label)||'', v=(d&&d.value)||''; if(!String(v).trim())return ''; return (l?('<b>'+esc2(l)+':</b> '):'')+esc2(wfDetailDisp(v)); }).filter(Boolean).join('<br>'); }
 
@@ -1584,7 +1672,9 @@
     return rows.slice().sort(function(a,b){
         return (rank(a.label)-rank(b.label)) || (seen[a.label]-seen[b.label]);
       })
-      .map(function(d){ return d.label+': '+wfDetailDisp(d.value); })
+      /* Just the value. "Company: X · Bill Date: Y" spent half the line repeating words the
+         reader already knows from position - the company is obviously the company. */
+      .map(function(d){ return wfDetailDisp(d.value); })
       .join(' \u00b7 ');
   }
   /* What a workflow task is CALLED in a list. On a flow that names its tasks after the instance
@@ -1592,12 +1682,19 @@
      - and deliberately not the step name: which step it is sitting at is the one thing the person
      opening it already knows, since it is in their list because it is their step. Every other
      workflow keeps step-name-first, as before. */
-  function wfRowTitle(wfInfo,list){
+  function wfRowTitle(wfInfo,list,storedDesc){
     if(!wfInfo) return '';
     const det=Array.isArray(wfInfo.details)?wfInfo.details:[];
-    // a flow that states its own naming order takes it, step name and all, and stops here
+    /* A flow that states its own naming order is named from the description the DATABASE built
+       (acc.wf_task_desc, kept current by a trigger) rather than rebuilt here. Two places
+       computing the same name is how they drifted apart: the stored one led with the JainE id
+       and carried no labels, while this one led with the Company and repeated every label.
+       One source of truth, so the list, the task page, the calendar and the email cannot
+       disagree - and every task already created is already correct, with nothing to migrate. */
     if(Array.isArray(wfInfo.taskFields)&&wfInfo.taskFields.length){
-      const t=wfTaskLine(det,wfInfo.taskFields);
+      const stored=String(storedDesc==null?'':storedDesc).trim();
+      if(stored) return stored;
+      const t=wfTaskLine(det,wfInfo.taskFields);   // only if the stored one is somehow missing
       if(t) return t;
     }
     const line=wfDetailsInline(det);
@@ -1613,11 +1710,13 @@
     return [step,line].filter(Boolean).join(' - ');
   }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
-  // Curated instance summary — Wheredoc Id/Bill No./Bill Date/Company/Amount (+ the instance No.),
+  // Curated instance summary — Bill No./Bill Date/Company/Amount (+ the instance No./JainE id),
   // explicitly WITHOUT User. Falls back to null (caller shows
   // the generic full detail list instead) for any workflow that doesn't have these field labels,
   // so other workflows (Leave approval, etc.) are unaffected.
-  var WF_SUMMARY_FIELDS=['Wheredoc Id','Bill No.','Bill Date','Company','Amount'];
+  // Wheredoc Id deliberately left out: it's gone from the form, but old instances still carry one
+  // in their stored trigger_details, and listing the label here would surface it again regardless.
+  var WF_SUMMARY_FIELDS=['Bill No.','Bill Date','Company','Amount'];
   function wfCaseSummaryHtml(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
@@ -1651,11 +1750,30 @@
        Nothing is widened just for being last: an odd count used to push the final item — usually
        Total Amount — onto a stretched row of its own, which read as a mistake rather than as
        emphasis. Only a field the flow actually declares wide (Remarks) spans the row. */
+    // Invoice Processing shows just the value, leading with the JainE id — "Bill No.", "Company"
+    // etc. don't need repeating on screen once the item order itself already reads as: id, then
+    // bill no., then date, then company, then amount.
+    const bareValues=flow&&flow.id===26;
     const gridItems=items.map(function(it){
-      return '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
+      return bareValues
+        ? '<div class="tp-f"><div class="v">'+esc2(it.v)+'</div></div>'
+        : '<div class="tp-f"><div class="k">'+esc2(it.k)+'</div><div class="v">'+esc2(it.v)+'</div></div>';
     }).join('')
       +(wideField?('<div class="tp-f tp-f-wide"><div class="k">'+esc2(wideField.k)+'</div><div class="v tp-f-scroll">'+wfMultiValHtml(wideField.v,flow)+'</div></div>'):'');
     return '<div class="tp-grid" style="margin-top:10px">'+gridItems+'</div>';
+  }
+  /* The Step Task page's own Description block — a separate render path from wfCaseSummaryHtml
+     above (that one is the case-timeline panel), so fixing one was never going to touch the other.
+     Same rule, same field list (WF_SUMMARY_FIELDS, already without Wheredoc Id): just the value,
+     leading with the JainE id, no "Company"/"Bill No."/"Bill Date" labels repeated on screen. */
+  function wfInvoiceTaskDetailsHtml(details,caseRow){
+    const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
+    const lines=[esc2(wfCaseNoText(caseRow))];
+    WF_SUMMARY_FIELDS.forEach(function(k){
+      const v=by[k];
+      if(v!=null && String(v).trim()) lines.push(esc2(wfDetailDisp(v)));
+    });
+    return lines.join('<br>');
   }
   // A repeated-set (multi-entry) field's value is stored as one comma-joined string, one segment
   // per set. Only actually split & labeled per-set when this flow IS multi-entry
@@ -2264,6 +2382,117 @@
     if(s && s.owner_role) return String(s.owner_role);
     return '—';
   }
+  /* WHICH WAY A BILL WENT.
+     The step columns alone cannot say it: a No Cheque bill and a Payment bill both leave gaps, and
+     a Payment bill's dates run out of column order because it visits Bill Checking after the
+     cheque. The route is the one thing that explains both, so it is stated outright.
+     Colour separates them at a glance rather than making anyone read: the ordinary path is quiet,
+     and the two exceptions are not. */
+  /* WHAT ACTUALLY COMES NEXT FOR THIS INSTANCE.
+     "The step with the next highest number" is right on every ordinary route, and wrong on one
+     that reorders: Invoice Processing's Payment path visits Bill Checking AFTER Cheque Preparation,
+     so at the cheque the next step by number is Bill Filing while the bill really goes back to
+     checking. That matters because the Forward button names whoever is next - it would have told
+     Arun Pandey the bill was going to Tapan when it was going to Soumyadeep.
+     Returns routed:false when the instance has no route, or is standing somewhere off it, so every
+     other bill and every other workflow keep the old behaviour untouched. */
+  /* IS THIS THE LAST STEP?
+     Answered from the ROUTE ITSELF - "is this the final entry in the path" - and never from
+     whether a following step's row happens to be in front of us. That distinction is the whole
+     bug: a Done flag appears wherever the page concludes nothing follows, and Done ENDS THE WHOLE
+     BILL. Deciding that from rows we may or may not have loaded means one missing row turns a
+     Forward into a button that closes a live bill, which is not a risk worth carrying for a
+     cosmetic saving.
+     Returns null when the instance has no route (or is standing off it), so the caller keeps its
+     old behaviour for every ordinary bill and every other workflow. */
+  function wfRouteIsLast(routeSeqs, curSeq){
+    const r=Array.isArray(routeSeqs)?routeSeqs:null;
+    if(!r || !r.length) return null;
+    const i=r.indexOf(curSeq);
+    if(i<0) return null;
+    return (i+1) >= r.length;
+  }
+  /* The steps of an instance in the order IT actually visits them, for anything that reads as a
+     sequence of events. On the Payment route that is Bill Booking, RTP, the cheque, then checking -
+     which is what happened, and what the timeline should show. Anything not on the route keeps its
+     numeric place at the end, so nothing is ever dropped. */
+  function wfStepsInRouteOrder(list, routeSeqs){
+    const arr=(list||[]).slice();
+    const r=(Array.isArray(routeSeqs)&&routeSeqs.length)?routeSeqs:null;
+    if(!r) return arr;
+    const pos=function(x){ const i=r.indexOf(x.seq); return i<0 ? (r.length + x.seq) : i; };
+    return arr.sort(function(a,b){ return pos(a)-pos(b) || a.seq-b.seq; });
+  }
+  function wfRouteNext(routeSeqs, curSeq){
+    const r=Array.isArray(routeSeqs)?routeSeqs:null;
+    if(!r || !r.length) return {routed:false, seq:null};
+    const i=r.indexOf(curSeq);
+    if(i<0) return {routed:false, seq:null};
+    return {routed:true, seq:(i+1<r.length)?r[i+1]:null};   // seq null = end of the route
+  }
+  const WF_ROUTE_PILL={
+    cheque:   {label:'Cheque',    bg:'#eef2ff', fg:'#4338ca', bd:'#c7d2fe'},
+    no_cheque:{label:'No Cheque', bg:'#fef3c7', fg:'#92400e', bd:'#fde68a'},
+    payment:  {label:'Payment',   bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0'}
+  };
+  function wfRoutePill(route,tiny){
+    const r=WF_ROUTE_PILL[String(route||'')];
+    if(!r) return tiny?'':'<span class="wf-pill" style="background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0" title="Nobody has chosen this bill\u2019s route yet">Not set</span>';
+    return '<span class="wf-pill" style="background:'+r.bg+';color:'+r.fg+';border-color:'+r.bd+'"'
+      +' title="'+esc2(wfRouteWhat(route))+'">'+r.label+'</span>';
+  }
+  function wfRouteWhat(route){
+    if(route==='payment')   return 'Payment: RTP, Cheque Preparation, Bill Checking, Audit Work, Bill Filing \u2014 the payment goes first and the checking follows';
+    if(route==='no_cheque') return 'No Cheque: paid without a cheque \u2014 GST Approval and Bill Filing still happen, the cheque steps do not';
+    if(route==='cheque')    return 'Cheque: every step in the normal order';
+    return 'The route is chosen at Bill Booking (Payment) or at RTP (Cheque / No Cheque)';
+  }
+  /* A draft, summarised by what has actually been filled in. Deliberately not the instance table:
+     a draft has no number, no step and no owner to show, so the columns of that table would be
+     mostly empty. What matters is what is in it and when it was last touched. */
+  function wfDraftsHtml(flow, drafts){
+    const N=wfNounOf(flow);
+    if(!drafts.length){
+      return '<div class="ac-empty" style="cursor:default">'
+        +'No drafts. Start a '+esc2(N.lc)+' and press <b>Save draft</b> to keep it here '
+        +'until you are ready to send it.</div>';
+    }
+    const sumKey=(flow.tracker_sum_field||'').trim();
+    const rows=drafts.map(function(d,i){
+      const det=Array.isArray(d.details)?d.details:[];
+      const filled=det.filter(function(x){ return x && String(x.value==null?'':x.value).trim(); });
+      // what it comes to so far - a draft is mostly about the running figure
+      const tot=sumKey?wfSumField((det.filter(function(x){ return x&&eq(x.label,sumKey); })[0]||{}).value):0;
+      const what=filled.filter(function(x){ return !eq(x.label,sumKey) && String(x.value).indexOf('s3:')!==0; })
+        .slice(0,3).map(function(x){ return esc2(wfDetailDisp(x.value)); }).join(' \u00b7 ');
+      /* The whole row opens it, the way a bill's row opens the bill. A button that repeats what
+         clicking the row already does is a second thing to aim at for no gain. Delete stops the
+         click travelling, or tidying up would open the draft on the way past. */
+      return '<tr class="wf-draft-row" title="Open this draft" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
+        /* Numbered, not priced. A draft has no "reimbursement number" - it takes one only when it
+           is submitted - so this is simply its place in the list, newest first. */
+        +'<td><b>'+(i+1)+'</b></td>'
+        +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
+        +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
+        +'<td>'+filled.length+' of '+det.length+' filled</td>'
+        +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
+        +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
+          +'<button class="ac-btn danger ic" title="Delete this draft" onclick="wfDraftDelete('+d.id+')">'
+            +'<i class="fa-solid fa-trash"></i></button>'
+        +'</td></tr>';
+    }).join('');
+    return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
+      +'<th>No.</th><th>'+esc2(sumKey||'Total')+'</th><th>What is in it</th><th>Filled</th>'
+      +'<th>Last saved</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+  window.wfDraftDelete=function(id){
+    wfConfirm({ title:'Delete this draft?', body:'It has not been sent to anyone, so nothing else is affected. This cannot be undone.',
+      okLabel:'Delete', okClass:'danger', onOk:async function(){
+        try{ const {error}=await ACC().from('flow_drafts').delete().eq('id',id); if(error)throw error; }
+        catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+        toast('Draft deleted','ok'); renderPage();
+      }});
+  };
   function wfTrackerHtml(flow, steps, cases, fcs){
     if(!steps.length) return '<div class="ac-empty" style="cursor:default">Add steps to this workflow to track them</div>';
     if(!cases.length) return '<div class="ac-empty" style="cursor:default">Nothing recorded yet</div>';
@@ -2279,7 +2508,7 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    const fixed=[{k:flow.id===26?'JainE id':'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2347,6 +2576,13 @@
         : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
+        // Deliberately bypassed for this one instance (Invoice Processing's No-Cheque path) — a
+        // real "did not happen", not just empty because it hasn't been reached yet, so it gets an
+        // unmistakable mark rather than a blank the eye could read as missing data.
+        if(Array.isArray(c.skipped_seqs)&&c.skipped_seqs.indexOf(s.seq)!==-1){
+          const dash='<td class="wf-tk-gap" style="color:var(--slate);text-align:center">—</td>';
+          return s.is_manual_date?dash:(dash+'<td style="color:var(--slate);text-align:center">—</td><td style="color:var(--slate);text-align:center">—</td>');
+        }
         const cs=byCase[c.id]&&byCase[c.id][s.seq];
         if(s.is_manual_date){
           /* This step is a date somebody schedules, not one that gets forwarded on. Only the step's
@@ -2381,7 +2617,12 @@
         +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'data-amount="'+esc2(tkX.amount)+'" data-desc="'+esc2(tkX.desc)+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
-        +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
+        /* The route goes under "now at" rather than in a column of its own: the Tracker's header is
+           three stacked band rows whose colspans are counted, and adding a fourteenth column means
+           keeping four of them in step. This says the same thing and cannot fall out of alignment. */
+        +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b>'
+        +((flow&&flow.id===26)?('<div style="margin-top:4px">'+wfRoutePill(c.route)+'</div>'):'')
+        +'</td></tr>';
     }).join('');
 
     /* One row per instance and potentially hundreds of them, so the Tracker gets its own way in.
@@ -2550,11 +2791,23 @@
   // The panes of a workflow. Tracker is bill-style only; Forms appears wherever forms exist (and
   // for an Administration user, so they can add the first one).
   window.wfTabShow=function(which){
-    ['main','tracker','forms'].forEach(function(k){
-      const p=$('wfPane_'+k), b=$('wfTabBtn_'+k);
-      if(p) p.style.display=(k===which)?'':'none';
+    /* Archive is not a pane of its own - it is the main pane showing its other half. Panes and
+       buttons are therefore toggled against different keys. */
+    const pane=(which==='archive')?'main':which;
+    ['main','tracker','forms','drafts'].forEach(function(k){
+      const p=$('wfPane_'+k);
+      if(p) p.style.display=(k===pane)?'':'none';
+    });
+    ['main','tracker','forms','archive','drafts'].forEach(function(k){
+      const b=$('wfTabBtn_'+k);
       if(b) b.classList.toggle('on', k===which);
     });
+    if(window._wfArchOn && (which==='main'||which==='archive')){
+      window._wfArchView=(which==='archive')?'archive':'active';
+      const ttl=$('wfInstTitle');
+      if(ttl) ttl.textContent=(which==='archive')?'Archive':(window._wfInstNoun||'');
+      try{ wfInstFilter(); }catch(_e){}   // re-runs search and dates against the view just opened
+    }
     // the search box on the right of the tab strip searches the tracker's rows, so it is only on
     // show while the tracker is
     const right=$('wfTabsRight');
@@ -2577,6 +2830,11 @@
     try{ const {data}=await ACC().from('flow_steps').select('*').eq('flow_id',id).order('seq',{ascending:true}); steps=data||[]; }catch(e){}
     if(!flow){ toast('Workflow not found','err'); return navTo('tasks/workflow'); }
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('flow_id',id).order('case_no',{ascending:true}); cases=data||[]; }catch(e){}
+    /* Only ever this person's own - the row-level rule enforces it, and asking for everyone's
+       would return nothing anyway. A draft is working-out, not something colleagues should read. */
+    let drafts=[];
+    try{ const {data}=await ACC().from('flow_drafts').select('*').eq('flow_id',id)
+           .order('updated_at',{ascending:false}); drafts=data||[]; }catch(e){}
     if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
@@ -2665,8 +2923,16 @@
        are actually handled — kept as a single flag rather than ripped out so the pane below and its
        loader stay intact and it is one word to put back. */
     const showForms=false;
-    // Who may see the handling roster (the People row) and the Tracker on this workflow.
-    const maySeeRoster=wfMaySeeRoster(flow);
+    // Who may see the handling roster (the People row), and how much of the Tracker's own bill
+    // list they get — 'all' / 'own-created' / 'own-assigned' (see wfRosterAccess).
+    const rosterAccess=wfRosterAccess(flow,steps,fcs);
+    const maySeeRoster=rosterAccess.show;
+    // The Tracker's actual rows, scoped to whichever tier rosterAccess resolved to. wfTrackerHtml
+    // itself stays unaware of any of this — it just gets fewer cases to draw.
+    const trackerCases=rosterAccess.scope==='all' ? cases
+      : rosterAccess.scope==='own-created' ? cases.filter(function(c){ return eq(c&&c.created_by, mySelf); })
+      : rosterAccess.scope==='own-assigned' ? cases.filter(function(c){ return wfIsCaseStepPerson(fcs,c.id,mySelf); })
+      : [];
     /* Who may do what, per instance:
          EDIT   — the triggering event owner only (whoever started it) — not the workflow-management
                   admins, and not step members: changing the details changes what everyone
@@ -2690,17 +2956,35 @@
     const canPrintBulk=isStepHolder || eq(mySelf,'ayushruia1@gmail.com')
       || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
     const showChk=anyActionable||canPrintBulk;
+    /* FINISHED WORK MOVES OUT OF THE WAY.
+       A workflow that opts in (flows.archive_done) shows only its running instances in the main
+       list and puts the completed ones behind an Archive tab. Both live in the SAME table and the
+       tab simply changes which rows are on show - duplicating the table would have meant two of
+       every id on the page, breaking the search box, the date range and the print selection, all
+       of which are wired to one set. This way every one of them keeps working, within whichever
+       view is open. */
+    const archiveOn=!!(flow&&flow.archive_done);
+    const activeCount=cases.filter(function(c){ return c.status!=='Done'; }).length;
+    const doneCount=cases.length-activeCount;
+    window._wfArchOn=archiveOn;
+    window._wfArchView='active';
+    window._wfInstNoun=N.many;
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
       const head=(showChk?'<th class="wf-chk-col"></th>':'')
-        // On the bill workflow the number IS the Wheredoc Id it was filed under; ordinary
-        // workflows just count their instances.
-        +'<th>No.</th>'+(isBill?'<th>Wheredoc Id</th>':'')
-        +'<th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+        // Invoice Processing calls its instance number the "JainE id"; ordinary workflows just
+        // count their instances under a plain "No.".
+        +'<th>'+(flow&&flow.id===26?'JainE id':'No.')+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
+        +'<th>'+esc2(N.one)+'</th>'+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
+          // This instance deliberately bypassed this step (Invoice Processing's No-Cheque path) —
+          // it never happened for this bill, which is a different thing from not-yet-reached.
+          if(Array.isArray(c.skipped_seqs)&&c.skipped_seqs.indexOf(s.seq)!==-1){
+            return '<td><span class="wf-pill" style="background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0" title="Not applicable to this bill — the No Cheque path skips this step">NA</span></td>';
+          }
           const cs=(byCase[c.id]||{})[s.seq];
           if(cs&&(cs.status==='done'||cs.forwarded_at)){ var rcv=cs.received_at?wfDT(cs.received_at):'—'; var don=cs.forwarded_at?wfDT(cs.forwarded_at):'—'; return '<td><span class="wf-pill ok wf-poptip" tabindex="0" onclick="event.stopPropagation();wfPopToggle(this)"><i class="fa-solid fa-check"></i> Done<span class="wf-tip-txt">Received: '+esc2(rcv)+'<br>Done: '+esc2(don)+'</span></span></td>'; }
           if(c.status==='Pending' && c.current_step===s.seq){
@@ -2723,18 +3007,18 @@
         // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
         const ownerKey=wfOwnerKey(c, byCase);
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
-        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
       }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
           +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
           +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
         +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Wheredoc Id, anyone it is with, amount or description…':'Search by No., anyone it is with, amount or description…')+'" oninput="wfInstFilter()"></div>'
+          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Company, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -2753,13 +3037,17 @@
       +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
+      // Reimbursement only: everything Accounts (step 2) has just received and this tool has not
+      // already printed - a running month-end pile, not a fixed selection, so it is its own button
+      // rather than another item in the checkbox-driven "Print selected" flow above.
+      +(id===39?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Receipts</span></button>':'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     /* Built up front rather than inline below: rendering the tracker is what works out whether it
        has an Owner column worth searching, and the tab strip - which carries the search box - is
        concatenated before it in the same expression. */
-    const trackerHtml=wfTrackerHtml(flow,steps,cases,fcs);
+    const trackerHtml=wfTrackerHtml(flow,steps,trackerCases,fcs);
     v.innerHTML='<div class="wf-page">'
       /* An observer sees a page with no buttons on it, which reads as something being broken rather
          than as something being deliberate. Say so once, plainly, next to the title. */
@@ -2782,6 +3070,16 @@
           // The Tracker reports where every instance has reached, so it is held to the same roster
           // rule as the People row above rather than being open to anyone who can see the page.
           +(maySeeRoster?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
+          /* Archive sits next to the list it came out of. Shown only where the workflow asked for
+             it, so no other workflow's tab strip changes. */
+          /* Drafts sit beside the list they will join. Only where the workflow offers them, and
+             the count is this person's own - nobody sees anybody else's. */
+          +(flow.allow_drafts?('<button class="wf-tab" id="wfTabBtn_drafts" onclick="wfTabShow(\'drafts\')">'
+              +'<i class="fa-regular fa-floppy-disk"></i> Drafts'
+              +(drafts.length?(' <span class="cnt">'+drafts.length+'</span>'):'')+'</button>'):'')
+          +(archiveOn?('<button class="wf-tab" id="wfTabBtn_archive" onclick="wfTabShow(\'archive\')">'
+              +'<i class="fa-solid fa-box-archive"></i> Archive'
+              +(doneCount?(' <span class="cnt">'+doneCount+'</span>'):'')+'</button>'):'')
           // pushed to the right-hand end of the same row, and only on show while the Tracker is the
           // open tab - it searches the tracker's rows and means nothing against the others
           +'<span class="wf-tabs-right" id="wfTabsRight" style="display:none">'+(window._wfTkFindBar||'')+'</span>'
@@ -2793,9 +3091,18 @@
       // Gated as well as the tab: a hidden pane still ships its rows to the browser, and "you cannot
       // click to it" is not the same as "you were not sent it".
       +(maySeeRoster?('<div id="wfPane_tracker" style="display:none"><div class="wf-card">'
-          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+cases.length+'</span>'
+          +'<div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">'+trackerCases.length+'</span>'
           +tip('Every '+N.lc+' against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.')+'</div>'
           +trackerHtml
+        +'</div></div>'):'')
+      +(flow.allow_drafts?('<div id="wfPane_drafts" style="display:none"><div class="wf-card">'
+          +'<div class="wf-card-hd"><i class="fa-regular fa-floppy-disk"></i> Drafts'
+            +(drafts.length?(' <span class="cnt">'+drafts.length+'</span>'):'')
+            +tip('Your own unfinished '+N.lcMany+'. A draft is not sent to anyone, takes no '
+                 +esc2(N.lc)+' number, and the minimum does not apply to it. It becomes a real '
+                 +esc2(N.lc)+' when you open it and submit it.')
+          +'</div>'
+          +wfDraftsHtml(flow, drafts)
         +'</div></div>'):'')
       +(showForms?('<div id="wfPane_forms" style="display:none"><div class="wf-card">'
           +'<div class="wf-card-hd"><i class="fa-solid fa-clipboard-list"></i> Forms'
@@ -2806,6 +3113,11 @@
           +wfFormsTableHtml(forms,canManage)
         +'</div></div>'):'')
     +'</div>';
+    /* Completed instances have to be out of the main list from the FIRST paint. The filter is what
+       decides which half is on show, and it otherwise runs only when something is typed or a tab is
+       clicked - so without this the archived rows sit in the main list until the viewer happens to
+       touch one of them, which is the whole bug this tab exists to avoid. */
+    if(archiveOn){ try{ wfInstFilter(); }catch(_e){} }
     if(selCaseId){ wfShowCase(selCaseId, null); }
   }
 
@@ -2832,15 +3144,25 @@
       // The claim's own contents, so a row is findable by what it was for and what it cost - see wfFindExtra.
       const amount=r.getAttribute('data-amount')||'';
       const desc=r.getAttribute('data-desc')||'';
+      // Company / Vendor / Bill No. - whatever this workflow calls the things it was raised about.
+      const text=r.getAttribute('data-text')||'';
       let ok=true;
+      /* Finished or running, before anything else is considered - so a search inside the Archive
+         searches the archive, and a date range on the main list never turns up a completed one. */
+      if(window._wfArchOn){
+        const done=(r.getAttribute('data-done')==='1');
+        if(done !== (window._wfArchView==='archive')) ok=false;
+      }
       if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1 && owner.indexOf(qLower)===-1
-           && amount.indexOf(qLower)===-1 && desc.indexOf(qLower)===-1) ok=false;
+           && amount.indexOf(qLower)===-1 && desc.indexOf(qLower)===-1
+           && text.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
       if(ok && to && created && created>to) ok=false;
       r.style.display=ok?'':'none';
       if(ok) shown++;
     });
     const nm=$('wfInstNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
+    const cnt=$('wfInstCount'); if(cnt) cnt.textContent=shown;
   };
   // To can never be earlier than From — once From is picked, To's minimum becomes that date
   // (and if To was already set to something now-invalid, it's cleared rather than left wrong).
@@ -3031,7 +3353,7 @@
           })()
         : '')
       +detHtml
-      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(fcs,{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
+      +'<div class="wf-timeline" style="margin-top:12px">'+(wfTimelineHtml(wfStepsInRouteOrder(fcs, c&&c.route_seqs),{live:true,caseStatus:c.status,caseCreatedAt:c.created_at})||'')+'</div>'
       // Same Updates & Feedback section every step-task page already has (post a note, attach a
       // file) — this panel used to only ever show past updates read-only, with no way to add one,
       // so anyone who only ever sees an instance from the Tracker (never gets a step task of their
@@ -3102,17 +3424,17 @@
      first, so Accounts were doing thirty of these by hand at month end. */
   window.wfPrintCases=async function(caseIds){
     const ids=(caseIds||[]).filter(function(x){ return x!=null; });
-    if(!ids.length){ toast('Nothing selected','warn'); return; }
+    if(!ids.length){ toast('Nothing selected','warn'); return false; }
     /* The tab is opened BEFORE anything is awaited. A window.open() that happens after an await is
        no longer attributable to the click that asked for it, and every browser blocks it - which
        is why this cannot simply build the HTML first and open the tab at the end. */
     const w=window.open('','_blank');
-    if(!w){ toast('Please allow popups to print','err'); return; }
+    if(!w){ toast('Please allow popups to print','err'); return false; }
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
-    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return; }
+    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
     const css=(($('wfCss')||{}).textContent)||'';
     const title=(parts.length===1)?parts[0].title:(wfN().many+' — '+parts.length+' selected');
     const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc2(title)+'</title><style>'+css
@@ -3127,16 +3449,54 @@
       +parts.map(function(p){ return p.html; }).join('')
       +'</body></html>';
     try{ w.document.open(); w.document.write(html); w.document.close(); }
-    catch(_e){ toast('Could not build the printout','err'); return; }
+    catch(_e){ toast('Could not build the printout','err'); return false; }
     let printed=false;
     const doPrint=function(){ if(printed)return; printed=true; try{ w.focus(); w.print(); }catch(_e){} };
-    // Images (the QR codes) may still be loading when the document write finishes - load fires once
-    // they have all resolved; the timeout is a fallback if it never does. Scaled to the number of
-    // pages, since thirty QR images do not arrive as fast as one.
-    w.addEventListener('load', doPrint);
-    setTimeout(doPrint, 600+Math.min(parts.length,30)*120);
+    /* The QR images (the one thing on this page that matters most) used to be gambled on: the
+       window's own 'load' event after a document.write() is not reliable across browsers, and the
+       flat per-page timeout that backed it up was a guess that a slow S3 fetch or a big bulk print
+       could easily outrun - print would fire with the images still blank boxes, which is exactly
+       what a printed sheet of QR codes cannot afford to be. Waiting on each <img> directly removes
+       the guesswork; 'error' resolves too; a truly hung image cannot block printing forever. */
+    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
+    const imgReady=function(img){ return new Promise(function(res){
+      if(img.complete) return res();
+      img.addEventListener('load',res,{once:true});
+      img.addEventListener('error',res,{once:true});
+    }); };
+    Promise.race([
+      Promise.all(imgs.map(imgReady)),
+      new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
+    ]).then(doPrint);
+    return true;
   };
   window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
+  /* Reimbursement's "Print New Receipts": everything Accounts (step 2) currently has as received,
+     minus whatever this button has already sent to print before - so running it again next week
+     only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
+     eye to find what changed. Marking done happens AFTER the print job is actually handed to the
+     browser, not before - a popup blocked or a build failure must leave every claim eligible for
+     the next attempt, not silently drop it from every future run. */
+  window.wfBulkPrintNewReceipts=async function(){
+    let cases=[];
+    try{
+      const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).is('bulk_printed_at',null);
+      cases=data||[];
+    }catch(e){ toast('Could not load claims','err'); return; }
+    if(!cases.length){ toast('Nothing new to print','warn'); return; }
+    const ids=cases.map(function(c){ return c.id; });
+    let steps=[];
+    try{
+      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
+      steps=data||[];
+    }catch(e){ toast('Could not check receipt status','err'); return; }
+    const eligible=steps.map(function(s){ return s.case_id; });
+    if(!eligible.length){ toast('Nothing new to print','warn'); return; }
+    const ok=await window.wfPrintCases(eligible);
+    if(!ok) return;
+    try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
+    catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+  };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
     const ae=document.activeElement, tag=(ae&&ae.tagName)||'';
@@ -4102,7 +4462,7 @@
       } else if(gs.length<2 && x){ x.remove(); }
     });
   }
-  window.wfEventOpen=async function(flowId, caseId){
+  window.wfEventOpen=async function(flowId, caseId, draftId){
     wfInjectCss();
     /* Anything left over from a previous session that was closed without Cancel - the overlay,
        Escape, navigating away - is swept now. Doing it on the way IN covers every exit, without
@@ -4113,9 +4473,20 @@
     try{ const {data}=await ACC().from('flows').select('*').eq('id',flowId).maybeSingle(); flow=data; }catch(e){}
     try{ const {data}=await ACC().from('flow_steps').select('id').eq('flow_id',flowId); steps=data||[]; }catch(e){}
     if(caseId){ try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); caseRow=data; }catch(e){} }
+    /* A draft reopens into the same form, prefilled from what was saved. It is still a CREATION -
+       editing stays false - because the draft has never been an instance. */
+    window._wfDraftId=null; let draftRow=null;
+    if(draftId){
+      try{ const {data}=await ACC().from('flow_drafts').select('*').eq('id',draftId).maybeSingle();
+           draftRow=data; }catch(e){}
+      if(draftRow){ window._wfDraftId=draftRow.id; }
+      else { toast('That draft could not be opened','err'); return; }
+    }
     if(!flow){ toast('Workflow not found','err'); return; }
     const N=wfNounOf(flow); window._wfNoun=N; window._wfIsBill=wfIsBillFlow(flow);
     window._wfEvtSumKey=(flow.tracker_sum_field||'').trim();   // 'Amount' on Reimbursement
+    // The least a claim may come to, if this workflow sets one (Reimbursement: 200).
+    window._wfEvtMinTotal=Number(flow.min_total||0)||0;
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
@@ -4161,7 +4532,7 @@
     let src=[];
     let groupsSrc;
     if(editing){
-      const savedDetails=Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[];
+      const savedDetails=Array.isArray(draftRow&&draftRow.details)?draftRow.details:(Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
       if(locked){
         const byGroup={};
         savedDetails.forEach(function(d){ if(!d||!d.label) return; const g=(d.group|0); (byGroup[g]=byGroup[g]||{})[d.label]=d.value; });
@@ -4370,7 +4741,7 @@
       +'</div>'
       +'<div class="modal-foot">'
       +(window._wfEvtSumKey?'<div id="wfEvtTotal" class="wf-evt-total"></div>':'')
-      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button><button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn ic" style="height:34px;width:34px" title="Save as draft \u2014 keep this and finish it later. Nothing is sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i></button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfPhoneHydrate();
     wfShowWhenSyncAll();
@@ -4417,7 +4788,12 @@
     el.innerHTML='<span class="wf-evt-total-k">Total '+esc2(window._wfEvtSumKey||'')+'</span>'
       +'<b>'+wfMoney(t.total)+'</b>'
       // said plainly rather than left to be noticed: a total is misleading while a box is empty
-      +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'');
+      +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'')
+      ;
+      /* The minimum is NOT announced here. A line beside the total saying the claim cannot be sent
+         crowded the form and was read on every keystroke while somebody was still typing the first
+         figure. The rule is enforced on submit instead, where it is actually relevant, and said
+         once in the corner. */
   };
   /* Typing fires input; adding or removing a date or an expense does not, and those change the
      total just as much. One observer on the container catches every add and remove whichever
@@ -4431,6 +4807,13 @@
     wfEvtTotalRefresh();
   }
 
+  /* Save draft and Create are the same gathering with a different destination, so they share one
+     path rather than two that could drift. */
+  window.wfEventSaveDraft=async function(flowId){
+    window._wfEvtDraftMode=true;
+    try{ await wfEventSaveInner(flowId, null); }
+    finally{ window._wfEvtDraftMode=false; }
+  };
   window.wfEventSave=async function(flowId, caseId){
     // A fast double-click (or a click landing right as Enter also fires) could send this twice
     // before the modal closed, creating two real instances a few dozen milliseconds apart for the
@@ -4448,6 +4831,12 @@
     } finally { window._wfSaving=false; if(saveBtn) saveBtn.disabled=false; }
   };
   async function wfEventSaveInner(flowId, caseId){
+    /* A DRAFT IS NOT A SUBMISSION.
+       Everything below gathers the form exactly as a real save does, so a draft holds precisely
+       what would have been sent. What it skips is every rule about SENDING: the minimum total, the
+       required fields, the date checks, the step members. A claim still being written is allowed to
+       be incomplete - that is the whole point of saving one. */
+    const DRAFT=!!window._wfEvtDraftMode;
     const wrap=$('wfEvtDetails'); const details=[]; let missing='';
     if(wrap){
       // Multi-entry workflows wrap each filled-in set in its own .wf-evt-group; a normal
@@ -4464,14 +4853,14 @@
         for(const g of dgroups){
           const dRow=g.querySelector('.wf-evt-daterow .wf-evt-row');
           const dVal=((dRow&&dRow.querySelector('.wf-evt-value'))||{}).value||'';
-          if(!String(dVal).trim()){ toast('Please pick a date for every date section','warn'); return; }
+          if(!DRAFT && !String(dVal).trim()){ toast('Please pick a date for every date section','warn'); return; }
           // typed dates get past the picker's own cap, so the rule is enforced here too
-          if((window._wfEvtDateField||{}).maxToday && String(dVal) > wfTodayISO()){
+          if(!DRAFT && (window._wfEvtDateField||{}).maxToday && String(dVal) > wfTodayISO()){
             toast(dVal+' is in the future — an expense can only be claimed once it has happened','warn'); return;
           }
           // Two containers for the same day would split one day's expenses in two and read as
           // duplicates further down the line, so the second one is refused rather than merged.
-          if(seenDates.indexOf(dVal)!==-1){ toast('The date '+dVal+' is used twice — put those expenses in the same date section','warn'); return; }
+          if(!DRAFT && seenDates.indexOf(dVal)!==-1){ toast('The date '+dVal+' is used twice — put those expenses in the same date section','warn'); return; }
           seenDates.push(dVal);
           const exps=[].slice.call(g.querySelectorAll('.wf-evt-exp'));
           for(const b of (exps.length?exps:[g])){
@@ -4485,6 +4874,20 @@
       /* Fields marked `common` live outside the entry groups and are read once, so they are stored
          as a single value rather than the same answer repeated per entry. Read LAST so the entry
          fields keep their template order ahead of them. */
+      /* THE MINIMUM, ENFORCED.
+         Refused here rather than accepted and sent round the workflow for somebody further down to
+         reject: the only person who can actually fix it is the one filling the form in.
+         NEW claims only. Eight of the claims already raised are under this figure, and applying it
+         to edits would leave nobody able to open those again to correct anything else about them. */
+      const minT=Number(window._wfEvtMinTotal||0);
+      if(minT>0 && !caseId && !DRAFT){
+        const tt=wfEvtTotalCalc();
+        if(tt && tt.total<minT){
+          toast('A '+N.lc+' must come to at least '+wfMoney(minT)
+            +' \u2014 this one totals '+wfMoney(tt.total),'warn');
+          return;
+        }
+      }
       const commonBox=$('wfEvtCommon');
       if(commonBox) rowSets.push([].slice.call(commonBox.querySelectorAll('.wf-evt-row')));
       const byLabel={}; const order=[];
@@ -4529,7 +4932,7 @@
       if(upiField){
         const re=new RegExp(upiField.pattern);
         const bad=(byLabel[upiField.label]||[]).filter(function(v){ const t=String(v||'').trim(); return t && !re.test(t); });
-        if(bad.length){
+        if(bad.length && !DRAFT){
           toast('"'+bad[0]+'" is not a valid UPI id. '+(upiField.patternHint||'Expected 10 digits, then @, then letters.'),'warn');
           return;
         }
@@ -4546,7 +4949,7 @@
       if(phoneField){
         const vals=(byLabel[phoneField.label]||[]).map(function(v){ return String(v||'').trim(); });
         const re=new RegExp(phoneField.pattern||'^[0-9]{10}$');
-        if(!phoneField.optional && !vals.some(Boolean)){
+        if(!DRAFT && !phoneField.optional && !vals.some(Boolean)){
           toast('Please enter your phone number — Accounts need it to reach you about this payment.','warn');
           return;
         }
@@ -4571,7 +4974,30 @@
         }
       }
     }
-    if(missing){ toast('Please fill in "'+missing+'"','warn'); return; }
+    if(missing && !DRAFT){ toast('Please fill in "'+missing+'"','warn'); return; }
+
+      /* Saved and editable, and NOT an instance: no number, no steps, nobody assigned, nothing
+         waiting on anyone. It becomes a real claim - and takes its number - only when submitted. */
+      if(DRAFT){
+        const body={flow_id:flowId, created_by:me(), details:details,
+                    updated_at:new Date().toISOString()};
+        try{
+          if(window._wfDraftId){
+            const {error}=await ACC().from('flow_drafts')
+              .update({details:details, updated_at:body.updated_at}).eq('id',window._wfDraftId);
+            if(error)throw error;
+          }else{
+            const {data,error}=await ACC().from('flow_drafts')
+              .insert(body).select('id').single();
+            if(error)throw error;
+            window._wfDraftId=data&&data.id;
+          }
+        }catch(e){ toast('Could not save the draft: '+((e&&e.message)||e),'err'); return; }
+        try{ closeModal(); }catch(_e){}
+        toast('Draft saved','ok');
+        renderPage();
+        return;
+      }
     const N=wfN();
     try{
       if(caseId){
@@ -4609,13 +5035,36 @@
           if(!v.length){ toast('Please choose who does '+(seqs.length>1?'these steps':'this step'),'warn'); return; }
           seqs.forEach(function(sq){ members[sq]=v.slice(); });
         }
-        const {error}=await ACC().rpc('wf_create_instance',
+        const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
           {p_flow_id:flowId, p_details:details, p_step_members:Object.keys(members).length?members:null});
         if(error)throw error;
         // same on creation: attached, thought better of it, then created
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
+        /* It has entered the workflow, so the draft it came from has done its job. Removed only
+           after the instance is safely created - the other order loses the work if creation fails. */
+        if(window._wfDraftId){
+          try{ await ACC().from('flow_drafts').delete().eq('id',window._wfDraftId); }catch(_e){}
+          window._wfDraftId=null;
+        }
         try{ closeModal(); }catch(e){}
-        toast(N.one+' created — first step assigned','ok');
+        /* Say WHICH id it got. Numbers are handed out at the moment of saving, so two people
+           filing bills at the same time do not get the numbers they expected - somebody who has
+           just entered up to 140 assumes the next is 141 and it is 142, because a colleague saved
+           one in between. The only cure is to state the id that was actually assigned, at the
+           moment it is assigned, rather than leaving it to be inferred. Read back from the created
+           row so it is the real stored value and not a guess made here. */
+        let newIdText='';
+        try{
+          if(newCaseId!=null){
+            const {data:mk}=await ACC().from('flow_cases').select('jaine_id,case_no')
+              .eq('id',newCaseId).maybeSingle();
+            const v=mk&&(mk.jaine_id!=null?mk.jaine_id:mk.case_no);
+            if(v!=null&&String(v).trim()!=='') newIdText=String(v);
+          }
+        }catch(_e){}    // the bill exists either way; a missing id is no reason to look like a failure
+        toast(newIdText
+          ? ('New '+N.one+' created — Id: '+newIdText)
+          : (N.one+' created — first step assigned'),'ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       }
     }catch(e){ toast('Could not save '+N.lc+': '+((e&&e.message)||e),'err'); }
@@ -4743,11 +5192,20 @@
        forward it to whoever happened to be first in the list. Falling back to fcs.seq keeps the
        two views saying the same thing. */
     const mySeq=(idx>=0?allSteps[idx].seq:fcs.seq);
-    const nextStep=allSteps.filter(function(s){ return s.seq>mySeq; })
-      .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
+    const _rNext=wfRouteNext(caseRow&&caseRow.route_seqs, mySeq);
+    const nextStep=_rNext.routed
+      ? (_rNext.seq==null ? null
+          : (allSteps.filter(function(s){ return s.seq===_rNext.seq; })[0]||null))
+      : allSteps.filter(function(s){ return s.seq>mySeq; })
+          .reduce(function(a,b){ return (!a||b.seq<a.seq)?b:a; }, null);
     const prevExists=allSteps.some(function(s){ return s.seq<mySeq; });
-    const isFirst=!prevExists, isLast=!nextStep;
-    const amAssignee=(members||[]).some(function(e){return eq(e,me());});
+    /* Same rule as the list: on a routed bill only the route's final entry is the last step.
+       Read from the path so the page and the list can never disagree about who gets a Done. */
+    const _dLast=wfRouteIsLast(caseRow&&caseRow.route_seqs, mySeq);
+    const isFirst=!prevExists, isLast=(_dLast!==null)?_dLast:!nextStep;
+    const amAssignee=(members||[]).some(function(e){
+      return eq(e,me())||wfActForPerson(e,flow&&flow.id);   // mine, or I stand in for them
+    });
     const received=!!fcs.received_at, forwarded=!!fcs.forwarded_at;
     const caseActive=caseRow && caseRow.status!=='Done';
     let A='';
@@ -4783,6 +5241,22 @@
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
+        /* BILL BOOKING DECIDES WHETHER THIS IS A PAYMENT.
+           Forward sends it the ordinary way - Bill Checking, Audit Checking, then RTP. Payment
+           sends it down the route where the money moves first: RTP, Cheque Preparation, and only
+           then Bill Checking and Audit Work before filing. Both are forwards; one of them also
+           fixes which path the bill follows from here. */
+        else if(flow&&flow.id===26&&fcs.seq===2){
+          const fwd2=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
+          A+='<button class="ac-btn primary" title="'+esc2(fwd2)+'" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd2)+'</button>'
+           +'<button class="ac-btn primary" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="wfForwardPaymentChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Payment</button>';
+        }
+        // The Cheque / No Cheque choice belongs to RTP - but a bill already on the Payment route
+        // reached RTP with its path settled, so there is nothing left to choose and it forwards on.
+        else if(flow&&flow.id===26&&fcs.seq===5&&(caseRow&&caseRow.route)!=='payment'){
+          A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Cheque</button>'
+           +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
+        }
         else{
           // The button says where it is going, and so does its hover — no guessing who is next.
           const fwd=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
@@ -4809,12 +5283,12 @@
        "Label: value, value, value" lines, where nothing tells you which amount belongs to which
        date. Everything else keeps the plain list. */
     const wfDayTable=wfIsDaywise(flow,wfDetailsArr)?wfDaywiseHtml(wfDetailsArr,flow):'';
-    const wfDescFmt=wfDayTable?'':wfDetailsFmt(wfDetailsArr);
+    const wfDescFmt=wfDayTable?'':(flow&&flow.id===26?wfInvoiceTaskDetailsHtml(wfDetailsArr,caseRow):wfDetailsFmt(wfDetailsArr));
     // Same on the task itself. The step is still named right below it, in "Step 1 of 2 - HR Review".
     /* Named the same way the list names it, so opening a task does not rename it. */
     const wfTaskFields=(Array.isArray(flow&&flow.task_fields)&&flow.task_fields.length)?flow.task_fields:null;
     const wfHeadTitle=wfTaskFields
-      ? (wfTaskLine(wfDetailsArr,wfTaskFields)||t.title)
+      ? (String(t.description||'').trim()||wfTaskLine(wfDetailsArr,wfTaskFields)||t.title)
       : (flow&&flow.tracker_sum_field)
       ? (wfInline||t.title)
       : ([wfStepName,wfInline].filter(Boolean).join(' - ')||t.title);
@@ -4822,6 +5296,7 @@
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
+      +(caseRow?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
       +A+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTaskFields?wfInst:(wfInst+' - '+wfStepName))+'</b>'+(wfDayTable?wfDayTable:(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':''))+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
@@ -4885,6 +5360,26 @@
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
     toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
+  };
+
+  window.wfForwardChequeChoice=async function(fcsId,cheque){
+    try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
+    catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
+    navTo('tasks/work');
+  };
+
+  /* Bill Booking's Payment button. Deliberately a separate call from a plain Forward: it decides
+     the bill's whole route, so it is worth being an explicit act rather than a variant of a
+     forward that happens to take an argument. */
+  window.wfForwardPaymentChoice=async function(fcsId,payment){
+    try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
+      {p_fcs_id:fcsId,p_payment:!!payment}); if(error)throw error; }
+    catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    toast(payment
+      ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
+      : 'Forwarded','ok');
+    navTo('tasks/work');
   };
 
   window.wfDone=async function(fcsId){
@@ -5501,6 +5996,8 @@
     .wf-tktable{min-width:100%;font-size:12px}
     .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
     .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row:hover{background:var(--bg-subtle,#f1f5f9)}
     .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
     .wf-tktable tbody tr:hover{background:var(--brand-a10,#eef2ff)}
     /* Each step's three columns are banded together with a heavier divider, so at a glance you
@@ -7469,7 +7966,7 @@
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,flow_id,trigger_details,created_by').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
@@ -7498,6 +7995,11 @@
            last one and offered Done while the step's own page correctly offered Forward. This is
            the same "next" the database itself uses when forwarding. */
         function wfNextOf(caseId, seq){
+          const rn=wfRouteNext((caseMap[caseId]||{}).route_seqs, seq);
+          if(rn.routed){
+            if(rn.seq==null) return null;   // the route ends here
+            return (byCase[caseId]||[]).filter(function(x){ return x.seq===rn.seq; })[0]||null;
+          }
           const list=(byCase[caseId]||[]).filter(function(x){ return x.seq>seq; });
           if(!list.length) return null;
           return list.reduce(function(a,b){ return b.seq<a.seq?b:a; });
@@ -7507,16 +8009,30 @@
           const c=caseMap[s.case_id]||{}; const f=flowMap[c.flow_id]||{};
           const nextStep=wfNextOf(s.case_id,s.seq);
           // A step is the last one only if the WORKFLOW says nothing follows it. Seeing no next
-          // step among the rows we loaded is not proof there isn't one.
+          // step among the rows we loaded is not proof there isn't one — UNLESS this instance
+          // deliberately skipped every remaining seq (Invoice Processing's No-Cheque path), which
+          // is a real "nothing follows", not a visibility gap.
           const defMax=(c.flow_id!=null)?maxSeqByFlow[c.flow_id]:undefined;
-          const moreToCome=!!nextStep || (defMax!=null && s.seq<defMax);
+          /* On a routed bill the route is the whole truth about what is left. Asked of the path,
+             not of the rows in hand: the old version inferred it from having found a next row,
+             so a step whose successor had not been loaded turned into a Done flag that would
+             have closed the bill. */
+          const _rLast=wfRouteIsLast(c.route_seqs, s.seq);
+          let moreToCome=(_rLast!==null) ? !_rLast
+                                        : (!!nextStep || (defMax!=null && s.seq<defMax));
+          if(moreToCome && !nextStep && Array.isArray(c.skipped_seqs) && c.skipped_seqs.length){
+            const skipSet=new Set(c.skipped_seqs);
+            let stillPossible=false;
+            for(let sq=s.seq+1; sq<=defMax; sq++){ if(!skipSet.has(sq)){ stillPossible=true; break; } }
+            if(!stillPossible) moreToCome=false;
+          }
           /* Same for the FIRST step, which is what decides whether Reject is offered - only the
              very first step of a workflow cannot be rejected, because there is nobody to send it
              back to. Taken from the rows we could read, a step whose predecessors were invisible
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -7539,6 +8055,14 @@
       const {order}=effectiveOrder(arr);
       return order.map((t,i)=>({t, letter:letterFor(i+1)}));
     }
+    // Which workflow a task came from, for the Workflow grouping tab — read from window._wfStepInfo
+    // (populated just above, keyed by flow_case_step_id), the same cache the task rows themselves
+    // already use to show a workflow's name. A task with no flow_case_step_id is a manual task.
+    function wfNameFor(t){
+      if(t.flow_case_step_id==null) return 'No Workflow';
+      const info=(window._wfStepInfo||{})[t.flow_case_step_id];
+      return (info&&info.flowName)||'Workflow';
+    }
     /* Project/Person view: group order is fully derived from the current priority order above —
        whichever project/person contains the very top task appears first, and so on. No manual
        drag-and-drop of groups or of tasks within a group; only the Priority tab can be dragged. */
@@ -7549,6 +8073,11 @@
         const seen=[],seenSet=new Set(),g={};
         wl.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',items:[]};} g[k].items.push(x); });
         return {mode:'project',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
+      }
+      if(P3==='workflow'){
+        const seen=[],seenSet=new Set(),g={};
+        wl.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,items:[]};} g[k].items.push(x); });
+        return {mode:'workflow',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
       }
       const isOwnerRole = type==='toMe';
       const seen=[],seenSet=new Set(),g={};
@@ -7624,6 +8153,10 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         byMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        // No metaType/metaVal preset here — a task added through this gap has no sensible way to
+        // land inside a specific workflow (those only ever come from the workflow engine itself).
+        byMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
       } else {
         byMeFlat.forEach(x=>{ const mem=(asg[x.t.id]||[]); const ks=mem.length?mem.map(e=>e.toLowerCase()):[(x.t.delegator||'').toLowerCase()]; ks.forEach(k=>{ if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); }); });
       }
@@ -7662,6 +8195,8 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         toMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        toMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
       } else {
         toMeFlat.forEach(x=>{ const k=(x.t.delegator||'').toLowerCase(); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); });
       }
@@ -7682,7 +8217,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>
@@ -7916,7 +8451,19 @@
         // Hovering names the person it is going to, so you know who you are handing it to before
         // you press it — "Forward to the next person" told you nothing.
         const fwdTip=wfForwardLabel(wfInfo);
-        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${wfIsLastStep
+        /* A step answered with a CHOICE cannot be answered with Forward. Invoice Processing's RTP
+           step decides how the bill is paid, and that decision is what settles which later steps
+           apply - so the exterior list offers the same two buttons the step's own page does. A
+           paper-plane here forwarded nothing and simply failed, because the database refuses a
+           plain forward on that step. */
+        wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${
+          wfInfo.paymentChoice
+          ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`
+            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="wfForwardPaymentChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-indian-rupee-sign"></i></button>`
+          : wfInfo.chequeChoice
+          ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-indian-rupee-sign"></i></button>`
+            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)"><i class="fa-solid fa-ban"></i></button>`
+          : wfIsLastStep
           ? `<button class="ac-btn ok ic" style="height:30px;width:30px" title="Done — complete this workflow" onclick="wfDone(${t.flow_case_step_id})"><i class="fa-solid fa-flag-checkered"></i></button>`
           : `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`}</div>`;
       }
@@ -7940,7 +8487,7 @@
     const ownerVis=(t.flow_case_step_id!=null)
       ? `<span title="Owner: Workflow" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:11px;border:2px solid var(--bg-card)"><i class="fa-solid fa-diagram-project"></i></span>`
       : (emails.length?avatars(list,emails):'');
-    const wfCombined=wfRowTitle(wfInfo,list);
+    const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
@@ -7953,6 +8500,12 @@
      matching its current order, then the drag swap is applied on top. ---- */
   async function crystallizeAndSwap(draggedId,targetId,orderIds){
     if(!targetId||draggedId===targetId) return;
+    // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
+    // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can never
+    // see it - the "Insert a task at a specific position" feature was mapped to a different,
+    // long-dead global (taskReorderDrop) instead, which is why real drag-reorder usage never showed.
+    // usageQueue is nexus-core.js's own global helper, reachable here like any other global.
+    try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
     try{
       const my=me();
       const {data:existing}=await ACC().from('task_rank').select('task_id').eq('viewer_email',my).in('task_id',orderIds);
