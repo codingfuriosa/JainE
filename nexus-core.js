@@ -4039,6 +4039,12 @@ window.taskSave=async function(kind){
   const btn=$('tkSave');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
   const {data,error}=await sb.schema('acc').from('tasks').insert(row).select().single();
   if(error){toast(error.message,'err');btn.disabled=false;return;}
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - the title only
+  // exists as a value read off the form here, which a generic wrapper around this function could
+  // never see. On success only, so a failed save (bad due date, no permission) is never counted as
+  // a task that was created.
+  try{ usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create',
+    {title:title, assignee:isDel?(nameOf(row.assigned_to)||row.assigned_to):undefined}); }catch(_e){}
   if(!isDel&&mem.length)await sb.schema('acc').from('task_members').insert(mem.map(e=>({task_id:data.id,email:e})));
   if(projectId||goalId)await syncParentMembership(projectId,goalId,[row.owner,...mem]);
   if(projectId)await insertDelegationEdges(data.id,state.email,[row.owner,...mem]);
@@ -7986,15 +7992,24 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Project</th></tr></thead><tbody>'
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Project</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
 };
+// "Customized per feature" without a hand-written renderer per feature: what shows up here is
+// whatever that feature chose to capture (a task's title, a search query, who a claim went to) -
+// features that capture nothing yet just show a dash, same as before this existed.
+function usbMetaHtml(meta){
+  if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
+  const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
+    .map(function(k){ return '<b style="font-weight:600">'+esc(k.charAt(0).toUpperCase()+k.slice(1))+':</b> '+esc(String(meta[k])); });
+  return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
+}
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
    widened to everything they did, across every feature, in one chronological list — for when the
    question is "what has this person actually been doing", not "how many times did they use X". */
@@ -8021,11 +8036,11 @@ window.usbOpenUserActivity=async function(){
   const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th></tr></thead><tbody>'
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td></tr>';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -16150,9 +16165,9 @@ window.trDownload=async function(id){
    are queued and sent in batches, never one request per click. */
 const USAGE_MAP={
   // Accountability — Tasks
-  // taskSave(kind) is one Save button behind both "New Task" and "Delegate work" (kind==='delegation')
-  // - a plain string here would count every delegation made this way as a create instead.
-  taskSave:function(kind){ return kind==='delegation' ? 'tasks.tasks.delegate_task_to_someone' : 'tasks.tasks.create_task'; },
+  // taskSave itself is NOT mapped here (see the direct usageQueue call inside it) - the title it
+  // creates only exists as a DOM value read inside the function body, which a wrapper here can never
+  // see; only the function itself can capture it.
   taskUpdateDue:'tasks.tasks.edit_task_due_date',
   taskDelegateSave:'tasks.tasks.delegate_task_to_someone',
   // taskMarkComplete(id, makeComplete) toggles both ways from the same button pair - makeComplete
@@ -16175,7 +16190,8 @@ const USAGE_MAP={
   accEditDueSave:'tasks.tasks.edit_task_due_date', accDelegateSave:'tasks.tasks.delegate_task_to_someone',
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
-  accSubDel:'tasks.tasks.delete_sub_task', accTaskSearch:'tasks.tasks.search_tasks',
+  accSubDel:'tasks.tasks.delete_sub_task',
+  accTaskSearch:{key:'tasks.tasks.search_tasks', meta:function(val){ return val?{query:String(val)}:null; }},
   // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
   // view (already implied by simply landing on the tab), so only the other two are worth a feature
   // of their own; returning nothing for 'priority' means switching back to it logs no event.
@@ -16366,10 +16382,16 @@ let USAGE_Q=[], USAGE_TIMER=null;
 // freshest activity that's kept, not the oldest, since an approximate recent picture beats an
 // exact but ancient one for a report read in terms of "the last 30 days".
 const USAGE_MAX_Q=600;
-function usageQueue(featureKey, action){
+// meta is the specific thing the action was ABOUT - a task's title, a search query, who a claim
+// was delegated to - not just that the feature fired. Optional and feature-by-feature: most call
+// sites still pass nothing, same as before this existed. erp_log_usage only keeps it when it is a
+// plain object, so anything else here is silently dropped rather than corrupting the row.
+function usageQueue(featureKey, action, meta){
   if(!featureKey || !(state&&state.email)) return;
-  USAGE_Q.push({module_id:String(featureKey).split('.')[0], feature_key:featureKey,
-                action:action||'view', occurred_at:new Date().toISOString()});
+  const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
+                action:action||'view', occurred_at:new Date().toISOString()};
+  if(meta && typeof meta==='object') ev.meta=meta;
+  USAGE_Q.push(ev);
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
@@ -16442,10 +16464,21 @@ function usageInstall(){
     // modal and Save button), and a fixed string would count every delegation as "create task" while
     // "delegate a task" itself never fired. Those entries are a resolver instead: called with the
     // same arguments as the wrapped function, returning whichever feature key actually happened.
+    // A THIRD shape, {key, meta}, additionally captures the specific thing the action was about -
+    // only usable when that thing is itself one of the wrapped function's own arguments (a search
+    // box's typed value, say); anything read from the DOM inside the function's own body is outside
+    // what a wrapper can see, and is logged directly at the source instead (see crystallizeAndSwap).
+    const isDescriptor=mapped&&typeof mapped==='object'&&('key' in mapped);
+    const keySrc=isDescriptor?mapped.key:mapped;
+    const metaFn=isDescriptor?mapped.meta:null;
     const wrapped=function(){
       try{
-        const key=(typeof mapped==='function') ? mapped.apply(this, arguments) : mapped;
-        if(key) usageQueue(key, act);
+        const key=(typeof keySrc==='function') ? keySrc.apply(this, arguments) : keySrc;
+        if(key){
+          let meta=null;
+          if(metaFn){ try{ meta=metaFn.apply(this, arguments); }catch(_e){} }
+          usageQueue(key, act, meta);
+        }
       }catch(e){}
       return orig.apply(this, arguments);      // called through no matter what happened above
     };
