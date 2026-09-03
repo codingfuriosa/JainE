@@ -2818,6 +2818,53 @@
     window.addEventListener('resize',function(){ if(document.querySelector('.wf-tktable')) wfTrackerSticky(); });
   }
 
+  /* ---------- Reimbursement claimant/bill lookup (jaingrouppc2.ankita@/pc.thejaingroup1@ only) ----
+     Same .ms/.ms-field/.ms-panel/.ms-list/.ms-dept/.ms-opt component and msOpen/msFieldClick open-
+     close mechanics as the reporting-manager picker (nexus-core.js) - just its own state and render
+     functions, since that picker's own state (RM_STATE) is single-purpose and not keyed generically. */
+  function wfPcAvatar(nm){ try{ return (typeof avatar==='function')?avatar(nm):('<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'); }catch(e){ return ''; } }
+  function wfPcSearchHtml(){
+    return '<div class="wf-card card-pad" style="margin-bottom:14px">'
+      +'<label style="display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:6px"><i class="fa-solid fa-magnifying-glass"></i> Find a claimant\'s bills</label>'
+      +'<div class="ms" id="ms_wfpc">'
+        +'<div class="ms-field" onclick="msFieldClick(\'wfpc\',event)">'
+          +'<span class="ms-chips" id="ms_wfpc_chips"><span style="color:#94a3b8;font-size:13px">Search by name or department…</span></span>'
+          +'<input class="ms-typein" id="ms_wfpc_in" placeholder="Type a name or department…" autocomplete="off" oninput="msOpen(\'wfpc\');wfPcRenderList()" onfocus="msOpen(\'wfpc\')" onclick="event.stopPropagation()">'
+          +'<i class="fa-solid fa-chevron-down" style="color:#94a3b8;font-size:12px"></i>'
+        +'</div>'
+        +'<div class="ms-panel" id="ms_wfpc_panel"><div class="ms-list" id="ms_wfpc_list">'+wfPcListHtml('')+'</div></div>'
+      +'</div>'
+    +'</div>';
+  }
+  function wfPcListHtml(q){
+    const selEmail=window._wfPcSelEmail;
+    if(selEmail){
+      const person=(window._wfPcPeople||[]).find(function(p){return p.email===selEmail;});
+      if(!person){ window._wfPcSelEmail=null; return wfPcListHtml(q); }
+      const back='<div class="ms-opt" onclick="wfPcBack()"><i class="fa-solid fa-arrow-left" style="width:22px;text-align:center"></i><span style="flex:1">Back to people</span></div>';
+      if(!person.bills.length) return back+'<div style="padding:10px;color:#94a3b8;font-size:13px">No bills</div>';
+      const sorted=person.bills.slice().sort(function(a,b){return (b.overdue?1:0)-(a.overdue?1:0);});
+      return back+sorted.map(function(b){
+        return '<div class="ms-opt" onclick="wfPcOpenBill('+b.id+')"><span style="flex:1">'+esc2(b.caseNo)+' · '+esc2(b.status)+'</span>'
+          +(b.overdue?'<span class="wf-pill" style="background:#fef2f2;color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</span>':'')+'</div>';
+      }).join('');
+    }
+    q=(q||'').toLowerCase();
+    const people=(window._wfPcPeople||[]).filter(function(p){return !q||(p.name||'').toLowerCase().indexOf(q)!==-1||(p.dept||'').toLowerCase().indexOf(q)!==-1;});
+    if(!people.length) return '<div style="padding:10px;color:#94a3b8;font-size:13px">No matches</div>';
+    return groupByDept(people).map(function(g){
+      return '<div class="ms-dept">'+esc2(g.dept)+'</div>'+g.people.map(function(p){
+        const overdueCount=p.bills.filter(function(b){return b.overdue;}).length;
+        return '<div class="ms-opt" onclick="wfPcPickPerson(\''+esc2(p.email).replace(/'/g,"\\'")+'\')">'+wfPcAvatar(p.name)+'<span style="flex:1">'+esc2(p.name)+'</span>'
+          +(overdueCount?'<span class="wf-pill" style="background:#fef2f2;color:#dc2626">'+overdueCount+' overdue</span>':'')+'</div>';
+      }).join('');
+    }).join('');
+  }
+  window.wfPcRenderList=function(){ const list=document.getElementById('ms_wfpc_list'); if(!list)return; const q=(document.getElementById('ms_wfpc_in')||{}).value||''; list.innerHTML=wfPcListHtml(q); };
+  window.wfPcPickPerson=function(email){ window._wfPcSelEmail=email; const inp=document.getElementById('ms_wfpc_in'); if(inp)inp.value=''; wfPcRenderList(); };
+  window.wfPcBack=function(){ window._wfPcSelEmail=null; wfPcRenderList(); };
+  window.wfPcOpenBill=function(caseId){ const panel=document.getElementById('ms_wfpc_panel'); if(panel)panel.classList.remove('show'); wfTabShow('main'); wfShowCase(caseId,null); };
+
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -3039,10 +3086,38 @@
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
       // Reimbursement only: everything Accounts (step 2) has just received and this tool has not
       // already printed - a running month-end pile, not a fixed selection, so it is its own button
-      // rather than another item in the checkbox-driven "Print selected" flow above.
-      +(id===39?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Receipts</span></button>':'')
+      // rather than another item in the checkbox-driven "Print selected" flow above. Hidden while
+      // selCaseId is set (the page was opened focused on one particular reimbursement, e.g. from a
+      // task link) - a bulk action over the whole pile makes no sense from inside just one of them.
+      +(id===39&&!selCaseId?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Reimbursements</span></button>':'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
+
+    // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
+    // general feature, so it is a hardcoded pair the same way canManage above is): find a claimant
+    // by name or department, then jump straight to one of their bills. The people list is built
+    // from `cases` itself (whoever has actually raised a claim), not the full staff directory, so
+    // it never offers someone with nothing to look up. "Overdue" here means the bill's current
+    // step is still pending and its own due_at has passed — reading flow_steps.no_overdue so the
+    // claimant-confirmation step (which is deliberately exempt) is never flagged, the same rule
+    // the original migration set it up for.
+    const pcSearchOn = id===39 && (eq(mySelf,'jaingrouppc2.ankita@gmail.com') || eq(mySelf,'pc.thejaingroup1@gmail.com'));
+    let pcSearchHtml='';
+    if(pcSearchOn){
+      const pcMap={};
+      cases.forEach(function(cc){
+        const email=cc.created_by; if(!email) return;
+        const key=String(email).toLowerCase();
+        if(!pcMap[key]) pcMap[key]={email:email,name:wfNm(email)||email,dept:wfDeptOf(email)||'',bills:[]};
+        const cs=fcs.find(function(x){return x.case_id===cc.id && x.seq===cc.current_step;});
+        const stepDef=cs?steps.find(function(s){return s.seq===cs.seq;}):null;
+        const overdue=!!(cc.status==='Pending' && cs && !cs.forwarded_at && cs.due_at
+          && !(stepDef&&stepDef.no_overdue) && new Date(cs.due_at)<new Date());
+        pcMap[key].bills.push({id:cc.id,caseNo:wfCaseNoText(cc),status:cc.status,overdue:overdue});
+      });
+      window._wfPcPeople=Object.keys(pcMap).map(function(k){return pcMap[k];}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      pcSearchHtml=wfPcSearchHtml();
+    }
 
     /* Built up front rather than inline below: rendering the tracker is what works out whether it
        has an Owner column worth searching, and the tab strip - which carries the search box - is
@@ -3056,6 +3131,7 @@
         ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
         : '')
       +headActs+'</div>'
+      +pcSearchHtml
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
@@ -3457,9 +3533,14 @@
        flat per-page timeout that backed it up was a guess that a slow S3 fetch or a big bulk print
        could easily outrun - print would fire with the images still blank boxes, which is exactly
        what a printed sheet of QR codes cannot afford to be. Waiting on each <img> directly removes
-       the guesswork; 'error' resolves too; a truly hung image cannot block printing forever. */
+       the guesswork - but 'load'/img.complete only mean the bytes have arrived, not that the browser
+       has finished DECODING the image, which is what a synchronous print render actually needs
+       already done. decode() resolves only once the image can actually be painted; falls back to
+       load/error for the rare browser without it. Either way 'error' resolves too, so one broken
+       image can never hang the rest of the printout. */
     const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
     const imgReady=function(img){ return new Promise(function(res){
+      if(typeof img.decode==='function'){ img.decode().then(res,res); return; }
       if(img.complete) return res();
       img.addEventListener('load',res,{once:true});
       img.addEventListener('error',res,{once:true});
@@ -3471,7 +3552,7 @@
     return true;
   };
   window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
-  /* Reimbursement's "Print New Receipts": everything Accounts (step 2) currently has as received,
+  /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
      eye to find what changed. Marking done happens AFTER the print job is actually handed to the
@@ -8055,6 +8136,23 @@
       const {order}=effectiveOrder(arr);
       return order.map((t,i)=>({t, letter:letterFor(i+1)}));
     }
+    // Which workflow a task came from, for the Workflow grouping tab — read from window._wfStepInfo
+    // (populated just above, keyed by flow_case_step_id), the same cache the task rows themselves
+    // already use to show a workflow's name. A task with no flow_case_step_id is a manual task.
+    function wfNameFor(t){
+      if(t.flow_case_step_id==null) return 'No Workflow';
+      const info=(window._wfStepInfo||{})[t.flow_case_step_id];
+      return (info&&info.flowName)||'Workflow';
+    }
+    // Group order otherwise follows priority order (whichever group holds the top task comes
+    // first) - fine for Tags/Person, where every group is equally "a task", but for Workflow a
+    // manual task sorting ahead of every real workflow just because it happens to be top priority
+    // reads as the workflows being buried under stray tasks. No Workflow always sinks to the end.
+    function wfSinkNoWorkflow(seen){
+      const i=seen.indexOf('No Workflow');
+      if(i!==-1){ seen.splice(i,1); seen.push('No Workflow'); }
+      return seen;
+    }
     /* Project/Person view: group order is fully derived from the current priority order above —
        whichever project/person contains the very top task appears first, and so on. No manual
        drag-and-drop of groups or of tasks within a group; only the Priority tab can be dragged. */
@@ -8065,6 +8163,11 @@
         const seen=[],seenSet=new Set(),g={};
         wl.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',items:[]};} g[k].items.push(x); });
         return {mode:'project',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
+      }
+      if(P3==='workflow'){
+        const seen=[],seenSet=new Set(),g={};
+        wl.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,items:[]};} g[k].items.push(x); });
+        return {mode:'workflow',secs:wfSinkNoWorkflow(seen).map(k=>({key:k,label:g[k].label,items:g[k].items}))};
       }
       const isOwnerRole = type==='toMe';
       const seen=[],seenSet=new Set(),g={};
@@ -8140,6 +8243,11 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         byMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        // No metaType/metaVal preset here — a task added through this gap has no sensible way to
+        // land inside a specific workflow (those only ever come from the workflow engine itself).
+        byMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
+        wfSinkNoWorkflow(seen);
       } else {
         byMeFlat.forEach(x=>{ const mem=(asg[x.t.id]||[]); const ks=mem.length?mem.map(e=>e.toLowerCase()):[(x.t.delegator||'').toLowerCase()]; ks.forEach(k=>{ if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); }); });
       }
@@ -8178,6 +8286,9 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         toMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        toMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
+        wfSinkNoWorkflow(seen);
       } else {
         toMeFlat.forEach(x=>{ const k=(x.t.delegator||'').toLowerCase(); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); });
       }
@@ -8198,7 +8309,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>

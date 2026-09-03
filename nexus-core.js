@@ -617,6 +617,25 @@ function renderPage(){
 }
 function route(){renderPage();}
 window.addEventListener('hashchange',renderPage);
+// Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
+// tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
+// otherwise a page with enough tabs to overflow (e.g. the 13-tab customer portal) leaves the active
+// one wherever the row was last scrolled to, sometimes off-screen with no visual sign which tab is
+// actually selected. Runs off a MutationObserver rather than only at navigation time because several
+// views replace just their own tab row's innerHTML after loading data, not the whole page.
+(function(){
+  const viewEl=document.getElementById('view');
+  if(!viewEl)return;
+  const scrollActiveTabIntoView=function(){
+    const active=viewEl.querySelector('.tabs .tab.active');
+    if(active)active.scrollIntoView({inline:'nearest',block:'nearest'});
+  };
+  // No setTimeout/rAF wrapper needed - MutationObserver already batches a burst of DOM changes
+  // (e.g. rendering a whole page) into one callback call, so calling straight from it still fires
+  // once per render, not once per node. (rAF was tried here first and verified to sometimes never
+  // fire at all for a backgrounded tab - direct is both simpler and more reliable.)
+  new MutationObserver(scrollActiveTabIntoView).observe(viewEl,{childList:true,subtree:true});
+})();
 
 /* ============================ VIEWS ============================ */
 const VIEWS={};
@@ -4068,6 +4087,12 @@ window.taskSave=async function(kind){
   const btn=$('tkSave');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
   const {data,error}=await sb.schema('acc').from('tasks').insert(row).select().single();
   if(error){toast(error.message,'err');btn.disabled=false;return;}
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - the title only
+  // exists as a value read off the form here, which a generic wrapper around this function could
+  // never see. On success only, so a failed save (bad due date, no permission) is never counted as
+  // a task that was created.
+  try{ usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create',
+    {title:title, assignee:isDel?(nameOf(row.assigned_to)||row.assigned_to):undefined}); }catch(_e){}
   if(!isDel&&mem.length)await sb.schema('acc').from('task_members').insert(mem.map(e=>({task_id:data.id,email:e})));
   if(projectId||goalId)await syncParentMembership(projectId,goalId,[row.owner,...mem]);
   if(projectId)await insertDelegationEdges(data.id,state.email,[row.owner,...mem]);
@@ -7342,14 +7367,28 @@ VIEWS.security=async function(v,seg){
   if(seg[0]==='user'){return secUserDetail(v,decodeURIComponent(seg[1]||''));}
   return secList(v);
 };
+let SEC_USERS=[];
+function secRowsHtml(list){
+  if(!list.length)return '<div class="empty">No matches</div>';
+  return `<table class="tbl sec-tbl"><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Level</th><th>Tabs</th><th></th></tr></thead><tbody>`+
+    list.map(u=>{const pending=u.onboarded&&!u.super_admin&&!(Array.isArray(u.modules)&&u.modules.length);const valid=Array.isArray(u.modules)?u.modules.filter(m=>MODSET.has(m)):[];const noRestrict=u.modules===null||u.modules===undefined;const tabsCell=u.super_admin?'All':noRestrict?DEFAULT_MODULES.length+' (default)':valid.length===0?'0 — needs setup':valid.length>=MODLIST.length?'All':String(valid.length);return `<tr class="rowlink${pending?' pending-row':''}" onclick="navTo('security/user/'+encodeURIComponent('${esc(u.email)}'))"><td>${avatar(u.full_name)} <b>${esc(u.full_name)}</b>${u.super_admin?' <span class="tag t-purple">Admin</span>':''}${pending?' <span class="tag t-amber">New · needs setup</span>':''}</td><td style="color:var(--slate)">${esc(u.email)}</td><td>${(Array.isArray(u.department)&&u.department.length)?u.department.map(d=>avatar(d)).join(''):'—'}</td><td>${esc(u.lvl||'Employee')}</td><td>${tabsCell}</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>`;}).join('')+`</tbody></table>`;
+}
+window.secFilterUsers=function(){
+  const q=(($('secSearch')||{}).value||'').trim().toLowerCase();
+  const list=!q?SEC_USERS:SEC_USERS.filter(u=>{
+    const dept=Array.isArray(u.department)?u.department.join(' ').toLowerCase():'';
+    return (u.full_name||'').toLowerCase().includes(q)||(u.email||'').toLowerCase().includes(q)||dept.includes(q);
+  });
+  const host=$('secRows');if(host)host.innerHTML=secRowsHtml(list);
+};
 async function secList(v){
   setCrumb(['Control Panel']);
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-sliders" style="color:#7c3aed"></i> Control Panel</h1><p>Approve new people and manage everyone's department, level and tab access</p></div></div><div class="card card-pad" id="secRows"><div class="loader"><div class="spin"></div></div></div>`;
-  let users=[];
-  try{const {data,error}=await sb.schema('adm').rpc('admin_list_users');if(error)throw error;users=data||[];}
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-sliders" style="color:#7c3aed"></i> Control Panel</h1><p>Approve new people and manage everyone's department, level and tab access</p></div>`
+    +`<div class="search-box" style="max-width:320px"><i class="fa-solid fa-magnifying-glass"></i><input id="secSearch" placeholder="Search by name, email or department…" oninput="secFilterUsers()"></div></div>`
+    +`<div class="card card-pad" id="secRows"><div class="loader"><div class="spin"></div></div></div>`;
+  try{const {data,error}=await sb.schema('adm').rpc('admin_list_users');if(error)throw error;SEC_USERS=data||[];}
   catch(e){$('secRows').innerHTML='<div class="empty">Could not load users: '+esc(e.message||String(e))+'</div>';return;}
-  $('secRows').innerHTML=`<table class="tbl sec-tbl"><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Level</th><th>Tabs</th><th></th></tr></thead><tbody>`+
-    users.map(u=>{const pending=u.onboarded&&!u.super_admin&&!(Array.isArray(u.modules)&&u.modules.length);const valid=Array.isArray(u.modules)?u.modules.filter(m=>MODSET.has(m)):[];const noRestrict=u.modules===null||u.modules===undefined;const tabsCell=u.super_admin?'All':noRestrict?DEFAULT_MODULES.length+' (default)':valid.length===0?'0 — needs setup':valid.length>=MODLIST.length?'All':String(valid.length);return `<tr class="rowlink${pending?' pending-row':''}" onclick="navTo('security/user/'+encodeURIComponent('${esc(u.email)}'))"><td>${avatar(u.full_name)} <b>${esc(u.full_name)}</b>${u.super_admin?' <span class="tag t-purple">Admin</span>':''}${pending?' <span class="tag t-amber">New · needs setup</span>':''}</td><td style="color:var(--slate)">${esc(u.email)}</td><td>${(Array.isArray(u.department)&&u.department.length)?u.department.map(d=>avatar(d)).join(''):'—'}</td><td>${esc(u.lvl||'Employee')}</td><td>${tabsCell}</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>`;}).join('')+`</tbody></table>`;
+  $('secRows').innerHTML=secRowsHtml(SEC_USERS);
 }
 async function secUserDetail(v,email){
   setCrumb(['Control Panel',email]);
@@ -7360,7 +7399,7 @@ async function secUserDetail(v,email){
   const mods=Array.isArray(u.modules)?u.modules:DEFAULT_MODULES.slice();
   SEC_DEPTS=Array.isArray(u.department)?u.department.slice():[];
   v.innerHTML=`<div class="page-head"><div><h1>${avatar(u.full_name)} ${esc(u.full_name)}</h1><p>${esc(u.email)}${u.super_admin?' · <span class="tag t-purple">Administrator</span>':''}</p></div><button class="btn" onclick="navTo('security')"><i class="fa-solid fa-arrow-left"></i> Back</button></div>
-  <div class="card card-pad frm" style="max-width:780px">
+  <div class="card card-pad frm">
     <div class="two"><div><label>Name</label><input value="${esc(u.full_name)}" disabled></div><div><label>Email</label><input value="${esc(u.email)}" disabled></div></div>
     <div class="two"><div><label>Department</label>${deptPickerHtml(SEC_DEPTS)}</div><div><label>Level</label><select id="secLevel" ${u.super_admin?'disabled':''}>${LEVELS.map(l=>'<option '+(l===(u.lvl||'Employee')?'selected':'')+'>'+l+'</option>').join('')}</select></div></div>
     <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:14px">
@@ -8001,15 +8040,24 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Project</th></tr></thead><tbody>'
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Project</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
 };
+// "Customized per feature" without a hand-written renderer per feature: what shows up here is
+// whatever that feature chose to capture (a task's title, a search query, who a claim went to) -
+// features that capture nothing yet just show a dash, same as before this existed.
+function usbMetaHtml(meta){
+  if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
+  const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
+    .map(function(k){ return '<b style="font-weight:600">'+esc(k.charAt(0).toUpperCase()+k.slice(1))+':</b> '+esc(String(meta[k])); });
+  return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
+}
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
    widened to everything they did, across every feature, in one chronological list — for when the
    question is "what has this person actually been doing", not "how many times did they use X". */
@@ -8036,11 +8084,11 @@ window.usbOpenUserActivity=async function(){
   const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th></tr></thead><tbody>'
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td></tr>';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -12914,10 +12962,13 @@ window.custModReqDecide=async function(id,decision){
   closeModal();toast(decision==='accepted'?'Accepted':'Rejected','ok');route();
 };
 VIEWS.customer=async function(v,seg){
-  setCrumb(['Customer Portal']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
+  // Names the active tab in the breadcrumb too - with 13 tabs in a horizontally-scrolling row,
+  // the active one isn't always visible in the row itself, so this is the one place that always
+  // says which section you're actually looking at.
+  setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
   // WHO it's a preview of, or the empty state and the profile menu tell two different stories.
@@ -16162,9 +16213,9 @@ window.trDownload=async function(id){
    are queued and sent in batches, never one request per click. */
 const USAGE_MAP={
   // Accountability — Tasks
-  // taskSave(kind) is one Save button behind both "New Task" and "Delegate work" (kind==='delegation')
-  // - a plain string here would count every delegation made this way as a create instead.
-  taskSave:function(kind){ return kind==='delegation' ? 'tasks.tasks.delegate_task_to_someone' : 'tasks.tasks.create_task'; },
+  // taskSave itself is NOT mapped here (see the direct usageQueue call inside it) - the title it
+  // creates only exists as a DOM value read inside the function body, which a wrapper here can never
+  // see; only the function itself can capture it.
   taskUpdateDue:'tasks.tasks.edit_task_due_date',
   taskDelegateSave:'tasks.tasks.delegate_task_to_someone',
   // taskMarkComplete(id, makeComplete) toggles both ways from the same button pair - makeComplete
@@ -16187,11 +16238,12 @@ const USAGE_MAP={
   accEditDueSave:'tasks.tasks.edit_task_due_date', accDelegateSave:'tasks.tasks.delegate_task_to_someone',
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
-  accSubDel:'tasks.tasks.delete_sub_task', accTaskSearch:'tasks.tasks.search_tasks',
+  accSubDel:'tasks.tasks.delete_sub_task',
+  accTaskSearch:{key:'tasks.tasks.search_tasks', meta:function(val){ return val?{query:String(val)}:null; }},
   // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
   // view (already implied by simply landing on the tab), so only the other two are worth a feature
   // of their own; returning nothing for 'priority' means switching back to it logs no event.
-  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':null; },
+  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':k==='workflow'?'tasks.tasks.view_tasks_grouped_by_workflow':null; },
   /* Accountability — Meetings. Missed entirely on the first pass: the whole tab reported nothing,
      which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
      scheduling rather than editing because it saves both and scheduling is the act it usually is;
@@ -16378,10 +16430,16 @@ let USAGE_Q=[], USAGE_TIMER=null;
 // freshest activity that's kept, not the oldest, since an approximate recent picture beats an
 // exact but ancient one for a report read in terms of "the last 30 days".
 const USAGE_MAX_Q=600;
-function usageQueue(featureKey, action){
+// meta is the specific thing the action was ABOUT - a task's title, a search query, who a claim
+// was delegated to - not just that the feature fired. Optional and feature-by-feature: most call
+// sites still pass nothing, same as before this existed. erp_log_usage only keeps it when it is a
+// plain object, so anything else here is silently dropped rather than corrupting the row.
+function usageQueue(featureKey, action, meta){
   if(!featureKey || !(state&&state.email)) return;
-  USAGE_Q.push({module_id:String(featureKey).split('.')[0], feature_key:featureKey,
-                action:action||'view', occurred_at:new Date().toISOString()});
+  const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
+                action:action||'view', occurred_at:new Date().toISOString()};
+  if(meta && typeof meta==='object') ev.meta=meta;
+  USAGE_Q.push(ev);
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
@@ -16454,10 +16512,21 @@ function usageInstall(){
     // modal and Save button), and a fixed string would count every delegation as "create task" while
     // "delegate a task" itself never fired. Those entries are a resolver instead: called with the
     // same arguments as the wrapped function, returning whichever feature key actually happened.
+    // A THIRD shape, {key, meta}, additionally captures the specific thing the action was about -
+    // only usable when that thing is itself one of the wrapped function's own arguments (a search
+    // box's typed value, say); anything read from the DOM inside the function's own body is outside
+    // what a wrapper can see, and is logged directly at the source instead (see crystallizeAndSwap).
+    const isDescriptor=mapped&&typeof mapped==='object'&&('key' in mapped);
+    const keySrc=isDescriptor?mapped.key:mapped;
+    const metaFn=isDescriptor?mapped.meta:null;
     const wrapped=function(){
       try{
-        const key=(typeof mapped==='function') ? mapped.apply(this, arguments) : mapped;
-        if(key) usageQueue(key, act);
+        const key=(typeof keySrc==='function') ? keySrc.apply(this, arguments) : keySrc;
+        if(key){
+          let meta=null;
+          if(metaFn){ try{ meta=metaFn.apply(this, arguments); }catch(_e){} }
+          usageQueue(key, act, meta);
+        }
       }catch(e){}
       return orig.apply(this, arguments);      // called through no matter what happened above
     };
