@@ -13440,8 +13440,13 @@ function traDateBar(){
 }
 window.traSetRange=function(f,t){TRA_F.from=f||null;TRA_F.to=t||null;traRender(true);};
 
+/* "Repeat Site Visited on 11/04/26" is one CRM status per visit date, so this dropdown grew a fresh
+   line every time anyone revisited - dozens of one-lead options nobody would ever pick. They are
+   kept out of the options only; rows carrying the status still list under "All CRM statuses". */
+function trIsRepeatVisitStatus(s){return /^\s*repeat\s+site\s+visit/i.test(String(s||''));}
 function traFilterBar(all){
-  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
+    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
   const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
@@ -14165,7 +14170,8 @@ function trcDateBar(){
 window.trcSetRange=function(f,t){TRC_F.from=f||null;TRC_F.to=t||null;trcRender(true);};
 
 function trcFilterBar(all){
-  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
+    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
   const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
   const seenP={};
   const personnelValues=(all||[]).reduce(function(out,r){
