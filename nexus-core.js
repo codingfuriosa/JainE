@@ -13921,7 +13921,13 @@ function trcWall(v, withTime){
    Previous day - the day whose calls actually finished processing overnight - rather than All time,
    so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
-const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all'};
+const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',team:'all'};
+/* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
+   recently opened from this list, so coming back from its detail page (the in-app Back button, or
+   the browser's own back button - both re-run trcView the same way) highlights and scrolls to the
+   exact row someone came from instead of dropping them back at the top of the table. */
+let TRC_LAST_LEAD_ID=null;
+let TRC_LAST_FOLLOWUP_ID=null;
 
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
@@ -13929,7 +13935,21 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
   +'lost_reason_status,remarks_status,ai_assessed_status,status_match,mismatch_type,qa_score,qa_model,'
-  +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count';
+  +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
+  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,'
+  +'level_regression_severity,prev_status';
+
+/* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
+   Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
+   that skip a step backwards 'not_allowed' (as opposed to 'review', for a softer drop like OV back to
+   In Follow Up, which this tag deliberately leaves alone).
+   Only applied from the day this was wired up onward: the database has always computed it, correctly,
+   over the CRM's whole history, but flagging calls that were already sitting in the system before
+   anyone could act on this would just be noise, not new information. */
+const TRC_REGRESSION_CUTOFF='2026-09-02';
+function trcIsRegression(r){
+  return r.level_regression_severity==='not_allowed' && trcRowDate(r)>=TRC_REGRESSION_CUTOFF;
+}
 
 /* The list never asks for transcripts. A day of calls is a few hundred rows and every one of them
    carries its full turn-by-turn transcript plus five QA blobs - fetching those to render a table of
@@ -13971,6 +13991,8 @@ function trcApply(rows,skipCards){
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
     if(TRC_F.crm!=='all'&&String(r.crm_status||'')!==TRC_F.crm)return false;
     if(TRC_F.bu!=='all'&&String(r.business_unit_name||'')!==TRC_F.bu)return false;
+    if(TRC_F.personnel!=='all'&&String(r.personnel_email||'')!==TRC_F.personnel)return false;
+    if(TRC_F.team!=='all'&&String(r.personnel_team||'')!==TRC_F.team)return false;
     if(!skipCards){
       if(TRC_F.proc!=='all'&&String(r.transcription_status||'')!==TRC_F.proc)return false;
       if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
@@ -13979,7 +14001,8 @@ function trcApply(rows,skipCards){
       if(TRC_F.mismatch!=='all'&&String(r.mismatch_type||'')!==TRC_F.mismatch)return false;
     }
     if(q){
-      const hay=String(r.lead_id||'')+' '+String(r.lead_name||'')+' '+String(r.follow_up_id||'');
+      const hay=String(r.lead_id||'')+' '+String(r.lead_name||'')+' '+String(r.follow_up_id||'')
+        +' '+String(r.personnel_name||'')+' '+String(r.personnel_email||'');
       if(hay.toLowerCase().indexOf(q)<0)return false;
     }
     return true;
@@ -14015,6 +14038,7 @@ function trcLeads(rows){
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
     g.mismatches=g.rows.filter(function(r){return r.status_match===false;}).length;
+    g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
     g.trail=[];
     g.rows.forEach(function(r){
@@ -14128,9 +14152,9 @@ function trcDateBar(){
     const on=TRC_F.from===f&&TRC_F.to===t;
     return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
   };
-  const y=traYesterday(),td=traToday();
+  const y=traYesterday();
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-    +preset('Previous day',y,y)+preset('Today',td,td)+preset('All time',null,null)
+    +preset('Previous day',y,y)+preset('All time',null,null)
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onchange="trcSetRange(this.value||null,(document.getElementById(\'trcTo\').value||this.value||null))" style="padding:5px 8px">'
@@ -14143,6 +14167,12 @@ window.trcSetRange=function(f,t){TRC_F.from=f||null;TRC_F.to=t||null;trcRender(t
 function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;}).filter(Boolean))).sort();
   const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
+  const seenP={};
+  const personnelValues=(all||[]).reduce(function(out,r){
+    const email=r.personnel_email;
+    if(!email||seenP[email])return out;
+    seenP[email]=1;out.push({email:email,name:r.personnel_name||email});return out;
+  },[]).sort(function(a,b){return a.name.localeCompare(b.name);});
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -14159,7 +14189,16 @@ function trcFilterBar(all){
       +opt('all','All business units',TRC_F.bu)
       +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
-    +'<input id="trcQ" placeholder="Search lead ID, name or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
+    +'<select onchange="trcSet(\'team\',this.value)" style="padding:6px 8px">'
+      +opt('all','All teams',TRC_F.team)
+      +opt('Sales','Sales',TRC_F.team)
+      +opt('Pre-Sales','Pre-Sales',TRC_F.team)
+    +'</select>'
+    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
+      +opt('all','All personnel',TRC_F.personnel)
+      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'</select>'
+    +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
     +'<button class="btn btn-sm" onclick="trcClear()"><i class="fa-solid fa-filter-circle-xmark"></i> Clear filters</button>'
     +'<button class="btn btn-sm" onclick="trcRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
@@ -14172,6 +14211,7 @@ window.trcSet=function(k,v){
 };
 window.trcClear=function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
+  TRC_F.personnel='all';TRC_F.team='all';
   TRC_F.q='';TRC_F.from=null;TRC_F.to=null;trcRender(true);
 };
 window.trcRefresh=async function(){await trcFetch(true);trcRender(true);};
@@ -14186,7 +14226,7 @@ function trcTextCell(v,width){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
+const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
 
 /* Stops the row's own onclick (navigate to the lead) from firing when the copy button inside it is
    clicked - the button and the row share the same <tr>, so the click would otherwise bubble up. */
@@ -14196,10 +14236,19 @@ window.trcCopyRec=function(ev,url){
   return traClip(url,'Recording URL copied');
 };
 
-function trcLeadRowHtml(g){
+/* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
+   so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
+   recomputed on every render and means nothing outside this one table on this one screen. */
+function trcLeadRowHtml(g,sl){
   const n=g.rows.length;
   const last=g.last||{};
-  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+g.lead_id+'\')">'
+  /* g.rows was already narrowed to the active filters before being grouped here (trcApply runs
+     before trcLeads), so when a personnel filter is on, g.last IS that person's most recent
+     matching call - jumping straight to it instead of the top of the lead's whole history. */
+  const jumpTo=TRC_F.personnel!=='all'&&last.follow_up_id?'/'+last.follow_up_id:'';
+  const wasOpened=TRC_LAST_LEAD_ID!=null&&String(g.lead_id)===String(TRC_LAST_LEAD_ID);
+  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'\')">'
+    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate)">'+sl+'</td>'
     +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
     +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">'+n+' follow-up'+(n===1?'':'s')
@@ -14208,7 +14257,8 @@ function trcLeadRowHtml(g){
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
     +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
-      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')+'</td>'
+      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')
+      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?g.regressions+' status regressions':'Status regressed'):'')+'</td>'
     +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
     +'<td>'+(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
@@ -14227,7 +14277,8 @@ function trcLeadRowHtml(g){
    side by side, which is the comparison the count is made of. */
 function trcCallRowHtml(r){
   const m=TRC_MISMATCH[String(r.mismatch_type||'')];
-  return '<tr style="cursor:pointer" onclick="navTo(\'transcription/lead/'+r.lead_id+'\')">'
+  const wasOpened=TRC_LAST_FOLLOWUP_ID!=null&&String(r.follow_up_id)===String(TRC_LAST_FOLLOWUP_ID);
+  return '<tr id="trcCallRow'+esc(String(r.follow_up_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+r.lead_id+'/'+r.follow_up_id+'\')">'
     +'<td style="font-variant-numeric:tabular-nums">'+esc(String(r.lead_id))+'</td>'
     +'<td><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">follow-up '+esc(String(r.follow_up_id))+'</div></td>'
@@ -14246,12 +14297,12 @@ function trcTableHtml(rows){
       +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
   }
   if(callLevel)return rows.slice().sort(function(a,b){return trcChrono(b,a);}).map(trcCallRowHtml).join('');
-  return trcLeads(rows).map(trcLeadRowHtml).join('');
+  return trcLeads(rows).map(function(g,i){return trcLeadRowHtml(g,i+1);}).join('');
 }
 function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
-    : '<tr><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
+    : '<tr><th>SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
       +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
 }
 
@@ -14276,6 +14327,11 @@ function trcRender(full){
 }
 
 async function trcView(v,seg){
+  /* The lead id (and, if the click came off the call-level Mismatch table, the follow-up id too) a
+     "Back"/"All leads" link carried in the route itself (transcription/0/<leadId>/<followUpId>) -
+     this is what lets the exact row survive not just an in-app back click but a full page reload or
+     someone pasting the URL, which the in-memory TRC_LAST_LEAD_ID/TRC_LAST_FOLLOWUP_ID alone never could. */
+  if(seg&&seg[1]){TRC_LAST_LEAD_ID=seg[1];TRC_LAST_FOLLOWUP_ID=seg[2]||null;}
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
@@ -14287,8 +14343,18 @@ async function trcView(v,seg){
       +'<thead id="trcHead"></thead>'
       +'<tbody id="trcRows"><tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
     +'</table></div></div>';
-  await trcFetch(true);
+  /* Not a forced refetch: coming back here from a lead's detail page (the in-app Back button, or the
+     browser's own back button) must not re-download the whole day's rows and drop someone at the top
+     of the table while it loads - trcFetch already caches, and the explicit Refresh button still
+     forces a reload when the data itself might actually be stale. */
+  await trcFetch(false);
   trcRender(true);
+  /* The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one
+     row per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to. */
+  const row=(TRC_F.match==='MISMATCH'&&TRC_LAST_FOLLOWUP_ID!=null)
+    ? $('trcCallRow'+TRC_LAST_FOLLOWUP_ID)
+    : (TRC_LAST_LEAD_ID!=null ? $('trcLeadRow'+TRC_LAST_LEAD_ID) : null);
+  if(row)row.scrollIntoView({block:'center'});
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
@@ -14375,14 +14441,14 @@ function trcQaTableHtml(r,m){
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
      why:join([pitch.reason,Array.isArray(pitch.issues)&&pitch.issues.length?pitch.issues.join(' · '):null])},
-    {topic:'Follow-up date accuracy',status:r.followup_date_status,score:null,
+    {topic:'Follow-up date accuracy',status:r.followup_date_status,score:fdate.score,
      why:join([fdate.reason,fdate.crm_date?'CRM: '+fdate.crm_date:null,
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
-    {topic:'Lost reason accuracy',status:r.lost_reason_status,score:null,
+    {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
-    {topic:'Remarks accuracy',status:r.remarks_status,score:null,
+    {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
-    {topic:'Status check',status:r.ai_assessed_status,score:null,
+    {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
                m?m.label:null,sa.reason])}
   ];
@@ -14452,10 +14518,13 @@ function trcCallHtml(r,i,total){
       +(i+1)+' of '+total+'</span>'
     +'<span style="font-size:14px;font-weight:600">'+esc(when)+'</span>'
     +(r.crm_status?trcTag('t-blue','',r.crm_status):'')
+    +(r.personnel_name?trcTag(r.personnel_team==='Pre-Sales'?'t-purple':'t-blue','fa-user',
+        r.personnel_name+(r.personnel_team?' · '+r.personnel_team:'')):'')
     +trcTrTag(r)
     +(r.reused_transcription?trcTag('t-gray','fa-recycle','Transcript reused'):'')
     +(r.call_duration?trcTag('t-gray','fa-stopwatch',trFmtDur(r.call_duration)):'')
     +(m?trcTag(m.tag,m.icon,m.short):'')
+    +(trcIsRegression(r)?trcTag('t-red','fa-arrow-turn-down','Status regressed from '+(r.prev_status||'—')):'')
     +'<div class="grow"></div>'
     +(r.recording_url?'<button class="btn btn-sm" onclick="trcCopy(\'url\','+r.follow_up_id+')"><i class="fa-regular fa-copy"></i> Copy URL</button>':'')
     +((r.queue_status==='failed')?'<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'')
@@ -14464,7 +14533,9 @@ function trcCallHtml(r,i,total){
   const crm='<div class="card card-pad" style="margin:0">'
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-address-card" style="color:#0d9488"></i> What the CRM recorded</div>'
     +trcKV('Follow-up ID',r.follow_up_id)
+    +trcKV('Personnel',r.personnel_name?r.personnel_name+(r.personnel_email?' ('+r.personnel_email+')':''):null)
     +trcKV('Status',r.status_detail||r.crm_status_raw||r.crm_status)
+    +(trcIsRegression(r)?trcKV('Went back from',r.prev_status+' - not a legitimate step back'):'')
     +trcKV('Call started',trcWall(r.call_start_text,true))
     +trcKV('Logged at',r.communication_time?trcWall(String(r.communication_time).slice(0,16),true):null)
     +trcKV('Next follow-up',trcWall(r.next_follow_up_text,true)||r.next_follow_up_text)
@@ -14491,7 +14562,7 @@ function trcCallHtml(r,i,total){
 
   const accuracy=trcQaTableHtml(r,m);
 
-  return '<div class="card card-pad" style="margin-top:14px;border-left:3px solid '+(m?m.colour:'#0d9488')+'">'
+  return '<div id="trc-call-'+esc(String(r.follow_up_id))+'" class="card card-pad" style="margin-top:14px;border-left:3px solid '+(m?m.colour:'#0d9488')+'">'
     +head
     +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:12px">'+crm+proc+'</div>'
     +accuracy
@@ -14506,32 +14577,26 @@ function trcCallHtml(r,i,total){
 
 let TRC_LEAD=null;
 
-/* OV carries its scheduled date in next_follow_up_text (IST wall clock wearing a Z, so the first 10
-   characters are taken as-is - the same rule trcWall follows, never through new Date()). Once the
-   visit happens the CRM status becomes "Site Visited on DD/MM/YY" and the date moves to status_detail
-   instead. Either way: does this lead have a follow-up call actually logged on that exact day? */
-function trcVisitChecks(rows){
-  const seen={},out=[];
-  (rows||[]).forEach(function(r){
-    let date=null,kind=null;
-    if(r.crm_status==='Site Visited'&&r.status_detail){
-      const m=String(r.status_detail).match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
-      if(m){date='20'+m[3]+'-'+m[2]+'-'+m[1];kind='Site visited on';}
-    }else if(r.crm_status==='OV'&&r.next_follow_up_text){
-      date=String(r.next_follow_up_text).slice(0,10);kind='Site visit organised for';
-    }
-    if(!date||seen[kind+date])return;
-    seen[kind+date]=true;
-    const hasCall=rows.some(function(r2){return trcRowDate(r2)===date;});
-    out.push({date:date,kind:kind,hasCall:hasCall});
-  });
-  return out.sort(function(a,b){return b.date.localeCompare(a.date);});
+/* Pure calendar arithmetic on a YYYY-MM-DD string - deliberately through Date.UTC with every
+   component supplied explicitly, so the result never drifts a day depending on the server's or
+   browser's own timezone the way new Date('2026-09-05') interpreted then read back in local time can. */
+function trcAddDays(dateStr,delta){
+  const p=String(dateStr).split('-').map(Number);
+  const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]));
+  dt.setUTCDate(dt.getUTCDate()+delta);
+  return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
-   (1) an OV lead must have had a follow-up call within the last two days - silence means nobody is
-       actually managing the scheduled visit, whatever the CRM status still says.
+   (1) each of the two days immediately BEFORE the visit day needs its own follow-up call logged on
+       that exact day - not merely some call somewhere in the last two days, which could just as
+       easily be a call about a different lead's older business and say nothing about this visit.
    (2) once the visit date itself arrives, TWO follow-up calls must be logged on that exact day, not
        one - a single call is under the bar here, not a pass.
+   Both only apply to a day that has actually happened - a pre-visit day or the visit day itself that
+   is still in the future has nothing to check yet. And both are always computed off the CURRENT visit
+   date (the latest OV row's next_follow_up_text): a lead that tells the agent "I'll come another day"
+   gets a fresh OV follow-up logged with the new date, which becomes latestOv here automatically, so
+   the two days being checked move with it rather than staying pinned to whatever day was first booked.
    Also flags an OV row that carries no parseable visit date at all as not properly marked, which is
    what "is the organised-visit status marked properly" comes down to on the data this lead actually
    has. Only evaluated for a lead whose CURRENT status is OV - a lead that has since moved on (Site
@@ -14554,9 +14619,18 @@ function trcOvHealth(status,rows){
       +', '+(trcWall(trcRowDate(trueLatest))||'date not recorded')+') has already moved past it - not marked properly');
 
   const today=traToday();
-  const twoDaysAgo=traLocalDate(new Date(Date.now()-2*864e5));
-  const recentCall=(rows||[]).some(function(r){const d=trcRowDate(r);return d&&d>=twoDaysAgo&&d<=today;});
-  if(!recentCall)reasons.push('No follow-up call logged in the last two days');
+
+  const missingPreDays=[];
+  if(visitDate){
+    [2,1].forEach(function(back){
+      const day=trcAddDays(visitDate,-back);
+      if(day>today)return;
+      const hasCall=(rows||[]).some(function(r){return trcRowDate(r)===day;});
+      if(!hasCall)missingPreDays.push(day);
+    });
+  }
+  if(missingPreDays.length)reasons.push('No follow-up call logged on '
+    +missingPreDays.map(function(d){return trcWall(d)||d;}).join(' or ')+' - the two days before the visit');
 
   let onVisitDay=null;
   if(visitDate&&visitDate<=today){
@@ -14580,22 +14654,15 @@ function trcOvHealthHtml(h){
   +'</div>';
 }
 
-function trcVisitCheckHtml(checks){
-  if(!checks.length)return '';
-  return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
-    +'<i class="fa-solid fa-house-circle-check" style="color:#0d9488"></i> Site visit day check</div>'
-    +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:10px">Every site visit this lead has organised or completed, and whether a follow-up call was actually logged on that exact day.</div>'
-    +'<table class="tbl"><thead><tr><th>Date</th><th>What the CRM recorded</th><th>Call logged that day</th></tr></thead><tbody>'
-    +checks.map(function(c){
-      return '<tr><td style="white-space:nowrap">'+esc(trcWall(c.date)||c.date)+'</td><td>'+esc(c.kind)+'</td>'
-        +'<td>'+(c.hasCall?trcTag('t-green','fa-check','Yes'):trcTag('t-red','fa-xmark','No - no call logged that day'))+'</td></tr>';
-    }).join('')+'</tbody></table></div>';
-}
-
-async function trcLeadDetail(v,leadId){
+async function trcLeadDetail(v,leadId,targetFollowUpId){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const id=Number(leadId);
+  TRC_LAST_LEAD_ID=id;
+  TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
+  /* Carried on every "Back"/"All leads" link below, so the list can restore the exact row - the lead
+     row it left from, or, if this page was opened off the call-level Mismatch table, that call row. */
+  const backRoute='transcription/0/'+id+(targetFollowUpId?'/'+targetFollowUpId:'');
   let lead=null,rows=[];
   try{
     const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
@@ -14609,13 +14676,13 @@ async function trcLeadDetail(v,leadId){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i>'
       +'<div>Could not load this lead: '+esc((e&&e.message)||String(e))+'</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
     return;
   }
   if(!lead&&!rows.length){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
       +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/0\')">Back</button></div>';
+      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
     return;
   }
   TRC_LEAD={lead:lead,rows:rows};
@@ -14634,7 +14701,7 @@ async function trcLeadDetail(v,leadId){
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
+        +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
@@ -14679,12 +14746,10 @@ async function trcLeadDetail(v,leadId){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
-  const visitChecks=trcVisitCheckHtml(trcVisitChecks(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
-    +visitChecks
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
@@ -14692,6 +14757,20 @@ async function trcLeadDetail(v,leadId){
     s.id='trcTwoCss';
     s.textContent='@media(max-width:900px){.trc-two{grid-template-columns:1fr!important}}';
     document.head.appendChild(s);
+  }
+
+  /* Coming here from a personnel filter or a mismatch drill-down means one specific call is the
+     reason for the click, not the lead in general - scroll to it and flash it so it's obvious which
+     one of possibly dozens of calls is the match, instead of leaving the reader to hunt for it. */
+  if(targetFollowUpId){
+    setTimeout(function(){
+      const el=document.getElementById('trc-call-'+targetFollowUpId);
+      if(!el)return;
+      el.scrollIntoView({behavior:'smooth',block:'start'});
+      const prevShadow=el.style.boxShadow;
+      el.style.boxShadow='0 0 0 3px #0d9488';
+      setTimeout(function(){el.style.boxShadow=prevShadow;},2000);
+    },40);
   }
 }
 
@@ -14750,7 +14829,7 @@ VIEWS.transcription=async function(v,seg){
   /* Detail routes, checked before the tab index because neither 'lead' nor 'auto' is a number.
      'lead' is the snapshot pipeline, keyed on the CRM's own lead_id. 'auto' still serves rows
      imported by the previous pipeline into acc.transcriptions, so an old link still resolves. */
-  if(seg[0]==='lead'&&seg[1]){return trcLeadDetail(v,seg[1]);}
+  if(seg[0]==='lead'&&seg[1]){return trcLeadDetail(v,seg[1],seg[2]);}
   if(seg[0]==='auto'&&seg[1]){return traDetail(v,seg[1]);}
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
   const tabs=TRA_TABS;

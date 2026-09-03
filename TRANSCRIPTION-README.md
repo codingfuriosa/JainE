@@ -29,7 +29,7 @@ One recording at a time, in order:
       ↓
    Gemini: transcribe, with diarization and MM:SS timestamps
       ↓
-   Gemini: judge the transcript against the CRM's own record
+   OpenAI: judge the transcript against the CRM's own record
       ↓
    pitch · follow-up date · lost reason · remarks · status
       ↓
@@ -80,15 +80,17 @@ The function writes to columns the migration creates.
 **1. Apply the schema.** Supabase SQL editor, or `supabase db push`. Both migrations are idempotent —
 applying them to a database that already has the pipeline changes nothing.
 
-**2. Set the secrets** (Supabase → Edge Functions → Secrets). `GEMINI_API_KEY` is the only required
-one; every other has a working default.
+**2. Set the secrets** (Supabase → Edge Functions → Secrets). **Two keys, one per half:**
+`GEMINI_API_KEY` transcribes and `CHATGPT_API_KEY` judges. Every other secret has a working default.
 
 | Secret | Default | What it does |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | — | **Required.** Never reaches the browser. |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Transcription, and QA unless overridden below. |
-| `GEMINI_QA_MODEL` | *(same as `GEMINI_MODEL`)* | Set this to put the judge on a stronger tier than the transcriber. |
-| `QA_MAX_TOKENS` | `16000` | Output budget for the QA reply. On a thinking model the reasoning comes out of this too. |
+| `GEMINI_API_KEY` | — | **Required.** Transcription. Never reaches the browser. |
+| `CHATGPT_API_KEY` | — | **Required for QA.** The OpenAI key, under the name this project's secret already uses (`OPENAI_API_KEY` is read as a fallback). Without it recordings still transcribe and the assessments queue up — see below. Never reaches the browser. |
+| `GEMINI_MODEL` | `gemini-flash-latest` | The transcriber. |
+| `CHATGPT_QA_MODEL` | `gpt-4.1` | The judge. `OPENAI_QA_MODEL` and `QA_MODEL` are accepted too. |
+| `QA_MAX_TOKENS` | `16000` | Output budget for the QA reply. On a reasoning model the thinking comes out of this too. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Only for an Azure or gateway endpoint. |
 | `APP_TZ_OFFSET_MIN` | `330` | IST. Decides what "yesterday" means. |
 | `LOST_CALL_FEED` | the RealtyBucket URL | |
 | `MIN_DURATION_SECONDS` | `20` | Ring-out floor, checked against the CRM's own duration before any audio is fetched. `0` sends everything. |
@@ -136,8 +138,9 @@ rather than overwriting it, so "what did the CRM say at midnight" stays answerab
 ### Audio is never stored
 
 The recording is fetched from Knowlarity into memory, handed to Gemini as inline base64, and goes out
-of scope. The row keeps the ~90 byte `recording_url` and nothing else. There is no audio column, no
-bucket, no blob — a retry simply re-fetches.
+of scope. OpenAI never receives audio at all — the judge is given the transcript as text. The row
+keeps the ~90 byte `recording_url` and nothing else. There is no audio column, no bucket, no blob —
+a retry simply re-fetches.
 
 The Knowlarity link 302s to a presigned S3 URL that expires in ~600 seconds, which is exactly why the
 *Knowlarity* link is what gets stored and never the redirect target.
@@ -165,25 +168,48 @@ transcribed yesterday, then today:
 `acc.crm_followups` is keyed on the CRM's own `follow_up_id` and is never touched by deduplication.
 The lead's complete history is *existing transcripts + the new CRM snapshot*, not one or the other.
 
-### Two model calls, not one, and both on Gemini
+### Two model calls, not one — Gemini listens, OpenAI judges
 
-**Stage one transcribes.** It is given the audio and nothing else — no CRM data, no project figures,
-no name. That is deliberate: a model that has been told the answer can return it without listening.
+**Stage one transcribes, on Gemini.** It is given the audio and nothing else — no CRM data, no
+project figures, no name. That is deliberate: a model that has been told the answer can return it
+without listening.
 
-**Stage two judges.** It is given the transcript as text and the CRM's own record, side by side, and
-never sees audio. Because there is no audio in the room and no transcript field in its output, the
-project catalogue *can* safely be given to it — the transcript is already fixed by then.
+**Stage two judges, on OpenAI** (`gpt-4.1` by default). It is given the transcript as text and the
+CRM's own record, side by side, and never sees audio. Because there is no audio in the room and no
+transcript field in its output, the project catalogue *can* safely be given to it — the transcript is
+already fixed by then.
 
-Both run on Gemini as of 2026-08-31. The judge was OpenAI (`gpt-4.1`) until then; one model for both
-halves was asked for, and it removes a second vendor, a second key, and a failure mode that had
-already bitten — with no OpenAI key set the function refused `work` outright, so recordings were
-transcribed and then never assessed.
+QA is on OpenAI as of 2026-09-02, by requirement. Both halves ran on Gemini between 2026-08-31 and
+that date; before 2026-08-31 the judge was OpenAI (`gpt-4.1`). The transcript half never moved.
 
-The judge is asked for `application/json` and told the required shape in the prompt, the same
-arrangement the transcriber uses. Gemini's `responseSchema` cannot express this contract (nullable
-unions, a `null` member inside an enum) without quietly relaxing it, so the guarantee lives in
-`qaPhase`'s validation instead: a reply missing any of the five assessments is refused and retried,
-and nothing half-formed is ever saved.
+**Nothing about the scheduling changed with the vendor move.** Same two cron jobs, same 00:00 IST
+snapshot, same one-minute worker window, same FIFO queue, same one-recording-at-a-time, same two
+phases. The QA phase calls a different vendor and that is the whole of it — the cron bodies name no
+model, so there was nothing to edit there.
+
+**The failure mode this split had the first time is handled.** With no OpenAI key the function used to
+refuse `work` outright, so recordings were not even transcribed. Now a missing `CHATGPT_API_KEY` only
+**pauses the judge**: `oneStep` drops `qa_pending` out of the claimable set, so transcription keeps
+draining in order and the assessments bank up until the key is set. No attempt is consumed and no row
+is failed over a key that is simply absent. Both `status` and every `work` reply carry `qa_paused` and
+how many transcripts are waiting, because a paused judge is the one state that looks like healthy
+progress from outside — recordings keep being transcribed.
+
+A rate limit on one half never re-bills the other: a failure resumes **at the phase that failed**, so
+a 429 from OpenAI does not send the audio back through Gemini. That distinction mattered before and
+matters more now that the two phases sit with two vendors.
+
+The judge is asked for `json_object` and told the required shape in the prompt, the same arrangement
+the transcriber uses. OpenAI's Structured Outputs would mean restating this contract in strict JSON
+Schema, and the contract is nullable unions and a `null` member inside an enum — expressible only by
+relaxing it, which trades a real guarantee for a nominal one. (Gemini's `responseSchema` could not
+express it either, so this is unchanged by the move.) The guarantee therefore lives in `qaPhase`'s
+validation: a reply missing any of the five assessments is refused and retried, and nothing
+half-formed is ever saved.
+
+`CHATGPT_QA_MODEL` moves the judge. An o-series or gpt-5 name is detected and sent
+`max_completion_tokens` with no `temperature`; the 4.x chat models get `max_tokens` and
+`temperature: 0`, which is what makes two runs over the same call comparable.
 
 ### The content guards, and why they must stay
 
@@ -340,8 +366,20 @@ it already has.
 `cron.job_run_details` for failures; whether a row is wedged in `transcribing` (it self-clears after
 15 minutes); whether `GEMINI_API_KEY` is set; then `{"action":"status"}`.
 
-**Everything is failing at once.** Almost always the model name or the key. `raw_reply` on a failed
-`call_transcripts` row holds the actual reply.
+**Recordings are transcribing but nothing is being assessed.** `{"action":"status"}`, then look at
+`chatgpt_key_present` and `qa_paused`. This is the deliberate behaviour when `CHATGPT_API_KEY` is not
+set — the transcripts are queued at `qa_pending`, not lost. Set the secret and they are judged in
+order on the next tick, with no re-transcription and no second audio bill.
+
+**Everything is failing at once.** Almost always a model name or a key. Which half tells you which
+vendor: a `last_error` beginning `Gemini` is the transcriber, `OpenAI QA` is the judge, and
+`fail_phase` on the queue row says the same thing. `raw_reply` on a failed `call_transcripts` row
+holds the actual reply.
+
+**Every QA call 400s.** A model name and its parameters disagreeing — a reasoning model sent
+`max_tokens`, or `temperature` sent to one that refuses it. The name decides this in
+`isReasoningModel`; a name outside `o*` / `gpt-5*` that behaves like a reasoning model needs adding
+there.
 
 ---
 
@@ -358,3 +396,6 @@ it already has.
 - **`gemini-flash-latest` is an alias, not a pinned version.** Google repoints it as Flash changes, so
   it cannot 404 the way a pinned name once did — but the model underneath can change with no deploy
   and no warning. That is what the content guards are for.
+- **Two vendors means two keys, two rate limits and two status pages.** That is the cost of putting
+  the judge on OpenAI, and it is accepted deliberately. What it does *not* cost is a stalled night: a
+  missing or rate-limited judge pauses only the judging, never the transcription.
