@@ -14474,6 +14474,36 @@ function trcMarkRowHtml(title,chips){
   return '<div style="margin-top:10px"><div style="font-size:12.5px;font-weight:700;margin-bottom:6px">'
     +esc(title)+'</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+chips+'</div></div>';
 }
+/* THE FOUR QUALIFICATION GATES, as the audit read them: does what the CUSTOMER wants fit what this
+   project offers on location, budget, size and possession. Distinct from the pitch's fact-checks
+   above, which ask whether what the AGENT SAID was true - the same call can be pitched perfectly to
+   a customer who wants something this project does not build.
+   Rendered above the status signals because the gates are what the status verdict rests on, and the
+   whole row is skipped for assessments made before the gates existed. */
+const TRC_GATES=[['location','Location'],['budget','Budget'],['area_sqft','Size (sqft)'],['position','Ready / under construction']];
+function trcQualGatesHtml(r){
+  if(!r.qa_id)return '';
+  const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:{};
+  const g=sa.qualification_check&&typeof sa.qualification_check==='object'?sa.qualification_check:null;
+  if(!g)return '';
+  const chips=TRC_GATES.map(function(pair){
+    const v=String(g[pair[0]]||'');
+    const isMatch=/^match$/i.test(v), isMismatch=/^mismatch$/i.test(v);
+    const cls=isMatch?'t-green':isMismatch?'t-red':'t-gray';
+    const icon=isMatch?'fa-check':isMismatch?'fa-xmark':'fa-circle-question';
+    return trcMarkChip(cls,icon,pair[1]+(v?' - '+v:' - not established'),g.note||null);
+  }).join('');
+  const ratchet=sa.qualification_ratcheted
+    ?'<div style="font-size:12px;color:var(--slate);margin-top:6px">'
+      +'<i class="fa-solid fa-lock"></i> This lead was already qualified on an earlier call, so the '
+      +'assessment is carried forward as Qualified - a next follow-up date and remarks are how a '
+      +'qualified lead is worked, not a step back.'
+      +(sa.model_assessed_status&&sa.model_assessed_status!==sa.ai_assessed_status
+        ?' The call on its own read as '+esc(String(sa.model_assessed_status))+'.':'')
+    +'</div>':'';
+  return trcMarkRowHtml('Does the customer fit the project (the four qualification gates)',chips)+ratchet;
+}
+
 function trcStatusSignalsHtml(r){
   if(!r.qa_id)return '';
   const sa=r.status_assessment&&typeof r.status_assessment==='object'?r.status_assessment:{};
@@ -14547,6 +14577,7 @@ function trcCallHtml(r,i,total){
     +accuracy
     +(r.summary_verdict?'<div style="margin-top:12px;font-size:13.5px;line-height:1.65;white-space:pre-wrap">'
       +'<b style="font-size:12.5px">Verdict.</b> '+esc(r.summary_verdict)+'</div>':'')
+    +trcQualGatesHtml(r)
     +trcStatusSignalsHtml(r)
     +'<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:8px">'
       +'<i class="fa-solid fa-quote-left" style="color:#0d9488"></i> The conversation</div>'
