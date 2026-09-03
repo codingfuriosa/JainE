@@ -2654,11 +2654,23 @@
   // The panes of a workflow. Tracker is bill-style only; Forms appears wherever forms exist (and
   // for an Administration user, so they can add the first one).
   window.wfTabShow=function(which){
+    /* Archive is not a pane of its own - it is the main pane showing its other half. Panes and
+       buttons are therefore toggled against different keys. */
+    const pane=(which==='archive')?'main':which;
     ['main','tracker','forms'].forEach(function(k){
-      const p=$('wfPane_'+k), b=$('wfTabBtn_'+k);
-      if(p) p.style.display=(k===which)?'':'none';
+      const p=$('wfPane_'+k);
+      if(p) p.style.display=(k===pane)?'':'none';
+    });
+    ['main','tracker','forms','archive'].forEach(function(k){
+      const b=$('wfTabBtn_'+k);
       if(b) b.classList.toggle('on', k===which);
     });
+    if(window._wfArchOn && (which==='main'||which==='archive')){
+      window._wfArchView=(which==='archive')?'archive':'active';
+      const ttl=$('wfInstTitle');
+      if(ttl) ttl.textContent=(which==='archive')?'Archive':(window._wfInstNoun||'');
+      try{ wfInstFilter(); }catch(_e){}   // re-runs search and dates against the view just opened
+    }
     // the search box on the right of the tab strip searches the tracker's rows, so it is only on
     // show while the tracker is
     const right=$('wfTabsRight');
@@ -2802,6 +2814,19 @@
     const canPrintBulk=isStepHolder || eq(mySelf,'ayushruia1@gmail.com')
       || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
     const showChk=anyActionable||canPrintBulk;
+    /* FINISHED WORK MOVES OUT OF THE WAY.
+       A workflow that opts in (flows.archive_done) shows only its running instances in the main
+       list and puts the completed ones behind an Archive tab. Both live in the SAME table and the
+       tab simply changes which rows are on show - duplicating the table would have meant two of
+       every id on the page, breaking the search box, the date range and the print selection, all
+       of which are wired to one set. This way every one of them keeps working, within whichever
+       view is open. */
+    const archiveOn=!!(flow&&flow.archive_done);
+    const activeCount=cases.filter(function(c){ return c.status!=='Done'; }).length;
+    const doneCount=cases.length-activeCount;
+    window._wfArchOn=archiveOn;
+    window._wfArchView='active';
+    window._wfInstNoun=N.many;
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
@@ -2840,11 +2865,11 @@
         // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
         const ownerKey=wfOwnerKey(c, byCase);
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
-        return '<tr data-case="'+c.id+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
           +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
       }).join('');
-      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> '+esc2(N.many)+' <span class="cnt">'+cases.length+'</span>'
+      tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
           +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
@@ -2899,6 +2924,11 @@
           // The Tracker reports where every instance has reached, so it is held to the same roster
           // rule as the People row above rather than being open to anyone who can see the page.
           +(maySeeRoster?'<button class="wf-tab" id="wfTabBtn_tracker" onclick="wfTabShow(\'tracker\')"><i class="fa-solid fa-table-columns"></i> Tracker</button>':'')
+          /* Archive sits next to the list it came out of. Shown only where the workflow asked for
+             it, so no other workflow's tab strip changes. */
+          +(archiveOn?('<button class="wf-tab" id="wfTabBtn_archive" onclick="wfTabShow(\'archive\')">'
+              +'<i class="fa-solid fa-box-archive"></i> Archive'
+              +(doneCount?(' <span class="cnt">'+doneCount+'</span>'):'')+'</button>'):'')
           // pushed to the right-hand end of the same row, and only on show while the Tracker is the
           // open tab - it searches the tracker's rows and means nothing against the others
           +'<span class="wf-tabs-right" id="wfTabsRight" style="display:none">'+(window._wfTkFindBar||'')+'</span>'
@@ -2923,6 +2953,11 @@
           +wfFormsTableHtml(forms,canManage)
         +'</div></div>'):'')
     +'</div>';
+    /* Completed instances have to be out of the main list from the FIRST paint. The filter is what
+       decides which half is on show, and it otherwise runs only when something is typed or a tab is
+       clicked - so without this the archived rows sit in the main list until the viewer happens to
+       touch one of them, which is the whole bug this tab exists to avoid. */
+    if(archiveOn){ try{ wfInstFilter(); }catch(_e){} }
     if(selCaseId){ wfShowCase(selCaseId, null); }
   }
 
@@ -2950,6 +2985,12 @@
       const amount=r.getAttribute('data-amount')||'';
       const desc=r.getAttribute('data-desc')||'';
       let ok=true;
+      /* Finished or running, before anything else is considered - so a search inside the Archive
+         searches the archive, and a date range on the main list never turns up a completed one. */
+      if(window._wfArchOn){
+        const done=(r.getAttribute('data-done')==='1');
+        if(done !== (window._wfArchView==='archive')) ok=false;
+      }
       if(q && id5.indexOf(q)===-1 && wheredoc.indexOf(qLower)===-1 && owner.indexOf(qLower)===-1
            && amount.indexOf(qLower)===-1 && desc.indexOf(qLower)===-1) ok=false;
       if(ok && from && created && created<from) ok=false;
@@ -2958,6 +2999,7 @@
       if(ok) shown++;
     });
     const nm=$('wfInstNoMatch'); if(nm) nm.style.display=(rows.length&&!shown)?'':'none';
+    const cnt=$('wfInstCount'); if(cnt) cnt.textContent=shown;
   };
   // To can never be earlier than From — once From is picked, To's minimum becomes that date
   // (and if To was already set to something now-invalid, it's cleared rather than left wrong).
