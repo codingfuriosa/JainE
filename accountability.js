@@ -2361,6 +2361,29 @@
     if(s && s.owner_role) return String(s.owner_role);
     return '—';
   }
+  /* WHICH WAY A BILL WENT.
+     The step columns alone cannot say it: a No Cheque bill and a Payment bill both leave gaps, and
+     a Payment bill's dates run out of column order because it visits Bill Checking after the
+     cheque. The route is the one thing that explains both, so it is stated outright.
+     Colour separates them at a glance rather than making anyone read: the ordinary path is quiet,
+     and the two exceptions are not. */
+  const WF_ROUTE_PILL={
+    cheque:   {label:'Cheque',    bg:'#eef2ff', fg:'#4338ca', bd:'#c7d2fe'},
+    no_cheque:{label:'No Cheque', bg:'#fef3c7', fg:'#92400e', bd:'#fde68a'},
+    payment:  {label:'Payment',   bg:'#dcfce7', fg:'#166534', bd:'#bbf7d0'}
+  };
+  function wfRoutePill(route,tiny){
+    const r=WF_ROUTE_PILL[String(route||'')];
+    if(!r) return tiny?'':'<span class="wf-pill" style="background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0" title="Nobody has chosen this bill\u2019s route yet">Not set</span>';
+    return '<span class="wf-pill" style="background:'+r.bg+';color:'+r.fg+';border-color:'+r.bd+'"'
+      +' title="'+esc2(wfRouteWhat(route))+'">'+r.label+'</span>';
+  }
+  function wfRouteWhat(route){
+    if(route==='payment')   return 'Payment: RTP, Cheque Preparation, Bill Checking, Audit Work, Bill Filing \u2014 the payment goes first and the checking follows';
+    if(route==='no_cheque') return 'No Cheque: paid without a cheque \u2014 GST Approval and Bill Filing still happen, the cheque steps do not';
+    if(route==='cheque')    return 'Cheque: every step in the normal order';
+    return 'The route is chosen at Bill Booking (Payment) or at RTP (Cheque / No Cheque)';
+  }
   function wfTrackerHtml(flow, steps, cases, fcs){
     if(!steps.length) return '<div class="ac-empty" style="cursor:default">Add steps to this workflow to track them</div>';
     if(!cases.length) return '<div class="ac-empty" style="cursor:default">Nothing recorded yet</div>';
@@ -2485,7 +2508,12 @@
         +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'data-amount="'+esc2(tkX.amount)+'" data-desc="'+esc2(tkX.desc)+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
-        +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b></td></tr>';
+        /* The route goes under "now at" rather than in a column of its own: the Tracker's header is
+           three stacked band rows whose colspans are counted, and adding a fourteenth column means
+           keeping four of them in step. This says the same thing and cannot fall out of alignment. */
+        +left+cells+'<td class="wf-tk-gap"><b>'+esc2(now)+'</b>'
+        +((flow&&flow.id===26)?('<div style="margin-top:4px">'+wfRoutePill(c.route)+'</div>'):'')
+        +'</td></tr>';
     }).join('');
 
     /* One row per instance and potentially hundreds of them, so the Tracker gets its own way in.
@@ -2835,7 +2863,7 @@
         // Invoice Processing calls its instance number the "JainE id"; ordinary workflows just
         // count their instances under a plain "No.".
         +'<th>'+(flow&&flow.id===26?'JainE id':'No.')+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
-        +'<th>'+esc2(N.one)+'</th>'+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+        +'<th>'+esc2(N.one)+'</th>'+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           // This instance deliberately bypassed this step (Invoice Processing's No-Cheque path) —
@@ -2867,7 +2895,7 @@
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
         return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
@@ -4966,7 +4994,19 @@
         // prep/checking/signing/handover chain; No Cheque still needs GST Approval and still
         // gets filed, but skips the rest (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
         // "real" one, so both get equal weight rather than one reading as a fallback of the other.
-        else if(flow&&flow.id===26&&fcs.seq===5){
+        /* BILL BOOKING DECIDES WHETHER THIS IS A PAYMENT.
+           Forward sends it the ordinary way - Bill Checking, Audit Checking, then RTP. Payment
+           sends it down the route where the money moves first: RTP, Cheque Preparation, and only
+           then Bill Checking and Audit Work before filing. Both are forwards; one of them also
+           fixes which path the bill follows from here. */
+        else if(flow&&flow.id===26&&fcs.seq===2){
+          const fwd2=wfForwardLabel({nextWho:nextStep?wfWhoOfStep(nextStep):''});
+          A+='<button class="ac-btn primary" title="'+esc2(fwd2)+'" onclick="wfForward('+fcs.id+')"><i class="fa-solid fa-paper-plane"></i> '+esc2(fwd2)+'</button>'
+           +'<button class="ac-btn primary" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="wfForwardPaymentChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Payment</button>';
+        }
+        // The Cheque / No Cheque choice belongs to RTP - but a bill already on the Payment route
+        // reached RTP with its path settled, so there is nothing left to choose and it forwards on.
+        else if(flow&&flow.id===26&&fcs.seq===5&&(caseRow&&caseRow.route)!=='payment'){
           A+='<button class="ac-btn primary" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice('+fcs.id+',true)"><i class="fa-solid fa-indian-rupee-sign"></i> Cheque</button>'
            +'<button class="ac-btn primary" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice('+fcs.id+',false)"><i class="fa-solid fa-ban"></i> No Cheque</button>';
         }
@@ -5079,6 +5119,19 @@
     try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
     toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
+    navTo('tasks/work');
+  };
+
+  /* Bill Booking's Payment button. Deliberately a separate call from a plain Forward: it decides
+     the bill's whole route, so it is worth being an explicit act rather than a variant of a
+     forward that happens to take an argument. */
+  window.wfForwardPaymentChoice=async function(fcsId,payment){
+    try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
+      {p_fcs_id:fcsId,p_payment:!!payment}); if(error)throw error; }
+    catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    toast(payment
+      ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
+      : 'Forwarded','ok');
     navTo('tasks/work');
   };
 
@@ -7664,7 +7717,7 @@
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
            list - for everyone, not just the person who raised it. */
-        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
+        let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
         let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
@@ -7719,7 +7772,7 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -8125,7 +8178,10 @@
            paper-plane here forwarded nothing and simply failed, because the database refuses a
            plain forward on that step. */
         wfRR=`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${
-          wfInfo.chequeChoice
+          wfInfo.paymentChoice
+          ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="${esc2(fwdTip)}" onclick="wfForward(${t.flow_case_step_id})"><i class="fa-solid fa-paper-plane"></i></button>`
+            +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="Payment — RTP, then Cheque Preparation, then Bill Checking and Audit Work, then filing" onclick="wfForwardPaymentChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-indian-rupee-sign"></i></button>`
+          : wfInfo.chequeChoice
           ? `<button class="ac-btn primary ic" style="height:30px;width:30px" title="Cheque — Cheque Preparation, Checking, Signing and Handover, then filing" onclick="wfForwardChequeChoice(${t.flow_case_step_id},true)"><i class="fa-solid fa-indian-rupee-sign"></i></button>`
             +`<button class="ac-btn primary ic" style="height:30px;width:30px" title="No Cheque — paid without a cheque; skips Cheque Preparation through Handover, and the bill is still filed" onclick="wfForwardChequeChoice(${t.flow_case_step_id},false)"><i class="fa-solid fa-ban"></i></button>`
           : wfIsLastStep
