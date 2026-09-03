@@ -7694,12 +7694,22 @@ const USB_CSS='<style id="usbCss">'
   +'.usb-user-name{color:var(--ink)}'
   +'.usb-user-meta{color:var(--slate);white-space:nowrap}'
   +'</style>';
-/* Grouped by department (a person's first listed one) rather than one flat A-Z list of everyone in
-   the company — with dozens of names, "who's Reception again?" was the whole problem. Anyone with no
-   department lands in one "Unassigned" group at the end, never mixed silently into the rest. */
+/* Linked to the Department filter: once a department is picked, Person narrows down to just that
+   department's people — a flat A-Z list, since grouping by department would be pointless when
+   there is only one. With no department picked it falls back to one flat list grouped by
+   department (a person's first listed one) rather than one A-Z list of the whole company — with
+   dozens of names, "who's Reception again?" was the whole problem. Anyone with no department lands
+   in one "Unassigned" group at the end, never mixed silently into the rest. */
 function usbPersonOptionsHtml(){
+  const people=(USB.people||[]).filter(function(p){
+    return !USB.dept || (Array.isArray(p.depts) && p.depts.indexOf(USB.dept)!==-1);
+  });
+  if(USB.dept){
+    return people.slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));})
+      .map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('');
+  }
   const byDept={};
-  (USB.people||[]).forEach(function(p){
+  people.forEach(function(p){
     const dept=(Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'Unassigned';
     (byDept[dept]=byDept[dept]||[]).push(p);
   });
@@ -7757,7 +7767,7 @@ function usbControlsHtml(){
       +'</select></div>'
     +'<div class="usb-f"><label for="usbPerson">Person</label>'
       +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
-        +'<option value="">Everyone</option>'
+        +'<option value="">'+(USB.dept?'Everyone in '+esc(USB.dept):'Everyone')+'</option>'
         +usbPersonOptionsHtml()
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
@@ -7774,11 +7784,25 @@ window.usbSetPreset=function(v){
   USB.preset=v; renderPage();
 };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
-// Person and Department are mutually exclusive views of the same numbers, not two filters that
-// stack — "Sales, but only Priya" is a person filter, not a department one, so picking either
-// clears the other rather than silently AND-ing two dropdowns together into an empty report.
-window.usbSetPerson=function(v){ USB.email=v||''; if(v)USB.dept=''; renderPage(); };
-window.usbSetDept=function(v){ USB.dept=v||''; if(v)USB.email=''; renderPage(); };
+// Person is linked to Department, not a separate filter beside it: picking someone fills in their
+// own department too (so the two never disagree), and picking a department narrows the Person list
+// down to that department's people, dropping whoever was picked if they no longer belong to it.
+window.usbSetPerson=function(v){
+  USB.email=v||'';
+  if(v){
+    const p=(USB.people||[]).find(function(x){return x.email===v;});
+    USB.dept=(p&&Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'';
+  }
+  renderPage();
+};
+window.usbSetDept=function(v){
+  USB.dept=v||'';
+  if(v && USB.email){
+    const p=(USB.people||[]).find(function(x){return x.email===USB.email;});
+    if(!(p&&Array.isArray(p.depts)&&p.depts.indexOf(v)!==-1)) USB.email='';
+  }
+  renderPage();
+};
 /* ---- Extract to Excel -------------------------------------------------------------------
    A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
    as numbers that actually sum, the date as a date, and each feature's activity in the same colour
