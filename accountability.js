@@ -1056,6 +1056,11 @@
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
   // How an instance's number reads on screen. Invoice Processing calls it the "JainE id" and
   // prefixes it with J (J1, J2, J3…) — every ordinary workflow keeps the plain No. — 1, 2, 3.
+  /* What a workflow calls its instance number. Invoice Processing says "JainE id" because it
+     carries a numbering that began before the portal; Challan Processing says "Challan Id" and
+     counts from 1. Read from the workflow rather than written into the page, so a new one can
+     name its own column without this needing to be edited again. */
+  function wfIdLabel(flow){ return String((flow&&flow.id_label)||'').trim() || 'No.'; }
   function wfCaseNoText(c){
     if(c && c.flow_id===26) return String(c.jaine_id||c.case_no||0);
     return String((c&&c.case_no)||0);
@@ -2508,7 +2513,7 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:flow.id===26?'JainE id':'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -3023,7 +3028,7 @@
       const head=(showChk?'<th class="wf-chk-col"></th>':'')
         // Invoice Processing calls its instance number the "JainE id"; ordinary workflows just
         // count their instances under a plain "No.".
-        +'<th>'+(flow&&flow.id===26?'JainE id':'No.')+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
+        +'<th>'+(wfIdLabel(flow))+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
         +'<th>'+esc2(N.one)+'</th>'+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
