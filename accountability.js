@@ -1061,6 +1061,51 @@
      counts from 1. Read from the workflow rather than written into the page, so a new one can
      name its own column without this needing to be edited again. */
   function wfIdLabel(flow){ return String((flow&&flow.id_label)||'').trim() || 'No.'; }
+  /* THE COORDINATORS' VIEW.
+     Two people watch Invoice Processing in order to CHASE it. What they need from the list is the
+     opposite of what everybody else needs: not "find me this bill" but "show me what has slipped
+     at this step, and who do I ring about it". So for them the list becomes a step picker, the
+     rows are the overdue ones only, and the department person is a column of its own.
+     Whether somebody gets this view is recorded against their viewer entry on the workflow, not
+     written into the page, so a third coordinator needs a setting and not a deployment. */
+  function wfIsChaser(flow){
+    const me_=me();
+    return (Array.isArray(flow&&flow.case_viewers)?flow.case_viewers:[])
+      .some(function(v){ return v && eq(v.viewer||'', me_) && (v.pc_chase===true||v.pc_chase==='true'); });
+  }
+  /* The department person for a bill - the one chosen on the form when it was raised, which is why
+     it differs from bill to bill where every other step has a fixed owner. Read from the bill's own
+     first step rather than from the workflow, since the workflow only says "whoever was picked". */
+  function wfDeptPersonOf(caseSteps, firstSeq){
+    const s0=caseSteps && caseSteps[firstSeq];
+    if(!s0) return '';
+    if(s0.person) return s0.person;
+    const c=Array.isArray(s0.candidates)?s0.candidates.filter(Boolean):[];
+    return c.length===1?c[0]:'';
+  }
+  function wfDeptNameOf(caseSteps, firstSeq){
+    const e=wfDeptPersonOf(caseSteps, firstSeq);
+    return e ? wfNm(e) : '\u2014';
+  }
+  /* Who a step belongs to according to the WORKFLOW, for the picker's labels. A step whose owner is
+     chosen when the bill is raised has no fixed answer, and says so rather than showing blank. */
+  function wfDefStepWho(s){
+    if(s && s.owner_from_trigger) return 'chosen on the form';
+    const list=(Array.isArray(s&&s.owner_emails)&&s.owner_emails.length)
+      ? s.owner_emails.filter(Boolean)
+      : ((s&&s.owner_email)?[s.owner_email]:[]);
+    if(!list.length) return 'chosen on the form';
+    return list.map(function(e){ return wfNm(e); }).join(' / ');
+  }
+  /* Late means the step it is sitting at has passed its deadline. Computed from the deadline
+     itself: flow_case_steps.overdue exists but has never been set true on any row, so trusting it
+     would report nothing as late for ever. */
+  function wfCaseIsLate(caseSteps, curSeq){
+    const cur=caseSteps && caseSteps[curSeq];
+    if(!cur || !cur.due_at || cur.forwarded_at) return false;
+    const d=new Date(cur.due_at);
+    return !isNaN(d) && d.getTime() < Date.now();
+  }
   function wfCaseNoText(c){
     if(c && c.flow_id===26) return String(c.jaine_id||c.case_no||0);
     return String((c&&c.case_no)||0);
@@ -3024,12 +3069,14 @@
     let tableHtml='';
     if(cases.length){
       const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
+      // the two coordinators get a different list from everybody else - see wfIsChaser
+      const chaser=wfIsChaser(flow);
       const firstSeq = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
       const head=(showChk?'<th class="wf-chk-col"></th>':'')
         // Invoice Processing calls its instance number the "JainE id"; ordinary workflows just
         // count their instances under a plain "No.".
         +'<th>'+(wfIdLabel(flow))+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
-        +'<th>'+esc2(N.one)+'</th>'+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
+        +'<th>'+esc2(N.one)+'</th>'+(chaser?'<th>Dept Owner</th>':'')+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
           // This instance deliberately bypassed this step (Invoice Processing's No-Cheque path) —
@@ -3059,9 +3106,9 @@
         // Searchable by everyone responsible for it, not just whoever raised it - see wfOwnerKey.
         const ownerKey=wfOwnerKey(c, byCase);
         const xtra=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
-        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
+        return '<tr data-case="'+c.id+'" data-done="'+(c.status==='Done'?'1':'0')+'" data-caseno5="'+wfCaseNoText(c)+'" data-owner="'+esc2(ownerKey)+'" data-amount="'+esc2(xtra.amount)+'" data-desc="'+esc2(xtra.desc)+'" data-text="'+esc2(xtra.text)+'" data-curstep="'+(c.current_step==null?'':c.current_step)+'" data-late="'+(wfCaseIsLate(byCase[c.id], c.current_step)?'1':'0')+'" data-wheredoc="'+esc2(((wheredoc&&wheredoc.value)||'').toLowerCase())+'" data-created="'+esc2((c.created_at||'').slice(0,10))+'" onclick="wfShowCase('+c.id+',this)">'
           +(showChk?'<td class="wf-chk-col" onclick="event.stopPropagation()"><input type="checkbox" class="wf-inst-chk" data-case="'+c.id+'" data-inst-over="'+(instOver?'1':'0')+'" data-first-received="'+(firstReceived?'1':'0')+'" data-can-edit="'+(canEditCase(c)?'1':'0')+'" data-can-del="'+(canDeleteCase(c)?'1':'0')+'" onclick="event.stopPropagation();wfInstSelChange()"></td>':'')
-          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
+          +'<td><b>'+wfCaseNoText(c)+'</b></td>'+(isBill?('<td>'+esc2((wheredoc&&wheredoc.value)||'—')+'</td>'):'')+'<td class="wf-trigcell" title="'+esc2(wfTrigShort(c,flow).full)+'">'+esc2(wfTrigShort(c,flow).short)+'</td>'+(chaser?('<td>'+esc2(wfDeptNameOf(byCase[c.id], firstSeq))+'</td>'):'')+(isBill?('<td>'+wfRoutePill(c.route)+'</td>'):'')+cells+'</tr>';
       }).join('');
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
@@ -3075,7 +3122,18 @@
           +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
         +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
-          +'<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i><input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Company, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'
+          /* A chaser gets a step picker, not a search box: the question they arrive with is always
+             "what is stuck at this step", and typing a company name is not how that is asked. */
+          +(chaser
+            ? ('<div class="wf-inst-filter-search"><i class="fa-solid fa-clock-rotate-left"></i>'
+               +'<select class="ac-in" id="wfInstStepPick" onchange="wfInstFilter()">'
+               +'<option value="">Overdue at any step</option>'
+               +steps.map(function(s){
+                   return '<option value="'+s.seq+'">'+esc2(s.seq+' - '+(s.title||('Step '+s.seq))
+                          +' ('+wfDefStepWho(s)+')')+'</option>'; }).join('')
+               +'</select></div>')
+            : ('<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i>'
+               +'<input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Company, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'))
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -3208,6 +3266,10 @@
   window._wfInstDateFilter={from:'',to:''};
   window.wfInstFilter=function(){
     const q=(($('wfInstSearch')||{}).value||'').trim();
+    // the coordinators' step picker stands where the search box would be
+    const picker=$('wfInstStepPick');
+    const chase=!!picker;
+    const pickSeq=picker?String(picker.value||''):'';
     const from=window._wfInstDateFilter.from, to=window._wfInstDateFilter.to;
     /* The Instances table only. The Tracker's table also carries wf-itable, and both panes sit in
        the page at once (the tabs just set display:none), so the bare selector hid every Tracker row
@@ -3227,6 +3289,13 @@
       // Company / Vendor / Bill No. - whatever this workflow calls the things it was raised about.
       const text=r.getAttribute('data-text')||'';
       let ok=true;
+      /* A chaser sees only what has slipped, and only at the step they picked. Applied before
+         anything else - the rest of the filtering is about finding a particular bill, which is not
+         the question being asked here. */
+      if(chase){
+        if(r.getAttribute('data-late')!=='1') ok=false;
+        if(ok && pickSeq && String(r.getAttribute('data-curstep')||'')!==pickSeq) ok=false;
+      }
       /* Finished or running, before anything else is considered - so a search inside the Archive
          searches the archive, and a date range on the main list never turns up a completed one. */
       if(window._wfArchOn){
