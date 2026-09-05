@@ -2744,6 +2744,7 @@ async function legalMIS(){
 &quot;in quotes&quot;: that exact phrase, word for word.
 priority is empty / court is high court: search one column.">
         </div>
+        <button class="btn" onclick="misViewCauselist()" title="View the causelist for the selected date range in a new tab"><i class="fa-solid fa-eye"></i> View</button>
         <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
         <span class="mis-count" id="misAiStatus"></span>
       </div>
@@ -3045,18 +3046,22 @@ async function legalScoreboard(){
    SL NO. | CASE TYPE | CASE DETAILS | CASE NO. | DATE | Advocate incharge | Court Name |
    STATUS | ACTION NEEDED.
    A causelist covers a period, so it refuses to run until a date range is chosen. */
-window.misExportCauselist=function(){
+// Shared by View and Export - both need the identical sheet, one just renders it in a new
+// tab instead of triggering a download. Returns null (having already shown its own warning
+// toast) on every validation failure, so a caller never has to duplicate those checks, and
+// a usage event only ever gets logged where a real sheet actually came out the other end.
+function misBuildCauselist(){
   let win=misRangeDates();
   if(!win && MIS_RANGE==='custom'){
     toast('Pick both a From and a To date before exporting the causelist','warn');
     const sel=document.querySelector('#misRangeMenu .mis-range-btn');
     if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
-    return;
+    return null;
   }
   const rows=(window._misRows||[]).filter(misInRangeDated)
     .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
-  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
+  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return null; }
 
   // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
   // out of that file: doc name "CAUSTLIST" top-left, sheet tab name top-right, page number,
@@ -3133,17 +3138,37 @@ window.misExportCauselist=function(){
    +'</tbody></table>'
    +'</div></body></html>';
 
-  // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
-  // laid out exactly as here — print it from the browser's own File > Print when needed.
-  const name='CAUSTLIST - '+tabName+'.html';
+  return {html:html, tabName:tabName, rows:rows};
+}
+// Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
+// laid out exactly as it renders here — print it from the browser's own File > Print when needed.
+window.misExportCauselist=function(){
+  const built=misBuildCauselist();
+  if(!built) return;   // misBuildCauselist already toasted why
+  const rows=built.rows;
   try{
-    const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
+    const url=URL.createObjectURL(new Blob([built.html],{type:'text/html;charset=utf-8'}));
     const a=document.createElement('a');
-    a.href=url; a.download=name; a.style.display='none';
+    a.href=url; a.download='CAUSTLIST - '+built.tabName+'.html'; a.style.display='none';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1500);
   }catch(e){ toast('Could not export the causelist: '+((e&&e.message)||e),'err'); return; }
   toast('Causelist exported — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+  // Logged here, after the download has actually fired, rather than left to the generic
+  // USAGE_MAP wrapper - that would have counted a click that was warned off by
+  // misBuildCauselist (no date range, or nothing in range) as a use just the same as a real
+  // export, which is exactly the bug that made "1 use" unverifiable as a real success.
+  try{ usageQueue('legal.mis.export_causelist','export'); }catch(_e){}
+};
+// View is the same sheet, opened for on-screen reading instead of forced onto disk - the
+// causelist-format equivalent of every other module's Preview/Download pair.
+window.misViewCauselist=function(){
+  const built=misBuildCauselist();
+  if(!built) return;
+  const w=window.open('', '_blank');
+  if(!w){ toast('Could not open a new tab — check your browser’s pop-up blocker','warn'); return; }
+  w.document.open(); w.document.write(built.html); w.document.close();
+  try{ usageQueue('legal.mis.view_causelist','view'); }catch(_e){}
 };
 
 window.misRowCheck=function(cb){
@@ -16384,7 +16409,10 @@ const USAGE_MAP={
   misActionExecute:'legal.mis.record_execute_a_case_action',
   misActionSave:'legal.mis.record_execute_a_case_action',
   misSwipeToggle:'legal.mis.mark_case_complete_reopen',
-  misDocsPick:'legal.mis.upload_documents_for_a_case', misExportCauselist:'legal.mis.export_causelist',
+  misDocsPick:'legal.mis.upload_documents_for_a_case',
+  // misExportCauselist / misViewCauselist are NOT mapped here on purpose - they log directly,
+  // after misBuildCauselist actually produces a sheet, so a click warned off for no date
+  // range or no matching hearings doesn't count as a use the way the generic wrapper would.
   legalActionsFilter:'legal.actions.view_search_filter_case_actions',
   advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
   advFilter:'legal.advocates.search_advocates',
@@ -16443,7 +16471,12 @@ const USAGE_MAP={
   psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
   psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
   psaDownloadOne:'postsales.adhoc.download_a_document',
-  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip'
+  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip',
+  // Procurement / Projects / Construction — previously untracked
+  procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
+  procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
+  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit', vtFilterVendors:'procurement.vendor_trends.search_filter_vendors',
+  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history'
 };
 /* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
    speed-test tables. Wrapping buttons can never catch those: there is no button, the act is opening
@@ -16465,7 +16498,10 @@ const USAGE_VIEWS={
   // Console is Inspection's default landing tab, reached with NO segment in the hash at all
   // (inspGo builds a bare '#/inspection' for it) - usageViewTick's own fallback for "no segment"
   // is the string '0', not the tab's name, so the key has to be '0' to ever actually match.
-  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns'
+  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns',
+  // Procurement / Projects / Construction — previously untracked
+  'procurement/4':       'procurement.vendor_trends.view_spend_kpis_trend_charts',
+  'projects/0':          'projects.overview.view_ongoing_sold_out_projects_gallery'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){
