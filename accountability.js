@@ -1056,6 +1056,11 @@
   // 5-digit display Id for an instance — cosmetic padding of the per-workflow case_no counter.
   // How an instance's number reads on screen. Invoice Processing calls it the "JainE id" and
   // prefixes it with J (J1, J2, J3…) — every ordinary workflow keeps the plain No. — 1, 2, 3.
+  /* What a workflow calls its instance number. Invoice Processing says "JainE id" because it
+     carries a numbering that began before the portal; Challan Processing says "Challan Id" and
+     counts from 1. Read from the workflow rather than written into the page, so a new one can
+     name its own column without this needing to be edited again. */
+  function wfIdLabel(flow){ return String((flow&&flow.id_label)||'').trim() || 'No.'; }
   function wfCaseNoText(c){
     if(c && c.flow_id===26) return String(c.jaine_id||c.case_no||0);
     return String((c&&c.case_no)||0);
@@ -2458,26 +2463,31 @@
         +'until you are ready to send it.</div>';
     }
     const sumKey=(flow.tracker_sum_field||'').trim();
-    const rows=drafts.map(function(d){
+    const rows=drafts.map(function(d,i){
       const det=Array.isArray(d.details)?d.details:[];
       const filled=det.filter(function(x){ return x && String(x.value==null?'':x.value).trim(); });
+      // what it comes to so far - a draft is mostly about the running figure
       const tot=sumKey?wfSumField((det.filter(function(x){ return x&&eq(x.label,sumKey); })[0]||{}).value):0;
       const what=filled.filter(function(x){ return !eq(x.label,sumKey) && String(x.value).indexOf('s3:')!==0; })
         .slice(0,3).map(function(x){ return esc2(wfDetailDisp(x.value)); }).join(' \u00b7 ');
-      return '<tr>'
+      /* The whole row opens it, the way a bill's row opens the bill. A button that repeats what
+         clicking the row already does is a second thing to aim at for no gain. Delete stops the
+         click travelling, or tidying up would open the draft on the way past. */
+      return '<tr class="wf-draft-row" title="Open this draft" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
+        /* Numbered, not priced. A draft has no "reimbursement number" - it takes one only when it
+           is submitted - so this is simply its place in the list, newest first. */
+        +'<td><b>'+(i+1)+'</b></td>'
         +'<td><b>'+(tot?wfMoney(tot):'\u2014')+'</b></td>'
         +'<td class="wf-trigcell">'+(what||'<span style="color:var(--slate)">nothing filled in yet</span>')+'</td>'
         +'<td>'+filled.length+' of '+det.length+' filled</td>'
         +'<td>'+esc2(wfDT(d.updated_at||d.created_at))+'</td>'
-        +'<td style="white-space:nowrap">'
-          +'<button class="ac-btn primary" onclick="wfEventOpen('+flow.id+',null,'+d.id+')">'
-            +'<i class="fa-solid fa-pen"></i> Open</button> '
+        +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
           +'<button class="ac-btn danger ic" title="Delete this draft" onclick="wfDraftDelete('+d.id+')">'
             +'<i class="fa-solid fa-trash"></i></button>'
         +'</td></tr>';
     }).join('');
     return '<div class="wf-tablewrap"><table class="wf-itable"><thead><tr>'
-      +'<th>'+esc2(sumKey||'Total')+'</th><th>What is in it</th><th>Filled</th>'
+      +'<th>No.</th><th>'+esc2(sumKey||'Total')+'</th><th>What is in it</th><th>Filled</th>'
       +'<th>Last saved</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   window.wfDraftDelete=function(id){
@@ -2503,7 +2513,7 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:flow.id===26?'JainE id':'No.'},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2813,6 +2823,53 @@
     window.addEventListener('resize',function(){ if(document.querySelector('.wf-tktable')) wfTrackerSticky(); });
   }
 
+  /* ---------- Reimbursement claimant/bill lookup (jaingrouppc2.ankita@/pc.thejaingroup1@ only) ----
+     Same .ms/.ms-field/.ms-panel/.ms-list/.ms-dept/.ms-opt component and msOpen/msFieldClick open-
+     close mechanics as the reporting-manager picker (nexus-core.js) - just its own state and render
+     functions, since that picker's own state (RM_STATE) is single-purpose and not keyed generically. */
+  function wfPcAvatar(nm){ try{ return (typeof avatar==='function')?avatar(nm):('<span class="avatar avatar-sm" style="background:'+colorFor(nm)+'">'+esc2(iniOf(nm).toUpperCase())+'</span>'); }catch(e){ return ''; } }
+  function wfPcSearchHtml(){
+    return '<div class="wf-card card-pad" style="margin-bottom:14px">'
+      +'<label style="display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:6px"><i class="fa-solid fa-magnifying-glass"></i> Find a claimant\'s bills</label>'
+      +'<div class="ms" id="ms_wfpc">'
+        +'<div class="ms-field" onclick="msFieldClick(\'wfpc\',event)">'
+          +'<span class="ms-chips" id="ms_wfpc_chips"><span style="color:#94a3b8;font-size:13px">Search by name or department…</span></span>'
+          +'<input class="ms-typein" id="ms_wfpc_in" placeholder="Type a name or department…" autocomplete="off" oninput="msOpen(\'wfpc\');wfPcRenderList()" onfocus="msOpen(\'wfpc\')" onclick="event.stopPropagation()">'
+          +'<i class="fa-solid fa-chevron-down" style="color:#94a3b8;font-size:12px"></i>'
+        +'</div>'
+        +'<div class="ms-panel" id="ms_wfpc_panel"><div class="ms-list" id="ms_wfpc_list">'+wfPcListHtml('')+'</div></div>'
+      +'</div>'
+    +'</div>';
+  }
+  function wfPcListHtml(q){
+    const selEmail=window._wfPcSelEmail;
+    if(selEmail){
+      const person=(window._wfPcPeople||[]).find(function(p){return p.email===selEmail;});
+      if(!person){ window._wfPcSelEmail=null; return wfPcListHtml(q); }
+      const back='<div class="ms-opt" onclick="wfPcBack()"><i class="fa-solid fa-arrow-left" style="width:22px;text-align:center"></i><span style="flex:1">Back to people</span></div>';
+      if(!person.bills.length) return back+'<div style="padding:10px;color:#94a3b8;font-size:13px">No bills</div>';
+      const sorted=person.bills.slice().sort(function(a,b){return (b.overdue?1:0)-(a.overdue?1:0);});
+      return back+sorted.map(function(b){
+        return '<div class="ms-opt" onclick="wfPcOpenBill('+b.id+')"><span style="flex:1">'+esc2(b.caseNo)+' · '+esc2(b.status)+'</span>'
+          +(b.overdue?'<span class="wf-pill" style="background:#fef2f2;color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</span>':'')+'</div>';
+      }).join('');
+    }
+    q=(q||'').toLowerCase();
+    const people=(window._wfPcPeople||[]).filter(function(p){return !q||(p.name||'').toLowerCase().indexOf(q)!==-1||(p.dept||'').toLowerCase().indexOf(q)!==-1;});
+    if(!people.length) return '<div style="padding:10px;color:#94a3b8;font-size:13px">No matches</div>';
+    return groupByDept(people).map(function(g){
+      return '<div class="ms-dept">'+esc2(g.dept)+'</div>'+g.people.map(function(p){
+        const overdueCount=p.bills.filter(function(b){return b.overdue;}).length;
+        return '<div class="ms-opt" onclick="wfPcPickPerson(\''+esc2(p.email).replace(/'/g,"\\'")+'\')">'+wfPcAvatar(p.name)+'<span style="flex:1">'+esc2(p.name)+'</span>'
+          +(overdueCount?'<span class="wf-pill" style="background:#fef2f2;color:#dc2626">'+overdueCount+' overdue</span>':'')+'</div>';
+      }).join('');
+    }).join('');
+  }
+  window.wfPcRenderList=function(){ const list=document.getElementById('ms_wfpc_list'); if(!list)return; const q=(document.getElementById('ms_wfpc_in')||{}).value||''; list.innerHTML=wfPcListHtml(q); };
+  window.wfPcPickPerson=function(email){ window._wfPcSelEmail=email; const inp=document.getElementById('ms_wfpc_in'); if(inp)inp.value=''; wfPcRenderList(); };
+  window.wfPcBack=function(){ window._wfPcSelEmail=null; wfPcRenderList(); };
+  window.wfPcOpenBill=function(caseId){ const panel=document.getElementById('ms_wfpc_panel'); if(panel)panel.classList.remove('show'); wfTabShow('main'); wfShowCase(caseId,null); };
+
   async function wfDetailPage(v, id, selCaseId){
     wfInjectCss(); setCrumb(['Accountability','Workflow']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -2971,7 +3028,7 @@
       const head=(showChk?'<th class="wf-chk-col"></th>':'')
         // Invoice Processing calls its instance number the "JainE id"; ordinary workflows just
         // count their instances under a plain "No.".
-        +'<th>'+(flow&&flow.id===26?'JainE id':'No.')+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
+        +'<th>'+(wfIdLabel(flow))+'</th>'+(isBill?'<th>Wheredoc Id</th>':'')
         +'<th>'+esc2(N.one)+'</th>'+(isBill?'<th>Route</th>':'')+steps.map(function(s){return '<th title="'+esc2(s.title||'')+'">'+esc2(s.title||('Step '+s.seq))+'</th>';}).join('');
       const rows=cases.map(function(c){
         const cells=steps.map(function(s){
@@ -3010,6 +3067,11 @@
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
           +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
+          // Reimbursement only: sits right beside the disabled "print selected" icon it is an
+          // alternative to - one prints whatever you've ticked, this one prints the whole running
+          // new-and-unprinted pile without having to select anything. Hidden while selCaseId is set
+          // (opened focused on one particular reimbursement) same as before.
+          +(id===39&&!selCaseId?'<button class="ac-btn" title="Print every claim Accounts has received that has not been printed before" onclick="wfBulkPrintNewReceipts()"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print New Reimbursements</span></button>':'')
           +(anyActionable?('<button class="ac-btn ic" id="wfInstEdit" title="Edit selected '+esc2(N.lc)+'" disabled onclick="wfInstEditSel()"><i class="fa-solid fa-pen"></i></button><button class="ac-btn ic danger" id="wfInstDel" title="Delete selected" disabled onclick="wfInstDelSel()"><i class="fa-solid fa-trash"></i></button>'):'')
         +'</span>'):'')+'</div>'
         +'<div class="wf-inst-filterbar">'
@@ -3035,6 +3097,32 @@
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
+    // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
+    // general feature, so it is a hardcoded pair the same way canManage above is): find a claimant
+    // by name or department, then jump straight to one of their bills. The people list is built
+    // from `cases` itself (whoever has actually raised a claim), not the full staff directory, so
+    // it never offers someone with nothing to look up. "Overdue" here means the bill's current
+    // step is still pending and its own due_at has passed — reading flow_steps.no_overdue so the
+    // claimant-confirmation step (which is deliberately exempt) is never flagged, the same rule
+    // the original migration set it up for.
+    const pcSearchOn = id===39 && (eq(mySelf,'jaingrouppc2.ankita@gmail.com') || eq(mySelf,'pc.thejaingroup1@gmail.com'));
+    let pcSearchHtml='';
+    if(pcSearchOn){
+      const pcMap={};
+      cases.forEach(function(cc){
+        const email=cc.created_by; if(!email) return;
+        const key=String(email).toLowerCase();
+        if(!pcMap[key]) pcMap[key]={email:email,name:wfNm(email)||email,dept:wfDeptOf(email)||'',bills:[]};
+        const cs=fcs.find(function(x){return x.case_id===cc.id && x.seq===cc.current_step;});
+        const stepDef=cs?steps.find(function(s){return s.seq===cs.seq;}):null;
+        const overdue=!!(cc.status==='Pending' && cs && !cs.forwarded_at && cs.due_at
+          && !(stepDef&&stepDef.no_overdue) && new Date(cs.due_at)<new Date());
+        pcMap[key].bills.push({id:cc.id,caseNo:wfCaseNoText(cc),status:cc.status,overdue:overdue});
+      });
+      window._wfPcPeople=Object.keys(pcMap).map(function(k){return pcMap[k];}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      pcSearchHtml=wfPcSearchHtml();
+    }
+
     /* Built up front rather than inline below: rendering the tracker is what works out whether it
        has an Owner column worth searching, and the tab strip - which carries the search box - is
        concatenated before it in the same expression. */
@@ -3047,6 +3135,7 @@
         ? '<span class="wf-pill" style="background:#eef2ff;color:#3730a3;margin-left:8px" title="You can see these records but not change them. Anything that needs action stays with the person the '+esc2(N.lc)+' is assigned to."><i class="fa-solid fa-eye"></i> View only</span>'
         : '')
       +headActs+'</div>'
+      +pcSearchHtml
       +'<div class="wf-card wf-meta">'
         +(flow.description?'<div class="wf-desc">'+esc2(flow.description)+'</div>':'')
         +'<div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> '+esc2(flow.trigger_event||'—')+'</div>'
@@ -3415,17 +3504,17 @@
      first, so Accounts were doing thirty of these by hand at month end. */
   window.wfPrintCases=async function(caseIds){
     const ids=(caseIds||[]).filter(function(x){ return x!=null; });
-    if(!ids.length){ toast('Nothing selected','warn'); return; }
+    if(!ids.length){ toast('Nothing selected','warn'); return false; }
     /* The tab is opened BEFORE anything is awaited. A window.open() that happens after an await is
        no longer attributable to the click that asked for it, and every browser blocks it - which
        is why this cannot simply build the HTML first and open the tab at the end. */
     const w=window.open('','_blank');
-    if(!w){ toast('Please allow popups to print','err'); return; }
+    if(!w){ toast('Please allow popups to print','err'); return false; }
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
-    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return; }
+    if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
     const css=(($('wfCss')||{}).textContent)||'';
     const title=(parts.length===1)?parts[0].title:(wfN().many+' — '+parts.length+' selected');
     const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc2(title)+'</title><style>'+css
@@ -3440,16 +3529,59 @@
       +parts.map(function(p){ return p.html; }).join('')
       +'</body></html>';
     try{ w.document.open(); w.document.write(html); w.document.close(); }
-    catch(_e){ toast('Could not build the printout','err'); return; }
+    catch(_e){ toast('Could not build the printout','err'); return false; }
     let printed=false;
     const doPrint=function(){ if(printed)return; printed=true; try{ w.focus(); w.print(); }catch(_e){} };
-    // Images (the QR codes) may still be loading when the document write finishes - load fires once
-    // they have all resolved; the timeout is a fallback if it never does. Scaled to the number of
-    // pages, since thirty QR images do not arrive as fast as one.
-    w.addEventListener('load', doPrint);
-    setTimeout(doPrint, 600+Math.min(parts.length,30)*120);
+    /* The QR images (the one thing on this page that matters most) used to be gambled on: the
+       window's own 'load' event after a document.write() is not reliable across browsers, and the
+       flat per-page timeout that backed it up was a guess that a slow S3 fetch or a big bulk print
+       could easily outrun - print would fire with the images still blank boxes, which is exactly
+       what a printed sheet of QR codes cannot afford to be. Waiting on each <img> directly removes
+       the guesswork - but 'load'/img.complete only mean the bytes have arrived, not that the browser
+       has finished DECODING the image, which is what a synchronous print render actually needs
+       already done. decode() resolves only once the image can actually be painted; falls back to
+       load/error for the rare browser without it. Either way 'error' resolves too, so one broken
+       image can never hang the rest of the printout. */
+    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
+    const imgReady=function(img){ return new Promise(function(res){
+      if(typeof img.decode==='function'){ img.decode().then(res,res); return; }
+      if(img.complete) return res();
+      img.addEventListener('load',res,{once:true});
+      img.addEventListener('error',res,{once:true});
+    }); };
+    Promise.race([
+      Promise.all(imgs.map(imgReady)),
+      new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
+    ]).then(doPrint);
+    return true;
   };
   window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
+  /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
+     minus whatever this button has already sent to print before - so running it again next week
+     only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
+     eye to find what changed. Marking done happens AFTER the print job is actually handed to the
+     browser, not before - a popup blocked or a build failure must leave every claim eligible for
+     the next attempt, not silently drop it from every future run. */
+  window.wfBulkPrintNewReceipts=async function(){
+    let cases=[];
+    try{
+      const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).is('bulk_printed_at',null);
+      cases=data||[];
+    }catch(e){ toast('Could not load claims','err'); return; }
+    if(!cases.length){ toast('Nothing new to print','warn'); return; }
+    const ids=cases.map(function(c){ return c.id; });
+    let steps=[];
+    try{
+      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
+      steps=data||[];
+    }catch(e){ toast('Could not check receipt status','err'); return; }
+    const eligible=steps.map(function(s){ return s.case_id; });
+    if(!eligible.length){ toast('Nothing new to print','warn'); return; }
+    const ok=await window.wfPrintCases(eligible);
+    if(!ok) return;
+    try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
+    catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+  };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
     const ae=document.activeElement, tag=(ae&&ae.tagName)||'';
@@ -4694,7 +4826,7 @@
       +'</div>'
       +'<div class="modal-foot">'
       +(window._wfEvtSumKey?'<div id="wfEvtTotal" class="wf-evt-total"></div>':'')
-      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn" title="Keep this and finish it later. It is not sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i> Save draft</button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
+      +'<button class="ac-btn" onclick="wfEventCancel()">Cancel</button>'+((flow.allow_drafts && !editing)?('<button class="ac-btn ic" style="height:34px;width:34px" title="Save as draft \u2014 keep this and finish it later. Nothing is sent to anyone and no '+esc2(N.lc)+' number is taken until you submit it." onclick="wfEventSaveDraft('+flowId+')"><i class="fa-regular fa-floppy-disk"></i></button>'):'')+'<button class="ac-btn primary" onclick="wfEventSave('+flowId+','+(editing?caseId:'null')+')"><i class="fa-solid fa-'+(editing?'floppy-disk':'play')+'"></i> '+esc2(editing?'Save changes':('Create '+N.one))+'</button></div>','wf-evt-modal');
     wfUpiHydrate();
     wfPhoneHydrate();
     wfShowWhenSyncAll();
@@ -4738,17 +4870,15 @@
   window.wfEvtTotalRefresh=function(){
     const el=$('wfEvtTotal'); if(!el) return;
     const t=wfEvtTotalCalc(); if(!t){ el.innerHTML=''; return; }
-    const min=Number(window._wfEvtMinTotal||0);
     el.innerHTML='<span class="wf-evt-total-k">Total '+esc2(window._wfEvtSumKey||'')+'</span>'
       +'<b>'+wfMoney(t.total)+'</b>'
       // said plainly rather than left to be noticed: a total is misleading while a box is empty
       +(t.blanks?('<span class="wf-evt-total-miss">'+t.blanks+' still to fill</span>'):'')
-      /* Below the minimum is said HERE, beside the total, while it is being typed - not held back
-         until Save. The person can see the number and the rule in the same place, and does not
-         fill the rest of the form before being told it cannot be sent. */
-      +((min>0 && t.total<min)
-          ? ('<span class="wf-evt-total-warn">Below the '+wfMoney(min)+' minimum \u2014 cannot be submitted</span>')
-          : '');
+      ;
+      /* The minimum is NOT announced here. A line beside the total saying the claim cannot be sent
+         crowded the form and was read on every keystroke while somebody was still typing the first
+         figure. The rule is enforced on submit instead, where it is actually relevant, and said
+         once in the corner. */
   };
   /* Typing fires input; adding or removing a date or an expense does not, and those change the
      total just as much. One observer on the container catches every add and remove whichever
@@ -5196,11 +5326,6 @@
       } else {
         A='<button class="ac-btn" disabled><i class="fa-solid fa-check"></i> Received</button>'+rejectBtn;
         if(isLast) A+='<button class="ac-btn ok" onclick="wfDone('+fcs.id+')"><i class="fa-solid fa-flag-checkered"></i> Done</button>';
-        // Invoice Processing's RTP / Schedule Payment step decides HOW the bill gets paid, and that
-        // choice is what decides which later steps even apply — Cheque runs the normal cheque
-        // prep/checking/signing/handover chain; No Cheque still needs GST Approval and still
-        // gets filed, but skips the rest (see wf_forward_rtp_cheque_choice). Both are forwards; neither is more the
-        // "real" one, so both get equal weight rather than one reading as a fallback of the other.
         /* BILL BOOKING DECIDES WHETHER THIS IS A PAYMENT.
            Forward sends it the ordinary way - Bill Checking, Audit Checking, then RTP. Payment
            sends it down the route where the money moves first: RTP, Cheque Preparation, and only
@@ -5956,6 +6081,8 @@
     .wf-tktable{min-width:100%;font-size:12px}
     .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
     .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row{cursor:pointer}
+    .wf-itable tbody tr.wf-draft-row:hover{background:var(--bg-subtle,#f1f5f9)}
     .wf-tktable tbody tr:nth-child(even){background:var(--bg-subtle,#fafbfc)}
     .wf-tktable tbody tr:hover{background:var(--brand-a10,#eef2ff)}
     /* Each step's three columns are banded together with a heavier divider, so at a glance you
@@ -5994,8 +6121,6 @@
     .wf-evt-total b{font-size:17px;color:var(--ink);font-weight:800;letter-spacing:-.2px}
     .wf-evt-total-k{font-weight:600}
     .wf-evt-total-miss{font-size:11px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 9px;border-radius:20px}
-    /* Red, not amber: "still to fill" is a note in passing, this one stops the claim being sent. */
-    .wf-evt-total-warn{font-size:11px;font-weight:700;color:#991b1b;background:#fee2e2;padding:2px 9px;border-radius:20px}
     .wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
@@ -8015,6 +8140,23 @@
       const {order}=effectiveOrder(arr);
       return order.map((t,i)=>({t, letter:letterFor(i+1)}));
     }
+    // Which workflow a task came from, for the Workflow grouping tab — read from window._wfStepInfo
+    // (populated just above, keyed by flow_case_step_id), the same cache the task rows themselves
+    // already use to show a workflow's name. A task with no flow_case_step_id is a manual task.
+    function wfNameFor(t){
+      if(t.flow_case_step_id==null) return 'No Workflow';
+      const info=(window._wfStepInfo||{})[t.flow_case_step_id];
+      return (info&&info.flowName)||'Workflow';
+    }
+    // Group order otherwise follows priority order (whichever group holds the top task comes
+    // first) - fine for Tags/Person, where every group is equally "a task", but for Workflow a
+    // manual task sorting ahead of every real workflow just because it happens to be top priority
+    // reads as the workflows being buried under stray tasks. No Workflow always sinks to the end.
+    function wfSinkNoWorkflow(seen){
+      const i=seen.indexOf('No Workflow');
+      if(i!==-1){ seen.splice(i,1); seen.push('No Workflow'); }
+      return seen;
+    }
     /* Project/Person view: group order is fully derived from the current priority order above —
        whichever project/person contains the very top task appears first, and so on. No manual
        drag-and-drop of groups or of tasks within a group; only the Priority tab can be dragged. */
@@ -8025,6 +8167,11 @@
         const seen=[],seenSet=new Set(),g={};
         wl.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',items:[]};} g[k].items.push(x); });
         return {mode:'project',secs:seen.map(k=>({key:k,label:g[k].label,items:g[k].items}))};
+      }
+      if(P3==='workflow'){
+        const seen=[],seenSet=new Set(),g={};
+        wl.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,items:[]};} g[k].items.push(x); });
+        return {mode:'workflow',secs:wfSinkNoWorkflow(seen).map(k=>({key:k,label:g[k].label,items:g[k].items}))};
       }
       const isOwnerRole = type==='toMe';
       const seen=[],seenSet=new Set(),g={};
@@ -8100,6 +8247,11 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         byMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        // No metaType/metaVal preset here — a task added through this gap has no sensible way to
+        // land inside a specific workflow (those only ever come from the workflow engine itself).
+        byMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
+        wfSinkNoWorkflow(seen);
       } else {
         byMeFlat.forEach(x=>{ const mem=(asg[x.t.id]||[]); const ks=mem.length?mem.map(e=>e.toLowerCase()):[(x.t.delegator||'').toLowerCase()]; ks.forEach(k=>{ if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); }); });
       }
@@ -8138,6 +8290,9 @@
       const seen=[],seenSet=new Set(),g={};
       if(P3==='project'){
         toMeFlat.forEach(x=>{ const k=x.t.project_id?String(x.t.project_id):'__none__'; if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:x.t.project_id?(pm[x.t.project_id]||'—'):'No tag',metaType:'project',metaVal:x.t.project_id||null,items:[]};} g[k].items.push(x); });
+      } else if(P3==='workflow'){
+        toMeFlat.forEach(x=>{ const k=wfNameFor(x.t); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:k,metaType:null,metaVal:null,items:[]};} g[k].items.push(x); });
+        wfSinkNoWorkflow(seen);
       } else {
         toMeFlat.forEach(x=>{ const k=(x.t.delegator||'').toLowerCase(); if(!seenSet.has(k)){seenSet.add(k);seen.push(k);g[k]={label:nameOf(list,k)||'—',metaType:'person',metaVal:k,items:[]};} g[k].items.push(x); });
       }
@@ -8158,7 +8313,7 @@
 
     b.innerHTML=`
     <input class="ac-in" id="acTaskSearch" placeholder="Search tasks…" style="margin-bottom:14px;width:100%" oninput="accTaskSearch(this.value)">
-    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}</div>
+    <div class="ac-3p">${p3('priority','fa-arrow-down-1-9','Priority')}${p3('project','fa-tag','Tags')}${p3('person','fa-user','Person')}${p3('workflow','fa-sitemap','Workflow')}</div>
     <div class="ac-cols">
       <div class="ac-col">
         <div class="ac-colh"><i class="fa-solid fa-inbox" style="color:#0369a1"></i> Todo</div>
@@ -8441,6 +8596,12 @@
      matching its current order, then the drag swap is applied on top. ---- */
   async function crystallizeAndSwap(draggedId,targetId,orderIds){
     if(!targetId||draggedId===targetId) return;
+    // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
+    // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can never
+    // see it - the "Insert a task at a specific position" feature was mapped to a different,
+    // long-dead global (taskReorderDrop) instead, which is why real drag-reorder usage never showed.
+    // usageQueue is nexus-core.js's own global helper, reachable here like any other global.
+    try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
     try{
       const my=me();
       const {data:existing}=await ACC().from('task_rank').select('task_id').eq('viewer_email',my).in('task_id',orderIds);
@@ -8572,7 +8733,7 @@
         <div class="tp-sub">${selfTask?'Self task':(verb+' to '+(members.map(e=>esc2(nameOf(list,e))).join(', ')||'nobody yet')+' by '+esc2(nameOf(list,t.delegator)))}</div></div>
       <div class="tp-acts">
         <button class="ac-btn ic" title="Back" onclick="navTo('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
-        <button class="ac-btn ic" title="Time Sheet / Sub-tasks" onclick="accTimesheet()"><i class="fa-solid fa-list-check"></i></button>
+        <button class="ac-btn ic" title="Sub-tasks" onclick="accSubtasksToggle()"><i class="fa-solid fa-list-check"></i></button>
         ${(amMember && !iHaveDelegated && !selfTask && !locked)?`<button class="ac-btn ic" title="Delegate" onclick="accDelegate(${tid})"><i class="fa-solid fa-people-arrows"></i></button>`:''}
         ${A}
       </div>
@@ -8660,9 +8821,12 @@
     });
   };
   function subRow(s){ return `<div class="tp-sub-item" data-id="${s.id}"><i class="fa-solid fa-grip-vertical grip"></i><input type="checkbox" ${s.done?'checked':''} onchange="accSubToggle(${s.id},this.checked)" style="width:17px;height:17px"><div style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--slate)':''}">${esc2(s.title)}</div><button class="ac-btn ic danger" style="height:28px;width:28px" onclick="accSubDel(${s.id})"><i class="fa-solid fa-trash"></i></button></div>`; }
-  window.accTimesheet=function(){ const c=$('subCard'); if(!c)return; const show=c.style.display==='none'; c.style.display=show?'block':'none'; if(show){const i=$('stTitle'); if(i)i.focus();} };
+  /* There was never a Time Sheet. This opens the SUB-TASKS card and always has - the name was a
+     leftover from an earlier idea, and it sent people looking in the database for a feature that
+     does not exist there. Sub-tasks (acc.ptask_subtasks) are the whole of it. */
+  window.accSubtasksToggle=function(){ const c=$('subCard'); if(!c)return; const show=c.style.display==='none'; c.style.display=show?'block':'none'; if(show){const i=$('stTitle'); if(i)i.focus();} };
   window.accSubCancel=function(){ const i=$('stTitle'); if(i)i.value=''; };
-  window.accSubAdd=async function(tid){ const i=$('stTitle'); const title=(i&&i.value||'').trim(); if(!title){toast('Type a sub-task title','err');return;} try{const {data:mx}=await ACC().from('ptask_subtasks').select('order_index').eq('task_id',tid).order('order_index',{ascending:false}).limit(1);const nx=(mx&&mx[0]?mx[0].order_index+1:0);const firstSub=!(mx&&mx.length);await ACC().from('ptask_subtasks').insert({task_id:tid,title,order_index:nx});if(firstSub)await sysMsg(tid,'enabled the Time Sheet');await recalc(tid);renderPage();}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} };
+  window.accSubAdd=async function(tid){ const i=$('stTitle'); const title=(i&&i.value||'').trim(); if(!title){toast('Type a sub-task title','err');return;} try{const {data:mx}=await ACC().from('ptask_subtasks').select('order_index').eq('task_id',tid).order('order_index',{ascending:false}).limit(1);const nx=(mx&&mx[0]?mx[0].order_index+1:0);const firstSub=!(mx&&mx.length);await ACC().from('ptask_subtasks').insert({task_id:tid,title,order_index:nx});if(firstSub)await sysMsg(tid,'added the first sub-task');await recalc(tid);renderPage();}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} };
   window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Failed','err');} };
   window.accSubDel=function(sid){ accConfirm('Delete this sub-task?', async function(){ try{const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();await ACC().from('ptask_subtasks').delete().eq('id',sid);if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){} }); };
   async function recalc(tid){

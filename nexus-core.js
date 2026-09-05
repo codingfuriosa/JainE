@@ -617,6 +617,25 @@ function renderPage(){
 }
 function route(){renderPage();}
 window.addEventListener('hashchange',renderPage);
+// Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
+// tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
+// otherwise a page with enough tabs to overflow (e.g. the 13-tab customer portal) leaves the active
+// one wherever the row was last scrolled to, sometimes off-screen with no visual sign which tab is
+// actually selected. Runs off a MutationObserver rather than only at navigation time because several
+// views replace just their own tab row's innerHTML after loading data, not the whole page.
+(function(){
+  const viewEl=document.getElementById('view');
+  if(!viewEl)return;
+  const scrollActiveTabIntoView=function(){
+    const active=viewEl.querySelector('.tabs .tab.active');
+    if(active)active.scrollIntoView({inline:'nearest',block:'nearest'});
+  };
+  // No setTimeout/rAF wrapper needed - MutationObserver already batches a burst of DOM changes
+  // (e.g. rendering a whole page) into one callback call, so calling straight from it still fires
+  // once per render, not once per node. (rAF was tried here first and verified to sometimes never
+  // fire at all for a backgrounded tab - direct is both simpler and more reliable.)
+  new MutationObserver(scrollActiveTabIntoView).observe(viewEl,{childList:true,subtree:true});
+})();
 
 /* ============================ VIEWS ============================ */
 const VIEWS={};
@@ -1703,6 +1722,56 @@ window.docUploadSave=async function(){
 };
 
 /* ---------- LEGAL module (dedicated DMS, hierarchical category tree) ---------- */
+/* HOW MUCH OF THE ARCHIVE IS SEARCHABLE.
+   Reading a document means Gemini extracting its text, and until that has happened the file can be
+   found by its NAME but nothing inside it can be searched - so "1,349 documents" and "1,349
+   searchable documents" are very different claims. This says which is true, per section, because
+   Litigation and Projects are at completely different stages.
+   Counted by the same rule the OCR job selects work with, so the bar and the job can never
+   disagree. Word and Excel files are left out of the total as well as the backlog - OCR reads PDFs
+   and images, so counting files it will never open would leave this permanently short of 100% and
+   looking stuck. */
+async function legalOcrBarPaint(){
+  const host=document.getElementById('legalOcrBar'); if(!host) return;
+  let rows=[];
+  try{ const {data}=await sb.schema('doc').rpc('legal_ocr_progress'); rows=data||[]; }catch(_e){ return; }
+  const all=rows.filter(r=>r.section==='All Legal')[0];
+  if(!all||!all.total) { host.innerHTML=''; return; }
+  const parts=rows.filter(r=>r.section!=='All Legal')
+    .sort((a,b)=>a.section<b.section?-1:1)
+    .map(r=>{
+      const pct=r.total?Math.round(100*r.done/r.total):0;
+      return '<div style="flex:1;min-width:190px">'
+        +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">'
+          +'<span style="font-weight:600">'+esc(r.section)+'</span>'
+          +'<span style="color:var(--slate)">'+r.done+' of '+r.total+'</span></div>'
+        +'<div style="height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
+          +'<div style="height:100%;width:'+pct+'%;background:'+(pct>=100?'#16a34a':'#2563eb')+'"></div></div>'
+        +'<div style="font-size:11px;color:var(--slate);margin-top:3px">'
+          +(r.remaining?(r.remaining+' still to read'):'all read')
+          +(r.unreadable?(' · '+r.unreadable+' could not be read'):'')+'</div>'
+      +'</div>';
+    }).join('');
+  const pctAll=Math.round(100*all.done/all.total);
+  host.innerHTML='<div style="border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:13px 15px;margin:14px 0;background:var(--bg-card,#fff)">'
+    +'<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:11px;flex-wrap:wrap">'
+      +'<b style="font-size:13px"><i class="fa-solid fa-magnifying-glass-chart" style="color:#1e3a8a"></i> Searchable text</b>'
+      +'<span style="font-size:12px;color:var(--slate)">'
+        +all.done+' of '+all.total+' documents read ('+pctAll+'%)'
+        +(all.remaining?(' \u00b7 '+all.remaining+' still to go'):' \u00b7 complete')
+        /* A scan Gemini cannot get text out of is retired after three tries and counted here.
+           Left unsaid, the figure sits just short of complete for ever and reads as a stalled job. */
+        +(all.unreadable?(' \u00b7 '+all.unreadable+' unreadable'):'')+'</span>'
+      +'<button class="btn-sm" style="margin-left:auto" onclick="legalOcrBarPaint()">'
+        +'<i class="fa-solid fa-rotate"></i> Refresh</button>'
+    +'</div>'
+    +'<div style="display:flex;gap:18px;flex-wrap:wrap">'+parts+'</div>'
+    +(all.remaining?('<div style="font-size:11px;color:var(--slate);margin-top:9px">'
+        +'Reading runs in the background, a few documents at a time. Until a document is read you '
+        +'can find it by name, but not by what is written inside it.</div>'):'')
+  +'</div>';
+}
+window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
   const known={mis:1,scoreboard:1,actions:1,advocates:1};
   const tab=known[seg[0]]?seg[0]:'docs';
@@ -1715,7 +1784,9 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
+    <div id="legalOcrBar"></div>
     <div id="legalBody"><div class="loader"><div class="spin"></div></div></div>`;
+  legalOcrBarPaint();
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
@@ -4020,6 +4091,12 @@ window.taskSave=async function(kind){
   const btn=$('tkSave');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
   const {data,error}=await sb.schema('acc').from('tasks').insert(row).select().single();
   if(error){toast(error.message,'err');btn.disabled=false;return;}
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - the title only
+  // exists as a value read off the form here, which a generic wrapper around this function could
+  // never see. On success only, so a failed save (bad due date, no permission) is never counted as
+  // a task that was created.
+  try{ usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create',
+    {title:title, assignee:isDel?(nameOf(row.assigned_to)||row.assigned_to):undefined}); }catch(_e){}
   if(!isDel&&mem.length)await sb.schema('acc').from('task_members').insert(mem.map(e=>({task_id:data.id,email:e})));
   if(projectId||goalId)await syncParentMembership(projectId,goalId,[row.owner,...mem]);
   if(projectId)await insertDelegationEdges(data.id,state.email,[row.owner,...mem]);
@@ -5013,6 +5090,11 @@ function wireProjTaskDrag(parentType,parentId){
   });
 }
 async function persistProjTaskOrder(list,parentType,parentId){
+  // Logged directly rather than through USAGE_MAP's window[fn] wrapping: the drag reorder this
+  // serves fires a pointerdown handler bound to this exact function reference at render time, and
+  // usageAction() would misclassify it as 'view' anyway (nothing in "persistProjTaskOrder" matches
+  // its verb regexes). See the same note on crystallizeAndSwap in accountability.js.
+  try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
   const ids=[...list.querySelectorAll('.drag-row')].map(r=>Number(r.dataset.id));
   await Promise.all(ids.map((tid,i)=>sb.schema('acc').from('tasks').update({sort_order:i}).eq('id',tid)));
   if(parentType==='project')projectDetail($('view'),parentId); else goalDetail($('view'),parentId);
@@ -7289,14 +7371,28 @@ VIEWS.security=async function(v,seg){
   if(seg[0]==='user'){return secUserDetail(v,decodeURIComponent(seg[1]||''));}
   return secList(v);
 };
+let SEC_USERS=[];
+function secRowsHtml(list){
+  if(!list.length)return '<div class="empty">No matches</div>';
+  return `<table class="tbl sec-tbl"><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Level</th><th>Tabs</th><th></th></tr></thead><tbody>`+
+    list.map(u=>{const pending=u.onboarded&&!u.super_admin&&!(Array.isArray(u.modules)&&u.modules.length);const valid=Array.isArray(u.modules)?u.modules.filter(m=>MODSET.has(m)):[];const noRestrict=u.modules===null||u.modules===undefined;const tabsCell=u.super_admin?'All':noRestrict?DEFAULT_MODULES.length+' (default)':valid.length===0?'0 — needs setup':valid.length>=MODLIST.length?'All':String(valid.length);return `<tr class="rowlink${pending?' pending-row':''}" onclick="navTo('security/user/'+encodeURIComponent('${esc(u.email)}'))"><td>${avatar(u.full_name)} <b>${esc(u.full_name)}</b>${u.super_admin?' <span class="tag t-purple">Admin</span>':''}${pending?' <span class="tag t-amber">New · needs setup</span>':''}</td><td style="color:var(--slate)">${esc(u.email)}</td><td>${(Array.isArray(u.department)&&u.department.length)?u.department.map(d=>avatar(d)).join(''):'—'}</td><td>${esc(u.lvl||'Employee')}</td><td>${tabsCell}</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>`;}).join('')+`</tbody></table>`;
+}
+window.secFilterUsers=function(){
+  const q=(($('secSearch')||{}).value||'').trim().toLowerCase();
+  const list=!q?SEC_USERS:SEC_USERS.filter(u=>{
+    const dept=Array.isArray(u.department)?u.department.join(' ').toLowerCase():'';
+    return (u.full_name||'').toLowerCase().includes(q)||(u.email||'').toLowerCase().includes(q)||dept.includes(q);
+  });
+  const host=$('secRows');if(host)host.innerHTML=secRowsHtml(list);
+};
 async function secList(v){
   setCrumb(['Control Panel']);
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-sliders" style="color:#7c3aed"></i> Control Panel</h1><p>Approve new people and manage everyone's department, level and tab access</p></div></div><div class="card card-pad" id="secRows"><div class="loader"><div class="spin"></div></div></div>`;
-  let users=[];
-  try{const {data,error}=await sb.schema('adm').rpc('admin_list_users');if(error)throw error;users=data||[];}
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-sliders" style="color:#7c3aed"></i> Control Panel</h1><p>Approve new people and manage everyone's department, level and tab access</p></div>`
+    +`<div class="search-box" style="max-width:320px"><i class="fa-solid fa-magnifying-glass"></i><input id="secSearch" placeholder="Search by name, email or department…" oninput="secFilterUsers()"></div></div>`
+    +`<div class="card card-pad" id="secRows"><div class="loader"><div class="spin"></div></div></div>`;
+  try{const {data,error}=await sb.schema('adm').rpc('admin_list_users');if(error)throw error;SEC_USERS=data||[];}
   catch(e){$('secRows').innerHTML='<div class="empty">Could not load users: '+esc(e.message||String(e))+'</div>';return;}
-  $('secRows').innerHTML=`<table class="tbl sec-tbl"><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Level</th><th>Tabs</th><th></th></tr></thead><tbody>`+
-    users.map(u=>{const pending=u.onboarded&&!u.super_admin&&!(Array.isArray(u.modules)&&u.modules.length);const valid=Array.isArray(u.modules)?u.modules.filter(m=>MODSET.has(m)):[];const noRestrict=u.modules===null||u.modules===undefined;const tabsCell=u.super_admin?'All':noRestrict?DEFAULT_MODULES.length+' (default)':valid.length===0?'0 — needs setup':valid.length>=MODLIST.length?'All':String(valid.length);return `<tr class="rowlink${pending?' pending-row':''}" onclick="navTo('security/user/'+encodeURIComponent('${esc(u.email)}'))"><td>${avatar(u.full_name)} <b>${esc(u.full_name)}</b>${u.super_admin?' <span class="tag t-purple">Admin</span>':''}${pending?' <span class="tag t-amber">New · needs setup</span>':''}</td><td style="color:var(--slate)">${esc(u.email)}</td><td>${(Array.isArray(u.department)&&u.department.length)?u.department.map(d=>avatar(d)).join(''):'—'}</td><td>${esc(u.lvl||'Employee')}</td><td>${tabsCell}</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>`;}).join('')+`</tbody></table>`;
+  $('secRows').innerHTML=secRowsHtml(SEC_USERS);
 }
 async function secUserDetail(v,email){
   setCrumb(['Control Panel',email]);
@@ -7307,7 +7403,7 @@ async function secUserDetail(v,email){
   const mods=Array.isArray(u.modules)?u.modules:DEFAULT_MODULES.slice();
   SEC_DEPTS=Array.isArray(u.department)?u.department.slice():[];
   v.innerHTML=`<div class="page-head"><div><h1>${avatar(u.full_name)} ${esc(u.full_name)}</h1><p>${esc(u.email)}${u.super_admin?' · <span class="tag t-purple">Administrator</span>':''}</p></div><button class="btn" onclick="navTo('security')"><i class="fa-solid fa-arrow-left"></i> Back</button></div>
-  <div class="card card-pad frm" style="max-width:780px">
+  <div class="card card-pad frm">
     <div class="two"><div><label>Name</label><input value="${esc(u.full_name)}" disabled></div><div><label>Email</label><input value="${esc(u.email)}" disabled></div></div>
     <div class="two"><div><label>Department</label>${deptPickerHtml(SEC_DEPTS)}</div><div><label>Level</label><select id="secLevel" ${u.super_admin?'disabled':''}>${LEVELS.map(l=>'<option '+(l===(u.lvl||'Employee')?'selected':'')+'>'+l+'</option>').join('')}</select></div></div>
     <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:14px">
@@ -7521,7 +7617,11 @@ function mTabs(id,tabs,ti){return '<div class="tabs">'+tabs.map((t,i)=>'<div cla
 function mKpis(arr){return '<div class="grid kpis" style="grid-template-columns:repeat('+arr.length+',1fr)">'+arr.map(k=>'<div class="kpi"><div class="lbl" style="margin-bottom:7px">'+esc(k[0])+'</div><div class="val">'+esc(k[1])+'</div><div style="font-size:12px;color:'+(k[3]||'var(--slate)')+';margin-top:3px">'+esc(k[2]||'')+'</div></div>').join('')+'</div>';}
 function mStep(steps,active){const ai=steps.indexOf(active);return '<div class="mstep">'+steps.map((s,i)=>'<span class="mstep-i'+(s===active?' on':(i<ai?' done':''))+'">'+esc(s)+'</span>'+(i<steps.length-1?'<span class="mstep-a">→</span>':'')).join('')+'</div>';}
 function mFunnel(items){const max=Math.max.apply(null,items.map(x=>x[1]));return '<div class="mfunnel">'+items.map(x=>'<div class="mfunnel-r"><div class="mfunnel-bar" style="width:'+Math.max(20,Math.round(x[1]/max*100))+'%">'+esc(x[0])+'</div><span class="mfunnel-v">'+x[1]+'</span></div>').join('')+'</div>';}
-function mTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+(String(c).slice(0,5)==='<span'?c:esc(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
+// A cell starting with '<' is already-built HTML from the caller (a status pill, a clickable
+// vendor link) and must pass through as-is; everything else is a plain value and gets escaped.
+// Used to only recognise '<span' pills - Vendor Trends' clickable '<a ...>' vendor names fell
+// through that narrower check and rendered as literal, visible markup instead of a link.
+function mTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+(String(c).charAt(0)==='<'?c:esc(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
 function mCard(title,inner){return '<div class="card card-pad"><div class="sec-title" style="margin:0 0 12px">'+esc(title)+'</div>'+inner+'</div>';}
 function mHead(icon,color,title){return '<div class="page-head"><div><h1><i class="fa-solid '+icon+'" style="color:'+color+'"></i> '+esc(title)+'</h1></div></div>';}
 function mTab(seg,n){let t=parseInt(seg&&seg[0]);return (isNaN(t)||t<0||t>=n)?0:t;}
@@ -7538,7 +7638,7 @@ const USB_BANDS=[
 ];
 function usbBandStyle(b){ const f=USB_BANDS.find(function(x){return x[0]===b;})||USB_BANDS[3]; return {ink:f[1],bg:f[2]}; }
 // Opens on the past 30 days — one of the four fixed presets, no custom entry to fall back to.
-const USB={preset:'30d',from:null,to:null,email:'',rows:null,people:null};
+const USB={preset:'30d',from:null,to:null,email:'',dept:'',rows:null,people:null};
 /* The presets the user asked for, resolved against IST because a "month" is a month where the
    people using this actually are. Kept as pure date maths so the same range is produced whatever
    the browser's own timezone happens to be set to. */
@@ -7557,7 +7657,7 @@ function usbCurrentRange(){
 async function usbLoad(){
   const r=usbCurrentRange();
   try{
-    const {data,error}=await sb.rpc('erp_usability_report',{p_from:r.from,p_to:r.to,p_email:USB.email||null});
+    const {data,error}=await sb.rpc('erp_usability_report',{p_from:r.from,p_to:r.to,p_email:USB.email||null,p_department:USB.dept||null});
     if(error)throw error;
     USB.rows=data||[];
   }catch(e){ USB.rows=null; USB.err=(e&&e.message)||String(e); }
@@ -7593,15 +7693,27 @@ const USB_CSS='<style id="usbCss">'
   +'.usb-users-wrap{padding:4px 14px 12px 34px}'
   +'.usb-user-line{display:flex;justify-content:space-between;gap:14px;padding:6px 0;font-size:12.5px;border-bottom:1px solid #f1eefc}'
   +'.usb-user-line:last-child{border-bottom:none}'
+  +'.usb-user-clickable{cursor:pointer;border-radius:6px;padding-left:6px;padding-right:6px;margin:0 -6px}'
+  +'.usb-user-clickable:hover{background:#f3effc}'
   +'.usb-user-name{color:var(--ink)}'
   +'.usb-user-meta{color:var(--slate);white-space:nowrap}'
   +'</style>';
-/* Grouped by department (a person's first listed one) rather than one flat A-Z list of everyone in
-   the company — with dozens of names, "who's Reception again?" was the whole problem. Anyone with no
-   department lands in one "Unassigned" group at the end, never mixed silently into the rest. */
+/* Linked to the Department filter: once a department is picked, Person narrows down to just that
+   department's people — a flat A-Z list, since grouping by department would be pointless when
+   there is only one. With no department picked it falls back to one flat list grouped by
+   department (a person's first listed one) rather than one A-Z list of the whole company — with
+   dozens of names, "who's Reception again?" was the whole problem. Anyone with no department lands
+   in one "Unassigned" group at the end, never mixed silently into the rest. */
 function usbPersonOptionsHtml(){
+  const people=(USB.people||[]).filter(function(p){
+    return !USB.dept || (Array.isArray(p.depts) && p.depts.indexOf(USB.dept)!==-1);
+  });
+  if(USB.dept){
+    return people.slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));})
+      .map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('');
+  }
   const byDept={};
-  (USB.people||[]).forEach(function(p){
+  people.forEach(function(p){
     const dept=(Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'Unassigned';
     (byDept[dept]=byDept[dept]||[]).push(p);
   });
@@ -7615,6 +7727,16 @@ function usbPersonOptionsHtml(){
       +list.map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('')
     +'</optgroup>';
   }).join('');
+}
+// Every department any person carries, A-Z. A person's own first-listed department is what
+// erp_log_usage stamps onto their events, so this list is deliberately every department seen
+// anywhere in USB.people rather than just first-listed ones — the filter should offer everything
+// there's a chance of matching.
+function usbDeptOptionsHtml(){
+  const set=new Set();
+  (USB.people||[]).forEach(function(p){ (Array.isArray(p.depts)?p.depts:[]).forEach(function(d){ if(d) set.add(d); }); });
+  return Array.from(set).sort(function(a,b){return a.localeCompare(b);})
+    .map(function(d){ return '<option value="'+esc(d)+'"'+(USB.dept===d?' selected':'')+'>'+esc(d)+'</option>'; }).join('');
 }
 function usbControlsHtml(){
   const r=usbCurrentRange();
@@ -7642,12 +7764,20 @@ function usbControlsHtml(){
       ? '<div class="usb-f"><label for="usbFrom">From</label><input type="date" id="usbFrom" value="'+esc(r.from)+'" max="'+esc(r.to)+'" onchange="usbSetCustom()"></div>'
         +'<div class="usb-f"><label for="usbTo">To</label><input type="date" id="usbTo" value="'+esc(r.to)+'" min="'+esc(r.from)+'" onchange="usbSetCustom()"></div>'
       : '')
+    +'<div class="usb-f"><label for="usbDept">Department</label>'
+      +'<select class="sel" id="usbDept" onchange="usbSetDept(this.value)" style="min-width:170px">'
+        +'<option value="">All departments</option>'
+        +usbDeptOptionsHtml()
+      +'</select></div>'
     +'<div class="usb-f"><label for="usbPerson">Person</label>'
       +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
-        +'<option value="">Everyone</option>'
+        +'<option value="">'+(USB.dept?'Everyone in '+esc(USB.dept):'Everyone')+'</option>'
         +usbPersonOptionsHtml()
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
+    // Only makes sense once the report is already narrowed to one person — "full activity log"
+    // for everyone at once would be every event the company generated, not a report anyone reads.
+    +(USB.email?'<button class="btn usb-xl" onclick="usbOpenUserActivity()"><i class="fa-solid fa-list-ul"></i> Full Activity Log</button>':'')
     +'<button class="btn btn-primary usb-xl" id="usbXl" onclick="usbExport(this)"><i class="fa-solid fa-file-excel"></i> Extract to Excel</button>'
   +'</div>';
 }
@@ -7658,7 +7788,25 @@ window.usbSetPreset=function(v){
   USB.preset=v; renderPage();
 };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
-window.usbSetPerson=function(v){ USB.email=v||''; renderPage(); };
+// Person is linked to Department, not a separate filter beside it: picking someone fills in their
+// own department too (so the two never disagree), and picking a department narrows the Person list
+// down to that department's people, dropping whoever was picked if they no longer belong to it.
+window.usbSetPerson=function(v){
+  USB.email=v||'';
+  if(v){
+    const p=(USB.people||[]).find(function(x){return x.email===v;});
+    USB.dept=(p&&Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'';
+  }
+  renderPage();
+};
+window.usbSetDept=function(v){
+  USB.dept=v||'';
+  if(v && USB.email){
+    const p=(USB.people||[]).find(function(x){return x.email===USB.email;});
+    if(!(p&&Array.isArray(p.depts)&&p.depts.indexOf(v)!==-1)) USB.email='';
+  }
+  renderPage();
+};
 /* ---- Extract to Excel -------------------------------------------------------------------
    A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
    as numbers that actually sum, the date as a date, and each feature's activity in the same colour
@@ -7684,7 +7832,7 @@ function usbLoadXlsx(){
 const USB_XL_BAND={'Very Active':['FF166534','FFDCFCE7'],'Active':['FF0369A1','FFE0F2FE'],
                    'Less':['FFB45309','FFFEF3C7'],'Inactive':['FF64748B','FFF1F5F9']};
 function usbExportName(r){
-  return 'Usability '+r.from+' to '+r.to+(USB.email?(' - '+USB.email.split('@')[0]):'');
+  return 'Usability '+r.from+' to '+r.to+(USB.email?(' - '+USB.email.split('@')[0]):(USB.dept?(' - '+USB.dept):''));
 }
 function usbSaveBlob(blob,name){
   const url=URL.createObjectURL(blob), a=document.createElement('a');
@@ -7889,13 +8037,94 @@ function usbFeatureUsersRowHtml(r){
   }else{
     inner='<div class="usb-users-wrap">'
       +cached.map(function(u){
-        return '<div class="usb-user-line"><span class="usb-user-name">'+esc(nameOf(u.email))+'</span>'
-          +'<span class="usb-user-meta">'+u.uses+' use'+(u.uses===1?'':'s')+' · last '+esc(fmtDate(u.last_used))+'</span></div>';
+        return '<div class="usb-user-line usb-user-clickable" onclick="usbOpenUserEvents(\''+esc(r.feature_key)+'\',\''+esc(u.email)+'\',\''+esc(r.feature)+'\')" title="See every individual use">'
+          +'<span class="usb-user-name">'+esc(nameOf(u.email))+'</span>'
+          +'<span class="usb-user-meta">'+u.uses+' use'+(u.uses===1?'':'s')+' · last '+esc(fmtDate(u.last_used))+' <i class="fa-solid fa-chevron-right" style="font-size:9px;color:var(--slate-2);margin-left:6px"></i></span></div>';
       }).join('')
     +'</div>';
   }
   return '<tr class="usb-users-row"><td colspan="5">'+inner+'</td></tr>';
 }
+// Bumped on every open and checked after each round trip below, so a slower request for a feature
+// you have since clicked away from can never win a race against a faster one that came after it and
+// paint its (wrong) data into the modal you are now actually looking at.
+let USB_EV_TOKEN=0;
+/* The "66 uses" line on its own answers nothing management would actually ask next - when, how
+   often in a day, whether it tapered off. This is that: every individual event behind the count,
+   newest first, for exactly this person/feature/range. */
+window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
+  const myToken=++USB_EV_TOKEN;
+  const r=usbCurrentRange();
+  openModal(
+    '<div class="modal-head"><h3><i class="fa-solid fa-list-check" style="color:#7c3aed"></i> '+esc(nameOf(email))+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div id="usbEvWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>',
+    'lg'
+  );
+  let rows=[], err=null;
+  try{
+    const {data,error}=await sb.rpc('erp_usability_feature_user_events',{p_feature_key:featureKey,p_email:email,p_from:r.from,p_to:r.to});
+    if(error)throw error;
+    rows=data||[];
+  }catch(e){ err=(e&&e.message)||String(e); }
+  if(myToken!==USB_EV_TOKEN) return;   // superseded by a newer drill-down while this was in flight
+  const wrap=$('usbEvWrap'); if(!wrap)return;   // closed before the round trip finished
+  if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
+  const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
+  if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Project</th></tr></thead><tbody>'
+    +rows.map(function(e){
+      const dt=new Date(e.occurred_at);
+      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
+    }).join('')
+    +'</tbody></table></div></div>';
+  wrap.innerHTML=head+body;
+};
+// "Customized per feature" without a hand-written renderer per feature: what shows up here is
+// whatever that feature chose to capture (a task's title, a search query, who a claim went to) -
+// features that capture nothing yet just show a dash, same as before this existed.
+function usbMetaHtml(meta){
+  if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
+  const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
+    .map(function(k){ return '<b style="font-weight:600">'+esc(k.charAt(0).toUpperCase()+k.slice(1))+':</b> '+esc(String(meta[k])); });
+  return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
+}
+/* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
+   widened to everything they did, across every feature, in one chronological list — for when the
+   question is "what has this person actually been doing", not "how many times did they use X". */
+let USB_ACT_TOKEN=0;
+window.usbOpenUserActivity=async function(){
+  const email=USB.email; if(!email)return;
+  const myToken=++USB_ACT_TOKEN;
+  const r=usbCurrentRange();
+  openModal(
+    '<div class="modal-head"><h3><i class="fa-solid fa-list-ul" style="color:#7c3aed"></i> '+esc(nameOf(email))+' — full activity</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body"><div id="usbActWrap"><div class="loader"><div class="spin"></div></div></div></div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>',
+    'xl'
+  );
+  let rows=[], err=null;
+  try{
+    const {data,error}=await sb.rpc('erp_usability_user_activity',{p_email:email,p_from:r.from,p_to:r.to});
+    if(error)throw error;
+    rows=data||[];
+  }catch(e){ err=(e&&e.message)||String(e); }
+  if(myToken!==USB_ACT_TOKEN) return;   // superseded by a newer request while this was in flight
+  const wrap=$('usbActWrap'); if(!wrap)return;   // closed before the round trip finished
+  if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load activity</div><p>'+esc(err)+'</p></div>'; return; }
+  const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
+  const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
+  if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th></tr></thead><tbody>'
+    +rows.map(function(e){
+      const dt=new Date(e.occurred_at);
+      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td></tr>';
+    }).join('')
+    +'</tbody></table></div></div>';
+  wrap.innerHTML=head+body;
+};
 window.usbToggleFeature=async function(key){
   if(USB_FEAT_OPEN.has(key)){ USB_FEAT_OPEN.delete(key); usbRerenderDetail(); return; }
   USB_FEAT_OPEN.add(key);
@@ -7903,7 +8132,7 @@ window.usbToggleFeature=async function(key){
   if(!(key in USB_FEAT_CACHE)){
     const r=usbCurrentRange();
     try{
-      const {data,error}=await sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:USB.email||null});
+      const {data,error}=await sb.rpc('erp_usability_feature_users',{p_feature_key:key,p_from:r.from,p_to:r.to,p_email:USB.email||null,p_department:USB.dept||null});
       if(error)throw error;
       USB_FEAT_CACHE[key]=data||[];
     }catch(e){ USB_FEAT_CACHE[key]=[]; }
@@ -8537,21 +8766,240 @@ window.procEditSave=async function(id,cat,oldPath,dept){
   closeModal();PROC.sel.clear();toast('Updated','ok');procRefresh(cat);
 };
 
+/* ===== VENDOR TREND ANALYSIS (Procurement → Vendor Trends) =====
+   Backed by kraya.vtrend_vendors / vtrend_purchases (real Farvision PO-register data, one row per
+   invoice line) and read entirely through kraya.vtrend_* RPCs, which already compute every
+   classification (New / Growing / Stable / Declining / Inactive). Nothing here re-derives that
+   logic client-side. Every RPC takes an optional p_business_units text[] filter — null means "all
+   units" — so a fresh business unit's data just needs importing into vtrend_purchases; no report
+   changes are needed for it to show up in the filter. */
+const VT_PALETTE=['#0369a1','#db2777','#0d9488','#7c3aed','#ea4335','#16a34a','#c2410c','#eab308','#64748b'];
+let VT_CACHE=null;   // {vendors:{id:{...summary, monthly:[{month,amount}]}}, catColor:{category:hex}}
+let VT_BU_ALL=null;  // [{business_unit,vendor_count,tx_count,total_spend}] — every unit that has data, loaded once
+let VT_BU_SEL=null;  // Set of currently-selected business_unit strings (defaults to "all selected")
+
+function vtEmptyNote(msg){ return '<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">'+esc(msg)+'</div>'; }
+function vtHhiLabel(h){ h=Number(h)||0; return h<1500?'unconcentrated':h<2500?'moderate concentration':'high concentration'; }
+function vtInr(n){ return '₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+function vtPct(n){ return n==null?'—':(n>0?'+':'')+n+'%'; }
+function vtPctColor(n){ return n==null?'var(--slate)':(n>0?'#16a34a':n<0?'#c83232':'var(--slate)'); }
+function vtDfmt(d){ return d?new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—'; }
+function vtStatusTag(s){ return ({New:'<span class="tag t-blue">New</span>',Growing:'<span class="tag t-green">Growing</span>',
+  Stable:'<span class="tag t-gray">Stable</span>',Declining:'<span class="tag t-amber">Declining</span>',
+  Inactive:'<span class="tag t-red">Inactive</span>'}[s]||esc(s)); }
+function vtDot(color){ return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:7px;vertical-align:middle"></span>'; }
+function vtCatCell(cat){ return vtDot((VT_CACHE&&VT_CACHE.catColor[cat])||'#94a3b8')+esc(cat); }
+function vtVendorLink(id,name){ return '<a href="javascript:void(0)" onclick="vtOpenVendor('+id+')" style="font-weight:600;color:var(--brand);text-decoration:none" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">'+esc(name)+'</a>'; }
+
+function vtBuFilterHtml(){
+  if(!VT_BU_ALL||VT_BU_ALL.length<2) return ''; // one unit (or none yet) - a filter has nothing to filter
+  const opts=VT_BU_ALL.map(function(b){
+    const on=VT_BU_SEL.has(b.business_unit);
+    return '<div class="ms-opt'+(on?' on':'')+'" onclick="vtBuToggle(\''+esc(b.business_unit).replace(/'/g,"\\'")+'\')">'+
+      '<i class="fa-solid fa-'+(on?'square-check':'square')+'" style="width:18px;color:'+(on?'var(--brand)':'#94a3b8')+'"></i>'+
+      '<span style="flex:1">'+esc(b.business_unit)+'</span>'+
+      '<span style="color:var(--slate);font-size:11.5px">'+vtInr(b.total_spend)+'</span></div>';
+  }).join('');
+  const label=VT_BU_SEL.size===VT_BU_ALL.length?'All business units':VT_BU_SEL.size+' of '+VT_BU_ALL.length+' business units';
+  return '<div class="card card-pad" style="margin-bottom:16px">'+
+    '<label style="display:block;font-size:12.5px;font-weight:600;color:#334155;margin-bottom:6px"><i class="fa-solid fa-building"></i> Business unit</label>'+
+    '<div class="ms" id="ms_vtbu">'+
+      '<div class="ms-field" onclick="msFieldClick(\'vtbu\',event)">'+
+        '<span class="ms-chips">'+esc(label)+'</span>'+
+        '<i class="fa-solid fa-chevron-down" style="color:#94a3b8;font-size:12px"></i>'+
+      '</div>'+
+      '<div class="ms-panel" id="ms_vtbu_panel"><div class="ms-list">'+opts+'</div></div>'+
+    '</div></div>';
+}
+window.vtBuToggle=function(bu){
+  if(VT_BU_SEL.has(bu)){ if(VT_BU_SEL.size>1) VT_BU_SEL.delete(bu); } // always keep at least one selected
+  else VT_BU_SEL.add(bu);
+  procVendorTrendsRender();
+};
+
+async function procVendorTrendsRender(){
+  const host=$('vtHost');if(!host)return;
+  host.innerHTML='<div class="card card-pad empty" style="padding:48px;text-align:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;display:block"></i>Crunching vendor data…</div>';
+  const K=sb.schema('kraya');
+  if(!VT_BU_ALL){
+    const bu=await K.rpc('vtrend_business_units');
+    if(bu.error){ host.innerHTML=vtEmptyNote('Could not load business units: '+bu.error.message); return; }
+    VT_BU_ALL=bu.data||[];
+    VT_BU_SEL=new Set(VT_BU_ALL.map(function(b){return b.business_unit;})); // default: every unit selected
+  }
+  const buFilterHtml=vtBuFilterHtml();
+  // null = "all units" (matches every RPC's default and lets the DB skip the filter entirely)
+  const selBu=VT_BU_SEL.size===VT_BU_ALL.length?null:Array.from(VT_BU_SEL);
+  const rpcArgs=selBu?{p_business_units:selBu}:{};
+  const [ov,mo,cat,vs,an,vm]=await Promise.all([
+    K.rpc('vtrend_overview',rpcArgs), K.rpc('vtrend_monthly',rpcArgs), K.rpc('vtrend_category_monthly',rpcArgs),
+    K.rpc('vtrend_vendor_summary',rpcArgs), K.rpc('vtrend_anomalies',rpcArgs), K.rpc('vtrend_vendor_monthly_all',rpcArgs)
+  ]);
+  const firstErr=ov.error||mo.error||cat.error||vs.error||an.error||vm.error;
+  if(firstErr){ host.innerHTML=buFilterHtml+vtEmptyNote('Could not load vendor trend data: '+firstErr.message); return; }
+
+  const O=ov.data||{}, MO=mo.data||[], CAT=cat.data||[], VS=vs.data||[], AN=an.data||[], VM=vm.data||[];
+
+  // One category → colour map, shared by the doughnut chart, every category cell's dot, and the
+  // vendor detail modal — ranked by all-time spend so the biggest slice always reads as the same hue.
+  const catTotalsAll={};
+  CAT.forEach(function(c){ catTotalsAll[c.category]=(catTotalsAll[c.category]||0)+Number(c.amount); });
+  const catOrder=Object.keys(catTotalsAll).sort(function(a,b){return catTotalsAll[b]-catTotalsAll[a];});
+  const catColor={}; catOrder.forEach(function(c,i){ catColor[c]=VT_PALETTE[i%VT_PALETTE.length]; });
+
+  const vendorMonthly={};
+  VM.forEach(function(r){ (vendorMonthly[r.vendor_id]=vendorMonthly[r.vendor_id]||[]).push({month:r.month,amount:Number(r.amount)}); });
+  const anomalySet=new Set(AN.map(function(a){ return a.vendor_id+'|'+a.month; }));
+  const vendorsById={};
+  VS.forEach(function(x){ vendorsById[x.vendor_id]=Object.assign({},x,{monthly:(vendorMonthly[x.vendor_id]||[]).sort(function(a,b){return new Date(a.month)-new Date(b.month);})}); });
+  VT_CACHE={vendors:vendorsById, catColor:catColor, anomalySet:anomalySet};
+
+  const kpis=[
+    {ic:'fa-sack-dollar',bg:'#eff4ff',c:'#1d4ed8',val:vtInr(O.total_spend),lbl:'Total Spend (24 mo)',
+      sub:(O.total_vendors||0)+' vendors · '+(O.total_transactions||0)+' invoices',go:'vt-sec-trend'},
+    {ic:'fa-users',bg:'#f0fdf4',c:'#16a34a',val:O.active_vendors_90d||0,lbl:'Active Vendors (90d)',
+      sub:'of '+(O.total_vendors||0)+' total',go:'vt-sec-all'},
+    {ic:(O.yoy_change_pct>=0?'fa-arrow-trend-up':'fa-arrow-trend-down'),bg:'#fffbeb',c:'#d97706',val:vtPct(O.yoy_change_pct),lbl:'YoY Spend Change',
+      sub:'vs prior 12 months',go:'vt-sec-growdecl'},
+    {ic:'fa-layer-group',bg:'#f5f3ff',c:'#7c3aed',val:(O.top5_share_pct||0)+'%',lbl:'Top 5 Concentration',
+      sub:'HHI '+O.hhi+' · '+(O.vendors_for_80pct||'—')+' vendors = 80% of spend',go:'vt-sec-conc'}
+  ];
+  const kpiHtml='<div class="grid kpis">'+kpis.map(function(k){
+    return '<div class="kpi" onclick="vtScrollTo(\''+k.go+'\')" style="cursor:pointer;transition:transform .12s,box-shadow .12s" onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'var(--shadow-lg,0 10px 24px rgba(15,23,42,.12))\'" onmouseout="this.style.transform=\'\';this.style.boxShadow=\'\'">'+
+      '<div class="top"><div class="ic" style="background:'+k.bg+';color:'+k.c+'"><i class="fa-solid '+k.ic+'"></i></div><i class="fa-solid fa-arrow-up-right-from-square" style="color:var(--slate-2);font-size:11px"></i></div>'+
+      '<div class="val">'+k.val+'</div><div class="lbl">'+k.lbl+'</div>'+
+      '<div style="font-size:11.5px;color:var(--slate);margin-top:6px">'+k.sub+'</div>'+
+    '</div>';
+  }).join('')+'</div>';
+
+  const major=VS.slice().sort(function(a,b){return b.total_spend-a.total_spend;}).slice(0,10);
+  const newV=VS.filter(function(x){return x.status==='New';});
+  const inactiveV=VS.filter(function(x){return x.status==='Inactive';}).sort(function(a,b){return new Date(b.last_purchase)-new Date(a.last_purchase);});
+  const growDecline=VS.filter(function(x){return x.status==='Growing'||x.status==='Declining';}).sort(function(a,b){return Math.abs(b.change_pct||0)-Math.abs(a.change_pct||0);});
+
+  const majorRows=major.map(function(x){return [vtVendorLink(x.vendor_id,x.name),vtCatCell(x.category),vtInr(x.total_spend),x.share_pct+'%',vtStatusTag(x.status)];});
+  const newRows=newV.map(function(x){return [vtVendorLink(x.vendor_id,x.name),vtCatCell(x.category),vtDfmt(x.first_purchase),vtInr(x.total_spend)];});
+  const inactiveRows=inactiveV.map(function(x){return [vtVendorLink(x.vendor_id,x.name),vtCatCell(x.category),vtDfmt(x.last_purchase),vtInr(x.total_spend)];});
+  const gdRows=growDecline.map(function(x){return [vtVendorLink(x.vendor_id,x.name),vtCatCell(x.category),vtStatusTag(x.status),'<span style="color:'+vtPctColor(x.change_pct)+';font-weight:600">'+vtPct(x.change_pct)+'</span>',vtInr(x.recent_spend)];});
+  const anRows=AN.map(function(x){return [vtVendorLink(x.vendor_id,x.name),vtCatCell(x.category),new Date(x.month).toLocaleDateString('en-IN',{month:'short',year:'numeric'}),vtInr(x.amount),vtInr(x.trailing_avg),x.multiple+'×'];});
+
+  // All Vendors gets its own hand-built table (not mTable) so each row can carry a search key for
+  // the filter box above it — 43+ rows is exactly the case "don't discard the underlying data"
+  // was written for, so the answer is a searchable table, not a trimmed one.
+  const allBody=VS.map(function(x){
+    return '<tr data-vt-s="'+esc((x.name+' '+x.category).toLowerCase())+'">'+
+      '<td>'+vtVendorLink(x.vendor_id,x.name)+'</td><td>'+vtCatCell(x.category)+'</td>'+
+      '<td>'+vtInr(x.total_spend)+'</td><td>'+x.share_pct+'%</td><td>'+vtStatusTag(x.status)+'</td><td>'+vtDfmt(x.last_purchase)+'</td></tr>';
+  }).join('');
+
+  host.innerHTML=
+    buFilterHtml+
+    kpiHtml+
+    '<div class="grid" id="vt-sec-trend" style="grid-template-columns:1.4fr 1fr;gap:16px;margin-top:20px;scroll-margin-top:16px">'+
+      '<div class="card card-pad"><h3 style="margin:0 0 12px"><i class="fa-solid fa-chart-line" style="color:#0369a1"></i> Monthly Spend Trend</h3><div style="height:260px"><canvas id="vtChMonthly"></canvas></div></div>'+
+      '<div class="card card-pad"><h3 style="margin:0 0 12px"><i class="fa-solid fa-chart-pie" style="color:#0369a1"></i> Spend by Category (last 12 mo)</h3><div style="height:260px"><canvas id="vtChCategory"></canvas></div></div>'+
+    '</div>'+
+    '<div style="margin-top:22px"><h3><i class="fa-solid fa-crown" style="color:#b45309"></i> Major Vendors</h3><p style="color:var(--slate);font-size:13px;margin:2px 0 10px">Top 10 by total spend over the last 24 months — click a name for its full history.</p>'+mTable(['Vendor','Category','Total Spend','Share of Spend','Status'],majorRows)+'</div>'+
+    '<div style="margin-top:22px"><h3><i class="fa-solid fa-star" style="color:#2563eb"></i> New Vendors</h3><p style="color:var(--slate);font-size:13px;margin:2px 0 10px">First purchase within the last 90 days.</p>'+(newRows.length?mTable(['Vendor','Category','First Purchase','Spend to Date'],newRows):vtEmptyNote('No new vendors in the last 90 days.'))+'</div>'+
+    '<div style="margin-top:22px"><h3><i class="fa-solid fa-triangle-exclamation" style="color:#c83232"></i> Inactive Vendors</h3><p style="color:var(--slate);font-size:13px;margin:2px 0 10px">No purchase in the last 120+ days, despite prior activity.</p>'+(inactiveRows.length?mTable(['Vendor','Category','Last Purchase','Lifetime Spend'],inactiveRows):vtEmptyNote('No vendors have gone quiet.'))+'</div>'+
+    '<div id="vt-sec-growdecl" style="margin-top:22px;scroll-margin-top:16px"><h3><i class="fa-solid fa-arrows-up-down" style="color:#0d9488"></i> Growing / Declining Dependency</h3><p style="color:var(--slate);font-size:13px;margin:2px 0 10px">Last 6 months vs. the 6 months before that, ranked by size of the swing.</p>'+(gdRows.length?mTable(['Vendor','Category','Trend','Change','Last 6 mo Spend'],gdRows):vtEmptyNote('No significant swings.'))+'</div>'+
+    '<div id="vt-sec-conc" style="margin-top:22px;scroll-margin-top:16px"><h3><i class="fa-solid fa-layer-group" style="color:#7c3aed"></i> Vendor Concentration</h3>'+
+      '<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:14px">'+
+        vtConcCard('fa-medal','#7c3aed',(O.top5_share_pct||0)+'%','held by top 5 vendors')+
+        vtConcCard('fa-ranking-star','#7c3aed',(O.top10_share_pct||0)+'%','held by top 10 vendors')+
+        vtConcCard('fa-gauge-high','#7c3aed',O.hhi,'HHI — '+vtHhiLabel(O.hhi))+
+        vtConcCard('fa-scale-balanced','#7c3aed',O.vendors_for_80pct,'vendors make up 80% of spend')+
+      '</div></div>'+
+    '<div style="margin-top:22px"><h3><i class="fa-solid fa-bolt" style="color:#e08600"></i> Unusual / Exceptional Movements</h3><p style="color:var(--slate);font-size:13px;margin:2px 0 10px">A single month over 2.5× that vendor\'s own trailing 6-month average.</p>'+(anRows.length?mTable(['Vendor','Category','Month','Amount','Typical Month','Multiple'],anRows):vtEmptyNote('No unusual spikes detected.'))+'</div>'+
+    '<div id="vt-sec-all" style="margin-top:22px;scroll-margin-top:16px"><h3><i class="fa-solid fa-list" style="color:#334155"></i> All Vendors ('+VS.length+')</h3><p style="color:var(--slate);font-size:13px;margin:2px 0 10px">Full vendor base, ranked by total spend. Click any name for its monthly history.</p>'+
+      '<div style="margin-bottom:10px;max-width:320px"><div style="position:relative"><i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--slate-2);font-size:12px"></i><input id="vtSearch" oninput="vtFilterVendors()" placeholder="Search vendor or category…" style="width:100%;padding:9px 12px 9px 32px;border:1px solid var(--line);border-radius:8px;font-size:13px"></div></div>'+
+      '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:520px"><table class="tbl"><thead><tr><th>Vendor</th><th>Category</th><th>Total Spend</th><th>Share</th><th>Status</th><th>Last Purchase</th></tr></thead><tbody id="vtAllBody">'+allBody+'</tbody></table></div></div>'+
+      '<div id="vtSearchEmpty" style="display:none">'+vtEmptyNote('No vendor matches that search.')+'</div>'+
+    '</div>'+
+    '<div style="margin-top:14px;font-size:11.5px;color:var(--slate)">'+VS.length+' vendors, '+(O.total_transactions||0)+' invoices, as of '+vtDfmt(O.as_of)+(selBu?' · filtered to '+selBu.length+' of '+VT_BU_ALL.length+' business units':'')+'.</div>';
+
+  setTimeout(function(){
+    if(!window.Chart)return;
+    const gy={grid:{color:'#f1f5f9'},ticks:{font:{size:11}}},gx={grid:{display:false},ticks:{font:{size:11}}};
+    const mlabels=MO.map(function(m){return new Date(m.month).toLocaleDateString('en-IN',{month:'short',year:'2-digit'});});
+    try{new Chart(document.getElementById('vtChMonthly'),{type:'line',data:{labels:mlabels,datasets:[{label:'Spend (₹)',data:MO.map(function(m){return m.amount;}),borderColor:'#0369a1',backgroundColor:'rgba(3,105,161,.08)',fill:true,tension:.3,pointRadius:0,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
+
+    const last12start=O.as_of?new Date(O.as_of):new Date();
+    last12start.setMonth(last12start.getMonth()-11);
+    const catTotals12={};
+    CAT.forEach(function(c){ if(new Date(c.month)>=last12start){ catTotals12[c.category]=(catTotals12[c.category]||0)+Number(c.amount); } });
+    const catLabels=catOrder.filter(function(c){return catTotals12[c];});
+    try{new Chart(document.getElementById('vtChCategory'),{type:'doughnut',data:{labels:catLabels,datasets:[{data:catLabels.map(function(c){return catTotals12[c];}),backgroundColor:catLabels.map(function(c){return catColor[c];}),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'58%',plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:10.5}}}}}});}catch(e){}
+  },60);
+}
+
+function vtConcCard(icon,color,val,lbl){
+  return '<div class="card card-pad" style="text-align:center">'+
+    '<div class="ic" style="background:'+color+'18;color:'+color+';margin:0 auto 10px"><i class="fa-solid '+icon+'"></i></div>'+
+    '<div style="font-size:22px;font-weight:700">'+val+'</div><div style="font-size:12px;color:var(--slate);margin-top:2px">'+esc(lbl)+'</div>'+
+  '</div>';
+}
+
+window.vtScrollTo=function(id){ const el=$(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
+
+window.vtFilterVendors=function(){
+  const q=($('vtSearch').value||'').trim().toLowerCase();
+  const rows=document.querySelectorAll('#vtAllBody tr');
+  let shown=0;
+  rows.forEach(function(tr){ const m=!q||tr.getAttribute('data-vt-s').indexOf(q)!==-1; tr.style.display=m?'':'none'; if(m)shown++; });
+  const empty=$('vtSearchEmpty'); if(empty) empty.style.display=shown?'none':'block';
+};
+
+window.vtOpenVendor=function(id){
+  if(!VT_CACHE||!VT_CACHE.vendors[id])return;
+  const v=VT_CACHE.vendors[id];
+  openModal(
+    '<div class="modal-head"><h3><i class="fa-solid fa-building" style="color:#0369a1"></i> '+esc(v.name)+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body">'+
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">'+vtStatusTag(v.status)+'<span class="tag t-gray">'+vtCatCell(v.category)+'</span></div>'+
+      '<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">'+
+        vtStatBlock('Total Spend',vtInr(v.total_spend))+vtStatBlock('Share of Spend',v.share_pct+'%')+
+        vtStatBlock('First Purchase',vtDfmt(v.first_purchase))+vtStatBlock('Last Purchase',vtDfmt(v.last_purchase))+
+        vtStatBlock('Invoices',v.tx_count)+vtStatBlock('Last 6 mo',vtInr(v.recent_spend))+
+        vtStatBlock('Prior 6 mo',vtInr(v.previous_spend))+vtStatBlock('Change','<span style="color:'+vtPctColor(v.change_pct)+'">'+vtPct(v.change_pct)+'</span>')+
+      '</div>'+
+      '<h4 style="margin:0 0 10px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate)">Monthly Spend History</h4>'+
+      (v.monthly.length?'<div style="height:220px"><canvas id="vtVendorCh"></canvas></div>':vtEmptyNote('No purchases recorded for this vendor.'))+
+      (v.monthly.some(function(m){return VT_CACHE.anomalySet.has(id+'|'+m.month);})?'<div style="margin-top:10px;font-size:12px;color:#e08600"><i class="fa-solid fa-bolt"></i> Amber bars mark months flagged as unusual spikes.</div>':'')+
+    '</div>'+
+    '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>',
+    'lg'
+  );
+  setTimeout(function(){
+    if(!window.Chart||!v.monthly.length)return;
+    const labels=v.monthly.map(function(m){return new Date(m.month).toLocaleDateString('en-IN',{month:'short',year:'2-digit'});});
+    const colors=v.monthly.map(function(m){return VT_CACHE.anomalySet.has(id+'|'+m.month)?'#e08600':'#0369a1';});
+    try{new Chart(document.getElementById('vtVendorCh'),{type:'bar',data:{labels:labels,datasets:[{label:'Spend',data:v.monthly.map(function(m){return m.amount;}),backgroundColor:colors,borderRadius:5,maxBarThickness:30}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f1f5f9'},ticks:{font:{size:10.5}}},x:{grid:{display:false},ticks:{font:{size:10.5}}}}}});}catch(e){}
+  },60);
+};
+function vtStatBlock(lbl,val){ return '<div><div style="font-size:11px;color:var(--slate)">'+esc(lbl)+'</div><div style="font-weight:700;font-size:16px;margin-top:2px">'+val+'</div></div>'; }
+
 VIEWS.procurement=function(v,seg){
   setCrumb(['Operations','Procurement']);
-  const tabs=['Indent','Quote Comp','PO','GRN'];const ti=mTab(seg,tabs.length);
+  const tabs=['Indent','Quote Comp','PO','GRN','Vendor Trends'];const ti=mTab(seg,tabs.length);
   const cat=tabs[ti];
+  const subtitle='Indents · Quote Comparison · Purchase Orders · GRN · Vendor Trends';
   PROC.sel.clear();
   if(ti===1){// Quote Comp
-    v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-file-invoice" style="color:#0369a1"></i> Procurement</h1><p>Indents · Quote Comparison · Purchase Orders · GRN</p></div></div>`+
+    v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-file-invoice" style="color:#0369a1"></i> Procurement</h1><p>${subtitle}</p></div></div>`+
       mTabs('procurement',tabs,ti)+
       `<div style="margin-top:20px">
         <div id="procBar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px"></div>
         <div id="procHost"></div>
       </div>`;
     procRefresh(cat);
+  } else if(ti===4){// Vendor Trends
+    v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-file-invoice" style="color:#0369a1"></i> Procurement</h1><p>${subtitle}</p></div></div>`+
+      mTabs('procurement',tabs,ti)+
+      `<div style="margin-top:20px" id="vtHost"></div>`;
+    procVendorTrendsRender();
   } else {
-    v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-file-invoice" style="color:#0369a1"></i> Procurement</h1><p>Indents · Quote Comparison · Purchase Orders · GRN</p></div></div>`+
+    v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-file-invoice" style="color:#0369a1"></i> Procurement</h1><p>${subtitle}</p></div></div>`+
       mTabs('procurement',tabs,ti)+
       `<div style="margin-top:20px">`+mSoon(cat)+`</div>`;
   }
@@ -12587,10 +13035,13 @@ window.custModReqDecide=async function(id,decision){
   closeModal();toast(decision==='accepted'?'Accepted':'Rejected','ok');route();
 };
 VIEWS.customer=async function(v,seg){
-  setCrumb(['Customer Portal']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
   const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
+  // Names the active tab in the breadcrumb too - with 13 tabs in a horizontally-scrolling row,
+  // the active one isn't always visible in the row itself, so this is the one place that always
+  // says which section you're actually looking at.
+  setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
   // WHO it's a preview of, or the empty state and the profile menu tell two different stories.
@@ -15863,14 +16314,37 @@ window.trDownload=async function(id){
    are queued and sent in batches, never one request per click. */
 const USAGE_MAP={
   // Accountability — Tasks
-  taskSave:'tasks.tasks.create_task', taskUpdateDue:'tasks.tasks.edit_task_due_date',
+  // taskSave itself is NOT mapped here (see the direct usageQueue call inside it) - the title it
+  // creates only exists as a DOM value read inside the function body, which a wrapper here can never
+  // see; only the function itself can capture it.
+  taskUpdateDue:'tasks.tasks.edit_task_due_date',
   taskDelegateSave:'tasks.tasks.delegate_task_to_someone',
-  taskMarkComplete:'tasks.tasks.mark_task_done_send_for_approval',
+  // taskMarkComplete(id, makeComplete) toggles both ways from the same button pair - makeComplete
+  // false is "un-complete a task" (Completed -> back to Pending), not another mark-done, and it was
+  // silently inflating that count every time someone reopened a task by mistake.
+  taskMarkComplete:function(id,makeComplete){ return makeComplete ? 'tasks.tasks.mark_task_done_send_for_approval' : 'tasks.tasks.revert_reopen_a_task'; },
   taskApprove:'tasks.tasks.approve_a_completed_task', taskDecline:'tasks.tasks.decline_a_completed_task',
   taskReorderDrop:'tasks.tasks.insert_a_task_at_a_specific_position',
   cmAdd:'tasks.tasks.comment_on_a_task', taskAttachUpload:'tasks.tasks.attach_file_to_a_task_or_comment',
   taskAttachDelete:'tasks.tasks.delete_attached_file', taskAttachDeleteSel:'tasks.tasks.delete_attached_file',
   notifDismissAllDue:'tasks.tasks.mark_all_notifications_as_read',
+  /* The Accountability module's OWN Tasks tab (accountability.js, table ptasks) turned out to have a
+     second, separate implementation of most of these actions from the Projects/Goals one above
+     (table acc.tasks) - global functions, just never added here. Real day-to-day task editing goes
+     through these, so several catalog rows (edit title/description/members, delegate, sub-tasks,
+     search) had a live feature and zero events against it, not because nobody used them but because
+     nothing was watching this half of the app. */
+  accEditTitleSave:'tasks.tasks.edit_task_title', accEditDescSave:'tasks.tasks.edit_task_description',
+  accEditProjectSave:'tasks.tasks.edit_task_project', accEditMembersSave:'tasks.tasks.edit_task_members_assignees',
+  accEditDueSave:'tasks.tasks.edit_task_due_date', accDelegateSave:'tasks.tasks.delegate_task_to_someone',
+  accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
+  accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
+  accSubDel:'tasks.tasks.delete_sub_task',
+  accTaskSearch:{key:'tasks.tasks.search_tasks', meta:function(val){ return val?{query:String(val)}:null; }},
+  // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
+  // view (already implied by simply landing on the tab), so only the other two are worth a feature
+  // of their own; returning nothing for 'priority' means switching back to it logs no event.
+  accP3:function(k){ return k==='project'?'tasks.tasks.view_tasks_grouped_by_tag':k==='person'?'tasks.tasks.view_tasks_grouped_by_person':k==='workflow'?'tasks.tasks.view_tasks_grouped_by_workflow':null; },
   /* Accountability — Meetings. Missed entirely on the first pass: the whole tab reported nothing,
      which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
      scheduling rather than editing because it saves both and scheduling is the act it usually is;
@@ -16016,7 +16490,10 @@ const USAGE_VIEWS={
   'campaigns/5':         'campaigns.ad_fatigue.view_fatigue_ranking_by_ad_campaign',
   'network/0':           'network.overview.view_live_monitoring_status',
   'network/1':           'network.all_readings.view_full_readings_table',
-  'inspection/console':  'inspection.console.view_inspection_kpis_and_breakdowns'
+  // Console is Inspection's default landing tab, reached with NO segment in the hash at all
+  // (inspGo builds a bare '#/inspection' for it) - usageViewTick's own fallback for "no segment"
+  // is the string '0', not the tab's name, so the key has to be '0' to ever actually match.
+  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){
@@ -16054,10 +16531,16 @@ let USAGE_Q=[], USAGE_TIMER=null;
 // freshest activity that's kept, not the oldest, since an approximate recent picture beats an
 // exact but ancient one for a report read in terms of "the last 30 days".
 const USAGE_MAX_Q=600;
-function usageQueue(featureKey, action){
+// meta is the specific thing the action was ABOUT - a task's title, a search query, who a claim
+// was delegated to - not just that the feature fired. Optional and feature-by-feature: most call
+// sites still pass nothing, same as before this existed. erp_log_usage only keeps it when it is a
+// plain object, so anything else here is silently dropped rather than corrupting the row.
+function usageQueue(featureKey, action, meta){
   if(!featureKey || !(state&&state.email)) return;
-  USAGE_Q.push({module_id:String(featureKey).split('.')[0], feature_key:featureKey,
-                action:action||'view', occurred_at:new Date().toISOString()});
+  const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
+                action:action||'view', occurred_at:new Date().toISOString()};
+  if(meta && typeof meta==='object') ev.meta=meta;
+  USAGE_Q.push(ev);
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
@@ -16124,9 +16607,28 @@ function usageInstall(){
   Object.keys(USAGE_MAP).forEach(function(fn){
     const orig=window[fn];
     if(typeof orig!=='function' || orig.__usageWrapped) return;
-    const key=USAGE_MAP[fn], act=usageAction(fn);
+    const mapped=USAGE_MAP[fn], act=usageAction(fn);
+    // Most entries are one function, one feature - a plain string. A few functions do two different
+    // things depending on an argument (taskSave(kind) creates a task OR delegates one from the same
+    // modal and Save button), and a fixed string would count every delegation as "create task" while
+    // "delegate a task" itself never fired. Those entries are a resolver instead: called with the
+    // same arguments as the wrapped function, returning whichever feature key actually happened.
+    // A THIRD shape, {key, meta}, additionally captures the specific thing the action was about -
+    // only usable when that thing is itself one of the wrapped function's own arguments (a search
+    // box's typed value, say); anything read from the DOM inside the function's own body is outside
+    // what a wrapper can see, and is logged directly at the source instead (see crystallizeAndSwap).
+    const isDescriptor=mapped&&typeof mapped==='object'&&('key' in mapped);
+    const keySrc=isDescriptor?mapped.key:mapped;
+    const metaFn=isDescriptor?mapped.meta:null;
     const wrapped=function(){
-      try{ usageQueue(key, act); }catch(e){}
+      try{
+        const key=(typeof keySrc==='function') ? keySrc.apply(this, arguments) : keySrc;
+        if(key){
+          let meta=null;
+          if(metaFn){ try{ meta=metaFn.apply(this, arguments); }catch(_e){} }
+          usageQueue(key, act, meta);
+        }
+      }catch(e){}
       return orig.apply(this, arguments);      // called through no matter what happened above
     };
     wrapped.__usageWrapped=true;
