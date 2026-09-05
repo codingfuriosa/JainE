@@ -14365,15 +14365,30 @@ const TRC_TR_META = {
   non_transcribable: {label:'No conversation',  tag:'t-gray',  icon:'fa-volume-xmark'},
   failed:            {label:'Transcription failed', tag:'t-red', icon:'fa-circle-exclamation'},
   not_transcribed:   {label:'Waiting',          tag:'t-amber', icon:'fa-clock'},
-  no_recording:      {label:'No recording',     tag:'t-gray',  icon:'fa-phone-slash'}
+  no_recording:      {label:'No recording',     tag:'t-gray',  icon:'fa-phone-slash'},
+  out_of_scope:      {label:'Not in scope',     tag:'t-gray',  icon:'fa-user-slash'}
 };
+
+/* ONLY THE PRE-SALES TEAM'S CALLS ARE TRANSCRIBED - crm_build_queue queues a recording only when
+   acc.crm_personnel_team() puts its caller in Pre-Sales, so a Sales Executive's call is never picked
+   up at all. The view has no way to say that: it sees a recording with no transcript and reports
+   'not_transcribed', which this page draws as an amber "Waiting". It is not waiting for anything and
+   never will be, so it would sit in the day's backlog for ever and make every day look unfinished.
+   Out of scope is what it actually is, and it is counted separately from the real backlog.
+   A Sales call transcribed BEFORE the queue was narrowed keeps its own status - those are left
+   exactly as they are, transcript, QA and all. */
+function trcTrStatus(r){
+  if(!r)return '';
+  const st=String(r.transcription_status||'');
+  return (st==='not_transcribed'&&String(r.personnel_team||'')!=='Pre-Sales') ? 'out_of_scope' : st;
+}
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 
 function trcTag(cls, icon, label){
   return '<span class="tag '+cls+'">'+(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
 }
 function trcTrTag(r){
-  const m = TRC_TR_META[String(r&&r.transcription_status||'')];
+  const m = TRC_TR_META[trcTrStatus(r)];
   return m ? trcTag(m.tag,m.icon,m.label) : trcTag('t-gray','','—');
 }
 function trcMismatchTag(r){
@@ -14402,7 +14417,7 @@ function trcWall(v, withTime){
    Previous day - the day whose calls actually finished processing overnight - rather than All time,
    so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
-const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',team:'all'};
+const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
 /* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
    recently opened from this list, so coming back from its detail page (the in-app Back button, or
    the browser's own back button - both re-run trcView the same way) highlights and scrolls to the
@@ -14462,20 +14477,37 @@ function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
 }
 
+/* A lead whose most recent call (by trcChrono, over its COMPLETE history - not just the rows a date
+   filter would leave) was not handled by Pre-Sales is dropped in full, including any older call of
+   its own that was individually Pre-Sales - crm_build_queue applies the identical lead-level gate
+   server-side, so a lead neither of them queues or lists here once it has moved on from pre-sales. */
+function trcLeadLastIsPresales(all){
+  const last={};
+  (all||[]).forEach(function(r){
+    const k=String(r.lead_id);
+    if(!last[k]||trcChrono(last[k],r)<0)last[k]=r;
+  });
+  const ok={};
+  Object.keys(last).forEach(function(k){ok[k]=String(last[k].personnel_team||'')==='Pre-Sales';});
+  return ok;
+}
+
 /* Every filter, applied together. skipCards lifts the two card filters so the four totals stay put
    while one of them is selected - clicking Mismatch must not collapse Transcribed to the mismatches. */
 function trcApply(rows,skipCards){
   const q=String(TRC_F.q||'').trim().toLowerCase();
-  return (rows||[]).filter(function(r){
+  const all=rows||[];
+  const leadOk=trcLeadLastIsPresales(all);
+  return all.filter(function(r){
+    if(!leadOk[String(r.lead_id)])return false;
     const d=trcRowDate(r);
     if(TRC_F.from&&(!d||d<TRC_F.from))return false;
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
     if(TRC_F.crm!=='all'&&String(r.crm_status||'')!==TRC_F.crm)return false;
     if(TRC_F.bu!=='all'&&String(r.business_unit_name||'')!==TRC_F.bu)return false;
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'')!==TRC_F.personnel)return false;
-    if(TRC_F.team!=='all'&&String(r.personnel_team||'')!==TRC_F.team)return false;
     if(!skipCards){
-      if(TRC_F.proc!=='all'&&String(r.transcription_status||'')!==TRC_F.proc)return false;
+      if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
       if(TRC_F.match==='MISMATCH'&&r.status_match!==false)return false;
       if(TRC_F.match==='NONE'&&r.status_match!==null&&r.status_match!==undefined)return false;
@@ -14548,7 +14580,7 @@ function trcChrono(a,b){
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
-  const n=function(st){return rows.filter(function(r){return r.transcription_status===st;}).length;};
+  const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
   const leadCount=new Set(rows.map(function(r){return r.lead_id;})).size;
   const cards=[
     ['Total Calls',rows.length,'follow-ups in '+leadCount+' lead'+(leadCount===1?'':'s'),'var(--slate)','all','proc'],
@@ -14560,7 +14592,8 @@ function trcKpiHtml(rows){
     ['Waiting','not_transcribed',n('not_transcribed'),'fa-clock'],
     ['No recording','no_recording',n('no_recording'),'fa-phone-slash'],
     ['No conversation','non_transcribable',n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',n('failed'),'fa-circle-exclamation']
+    ['Failed','failed',n('failed'),'fa-circle-exclamation'],
+    ['Not in scope','out_of_scope',n('out_of_scope'),'fa-user-slash']
   ];
   const assessed=rows.filter(function(r){return r.qa_id;}).length;
   const reused=rows.filter(function(r){return r.reused_transcription;}).length;
@@ -14652,7 +14685,7 @@ function trcFilterBar(all){
   const seenP={};
   const personnelValues=(all||[]).reduce(function(out,r){
     const email=r.personnel_email;
-    if(!email||seenP[email])return out;
+    if(!email||seenP[email]||String(r.personnel_team||'')!=='Pre-Sales')return out;
     seenP[email]=1;out.push({email:email,name:r.personnel_name||email});return out;
   },[]).sort(function(a,b){return a.name.localeCompare(b.name);});
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
@@ -14671,11 +14704,6 @@ function trcFilterBar(all){
       +opt('all','All business units',TRC_F.bu)
       +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
-    +'<select onchange="trcSet(\'team\',this.value)" style="padding:6px 8px">'
-      +opt('all','All teams',TRC_F.team)
-      +opt('Sales','Sales',TRC_F.team)
-      +opt('Pre-Sales','Pre-Sales',TRC_F.team)
-    +'</select>'
     +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
       +opt('all','All personnel',TRC_F.personnel)
       +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
@@ -14693,7 +14721,7 @@ window.trcSet=function(k,v){
 };
 window.trcClear=function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';TRC_F.team='all';
+  TRC_F.personnel='all';
   TRC_F.q='';TRC_F.from=null;TRC_F.to=null;trcRender(true);
 };
 window.trcRefresh=async function(){await trcFetch(true);trcRender(true);};
@@ -15032,7 +15060,7 @@ function trcCallHtml(r,i,total){
 
   const proc='<div class="card card-pad" style="margin:0">'
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-gears" style="color:#0d9488"></i> How it was processed</div>'
-    +trcKV('Transcription',(TRC_TR_META[String(r.transcription_status||'')]||{}).label||r.transcription_status)
+    +trcKV('Transcription',(TRC_TR_META[trcTrStatus(r)]||{}).label||r.transcription_status)
     +trcKV('Queue state',r.queue_status)
     +trcKV('Transcription model',r.transcription_model)
     +trcKV('QA model',r.qa_model)
