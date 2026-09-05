@@ -16443,7 +16443,12 @@ const USAGE_MAP={
   psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
   psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
   psaDownloadOne:'postsales.adhoc.download_a_document',
-  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip'
+  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip',
+  // Procurement / Projects / Construction — previously untracked
+  procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
+  procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
+  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit', vtFilterVendors:'procurement.vendor_trends.search_filter_vendors',
+  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history'
 };
 /* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
    speed-test tables. Wrapping buttons can never catch those: there is no button, the act is opening
@@ -16465,7 +16470,10 @@ const USAGE_VIEWS={
   // Console is Inspection's default landing tab, reached with NO segment in the hash at all
   // (inspGo builds a bare '#/inspection' for it) - usageViewTick's own fallback for "no segment"
   // is the string '0', not the tab's name, so the key has to be '0' to ever actually match.
-  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns'
+  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns',
+  // Procurement / Projects / Construction — previously untracked
+  'procurement/4':       'procurement.vendor_trends.view_spend_kpis_trend_charts',
+  'projects/0':          'projects.overview.view_ongoing_sold_out_projects_gallery'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){
