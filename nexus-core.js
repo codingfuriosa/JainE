@@ -14409,18 +14409,23 @@ const TRC_TR_META = {
   out_of_scope:      {label:'Not in scope',     tag:'t-gray',  icon:'fa-user-slash'}
 };
 
-/* ONLY THE PRE-SALES TEAM'S CALLS ARE TRANSCRIBED - crm_build_queue queues a recording only when
-   acc.crm_personnel_team() puts its caller in Pre-Sales, so a Sales Executive's call is never picked
-   up at all. The view has no way to say that: it sees a recording with no transcript and reports
-   'not_transcribed', which this page draws as an amber "Waiting". It is not waiting for anything and
-   never will be, so it would sit in the day's backlog for ever and make every day look unfinished.
-   Out of scope is what it actually is, and it is counted separately from the real backlog.
-   A Sales call transcribed BEFORE the queue was narrowed keeps its own status - those are left
-   exactly as they are, transcript, QA and all. */
+/* NOT EVERY CALL IS QUEUED - crm_build_queue queues a lead's recorded calls for a snapshot only when
+   that lead had at least one Pre-Sales call that day; a lead contacted by Sales alone that day queues
+   nothing at all. (A lead contacted by BOTH gets every recorded call queued, Sales included - so
+   personnel_team alone no longer says whether a call was in scope, only queue_status does.)
+   The view has no way to say "never queued": a recording with no transcript yet reports
+   'not_transcribed' regardless of why, which this page draws as an amber "Waiting". For a call that
+   was genuinely never queued that is wrong - it is not waiting for anything and never will be, so it
+   would sit in the day's backlog for ever and make every day look unfinished. queue_status is what
+   tells the two apart: a queued call (whatever its team) always has a row in transcription_queue, so
+   queue_status is set; a call that was never queued has none. Out of scope is counted separately from
+   the real backlog.
+   A Sales call transcribed BEFORE the queue existed, or riding along on a qualifying lead, keeps its
+   own real status - those are left exactly as they are, transcript, QA and all. */
 function trcTrStatus(r){
   if(!r)return '';
   const st=String(r.transcription_status||'');
-  return (st==='not_transcribed'&&String(r.personnel_team||'')!=='Pre-Sales') ? 'out_of_scope' : st;
+  return (st==='not_transcribed'&&!r.queue_status) ? 'out_of_scope' : st;
 }
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 

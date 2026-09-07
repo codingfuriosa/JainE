@@ -56,7 +56,11 @@ const APP_TZ_NAME = Deno.env.get("APP_TZ") || "Asia/Kolkata";
 
 const JOB_SECRET_NAME = "transcription_sync";
 
-const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 20);
+/* Only a call genuinely longer than this is worth a model call. By requirement this is 60 seconds -
+   a call has to run past a full minute before it is transcribed at all. A call at or under it is
+   never sent to a model: it lands as non_transcribable, with the CRM's own recording_url still stored
+   and shown on the row, so the call is never hidden - just not transcribed. */
+const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 60);
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 
 const MAX_ATTEMPTS = Number(Deno.env.get("MAX_ATTEMPTS") || 3);
@@ -386,10 +390,10 @@ async function transcribePhase(db: DB, item: any, geminiKey: string, geminiModel
   const crmDur = item.fu_duration === null || item.fu_duration === undefined ? null : Number(item.fu_duration);
   if (MIN_DURATION_SECONDS > 0 && crmDur !== null && crmDur <= MIN_DURATION_SECONDS) {
     checks.push({ check: "duration_floor", status: "fail",
-      detail: `The CRM records this call as ${crmDur}s, at or under the ${MIN_DURATION_SECONDS}s floor - a ring-out. Not sent to a model.` });
+      detail: `The CRM records this call as ${crmDur}s, at or under the ${MIN_DURATION_SECONDS}s floor. Not sent to a model.` });
     const tid = await saveTranscript({
       status: "non_transcribable", crm_duration: crmDur, verification: checks,
-      non_transcribable_reason: `Ring-out or unanswered: the CRM records this call as ${crmDur} seconds, under the ${MIN_DURATION_SECONDS}s floor.`,
+      non_transcribable_reason: `Too short to transcribe: the CRM records this call as ${crmDur} seconds, under the ${MIN_DURATION_SECONDS}s floor.`,
       completed_at: nowIso(),
     });
     await db.schema("acc").from("transcription_queue").update({
@@ -423,7 +427,7 @@ async function transcribePhase(db: DB, item: any, geminiKey: string, geminiModel
       detail: `The CRM sent no duration and the audio header reads ~${headerSeconds}s, at or under the ${MIN_DURATION_SECONDS}s floor.` });
     const tid = await saveTranscript({
       status: "non_transcribable", duration_seconds: headerSeconds, crm_duration: null, verification: checks,
-      non_transcribable_reason: `Ring-out or unanswered: the recording is only ~${headerSeconds}s, under the ${MIN_DURATION_SECONDS}s floor.`,
+      non_transcribable_reason: `Too short to transcribe: the recording is only ~${headerSeconds}s, under the ${MIN_DURATION_SECONDS}s floor.`,
       completed_at: nowIso(),
     });
     await db.schema("acc").from("transcription_queue").update({
