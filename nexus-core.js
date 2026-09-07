@@ -6689,28 +6689,43 @@ async function resumeAI(payload){
 }
 
 /* ── Resumes (AI-parsed resume bank) ── */
-let RS_ROWS=null, RS_SEARCH=null, RS_SEL=new Set();
+let RS_ROWS=null, RS_SEARCH=null, RS_SEL=new Set(), RS_Q='';
 async function hrResumes(){
   const b=$('hrBody');loader(b);
   try{const {data,error}=await sb.schema('hr').from('resumes').select('*').order('created_at',{ascending:false});if(error)throw error;RS_ROWS=data||[];}
   catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message)+'</div>';return;}
-  RS_SEARCH=null;RS_SEL=new Set();
+  RS_SEARCH=null;RS_SEL=new Set();RS_Q='';
   rsRender();
 }
+/* Resumes is a filing cabinet, not an analyser. The AI reading was never asked for and never
+   finished - rows sat on "Analyzing..." for ever because nothing retried a failed call - so it is
+   gone entirely. What a row shows now is what the file actually is. */
 function rsCard(r){
-  const status=r.ai_status;
-  const badge=status==='pending'?'<span class="tag t-amber" style="margin-left:8px"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing…</span>':status==='error'?'<span class="tag t-red" style="margin-left:8px" title="'+esc(r.ai_error||'')+'">AI failed</span>':'';
-  const matchBadge=(r._match&&r._match.score!=null)?`<span class="tag t-green" style="margin-left:8px">${r._match.score}% match</span>`:'';
-  const sub=[r.role_title,r.company,r.location].filter(Boolean).join(' · ');
+  const who=r.candidate_name||r.file_name||'Unnamed';
+  const bits=[];
+  if(r.file_name&&r.candidate_name) bits.push(r.file_name);
+  if(r.file_size) bits.push(rsSize(r.file_size));
+  if(r.created_at) bits.push(rsWhen(r.created_at));
   return `<div class="card rs-card" onclick="rsOpenDetail(${r.id})">
     <input type="checkbox" class="rs-chk" value="${r.id}" ${RS_SEL.has(r.id)?'checked':''} onclick="event.stopPropagation()" onchange="rsSyncToolbar()">
-    <div class="avatar-sm rs-card-avatar" style="background:${colorFor(r.candidate_name||r.file_name||'?')}">${esc(initials(r.candidate_name||r.file_name||'?').toUpperCase())}</div>
+    <div class="avatar-sm rs-card-avatar" style="background:${colorFor(who)}">${esc(initials(who).toUpperCase())}</div>
     <div class="rs-card-body">
-      <div class="rs-card-name">${esc(r.candidate_name||r.file_name||'Unnamed')}${badge}${matchBadge}</div>
-      <div class="rs-card-sub">${esc(sub||'—')}</div>
+      <div class="rs-card-name">${esc(who)}</div>
+      <div class="rs-card-sub">${esc(bits.join(' · ')||'—')}</div>
     </div>
-    <button class="btn btn-sm btn-ghost rs-card-eye" title="Preview resume file" onclick="event.stopPropagation();rsPreview(${r.id})"><i class="fa-solid fa-eye"></i></button>
+    <span class="rs-card-eye" style="display:inline-flex;gap:4px" onclick="event.stopPropagation()">
+      <button class="btn btn-sm btn-ghost" title="Preview" onclick="rsPreview(${r.id})"><i class="fa-regular fa-eye"></i></button>
+      <button class="btn btn-sm btn-ghost" title="Download" onclick="rsDownload(${r.id})"><i class="fa-solid fa-download"></i></button>
+    </span>
   </div>`;
+}
+function rsSize(n){
+  n=Number(n)||0;
+  return n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+}
+function rsWhen(ts){
+  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return ''; }
 }
 function rsRender(){
   const b=$('hrBody');if(!b)return;
@@ -6725,11 +6740,10 @@ function rsRender(){
     </div>
   </div>
   <div class="card card-pad rs-ai-card">
-    <label class="rs-ai-label"><i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i> Ask AI to find a candidate</label>
+    <label class="rs-ai-label"><i class="fa-solid fa-magnifying-glass" style="color:var(--slate)"></i> Find a resume</label>
     <div class="rs-ai-row">
-      <input id="rsQ" class="rs-ai-input" placeholder="e.g. someone with 3+ years in sales who knows CRM tools" onkeydown="if(event.key==='Enter')rsSearch()">
-      <button class="btn btn-primary" id="rsSearchBtn" onclick="rsSearch()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
-      ${RS_SEARCH?'<button class="btn" onclick="rsClearSearch()"><i class="fa-solid fa-xmark"></i> Clear</button>':''}
+      <input id="rsQ" class="rs-ai-input" placeholder="Name or file name…" value="${esc(RS_Q||'')}" oninput="rsFilter(this.value)">
+      ${RS_Q?'<button class="btn" onclick="rsClearFilter()"><i class="fa-solid fa-xmark"></i> Clear</button>':''}
     </div>
   </div>
   <div id="rsList" class="grid rs-list">${rows.length?rows.map(r=>rsCard(r)).join(''):'<div class="empty" style="padding:40px;grid-column:1/-1"><i class="fa-solid fa-id-card-clip"></i><div>No resumes yet — click Upload Resume</div></div>'}</div>`;
@@ -6765,61 +6779,48 @@ function rsDetailRow(label,html){
   return `<div style="margin-bottom:14px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);font-weight:700;margin-bottom:4px">${label}</div><div style="font-size:13.5px;color:var(--ink);line-height:1.6">${html}</div></div>`;
 }
 window.rsOpenDetail=function(id){
-  const pool=(RS_SEARCH&&RS_SEARCH.length?RS_SEARCH:RS_ROWS)||[];
-  const r=pool.find(x=>x.id===id)||(RS_ROWS||[]).find(x=>x.id===id);
+  const r=(RS_ROWS||[]).find(x=>x.id===id);
   if(!r)return;
-  const a=r.analysis||{};
-  const expParts=[];
-  if(r.experience_years!=null&&r.experience_years!=='')expParts.push(esc(String(r.experience_years))+' years');
-  if(a.experience_summary)expParts.push(esc(a.experience_summary));
-  const deptParts=[];
-  if(a.recommended_departments&&a.recommended_departments.length)deptParts.push(esc(a.recommended_departments.join(', ')));
-  if(a.department_fit)deptParts.push(esc(a.department_fit));
-  const skillsHtml=(r.skills&&r.skills.length)?r.skills.map(s=>`<span class="tag t-gray" style="margin:2px 5px 2px 0;display:inline-block">${esc(s)}</span>`).join(''):'';
-  const strengthsHtml=(a.strengths&&a.strengths.length)?('<ul style="padding-left:18px;margin:0">'+a.strengths.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul>'):'';
-  const certsHtml=(r.certifications&&r.certifications.length)?esc(r.certifications.join(', ')):'';
+  /* What is actually known about the file, and nothing inferred. The AI-extracted columns
+     (role_title, skills, strengths and the rest) are left in the table but no longer read -
+     removing the analysis was the point, not rewriting the schema. */
+  const who=r.candidate_name||r.file_name||'Unnamed';
   const contact=[r.email,r.phone].filter(Boolean).map(esc).join(' · ');
-  let aiNote='';
-  if(r.ai_status==='error')aiNote=rsDetailRow('AI status','<span style="color:var(--err)">Analysis failed — '+esc(r.ai_error||'')+'</span>');
-  else if(r.ai_status==='pending')aiNote=rsDetailRow('AI status','<span style="color:#c08000">Still analyzing…</span>');
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-id-card-clip"></i> Candidate Profile</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-id-card-clip"></i> Resume</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body">
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:18px">
-      <div class="avatar-sm" style="width:52px;height:52px;font-size:18px;background:${colorFor(r.candidate_name||r.file_name||'?')}">${esc(initials(r.candidate_name||r.file_name||'?').toUpperCase())}</div>
+      <div class="avatar-sm" style="width:52px;height:52px;font-size:18px;background:${colorFor(who)}">${esc(initials(who).toUpperCase())}</div>
       <div>
-        <div style="font-weight:700;font-size:17px">${esc(r.candidate_name||r.file_name||'Unnamed')}</div>
-        <div style="color:var(--slate);font-size:13px">${esc([r.role_title,r.company].filter(Boolean).join(' at ')||'—')}</div>
+        <div style="font-weight:700;font-size:17px">${esc(who)}</div>
+        <div style="color:var(--slate);font-size:13px">${esc(r.file_name||'')}</div>
       </div>
     </div>
-    ${rsDetailRow('Department fit',deptParts.join(' — '))}
-    ${rsDetailRow('Location',esc(r.location||''))}
-    ${rsDetailRow('Experience',expParts.join(' — '))}
-    ${rsDetailRow('Credentials',esc(a.credentials||''))}
-    ${rsDetailRow('Education',esc(r.education||''))}
-    ${rsDetailRow('Summary',esc(r.summary||''))}
-    ${rsDetailRow('Strengths',strengthsHtml)}
-    ${rsDetailRow('Skills',skillsHtml)}
-    ${rsDetailRow('Certifications',certsHtml)}
     ${rsDetailRow('Contact',contact)}
-    ${aiNote}
+    ${rsDetailRow('File',esc([r.file_type?String(r.file_type).toUpperCase():'',r.file_size?rsSize(r.file_size):''].filter(Boolean).join(' · ')))}
+    ${rsDetailRow('Uploaded',esc([rsWhen(r.created_at),r.uploaded_by].filter(Boolean).join(' · ')))}
   </div>
-  <div class="modal-foot"><button class="btn" onclick="rsPreview(${r.id})"><i class="fa-solid fa-eye"></i> Preview file</button><button class="btn btn-primary" onclick="closeModal()">Close</button></div>`,'lg');
+  <div class="modal-foot">
+    <button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn" onclick="rsDownload(${r.id})"><i class="fa-solid fa-download"></i> Download</button>
+    <button class="btn btn-primary" onclick="rsPreview(${r.id})"><i class="fa-regular fa-eye"></i> Preview</button>
+  </div>`);
 };
-window.rsClearSearch=function(){RS_SEARCH=null;rsRender();};
-window.rsSearch=async function(){
-  const q=($('rsQ')||{}).value?.trim();if(!q)return;
-  const btn=$('rsSearchBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Searching…';
-  try{
-    const candidates=(RS_ROWS||[]).map(r=>({id:r.id,candidate_name:r.candidate_name,role_title:r.role_title,company:r.company,experience_years:r.experience_years,location:r.location,skills:r.skills,summary:r.summary,department_fit:r.analysis&&r.analysis.department_fit,recommended_departments:r.analysis&&r.analysis.recommended_departments}));
-    const out=await resumeAI({action:'search',query:q,candidates});
-    const results=out.results||[];
-    const byId={};(RS_ROWS||[]).forEach(r=>byId[r.id]=r);
-    RS_SEARCH=results.map(x=>{const r=byId[x.id];if(!r)return null;return {...r,_match:{score:x.score,reason:x.reason}};}).filter(Boolean);
-    if(!RS_SEARCH.length)toast('No strong matches found','');
-  }catch(e){toast('Search failed: '+e.message,'err');}
-  const btn2=$('rsSearchBtn');if(btn2){btn2.disabled=false;btn2.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search';}
+
+/* Was an AI search that sent every resume's text to a model to rank them. Now a plain filter over
+   what is already loaded: no request, no cost, instant, and it cannot fail. */
+window.rsFilter=function(q){
+  RS_Q=String(q||'');
+  const t=RS_Q.trim().toLowerCase();
+  RS_SEARCH=t?(RS_ROWS||[]).filter(function(r){
+    return String(r.candidate_name||'').toLowerCase().indexOf(t)>-1
+        || String(r.file_name||'').toLowerCase().indexOf(t)>-1
+        || String(r.email||'').toLowerCase().indexOf(t)>-1;
+  }):null;
   rsRender();
+  // rsRender rebuilds the box, so put the caret back where the person left it
+  const el=$('rsQ'); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length); }
 };
+window.rsClearFilter=function(){ rsFilter(''); };
 window.rsUploadModal=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload Resume</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
@@ -6827,38 +6828,40 @@ window.rsUploadModal=function(){
     <input type="file" id="rsFile" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="document.getElementById('rsFName').textContent=this.files[0]?this.files[0].name:'Click to choose a PDF, Word doc, or image'">
     <p style="font-size:12px;color:var(--slate);margin-top:10px">AI will automatically read the resume and fill in name, contact info, skills, experience and a summary — no need to type it in.</p>
   </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload & Analyze</button></div>`);
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>`);
 };
 window.rsUploadSave=async function(){
-  const fEl=$('rsFile');const f=fEl&&fEl.files&&fEl.files[0];if(!f){toast('Choose a file first','err');return;}
+  const fEl=$('rsFile');const f=fEl&&fEl.files&&fEl.files[0];
+  if(!f){toast('Choose a file first','err');return;}
   const btn=$('rsUpBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
   const key=s3KeyForResume(f.name);
   const {data:upData,error:upErr}=await uploadFileToS3(key,f);
-  if(upErr){toast('Upload failed: '+upErr.message,'err');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload & Analyze';return;}
-  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading file…';
-  const ctext=await extractFileText(f);
-  const {data:row,error}=await sb.schema('hr').from('resumes').insert({file_name:f.name,storage_path:upData.path,file_size:f.size,file_type:f.name.split('.').pop(),uploaded_by:state.email,content_text:ctext,ai_status:'pending'}).select().single();
-  if(error){toast('Saved file but record failed: '+error.message,'err');closeModal();hrResumes();return;}
-  closeModal();toast('Resume uploaded — analyzing with AI…','ok');
-  RS_ROWS=[row,...(RS_ROWS||[])];rsRender();
-  if(!ctext||ctext.replace(/\s/g,'').length<20){
-    await sb.schema('hr').from('resumes').update({ai_status:'error',ai_error:'Could not read text from this file'}).eq('id',row.id);
-    const idx=(RS_ROWS||[]).findIndex(x=>x.id===row.id);if(idx>-1){RS_ROWS[idx].ai_status='error';RS_ROWS[idx].ai_error='Could not read text from this file';}
-    rsRender();return;
+  if(upErr){
+    toast('Upload failed: '+upErr.message,'err');
+    btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+    return;
   }
-  try{
-    const out=await resumeAI({action:'analyze',text:ctext});
-    const p=out.profile||{};
-    const patch={ai_status:'done',ai_error:null,candidate_name:p.candidate_name||null,email:p.email||null,phone:p.phone||null,location:p.location||null,role_title:p.role_title||null,company:p.company||null,experience_years:p.experience_years||null,education:p.education||null,summary:p.summary||null,skills:p.skills||[],certifications:p.certifications||[],analysis:p};
-    await sb.schema('hr').from('resumes').update(patch).eq('id',row.id);
-    const idx=(RS_ROWS||[]).findIndex(x=>x.id===row.id);if(idx>-1)RS_ROWS[idx]={...RS_ROWS[idx],...patch};
-    toast('Resume analyzed','ok');
-  }catch(e){
-    await sb.schema('hr').from('resumes').update({ai_status:'error',ai_error:e.message}).eq('id',row.id);
-    const idx=(RS_ROWS||[]).findIndex(x=>x.id===row.id);if(idx>-1){RS_ROWS[idx].ai_status='error';RS_ROWS[idx].ai_error=e.message;}
-    toast('AI analysis failed: '+e.message,'err');
-  }
-  rsRender();
+  /* Nothing is read out of the file and nothing is sent to a model. The AI columns stay null,
+     which is why no row can sit on "Analyzing" any more - there is nothing to wait for. */
+  const {data:row,error}=await sb.schema('hr').from('resumes').insert({
+    file_name:f.name, storage_path:upData.path, file_size:f.size,
+    file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:null
+  }).select().single();
+  if(error){ toast('Saved the file but the record failed: '+error.message,'err'); closeModal(); hrResumes(); return; }
+  closeModal();
+  toast('Resume uploaded','ok');
+  RS_ROWS=[row,...(RS_ROWS||[])];
+  if(RS_Q) rsFilter(RS_Q); else rsRender();
+};
+
+/* Download keeps the candidate's own name on the file rather than the stamped storage name, the
+   same as the Tracker's Resumes column does. */
+window.rsDownload=function(id){
+  const r=(RS_ROWS||[]).find(x=>x.id===id);
+  if(!r||!r.storage_path){ toast('No file on this row','err'); return; }
+  const base=(r.candidate_name||r.file_name||'Resume').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'Resume';
+  const ext=String(r.file_name||'').split('.').pop().toLowerCase();
+  s3OpenSigned(r.storage_path, base+(base.toLowerCase().endsWith('.'+ext)?'':(ext&&ext.length<=5?'.'+ext:'')));
 };
 async function rsGet(id){const {data}=await sb.schema('hr').from('resumes').select('*').eq('id',id).single();return data;}
 window.rsPreview=async function(id){
@@ -16931,7 +16934,9 @@ const USAGE_MAP={
   trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
   rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
   rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
-  rsBulkDelete:'hr.resumes.delete_resume_s', rsSearch:'hr.resumes.ai_natural_language_resume_search',
+  rsBulkDelete:'hr.resumes.delete_resume_s',
+  // the AI resume search is gone - a plain name/file filter replaced it
+  rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
   rtSave:'recruitment.tests.add_test', rtRename:'recruitment.tests.rename_test',

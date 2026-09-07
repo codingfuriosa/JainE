@@ -738,6 +738,7 @@ select.mu-sel:focus{outline:none;border-color:var(--brand)}
 /* A closed position stays on the row - it is part of the month’s record - but reads as finished
    rather than competing with the ones still being hired for. */
 .mu-tbl tbody tr.mu-closed td{opacity:.62}
+.mu-tbl tbody tr.mu-closed td.mu-hire{opacity:1}
 .mu-tbl tbody tr.mu-closed:hover td{opacity:1}
 
 @media(max-width:900px){
