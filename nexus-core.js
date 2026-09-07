@@ -9837,8 +9837,7 @@ function mpAiPanel(rec){
   let inner;
   if(st==='ready'&&hasJd){
     inner='<div class="mp-ai-acts">'
-      +'<button class="btn btn-sm btn-primary" onclick="mpJdOpen('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
-      +'<button class="btn btn-sm" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-download"></i> Download</button>'
+      +'<button class="btn btn-sm btn-primary" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
       +(rec.ai_creative_path
         ? '<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-image"></i> Creative</button>'
         : '')
@@ -9980,17 +9979,23 @@ function mpJdRec(id){
   return rec;
 }
 
-// Opens the document in its own tab, ready to print or save as PDF.
-window.mpJdOpen=function(id){
-  const rec=mpJdRec(id); if(!rec) return;
+/* Last resort only. The Job Description is a download, not something that opens in a tab - but if
+   the browser refuses the blob download there has to be some way to get at the document, so it is
+   opened instead and the print dialog offered. */
+function mpJdOpenFallback(rec){
   const w=window.open('','_blank');
-  if(!w){ toast('Your browser blocked the new tab — allow pop-ups for JAIN-E, or use Download','err'); return; }
+  if(!w) return false;
   w.document.open(); w.document.write(mpJdDocHtml(rec)); w.document.close();
-};
+  return true;
+}
 
 // Saves a real file. A Blob URL downloads whatever the server would have argued about.
 window.mpJdDownload=function(id){
   const rec=mpJdRec(id); if(!rec) return;
+  if(!('download' in document.createElement('a'))){
+    if(!mpJdOpenFallback(rec)) toast('Your browser will not download it — allow pop-ups for JAIN-E','err');
+    return;
+  }
   const name=String((rec.ai_job_description_json.job_title||rec.job_title||'Job Description'))
     .replace(/[^A-Za-z0-9 .()-]/g,'').trim().replace(/\s+/g,'_');
   const blob=new Blob([mpJdDocHtml(rec)],{type:'text/html;charset=utf-8'});
