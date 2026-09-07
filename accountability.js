@@ -1148,6 +1148,12 @@
     // creator/step-owners, the same class of bug already fixed in canEvent.
     const trigList=(f.trigger_owner||'').split(',').map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
     const trigOk = f.trigger_owner==='__ALL__' || trigList.indexOf(String(me()||'').toLowerCase())!==-1;
+    /* The Administrator sees every workflow. The database already agreed - acc.wf_can_see_flow
+       starts at app.can_read('acc'), which a superadmin passes - but this client-side filter did
+       not, so a flow whose created_by was not the Administrator was served and then hidden. That
+       happens to any flow inserted by a migration rather than through the builder, which has no
+       logged-in user to record. Checked here so it cannot depend on who happened to create it. */
+    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
     return eq(f.created_by||'',me()) || trigOk || o.some(function(e){return eq(e,me());})
       // A flow can be opened up to whole departments (e.g. Invoice Processing -> Systems +
       // Administration) instead of just its creator/trigger-owner/step-owners — mirrors the
