@@ -9840,8 +9840,7 @@ function mpAiPanel(rec){
       +'<button class="btn btn-sm btn-primary" onclick="mpJdOpen('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
       +'<button class="btn btn-sm" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-download"></i> Download</button>'
       +(rec.ai_creative_path
-        ? '<a class="btn btn-sm" target="_blank" rel="noopener" href="'+esc(rec.ai_creative_path)+'"><i class="fa-solid fa-image"></i> Creative</a>'
-          +'<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-download"></i> Creative PNG</button>'
+        ? '<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-image"></i> Creative</button>'
         : '')
       +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
       +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
@@ -10044,7 +10043,7 @@ window.mpCreativePng=async function(id){
     toast('Could not make the PNG: '+((e&&e.message)||e),'err');
   }finally{
     if(url) URL.revokeObjectURL(url);
-    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-download"></i> Creative PNG'; }
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-image"></i> Creative'; }
   }
 };
 
