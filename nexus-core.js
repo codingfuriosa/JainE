@@ -2870,6 +2870,7 @@ window.legalActionsFilter=function(){
     +'<td style="color:var(--slate)"><span class="lg-clamp" title="'+esc(r.remarks||'')+'">'+esc(r.remarks||'')+'</span></td>'
   +'</tr>').join('');
   const em=$('actEmpty'); if(em)em.style.display=list.length?'none':'';
+  usageQueueDebounced('legal.actions.view_search_filter_case_actions', q);
 };
 
 /* ---------- Advocates ----------------------------------------------------------------------- */
@@ -2930,6 +2931,7 @@ window.advFilter=function(){
     +'</td>'
   +'</tr>').join('');
   const em=$('advEmpty'); if(em)em.style.display=list.length?'none':'';
+  usageQueueDebounced('legal.advocates.search_advocates', q);
 };
 window.advModal=function(id){
   const r=(window._advRows||[]).filter(x=>String(x.id)===String(id))[0]||{};
@@ -3344,6 +3346,7 @@ window.misFilter=function(){
   // other half of what made the list flicker.
   const skipAi=parsed.openQuote || (parsed.phrases&&parsed.phrases.length);
   if(raw&&raw.length>=3&&!skipAi) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
+  usageQueueDebounced('legal.mis.search_cases_incl_ai_semantic_search', raw);
 };
 window.misAiSearch=async function(raw){
   const statusEl=$('misAiStatus');
@@ -6583,6 +6586,7 @@ window.trackerFilter=function(){
   });
   const c=$('trCount');if(c)c.textContent=vis+' entries';
   trUpdateToolbar();
+  usageQueueDebounced('hr.interview_tracker.search_filter_interviews', q);
 };
 window.trackerCreate=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-calendar-check"></i> Schedule Interview</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -7088,6 +7092,7 @@ window.inspRespFilter=function(){
   const respRow=({x,i})=>'<tr class="rowlink" onclick="inspOpenSub('+i+')"><td>'+esc(fmtDate(x.ts))+'</td><td>'+esc(x.ins)+'</td><td>'+x.loc+'</td><td>'+esc(x.cat)+'</td><td style="color:#16855a;font-weight:600">'+x.ok+'</td><td style="color:#c83232;font-weight:600">'+x.no+'</td><td style="font-weight:600">'+(x.ok+x.no)+'</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>';
   const tb=$('respTbody'); if(tb)tb.innerHTML=shown.length?shown.map(respRow).join(''):'<tr><td colspan="8"><div class="empty">No submissions match this search/filter.</div></td></tr>';
   const sub=$('respSecSub'); if(sub)sub.textContent=shown.length+' of '+INSP_SUBS.length+' submissions · click a row to open it';
+  usageQueueDebounced('inspection.responses.search_filter_submissions', q);
 };
 window.inspRespFilterClear=function(){ INSP_RESP_FILTER={q:'',work:'All'}; if(PAGE==='inspection')renderPage(); };
 function inspEditView(v,s){
@@ -7171,6 +7176,7 @@ window.inspLogFilter=function(){
   const shown=inspLogFiltered(INSP_ROWS||[]);
   const tb=$('logTbody'); if(tb)tb.innerHTML=shown.length?shown.map(inspLogRow).join(''):'<tr><td colspan="8"><div class="empty">No checks match this search/filter.</div></td></tr>';
   const sub=$('logSecSub'); if(sub)sub.textContent=shown.length+' of '+(INSP_ROWS||[]).length+' checks';
+  usageQueueDebounced('inspection.log.search_filter_inspection_log', INSP_LOG_FILTER.q);
 };
 window.inspLogFilterClear=function(){ INSP_LOG_FILTER={q:'',block:'All',cat:'All',status:'All',section:'All'}; if(PAGE==='inspection')renderPage(); };
 const PM_PROJECT_MAP={
@@ -8143,9 +8149,15 @@ function usbMetaLabel(k){
   return String(k).replace(/_/g,' ').replace(/([a-z])([A-Z])/g,'$1 $2')
     .replace(/\w\S*/g, function(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); });
 }
+// A one-time historical backfill stamped {ref:'<table>.<action>:<id>', backfill:true} onto
+// thousands of old events across nearly every feature - an internal pointer back to the row it
+// was reconstructed from, not a real captured detail (no title, no assignee, nothing a person
+// would recognise). It was never meant to be user-facing; showing it read as corrupted, garbled
+// data rather than the honest "nothing was captured for this one" that an old event actually is.
+const USB_META_INTERNAL_KEYS=['ref','backfill'];
 function usbMetaHtml(meta){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
-  const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
+  const parts=Object.keys(meta).filter(function(k){ return USB_META_INTERNAL_KEYS.indexOf(k)===-1 && meta[k]!=null && String(meta[k]).trim(); })
     .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
   return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
 }
@@ -11577,7 +11589,7 @@ window.compSetDate=function(which,val){
   }
   compPaint();
 };
-window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); };
+window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
 VIEWS.competitors=async function(v,seg){
   setCrumb(['Growth & Strategy','Competitor Ads']);
@@ -13892,6 +13904,7 @@ window.orgSetPageId=function(v){ORG_PAGE=v;ORG_PG=0;renderPage();};
 window.orgSetSort=function(v){ORG_SORT=v;ORG_PG=0;renderPage();};
 window.orgSearch=function(v){ORG_Q=v;ORG_PG=0;
   clearTimeout(window._orgQT); window._orgQT=setTimeout(function(){renderPage(); const el=document.getElementById('orgQ'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} },320);
+  usageQueueDebounced('organic.all_content.search_caption_or_page', v);
 };
 window.orgGo=function(d){ORG_PG=Math.max(0,ORG_PG+d);renderPage();};
 
@@ -16839,7 +16852,9 @@ const USAGE_MAP={
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
   accSubDel:'tasks.tasks.delete_sub_task',
-  accTaskSearch:{key:'tasks.tasks.search_tasks', meta:function(val){ return val?{query:String(val)}:null; }},
+  // accTaskSearch is NOT mapped here on purpose - it fires on every keystroke for instant
+  // filtering, and the generic wrapper logging every keystroke turned one real search into a
+  // burst of single-character fragments; it logs directly instead, debounced to the settled query.
   // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
   // view (already implied by simply landing on the tab), so only the other two are worth a feature
   // of their own; returning nothing for 'priority' means switching back to it logs no event.
@@ -16906,8 +16921,6 @@ const USAGE_MAP={
   misSave:'legal.mis.add_case', misUpdate:'legal.mis.edit_case', misDeleteSel:'legal.mis.delete_case_s',
   misSetRange:'legal.mis.filter_cases_by_hearing_date_range',
   misRangePick:'legal.mis.filter_cases_by_hearing_date_range',
-  misFilter:'legal.mis.search_cases_incl_ai_semantic_search',
-  misAiSearch:'legal.mis.search_cases_incl_ai_semantic_search',
   misActionExecute:'legal.mis.record_execute_a_case_action',
   misActionSave:'legal.mis.record_execute_a_case_action',
   misSwipeToggle:'legal.mis.mark_case_complete_reopen',
@@ -16915,9 +16928,12 @@ const USAGE_MAP={
   // misExportCauselist / misViewCauselist are NOT mapped here on purpose - they log directly,
   // after misBuildCauselist actually produces a sheet, so a click warned off for no date
   // range or no matching hearings doesn't count as a use the way the generic wrapper would.
-  legalActionsFilter:'legal.actions.view_search_filter_case_actions',
+  // misFilter / misAiSearch, legalActionsFilter, advFilter, hsFilter, trackerFilter,
+  // inspRespFilter, inspLogFilter, compSearch, orgSearch are likewise NOT mapped here - every one
+  // of them is wired to oninput for instant live filtering, and the generic wrapper logging on
+  // every keystroke turned one real search into a burst of single/two-character fragments a few
+  // milliseconds apart. Each logs directly via usageQueueDebounced, once typing actually settles.
   advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
-  advFilter:'legal.advocates.search_advocates',
   // Human Resources
   // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
@@ -16930,7 +16946,7 @@ const USAGE_MAP={
   trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
   trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
-  trackerFilter:'hr.interview_tracker.search_filter_interviews',
+  // trackerFilter is NOT mapped here - it logs directly via usageQueueDebounced.
   trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
   rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
   rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
@@ -16956,13 +16972,11 @@ const USAGE_MAP={
   // Inspection
   inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
   inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',
-  inspRespFilter:'inspection.responses.search_filter_submissions',
   inspOpenSub:'inspection.responses.open_and_edit_a_submission',
   inspEditSub:'inspection.responses.open_and_edit_a_submission',
   inspUpdateSub:'inspection.responses.update_check_status_per_item',
   inspBulkE:'inspection.responses.bulk_mark_all_checks_ok',
   inspBulk:'inspection.new_inspection.bulk_mark_all_items_ok',
-  inspLogFilter:'inspection.log.search_filter_inspection_log',
   inspPick:'inspection.new_inspection.mark_item_ok_not_ok_n_a',
   inspLevelPick:'inspection.new_inspection.select_project_block_floor_flat_work_category',
   inspOpenPhoto:'inspection.responses.add_replace_defect_photo',
@@ -16996,20 +17010,20 @@ const USAGE_MAP={
   compShowOnly:'competitors.overview.drill_into_a_single_competitor',
   compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
   compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
-  compSearch:'competitors.overview.search_ad_text_headline_or_page',
   compOpenDetail:'competitors.overview.view_ad_detail',
   // compSave and compRunSync (compSyncFiltered/compRefreshMedia) are NOT mapped here on purpose -
   // both have real validation/network failure paths and log directly, after success is actually
-  // confirmed, same as misExportCauselist/taskSave above.
+  // confirmed, same as misExportCauselist/taskSave above. compSearch is likewise unmapped - see
+  // the oninput/usageQueueDebounced note further up.
   orgSetPeriod:'organic.all_content.filter_by_date_range',
   orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetPageId:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetSort:'organic.all_content.sort_content_by_metric',
-  orgSearch:'organic.all_content.search_caption_or_page',
   orgOpen:'organic.all_content.view_post_detail'
   // orgApplyCustom is NOT mapped here on purpose - it has real validation (missing dates, From
-  // after To) and logs directly, same reason as compSave above. Scaling Up and Playbook are both
+  // after To) and logs directly, same reason as compSave above. orgSearch is likewise unmapped -
+  // see the oninput/usageQueueDebounced note further up. Scaling Up and Playbook are both
   // entirely static, hardcoded screens (no wired buttons at all) - see USAGE_VIEWS instead.
 };
 /* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
@@ -17154,6 +17168,22 @@ function usageQueue(featureKey, action, meta){
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
   else if(!USAGE_TIMER){ USAGE_TIMER=setTimeout(usageFlush, 8000); }
+}
+// For a search/filter box wired to oninput (fires on every keystroke): logging through the
+// generic USAGE_MAP wrapper turned one real search into a burst of near-duplicate events a few
+// milliseconds apart (typing "182" logged "1", "18" and "182" as three separate uses) - both
+// inflating the count wildly and flooding the Usability report's per-person Details view with
+// noise. This logs only the SETTLED value, once typing actually pauses; a fresh keystroke
+// within the delay cancels the pending log and restarts the wait, same idea as debouncing a
+// live-filter re-render, just applied to telemetry instead of the DOM. Empty/cleared input logs
+// nothing - clearing a search box is not itself a search.
+const USAGE_DEBOUNCE_T={};
+function usageQueueDebounced(featureKey, val, action, delay){
+  clearTimeout(USAGE_DEBOUNCE_T[featureKey]);
+  if(!val) return;
+  USAGE_DEBOUNCE_T[featureKey]=setTimeout(function(){
+    try{ usageQueue(featureKey, action||'search', {query:String(val)}); }catch(_e){}
+  }, delay||800);
 }
 /* A failed send used to just discard its batch — one network blip during the retry window silently
    erased that activity from the report, with nothing anywhere to show it had ever happened. A failed
