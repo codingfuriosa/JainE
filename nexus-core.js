@@ -6202,7 +6202,7 @@ async function muRenderDetail(b){
 
   const head='<tr>'
     +'<th style="width:36px"><input type="checkbox" class="mu-cb" id="muChkAll" onchange="muToggleAll(this)"></th>'
-    +'<th>Position</th><th>Vacancies</th><th>Approval</th>'
+    +'<th>Position</th><th>Vacancies</th><th>Approval</th><th>Hiring</th>'
     +stages.map(function(s,i){ return '<th class="mu-n'+(i===0?' mu-split':'')+'">'+esc(s)+'</th>'; }).join('')
     +'</tr>';
 
@@ -6226,8 +6226,10 @@ async function muRenderDetail(b){
     } else {
       appr='<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
     }
+    const open=(r.hiring_status||'Open')==='Open';
+    const cls=[st==='Pending'?'mu-fresh':'', open?'':'mu-closed'].filter(Boolean).join(' ');
     return '<tr data-id="'+r.row_id+'" data-pos="'+esc((r.position_title||'').toLowerCase())+'" data-dept="'+esc(r.department||'')+'"'
-      +(st==='Pending'?' class="mu-fresh"':'')+'>'
+      +(cls?' class="'+cls+'"':'')+'>'
       +'<td><input type="checkbox" class="mu-cb mu-row-cb" data-id="'+r.row_id+'" onchange="muRowCheck(this)"></td>'
       +'<td class="mu-pos">'+esc(r.position_title||'—')
         +'<div class="mu-sub">'+esc(r.department||'No department')
@@ -6235,6 +6237,7 @@ async function muRenderDetail(b){
         +(r.priority==='Urgent'?' · <b style="color:var(--err)">Urgent</b>':'')+'</div></td>'
       +'<td>'+esc(r.vacancies||'—')+'</td>'
       +'<td>'+appr+'</td>'
+      +'<td class="mu-hire">'+muHireCell(r,open,canAppr)+'</td>'
       +cells
       +'</tr>';
   }).join('');
@@ -6256,6 +6259,8 @@ async function muRenderDetail(b){
             +depts.map(function(d){return '<option>'+esc(d)+'</option>';}).join('')+'</select>'
           +'<select class="mu-sel" id="muApprF" onchange="muFilter()"><option value="">All</option>'
             +'<option value="Pending">To approve</option><option value="Approved">Approved</option><option value="Rejected">Rejected</option></select>'
+          +'<select class="mu-sel" id="muHireF" onchange="muFilter()"><option value="">Open and closed</option>'
+            +'<option value="Open">Still hiring</option><option value="Closed">Closed</option></select>'
           +'<span class="mu-count" id="muCount">'+rows.length+' position'+(rows.length===1?'':'s')+'</span>'
           +'<span class="mu-computed" style="margin-left:auto"><i class="fa-solid fa-circle-check"></i> Counted live from the Tracker</span>'
         +'</div>'
@@ -6265,6 +6270,49 @@ async function muRenderDetail(b){
         +'<div style="font-weight:600;color:var(--ink)">Nothing in '+esc(muMonthLabel(MU_CUR))+' yet</div>'
         +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from ManPower requisitions.</p></div>');
 }
+
+/* Closing a position is what takes its page off the website. hr.public_position only answers for
+   a requisition whose status is Open, so the moment this is closed thejaingroup.com/career/<slug>
+   stops showing the role and says it is no longer open instead. Nothing else has to be changed and
+   nothing has to be taken down by hand. */
+function muHireCell(r,open,canAppr){
+  if(!r.manpower_id) return '<span style="color:var(--slate-2)">—</span>';
+  if((r.approval_status||'Pending')!=='Approved'){
+    return '<span class="tag t-gray" title="A position is only live once it is approved">Not live</span>';
+  }
+  const live='<span class="tag t-green" title="'+esc('Live at /career/'+(r.slug||''))+'">Hiring</span>';
+  const shut='<span class="tag t-gray" title="'+esc(r.closed_at?('Closed '+muWhen(r.closed_at)):'Closed')+'">Closed</span>';
+  if(!canAppr) return open?live:shut;
+  return '<span class="mu-hire-wrap">'+(open?live:shut)
+    +'<button class="btn btn-sm" title="'+(open?'Close hiring — this takes the page off the website'
+                                              :'Reopen hiring — the page goes back up')+'"'
+    +' onclick="event.stopPropagation();muSetHiring('+r.manpower_id+','+(open?'false':'true')+')">'
+    +'<i class="fa-solid fa-'+(open?'lock':'lock-open')+'"></i></button></span>';
+}
+function muWhen(ts){
+  if(!ts) return '';
+  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return String(ts); }
+}
+window.muSetHiring=async function(manpowerId,open){
+  if(!hrCan()){ toast('Only HR can open or close a position','err'); return; }
+  const row=(MU_ROWS||[]).find(function(r){ return r.manpower_id===manpowerId; })||{};
+  const who=row.position_title||'this position';
+  const msg=open
+    ? 'Reopen hiring for “'+who+'”? Its page goes back up on the website and candidates can apply again.'
+    : 'Close hiring for “'+who+'”? Its page comes off the website immediately — anyone opening the '
+      +'link will be told the position is no longer open. Everything already recorded is kept.';
+  if(!await confirmDialog(msg, open
+      ? {title:'Reopen hiring', okLabel:'Reopen', icon:'fa-lock-open', danger:false}
+      : {title:'Close hiring',  okLabel:'Close',  icon:'fa-lock'})) return;
+  try{
+    const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:manpowerId,p_open:open});
+    if(error) throw error;
+  }catch(e){ toast((e&&e.message)||String(e),'err'); return; }
+  toast(open?'Hiring reopened — the page is live again':'Closed — the page is off the website','ok');
+  MP_RECORDS=null;
+  muRefresh();
+};
 
 window.muToggleAll=function(el){
   MU_SEL=new Set();
@@ -6294,6 +6342,7 @@ window.muFilter=function(){
   const q=(($('muQ')||{}).value||'').trim().toLowerCase();
   const dept=($('muDeptF')||{}).value||'';
   const appr=($('muApprF')||{}).value||'';
+  const hire=($('muHireF')||{}).value||'';
   let shown=0;
   document.querySelectorAll('#muTbody tr').forEach(function(tr){
     const row=(MU_ROWS||[]).find(function(r){return String(r.row_id)===tr.dataset.id;})||{};
@@ -6301,6 +6350,10 @@ window.muFilter=function(){
     if(q && (tr.dataset.pos||'').indexOf(q)===-1) ok=false;
     if(ok && dept && (tr.dataset.dept||'')!==dept) ok=false;
     if(ok && appr && (row.approval_status||'Pending')!==appr) ok=false;
+    if(ok && hire){
+      const isOpen=(row.hiring_status||'Open')==='Open';
+      if(hire==='Open' ? !isOpen : isOpen) ok=false;
+    }
     tr.style.display=ok?'':'none';
     if(ok) shown++;
   });
@@ -16869,6 +16922,7 @@ const USAGE_MAP={
   muViewMonth:'hr.monthly_update.open_a_month',
   muDeleteSel:'hr.monthly_update.remove_position_from_month',
   muApprove:'hr.monthly_update.approve_reject_requisition',
+  muSetHiring:'hr.monthly_update.close_reopen_hiring',
   muFilter:'hr.monthly_update.search_filter_positions',
   trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
   trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
