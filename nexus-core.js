@@ -9841,6 +9841,7 @@ function mpAiPanel(rec){
       +'<button class="btn btn-sm" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-download"></i> Download</button>'
       +(rec.ai_creative_path
         ? '<a class="btn btn-sm" target="_blank" rel="noopener" href="'+esc(rec.ai_creative_path)+'"><i class="fa-solid fa-image"></i> Creative</a>'
+          +'<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-download"></i> Creative PNG</button>'
         : '')
       +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
       +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
@@ -10000,6 +10001,51 @@ window.mpJdDownload=function(id){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(function(){ URL.revokeObjectURL(url); },4000);
   toast('Downloaded','ok');
+};
+
+/* The creative is stored as SVG - text stays crisp at any size and the poster can be re-rendered
+   from it - but what anybody actually posts to LinkedIn or WhatsApp is a PNG. The conversion runs
+   here rather than on the server: rasterising in Deno would mean adding an image library, whereas
+   the browser already has one.
+   The SVG is fetched as TEXT and handed back as a same-origin blob. Pointing an <img> at the
+   storage URL directly would taint the canvas and toBlob() would then be refused - the file is
+   cross-origin even though storage does send permissive CORS headers. */
+window.mpCreativePng=async function(id){
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  if(!rec||!rec.ai_creative_path){ toast('No creative generated yet','err'); return; }
+  const btn=event&&event.currentTarget;
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Building…'; }
+  let url=null;
+  try{
+    const res=await fetch(rec.ai_creative_path,{cache:'no-store'});
+    if(!res.ok) throw new Error('could not read the creative ('+res.status+')');
+    const svg=await res.text();
+    url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
+    const img=new Image();
+    await new Promise(function(ok,bad){
+      img.onload=ok;
+      img.onerror=function(){ bad(new Error('the creative would not render')); };
+      img.src=url;
+    });
+    // 1122x1402 is the artwork's own size, so this is a straight one-to-one raster, no resampling.
+    const c=document.createElement('canvas'); c.width=1122; c.height=1402;
+    const g=c.getContext('2d');
+    g.drawImage(img,0,0,c.width,c.height);
+    const blob=await new Promise(function(r){ c.toBlob(r,'image/png'); });
+    if(!blob) throw new Error('the browser would not produce a PNG');
+    const name=String(rec.job_title||'Hiring').replace(/[^A-Za-z0-9 ()-]/g,'').trim().replace(/\s+/g,'_');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=(name||'Hiring')+' - We Are Hiring.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); },4000);
+    toast('PNG downloaded','ok');
+  }catch(e){
+    toast('Could not make the PNG: '+((e&&e.message)||e),'err');
+  }finally{
+    if(url) URL.revokeObjectURL(url);
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-download"></i> Creative PNG'; }
+  }
 };
 
 /* ── Referrals ──
