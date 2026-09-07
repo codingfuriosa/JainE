@@ -19,7 +19,7 @@ STORE THE RESPONSE VERBATIM  ──→  acc.crm_snapshots.raw, never cleared
       ↓
 Normalise the STORED copy → one row per lead, one row per follow-up
       ↓
-Build the queue from the STORED copy — only follow-ups with a recording
+Build the queue from the STORED copy — pre-sales follow-ups with a recording
       ↓
 One recording at a time, in order:
       ↓
@@ -53,6 +53,8 @@ the work.
 | The QA prompt — judging only | [supabase/functions/crm-snapshot-qa/qa-prompt.ts](supabase/functions/crm-snapshot-qa/qa-prompt.ts) |
 | The six-point agent rubric | [supabase/functions/_shared/qa-rubric.ts](supabase/functions/_shared/qa-rubric.ts) |
 | Schema, normaliser, queue builder, views | [supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql](supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql) |
+| Queue builder narrowed to pre-sales | [supabase/migrations/20260905090000_transcribe_presales_calls_only.sql](supabase/migrations/20260905090000_transcribe_presales_calls_only.sql) |
+| Queue builder, current version — per-call gate only, no cross-day lead gate | [supabase/migrations/20260907090000_crm_build_queue_drop_prior_handoff_gate.sql](supabase/migrations/20260907090000_crm_build_queue_drop_prior_handoff_gate.sql) |
 | The two cron jobs | [supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql](supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql) |
 | Dashboard, lead list, lead detail | [nexus-core.js](nexus-core.js) — the `trc*` functions |
 | Page shell | [transcription.html](transcription.html) |
@@ -67,7 +69,7 @@ the work.
 | `acc.crm_followups` | follow-up | **the lead history.** Every follow-up ever seen |
 | `acc.call_transcripts` | **recording_url** | the transcript. This is the deduplication key |
 | `acc.followup_qa` | follow-up | the five assessments |
-| `acc.transcription_queue` | follow-up with a recording | FIFO state |
+| `acc.transcription_queue` | pre-sales follow-up with a recording | FIFO state |
 | `acc.followup_timeline_v` | follow-up | all of the above joined — what the UI reads |
 | `acc.daily_qa_summary_v` | day | the day's numbers, including the four mismatch counts |
 
@@ -144,6 +146,40 @@ a retry simply re-fetches.
 
 The Knowlarity link 302s to a presigned S3 URL that expires in ~600 seconds, which is exactly why the
 *Knowlarity* link is what gets stored and never the redirect target.
+
+### Only the pre-sales team's calls are transcribed
+
+`crm_build_queue` queues a recording only when `acc.crm_personnel_team(personnel_email)` puts its
+caller in **Pre-Sales** — that is, when the email is one of the nine in `acc.crm_presales_emails()`.
+A Sales Executive's call is never picked up: the QA rubric marks the pre-sales opening script,
+qualification questions and call to action, and running a sales conversation against a script it was
+never meant to follow bought a verdict nobody reads, twice billed (Gemini to transcribe, OpenAI to
+judge).
+
+Two things follow from this.
+
+**Sales calls already transcribed are left exactly as they are** — transcript, QA and all. This
+narrowed what gets picked up from here on; it deleted nothing.
+
+**A sales call is never "Waiting".** The view has no way to express "out of scope", so it reports an
+untranscribed recording as `not_transcribed`. The transcription page maps that to **Not in scope**
+(`trcTrStatus`) whenever the caller is not pre-sales, so those calls are counted on a chip of their
+own instead of sitting in the day's backlog for ever. The Sales/Pre-Sales *filter* is gone from the
+page — with the queue itself deciding, everything transcribed is pre-sales work.
+
+If the CRM ever stops sending `personnel_email` (it only started sending it on every row on
+2026-09-02), every call reads as team `NULL` and none of them would queue. That is why the function
+returns `skipped_sales` and `skipped_no_personnel` next to `queued` — a silent zero and a dead
+pipeline must not look alike.
+
+**Eligibility is decided by the decision date alone, never by an earlier day.** `crm_build_queue`
+briefly carried a second, lead-level gate (2026-09-05/06) that skipped a lead in full once its last
+call *before* the snapshot date was Sales — even a later call that was itself Pre-Sales. That gate was
+removed on 2026-09-07: a lead re-contacted by Pre-Sales after ever being handed to Sales is processed
+like any other Pre-Sales call today, with its full follow-up history transcribed alongside it. Only the
+per-call gate above remains, which is also what keeps a same-day mix correct — a lead called by
+Pre-Sales at 10:00 and by Sales at 15:00 on the same day still queues the 10:00 call on its own merits
+and drops the 15:00 one, with no lead-level rule involved either way.
 
 ### A recording is transcribed once, ever
 

@@ -2744,6 +2744,7 @@ async function legalMIS(){
 &quot;in quotes&quot;: that exact phrase, word for word.
 priority is empty / court is high court: search one column.">
         </div>
+        <button class="btn" onclick="misViewCauselist()" title="View the causelist for the selected date range in a new tab"><i class="fa-solid fa-eye"></i> View</button>
         <button class="btn" onclick="misExportCauselist()" title="Export the causelist for the selected date range"><i class="fa-solid fa-file-arrow-down"></i> Causelist</button>
         <span class="mis-count" id="misAiStatus"></span>
       </div>
@@ -3045,18 +3046,22 @@ async function legalScoreboard(){
    SL NO. | CASE TYPE | CASE DETAILS | CASE NO. | DATE | Advocate incharge | Court Name |
    STATUS | ACTION NEEDED.
    A causelist covers a period, so it refuses to run until a date range is chosen. */
-window.misExportCauselist=function(){
+// Shared by View and Export - both need the identical sheet, one just renders it in a new
+// tab instead of triggering a download. Returns null (having already shown its own warning
+// toast) on every validation failure, so a caller never has to duplicate those checks, and
+// a usage event only ever gets logged where a real sheet actually came out the other end.
+function misBuildCauselist(){
   let win=misRangeDates();
   if(!win && MIS_RANGE==='custom'){
     toast('Pick both a From and a To date before exporting the causelist','warn');
     const sel=document.querySelector('#misRangeMenu .mis-range-btn');
     if(sel){ sel.focus(); sel.style.borderColor='var(--err)';
       setTimeout(function(){ sel.style.borderColor=''; },1800); }
-    return;
+    return null;
   }
   const rows=(window._misRows||[]).filter(misInRangeDated)
     .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
-  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return; }
+  if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return null; }
 
   // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
   // out of that file: doc name "CAUSTLIST" top-left, sheet tab name top-right, page number,
@@ -3133,17 +3138,37 @@ window.misExportCauselist=function(){
    +'</tbody></table>'
    +'</div></body></html>';
 
-  // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
-  // laid out exactly as here — print it from the browser's own File > Print when needed.
-  const name='CAUSTLIST - '+tabName+'.html';
+  return {html:html, tabName:tabName, rows:rows};
+}
+// Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
+// laid out exactly as it renders here — print it from the browser's own File > Print when needed.
+window.misExportCauselist=function(){
+  const built=misBuildCauselist();
+  if(!built) return;   // misBuildCauselist already toasted why
+  const rows=built.rows;
   try{
-    const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
+    const url=URL.createObjectURL(new Blob([built.html],{type:'text/html;charset=utf-8'}));
     const a=document.createElement('a');
-    a.href=url; a.download=name; a.style.display='none';
+    a.href=url; a.download='CAUSTLIST - '+built.tabName+'.html'; a.style.display='none';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },1500);
   }catch(e){ toast('Could not export the causelist: '+((e&&e.message)||e),'err'); return; }
   toast('Causelist exported — '+rows.length+' matter'+(rows.length===1?'':'s'),'ok');
+  // Logged here, after the download has actually fired, rather than left to the generic
+  // USAGE_MAP wrapper - that would have counted a click that was warned off by
+  // misBuildCauselist (no date range, or nothing in range) as a use just the same as a real
+  // export, which is exactly the bug that made "1 use" unverifiable as a real success.
+  try{ usageQueue('legal.mis.export_causelist','export'); }catch(_e){}
+};
+// View is the same sheet, opened for on-screen reading instead of forced onto disk - the
+// causelist-format equivalent of every other module's Preview/Download pair.
+window.misViewCauselist=function(){
+  const built=misBuildCauselist();
+  if(!built) return;
+  const w=window.open('', '_blank');
+  if(!w){ toast('Could not open a new tab — check your browser’s pop-up blocker','warn'); return; }
+  w.document.open(); w.document.write(built.html); w.document.close();
+  try{ usageQueue('legal.mis.view_causelist','view'); }catch(_e){}
 };
 
 window.misRowCheck=function(cb){
@@ -4091,12 +4116,23 @@ window.taskSave=async function(kind){
   const btn=$('tkSave');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
   const {data,error}=await sb.schema('acc').from('tasks').insert(row).select().single();
   if(error){toast(error.message,'err');btn.disabled=false;return;}
-  // Logged directly, after the row actually exists, rather than through USAGE_MAP - the title only
-  // exists as a value read off the form here, which a generic wrapper around this function could
-  // never see. On success only, so a failed save (bad due date, no permission) is never counted as
-  // a task that was created.
-  try{ usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create',
-    {title:title, assignee:isDel?(nameOf(row.assigned_to)||row.assigned_to):undefined}); }catch(_e){}
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - these values
+  // only exist as read off the form here, which a generic wrapper around this function could never
+  // see. On success only, so a failed save (bad due date, no permission) is never counted as a task
+  // that was created. Deliberately the FULL picture of what was created, not just the title - who
+  // it's for, when it's due, and a plain-text (HTML stripped) excerpt of the description - so the
+  // Usability report's Details column reads as a real record of the task, not just a name.
+  try{
+    const descText=String(desc||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();
+    const assignees=isDel ? (nameOf(row.assigned_to)||row.assigned_to)
+                           : [row.owner].concat(mem).filter(Boolean).map(function(e){return nameOf(e)||e;}).join(', ');
+    usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create', {
+      title:title,
+      assignee:assignees||undefined,
+      due_date:row.due_date||undefined,
+      description:descText?(descText.length>140?descText.slice(0,140)+'…':descText):undefined
+    });
+  }catch(_e){}
   if(!isDel&&mem.length)await sb.schema('acc').from('task_members').insert(mem.map(e=>({task_id:data.id,email:e})));
   if(projectId||goalId)await syncParentMembership(projectId,goalId,[row.owner,...mem]);
   if(projectId)await insertDelegationEdges(data.id,state.email,[row.owner,...mem]);
@@ -5877,9 +5913,14 @@ window.hdSend=async function(){
     const notSetUp=d.answer&&/not configured/i.test(d.answer);
     const md=notSetUp?(hdAnswer(q)||d.answer):(d.answer||'I could not work that out.');
     HD_MSGS.push({who:'bot', md:md, tools:d.tools_used||[], offerTicket:true});
+    // Logged directly, after the assistant actually answered, rather than through USAGE_MAP - a
+    // click here can genuinely fail (network error reaching helpdesk-ai), so the generic wrapper
+    // would have counted a failed round-trip as a real answer.
+    try{usageQueue('helpdesk.assistant.ask_a_question','search',{query:q});}catch(_e){}
   }catch(e){
     HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
     HD_MSGS.push({who:'bot', md:hdAnswer(q)||'I could not reach the assistant just now. Please try again in a moment.', offerTicket:true});
+    try{usageQueue('helpdesk.assistant.ask_a_question','error');}catch(_e){}
   }
   inp.disabled=false; if(btn)btn.disabled=false;
   try{inp.focus();}catch(_e){}
@@ -5915,11 +5956,15 @@ window.hdDocSearch=async function(){
     '</tbody></table>';
 }
 window.hdTicketSave=async function(){
+  // Logged directly, after the ticket actually exists, rather than through USAGE_MAP - real
+  // validation (empty subject/description) and a DB insert that can genuinely error both silently
+  // stop this, which a generic wrapper would have counted as a raised ticket either way.
   const subject=$('hdSub').value.trim(),category=$('hdDept').value,message=$('hdMsg').value.trim();
-  if(!subject||!message){toast('Add a subject and a description','err');return;}
+  if(!subject||!message){toast('Add a subject and a description','err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}return;}
   const btn=$('hdSubmitBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';}
   const {error}=await sb.schema('acc').from('helpdesk_tickets').insert({subject,category,message,status:'Open',raised_by:state.email,assigned_dept:category});
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}return;}
+  if(error){toast(error.message,'err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}return;}
+  try{usageQueue('helpdesk.tickets.raise_a_ticket','create',{subject:subject,category:category});}catch(_e){}
   // email the support inbox via Web3Forms (no backend needed)
   try{
     await fetch('https://api.web3forms.com/submit',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
@@ -7617,7 +7662,11 @@ function mTabs(id,tabs,ti){return '<div class="tabs">'+tabs.map((t,i)=>'<div cla
 function mKpis(arr){return '<div class="grid kpis" style="grid-template-columns:repeat('+arr.length+',1fr)">'+arr.map(k=>'<div class="kpi"><div class="lbl" style="margin-bottom:7px">'+esc(k[0])+'</div><div class="val">'+esc(k[1])+'</div><div style="font-size:12px;color:'+(k[3]||'var(--slate)')+';margin-top:3px">'+esc(k[2]||'')+'</div></div>').join('')+'</div>';}
 function mStep(steps,active){const ai=steps.indexOf(active);return '<div class="mstep">'+steps.map((s,i)=>'<span class="mstep-i'+(s===active?' on':(i<ai?' done':''))+'">'+esc(s)+'</span>'+(i<steps.length-1?'<span class="mstep-a">→</span>':'')).join('')+'</div>';}
 function mFunnel(items){const max=Math.max.apply(null,items.map(x=>x[1]));return '<div class="mfunnel">'+items.map(x=>'<div class="mfunnel-r"><div class="mfunnel-bar" style="width:'+Math.max(20,Math.round(x[1]/max*100))+'%">'+esc(x[0])+'</div><span class="mfunnel-v">'+x[1]+'</span></div>').join('')+'</div>';}
-function mTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+(String(c).slice(0,5)==='<span'?c:esc(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
+// A cell starting with '<' is already-built HTML from the caller (a status pill, a clickable
+// vendor link) and must pass through as-is; everything else is a plain value and gets escaped.
+// Used to only recognise '<span' pills - Vendor Trends' clickable '<a ...>' vendor names fell
+// through that narrower check and rendered as literal, visible markup instead of a link.
+function mTable(cols,rows){return '<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto"><table class="tbl"><thead><tr>'+cols.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+(String(c).charAt(0)==='<'?c:esc(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div>';}
 function mCard(title,inner){return '<div class="card card-pad"><div class="sec-title" style="margin:0 0 12px">'+esc(title)+'</div>'+inner+'</div>';}
 function mHead(icon,color,title){return '<div class="page-head"><div><h1><i class="fa-solid '+icon+'" style="color:'+color+'"></i> '+esc(title)+'</h1></div></div>';}
 function mTab(seg,n){let t=parseInt(seg&&seg[0]);return (isNaN(t)||t<0||t>=n)?0:t;}
@@ -7694,12 +7743,22 @@ const USB_CSS='<style id="usbCss">'
   +'.usb-user-name{color:var(--ink)}'
   +'.usb-user-meta{color:var(--slate);white-space:nowrap}'
   +'</style>';
-/* Grouped by department (a person's first listed one) rather than one flat A-Z list of everyone in
-   the company — with dozens of names, "who's Reception again?" was the whole problem. Anyone with no
-   department lands in one "Unassigned" group at the end, never mixed silently into the rest. */
+/* Linked to the Department filter: once a department is picked, Person narrows down to just that
+   department's people — a flat A-Z list, since grouping by department would be pointless when
+   there is only one. With no department picked it falls back to one flat list grouped by
+   department (a person's first listed one) rather than one A-Z list of the whole company — with
+   dozens of names, "who's Reception again?" was the whole problem. Anyone with no department lands
+   in one "Unassigned" group at the end, never mixed silently into the rest. */
 function usbPersonOptionsHtml(){
+  const people=(USB.people||[]).filter(function(p){
+    return !USB.dept || (Array.isArray(p.depts) && p.depts.indexOf(USB.dept)!==-1);
+  });
+  if(USB.dept){
+    return people.slice().sort(function(a,b){return String(a.name||a.email).localeCompare(String(b.name||b.email));})
+      .map(function(p){ return '<option value="'+esc(p.email)+'"'+(USB.email===p.email?' selected':'')+'>'+esc(p.name||p.email)+'</option>'; }).join('');
+  }
   const byDept={};
-  (USB.people||[]).forEach(function(p){
+  people.forEach(function(p){
     const dept=(Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'Unassigned';
     (byDept[dept]=byDept[dept]||[]).push(p);
   });
@@ -7757,7 +7816,7 @@ function usbControlsHtml(){
       +'</select></div>'
     +'<div class="usb-f"><label for="usbPerson">Person</label>'
       +'<select class="sel" id="usbPerson" onchange="usbSetPerson(this.value)" style="min-width:220px">'
-        +'<option value="">Everyone</option>'
+        +'<option value="">'+(USB.dept?'Everyone in '+esc(USB.dept):'Everyone')+'</option>'
         +usbPersonOptionsHtml()
       +'</select></div>'
     +'<div class="usb-range"><i class="fa-regular fa-calendar"></i> '+esc(fmtDate(r.from))+' &rarr; '+esc(fmtDate(r.to))+'</div>'
@@ -7774,11 +7833,25 @@ window.usbSetPreset=function(v){
   USB.preset=v; renderPage();
 };
 window.usbSetCustom=function(){ const f=$('usbFrom'),t=$('usbTo'); if(f&&t&&f.value&&t.value){ USB.from=f.value; USB.to=t.value; USB.preset='custom'; renderPage(); } };
-// Person and Department are mutually exclusive views of the same numbers, not two filters that
-// stack — "Sales, but only Priya" is a person filter, not a department one, so picking either
-// clears the other rather than silently AND-ing two dropdowns together into an empty report.
-window.usbSetPerson=function(v){ USB.email=v||''; if(v)USB.dept=''; renderPage(); };
-window.usbSetDept=function(v){ USB.dept=v||''; if(v)USB.email=''; renderPage(); };
+// Person is linked to Department, not a separate filter beside it: picking someone fills in their
+// own department too (so the two never disagree), and picking a department narrows the Person list
+// down to that department's people, dropping whoever was picked if they no longer belong to it.
+window.usbSetPerson=function(v){
+  USB.email=v||'';
+  if(v){
+    const p=(USB.people||[]).find(function(x){return x.email===v;});
+    USB.dept=(p&&Array.isArray(p.depts)&&p.depts.length)?p.depts[0]:'';
+  }
+  renderPage();
+};
+window.usbSetDept=function(v){
+  USB.dept=v||'';
+  if(v && USB.email){
+    const p=(USB.people||[]).find(function(x){return x.email===USB.email;});
+    if(!(p&&Array.isArray(p.depts)&&p.depts.indexOf(v)!==-1)) USB.email='';
+  }
+  renderPage();
+};
 /* ---- Extract to Excel -------------------------------------------------------------------
    A real .xlsx, not a CSV renamed - so it opens with the header frozen and filterable, the counts
    as numbers that actually sum, the date as a date, and each feature's activity in the same colour
@@ -8056,10 +8129,17 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
 // "Customized per feature" without a hand-written renderer per feature: what shows up here is
 // whatever that feature chose to capture (a task's title, a search query, who a claim went to) -
 // features that capture nothing yet just show a dash, same as before this existed.
+// snake_case/camelCase key -> "Title Case" label, e.g. due_date -> "Due Date". Meta keys are
+// written by whichever feature captured them, so this has to cope with either naming style
+// rather than assume one - a raw "Due_date:" or "dueDate:" reads as unfinished, not "nice".
+function usbMetaLabel(k){
+  return String(k).replace(/_/g,' ').replace(/([a-z])([A-Z])/g,'$1 $2')
+    .replace(/\w\S*/g, function(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); });
+}
 function usbMetaHtml(meta){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
   const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
-    .map(function(k){ return '<b style="font-weight:600">'+esc(k.charAt(0).toUpperCase()+k.slice(1))+':</b> '+esc(String(meta[k])); });
+    .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
   return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
 }
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
@@ -11426,18 +11506,24 @@ window.compEditModal=function(id){
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave('+w.id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
 };
 window.compSave=async function(id){
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - compSave
+  // both adds and edits, has real validation that can silently stop it (no name, an unparseable
+  // Page ID), and a DB call that can genuinely error, so a generic wrapper would have counted a
+  // rejected click the same as a real save.
+  const fk=id?'competitors.overview.edit_competitor':'competitors.overview.add_competitor';
   const name=(($('compName')&&$('compName').value)||'').trim();
   const term=(($('compSearchTerm')&&$('compSearchTerm').value)||'').trim()||name;
   const raw=(($('compPageId')&&$('compPageId').value)||'').trim();
   const pageId=compPageIdFrom(raw);
-  if(!name){toast('Enter a name','err');return;}
-  if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');return;}
+  if(!name){toast('Enter a name','err');try{usageQueue(fk,'error');}catch(_e){}return;}
+  if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');try{usageQueue(fk,'error');}catch(_e){}return;}
   const row={name:name,search_term:term,page_id:pageId||null};
   const {error}=id
     ? await sb.schema('camp').from('competitor_watchlist').update(row).eq('id',id)
     : await sb.schema('camp').from('competitor_watchlist').insert(row);
-  if(error){toast(error.message,'err');return;}
+  if(error){toast(error.message,'err');try{usageQueue(fk,'error');}catch(_e){}return;}
   closeModal();toast(id?'Competitor updated':'Competitor added','ok');
+  try{usageQueue(fk,id?'update':'create');}catch(_e){}
   await compRender();
 };
 window.compToggleActive=async function(id,active){
@@ -11450,7 +11536,10 @@ window.compRemove=async function(id){
   toast('Removed','ok');
   await compRender();
 };
-async function compRunSync(payload,btn,busyLabel,idleLabel){
+// featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
+// than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
+// rows skipped), so the generic wrapper would have counted a failed sync as a real one.
+async function compRunSync(payload,btn,busyLabel,idleLabel,featureKey){
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'');}
   try{
     const {data:{session}}=await sb.auth.getSession();
@@ -11459,8 +11548,8 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
       body:JSON.stringify(payload)});
     const jr=await res.json().catch(function(){return {};});
-    if(jr.error)toast(jr.error,'err');
-    else if(jr.skipped)toast(jr.message||'Sync skipped','err');
+    if(jr.error){toast(jr.error,'err'); try{usageQueue(featureKey,'error');}catch(_e){}}
+    else if(jr.skipped){toast(jr.message||'Sync skipped','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
     else {
       // Mark this selection as fetched so the grid is allowed to appear.
       window._compFetched[String(payload.watchlist_id!=null?payload.watchlist_id:'all')]=true;
@@ -11469,8 +11558,9 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
       if(jr.replaced) bits.push(jr.replaced+' replaced');
       if(jr.skippedWrongPage) bits.push(jr.skippedWrongPage+' from other pages ignored');
       toast('Fetched — '+bits.join(' · '),'ok');
+      try{usageQueue(featureKey,'update');}catch(_e){}
     }
-  }catch(e){toast('Fetch failed','err');}
+  }catch(e){toast('Fetch failed','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
   if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
   await compRender();
 }
@@ -11479,7 +11569,7 @@ window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); 
 // Meta has no carousel filter - so it asks for all media and the grid narrows it afterwards.
 window.compSyncFiltered=function(){
   const win=compRangeDates();
-  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); return; }
+  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); try{usageQueue('competitors.overview.fetch_ads_from_meta_ad_library','error');}catch(_e){} return; }
   const payload={
     active_status:COMP_F.status,
     media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
@@ -11487,7 +11577,7 @@ window.compSyncFiltered=function(){
     date_to:win?win.to:undefined
   };
   if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
-  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta');
+  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta','competitors.overview.fetch_ads_from_meta_ad_library');
 };
 // Same fetch, but it also re-downloads media for ads already held that have no preview image yet.
 window.compRefreshMedia=function(){
@@ -11496,7 +11586,7 @@ window.compRefreshMedia=function(){
     media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
     date_from:win?win.from:undefined, date_to:win?win.to:undefined};
   if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
-  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews');
+  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews');
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
@@ -13374,11 +13464,14 @@ window.orgSetPeriod=function(p){
   if(p==='custom'){ if(!ORG_SINCE||!ORG_UNTIL){ const r=orgRange(); const t=new Date(); ORG_UNTIL=orgDay(t); ORG_SINCE=orgDay(orgAdd(t,-27)); } renderPage(); return; }
   ORG_OPEN=false; renderPage();
 };
+// Logged directly rather than through USAGE_MAP - unlike orgSetPeriod's presets, this has real
+// validation (missing dates, From after To) that can silently stop it without applying anything.
 window.orgApplyCustom=function(){
   const a=document.getElementById('orgFrom'), b=document.getElementById('orgTo');
-  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); return; }
-  if(a.value>b.value){ toast('The From date must come before the To date','warn'); return; }
+  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
+  if(a.value>b.value){ toast('The From date must come before the To date','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
   ORG_SINCE=a.value; ORG_UNTIL=b.value; ORG_PERIOD='custom'; ORG_OPEN=false; ORG_PG=0; renderPage();
+  try{usageQueue('organic.all_content.filter_by_date_range','update');}catch(_e){}
 };
 window.orgSetNet=function(n){ORG_NET=n;ORG_PG=0;renderPage();};
 window.orgSetKind=function(k){ORG_KIND=k;ORG_PG=0;renderPage();};
@@ -14312,15 +14405,30 @@ const TRC_TR_META = {
   non_transcribable: {label:'No conversation',  tag:'t-gray',  icon:'fa-volume-xmark'},
   failed:            {label:'Transcription failed', tag:'t-red', icon:'fa-circle-exclamation'},
   not_transcribed:   {label:'Waiting',          tag:'t-amber', icon:'fa-clock'},
-  no_recording:      {label:'No recording',     tag:'t-gray',  icon:'fa-phone-slash'}
+  no_recording:      {label:'No recording',     tag:'t-gray',  icon:'fa-phone-slash'},
+  out_of_scope:      {label:'Not in scope',     tag:'t-gray',  icon:'fa-user-slash'}
 };
+
+/* ONLY THE PRE-SALES TEAM'S CALLS ARE TRANSCRIBED - crm_build_queue queues a recording only when
+   acc.crm_personnel_team() puts its caller in Pre-Sales, so a Sales Executive's call is never picked
+   up at all. The view has no way to say that: it sees a recording with no transcript and reports
+   'not_transcribed', which this page draws as an amber "Waiting". It is not waiting for anything and
+   never will be, so it would sit in the day's backlog for ever and make every day look unfinished.
+   Out of scope is what it actually is, and it is counted separately from the real backlog.
+   A Sales call transcribed BEFORE the queue was narrowed keeps its own status - those are left
+   exactly as they are, transcript, QA and all. */
+function trcTrStatus(r){
+  if(!r)return '';
+  const st=String(r.transcription_status||'');
+  return (st==='not_transcribed'&&String(r.personnel_team||'')!=='Pre-Sales') ? 'out_of_scope' : st;
+}
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 
 function trcTag(cls, icon, label){
   return '<span class="tag '+cls+'">'+(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
 }
 function trcTrTag(r){
-  const m = TRC_TR_META[String(r&&r.transcription_status||'')];
+  const m = TRC_TR_META[trcTrStatus(r)];
   return m ? trcTag(m.tag,m.icon,m.label) : trcTag('t-gray','','—');
 }
 function trcMismatchTag(r){
@@ -14349,7 +14457,10 @@ function trcWall(v, withTime){
    Previous day - the day whose calls actually finished processing overnight - rather than All time,
    so opening the page does not mean scrolling past months of history first. ---- */
 let TRC_ROWS=null;
-const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',team:'all'};
+/* Which window TRC_ROWS was actually fetched for ('from|to', '' meaning All time) - so a filter
+   change knows whether the cache still answers it or a fresh, still-scoped fetch is needed. */
+let TRC_ROWS_RANGE=null;
+const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
 /* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
    recently opened from this list, so coming back from its detail page (the in-app Back button, or
    the browser's own back button - both re-run trcView the same way) highlights and scrolls to the
@@ -14381,25 +14492,43 @@ function trcIsRegression(r){
 
 /* The list never asks for transcripts. A day of calls is a few hundred rows and every one of them
    carries its full turn-by-turn transcript plus five QA blobs - fetching those to render a table of
-   names is megabytes for nothing. The detail view asks for `*` on one lead. */
+   names is megabytes for nothing. The detail view asks for `*` on one lead.
+
+   IT ALSO USED TO ASK FOR EVERY FOLLOW-UP EVER SEEN, every time this page opened, regardless of the
+   date filter on screen - the whole point was that changing the filter afterwards could stay client
+   side and instant. That table only grows (nothing is ever pruned, by design), so the page got
+   slower to open every day whether or not anyone was looking at more than yesterday.
+
+   A later revision widened this to fetch each windowed lead's FULL history (not just the window),
+   because trcLeadRowGate judged a row against the lead's own earlier days. That gate is gone - the
+   business rule is now decided by the decision date alone, never by an earlier day - and nothing else
+   here reads a lead's history outside the window (the lead detail page runs its own dedicated query
+   for one lead_id). So this goes back to a single, directly date-filtered fetch: cost scales with the
+   window's own row count, not with any lead's lifetime history.
+   "All time" (both dates cleared) does the original full fetch - that is a real request for
+   everything, not the default. */
 async function trcFetch(force){
-  if(TRC_ROWS&&!force)return TRC_ROWS;
+  const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
+  if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
   const PAGE=1000;let out=[],from=0;
   try{
     for(;;){
-      const {data,error}=await sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
+      let q=sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
         .order('call_date',{ascending:false,nullsFirst:false})
         .order('communication_time',{ascending:false,nullsFirst:false})
         .order('follow_up_id',{ascending:false})
         .range(from,from+PAGE-1);
+      if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+      if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+      const {data,error}=await q;
       if(error)throw error;
       const batch=data||[];out=out.concat(batch);
       if(batch.length<PAGE)break;
       from+=PAGE;if(from>50000)break;
     }
-    TRC_ROWS=out;
+    TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;
   }catch(e){
-    TRC_ROWS=out.length?out:[];
+    TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
   }
   return TRC_ROWS;
@@ -14409,20 +14538,26 @@ function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
 }
 
+/* There used to be a lead-level gate here mirroring crm_build_queue's: a call was dropped whenever the
+   LEAD'S OWN LAST CALL FROM AN EARLIER DAY was confirmed Sales, even a call that was itself Pre-Sales.
+   That rule is gone from crm_build_queue - eligibility is decided by the decision date alone, never by
+   an earlier day - so this side dropped the matching gate too, to keep the queue and the screen from
+   disagreeing. Nothing here still needs a lead's history beyond the selected window (see trcFetch). */
+
 /* Every filter, applied together. skipCards lifts the two card filters so the four totals stay put
    while one of them is selected - clicking Mismatch must not collapse Transcribed to the mismatches. */
 function trcApply(rows,skipCards){
   const q=String(TRC_F.q||'').trim().toLowerCase();
-  return (rows||[]).filter(function(r){
+  const all=rows||[];
+  return all.filter(function(r){
     const d=trcRowDate(r);
     if(TRC_F.from&&(!d||d<TRC_F.from))return false;
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
     if(TRC_F.crm!=='all'&&String(r.crm_status||'')!==TRC_F.crm)return false;
     if(TRC_F.bu!=='all'&&String(r.business_unit_name||'')!==TRC_F.bu)return false;
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'')!==TRC_F.personnel)return false;
-    if(TRC_F.team!=='all'&&String(r.personnel_team||'')!==TRC_F.team)return false;
     if(!skipCards){
-      if(TRC_F.proc!=='all'&&String(r.transcription_status||'')!==TRC_F.proc)return false;
+      if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
       if(TRC_F.match==='MISMATCH'&&r.status_match!==false)return false;
       if(TRC_F.match==='NONE'&&r.status_match!==null&&r.status_match!==undefined)return false;
@@ -14495,7 +14630,7 @@ function trcChrono(a,b){
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
-  const n=function(st){return rows.filter(function(r){return r.transcription_status===st;}).length;};
+  const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
   const leadCount=new Set(rows.map(function(r){return r.lead_id;})).size;
   const cards=[
     ['Total Calls',rows.length,'follow-ups in '+leadCount+' lead'+(leadCount===1?'':'s'),'var(--slate)','all','proc'],
@@ -14507,7 +14642,8 @@ function trcKpiHtml(rows){
     ['Waiting','not_transcribed',n('not_transcribed'),'fa-clock'],
     ['No recording','no_recording',n('no_recording'),'fa-phone-slash'],
     ['No conversation','non_transcribable',n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',n('failed'),'fa-circle-exclamation']
+    ['Failed','failed',n('failed'),'fa-circle-exclamation'],
+    ['Not in scope','out_of_scope',n('out_of_scope'),'fa-user-slash']
   ];
   const assessed=rows.filter(function(r){return r.qa_id;}).length;
   const reused=rows.filter(function(r){return r.reused_transcription;}).length;
@@ -14590,7 +14726,11 @@ function trcDateBar(){
     +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onchange="trcSetRange((document.getElementById(\'trcFrom\').value||this.value||null),this.value||null)" style="padding:5px 8px">'
   +'</div>';
 }
-window.trcSetRange=function(f,t){TRC_F.from=f||null;TRC_F.to=t||null;trcRender(true);};
+window.trcSetRange=async function(f,t){
+  TRC_F.from=f||null;TRC_F.to=t||null;
+  const b=$('trcRows');if(b)b.innerHTML='<tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr>';
+  await trcFetch(false);trcRender(true);
+};
 
 function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
@@ -14599,7 +14739,7 @@ function trcFilterBar(all){
   const seenP={};
   const personnelValues=(all||[]).reduce(function(out,r){
     const email=r.personnel_email;
-    if(!email||seenP[email])return out;
+    if(!email||seenP[email]||String(r.personnel_team||'')!=='Pre-Sales')return out;
     seenP[email]=1;out.push({email:email,name:r.personnel_name||email});return out;
   },[]).sort(function(a,b){return a.name.localeCompare(b.name);});
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
@@ -14618,11 +14758,6 @@ function trcFilterBar(all){
       +opt('all','All business units',TRC_F.bu)
       +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
-    +'<select onchange="trcSet(\'team\',this.value)" style="padding:6px 8px">'
-      +opt('all','All teams',TRC_F.team)
-      +opt('Sales','Sales',TRC_F.team)
-      +opt('Pre-Sales','Pre-Sales',TRC_F.team)
-    +'</select>'
     +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
       +opt('all','All personnel',TRC_F.personnel)
       +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
@@ -14638,10 +14773,12 @@ window.trcSet=function(k,v){
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
-window.trcClear=function(){
+window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';TRC_F.team='all';
-  TRC_F.q='';TRC_F.from=null;TRC_F.to=null;trcRender(true);
+  TRC_F.personnel='all';
+  TRC_F.q='';TRC_F.from=null;TRC_F.to=null;
+  const b=$('trcRows');if(b)b.innerHTML='<tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr>';
+  await trcFetch(false);trcRender(true);
 };
 window.trcRefresh=async function(){await trcFetch(true);trcRender(true);};
 
@@ -14979,7 +15116,7 @@ function trcCallHtml(r,i,total){
 
   const proc='<div class="card card-pad" style="margin:0">'
     +'<div style="font-size:12.5px;font-weight:700;margin-bottom:6px"><i class="fa-solid fa-gears" style="color:#0d9488"></i> How it was processed</div>'
-    +trcKV('Transcription',(TRC_TR_META[String(r.transcription_status||'')]||{}).label||r.transcription_status)
+    +trcKV('Transcription',(TRC_TR_META[trcTrStatus(r)]||{}).label||r.transcription_status)
     +trcKV('Queue state',r.queue_status)
     +trcKV('Transcription model',r.transcription_model)
     +trcKV('QA model',r.qa_model)
@@ -16356,7 +16493,10 @@ const USAGE_MAP={
   misActionExecute:'legal.mis.record_execute_a_case_action',
   misActionSave:'legal.mis.record_execute_a_case_action',
   misSwipeToggle:'legal.mis.mark_case_complete_reopen',
-  misDocsPick:'legal.mis.upload_documents_for_a_case', misExportCauselist:'legal.mis.export_causelist',
+  misDocsPick:'legal.mis.upload_documents_for_a_case',
+  // misExportCauselist / misViewCauselist are NOT mapped here on purpose - they log directly,
+  // after misBuildCauselist actually produces a sheet, so a click warned off for no date
+  // range or no matching hearings doesn't count as a use the way the generic wrapper would.
   legalActionsFilter:'legal.actions.view_search_filter_case_actions',
   advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
   advFilter:'legal.advocates.search_advocates',
@@ -16415,7 +16555,35 @@ const USAGE_MAP={
   psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
   psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
   psaDownloadOne:'postsales.adhoc.download_a_document',
-  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip'
+  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip',
+  // Procurement / Projects / Construction — previously untracked
+  procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
+  procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
+  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit', vtFilterVendors:'procurement.vendor_trends.search_filter_vendors',
+  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history',
+  // Finance / Compliance / Documents / Video — previously untracked
+  docPickCat:'documents.department_library.browse_filter_by_category_folder',
+  // Competitors / Organic / Scaling / Playbook — previously untracked
+  compToggleActive:'competitors.overview.toggle_auto_sync_for_a_competitor',
+  compRemove:'competitors.overview.remove_competitor',
+  compShowOnly:'competitors.overview.drill_into_a_single_competitor',
+  compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
+  compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
+  compSearch:'competitors.overview.search_ad_text_headline_or_page',
+  compOpenDetail:'competitors.overview.view_ad_detail',
+  // compSave and compRunSync (compSyncFiltered/compRefreshMedia) are NOT mapped here on purpose -
+  // both have real validation/network failure paths and log directly, after success is actually
+  // confirmed, same as misExportCauselist/taskSave above.
+  orgSetPeriod:'organic.all_content.filter_by_date_range',
+  orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
+  orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
+  orgSetPageId:'organic.all_content.filter_by_network_content_type_or_page',
+  orgSetSort:'organic.all_content.sort_content_by_metric',
+  orgSearch:'organic.all_content.search_caption_or_page',
+  orgOpen:'organic.all_content.view_post_detail'
+  // orgApplyCustom is NOT mapped here on purpose - it has real validation (missing dates, From
+  // after To) and logs directly, same reason as compSave above. Scaling Up and Playbook are both
+  // entirely static, hardcoded screens (no wired buttons at all) - see USAGE_VIEWS instead.
 };
 /* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
    speed-test tables. Wrapping buttons can never catch those: there is no button, the act is opening
@@ -16437,7 +16605,77 @@ const USAGE_VIEWS={
   // Console is Inspection's default landing tab, reached with NO segment in the hash at all
   // (inspGo builds a bare '#/inspection' for it) - usageViewTick's own fallback for "no segment"
   // is the string '0', not the tab's name, so the key has to be '0' to ever actually match.
-  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns'
+  'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns',
+  // Procurement / Projects / Construction — previously untracked
+  'procurement/4':       'procurement.vendor_trends.view_spend_kpis_trend_charts',
+  'projects/0':          'projects.overview.view_ongoing_sold_out_projects_gallery',
+  // Finance / Compliance / Documents / Video — previously untracked
+  'finance/0':           'finance.overview.view_collections_payables_cash_summary',
+  'compliance/0':        'compliance.compliance_calendar.view_statutory_contractual_due_dates',
+  'compliance/1':        'compliance.licences_repository.view_licences_registrations_expiry_status',
+  'compliance/2':        'compliance.warranties_guarantees.view_amc_warranty_expiry_status',
+  'documents/0':         'documents.libraries.view_department_galleries_pinned_recent',
+  'documents/dept':      'documents.department_library.view_department_library',
+  'documents/all':       'documents.all_documents.view_all_documents_across_departments',
+  'documents/search':    'documents.search.view_document_search_results',
+  'video/0':             'video.all_videos.view_all_videos_grid',
+  'video/1':             'video.training.view_training_videos',
+  'video/2':             'video.youtube.view_youtube_videos',
+  'video/3':             'video.walkthrough.view_walkthrough_videos',
+  // Competitors / Organic / Scaling / Playbook — previously untracked
+  'competitors/0':       'competitors.overview.view_competitor_watchlist_and_stored_ads',
+  'organic/0':           'organic.overview.view_engagement_overview_by_type_and_page',
+  'organic/1':           'organic.all_content.view_all_posts_and_reels_list',
+  'organic/2':           'organic.top_performers.view_top_20_posts_by_engagement',
+  // Scaling Up and Playbook are entirely static, hardcoded screens (no wired buttons anywhere -
+  // the "pills" and search box on Playbook's All plays tab carry no onclick/oninput at all), so
+  // opening each tab is the only distinguishable action there is.
+  'scaling/0':           'scaling.strategy_opsp.view_purpose_values_bhag_targets',
+  'scaling/1':           'scaling.priorities_rocks.view_quarterly_rocks_progress',
+  'scaling/2':           'scaling.kpi_scoreboard.view_kpi_targets_vs_actuals',
+  'scaling/3':           'scaling.meeting_rhythm.view_meeting_cadence_schedule',
+  'scaling/4':           'scaling.learning_hub.view_learning_resources_list',
+  'playbook/0':          'playbook.all_plays.view_process_playbook_list',
+  'playbook/1':          'playbook.featured_play.view_featured_play_steps',
+  'playbook/2':          'playbook.roles_raci.view_raci_roles_by_step',
+  // Helpdesk / Reports / Inventory / Maintenance — previously untracked
+  // Assistant is Help Desk's default landing tab, reached with NO segment in the hash at all
+  // (the sidebar link is a bare navTo('helpdesk')) - usageViewTick's own fallback for "no segment"
+  // is the string '0', not the tab's name, so '0' has to be listed too for that landing to ever
+  // match; clicking the Assistant tab explicitly (from Tickets) sets the hash to 'assistant' instead.
+  'helpdesk/0':          'helpdesk.assistant.view_ai_assistant_chat',
+  'helpdesk/assistant':  'helpdesk.assistant.view_ai_assistant_chat',
+  'helpdesk/tickets':    'helpdesk.tickets.view_my_tickets',
+  'inventory/0':         'inventory.indents_rfq.view_indent_rfq_pipeline',
+  'inventory/1':         'inventory.quote_comparison.view_quote_comparison',
+  'inventory/2':         'inventory.purchase_orders.view_purchase_orders',
+  'inventory/3':         'inventory.grn_qc.view_grn_qc_status',
+  'inventory/4':         'inventory.stock_ledger.view_stock_ledger',
+  'inventory/5':         'inventory.accounts_payable.view_accounts_payable',
+  'maintenance/0':       'maintenance.asset_register.view_asset_register',
+  'maintenance/1':       'maintenance.preventive_maintenance.view_pm_schedule',
+  'maintenance/2':       'maintenance.breakdowns_repairs.view_breakdown_repair_tickets',
+  'maintenance/3':       'maintenance.location_wise.view_assets_by_location',
+  // GTD / CRM / Dashboard — previously untracked. All three are entirely static/hardcoded
+  // demo screens (no wired buttons anywhere - GTD's Capture/Clarify buttons and CRM's tab
+  // bodies carry no onclick besides mTabs' own tab-switch navTo), so opening each tab is the
+  // only distinguishable action there is. Dashboard has no tabs at all - a bare landing and
+  // every navTo('dashboard') both fall through usageViewTick's no-segment default of '0'.
+  'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
+  'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
+  'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
+  'gtd/2':               'gtd.projects.view_active_projects_next_steps',
+  'gtd/3':               'gtd.waiting_for.view_items_waiting_on_others',
+  'gtd/4':               'gtd.someday_maybe.view_someday_maybe_ideas_list',
+  'gtd/5':               'gtd.weekly_review.view_weekly_review_checklist',
+  'crm/0':               'crm.pipeline_funnel.view_conversion_funnel_stage_ageing',
+  'crm/1':               'crm.leads.view_leads_pipeline_list',
+  'crm/2':               'crm.bookings.view_bookings_list',
+  'crm/3':               'crm.directory_hierarchy.view_directory_hierarchy_tab',
+  'crm/4':               'crm.comm_history.view_communication_history',
+  'crm/5':               'crm.demands_collections.view_demands_collections_list',
+  'crm/6':               'crm.brokers.view_brokers_list',
+  'crm/7':               'crm.post_sale.view_post_sale_tab'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){
