@@ -6278,152 +6278,253 @@ window.hsDeleteSel=async function(){
   hrHS();
 };
 
-/* ── Monthly Update ── */
-let MU_RECORDS=null,MU_CUR=null;
-const MU_COLS=[
-  {l:'Tests Sent',          r:'RM',  t:'1 Day'},
-  {l:'Test Responses\nReceived', r:'RM', t:'3 Days'},
-  {l:'Passed Test CVs',     r:'RM',  t:'1 day'},
-  {l:'Schedule Interview',  r:'RM',  t:'1 day'},
-  {l:'Interview Done',      r:'MC',  t:'7 days'},
-  {l:'Selected',            r:'',    t:''},
-  {l:'Negotiation +\nOffer',r:'MC',  t:'1 day'},
-  {l:'Back Out',            r:'',    t:''},
-  {l:'To Join in Future',   r:'MC',  t:''},
-  {l:'Joined',              r:'MC',  t:''},
-  {l:'Joining Formalities', r:'MC',  t:'same day'},
-];
-const MU_POSITIONS=['Sales Manager','SR.Sales Advisor','Pre Sales Manager','CP Sales Executive','Backend Developer','Process Coordinator','Pre Sales Executive','Sr.Engineer','Supervisor','Wholetimer','Social Executive'];
-const MU_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-function muEmptyRows(){return [];}
+/* ── Monthly Update ──
+   Rebuilt against hr.monthly_view. The nine columns — Tests Sent, Test Passed, Interview Scheduled,
+   Interview Done, Selected, Rejected, Hold, Backed Out, Joined — are COUNTED from hr.candidates,
+   never typed. The old screen was a grid of number boxes somebody had to keep in step with reality
+   by hand; every figure here is derived, so it cannot drift.
+   The first four columns are cumulative ("how many got at least this far") and read the candidate's
+   high-water mark, not their current stage — otherwise anybody who dropped out after their test
+   would still be counted as having been interviewed. The last five are exact outcomes. That split
+   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change. */
+let MU_MONTHS_CACHE=null, MU_CUR=null, MU_ROWS=null, MU_SEL=new Set();
+const MU_MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
+/* The nine column names come from the database (hr.tracker_stages) so the screen cannot disagree
+   with what the counts were computed against. The literal below is the same list, and is what gets
+   used if that one read fails — a stale header is better than a blank page. */
+let MU_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Done','Selected','Rejected','Hold','Backed Out','Joined'];
+let MU_STAGES_LOADED=false;
+function muMonthLabel(iso){
+  if(!iso) return '';
+  const parts=String(iso).split('-');
+  return (MU_MONTH_NAMES[parseInt(parts[1],10)-1]||'')+' '+parts[0];
+}
+async function muLoadStages(){
+  if(MU_STAGES_LOADED) return;
+  MU_STAGES_LOADED=true;
+  try{
+    const {data}=await sb.schema('hr').from('tracker_stages').select('seq,label').order('seq');
+    if(data&&data.length) MU_STAGES=data.map(function(s){return s.label;});
+  }catch(e){/* keep the literal order above */}
+}
+
 async function hrMonthlyUpdate(){
   const b=$('hrBody');
-  if(!MU_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{const {data,error}=await sb.schema('hr').from('monthly_updates').select('*').order('id',{ascending:true});
-      if(error)throw error;
-      const MU_MON_ORD=['January','February','March','April','May','June','July','August','September','October','November','December'];
-      const muSort=l=>{const[m,y]=(l||'').split(' ');return (parseInt(y)||0)*100+(MU_MON_ORD.indexOf(m)+1);};
-      MU_RECORDS=(data||[]).sort((a,b)=>muSort(a.month_label)-muSort(b.month_label));}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  if(MU_CUR!=null) return muRenderDetail(b);
+  loader(b);
+  await muLoadStages();
+  try{
+    const {data,error}=await sb.schema('hr').rpc('monthly_months');
+    if(error) throw error;
+    MU_MONTHS_CACHE=data||[];
+  }catch(e){
+    b.innerHTML='<div class="card card-pad empty" style="color:var(--err)">'+esc(e.message||String(e))+'</div>';
+    return;
   }
-  if(MU_CUR!=null){muRenderDetail(b);return;}
   muRenderList(b);
 }
+
 function muRenderList(b){
-  const rows=MU_RECORDS;
-  let html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="sec-title" style="margin:0">Monthly Updates</div><button class="btn btn-primary" onclick="muCreate()"><i class="fa-solid fa-plus"></i> New Month</button></div>';
-  if(!rows.length){html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No monthly records yet</div><p style="max-width:360px;margin:6px auto 0">Click <b>New Month</b> to create your first monthly update.</p></div>';}
-  else{html+='<div class="mu-grid">'+rows.map(r=>`<div class="mu-card" onclick="muViewMonth(${r.id})"><div class="mu-card-icon"><i class="fa-solid fa-calendar-days"></i></div><div class="mu-card-body"><div class="mu-card-label">${esc(r.month_label)}</div><div class="mu-card-meta">${(r.data||[]).filter(x=>x.values&&x.values.some(v=>v)).length} of ${(r.data||[]).length} positions have data</div></div><i class="fa-solid fa-chevron-right mu-card-arrow"></i></div>`).join('')+'</div>';}
+  const rows=MU_MONTHS_CACHE||[];
+  let html='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">'
+    +'<div class="sec-title" style="margin:0">Monthly Updates</div>'
+    +'<span class="mu-computed"><i class="fa-solid fa-circle-check"></i> Every figure is counted from the candidates — nothing is typed in</span>'
+    +'</div>';
+  if(!rows.length){
+    html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i>'
+      +'<div style="font-weight:600;color:var(--ink)">No months yet</div>'
+      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a ManPower requisition lands in it. '
+      +'Fill a ManPower Form in Recruitment to start one.</p></div>';
+  } else {
+    html+='<div class="mu-grid">'+rows.map(function(r){
+      const pending=Number(r.pending||0);
+      const pos=Number(r.positions||0);
+      return '<div class="mu-card" onclick="muViewMonth(\''+esc(r.row_month)+'\')">'
+        +'<div class="mu-card-icon"><i class="fa-solid fa-calendar-days"></i></div>'
+        +'<div class="mu-card-body"><div class="mu-card-label">'+esc(muMonthLabel(r.row_month))
+          +(pending?'<span class="mu-card-pending">'+pending+' to approve</span>':'')+'</div>'
+          +'<div class="mu-card-meta">'+pos+' position'+(pos===1?'':'s')+'</div></div>'
+        +'<i class="fa-solid fa-chevron-right mu-card-arrow"></i></div>';
+    }).join('')+'</div>';
+  }
   b.innerHTML=html;
 }
-function muRenderDetail(b){
-  const rec=MU_RECORDS.find(r=>r.id===MU_CUR);if(!rec)return muBack();
-  const data=rec.data||[];
-  const rows=data.length?data:[];
-  const respBadge=r=>r?`<span class="mu-resp mu-resp-${r.toLowerCase()}">${r}</span>`:'';
-  let tbl='<div class="mu-tbl-wrap"><table class="mu-tbl"><thead>';
-  tbl+='<tr><th style="width:36px;text-align:center;background:#fdf4f6" rowspan="3"><input type="checkbox" id="muChkAll" onchange="muToggleAll(this)" title="Select all"></th><th class="mu-pos-col" rowspan="3">Position</th>'+MU_COLS.map(c=>`<th class="mu-hdr-top">${respBadge(c.r)||'&nbsp;'}</th>`).join('')+'</tr>';
-  tbl+='<tr>'+MU_COLS.map(c=>`<th class="mu-hdr-mid">${esc(c.t)||'&nbsp;'}</th>`).join('')+'</tr>';
-  tbl+='<tr>'+MU_COLS.map(c=>`<th class="mu-hdr-col">${c.l.replace('\n','<br>')}</th>`).join('')+'</tr>';
-  tbl+='</thead><tbody>';
-  rows.forEach((row,ri)=>{
-    tbl+=`<tr><td style="text-align:center;padding:0 8px;vertical-align:middle"><input type="checkbox" class="mu-row-chk" data-ri="${ri}"></td><td class="mu-pos-cell">${esc(row.position)}</td>`+
-      row.values.map((v,ci)=>`<td class="mu-cell"><input class="mu-inp" type="number" min="0" value="${v!=null?v:''}" placeholder="" data-ri="${ri}" data-ci="${ci}" onchange="muSaveCell(${rec.id},${ri},${ci},this.value)"></td>`).join('')+'</tr>';
-  });
-  tbl+='</tbody></table></div>';
-  b.innerHTML=`<div class="mu-detail-bar">
-    <button class="btn" onclick="muBack()"><i class="fa-solid fa-arrow-left"></i> Back</button>
-    <h2 style="margin:0;font-size:18px;font-weight:700"><i class="fa-solid fa-calendar-days" style="color:#be123c;margin-right:8px"></i>${esc(rec.month_label)}</h2>
-    <span class="mu-autosave-hint"><i class="fa-solid fa-pencil" style="font-size:10px"></i> Cells auto-save</span>
-    <div class="mu-detail-actions">
-      <button class="btn btn-sm btn-primary" onclick="muAddRow(${rec.id})"><i class="fa-solid fa-plus"></i> Add Row</button>
-      <button class="btn btn-sm" style="color:#c83232;border-color:#fecaca" onclick="muDeleteChecked(${rec.id})"><i class="fa-solid fa-trash"></i> Delete Selected</button>
-      <button class="btn btn-sm" style="color:#c83232;border-color:#fecaca;background:#fff5f5" onclick="muDeleteMonth(${rec.id})"><i class="fa-solid fa-calendar-xmark"></i> Delete Month</button>
-    </div>
-  </div>`+tbl;
-}
-window.muToggleAll=function(el){document.querySelectorAll('.mu-row-chk').forEach(c=>c.checked=el.checked);};
-window.muAddRow=function(id){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Position Row</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div><label>Position Name *</label><input id="muRowName" class="inp" placeholder="e.g. Sales Manager"></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="muAddRowSave(${id})"><i class="fa-solid fa-check"></i> Add</button></div>`);
-  setTimeout(()=>{const el=$('muRowName');if(el)el.focus();},50);
-};
-window.muAddRowSave=async function(id){
-  const name=($('muRowName').value||'').trim();
-  if(!name){toast('Enter a position name','err');return;}
-  const rec=MU_RECORDS.find(r=>r.id===id);if(!rec)return;
-  const data=JSON.parse(JSON.stringify(rec.data||[]));
-  if(data.find(r=>r.position===name)){toast('Position already exists','err');return;}
-  data.push({position:name,values:Array(11).fill(null)});
-  const {error}=await sb.schema('hr').from('monthly_updates').update({data}).eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  rec.data=data;closeModal();muRenderDetail($('hrBody'));
-};
-window.muDeleteChecked=async function(id){
-  const checked=[...document.querySelectorAll('.mu-row-chk:checked')].map(el=>parseInt(el.dataset.ri));
-  if(!checked.length){toast('Select at least one row to delete','err');return;}
-  if(!await confirmDialog('Delete '+checked.length+' row(s)? This cannot be undone.'))return;
-  const rec=MU_RECORDS.find(r=>r.id===id);if(!rec)return;
-  const data=(rec.data||[]).filter((_,i)=>!checked.includes(i));
-  const {error}=await sb.schema('hr').from('monthly_updates').update({data}).eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  rec.data=data;muRenderDetail($('hrBody'));
-};
-window.muViewMonth=function(id){MU_CUR=id;hrMonthlyUpdate();};
-window.muBack=function(){MU_CUR=null;hrMonthlyUpdate();};
-window.muCreate=function(){
-  const yr=new Date().getFullYear();
-  const curMo=new Date().getMonth(); // 0-indexed
-  const yrs=[yr-1,yr,yr+1];
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-calendar-plus"></i> New Monthly Update</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two">
-      <div><label>Month *</label><select id="muFMon" class="sel"><option value="">— Month —</option>${MU_MONTHS.map((m,i)=>`<option value="${m}"${i===curMo?' selected':''}>${m}</option>`).join('')}</select></div>
-      <div><label>Year *</label><select id="muFYr" class="sel">${yrs.map(y=>`<option${y===yr?' selected':''}>${y}</option>`).join('')}</select></div>
-    </div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="muSaveBtn" onclick="muSaveNew()"><i class="fa-solid fa-check"></i> Create</button></div>`);
-};
-window.muSaveNew=async function(){
-  const mon=($('muFMon').value||'').trim(), yr=($('muFYr').value||'').trim();
-  const lbl=mon&&yr?`${mon} ${yr}`:'';
-  if(!lbl){toast('Select month and year','err');return;}
-  if(MU_RECORDS&&MU_RECORDS.find(r=>r.month_label===lbl)){toast('That month already exists','err');return;}
-  const btn=$('muSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('monthly_updates').insert({month_label:lbl,data:muEmptyRows()}).select().single();
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Create';}return;}
-  MU_RECORDS=[...(MU_RECORDS||[]),data];
-  const MU_MON_ORD2=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const muSort2=l=>{const[m,y]=(l||'').split(' ');return (parseInt(y)||0)*100+(MU_MON_ORD2.indexOf(m)+1);};
-  MU_RECORDS.sort((a,b)=>muSort2(a.month_label)-muSort2(b.month_label));
-  closeModal();MU_CUR=data.id;hrMonthlyUpdate();
-};
-window.muSaveCell=async function(id,ri,ci,val){
-  const rec=MU_RECORDS&&MU_RECORDS.find(r=>r.id===id);if(!rec)return;
-  const data=JSON.parse(JSON.stringify(rec.data||[]));
-  // ensure row exists
-  if(!data[ri]){data[ri]={position:'',values:Array(11).fill(null)};}
-  if(!data[ri].values){data[ri].values=Array(11).fill(null);}
-  data[ri].values[ci]=val===''||val==null?null:Number(val);
-  const {error}=await sb.schema('hr').from('monthly_updates').update({data}).eq('id',id);
-  if(error){toast('Save failed: '+error.message,'err');}
-  else{
-    rec.data=data;
-    // keep the desktop table and mobile card copies of this cell in sync
-    document.querySelectorAll('.mu-inp[data-ri="'+ri+'"][data-ci="'+ci+'"]').forEach(el=>{el.value=(val===''||val==null)?'':val;});
+
+window.muViewMonth=function(iso){ MU_CUR=iso; MU_ROWS=null; MU_SEL=new Set(); hrMonthlyUpdate(); };
+window.muBack=function(){ MU_CUR=null; MU_ROWS=null; MU_SEL=new Set(); MU_MONTHS_CACHE=null; hrMonthlyUpdate(); };
+
+async function muRenderDetail(b){
+  await muLoadStages();
+  if(!MU_ROWS){
+    loader(b);
+    try{
+      const {data,error}=await sb.schema('hr').rpc('monthly_view',{p_month:MU_CUR});
+      if(error) throw error;
+      MU_ROWS=data||[];
+    }catch(e){
+      b.innerHTML='<div class="card card-pad empty" style="color:var(--err)">'+esc(e.message||String(e))+'</div>';
+      return;
+    }
   }
+  const rows=MU_ROWS, stages=MU_STAGES;
+  const depts=[...new Set(rows.map(function(r){return r.department;}).filter(Boolean))].sort();
+  const n=MU_SEL.size;
+  const dis='opacity:.45;cursor:not-allowed;pointer-events:none';
+  const canAppr=hrCan();
+
+  const head='<tr>'
+    +'<th style="width:36px"><input type="checkbox" class="mu-cb" id="muChkAll" onchange="muToggleAll(this)"></th>'
+    +'<th>Position</th><th>Vacancies</th><th>Approval</th>'
+    +stages.map(function(s,i){ return '<th class="mu-n'+(i===0?' mu-split':'')+'">'+esc(s)+'</th>'; }).join('')
+    +'</tr>';
+
+  const body=rows.map(function(r){
+    const c=r.counts||{};
+    const st=r.approval_status||'Pending';
+    const cells=stages.map(function(s,i){
+      const v=Number(c[s]||0);
+      return '<td class="mu-n'+(i===0?' mu-split':'')+(v?'':' mu-zero')+'">'+v+'</td>';
+    }).join('');
+    let appr;
+    if(st==='Pending'){
+      appr=canAppr
+        ? '<span class="mu-appr">'
+            +'<button class="btn btn-sm btn-ok" onclick="event.stopPropagation();muApprove('+r.manpower_id+',true)"><i class="fa-solid fa-check"></i> Approve</button>'
+            +'<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();muApprove('+r.manpower_id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
+          +'</span>'
+        : '<span class="tag t-amber">Awaiting HR</span>';
+    } else if(st==='Rejected'){
+      appr='<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
+    } else {
+      appr='<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
+    }
+    return '<tr data-id="'+r.row_id+'" data-pos="'+esc((r.position_title||'').toLowerCase())+'" data-dept="'+esc(r.department||'')+'"'
+      +(st==='Pending'?' class="mu-fresh"':'')+'>'
+      +'<td><input type="checkbox" class="mu-cb mu-row-cb" data-id="'+r.row_id+'" onchange="muRowCheck(this)"></td>'
+      +'<td class="mu-pos">'+esc(r.position_title||'—')
+        +'<div class="mu-sub">'+esc(r.department||'No department')
+        +(r.raised_by?' · raised by '+esc(r.raised_by):'')
+        +(r.priority==='Urgent'?' · <b style="color:var(--err)">Urgent</b>':'')+'</div></td>'
+      +'<td>'+esc(r.vacancies||'—')+'</td>'
+      +'<td>'+appr+'</td>'
+      +cells
+      +'</tr>';
+  }).join('');
+
+  b.innerHTML='<div class="mu-detail-bar">'
+      +'<button class="btn" onclick="muBack()"><i class="fa-solid fa-arrow-left"></i> Back</button>'
+      +'<h2 style="margin:0;font-size:18px;font-weight:700"><i class="fa-solid fa-calendar-days" style="color:#be123c;margin-right:8px"></i>'+esc(muMonthLabel(MU_CUR))+'</h2>'
+      +'<div class="mu-detail-actions">'
+        +'<button class="btn btn-sm" onclick="muRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+        +'<button class="btn btn-sm" id="muDelBtn" '+(n?'':'disabled style="'+dis+'"')
+          +' onclick="muDeleteSel()"><i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'')+'</button>'
+      +'</div>'
+    +'</div>'
+    +(rows.length
+      ? '<div class="mu-filters">'
+          +'<div class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i>'
+            +'<input id="muQ" placeholder="Search position…" oninput="muFilter()"></div>'
+          +'<select class="mu-sel" id="muDeptF" onchange="muFilter()"><option value="">All Departments</option>'
+            +depts.map(function(d){return '<option>'+esc(d)+'</option>';}).join('')+'</select>'
+          +'<select class="mu-sel" id="muApprF" onchange="muFilter()"><option value="">All</option>'
+            +'<option value="Pending">To approve</option><option value="Approved">Approved</option><option value="Rejected">Rejected</option></select>'
+          +'<span class="mu-count" id="muCount">'+rows.length+' position'+(rows.length===1?'':'s')+'</span>'
+          +'<span class="mu-computed" style="margin-left:auto"><i class="fa-solid fa-circle-check"></i> Counted live from the Tracker</span>'
+        +'</div>'
+        +'<div class="mu-tbl-wrap"><table class="mu-tbl"><thead>'+head+'</thead><tbody id="muTbody">'+body+'</tbody></table>'
+        +'<div id="muNoMatch" class="empty" style="display:none;padding:26px">No matches</div></div>'
+      : '<div class="card card-pad empty"><i class="fa-regular fa-folder-open"></i>'
+        +'<div style="font-weight:600;color:var(--ink)">Nothing in '+esc(muMonthLabel(MU_CUR))+' yet</div>'
+        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from ManPower requisitions.</p></div>');
+}
+
+window.muToggleAll=function(el){
+  MU_SEL=new Set();
+  document.querySelectorAll('#muTbody tr').forEach(function(tr){
+    if(tr.style.display==='none') return;   // only what the filter is actually showing
+    const cb=tr.querySelector('.mu-row-cb'); if(!cb) return;
+    cb.checked=el.checked;
+    tr.classList.toggle('mu-selected',el.checked);
+    if(el.checked) MU_SEL.add(parseInt(cb.dataset.id,10));
+  });
+  muSyncDelBtn();
 };
-window.muDeleteMonth=async function(id){
-  if(!await confirmDialog('Delete this monthly record?'))return;
-  const {error}=await sb.schema('hr').from('monthly_updates').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  MU_RECORDS=(MU_RECORDS||[]).filter(r=>r.id!==id);
-  MU_CUR=null;hrMonthlyUpdate();toast('Deleted','ok');
+window.muRowCheck=function(cb){
+  const id=parseInt(cb.dataset.id,10);
+  if(cb.checked) MU_SEL.add(id); else MU_SEL.delete(id);
+  const tr=cb.closest('tr'); if(tr) tr.classList.toggle('mu-selected',cb.checked);
+  muSyncDelBtn();
 };
-window.muReload=function(){MU_RECORDS=null;MU_CUR=null;if(PAGE==='hr')renderPage();};
+function muSyncDelBtn(){
+  const btn=$('muDelBtn'); if(!btn) return;
+  const n=MU_SEL.size;
+  btn.disabled=!n;
+  btn.style.cssText=n?'':'opacity:.45;cursor:not-allowed;pointer-events:none';
+  btn.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');
+}
+window.muFilter=function(){
+  const q=(($('muQ')||{}).value||'').trim().toLowerCase();
+  const dept=($('muDeptF')||{}).value||'';
+  const appr=($('muApprF')||{}).value||'';
+  let shown=0;
+  document.querySelectorAll('#muTbody tr').forEach(function(tr){
+    const row=(MU_ROWS||[]).find(function(r){return String(r.row_id)===tr.dataset.id;})||{};
+    let ok=true;
+    if(q && (tr.dataset.pos||'').indexOf(q)===-1) ok=false;
+    if(ok && dept && (tr.dataset.dept||'')!==dept) ok=false;
+    if(ok && appr && (row.approval_status||'Pending')!==appr) ok=false;
+    tr.style.display=ok?'':'none';
+    if(ok) shown++;
+  });
+  const c=$('muCount'); if(c) c.textContent=shown+' position'+(shown===1?'':'s');
+  const nm=$('muNoMatch'); if(nm) nm.style.display=shown?'none':'block';
+};
+window.muRefresh=function(){ MU_ROWS=null; MU_SEL=new Set(); hrMonthlyUpdate(); };
+
+/* Deleting a row takes the POSITION out of this month. The candidates attached to it are the real
+   record of what happened, so this is refused rather than cascading — move or remove the people
+   first. The requisition itself is never deleted here. */
+window.muDeleteSel=async function(){
+  const ids=[...MU_SEL];
+  if(!ids.length) return;
+  if(!hrCan()){ toast('Only HR can change the Monthly Update','err'); return; }
+  const picked=(MU_ROWS||[]).filter(function(r){return ids.indexOf(r.row_id)>-1;});
+  const withPeople=picked.filter(function(r){return Number(r.candidate_total||0)>0;});
+  if(withPeople.length){
+    toast(withPeople.length===1
+      ? '“'+(withPeople[0].position_title||'That position')+'” still has '+withPeople[0].candidate_total+' candidate(s) — remove them first'
+      : withPeople.length+' of the selected positions still have candidates — remove them first','err');
+    return;
+  }
+  const what=ids.length===1
+    ? 'Remove “'+((picked[0]&&picked[0].position_title)||'this position')+'” from '+muMonthLabel(MU_CUR)+'?'
+    : 'Remove '+ids.length+' positions from '+muMonthLabel(MU_CUR)+'?';
+  if(!await confirmDialog(what+' The requisition itself is not deleted.')) return;
+  const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
+  if(error){ toast(error.message,'err'); return; }
+  toast(ids.length===1?'Position removed':ids.length+' positions removed','ok');
+  muRefresh();
+};
+
+/* Approve / Reject a fresh row. The decision is recorded against the REQUISITION, which is what the
+   emailed one-click links act on as well, so both routes land in exactly the same place. */
+window.muApprove=async function(manpowerId,ok){
+  if(!manpowerId){ toast('This row has no requisition behind it','err'); return; }
+  if(!hrCan()){ toast('Only HR can approve a requisition','err'); return; }
+  const row=(MU_ROWS||[]).find(function(r){return r.manpower_id===manpowerId;})||{};
+  const who=row.position_title||'this requisition';
+  if(!await confirmDialog((ok?'Approve ':'Reject ')+'“'+who+'”?')) return;
+  const patch=ok
+    ? {approval_status:'Approved', approved_by:state.email, approved_at:new Date().toISOString(), rejection_reason:null}
+    : {approval_status:'Rejected', approved_by:state.email, approved_at:new Date().toISOString()};
+  const {error}=await sb.schema('hr').from('manpower_requests').update(patch).eq('id',manpowerId);
+  if(error){ toast(error.message,'err'); return; }
+  toast(ok?'Approved':'Rejected','ok');
+  MP_RECORDS=null;          // the Recruitment ManPower list shows the same status
+  muRefresh();
+};
+
+window.muReload=function(){ MU_MONTHS_CACHE=null; MU_ROWS=null; MU_CUR=null; MU_SEL=new Set(); if(PAGE==='hr')renderPage(); };
 
 /* ── Interview Tracker ── */
 async function hrTracker(){
@@ -16447,10 +16548,12 @@ const USAGE_MAP={
   // Human Resources
   hsSave:'hr.h_s_candidates.add_candidate', hsUpdate:'hr.h_s_candidates.edit_candidate',
   hsDeleteSel:'hr.h_s_candidates.delete_candidate_s', hsFilter:'hr.h_s_candidates.search_filter_candidates',
-  muSaveNew:'hr.monthly_update.create_new_month_record', muAddRowSave:'hr.monthly_update.add_position_row',
-  muSaveCell:'hr.monthly_update.edit_tracking_values',
-  muDeleteChecked:'hr.monthly_update.delete_rows_or_whole_month',
-  muDeleteMonth:'hr.monthly_update.delete_rows_or_whole_month',
+  // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
+  // candidates - so the old create-month / add-row / edit-cell actions have nothing to log.
+  muViewMonth:'hr.monthly_update.open_a_month',
+  muDeleteSel:'hr.monthly_update.remove_position_from_month',
+  muApprove:'hr.monthly_update.approve_reject_requisition',
+  muFilter:'hr.monthly_update.search_filter_positions',
   trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
   trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
