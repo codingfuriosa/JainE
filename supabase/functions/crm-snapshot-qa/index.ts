@@ -641,15 +641,14 @@ function isQualifiedOnwards(status: string | null): boolean {
    WHETHER the lead was already qualified comes from acc.followup_timeline_v's prior_max_status: the
    highest rank this lead reached BEFORE this follow-up, computed by the same view the dashboard's
    own "Status regressed" tag is derived from, so the two cannot disagree. The per-call list is only
-   consulted for the statuses that view ranks null, and for what an earlier AUDIT concluded.
+   consulted for the statuses that view ranks null.
 
-   `sound` is the guard that keeps this from laundering bad qualifications: a prior Qualified that an
-   earlier audit already flagged as unsupported does NOT earn the ratchet, so a lead qualified on no
-   evidence stays catchable on every call after it. Only a qualification that stood up protects the
-   ones that follow. An earlier AUDIT verdict of Qualified is sound by construction - that is this
-   pipeline's own reading of the conversation, not the CRM's claim about it. Note the one honest gap:
-   an earlier Qualified that has not been audited yet is taken at face value, because the CRM record
-   is all there is to go on at that point. The queue runs oldest-first, so it is rarely the case. */
+   ONCE THE CRM HAS CALLED A LEAD QUALIFIED, THAT IS FINAL - there used to be an exception here for a
+   qualification an earlier audit flagged unsupported, withholding the ratchet from that lead on every
+   later call. In practice that made a large share of already-qualified leads read "In Follow Up"
+   again on every subsequent call, which is exactly the downgrade this whole feature exists to stop.
+   The flag on the ORIGINAL qualifying call still stands on its own row for a human to act on - it is
+   only later calls that no longer re-litigate it. */
 function priorQualificationFrom(prior: PriorCall[],
                                 progress: { prior_max_rank?: number | null; prior_max_status?: string | null } | null):
   PriorQualification | null {
@@ -657,25 +656,17 @@ function priorQualificationFrom(prior: PriorCall[],
   const byLadder = Number.isFinite(ladderRank) && ladderRank >= QUALIFIED_RANK;
 
   /* Newest first: the most recent qualification is the one that governs this call. */
-  let unsound: PriorQualification | null = null;
   for (let i = prior.length - 1; i >= 0; i--) {
     const p = prior[i];
     const byAudit = String(p.ai_assessed_status || "").trim() === "Qualified";
     const byCrm = isQualifiedOnwards(p.crm_status);
     if (!byAudit && !byCrm) continue;
-    const flagged = p.mismatch_type === "qualified_should_not_have_been_qualified";
-    if (byAudit || !flagged) {
-      return { qualified: true, sound: true, follow_up_id: p.follow_up_id,
-        call_date_label: p.call_date_label, source: byAudit ? "audit" : "crm",
-        note: byAudit
-          ? "the audit of that call read it as Qualified on the conversation's own evidence"
-          : `the CRM logged that follow-up as "${p.crm_status}" and no audit has overturned it` };
-    }
-    unsound = unsound || { qualified: true, sound: false, follow_up_id: p.follow_up_id,
-      call_date_label: p.call_date_label, source: "crm",
-      note: "the audit of that call found the qualification unsupported" };
+    return { qualified: true, sound: true, follow_up_id: p.follow_up_id,
+      call_date_label: p.call_date_label, source: byAudit ? "audit" : "crm",
+      note: byAudit
+        ? "the audit of that call read it as Qualified on the conversation's own evidence"
+        : `the CRM logged that follow-up as "${p.crm_status}"` };
   }
-  if (unsound) return unsound;
 
   /* The ladder says the bar was cleared but no individual row matched - a status this function's
      fallback does not name, on a lead whose history rows were trimmed. Trust the ladder. */

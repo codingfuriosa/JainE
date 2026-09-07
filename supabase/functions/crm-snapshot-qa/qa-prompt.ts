@@ -413,9 +413,8 @@ earlier call. Read it before you decide anything. Where it says the lead was alr
   lead did not. Log the new date and keep the status where it is.
 - A customer who cannot attend the site visit at all but still wants a flat and asks the agent to
   call later stays Qualified. So does one who has gone quiet, or who is only negotiating on the day.
-- THE ONE EXCEPTION: a prior qualification that was never sound. The history block says so in as many
-  words where an earlier audit found the qualification unsupported. Only then may this call read
-  lower than Qualified.
+- THERE IS NO EXCEPTION. Once the CRM has this lead Qualified on an earlier call, this call may not
+  read lower than Qualified, even if you would have judged that earlier call differently yourself.
 Restate what the history told you in "prior_qualification_note", or leave it null when the lead has
 no earlier qualification. If you find yourself about to write "In Follow Up" for a lead the history
 says was qualified, the answer is Qualified unless the door was actually closed on this call.
@@ -450,7 +449,7 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
                                                     the customer moved or reset their site visit
                                                     date, NEVER because they declined or postponed
                                                     the visit while still wanting a flat, and NEVER
-                                                    for a lead the history already records as soundly
+                                                    for a lead the history already records as
                                                     qualified. In every one of those the CRM is
                                                     right and raising this would be the error, not
                                                     the finding. Use it ONLY where the four gates
@@ -490,10 +489,10 @@ ${QA_OUTPUT_SHAPE}`;
    judge that reads each call in isolation cannot see that. So the history is handed over as CRM FACT,
    in the same block as the rest of the record under audit, and it is the only past the judge gets.
 
-   `sound` is what stops this becoming a laundering machine: an earlier qualification that a previous
-   audit already flagged as qualified_should_not_have_been_qualified does NOT earn the ratchet. The
-   bad qualification stays catchable on every later call; only a qualification that stood up protects
-   the ones after it. */
+   Once the CRM has this lead Qualified on any earlier call, that is final - there is no exception for
+   a qualification a previous audit found unsupported. That flag still stands on the original call's
+   own row; it just no longer withholds the ratchet from every call after it. `sound` is always true
+   whenever `qualified` is true - it stays on the type only because deriveStatusMatch still reads it. */
 export type PriorCall = {
   follow_up_id: number;
   call_date_label: string | null;
@@ -563,17 +562,13 @@ qualification to respect, so judge this call on its own evidence.`;
   const verdict = !q || !q.qualified
     ? `THIS LEAD HAS NEVER BEEN QUALIFIED. Nothing above meets the bar, so judge this call on its own
 evidence and the four gates.`
-    : q.sound
-    ? `THIS LEAD WAS ALREADY QUALIFIED on ${or(q.call_date_label, "an earlier call")} (${q.note}).
-THE RATCHET APPLIES. Your assessment for this call may be "Qualified" or "Lost" and MUST NOT be
-"In Follow Up". A next follow-up date and new remarks are the normal way to work a qualified lead
-and are not a downgrade - and if this call moved or re-fixed a site visit date, that is the visit
-being rescheduled, which keeps the lead Qualified. Only the customer closing the door in words moves
-this lead at all, and it moves it to Lost.`
-    : `This lead was logged Qualified on ${or(q.call_date_label, "an earlier call")}, BUT AN EARLIER AUDIT
-FOUND THAT QUALIFICATION UNSUPPORTED (${q.note}).
-THE RATCHET DOES NOT APPLY. Judge this call on its own evidence and the four gates, and say lower
-than Qualified if that is what the call shows.`;
+    : `THIS LEAD WAS ALREADY QUALIFIED on ${or(q.call_date_label, "an earlier call")} (${q.note}).
+THE RATCHET APPLIES, WITH NO EXCEPTION. Your assessment for this call may be "Qualified" or "Lost"
+and MUST NOT be "In Follow Up" - even if you would have judged that earlier call differently
+yourself. A next follow-up date and new remarks are the normal way to work a qualified lead and are
+not a downgrade - and if this call moved or re-fixed a site visit date, that is the visit being
+rescheduled, which keeps the lead Qualified. Only the customer closing the door in words moves this
+lead at all, and it moves it to Lost.`;
 
   return `## LEAD HISTORY - the earlier calls on this same lead. Also CRM FACT.
 ${rows}

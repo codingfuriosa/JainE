@@ -54,7 +54,7 @@ the work.
 | The six-point agent rubric | [supabase/functions/_shared/qa-rubric.ts](supabase/functions/_shared/qa-rubric.ts) |
 | Schema, normaliser, queue builder, views | [supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql](supabase/migrations/20260831090000_crm_snapshot_qa_pipeline.sql) |
 | Queue builder narrowed to pre-sales | [supabase/migrations/20260905090000_transcribe_presales_calls_only.sql](supabase/migrations/20260905090000_transcribe_presales_calls_only.sql) |
-| Queue builder skips a lead whose last call moved off pre-sales | [supabase/migrations/20260905100000_skip_lead_when_last_call_not_presales.sql](supabase/migrations/20260905100000_skip_lead_when_last_call_not_presales.sql) |
+| Queue builder, current version — per-call gate only, no cross-day lead gate | [supabase/migrations/20260907090000_crm_build_queue_drop_prior_handoff_gate.sql](supabase/migrations/20260907090000_crm_build_queue_drop_prior_handoff_gate.sql) |
 | The two cron jobs | [supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql](supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql) |
 | Dashboard, lead list, lead detail | [nexus-core.js](nexus-core.js) — the `trc*` functions |
 | Page shell | [transcription.html](transcription.html) |
@@ -172,15 +172,14 @@ If the CRM ever stops sending `personnel_email` (it only started sending it on e
 returns `skipped_sales` and `skipped_no_personnel` next to `queued` — a silent zero and a dead
 pipeline must not look alike.
 
-**A lead whose most recent call was not Pre-Sales is skipped in full**, not just that one call. Before
-either gate above, `crm_build_queue` looks up each candidate's lead in `acc.crm_followups` (the
-complete history, every follow-up ever seen) and takes the one with the latest `communication_time` —
-that lead's *current* call. If that call's personnel is not Pre-Sales (handed to a Sales Executive, or
-the CRM never sent personnel for it), nothing new queues for the lead at all, even a follow-up that is
-itself individually Pre-Sales. `skipped_last_call_not_presales` carries this count next to the other
-two. The transcription page applies the same lead-level rule client-side (`trcLeadLastIsPresales`) so
-a lead that fails it does not appear in the list either — the queue and the screen still cannot
-disagree. Only what has not already queued or already listed is affected either way.
+**Eligibility is decided by the decision date alone, never by an earlier day.** `crm_build_queue`
+briefly carried a second, lead-level gate (2026-09-05/06) that skipped a lead in full once its last
+call *before* the snapshot date was Sales — even a later call that was itself Pre-Sales. That gate was
+removed on 2026-09-07: a lead re-contacted by Pre-Sales after ever being handed to Sales is processed
+like any other Pre-Sales call today, with its full follow-up history transcribed alongside it. Only the
+per-call gate above remains, which is also what keeps a same-day mix correct — a lead called by
+Pre-Sales at 10:00 and by Sales at 15:00 on the same day still queues the 10:00 call on its own merits
+and drops the 15:00 one, with no lead-level rule involved either way.
 
 ### A recording is transcribed once, ever
 
