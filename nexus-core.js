@@ -6361,12 +6361,46 @@ window.muApprove=async function(manpowerId,ok){
 
 window.muReload=function(){ MU_MONTHS_CACHE=null; MU_ROWS=null; MU_CUR=null; MU_SEL=new Set(); if(PAGE==='hr')renderPage(); };
 
+/* Preview opens the CV in a tab; Download saves it under the candidate's own name rather than the
+   stamped storage filename. Both go through s3OpenSigned, which mints a short-lived signed URL -
+   the bucket itself stays private, exactly as it does for the Resumes tab. */
+function trResumeCell(r){
+  const cv=r.candidate_id?(window._trResume||{})[r.candidate_id]:null;
+  if(!cv||!cv.storage_path) return '<span style="color:var(--slate-2)">—</span>';
+  const nm=(r.candidate_name||'Candidate').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'Candidate';
+  const ext=String(cv.file_name||'').split('.').pop().toLowerCase();
+  const dl=nm+' - CV'+(ext&&ext.length<=5?'.'+ext:'');
+  return '<span style="display:inline-flex;gap:4px">'
+    +'<button class="btn btn-sm" title="Preview the CV" onclick="trResumeOpen('+r.id+',0)"><i class="fa-regular fa-eye"></i></button>'
+    +'<button class="btn btn-sm" title="Download the CV" onclick="trResumeOpen('+r.id+',1,&quot;'+esc(dl)+'&quot;)"><i class="fa-solid fa-download"></i></button>'
+    +'</span>';
+}
+window.trResumeOpen=function(trackerId,download,name){
+  const r=(window._trRows||[]).find(function(x){return x.id===trackerId;});
+  const cv=r&&r.candidate_id?(window._trResume||{})[r.candidate_id]:null;
+  if(!cv||!cv.storage_path){ toast('No CV on this row','err'); return; }
+  s3OpenSigned(cv.storage_path, download?(name||'CV'):null);
+};
+
 /* ── Interview Tracker ── */
 async function hrTracker(){
   const b=$('hrBody');
   loader(b);
   let rows=[];
   try{const {data}=await sb.schema('hr').from('interview_tracker').select('*').order('id',{ascending:false});rows=data||[];}catch(e){}
+  /* The CV for each row. interview_tracker does not hold one - the candidate does - so the resumes
+     are fetched in a single follow-up query keyed on the candidates actually on screen, rather than
+     one request per row. Applications from the careers pages arrive with a CV already attached;
+     rows typed in by hand simply have none. */
+  window._trResume={};
+  const candIds=[...new Set(rows.map(function(r){return r.candidate_id;}).filter(Boolean))];
+  if(candIds.length){
+    try{
+      const {data}=await sb.schema('hr').from('candidates')
+        .select('id,resume_id,resumes(id,file_name,storage_path)').in('id',candIds);
+      (data||[]).forEach(function(c){ if(c&&c.resumes) window._trResume[c.id]=c.resumes; });
+    }catch(e){/* the column just shows a dash */}
+  }
   window._trRows=rows;
   window._trSel=new Set();
   const fbTag=s=>{
@@ -6391,7 +6425,7 @@ async function hrTracker(){
       .tr-tag--red{background:#fee2e2;color:#991b1b}
       .tr-tag--gray{background:#f1f5f9;color:#475569}
       .tr-tag--amber{background:#fef3c7;color:#92400e}
-      #trTbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:1480px;table-layout:fixed}
+      #trTbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:1580px;table-layout:fixed}
       #trTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:11px 14px;border-bottom:2px solid var(--line);text-align:left;white-space:normal;word-break:break-word;vertical-align:bottom}
       #trTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s}
       #trTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
@@ -6408,7 +6442,7 @@ async function hrTracker(){
         .tr-sw{width:100%}
         .tr-sw input{min-width:0;width:100%}
         select.tr-sel{min-width:0;width:100%}
-        #trTbl{min-width:1300px;font-size:13px}
+        #trTbl{min-width:1400px;font-size:13px}
         #trTbl thead th,#trTbl tbody td{padding:9px 10px}
       }
     </style>
@@ -6436,7 +6470,7 @@ async function hrTracker(){
       <table id="trTbl">
         <thead><tr>
           <th class="tr-nowrap" style="width:36px"><input type="checkbox" class="tr-cb" id="trChkAll" onchange="trToggleAll(this)"></th>
-          <th style="width:14%">Candidate</th><th style="width:11%">Position</th><th style="width:9%">Source</th><th style="width:9%">Entity</th><th class="tr-nowrap" style="width:12%">Phone</th><th style="width:14%">Email</th><th class="tr-nowrap" style="width:14%">Date & Time</th><th class="tr-nowrap" style="width:11%">Feedback</th><th style="width:16%">Notes</th>
+          <th style="width:14%">Candidate</th><th style="width:11%">Position</th><th style="width:9%">Source</th><th style="width:9%">Entity</th><th class="tr-nowrap" style="width:12%">Phone</th><th style="width:14%">Email</th><th class="tr-nowrap" style="width:14%">Date & Time</th><th class="tr-nowrap" style="width:11%">Feedback</th><th class="tr-nowrap" style="width:9%">Resumes</th><th style="width:14%">Notes</th>
         </tr></thead>
         <tbody id="trTbody">
           ${rows.length?rows.map(r=>`<tr data-id="${r.id}" data-name="${esc((r.candidate_name||'').toLowerCase())}" data-pos="${esc((r.position||'').toLowerCase())}" data-fb="${esc(r.feedback||'')}" data-entity="${esc((r.entity||'').toLowerCase())}">
@@ -6449,8 +6483,9 @@ async function hrTracker(){
             <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
             <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
             <td class="tr-nowrap">${fbTag(r.feedback)}</td>
+            <td class="tr-nowrap">${trResumeCell(r)}</td>
             <td style="font-size:12px;color:var(--slate)">${cel(r.notes)}</td>
-          </tr>`).join(''):'<tr><td colspan="10"><div class="empty" style="padding:32px"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No interviews yet</div><p>Click <b>Add</b> to schedule the first interview.</p></div></td></tr>'}
+          </tr>`).join(''):'<tr><td colspan="11"><div class="empty" style="padding:32px"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No interviews yet</div><p>Click <b>Add</b> to schedule the first interview.</p></div></td></tr>'}
         </tbody>
       </table>
       </div>
@@ -16839,6 +16874,7 @@ const USAGE_MAP={
   trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
   trackerFilter:'hr.interview_tracker.search_filter_interviews',
+  trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
   rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
   rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
   rsBulkDelete:'hr.resumes.delete_resume_s', rsSearch:'hr.resumes.ai_natural_language_resume_search',
