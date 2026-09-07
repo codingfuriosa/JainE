@@ -4116,12 +4116,23 @@ window.taskSave=async function(kind){
   const btn=$('tkSave');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';
   const {data,error}=await sb.schema('acc').from('tasks').insert(row).select().single();
   if(error){toast(error.message,'err');btn.disabled=false;return;}
-  // Logged directly, after the row actually exists, rather than through USAGE_MAP - the title only
-  // exists as a value read off the form here, which a generic wrapper around this function could
-  // never see. On success only, so a failed save (bad due date, no permission) is never counted as
-  // a task that was created.
-  try{ usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create',
-    {title:title, assignee:isDel?(nameOf(row.assigned_to)||row.assigned_to):undefined}); }catch(_e){}
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - these values
+  // only exist as read off the form here, which a generic wrapper around this function could never
+  // see. On success only, so a failed save (bad due date, no permission) is never counted as a task
+  // that was created. Deliberately the FULL picture of what was created, not just the title - who
+  // it's for, when it's due, and a plain-text (HTML stripped) excerpt of the description - so the
+  // Usability report's Details column reads as a real record of the task, not just a name.
+  try{
+    const descText=String(desc||'').replace(/<[^>]*>/g,' ').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();
+    const assignees=isDel ? (nameOf(row.assigned_to)||row.assigned_to)
+                           : [row.owner].concat(mem).filter(Boolean).map(function(e){return nameOf(e)||e;}).join(', ');
+    usageQueue(isDel?'tasks.tasks.delegate_task_to_someone':'tasks.tasks.create_task', 'create', {
+      title:title,
+      assignee:assignees||undefined,
+      due_date:row.due_date||undefined,
+      description:descText?(descText.length>140?descText.slice(0,140)+'…':descText):undefined
+    });
+  }catch(_e){}
   if(!isDel&&mem.length)await sb.schema('acc').from('task_members').insert(mem.map(e=>({task_id:data.id,email:e})));
   if(projectId||goalId)await syncParentMembership(projectId,goalId,[row.owner,...mem]);
   if(projectId)await insertDelegationEdges(data.id,state.email,[row.owner,...mem]);
@@ -5902,9 +5913,14 @@ window.hdSend=async function(){
     const notSetUp=d.answer&&/not configured/i.test(d.answer);
     const md=notSetUp?(hdAnswer(q)||d.answer):(d.answer||'I could not work that out.');
     HD_MSGS.push({who:'bot', md:md, tools:d.tools_used||[], offerTicket:true});
+    // Logged directly, after the assistant actually answered, rather than through USAGE_MAP - a
+    // click here can genuinely fail (network error reaching helpdesk-ai), so the generic wrapper
+    // would have counted a failed round-trip as a real answer.
+    try{usageQueue('helpdesk.assistant.ask_a_question','search',{query:q});}catch(_e){}
   }catch(e){
     HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
     HD_MSGS.push({who:'bot', md:hdAnswer(q)||'I could not reach the assistant just now. Please try again in a moment.', offerTicket:true});
+    try{usageQueue('helpdesk.assistant.ask_a_question','error');}catch(_e){}
   }
   inp.disabled=false; if(btn)btn.disabled=false;
   try{inp.focus();}catch(_e){}
@@ -5940,11 +5956,15 @@ window.hdDocSearch=async function(){
     '</tbody></table>';
 }
 window.hdTicketSave=async function(){
+  // Logged directly, after the ticket actually exists, rather than through USAGE_MAP - real
+  // validation (empty subject/description) and a DB insert that can genuinely error both silently
+  // stop this, which a generic wrapper would have counted as a raised ticket either way.
   const subject=$('hdSub').value.trim(),category=$('hdDept').value,message=$('hdMsg').value.trim();
-  if(!subject||!message){toast('Add a subject and a description','err');return;}
+  if(!subject||!message){toast('Add a subject and a description','err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}return;}
   const btn=$('hdSubmitBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';}
   const {error}=await sb.schema('acc').from('helpdesk_tickets').insert({subject,category,message,status:'Open',raised_by:state.email,assigned_dept:category});
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}return;}
+  if(error){toast(error.message,'err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}return;}
+  try{usageQueue('helpdesk.tickets.raise_a_ticket','create',{subject:subject,category:category});}catch(_e){}
   // email the support inbox via Web3Forms (no backend needed)
   try{
     await fetch('https://api.web3forms.com/submit',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
@@ -8109,10 +8129,17 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
 // "Customized per feature" without a hand-written renderer per feature: what shows up here is
 // whatever that feature chose to capture (a task's title, a search query, who a claim went to) -
 // features that capture nothing yet just show a dash, same as before this existed.
+// snake_case/camelCase key -> "Title Case" label, e.g. due_date -> "Due Date". Meta keys are
+// written by whichever feature captured them, so this has to cope with either naming style
+// rather than assume one - a raw "Due_date:" or "dueDate:" reads as unfinished, not "nice".
+function usbMetaLabel(k){
+  return String(k).replace(/_/g,' ').replace(/([a-z])([A-Z])/g,'$1 $2')
+    .replace(/\w\S*/g, function(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); });
+}
 function usbMetaHtml(meta){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
   const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
-    .map(function(k){ return '<b style="font-weight:600">'+esc(k.charAt(0).toUpperCase()+k.slice(1))+':</b> '+esc(String(meta[k])); });
+    .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
   return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
 }
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
@@ -11479,18 +11506,24 @@ window.compEditModal=function(id){
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="compSave('+w.id+')"><i class="fa-solid fa-check"></i> Save</button></div>','md');
 };
 window.compSave=async function(id){
+  // Logged directly, after the row actually exists, rather than through USAGE_MAP - compSave
+  // both adds and edits, has real validation that can silently stop it (no name, an unparseable
+  // Page ID), and a DB call that can genuinely error, so a generic wrapper would have counted a
+  // rejected click the same as a real save.
+  const fk=id?'competitors.overview.edit_competitor':'competitors.overview.add_competitor';
   const name=(($('compName')&&$('compName').value)||'').trim();
   const term=(($('compSearchTerm')&&$('compSearchTerm').value)||'').trim()||name;
   const raw=(($('compPageId')&&$('compPageId').value)||'').trim();
   const pageId=compPageIdFrom(raw);
-  if(!name){toast('Enter a name','err');return;}
-  if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');return;}
+  if(!name){toast('Enter a name','err');try{usageQueue(fk,'error');}catch(_e){}return;}
+  if(raw&&!pageId){toast('That doesn\'t look like an Ad Library link or Page ID — leave it blank to search by keyword','warn');try{usageQueue(fk,'error');}catch(_e){}return;}
   const row={name:name,search_term:term,page_id:pageId||null};
   const {error}=id
     ? await sb.schema('camp').from('competitor_watchlist').update(row).eq('id',id)
     : await sb.schema('camp').from('competitor_watchlist').insert(row);
-  if(error){toast(error.message,'err');return;}
+  if(error){toast(error.message,'err');try{usageQueue(fk,'error');}catch(_e){}return;}
   closeModal();toast(id?'Competitor updated':'Competitor added','ok');
+  try{usageQueue(fk,id?'update':'create');}catch(_e){}
   await compRender();
 };
 window.compToggleActive=async function(id,active){
@@ -11503,7 +11536,10 @@ window.compRemove=async function(id){
   toast('Removed','ok');
   await compRender();
 };
-async function compRunSync(payload,btn,busyLabel,idleLabel){
+// featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
+// than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
+// rows skipped), so the generic wrapper would have counted a failed sync as a real one.
+async function compRunSync(payload,btn,busyLabel,idleLabel,featureKey){
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'');}
   try{
     const {data:{session}}=await sb.auth.getSession();
@@ -11512,8 +11548,8 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
       body:JSON.stringify(payload)});
     const jr=await res.json().catch(function(){return {};});
-    if(jr.error)toast(jr.error,'err');
-    else if(jr.skipped)toast(jr.message||'Sync skipped','err');
+    if(jr.error){toast(jr.error,'err'); try{usageQueue(featureKey,'error');}catch(_e){}}
+    else if(jr.skipped){toast(jr.message||'Sync skipped','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
     else {
       // Mark this selection as fetched so the grid is allowed to appear.
       window._compFetched[String(payload.watchlist_id!=null?payload.watchlist_id:'all')]=true;
@@ -11522,8 +11558,9 @@ async function compRunSync(payload,btn,busyLabel,idleLabel){
       if(jr.replaced) bits.push(jr.replaced+' replaced');
       if(jr.skippedWrongPage) bits.push(jr.skippedWrongPage+' from other pages ignored');
       toast('Fetched — '+bits.join(' · '),'ok');
+      try{usageQueue(featureKey,'update');}catch(_e){}
     }
-  }catch(e){toast('Fetch failed','err');}
+  }catch(e){toast('Fetch failed','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
   if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate"></i> '+(idleLabel||'Sync');}
   await compRender();
 }
@@ -11532,7 +11569,7 @@ window.compSync=function(id,btn){ compRunSync({watchlist_id:id},btn,'','Sync'); 
 // Meta has no carousel filter - so it asks for all media and the grid narrows it afterwards.
 window.compSyncFiltered=function(){
   const win=compRangeDates();
-  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); return; }
+  if(COMP_F.range==='custom'&&!win){ toast('Pick both a From and a To date first','warn'); try{usageQueue('competitors.overview.fetch_ads_from_meta_ad_library','error');}catch(_e){} return; }
   const payload={
     active_status:COMP_F.status,
     media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
@@ -11540,7 +11577,7 @@ window.compSyncFiltered=function(){
     date_to:win?win.to:undefined
   };
   if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
-  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta');
+  compRunSync(payload,$('compSyncBtn'),'Fetching…','Fetch from Meta','competitors.overview.fetch_ads_from_meta_ad_library');
 };
 // Same fetch, but it also re-downloads media for ads already held that have no preview image yet.
 window.compRefreshMedia=function(){
@@ -11549,7 +11586,7 @@ window.compRefreshMedia=function(){
     media_type:(COMP_F.media==='carousel'?'all':COMP_F.media),
     date_from:win?win.from:undefined, date_to:win?win.to:undefined};
   if(COMP_F.wl!=='all') payload.watchlist_id=Number(COMP_F.wl);
-  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews');
+  compRunSync(payload,$('compPosterBtn'),'Rebuilding…','Rebuild previews','competitors.overview.rebuild_ad_media_previews');
 };
 window.compOpenDetail=function(id){
   const a=window._compAdsAll.find(function(x){return String(x.id)===String(id);});
@@ -13427,11 +13464,14 @@ window.orgSetPeriod=function(p){
   if(p==='custom'){ if(!ORG_SINCE||!ORG_UNTIL){ const r=orgRange(); const t=new Date(); ORG_UNTIL=orgDay(t); ORG_SINCE=orgDay(orgAdd(t,-27)); } renderPage(); return; }
   ORG_OPEN=false; renderPage();
 };
+// Logged directly rather than through USAGE_MAP - unlike orgSetPeriod's presets, this has real
+// validation (missing dates, From after To) that can silently stop it without applying anything.
 window.orgApplyCustom=function(){
   const a=document.getElementById('orgFrom'), b=document.getElementById('orgTo');
-  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); return; }
-  if(a.value>b.value){ toast('The From date must come before the To date','warn'); return; }
+  if(!a||!b||!a.value||!b.value){ toast('Pick both dates','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
+  if(a.value>b.value){ toast('The From date must come before the To date','warn'); try{usageQueue('organic.all_content.filter_by_date_range','error');}catch(_e){} return; }
   ORG_SINCE=a.value; ORG_UNTIL=b.value; ORG_PERIOD='custom'; ORG_OPEN=false; ORG_PG=0; renderPage();
+  try{usageQueue('organic.all_content.filter_by_date_range','update');}catch(_e){}
 };
 window.orgSetNet=function(n){ORG_NET=n;ORG_PG=0;renderPage();};
 window.orgSetKind=function(k){ORG_KIND=k;ORG_PG=0;renderPage();};
@@ -16520,7 +16560,30 @@ const USAGE_MAP={
   procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
   procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
   vtBuToggle:'procurement.vendor_trends.filter_by_business_unit', vtFilterVendors:'procurement.vendor_trends.search_filter_vendors',
-  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history'
+  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history',
+  // Finance / Compliance / Documents / Video — previously untracked
+  docPickCat:'documents.department_library.browse_filter_by_category_folder',
+  // Competitors / Organic / Scaling / Playbook — previously untracked
+  compToggleActive:'competitors.overview.toggle_auto_sync_for_a_competitor',
+  compRemove:'competitors.overview.remove_competitor',
+  compShowOnly:'competitors.overview.drill_into_a_single_competitor',
+  compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
+  compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
+  compSearch:'competitors.overview.search_ad_text_headline_or_page',
+  compOpenDetail:'competitors.overview.view_ad_detail',
+  // compSave and compRunSync (compSyncFiltered/compRefreshMedia) are NOT mapped here on purpose -
+  // both have real validation/network failure paths and log directly, after success is actually
+  // confirmed, same as misExportCauselist/taskSave above.
+  orgSetPeriod:'organic.all_content.filter_by_date_range',
+  orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
+  orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
+  orgSetPageId:'organic.all_content.filter_by_network_content_type_or_page',
+  orgSetSort:'organic.all_content.sort_content_by_metric',
+  orgSearch:'organic.all_content.search_caption_or_page',
+  orgOpen:'organic.all_content.view_post_detail'
+  // orgApplyCustom is NOT mapped here on purpose - it has real validation (missing dates, From
+  // after To) and logs directly, same reason as compSave above. Scaling Up and Playbook are both
+  // entirely static, hardcoded screens (no wired buttons at all) - see USAGE_VIEWS instead.
 };
 /* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
    speed-test tables. Wrapping buttons can never catch those: there is no button, the act is opening
@@ -16545,7 +16608,74 @@ const USAGE_VIEWS={
   'inspection/0':        'inspection.console.view_inspection_kpis_and_breakdowns',
   // Procurement / Projects / Construction — previously untracked
   'procurement/4':       'procurement.vendor_trends.view_spend_kpis_trend_charts',
-  'projects/0':          'projects.overview.view_ongoing_sold_out_projects_gallery'
+  'projects/0':          'projects.overview.view_ongoing_sold_out_projects_gallery',
+  // Finance / Compliance / Documents / Video — previously untracked
+  'finance/0':           'finance.overview.view_collections_payables_cash_summary',
+  'compliance/0':        'compliance.compliance_calendar.view_statutory_contractual_due_dates',
+  'compliance/1':        'compliance.licences_repository.view_licences_registrations_expiry_status',
+  'compliance/2':        'compliance.warranties_guarantees.view_amc_warranty_expiry_status',
+  'documents/0':         'documents.libraries.view_department_galleries_pinned_recent',
+  'documents/dept':      'documents.department_library.view_department_library',
+  'documents/all':       'documents.all_documents.view_all_documents_across_departments',
+  'documents/search':    'documents.search.view_document_search_results',
+  'video/0':             'video.all_videos.view_all_videos_grid',
+  'video/1':             'video.training.view_training_videos',
+  'video/2':             'video.youtube.view_youtube_videos',
+  'video/3':             'video.walkthrough.view_walkthrough_videos',
+  // Competitors / Organic / Scaling / Playbook — previously untracked
+  'competitors/0':       'competitors.overview.view_competitor_watchlist_and_stored_ads',
+  'organic/0':           'organic.overview.view_engagement_overview_by_type_and_page',
+  'organic/1':           'organic.all_content.view_all_posts_and_reels_list',
+  'organic/2':           'organic.top_performers.view_top_20_posts_by_engagement',
+  // Scaling Up and Playbook are entirely static, hardcoded screens (no wired buttons anywhere -
+  // the "pills" and search box on Playbook's All plays tab carry no onclick/oninput at all), so
+  // opening each tab is the only distinguishable action there is.
+  'scaling/0':           'scaling.strategy_opsp.view_purpose_values_bhag_targets',
+  'scaling/1':           'scaling.priorities_rocks.view_quarterly_rocks_progress',
+  'scaling/2':           'scaling.kpi_scoreboard.view_kpi_targets_vs_actuals',
+  'scaling/3':           'scaling.meeting_rhythm.view_meeting_cadence_schedule',
+  'scaling/4':           'scaling.learning_hub.view_learning_resources_list',
+  'playbook/0':          'playbook.all_plays.view_process_playbook_list',
+  'playbook/1':          'playbook.featured_play.view_featured_play_steps',
+  'playbook/2':          'playbook.roles_raci.view_raci_roles_by_step',
+  // Helpdesk / Reports / Inventory / Maintenance — previously untracked
+  // Assistant is Help Desk's default landing tab, reached with NO segment in the hash at all
+  // (the sidebar link is a bare navTo('helpdesk')) - usageViewTick's own fallback for "no segment"
+  // is the string '0', not the tab's name, so '0' has to be listed too for that landing to ever
+  // match; clicking the Assistant tab explicitly (from Tickets) sets the hash to 'assistant' instead.
+  'helpdesk/0':          'helpdesk.assistant.view_ai_assistant_chat',
+  'helpdesk/assistant':  'helpdesk.assistant.view_ai_assistant_chat',
+  'helpdesk/tickets':    'helpdesk.tickets.view_my_tickets',
+  'inventory/0':         'inventory.indents_rfq.view_indent_rfq_pipeline',
+  'inventory/1':         'inventory.quote_comparison.view_quote_comparison',
+  'inventory/2':         'inventory.purchase_orders.view_purchase_orders',
+  'inventory/3':         'inventory.grn_qc.view_grn_qc_status',
+  'inventory/4':         'inventory.stock_ledger.view_stock_ledger',
+  'inventory/5':         'inventory.accounts_payable.view_accounts_payable',
+  'maintenance/0':       'maintenance.asset_register.view_asset_register',
+  'maintenance/1':       'maintenance.preventive_maintenance.view_pm_schedule',
+  'maintenance/2':       'maintenance.breakdowns_repairs.view_breakdown_repair_tickets',
+  'maintenance/3':       'maintenance.location_wise.view_assets_by_location',
+  // GTD / CRM / Dashboard — previously untracked. All three are entirely static/hardcoded
+  // demo screens (no wired buttons anywhere - GTD's Capture/Clarify buttons and CRM's tab
+  // bodies carry no onclick besides mTabs' own tab-switch navTo), so opening each tab is the
+  // only distinguishable action there is. Dashboard has no tabs at all - a bare landing and
+  // every navTo('dashboard') both fall through usageViewTick's no-segment default of '0'.
+  'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
+  'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
+  'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
+  'gtd/2':               'gtd.projects.view_active_projects_next_steps',
+  'gtd/3':               'gtd.waiting_for.view_items_waiting_on_others',
+  'gtd/4':               'gtd.someday_maybe.view_someday_maybe_ideas_list',
+  'gtd/5':               'gtd.weekly_review.view_weekly_review_checklist',
+  'crm/0':               'crm.pipeline_funnel.view_conversion_funnel_stage_ageing',
+  'crm/1':               'crm.leads.view_leads_pipeline_list',
+  'crm/2':               'crm.bookings.view_bookings_list',
+  'crm/3':               'crm.directory_hierarchy.view_directory_hierarchy_tab',
+  'crm/4':               'crm.comm_history.view_communication_history',
+  'crm/5':               'crm.demands_collections.view_demands_collections_list',
+  'crm/6':               'crm.brokers.view_brokers_list',
+  'crm/7':               'crm.post_sale.view_post_sale_tab'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){
