@@ -6089,213 +6089,21 @@ VIEWS.hr=async function(v,seg){
     v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1></div></div><div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600;font-size:15px;color:var(--ink)">Restricted</div><p style="max-width:420px;margin:8px auto 0">You don't have HR access. Ask a director to grant you the HR role in Settings.</p></div>`;
     return;
   }
-  const tab=seg[0]||'hs';
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1><p>H/S Candidates · Monthly Update · Interview Tracker · Resumes · Interview Qs</p></div></div>
+  // H/S Candidates is gone - it was a second, hand-kept list of the same people the Interview
+  // Tracker already holds. 'hs' still resolves, so an old bookmark or a stale link lands on
+  // Monthly Update rather than a blank page.
+  const tab=(seg[0]==='hs'?'monthly':seg[0])||'monthly';
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1><p>Monthly Update · Interview Tracker · Resumes · Interview Qs</p></div></div>
   <div class="tabs">
-    <div class="tab ${tab==='hs'?'active':''}" onclick="navTo('hr/hs')"><i class="fa-solid fa-user-check"></i> H/S Candidates</div>
     <div class="tab ${tab==='monthly'?'active':''}" onclick="navTo('hr/monthly')"><i class="fa-solid fa-chart-bar"></i> Monthly Update</div>
     <div class="tab ${tab==='tracker'?'active':''}" onclick="navTo('hr/tracker')"><i class="fa-solid fa-calendar-check"></i> Interview Tracker</div>
     <div class="tab ${tab==='resumes'?'active':''}" onclick="navTo('hr/resumes')"><i class="fa-solid fa-id-card-clip"></i> Resumes</div>
     <div class="tab ${tab==='interviewqs'?'active':''}" onclick="navTo('hr/interviewqs')"><i class="fa-solid fa-comments"></i> Interview Qs</div>
   </div><div id="hrBody"><div class="loader"><div class="spin"></div></div></div>`;
-  if(tab==='monthly') hrMonthlyUpdate();
-  else if(tab==='tracker') hrTracker();
+  if(tab==='tracker') hrTracker();
   else if(tab==='resumes') hrResumes();
   else if(tab==='interviewqs') hrInterviewQs();
-  else hrHS();
-};
-
-/* ── H/S Candidates ── */
-async function hrHS(){
-  const b=$('hrBody');
-  loader(b);
-  let rows=[];
-  try{const {data}=await sb.schema('hr').from('hs_candidates').select('*').order('id',{ascending:false});rows=data||[];}catch(e){}
-  window._hsRows=rows;
-  window._hsSel=new Set();
-  const statusTag=s=>{
-    const m={'Hold':'t-amber','Selected':'t-green','Offer Decline':'t-red','Backout':'t-gray','Interview Not Done':'t-blue','Not Mentioned':'t-gray'};
-    return `<span class="hs-stag hs-stag--${(m[s]||'t-amber').replace('t-','')}">${esc(s||'Hold')}</span>`;
-  };
-  b.innerHTML=`
-    <style>
-      .hs-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-      .hs-toolbar .hs-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
-      .hs-toolbar .hs-filters{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap;min-width:0}
-      .hs-search-wrap{position:relative;display:flex;align-items:center;min-width:0}
-      .hs-search-wrap i{position:absolute;left:10px;color:var(--slate);font-size:13px;pointer-events:none}
-      .hs-search-wrap input{padding-left:30px;height:36px;min-width:200px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink)}
-      .hs-search-wrap input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
-      select.hs-sel{height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink);cursor:pointer;min-width:150px}
-      select.hs-sel:focus{outline:none;border-color:var(--brand)}
-      .hs-count{font-size:12.5px;color:var(--slate);white-space:nowrap;padding:0 4px}
-      .hs-stag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
-      .hs-stag--amber{background:#fef3c7;color:#92400e}
-      .hs-stag--green{background:#d1fae5;color:#065f46}
-      .hs-stag--red{background:#fee2e2;color:#991b1b}
-      .hs-stag--gray{background:#f1f5f9;color:#475569}
-      .hs-stag--blue{background:#dbeafe;color:#1e40af}
-      #hsTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
-      #hsTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
-      #hsTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s}
-      #hsTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
-      #hsTbl tbody tr.hs-selected{background:#eff6ff}
-      #hsTbl tbody td{padding:11px 12px;vertical-align:middle;white-space:nowrap}
-      .hs-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
-      @media(max-width:768px){
-        .hs-toolbar{flex-direction:column;align-items:stretch}
-        .hs-toolbar .hs-actions{width:100%}
-        .hs-toolbar .hs-actions .btn{flex:1 1 auto;justify-content:center}
-        .hs-count{width:100%;text-align:center;order:99}
-        .hs-toolbar .hs-filters{margin-left:0;width:100%}
-        .hs-search-wrap{width:100%}
-        .hs-search-wrap input{min-width:0;width:100%}
-        select.hs-sel{min-width:0;width:100%}
-        #hsTbl{min-width:600px;font-size:12.5px}
-        #hsTbl thead th,#hsTbl tbody td{padding:9px 8px}
-      }
-    </style>
-    <div class="hs-toolbar">
-      <div class="hs-actions">
-        <button class="btn btn-primary" onclick="hsCreate()"><i class="fa-solid fa-plus"></i> Add</button>
-        <button class="btn" id="hsEditBtn" onclick="hsEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn" id="hsDelBtn" onclick="hsDeleteSel()" disabled style="opacity:.45;color:var(--err);border-color:var(--err)"><i class="fa-solid fa-trash"></i> Delete</button>
-        <span class="hs-count" id="hsCount">${rows.length} candidates</span>
-      </div>
-      <div class="hs-filters">
-        <div class="hs-search-wrap">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input id="hsSearch" placeholder="Search name, position…" oninput="hsFilter()">
-        </div>
-        <select class="hs-sel" id="hsStatusFilter" onchange="hsFilter()">
-          <option value="">All Status</option>
-          <option>Hold</option><option>Selected</option><option>Offer Decline</option><option>Backout</option><option>Interview Not Done</option>
-        </select>
-      </div>
-    </div>
-    <div class="card" style="overflow:hidden">
-      <div style="overflow-x:auto">
-      <table id="hsTbl">
-        <thead><tr>
-          <th style="width:36px"><input type="checkbox" class="hs-cb" id="hsChkAll" onchange="hsToggleAll(this)"></th>
-          <th>Name</th><th>Position</th><th>Phone</th><th>Email</th><th>Interview Date</th><th>Status</th>
-        </tr></thead>
-        <tbody id="hsTbody">
-          ${rows.map((r)=>`<tr data-id="${r.id}" data-name="${esc((r.name||'').toLowerCase())}" data-pos="${esc((r.position||'').toLowerCase())}" data-status="${esc(r.status||'')}">
-            <td><input type="checkbox" class="hs-cb hs-row-cb" data-id="${r.id}" onchange="hsRowCheck(this)"></td>
-            <td style="font-weight:600">${esc(r.name||'—')}</td>
-            <td style="color:var(--slate)">${esc(r.position||'—')}</td>
-            <td style="font-family:monospace;font-size:12px">${esc(r.number||'—')}</td>
-            <td style="font-size:12px"><a href="mailto:${esc(r.email||'')}" style="color:var(--brand)">${esc(r.email||'—')}</a></td>
-            <td style="color:var(--slate)">${esc(r.interview_date||'—')}</td>
-            <td>${statusTag(r.status)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-      </div>
-    </div>`;
-}
-window.hsRowCheck=function(cb){
-  const id=Number(cb.dataset.id);
-  if(cb.checked) window._hsSel.add(id); else window._hsSel.delete(id);
-  cb.closest('tr').classList.toggle('hs-selected',cb.checked);
-  hsUpdateToolbar();
-};
-window.hsToggleAll=function(master){
-  document.querySelectorAll('.hs-row-cb').forEach(cb=>{
-    const tr=cb.closest('tr');
-    if(tr.style.display==='none')return;
-    cb.checked=master.checked;
-    const id=Number(cb.dataset.id);
-    if(master.checked) window._hsSel.add(id); else window._hsSel.delete(id);
-    tr.classList.toggle('hs-selected',master.checked);
-  });
-  hsUpdateToolbar();
-};
-window.hsUpdateToolbar=function(){
-  const n=window._hsSel.size;
-  const editBtn=$('hsEditBtn'),delBtn=$('hsDelBtn');
-  if(editBtn){editBtn.disabled=(n!==1);editBtn.style.opacity=(n===1)?'1':'.45';}
-  if(delBtn){delBtn.disabled=(n===0);delBtn.style.opacity=(n>0)?'1':'.45';}
-};
-window.hsFilter=function(){
-  const q=($('hsSearch').value||'').toLowerCase();
-  const st=$('hsStatusFilter').value;
-  let vis=0;
-  document.querySelectorAll('#hsTbody tr').forEach(tr=>{
-    const nm=tr.dataset.name||'',pos=tr.dataset.pos||'',s=tr.dataset.status||'';
-    const show=(!q||(nm.includes(q)||pos.includes(q)))&&(!st||s===st);
-    tr.style.display=show?'':'none';if(show)vis++;
-  });
-  const c=$('hsCount');if(c)c.textContent=vis+' candidates';
-  // deselect hidden rows
-  document.querySelectorAll('#hsTbody tr').forEach(tr=>{
-    if(tr.style.display==='none'){
-      const cb=tr.querySelector('.hs-row-cb');
-      if(cb&&cb.checked){cb.checked=false;window._hsSel.delete(Number(cb.dataset.id));tr.classList.remove('hs-selected');}
-    }
-  });
-  hsUpdateToolbar();
-};
-window.hsCreate=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Add Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Full Name *</label><input id="hsFName" class="sel" placeholder="e.g. Priya Sharma"></div>
-    <div><label>Position *</label><input id="hsFPos" class="sel" placeholder="e.g. Sales Manager"></div></div>
-    <div class="two"><div><label>Phone Number</label><input id="hsFNum" class="sel" placeholder="e.g. 9876543210"></div>
-    <div><label>Email</label><input id="hsFEmail" class="sel" type="email" placeholder="e.g. priya@email.com"></div></div>
-    <div class="two"><div><label>Interview Date</label><input id="hsFDate" class="sel" placeholder="e.g. 15.07.2026"></div>
-    <div><label>Status</label><select id="hsFStatus" class="sel">
-      <option>Hold</option><option>Selected</option><option>Offer Decline</option><option>Backout</option><option>Interview Not Done</option>
-    </select></div></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="hsSaveBtn" onclick="hsSave()"><i class="fa-solid fa-check"></i> Save</button></div>`);
-};
-window.hsSave=async function(){
-  const name=($('hsFName').value||'').trim();
-  const pos=($('hsFPos').value||'').trim();
-  if(!name){toast('Enter a name','err');return;}
-  const btn=$('hsSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {error}=await sb.schema('hr').from('hs_candidates').insert({name,position:pos,number:($('hsFNum').value||'').trim(),email:($('hsFEmail').value||'').trim(),interview_date:($('hsFDate').value||'').trim(),status:$('hsFStatus').value||'Hold'});
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
-  closeModal();toast('Candidate added','ok');hrHS();
-};
-window.hsEditSel=function(){
-  const sel=[...window._hsSel];
-  if(sel.length===0){toast('Select a candidate first','err');return;}
-  if(sel.length>1){toast('Select only one candidate to edit','err');return;}
-  hsEdit(sel[0]);
-};
-window.hsEdit=async function(id){
-  const r=(window._hsRows||[]).find(x=>x.id===id);if(!r)return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Full Name *</label><input id="hsFName" class="sel" value="${esc(r.name||'')}"></div>
-    <div><label>Position</label><input id="hsFPos" class="sel" value="${esc(r.position||'')}"></div></div>
-    <div class="two"><div><label>Phone Number</label><input id="hsFNum" class="sel" value="${esc(r.number||'')}"></div>
-    <div><label>Email</label><input id="hsFEmail" class="sel" value="${esc(r.email||'')}"></div></div>
-    <div class="two"><div><label>Interview Date</label><input id="hsFDate" class="sel" value="${esc(r.interview_date||'')}"></div>
-    <div><label>Status</label><select id="hsFStatus" class="sel">
-      ${['Hold','Selected','Offer Decline','Backout','Interview Not Done'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
-    </select></div></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="hsSaveBtn" onclick="hsUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button></div>`);
-};
-window.hsUpdate=async function(id){
-  const name=($('hsFName').value||'').trim();if(!name){toast('Enter a name','err');return;}
-  const btn=$('hsSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {error}=await sb.schema('hr').from('hs_candidates').update({name,position:($('hsFPos').value||'').trim(),number:($('hsFNum').value||'').trim(),email:($('hsFEmail').value||'').trim(),interview_date:($('hsFDate').value||'').trim(),status:$('hsFStatus').value||'Hold'}).eq('id',id);
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
-  closeModal();toast('Updated','ok');hrHS();
-};
-window.hsDeleteSel=async function(){
-  const sel=[...window._hsSel];
-  if(!sel.length)return;
-  if(!await confirmDialog(`Delete ${sel.length} candidate${sel.length>1?'s':''}?`))return;
-  const {error}=await sb.schema('hr').from('hs_candidates').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  toast(sel.length>1?`${sel.length} candidates deleted`:'Candidate deleted','ok');
-  hrHS();
+  else hrMonthlyUpdate();
 };
 
 /* ── Monthly Update ──
@@ -6519,7 +6327,8 @@ window.muDeleteSel=async function(){
   const what=ids.length===1
     ? 'Remove “'+((picked[0]&&picked[0].position_title)||'this position')+'” from '+muMonthLabel(MU_CUR)+'?'
     : 'Remove '+ids.length+' positions from '+muMonthLabel(MU_CUR)+'?';
-  if(!await confirmDialog(what+' The requisition itself is not deleted.')) return;
+  if(!await confirmDialog(what+' The requisition itself is not deleted.',
+      {title:'Remove from month', okLabel:'Remove'})) return;
   const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
   if(error){ toast(error.message,'err'); return; }
   toast(ids.length===1?'Position removed':ids.length+' positions removed','ok');
@@ -6533,7 +6342,13 @@ window.muApprove=async function(manpowerId,ok){
   if(!hrCan()){ toast('Only HR can approve a requisition','err'); return; }
   const row=(MU_ROWS||[]).find(function(r){return r.manpower_id===manpowerId;})||{};
   const who=row.position_title||'this requisition';
-  if(!await confirmDialog((ok?'Approve ':'Reject ')+'“'+who+'”?')) return;
+  /* confirmDialog defaults to danger:true with the OK button labelled "Delete" - which turned the
+     Approve prompt into a red delete warning. Both buttons are named for what they actually do. */
+  const okd=await confirmDialog(
+    (ok?'Approve the requisition for “':'Reject the requisition for “')+who+'”?',
+    ok ? {title:'Approve requisition', okLabel:'Approve', icon:'fa-circle-check', danger:false}
+       : {title:'Reject requisition',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
+  if(!okd) return;
   const patch=ok
     ? {approval_status:'Approved', approved_by:state.email, approved_at:new Date().toISOString(), rejection_reason:null}
     : {approval_status:'Rejected', approved_by:state.email, approved_at:new Date().toISOString()};
@@ -16607,8 +16422,7 @@ const USAGE_MAP={
   advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
   advFilter:'legal.advocates.search_advocates',
   // Human Resources
-  hsSave:'hr.h_s_candidates.add_candidate', hsUpdate:'hr.h_s_candidates.edit_candidate',
-  hsDeleteSel:'hr.h_s_candidates.delete_candidate_s', hsFilter:'hr.h_s_candidates.search_filter_candidates',
+  // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
   // candidates - so the old create-month / add-row / edit-cell actions have nothing to log.
   muViewMonth:'hr.monthly_update.open_a_month',
