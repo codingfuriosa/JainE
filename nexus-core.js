@@ -9259,11 +9259,12 @@ const DEFAULT_JDS=[]; // all JDs now stored in Supabase (recruit.job_description
 let REC_SEL=new Set();
 VIEWS.recruitment=async function(v,seg){
   setCrumb(['People','Recruitment (ATS)']);
-  const tabs=['Tests','Descriptions','ManPower Form'];const ti=mTab(seg,tabs.length);
+  const tabs=['Tests','Descriptions','ManPower Form','Referrals'];const ti=mTab(seg,tabs.length);
   v.innerHTML=REC_RO_CSS+mHead('fa-user-plus','#0369a1','Recruitment (ATS)')
     +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Read-only — adding, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
     +mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
+  if(ti===3){recReferrals();return;}
   if(ti===2){recManpower();return;}
   if(ti===0){await recTests();return;}
   await recLoadJDs(v);
@@ -9714,6 +9715,7 @@ window.mpShowDetail=function(id,e){
     </div>
     ${rec.job_description?`<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em;margin-bottom:6px">Job Description / KPI</div><div style="font-size:13.5px;white-space:pre-wrap;line-height:1.6;color:var(--ink)">${esc(rec.job_description)}</div></div>`:''}
     ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
+    ${mpAiPanel(rec)}
   </div>`;
 };
 window.mpCloseDetail=function(){
@@ -9817,6 +9819,360 @@ window.mpDeleteOne=async function(id){if(!recGuard())return;
 };
 window.mpDelete=window.mpDeleteOne;
 window.mpReload=function(){MP_RECORDS=null;if(PAGE==='recruitment')renderPage();};
+
+/* ── ManPower: the AI-written JD, post text and creative ──
+   The generation itself is the manpower-ai-generate edge function: it reads the requisition, takes
+   up to three of our past Job Descriptions as style examples, and writes the JD, the shorter
+   job-board post text and a creative. It stores all three and stamps ai_status on the requisition.
+   Nothing was ever calling it, so this is the button. */
+function mpAiPanel(rec){
+  const st=rec.ai_status||'pending';
+  // The document is built from the JSON in the browser, so that - not the stored file - is what
+  // decides whether there is anything to show.
+  const hasJd=!!rec.ai_job_description_json;
+  const badge={pending:'<span class="tag t-gray">Not generated</span>',
+               generating:'<span class="tag t-blue"><i class="fa-solid fa-spinner fa-spin"></i> Writing…</span>',
+               ready:'<span class="tag t-green">Ready</span>',
+               failed:'<span class="tag t-red">Failed</span>'}[st]||'';
+  let inner;
+  if(st==='ready'&&hasJd){
+    inner='<div class="mp-ai-acts">'
+      +'<button class="btn btn-sm btn-primary" onclick="mpJdOpen('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
+      +'<button class="btn btn-sm" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-download"></i> Download</button>'
+      +(rec.ai_creative_path
+        ? '<a class="btn btn-sm" target="_blank" rel="noopener" href="'+esc(rec.ai_creative_path)+'"><i class="fa-solid fa-image"></i> Creative</a>'
+        : '')
+      +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
+      +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
+      +'</div>'
+      +(rec.ai_platform_post_text
+        ? '<div class="mp-ai-post"><div class="mp-ai-lbl">Post text — for LinkedIn, Naukri or Indeed</div>'
+          +'<div class="mp-ai-post-body" id="mpAiPost'+rec.id+'">'+esc(rec.ai_platform_post_text)+'</div></div>'
+        : '');
+  } else if(st==='generating'){
+    inner='<div class="mp-ai-note">Writing the Job Description now. It takes a few seconds — press Refresh when it settles.</div>'
+      +'<div class="mp-ai-acts"><button class="btn btn-sm" onclick="mpReload()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>';
+  } else {
+    inner='<div class="mp-ai-note">'
+      +(st==='failed'
+        ? 'The last attempt failed. Trying again is safe — nothing was saved.'
+        : 'Writes a full Job Description in our house style, the shorter text for a job board, and a creative to post with it.')
+      +'</div>'
+      +'<div class="mp-ai-acts"><button class="btn btn-sm btn-primary" onclick="mpAiGenerate('+rec.id+')">'
+      +'<i class="fa-solid fa-wand-magic-sparkles"></i> '+(st==='failed'?'Try again':'Generate')+'</button></div>';
+  }
+  return '<div class="mp-ai"><div class="mp-ai-hd"><i class="fa-solid fa-wand-magic-sparkles"></i> Job Description &amp; creative '+badge+'</div>'+inner+'</div>';
+}
+
+window.mpAiCopyPost=function(id){
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  const txt=(rec&&rec.ai_platform_post_text)||'';
+  if(!txt){ toast('No post text yet','err'); return; }
+  // navigator.clipboard needs a secure context and can be refused; the textarea fallback works
+  // everywhere, so a copy never silently does nothing.
+  const done=function(){ toast('Post text copied','ok'); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done,function(){ mpCopyFallback(txt,done); });
+  } else { mpCopyFallback(txt,done); }
+};
+function mpCopyFallback(txt,done){
+  const ta=document.createElement('textarea');
+  ta.value=txt; ta.style.position='fixed'; ta.style.top='-1000px';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }
+  catch(e){ toast('Could not copy — select the text and copy it by hand','err'); }
+  document.body.removeChild(ta);
+}
+
+window.mpAiGenerate=async function(id,isRewrite){
+  if(!recGuard()) return;
+  if(isRewrite && !await confirmDialog(
+      'Rewrite the Job Description, post text and creative for this requisition? The current ones are replaced.',
+      {title:'Rewrite', okLabel:'Rewrite', icon:'fa-rotate', danger:false})) return;
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  if(rec){ rec.ai_status='generating'; mpShowDetail(id); }
+  toast('Writing the Job Description…','ok');
+  try{
+    const {data,error}=await sb.functions.invoke('manpower-ai-generate',
+      {body:{request_id:id, requested_by:state.email}});
+    if(error) throw error;
+    if(data&&data.error) throw new Error(data.error);
+    toast('Job Description ready','ok');
+  }catch(e){
+    // The requisition's own ai_status is set to 'failed' by the function, so the reload below
+    // shows the real state rather than whatever this screen last guessed.
+    toast('Could not generate: '+((e&&e.message)||e),'err');
+  }
+  MP_RECORDS=null;
+  if(PAGE==='recruitment') await recManpower();
+  const still=$('mpDetail');
+  if(still) mpShowDetail(id);
+};
+
+/* The Job Description document, built in the browser.
+   It used to be an HTML file uploaded to public storage, and that can never work: Supabase serves
+   HTML out of a public bucket as text/plain on purpose (it stops a stored page running scripts on
+   the storage domain). The browser therefore showed the raw source - which is the "no CSS, opens
+   some Supabase code" everybody was seeing. Verified: that URL returns Content-Type: text/plain,
+   while the SVG creative beside it correctly returns image/svg+xml.
+   So the document is assembled here instead, from ai_job_description_json which is already stored
+   on the requisition. Print gives a PDF, Download gives a real file, and neither depends on how
+   storage chooses to serve a content type. */
+const JD_LOGO='https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/recruitment-creatives/brand/jain-group-logo.webp';
+
+function mpJdDocHtml(rec){
+  const s=rec.ai_job_description_json||{};
+  const q=s.qualifications||{};
+  const li=function(arr){
+    return (Array.isArray(arr)&&arr.length)
+      ? '<ul>'+arr.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>' : '';
+  };
+  const resp=(s.responsibilities||[]).map(function(r){
+    return '<li>'+(r.label?'<b>'+esc(r.label)+'</b>: ':'')+esc(r.detail||'')+'</li>';
+  }).join('');
+  const qual=[];
+  if(q.education) qual.push('<p><b>Educational Background:</b> '+esc(q.education)+'</p>');
+  if(q.experience) qual.push('<p><b>Professional Experience:</b> '+esc(q.experience)+'</p>');
+  if(q.skills&&q.skills.length) qual.push('<p><b>Skills:</b></p>'+li(q.skills));
+  if(q.personal_attributes&&q.personal_attributes.length)
+    qual.push('<p><b>Personal Attributes:</b></p>'+li(q.personal_attributes));
+
+  return '<!doctype html><html><head><meta charset="utf-8">'
+    +'<title>'+esc(s.job_title||rec.job_title||'Job Description')+' — Jain Group</title>'
+    +'<style>'
+      +'@page{margin:18mm 16mm}'
+      +'*{box-sizing:border-box}'
+      +'body{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#111;max-width:820px;margin:0 auto;padding:44px 52px;line-height:1.6}'
+      +'.lh{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;'
+        +'border-bottom:3px solid #D21F3C;padding-bottom:16px;margin-bottom:26px}'
+      +'.lh img{height:42px}'
+      +'h1{font-size:23px;margin:0 0 3px;letter-spacing:-.2px}'
+      +'.dept{color:#555;font-size:14px}'
+      +'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#D21F3C;'
+        +'border-bottom:1px solid #eee;padding-bottom:5px;margin:26px 0 10px}'
+      +'p,li{font-size:14px}'
+      +'ul{margin:4px 0 4px;padding-left:20px}'
+      +'li{margin-bottom:4px}'
+      +'.foot{margin-top:38px;padding-top:13px;border-top:1px solid #eee;font-size:11.5px;color:#888}'
+      /* the print button is for the person reading it on screen and must never appear on paper */
+      +'.noprint{position:fixed;top:14px;right:14px}'
+      +'.noprint button{font:600 13px Inter,Arial,sans-serif;padding:9px 15px;border-radius:8px;'
+        +'border:0;background:#D21F3C;color:#fff;cursor:pointer}'
+      +'@media print{.noprint{display:none}body{padding:0}}'
+    +'</style></head><body>'
+    +'<div class="noprint"><button onclick="window.print()">Print / Save as PDF</button></div>'
+    +'<div class="lh"><div><h1>'+esc(s.job_title||rec.job_title||'')+'</h1>'
+      +'<div class="dept">'+esc(s.department||rec.department||'')+'</div></div>'
+      +'<img src="'+JD_LOGO+'" alt="Jain Group"></div>'
+    +'<h2>Job Summary</h2><p>'+esc(s.job_summary||'')+'</p>'
+    +(resp?'<h2>Key Responsibilities</h2><ul>'+resp+'</ul>':'')
+    +(qual.length?'<h2>Required Qualifications</h2>'+qual.join(''):'')
+    +(s.compensation?'<h2>Compensation and Benefits</h2><p>'+esc(s.compensation)+'</p>':'')
+    +'<div class="foot">Jain Group — Caring for your dreams. '
+      +esc([rec.location?'Location: '+rec.location:'',
+            rec.no_of_vacancy?'Vacancies: '+rec.no_of_vacancy:''].filter(Boolean).join(' · '))
+      +'</div></body></html>';
+}
+
+function mpJdRec(id){
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  if(!rec||!rec.ai_job_description_json){ toast('No Job Description generated yet','err'); return null; }
+  return rec;
+}
+
+// Opens the document in its own tab, ready to print or save as PDF.
+window.mpJdOpen=function(id){
+  const rec=mpJdRec(id); if(!rec) return;
+  const w=window.open('','_blank');
+  if(!w){ toast('Your browser blocked the new tab — allow pop-ups for JAIN-E, or use Download','err'); return; }
+  w.document.open(); w.document.write(mpJdDocHtml(rec)); w.document.close();
+};
+
+// Saves a real file. A Blob URL downloads whatever the server would have argued about.
+window.mpJdDownload=function(id){
+  const rec=mpJdRec(id); if(!rec) return;
+  const name=String((rec.ai_job_description_json.job_title||rec.job_title||'Job Description'))
+    .replace(/[^A-Za-z0-9 .()-]/g,'').trim().replace(/\s+/g,'_');
+  const blob=new Blob([mpJdDocHtml(rec)],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=(name||'Job_Description')+' — Jain Group.html';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); },4000);
+  toast('Downloaded','ok');
+};
+
+/* ── Referrals ──
+   Anyone signed in may refer somebody for an open position. A referral submitted by HR, the
+   Administrator or Management is approved on the way in (hr.submission_self_approves); everyone
+   else's waits for HR.
+   A referral is recorded HERE AND NOWHERE ELSE - it does not create a candidate and does not appear
+   in the Interview Tracker or in any Monthly Update column. Somebody has to pick it up deliberately. */
+let REF_RECORDS=null, REF_POSITIONS=null;
+
+async function recReferrals(){
+  const b=$('recBody');
+  if(!REF_RECORDS){
+    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    try{
+      const q=await sb.schema('hr').from('referrals').select('*').order('created_at',{ascending:false});
+      if(q.error) throw q.error;
+      REF_RECORDS=q.data||[];
+    }catch(e){
+      b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message||String(e))+'</div>';
+      return;
+    }
+  }
+  const rows=REF_RECORDS;
+  const mine=rows.filter(function(r){return (r.referred_by||'').toLowerCase()===(state.email||'').toLowerCase();}).length;
+  const waiting=rows.filter(function(r){return (r.approval_status||'Pending')==='Pending';}).length;
+  const canDecide=hrCan();
+
+  const stTag=function(r){
+    const s=r.approval_status||'Pending';
+    if(s==='Approved') return '<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
+    if(s==='Rejected') return '<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
+    return '<span class="tag t-amber">Waiting for HR</span>';
+  };
+
+  b.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0">Referrals <span class="tag t-gray" style="margin-left:4px">'+rows.length+'</span>'
+        +(waiting?' <span class="tag t-amber" style="margin-left:4px">'+waiting+' waiting</span>':'')+'</div>'
+      +'<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button class="btn btn-primary" onclick="refForm()"><i class="fa-solid fa-user-plus"></i> Refer someone</button>'
+      +'</div>'
+    +'</div>'
+    +'<div class="ref-note"><i class="fa-solid fa-circle-info"></i> '
+      +'A referral is kept here only. It does not create a candidate and is not counted in the Interview Tracker '
+      +'or the Monthly Update until someone takes it forward.'
+      +(mine?' You have referred '+mine+' '+(mine===1?'person':'people')+'.':'')
+    +'</div>'
+    +(rows.length
+      ? '<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table class="tbl">'
+        +'<thead><tr><th>Name</th><th>Position</th><th>Phone</th><th>Email</th>'
+          +'<th>Referred by</th><th>When</th><th>Status</th>'+(canDecide?'<th></th>':'')+'</tr></thead><tbody>'
+        +rows.map(function(r){
+          const pend=(r.approval_status||'Pending')==='Pending';
+          return '<tr>'
+            +'<td style="font-weight:600">'+esc(r.referred_name||'—')+'</td>'
+            +'<td>'+esc(r.position||'—')+'</td>'
+            +'<td style="white-space:nowrap">'+esc(r.referred_phone||'—')+'</td>'
+            +'<td style="font-size:12px">'+esc(r.referred_email||'—')+'</td>'
+            +'<td style="font-size:12px;color:var(--slate)">'+esc(r.referred_by||'—')+'</td>'
+            +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+esc(refWhen(r.created_at))+'</td>'
+            +'<td>'+stTag(r)+'</td>'
+            +(canDecide
+              ? '<td style="white-space:nowrap">'
+                +(pend
+                  ? '<button class="btn btn-sm btn-ok" onclick="refDecide('+r.id+',true)"><i class="fa-solid fa-check"></i> Approve</button> '
+                    +'<button class="btn btn-sm btn-danger" onclick="refDecide('+r.id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
+                  : '<button class="btn btn-sm btn-danger" onclick="refDelete('+r.id+')" title="Delete this referral"><i class="fa-solid fa-trash"></i></button>')
+                +'</td>'
+              : '')
+            +'</tr>';
+        }).join('')
+        +'</tbody></table></div></div>'
+      : '<div class="card card-pad empty"><i class="fa-solid fa-user-plus"></i>'
+        +'<div style="font-weight:600;color:var(--ink)">No referrals yet</div>'
+        +'<p style="max-width:400px;margin:6px auto 0">Know somebody good for an open role? Click <b>Refer someone</b>.</p></div>');
+}
+
+function refWhen(ts){
+  if(!ts) return '—';
+  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return String(ts); }
+}
+
+window.refForm=async function(){
+  if(!REF_POSITIONS){
+    try{
+      const {data}=await sb.schema('hr').rpc('open_positions');
+      REF_POSITIONS=data||[];
+    }catch(e){ REF_POSITIONS=[]; }
+  }
+  const opts=REF_POSITIONS.map(function(p){
+    return '<option value="'+p.manpower_id+'">'+esc(p.job_title+(p.department?' — '+p.department:''))+'</option>';
+  }).join('');
+  const selfAppr=hrCan();
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer someone</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +'<div><label>Their name *</label><input id="refFName" class="inp" placeholder="Full name"></div>'
+      +'<div class="two">'
+        +'<div><label>Phone</label><input id="refFPhone" class="inp" placeholder="10-digit mobile"></div>'
+        +'<div><label>Email</label><input id="refFEmail" class="inp" type="email" placeholder="name@example.com"></div>'
+      +'</div>'
+      +'<div><label>Position *</label><select id="refFPos" class="sel">'
+        +(opts?'<option value="">— Choose an open position —</option>'+opts
+              :'<option value="">No open positions right now</option>')
+        +'</select></div>'
+      +'<div><label>Anything we should know</label>'
+        +'<textarea id="refFNotes" class="inp" rows="3" placeholder="How you know them, what they do now, why they would suit it"></textarea></div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">'
+        +(selfAppr
+          ? 'You are in HR or Management, so this is approved as soon as you submit it.'
+          : 'HR will see this and approve or reject it.')
+      +'</div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="refSaveBtn" onclick="refSave()"><i class="fa-solid fa-check"></i> Submit</button></div>');
+  setTimeout(function(){ const el=$('refFName'); if(el) el.focus(); },50);
+};
+
+window.refSave=async function(){
+  const name=(($('refFName')||{}).value||'').trim();
+  const posId=(($('refFPos')||{}).value||'').trim();
+  const phone=(($('refFPhone')||{}).value||'').trim();
+  const email=(($('refFEmail')||{}).value||'').trim();
+  if(!name){ toast('Enter their name','err'); return; }
+  if(!posId){ toast('Choose the position','err'); return; }
+  if(!phone&&!email){ toast('Give a phone number or an email — otherwise nobody can reach them','err'); return; }
+  const pos=(REF_POSITIONS||[]).find(function(p){return String(p.manpower_id)===posId;});
+  const btn=$('refSaveBtn');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  const {error}=await sb.schema('hr').from('referrals').insert({
+    referred_name:name, referred_phone:phone||null, referred_email:email||null,
+    position:(pos&&pos.job_title)||null, manpower_request_id:parseInt(posId,10),
+    referred_by:state.email, notes:(($('refFNotes')||{}).value||'').trim()||null
+  });
+  if(error){
+    toast(error.message,'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Submit'; }
+    return;
+  }
+  closeModal();
+  toast(hrCan()?'Referral added and approved':'Referral sent to HR','ok');
+  REF_RECORDS=null; recReferrals();
+};
+
+window.refDecide=async function(id,ok){
+  if(!hrCan()){ toast('Only HR can approve a referral','err'); return; }
+  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
+  const who=r.referred_name||'this referral';
+  if(!await confirmDialog((ok?'Approve the referral for ':'Reject the referral for ')+'“'+who+'”?',
+      ok ? {title:'Approve referral', okLabel:'Approve', icon:'fa-circle-check', danger:false}
+         : {title:'Reject referral',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true})) return;
+  const {error}=await sb.schema('hr').from('referrals').update({
+    approval_status: ok?'Approved':'Rejected',
+    approved_by: state.email,
+    approved_at: new Date().toISOString()
+  }).eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  toast(ok?'Approved':'Rejected','ok');
+  REF_RECORDS=null; recReferrals();
+};
+
+window.refDelete=async function(id){
+  if(!hrCan()){ toast('Only HR can delete a referral','err'); return; }
+  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
+  if(!await confirmDialog('Delete the referral for “'+(r.referred_name||'this person')+'”? This cannot be undone.')) return;
+  const {error}=await sb.schema('hr').from('referrals').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  toast('Referral deleted','ok');
+  REF_RECORDS=null; recReferrals();
+};
+
+window.refReload=function(){ REF_RECORDS=null; REF_POSITIONS=null; if(PAGE==='recruitment')renderPage(); };
 
 async function recLoadJDs(v){
   REC_SEL=new Set();
@@ -16448,6 +16804,10 @@ const USAGE_MAP={
   mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:'recruitment.manpower_form.edit_requisition',
   mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
   mpDeleteOne:'recruitment.manpower_form.delete_requisition_s',
+  mpAiGenerate:'recruitment.manpower_form.generate_jd_post_text_creative',
+  mpAiCopyPost:'recruitment.manpower_form.copy_platform_post_text',
+  refSave:'recruitment.referrals.refer_someone', refDecide:'recruitment.referrals.approve_reject_referral',
+  refDelete:'recruitment.referrals.delete_referral',
   // Inspection
   inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
   inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',

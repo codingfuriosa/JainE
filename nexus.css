@@ -747,6 +747,23 @@ select.mu-sel:focus{outline:none;border-color:var(--brand)}
   .mu-tbl thead th,.mu-tbl tbody td{padding:9px 9px}
 }
 
+/* ── Referrals tab (Recruitment) ── */
+.ref-note{display:flex;align-items:flex-start;gap:9px;background:#eff4ff;border:1px solid #dbe4fb;border-radius:10px;padding:10px 13px;font-size:12.5px;color:#1e3a8a;line-height:1.55;margin-bottom:14px}
+.ref-note i{margin-top:2px;flex:none}
+
+/* ── ManPower: the AI-written JD, post text and creative ── */
+.mp-ai{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.mp-ai-hd{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);margin-bottom:9px}
+.mp-ai-hd i{color:var(--brand)}
+.mp-ai-note{font-size:12.5px;color:var(--slate);line-height:1.55;margin-bottom:10px;max-width:620px}
+.mp-ai-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* The post text is copy somebody is about to paste elsewhere, so it is shown as text to read and
+   check - not squeezed into a one-line field. */
+.mp-ai-post{margin-top:12px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:11px 14px;max-width:680px}
+.mp-ai-lbl{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate-2);margin-bottom:5px}
+.mp-ai-post-body{font-size:13px;line-height:1.65;color:var(--ink);white-space:pre-wrap}
+@media(max-width:640px){ .mp-ai-acts .btn{flex:1 1 auto;justify-content:center} }
+
 /* ── Resumes tab ── */
 .rs-toolbar-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .rs-toolbar-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
