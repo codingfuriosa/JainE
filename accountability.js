@@ -865,6 +865,17 @@
       const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
       g.style.display=hasVisible?'':'none';
     });
+    // Logged directly, debounced to the settled query, rather than through USAGE_MAP - this fires
+    // on every keystroke for instant filtering, and logging every keystroke turned one real search
+    // into a burst of single/two-character fragments milliseconds apart (typing "182" logged "1",
+    // "18" and "182" as three separate searches), flooding the Usability report's per-person
+    // Details view with noise instead of one clean "searched for 182" entry.
+    clearTimeout(window._accSearchLogT);
+    if(val){
+      window._accSearchLogT=setTimeout(function(){
+        try{ usageQueue('tasks.tasks.search_tasks','search',{query:String(val)}); }catch(_e){}
+      },800);
+    }
   };
 
   /* ---------- WORKFLOW ----------
