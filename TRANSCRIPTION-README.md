@@ -96,7 +96,7 @@ applying them to a database that already has the pipeline changes nothing.
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Only for an Azure or gateway endpoint. |
 | `APP_TZ_OFFSET_MIN` | `330` | IST. Decides what "yesterday" means. |
 | `LOST_CALL_FEED` | the RealtyBucket URL | |
-| `MIN_DURATION_SECONDS` | `69` | Only a call longer than this is transcribed. Checked against the CRM's own duration before any audio is fetched, so a call at or under it never even reaches a model - it lands as `non_transcribable`, with the recording_url still stored and shown on the row. `0` sends everything. |
+| `MIN_DURATION_SECONDS` | `60` | Only a call longer than this is transcribed - by requirement, more than a full minute. Checked against the CRM's own duration before any audio is fetched, so a call at or under it never even reaches a model - it lands as `non_transcribable`, with the recording_url still stored and shown on the row. `0` sends everything. |
 | `MAX_ATTEMPTS` | `3` | Retries per phase. |
 | `MAX_STEPS_PER_TICK` | `2` | Phases advanced per cron tick. Still strictly one recording at a time. |
 
@@ -482,7 +482,7 @@ there.
 
 - **All CRM statuses are ingested**, not just Lost. "Total Calls" has to be an honest total, and
   `qualified_should_not_have_been_qualified` cannot be counted if Qualified leads are never taken in.
-- **Only a call longer than `MIN_DURATION_SECONDS` (69s by requirement) is transcribed.** Recordings at
+- **Only a call longer than `MIN_DURATION_SECONDS` (60s by requirement) is transcribed.** Recordings at
   or under it never reach a model, and the CRM's own `call_duration` is checked *before* any audio is
   fetched, so a short call costs nothing at all. They land as `non_transcribable` with an explicit
   reason and the recording_url still stored and shown on the row - visible and its recording still
