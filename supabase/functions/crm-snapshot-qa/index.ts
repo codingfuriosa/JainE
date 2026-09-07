@@ -56,10 +56,11 @@ const APP_TZ_NAME = Deno.env.get("APP_TZ") || "Asia/Kolkata";
 
 const JOB_SECRET_NAME = "transcription_sync";
 
-/* Only a call genuinely longer than this is worth a model call. By requirement this is 60 seconds -
-   a call has to run past a full minute before it is transcribed at all - not the old 20s ring-out
-   floor, which only caught calls that never really connected. */
-const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 60);
+/* Only a call genuinely longer than this is worth a model call. By requirement this is 69 seconds -
+   raised from the earlier 60s/20s floors. A call at or under it is never sent to a model: it lands as
+   non_transcribable, with the CRM's own recording_url still stored and shown on the row, so the call
+   is never hidden - just not transcribed. */
+const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 69);
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 
 const MAX_ATTEMPTS = Number(Deno.env.get("MAX_ATTEMPTS") || 3);
