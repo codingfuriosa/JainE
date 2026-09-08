@@ -16846,9 +16846,10 @@ const USAGE_MAP={
      through these, so several catalog rows (edit title/description/members, delegate, sub-tasks,
      search) had a live feature and zero events against it, not because nobody used them but because
      nothing was watching this half of the app. */
-  accEditTitleSave:'tasks.tasks.edit_task_title', accEditDescSave:'tasks.tasks.edit_task_description',
-  accEditProjectSave:'tasks.tasks.edit_task_project', accEditMembersSave:'tasks.tasks.edit_task_members_assignees',
-  accEditDueSave:'tasks.tasks.edit_task_due_date', accDelegateSave:'tasks.tasks.delegate_task_to_someone',
+  // accEditTitleSave / accEditDescSave / accEditProjectSave / accEditMembersSave / accEditDueSave
+  // are NOT mapped here on purpose - each now logs directly (accountability.js), only when the
+  // edit actually changed something, capturing the new value itself rather than a bare click.
+  accDelegateSave:'tasks.tasks.delegate_task_to_someone',
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
   accSubDel:'tasks.tasks.delete_sub_task',
