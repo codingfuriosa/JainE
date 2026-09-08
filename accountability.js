@@ -3679,55 +3679,112 @@
      bucket's allowed-origins list. Where the fetch fails the file is named instead, so the print
      says what is missing rather than coming out silently blank. */
   const WF_PRINT_MAX_PAGES=12;
+  /* Pages embedded across ONE print job, however many instances it covers. Printing a single
+     booking form never comes near it; Accounts printing a month of invoices would, and without a
+     ceiling that job means dozens of fetches and megabytes of embedded images. Reset per job in
+     wfPrintCases. */
+  const WF_PRINT_PAGE_BUDGET=45;
+  let WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;
   function wfAttFileName(p){
     return String(p||'').split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
   }
-  async function wfPrintAttachmentsHtml(det){
+  /* Reads one stored file's BYTES through the s3-fetch edge function rather than letting the
+     browser fetch it from S3 directly.
+
+     pdf.js has to fetch a PDF to render it, and a direct fetch is cross-origin - so it only worked
+     from the one site the bucket's CORS rules name, and printing anywhere else failed with
+     "Could not be rendered here". Reading it server-side takes CORS out of the decision entirely.
+     Images are left on their signed URL: a plain <img src> is not a CORS request, and nothing here
+     reads its pixels. */
+  async function wfFetchAttachmentBytes(path){
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    if(!token) throw new Error('not signed in');
+    const res=await fetch(SUPABASE_URL+'/functions/v1/s3-fetch',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},
+      body:JSON.stringify({key:String(path||'').replace(/^s3:/,'')})
+    });
+    if(!res.ok){
+      let msg='';
+      try{ msg=((await res.json())||{}).error||''; }catch(_e){}
+      throw new Error(msg||('could not be read (HTTP '+res.status+')'));
+    }
+    return await res.arrayBuffer();
+  }
+  /* Attachments printed as pages rather than filenames - the Booking Form IS the attachment, so a
+     print listing "rajib_upadhay.pdf" and nothing else was not a printed booking form. Images go
+     straight in; a PDF is rendered page by page with pdf.js (loadPdfJs() already exists in
+     nexus-core for the Post-Sales tooling), because a browser will not include a cross-origin PDF
+     in its own print job.
+
+     Whatever field is flagged upiScannerMemory is skipped: Reimbursement's QR Code already prints
+     as its own image block above, and printing it here as well put the same code on the sheet
+     twice. */
+  async function wfPrintAttachmentsHtml(det,flow){
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    const qrLabel=(qrField&&qrField.label)||'';
     let paths=[];
-    (det||[]).forEach(function(d){ paths=paths.concat(wfValuePaths(d&&d.value)); });
+    (det||[]).forEach(function(d){
+      if(!d) return;
+      if(qrLabel && eq(d.label||'', qrLabel)) return;
+      paths=paths.concat(wfValuePaths(d.value));
+    });
     if(!paths.length) return '';
+
     const blocks=[];
     for(const p of paths){
       const name=wfAttFileName(p);
-      const url=await wfSignedUrl(p);
-      if(!url){
-        blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
-          +'<div class="wf-print-att-miss">This file could not be opened.</div></div>');
-        continue;
-      }
-      if(/\.(png|jpe?g|gif|webp|bmp)$/i.test(name)){
-        blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
-          +'<img src="'+esc2(url)+'" class="wf-print-att-img"></div>');
-        continue;
-      }
-      if(/\.pdf$/i.test(name)){
-        let imgs=[];
-        try{
-          const lib=await loadPdfJs();
-          if(lib){
-            const pdf=await lib.getDocument({url:url}).promise;
-            const n=Math.min(pdf.numPages, WF_PRINT_MAX_PAGES);
-            for(let i=1;i<=n;i++){
-              const page=await pdf.getPage(i);
-              // 1.6 keeps a scan readable in print without a 10MB page of data URLs.
-              const vp=page.getViewport({scale:1.6});
-              const cv=document.createElement('canvas');
-              cv.width=vp.width; cv.height=vp.height;
-              await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
-              imgs.push('<img src="'+cv.toDataURL('image/jpeg',0.82)+'" class="wf-print-att-img">');
-            }
-          }
-        }catch(_e){ imgs=[]; }
-        blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
-          +(imgs.length
-            ? imgs.join('')
-            : '<div class="wf-print-att-miss">Could not be rendered here \u2014 open it from the '
-              +esc2(wfN().lc)+' to print it.</div>')
+      const head='<div class="wf-print-att-h">'+esc2(name)+'</div>';
+
+      if(/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)){
+        const url=await wfSignedUrl(p);
+        blocks.push('<div class="wf-print-att">'+head
+          +(url?('<img src="'+esc2(url)+'" class="wf-print-att-img">')
+               :'<div class="wf-print-att-miss">This file could not be opened.</div>')
           +'</div>');
         continue;
       }
-      blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
-        +'<div class="wf-print-att-miss">Not a printable file type.</div></div>');
+
+      if(/\.pdf$/i.test(name)){
+        if(WF_PRINT_PAGES_LEFT<=0){
+          blocks.push('<div class="wf-print-att">'+head
+            +'<div class="wf-print-att-miss">Not printed \u2014 this job already covers '
+            +WF_PRINT_PAGE_BUDGET+' pages. Print this one on its own to include it.</div></div>');
+          continue;
+        }
+        let imgs=[], why='';
+        try{
+          const lib=await loadPdfJs();
+          if(!lib) throw new Error('the PDF renderer did not load');
+          const buf=await wfFetchAttachmentBytes(p);
+          const pdf=await lib.getDocument({data:new Uint8Array(buf)}).promise;
+          const n=Math.min(pdf.numPages, WF_PRINT_MAX_PAGES, WF_PRINT_PAGES_LEFT);
+          for(let i=1;i<=n;i++){
+            const page=await pdf.getPage(i);
+            // 1.6 keeps a scan readable in print without a page of 10MB data URLs.
+            const vp=page.getViewport({scale:1.6});
+            const cv=document.createElement('canvas');
+            cv.width=vp.width; cv.height=vp.height;
+            await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+            imgs.push('<img src="'+cv.toDataURL('image/jpeg',0.82)+'" class="wf-print-att-img">');
+          }
+          WF_PRINT_PAGES_LEFT-=imgs.length;
+          if(pdf.numPages>n) imgs.push('<div class="wf-print-att-miss">Only the first '+n
+            +' of '+pdf.numPages+' pages are printed.</div>');
+        }catch(e){ imgs=[]; why=(e&&e.message)?String(e.message):'it could not be read'; }
+        blocks.push('<div class="wf-print-att">'+head
+          +(imgs.length
+            ? imgs.join('')
+            // Say WHY. "Could not be rendered here" sent us looking in the wrong place once already.
+            : '<div class="wf-print-att-miss">Not printed \u2014 '+esc2(why)+'.</div>')
+          +'</div>');
+        continue;
+      }
+
+      blocks.push('<div class="wf-print-att">'+head
+        +'<div class="wf-print-att-miss">Not a printable file type \u2014 open it to view.</div></div>');
     }
     return blocks.join('');
   }
@@ -3753,7 +3810,7 @@
     /* Never let attachments take the printout down with them: a signing failure or an
        unreadable PDF must still leave the instance's own details printable. */
     let attHtml='';
-    try{ attHtml=await wfPrintAttachmentsHtml(det); }catch(_e){ attHtml=''; }
+    try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
@@ -3776,6 +3833,7 @@
     if(!w){ toast('Please allow popups to print','err'); return false; }
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
+    WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;   // a fresh allowance for each print job
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
     if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
