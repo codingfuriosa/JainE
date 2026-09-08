@@ -5061,8 +5061,7 @@
       if(minT>0 && !caseId && !DRAFT){
         const tt=wfEvtTotalCalc();
         if(tt && tt.total<minT){
-          toast('A '+wfN().lc+' must come to at least '+wfMoney(minT)
-            +' \u2014 this one totals '+wfMoney(tt.total),'warn');
+          toast('Your total should be at least '+wfMoney(minT),'warn');
           return;
         }
       }
