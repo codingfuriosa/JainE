@@ -515,9 +515,9 @@
     #notifDd{width:340px;max-width:92vw}
 
     /* ── due date + repeat picker ──────────────────────────────────────────────────────────
-       How often on the left, which day on the right. The right side is ALWAYS just the
-       calendar, so switching options on the left never makes the panel taller. */
-    .dp-pop{width:408px;max-width:min(94vw,408px);background:#fff;border:1px solid var(--line);
+       How often on the left; on the right, only what that choice needs. One fixed height, so
+       the panel does not grow or shrink as options are clicked. */
+    .dp-pop{width:432px;max-width:min(94vw,432px);background:#fff;border:1px solid var(--line);
       border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden}
     .dp-body{display:flex;align-items:stretch}
     .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
@@ -526,25 +526,59 @@
       font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
     .dp-opt:hover{background:var(--brand-a10,#eef2ff)}
     .dp-opt.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:600}
-    .dp-main{flex:1;min-width:0;padding:9px 11px 10px}
-    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:5px}
+    .dp-main{flex:1;min-width:0;padding:10px 12px 12px;min-height:314px;display:flex;flex-direction:column}
+    .dp-ask{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:8px}
+    .dp-ask .req{color:var(--brand,#1d4ed8);letter-spacing:0;text-transform:none;font-weight:600}
+    .dp-note{font-size:11.5px;color:var(--slate);line-height:1.55}
+    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:4px}
     .dp-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}
-    .dp-nav{width:26px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;
+    .dp-nav{width:25px;height:25px;flex:none;display:flex;align-items:center;justify-content:center;
       border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}
     .dp-nav:hover{background:var(--brand-a10,#eef2ff);color:var(--brand,#1d4ed8)}
     .dp-dow{display:grid;grid-template-columns:repeat(7,1fr)}
     .dp-dow span{text-align:center;font-size:10px;font-weight:700;color:var(--slate-2,#94a3b8);
       padding-bottom:2px}
     .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
-    .dp-day{height:31px;border:0;border-radius:7px;background:transparent;font:inherit;
+    .dp-day{height:30px;border:0;border-radius:7px;background:transparent;font:inherit;
       font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;
       position:relative;padding:0}
     .dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10,#eef2ff)}
-    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.42}
+    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.4}
     .dp-day[disabled]{color:var(--slate-2,#94a3b8);opacity:.3;cursor:default}
     .dp-day.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:700}
     .dp-day.today:not(.on)::after{content:'';position:absolute;left:50%;bottom:4px;width:3px;
       height:3px;margin-left:-1.5px;border-radius:50%;background:var(--brand,#1d4ed8)}
+    /* the multi-select grids: weekdays, dates of the month, months of the year */
+    .dp-chips{display:grid;gap:4px}
+    .dp-chips.dow{grid-template-columns:repeat(7,1fr)}
+    .dp-chips.dom{grid-template-columns:repeat(7,1fr)}
+    /* six across, two rows: twelve months in half the height, which is what leaves room for the
+       chosen month's dates underneath without the panel growing */
+    .dp-chips.mon{grid-template-columns:repeat(6,1fr)}
+    .dp-chips.mon .dp-chip{font-size:11px;height:28px;flex-direction:column;gap:0;line-height:1}
+    .dp-chip{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;font:inherit;
+      font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;padding:0;
+      display:flex;align-items:center;justify-content:center}
+    .dp-chip:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-chip.on{background:var(--brand,#1d4ed8);border-color:var(--brand,#1d4ed8);color:#fff;
+      font-weight:700}
+    .dp-chip.wide{grid-column:span 3}
+    /* a dot, not a number: at 44px wide a count would crowd the month name */
+    .dp-chip .pip{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.75;
+      margin-top:2px}
+    /* which month the date grid belongs to */
+    .dp-chip.active{box-shadow:0 0 0 2px var(--brand-a10,#eef2ff),0 0 0 3px var(--brand,#1d4ed8)}
+    .dp-sub{display:flex;align-items:baseline;gap:8px;margin:11px 0 7px;padding-top:10px;
+      border-top:1px solid var(--line)}
+    .dp-sub .lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate)}
+    .dp-sub .rm{margin-left:auto;border:0;background:transparent;padding:0;font:inherit;font-size:11px;
+      color:var(--slate-2,#94a3b8);cursor:pointer;text-decoration:underline}
+    .dp-sub .rm:hover{color:#dc2626}
+    .dp-empty{margin-top:11px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;
+      color:var(--slate);line-height:1.55}
     .dp-quick{display:flex;gap:4px;margin-top:7px}
     .dp-quick button{flex:1;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
       font:inherit;font-size:11.5px;font-weight:500;color:var(--slate);cursor:pointer;
@@ -556,10 +590,12 @@
       font-size:11.5px;font-weight:600}
     .dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:11.5px;
       font-weight:600;color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline;padding:0}
+    /* min-height so the footer does not shuffle as the sentence wraps */
     .dp-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;
-      color:var(--slate);line-height:1.55}
+      color:var(--slate);line-height:1.55;min-height:56px}
     .dp-says b{color:var(--ink);font-weight:600}
     .dp-says .warn{color:var(--brand,#1d4ed8);margin-top:2px}
+    .dp-says .miss{color:#dc2626;font-weight:600}
     .dp-says .ends{margin-top:4px}
     .dp-says .ends button{border:0;background:transparent;padding:0;font:inherit;font-size:11.5px;
       color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline}
@@ -570,17 +606,19 @@
     .dp-foot .dp-done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;
       background:var(--brand,#1d4ed8);color:#fff;font:inherit;font-size:12px;font-weight:600;
       cursor:pointer}
+    .dp-foot .dp-done[disabled]{opacity:.45;cursor:not-allowed}
     .dp-inline{box-shadow:none;width:100%;max-width:100%}
     /* the repeat, said on the task itself so a saved rule is visible without reopening the picker */
-    .dp-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+    .dp-chip-rep{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
       padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
       color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
-    .dp-chip i{font-size:9.5px}
-    @media (max-width:470px){
+    .dp-chip-rep i{font-size:9.5px}
+    @media (max-width:520px){
       .dp-body{flex-direction:column}
       .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
         flex-direction:row;flex-wrap:wrap;gap:4px}
       .dp-opt{width:auto;flex:1 1 30%;text-align:center}
+      .dp-main{min-height:0}
     }
     `;
     document.head.appendChild(s);
@@ -8481,7 +8519,7 @@
     });
     updateInsDateBtn(); updateInsMemberBtn(); updateInsProjBtn(); updateSelfInsDateBtn(); updateSelfInsProjBtn();
   }
-  let INS_STAGE={due:null,freq:'none',until:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,freq:'none',until:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
+  let INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
   function insInput(){
     return `<div class="ac-addrow-ghost" id="insGhost" onclick="accInsExpand()"><i class="fa-solid fa-plus"></i> Add task</div>
     <div class="ac-addrow" id="insRow" style="display:none">
@@ -8557,22 +8595,41 @@
     setTimeout(function(){ document.addEventListener('mousedown',popoverOutside,true); },0);
     return el;
   }
-  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(INS_STAGE.due?{date:INS_STAGE.due,freq:INS_STAGE.freq,until:INS_STAGE.until}:null); dpMarkBtn(b,INS_STAGE.freq); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,'none'); } }
+  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(INS_STAGE.recur||{freq:'none',date:INS_STAGE.due}); dpMarkBtn(b,INS_STAGE.recur); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,null); } }
   function updateInsMemberBtn(){ const b=$('insMemberBtn'); if(!b)return; const n=(INS_STAGE.members||[]).length; if(n){ b.classList.add('primary'); b.title=n+' member'+(n>1?'s':'')+' selected'; } else { b.classList.remove('primary'); b.title='Pick members'; } }
   function updateInsProjBtn(){ const b=$('insProjBtn'); if(!b)return; if(INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
-  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe({date:SELF_INS_STAGE.due,freq:SELF_INS_STAGE.freq,until:SELF_INS_STAGE.until}); dpMarkBtn(b,SELF_INS_STAGE.freq); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,'none'); } }
+  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(SELF_INS_STAGE.recur||{freq:'none',date:SELF_INS_STAGE.due}); dpMarkBtn(b,SELF_INS_STAGE.recur); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,null); } }
   function updateSelfInsProjBtn(){ const b=$('selfInsProjBtn'); if(!b)return; if(SELF_INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(SELF_INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
   /* ── due date + repeat picker ───────────────────────────────────────────────────────────────
-     Replaces the browser's native date box on Tasks. How often on the left, which day on the
-     right - and the repeat is READ OFF the day that is clicked, so "Every month" needs no second
-     grid to say which day: the 15th already means the 15th. That is what keeps the panel one
-     fixed size whatever is chosen. proto/due-date-picker.html is the standalone version. */
-  const DP_FREQS=[['none','Does not repeat'],['daily','Every day'],['weekly','Every week'],
-                  ['monthly','Every month'],['quarterly','Every 3 months'],['yearly','Every year']];
+     Replaces the browser's native date box on Tasks. How often on the left; on the right, only
+     what that choice actually needs:
+
+       Does not repeat  a date, required
+       Every day        nothing
+       Every week       which weekdays
+       Every month      which dates of the month (several allowed, plus "last day")
+       Every 3 months   the same, every third month counted from the first one
+       Every year       which months, and for each of them its own dates
+
+     What gets saved is a due_date (the next real occurrence) plus a rule stored as jsonb in
+     acc.ptasks.recur. dpMatches() below is a deliberate mirror of acc.recur_matches() in the
+     database - both walk a day at a time and test the same predicate, so the dates shown here are
+     the dates the server will actually create. Change one and you must change the other.
+     proto/due-date-picker.html is the standalone version. */
+  const DP_FREQS=[
+    {k:'none',      label:'Does not repeat', asks:'date'},
+    {k:'daily',     label:'Every day',       asks:'nothing'},
+    {k:'weekly',    label:'Every week',      asks:'weekdays'},
+    {k:'monthly',   label:'Every month',     asks:'monthdays'},
+    {k:'quarterly', label:'Every 3 months',  asks:'monthdays'},
+    {k:'yearly',    label:'Every year',      asks:'monthdates'}
+  ];
   const DP_DOW=['S','M','T','W','T','F','S'];
   const DP_DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const DP_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
   const DP_MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function dpAsks(f){ for(var i=0;i<DP_FREQS.length;i++) if(DP_FREQS[i].k===f) return DP_FREQS[i].asks; return 'date'; }
   const dpPad=n=>String(n).padStart(2,'0');
   const dpIso=(y,m,d)=>y+'-'+dpPad(m+1)+'-'+dpPad(d);
   const dpParse=s=>{const p=String(s).split('-');return {y:+p[0],m:+p[1]-1,d:+p[2]};};
@@ -8580,162 +8637,370 @@
   const dpAdd=(s,n)=>{const p=dpParse(s),d=new Date(p.y,p.m,p.d+n);return dpIso(d.getFullYear(),d.getMonth(),d.getDate());};
   const dpShort=s=>{if(!s)return '';const p=dpParse(s);return p.d+' '+DP_MONS[p.m]+' '+p.y;};
   const dpLong=s=>{if(!s)return '';const p=dpParse(s);return DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+DP_MONS[p.m]+' '+p.y;};
-  function dpOrd(n){n=+n;if(n%100>=11&&n%100<=13)return n+'th';return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');}
-  function dpDescribe(r){
-    if(!r||!r.date)return 'Set due date';
-    if(!r.freq||r.freq==='none')return dpLong(r.date);
-    const p=dpParse(r.date); let s='';
-    if(r.freq==='daily')s='Every day';
-    else if(r.freq==='weekly')s='Every '+DP_DOWL[new Date(p.y,p.m,p.d).getDay()];
-    else if(r.freq==='monthly')s='Every month on the '+dpOrd(p.d);
-    else if(r.freq==='quarterly')s='Every 3 months on the '+dpOrd(p.d);
-    else if(r.freq==='yearly')s='Every '+p.d+' '+DP_MONS[p.m];
-    else return dpLong(r.date);
-    if(r.until)s+=', until '+dpShort(r.until);
-    return s;
+  /* istTodayISO(), not todayISO(): the floor has to be the same "today" the backend works in, or a
+     device with a skewed clock offers a day the server already treats as past. */
+  function dpFloor(){ return istTodayISO(); }
+  function dpOrd(n){
+    if(n==='last') return 'last day';
+    n=+n;
+    if(n%100>=11&&n%100<=13) return n+'th';
+    return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');
   }
-  function dpMarkBtn(b,freq){ if(!b)return; const i=b.querySelector('i'); if(!i)return;
-    const rep=freq&&freq!=='none';
-    i.className=rep?'fa-solid fa-rotate':'fa-regular fa-calendar'; }
-  /* Mirrors acc.recur_next() in the database, clamp included. If these two ever disagree the
-     preview lies about the dates the server will actually create. */
-  function dpNextDates(r,n){
-    if(!r||!r.date)return [];
-    if(!r.freq||r.freq==='none')return [r.date];
-    const out=[],anchor=dpParse(r.anchor||r.date),base=dpParse(r.date);
-    let i=0;
-    while(out.length<n&&i<800){
-      let s;
-      if(r.freq==='daily')s=dpAdd(r.date,i);
-      else if(r.freq==='weekly')s=dpAdd(r.date,i*7);
-      else{
-        const step=r.freq==='monthly'?1:r.freq==='quarterly'?3:12;
-        let m=base.m+step*i; const y=base.y+Math.floor(m/12); m=((m%12)+12)%12;
-        s=dpIso(y,m,Math.min(anchor.d,dpDaysIn(y,m)));
-      }
-      i++;
-      if(r.until&&s>r.until)break;
-      out.push(s);
-    }
+  function dpList(a){
+    if(!a.length) return '';
+    if(a.length===1) return a[0];
+    return a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+  }
+  function dpSortDays(a){
+    return (a||[]).slice().sort(function(x,y){
+      if(x==='last') return 1;
+      if(y==='last') return -1;
+      return x-y;
+    });
+  }
+  // A day number placed inside a real month: 'last', or clamped so the 31st survives February.
+  function dpDayIn(y,m,day){ return day==='last' ? dpDaysIn(y,m) : Math.min(+day, dpDaysIn(y,m)); }
+  function dpDaysForMonth(rule,y,m){
+    var src = rule.freq==='yearly' ? ((rule.monthdates||{})[m]||[]) : (rule.monthdays||[]);
+    var out=[];
+    dpSortDays(src).forEach(function(d){
+      var n=dpDayIn(y,m,d);
+      if(out.indexOf(n)<0) out.push(n);
+    });
     return out;
   }
 
-  let DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_HOST=null, DP_OPTS=null;
-  /* istTodayISO(), not todayISO(): the floor has to be the same "today" the backend works in, or a
-     device with a skewed clock can offer a day the server treats as already past. */
-  function dpFloor(){ return istTodayISO(); }
-
-  function dpRailHtml(){
-    return '<div class="dp-rail">'+DP_FREQS.map(f=>
-      '<button type="button" class="dp-opt'+(DP_ST.freq===f[0]?' on':'')+'" data-dp="freq" data-v="'+f[0]+'">'+f[1]+'</button>'
-    ).join('')+'</div>';
+  /* Mirror of acc.recur_matches(). */
+  function dpMatches(rule,isoDate,anchor){
+    if(!rule||!rule.freq) return false;
+    var p=dpParse(isoDate);
+    if(rule.freq==='daily') return true;
+    if(rule.freq==='weekly') return (rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())>-1;
+    if(rule.freq==='monthly'||rule.freq==='quarterly'){
+      if(rule.freq==='quarterly'){
+        var a=dpParse(anchor||isoDate);
+        var months=(p.y*12+p.m)-(a.y*12+a.m);
+        if(((months%3)+3)%3!==0) return false;
+      }
+      return dpDaysForMonth(rule,p.y,p.m).indexOf(p.d)>-1;
+    }
+    if(rule.freq==='yearly') return dpDaysForMonth(rule,p.y,p.m).indexOf(p.d)>-1;
+    return false;
   }
-  function dpMainHtml(){
-    const sel=DP_MODE==='until'?DP_ST.until:DP_ST.date;
-    const floor=DP_MODE==='until'?(DP_ST.date||dpFloor()):dpFloor();
-    const y=DP_VIEW.y,m=DP_VIEW.m;
-    const first=new Date(y,m,1).getDay(),n=dpDaysIn(y,m);
-    const prevN=dpDaysIn(y,m===0?11:m-1),today=dpFloor();
-    let h='<div class="dp-main">';
-    if(DP_MODE==='until')h+='<div class="dp-mode"><i class="fa-solid fa-flag-checkered"></i>Choosing the last date<button type="button" data-dp="backtodate">Back</button></div>';
-    h+='<div class="dp-head">'
+  /* The next n dates on or after `from`. Same day-walk as the database, so the two agree. */
+  function dpOccurrences(rule,n,from,anchor){
+    if(!rule) return [];
+    if(rule.freq==='none'||!rule.freq) return rule.date?[rule.date]:[];
+    var out=[], cur=from||dpFloor(), guard=0;
+    while(out.length<n && guard++<800){
+      if(rule.until && cur>rule.until) break;
+      if(dpMatches(rule,cur,anchor||from)) out.push(cur);
+      cur=dpAdd(cur,1);
+    }
+    return out;
+  }
+  function dpFirst(rule){
+    var o=dpOccurrences(rule,1,dpFloor(),null);
+    return o.length?o[0]:null;
+  }
+
+  function dpDescribe(r){
+    if(!r) return 'Set due date';
+    if(!r.freq||r.freq==='none') return r.date?dpLong(r.date):'Set due date';
+    var s='';
+    if(r.freq==='daily') s='Every day';
+    else if(r.freq==='weekly')
+      s='Every '+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
+    else if(r.freq==='monthly'||r.freq==='quarterly'){
+      var ds=dpList(dpSortDays(r.monthdays).map(dpOrd));
+      s=(r.freq==='quarterly')?('The '+ds+', every 3 months'):('The '+ds+' of every month');
+    }
+    else if(r.freq==='yearly'){
+      var ms=Object.keys(r.monthdates||{}).map(Number).sort(function(a,b){return a-b;});
+      s=dpList(ms.map(function(m){
+        var ds2=dpSortDays((r.monthdates||{})[m]||[]);
+        var nums=ds2.filter(function(d){return d!=='last';});
+        var parts=[];
+        if(nums.length) parts.push(dpList(nums.map(String))+' '+DP_MONS[m]);
+        if(ds2.indexOf('last')>-1) parts.push('the last day of '+DP_MONS[m]);
+        return dpList(parts);
+      }))+' each year';
+      s=s.charAt(0).toUpperCase()+s.slice(1);
+    }
+    if(r.until) s+=', until '+dpShort(r.until);
+    return s;
+  }
+  function dpMarkBtn(b,rule){
+    if(!b) return;
+    var i=b.querySelector('i'); if(!i) return;
+    var rep=!!(rule&&rule.freq&&rule.freq!=='none');
+    i.className=rep?'fa-solid fa-rotate':'fa-regular fa-calendar';
+  }
+
+  var DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_AM=null, DP_HOST=null, DP_OPTS=null;
+
+  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null}; }
+
+  function dpMissing(r){
+    var a=dpAsks(r.freq);
+    if(a==='date')      return r.date?null:'Pick the date it is due.';
+    if(a==='nothing')   return null;
+    if(a==='weekdays')  return r.weekdays.length?null:'Pick at least one day of the week.';
+    if(a==='monthdays') return r.monthdays.length?null:'Pick at least one date of the month.';
+    if(a==='monthdates'){
+      var ms=Object.keys(r.monthdates);
+      if(!ms.length) return 'Pick at least one month.';
+      for(var i=0;i<ms.length;i++){
+        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the dates in '+DP_MONL[+ms[i]]+'.';
+      }
+      return null;
+    }
+    return null;
+  }
+
+  function dpFirstChosenMonth(){
+    var k=Object.keys(DP_ST.monthdates).map(Number).sort(function(a,b){return a-b;});
+    return k.length?k[0]:null;
+  }
+
+  function dpAskLbl(t,req){
+    return '<div class="dp-ask">'+t+(req?' <span class="req">required</span>':'')+'</div>';
+  }
+
+  function dpCalendar(){
+    var sel   = DP_MODE==='until' ? DP_ST.until : DP_ST.date;
+    var floor = DP_MODE==='until' ? (dpFirst(dpRuleOf(DP_ST))||dpFloor()) : dpFloor();
+    var y=DP_VIEW.y, m=DP_VIEW.m;
+    var first=new Date(y,m,1).getDay(), n=dpDaysIn(y,m);
+    var prevN=dpDaysIn(y,m===0?11:m-1), today=dpFloor(), i, d;
+    var h='<div class="dp-head">'
       +'<button type="button" class="dp-nav" data-dp="mv" data-v="-1" title="Previous month"><i class="fa-solid fa-chevron-left"></i></button>'
       +'<div class="dp-title">'+DP_MONL[m]+' '+y+'</div>'
       +'<button type="button" class="dp-nav" data-dp="mv" data-v="1" title="Next month"><i class="fa-solid fa-chevron-right"></i></button>'
-      +'</div><div class="dp-dow">'+DP_DOW.map(x=>'<span>'+x+'</span>').join('')+'</div><div class="dp-grid">';
-    for(let i=0;i<first;i++)h+='<button type="button" class="dp-day pad" disabled>'+(prevN-first+i+1)+'</button>';
-    for(let d=1;d<=n;d++){
-      const iso=dpIso(y,m,d);
-      h+='<button type="button" class="dp-day'+(iso===sel?' on':'')+(iso===today?' today':'')+'" data-dp="pick" data-v="'+iso+'"'+(iso<floor?' disabled':'')+'>'+d+'</button>';
+      +'</div><div class="dp-dow">'+DP_DOW.map(function(x){return '<span>'+x+'</span>';}).join('')+'</div><div class="dp-grid">';
+    for(i=0;i<first;i++) h+='<button type="button" class="dp-day pad" disabled>'+(prevN-first+i+1)+'</button>';
+    for(d=1;d<=n;d++){
+      var iso=dpIso(y,m,d);
+      h+='<button type="button" class="dp-day'+(iso===sel?' on':'')+(iso===today?' today':'')+'"'
+        +' data-dp="pick" data-v="'+iso+'"'+(iso<floor?' disabled':'')+'>'+d+'</button>';
     }
-    const tail=(first+n)%7;
-    if(tail)for(let t=1;t<=7-tail;t++)h+='<button type="button" class="dp-day pad" disabled>'+t+'</button>';
-    h+='</div>';
-    if(DP_MODE==='date'){
-      h+='<div class="dp-quick">'
+    var tail=(first+n)%7;
+    if(tail) for(i=1;i<=7-tail;i++) h+='<button type="button" class="dp-day pad" disabled>'+i+'</button>';
+    return h+'</div>';
+  }
+
+  function dpPane(){
+    var a=dpAsks(DP_ST.freq), h='<div class="dp-main">', i;
+
+    if(DP_MODE==='until'){
+      return h+'<div class="dp-mode"><i class="fa-solid fa-flag-checkered"></i>Choosing the last date'
+        +'<button type="button" data-dp="backtodate">Back</button></div>'+dpCalendar()+'</div>';
+    }
+
+    if(a==='date'){
+      h+=dpAskLbl('Due date',true)+dpCalendar()
+        +'<div class="dp-quick">'
         +'<button type="button" data-dp="pick" data-v="'+dpFloor()+'">Today</button>'
-        +'<button type="button" data-dp="jump" data-v="'+dpAdd(dpFloor(),1)+'">Tomorrow</button>'
-        +'<button type="button" data-dp="jump" data-v="'+dpAdd(dpFloor(),7)+'">Next week</button>'
+        +'<button type="button" data-dp="pick" data-v="'+dpAdd(dpFloor(),1)+'">Tomorrow</button>'
+        +'<button type="button" data-dp="pick" data-v="'+dpAdd(dpFloor(),7)+'">Next week</button>'
         +'</div>';
+    }
+    else if(a==='nothing'){
+      h+=dpAskLbl('Every day')
+        +'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>';
+    }
+    else if(a==='weekdays'){
+      h+=dpAskLbl('Which days',true)+'<div class="dp-chips dow">';
+      for(i=0;i<7;i++)
+        h+='<button type="button" class="dp-chip'+(DP_ST.weekdays.indexOf(i)>-1?' on':'')+'"'
+          +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
+      h+='</div><div class="dp-note" style="margin-top:9px">Twice a week is two days, not two tasks.</div>';
+    }
+    else if(a==='monthdays'){
+      h+=dpAskLbl('Which dates',true)+'<div class="dp-chips dom">';
+      for(i=1;i<=31;i++)
+        h+='<button type="button" class="dp-chip'+(DP_ST.monthdays.indexOf(i)>-1?' on':'')+'"'
+          +' data-dp="dom" data-v="'+i+'">'+i+'</button>';
+      h+='<button type="button" class="dp-chip wide'+(DP_ST.monthdays.indexOf('last')>-1?' on':'')+'"'
+        +' data-dp="dom" data-v="last">Last day</button></div>';
+    }
+    else if(a==='monthdates'){
+      h+=dpAskLbl('Which months',true)+'<div class="dp-chips mon">';
+      for(i=0;i<12;i++){
+        var picked=DP_ST.monthdates[i]!==undefined;
+        var hasDates=picked&&(DP_ST.monthdates[i]||[]).length>0;
+        h+='<button type="button" class="dp-chip'+(picked?' on':'')+(DP_AM===i?' active':'')+'"'
+          +' data-dp="mon" data-v="'+i+'" title="'+DP_MONL[i]+'">'+DP_MONS[i]
+          +(hasDates?'<span class="pip"></span>':'')+'</button>';
+      }
+      h+='</div>';
+      /* One 1-to-31 grid for whichever month is highlighted - the same grid "Every month" uses, so
+         choosing ten months does not make the panel ten rows taller. */
+      if(DP_AM!==null && DP_ST.monthdates[DP_AM]!==undefined){
+        var sel=DP_ST.monthdates[DP_AM]||[];
+        h+='<div class="dp-sub"><span class="lbl">Dates in '+DP_MONL[DP_AM]+'</span>'
+          +'<button type="button" class="rm" data-dp="unmon" data-v="'+DP_AM+'">Remove month</button></div>'
+          +'<div class="dp-chips dom">';
+        for(i=1;i<=31;i++)
+          h+='<button type="button" class="dp-chip'+(sel.indexOf(i)>-1?' on':'')+'"'
+            +' data-dp="ymd" data-v="'+i+'">'+i+'</button>';
+        h+='<button type="button" class="dp-chip wide'+(sel.indexOf('last')>-1?' on':'')+'"'
+          +' data-dp="ymd" data-v="last">Last day</button></div>';
+      } else {
+        h+='<div class="dp-empty">Pick a month above, then choose its dates here.<br>'
+          +'Each month keeps its own &mdash; 15 and 30 June, just the 1st in December.</div>';
+      }
     }
     return h+'</div>';
   }
-  function dpSaysHtml(){
-    if(!DP_ST.freq||DP_ST.freq==='none'){
-      return '<div class="dp-says">'+(DP_ST.date?'Due <b>'+dpLong(DP_ST.date)+'</b>':'No date chosen yet.')+'</div>';
+
+  function dpSays(){
+    var miss=dpMissing(DP_ST);
+    if(miss) return '<div class="dp-says"><span class="miss">'+miss+'</span></div>';
+    var rule=dpRuleOf(DP_ST);
+    var h='<b>'+dpDescribe(DP_ST)+'</b>';
+    var nx=(DP_ST.freq==='none')?[DP_ST.date]:dpOccurrences(rule,3,dpFloor(),null);
+    if(nx.length&&nx[0]) h+='<br>Next: '+nx.map(dpShort).join(' &middot; ');
+    if(dpUsesShortMonth()) h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +(dpAsks(DP_ST.freq)==='monthdates'
+         ? 'In February it falls on the 28th, or the 29th in a leap year.'
+         : 'A 29th, 30th or 31st falls on the last day of a shorter month.')+'</div>';
+    if(DP_ST.freq==='quarterly') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +'Every 3 months, counting from the first one.</div>';
+    if(DP_ST.freq!=='none'){
+      h+='<div class="ends">'+(DP_ST.until
+        ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
+        : '<button type="button" data-dp="setend">Set an end date</button>')+'</div>';
     }
-    if(!DP_ST.date)return '<div class="dp-says">Pick the first date on the right.</div>';
-    const nx=dpNextDates(DP_ST,3);
-    let h='<b>'+dpDescribe(DP_ST)+'</b>';
-    if(nx.length)h+='<br>Next: '+nx.map(dpShort).join(' &middot; ');
-    if((DP_ST.freq==='monthly'||DP_ST.freq==='quarterly')&&dpParse(DP_ST.date).d>28)
-      h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> In a shorter month it falls on that month\u2019s last day.</div>';
-    h+='<div class="ends">'+(DP_ST.until
-      ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
-      : '<button type="button" data-dp="setend">Set an end date</button>')+'</div>';
     return '<div class="dp-says">'+h+'</div>';
   }
-  function dpPaint(){
-    if(!DP_HOST)return;
-    let h='<div class="dp-body">'+dpRailHtml()+dpMainHtml()+'</div>'+dpSaysHtml();
-    if(DP_OPTS.footer)h+='<div class="dp-foot"><button type="button" class="dp-clear" data-dp="clear">Clear</button><button type="button" class="dp-done" data-dp="done">Done</button></div>';
-    DP_HOST.innerHTML=h;
-    if(DP_OPTS.onChange)DP_OPTS.onChange(dpRule());
-  }
-  function dpRule(){
-    if(!DP_ST||!DP_ST.date)return null;
-    return {date:DP_ST.date,freq:DP_ST.freq||'none',until:(DP_ST.freq&&DP_ST.freq!=='none')?(DP_ST.until||null):null,anchor:DP_ST.anchor||null};
-  }
-  function dpClick(e){
-    const el=e.target.closest('[data-dp]'); if(!el)return;
-    e.preventDefault(); e.stopPropagation();
-    const a=el.getAttribute('data-dp'), v=el.getAttribute('data-v');
-    if(a==='freq'){
-      DP_ST.freq=v;
-      if(v==='none')DP_ST.until=null;
-      if(!DP_ST.date)DP_ST.date=dpFloor();
-      DP_MODE='date';
+  function dpUsesShortMonth(){
+    var a=dpAsks(DP_ST.freq), i, m, ds;
+    if(a==='monthdays') for(i=0;i<DP_ST.monthdays.length;i++){ if(+DP_ST.monthdays[i]>28) return true; }
+    if(a==='monthdates'){
+      // Only February can be short of a 29th/30th/31st; January the 31st is the 31st every year.
+      ds=DP_ST.monthdates[1]||[];
+      for(i=0;i<ds.length;i++){ if(+ds[i]>28) return true; }
     }
-    else if(a==='mv'){ let m=DP_VIEW.m+Number(v); DP_VIEW={y:DP_VIEW.y+Math.floor(m/12),m:((m%12)+12)%12}; }
-    else if(a==='pick'||a==='jump'){
+    return false;
+  }
+
+  // The rule as it will be stored: only the fields its own option uses, so nothing stale rides along.
+  function dpRuleOf(st){
+    var a=dpAsks(st.freq);
+    if(a==='date') return null;                    // no repeat; the due date carries it
+    var r={freq:st.freq};
+    if(a==='weekdays')        r.weekdays=st.weekdays.slice().sort(function(x,y){return x-y;});
+    else if(a==='monthdays')  r.monthdays=dpSortDays(st.monthdays);
+    else if(a==='monthdates') r.monthdates=JSON.parse(JSON.stringify(st.monthdates));
+    if(st.until) r.until=st.until;
+    return r;
+  }
+  // What a caller gets back: the due date to store, and the rule (or null).
+  function dpResult(){
+    if(dpMissing(DP_ST)) return null;
+    var rule=dpRuleOf(DP_ST);
+    return rule ? {due:dpFirst(rule), recur:rule} : {due:DP_ST.date, recur:null};
+  }
+
+  function dpPaint(){
+    if(!DP_HOST) return;
+    var railH='<div class="dp-rail">'+DP_FREQS.map(function(f){
+      return '<button type="button" class="dp-opt'+(DP_ST.freq===f.k?' on':'')+'" data-dp="freq" data-v="'+f.k+'">'+f.label+'</button>';
+    }).join('')+'</div>';
+    var h='<div class="dp-body">'+railH+dpPane()+'</div>'+dpSays();
+    if(DP_OPTS.footer)
+      h+='<div class="dp-foot"><button type="button" class="dp-clear" data-dp="clear">Clear</button>'
+        +'<button type="button" class="dp-done" data-dp="done"'+(dpMissing(DP_ST)?' disabled':'')+'>Done</button></div>';
+    DP_HOST.innerHTML=h;
+    if(DP_OPTS.onChange) DP_OPTS.onChange(dpResult());
+  }
+
+  function dpToggle(arr,v){ var i=arr.indexOf(v); if(i>-1) arr.splice(i,1); else arr.push(v); }
+
+  function dpClick(e){
+    var el=e.target.closest('[data-dp]'); if(!el) return;
+    e.preventDefault(); e.stopPropagation();
+    var a=el.getAttribute('data-dp'), v=el.getAttribute('data-v'), m;
+
+    if(a==='freq'){
+      DP_ST.freq=v; DP_MODE='date';
+      if(dpAsks(v)==='date') DP_ST.until=null;          // a one-off has nothing to end
+      if(dpAsks(v)==='monthdates') DP_AM=dpFirstChosenMonth();
+    }
+    else if(a==='mv'){ m=DP_VIEW.m+Number(v); DP_VIEW={y:DP_VIEW.y+Math.floor(m/12),m:((m%12)+12)%12}; }
+    else if(a==='pick'){
       if(DP_MODE==='until'){
         DP_ST.until=v; DP_MODE='date';
-        // Back to the month being worked on, not the month the end date happened to be in.
-        const b=dpParse(DP_ST.date||v); DP_VIEW={y:b.y,m:b.m};
-      }
-      else{
+      } else {
         DP_ST.date=v;
-        // A leftover end date before the start would save a series that could never run.
-        if(DP_ST.until&&DP_ST.until<v)DP_ST.until=null;
-        const q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
+        if(DP_ST.until&&DP_ST.until<v) DP_ST.until=null;
+        var q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
       }
     }
-    else if(a==='setend'){ DP_MODE='until'; const u=dpParse(DP_ST.until||DP_ST.date); DP_VIEW={y:u.y,m:u.m}; }
+    else if(a==='dow') dpToggle(DP_ST.weekdays,Number(v));
+    else if(a==='dom') dpToggle(DP_ST.monthdays, v==='last'?'last':Number(v));
+    else if(a==='mon'){
+      /* Clicking a month always selects it and points the grid at it; removing is the explicit
+         "Remove month", so one click cannot quietly discard dates already set for a month you
+         only meant to look at. */
+      m=Number(v);
+      if(DP_ST.monthdates[m]===undefined) DP_ST.monthdates[m]=[];
+      DP_AM=m;
+    }
+    else if(a==='ymd'){
+      if(DP_AM===null) return;
+      if(!DP_ST.monthdates[DP_AM]) DP_ST.monthdates[DP_AM]=[];
+      dpToggle(DP_ST.monthdates[DP_AM], v==='last'?'last':Number(v));
+    }
+    else if(a==='unmon'){
+      delete DP_ST.monthdates[v];
+      if(DP_AM===Number(v)) DP_AM=dpFirstChosenMonth();
+    }
+    else if(a==='setend'){
+      DP_MODE='until';
+      var f=dpParse(DP_ST.until||dpFirst(dpRuleOf(DP_ST))||dpFloor()); DP_VIEW={y:f.y,m:f.m};
+    }
     else if(a==='backtodate'){ DP_MODE='date'; }
     else if(a==='noend'){ DP_ST.until=null; }
-    else if(a==='clear'){ if(DP_OPTS.onDone)DP_OPTS.onDone(null); return; }
-    else if(a==='done'){ if(DP_OPTS.onDone)DP_OPTS.onDone(dpRule()); return; }
+    else if(a==='clear'){ if(DP_OPTS.onDone) DP_OPTS.onDone(null); return; }
+    else if(a==='done'){ if(dpMissing(DP_ST)) return; if(DP_OPTS.onDone) DP_OPTS.onDone(dpResult()); return; }
     dpPaint();
   }
-  function accDpMount(host,rule,opts){
+
+  /* rule = {due, recur} as stored on the task, or null. */
+  function accDpMount(host,cur,opts){
     DP_HOST=host; DP_OPTS=opts||{};
-    DP_ST={date:(rule&&rule.date)||null,freq:(rule&&rule.freq)||'none',
-           until:(rule&&rule.until)||null,anchor:(rule&&rule.anchor)||null};
-    // Open on the month of the chosen day, but never behind today - a task whose due date has
-    // already passed would otherwise open on a month where every day is greyed out.
-    const start=(DP_ST.date&&DP_ST.date>=dpFloor())?DP_ST.date:dpFloor();
-    const p=dpParse(start); DP_VIEW={y:p.y,m:p.m}; DP_MODE='date';
+    DP_ST=dpBlank();
+    var recur=cur&&cur.recur;
+    if(recur&&recur.freq){
+      DP_ST.freq=recur.freq;
+      DP_ST.weekdays=(recur.weekdays||[]).slice();
+      DP_ST.monthdays=(recur.monthdays||[]).slice();
+      DP_ST.monthdates={};
+      if(recur.monthdates) for(var k in recur.monthdates){
+        var vv=recur.monthdates[k];
+        DP_ST.monthdates[k]=Array.isArray(vv)?vv.slice():(vv==null?[]:[vv]);
+      }
+      DP_ST.until=recur.until||null;
+    } else {
+      DP_ST.freq='none';
+      DP_ST.date=(cur&&cur.due)||dpFloor();
+    }
+    // Never open on a month already behind today, or every day in view is greyed out.
+    var start=(DP_ST.date&&DP_ST.date>=dpFloor())?DP_ST.date:dpFloor();
+    var p=dpParse(start);
+    DP_VIEW={y:p.y,m:p.m}; DP_MODE='date'; DP_AM=dpFirstChosenMonth();
     host.classList.add('dp-pop');
     host.addEventListener('click',dpClick);
     dpPaint();
     return host;
   }
-  /* The popover is placed below its button by openPopover, which measures it while it is still
-     an empty div - so a 408px panel opened near the right or bottom edge has to be nudged back
-     on screen here, once it actually has a size. */
+  /* openPopover positions the panel while it is still an empty div, so it measures 0 wide; a
+     432px panel opened near an edge has to be nudged back on screen once it has a size. */
   function dpFitPopover(el,anchor){
-    if(!el||!anchor)return;
-    const r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight, m=8;
+    if(!el||!anchor) return;
+    var r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight, m=8;
     if(r.bottom+4+h > window.innerHeight-m) el.style.top=Math.max(m,r.top-h-4)+'px';
     el.style.left=Math.max(m,Math.min(r.left,window.innerWidth-w-m))+'px';
   }
@@ -8745,12 +9010,12 @@
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
     const el=openPopover(btn,'<div id="acDpBox"></div>');
     accDpMount(document.getElementById('acDpBox'),
-      {date:INS_STAGE.due,freq:INS_STAGE.freq,until:INS_STAGE.until},
+      {due:INS_STAGE.due,recur:INS_STAGE.recur},
       {footer:true,onDone:function(r){ accInsDateSet(r); }});
     dpFitPopover(el,btn);
   };
   window.accInsDateSet=function(r){
-    INS_STAGE.due=r?r.date:null; INS_STAGE.freq=r?r.freq:'none'; INS_STAGE.until=r?r.until:null;
+    INS_STAGE.due=r?r.due:null; INS_STAGE.recur=r?r.recur:null;
     updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus();
   };
   window.accInsPickMembers=async function(ev){
@@ -8779,12 +9044,12 @@
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
     const el=openPopover(btn,'<div id="acDpBox"></div>');
     accDpMount(document.getElementById('acDpBox'),
-      {date:SELF_INS_STAGE.due,freq:SELF_INS_STAGE.freq,until:SELF_INS_STAGE.until},
+      {due:SELF_INS_STAGE.due,recur:SELF_INS_STAGE.recur},
       {footer:true,onDone:function(r){ accSelfInsDateSet(r); }});
     dpFitPopover(el,btn);
   };
   window.accSelfInsDateSet=function(r){
-    SELF_INS_STAGE.due=r?r.date:null; SELF_INS_STAGE.freq=r?r.freq:'none'; SELF_INS_STAGE.until=r?r.until:null;
+    SELF_INS_STAGE.due=r?r.due:null; SELF_INS_STAGE.recur=r?r.recur:null;
     updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus();
   };
   window.accSelfInsPickProject=async function(ev){
@@ -8804,11 +9069,8 @@
   window.accP3=function(k){P3=k;tasksScreen();};
   window.accInsToggleX=function(){};
   window.accSelfInsToggleX=function(){};
-  window.accInsCancel=function(){ INS_STAGE={due:null,freq:'none',until:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
-  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,freq:'none',until:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
-  // 'none' is stored as NULL so "does not repeat" reads the same as it always has in the table.
-  function dpFreqOrNull(f){ return (f&&f!=='none')?f:null; }
-  function dpUntilOrNull(st){ return (st.freq&&st.freq!=='none'&&st.until)?st.until:null; }
+  window.accInsCancel=function(){ INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -8817,14 +9079,14 @@
     const projectId=INS_STAGE.project||null;
     INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur_freq:dpFreqOrNull(INS_STAGE.freq),recur_until:dpUntilOrNull(INS_STAGE)}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur:INS_STAGE.recur||null}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert(sel.map(e=>({task_id:t.id,email:e})));
       let r;
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      INS_STAGE={due:null,freq:'none',until:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
+      INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
   };
@@ -8835,14 +9097,14 @@
     const projectId=SELF_INS_STAGE.project||null;
     SELF_INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur_freq:dpFreqOrNull(SELF_INS_STAGE.freq),recur_until:dpUntilOrNull(SELF_INS_STAGE)}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur:SELF_INS_STAGE.recur||null}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert({task_id:t.id,email:me()});
       let r;
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      SELF_INS_STAGE={due:null,freq:'none',until:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
+      SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
   };
@@ -9079,7 +9341,7 @@
         ${canEdit?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
         ${canEdit?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`:''}</span></h3>
       <div class="tp-grid">
-        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${(t.recur_freq&&t.recur_freq!=='none')?` <span class="dp-chip"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe({date:t.due_date,freq:t.recur_freq,until:t.recur_until}))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
+        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${t.recur?` <span class="dp-chip-rep"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe(t.recur))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Created</div><div class="v">${t.created_at?wfDTFull(t.created_at):'—'}</div></div>
         <div class="tp-f"><div class="k">Owner</div><div class="v">${esc2(nameOf(list,t.delegator))}</div></div>
@@ -9275,25 +9537,26 @@
   };
   let DP_EDIT=null;   // the rule the modal is holding, read back by accEditDueSave
   window.accEditDue=async function(tid){
-    const {data:t}=await ACC().from('ptasks').select('due_date,created_at,recur_freq,recur_until,recur_anchor').eq('id',tid).single();
+    const {data:t}=await ACC().from('ptasks').select('due_date,created_at,recur,recur_anchor').eq('id',tid).single();
     openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(94vw,408px);padding:0"><div id="acDpBox" class="dp-inline"></div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
-    DP_EDIT=t?{date:t.due_date,freq:t.recur_freq||'none',until:t.recur_until,anchor:t.recur_anchor}:null;
+    DP_EDIT=t?{due:t.due_date,recur:t.recur}:null;
     accDpMount(document.getElementById('acDpBox'),DP_EDIT,
       {footer:false,onChange:function(r){ DP_EDIT=r; }});
   };
   window.accEditDueSave=async function(tid){
-    const rule=DP_EDIT;
-    const due=(rule&&rule.date)||null;
+    const res=DP_EDIT;
+    const due=(res&&res.due)||null;
     try{
-      const {data:old}=await ACC().from('ptasks').select('due_date,created_at,recur_freq,recur_until').eq('id',tid).single();
+      const {data:old}=await ACC().from('ptasks').select('due_date,created_at,recur').eq('id',tid).single();
       if(due&&due<istTodayISO()){toast('Due date cannot be earlier than today','err');return;}
       const prevDue=old?old.due_date:null;
-      const prevFreq=(old&&old.recur_freq)||null, newFreq=dpFreqOrNull(rule&&rule.freq);
-      // recur_anchor is left alone: the DB trigger sets it on the first save and it must not move
-      // afterwards, or a monthly 31st would re-anchor to whatever clamped date it last landed on.
-      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur_freq:newFreq,recur_until:(newFreq&&rule&&rule.until)?rule.until:null}).eq('id',tid);
-      if((prevFreq||'')!==(newFreq||'')){
-        await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevFreq?dpDescribe({date:due||prevDue,freq:prevFreq}):'none')+' \u2192 '+(newFreq?dpDescribe({date:due,freq:newFreq,until:rule&&rule.until}):'none')});
+      const prevRecur=(old&&old.recur)||null, newRecur=(res&&res.recur)||null;
+      /* recur_anchor is left alone on purpose: the trigger sets it on the first save and it must
+         not move afterwards, or a quarterly rule would re-phase and a clamped monthly 31st would
+         re-anchor to whatever short month it last landed on. */
+      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur}).eq('id',tid);
+      if(JSON.stringify(prevRecur)!==JSON.stringify(newRecur)){
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevRecur?dpDescribe(prevRecur):'none')+' \u2192 '+(newRecur?dpDescribe(newRecur):'none')});
       }
       if((prevDue||'')!==(due||'')){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'due date changed',detail:'Due date '+(prevDue?fmtDateY(prevDue):'none')+' → '+(due?fmtDateY(due):'none')});
