@@ -4696,7 +4696,12 @@
        properly, and the editing branch now feeds it. */
     let src=[];
     let groupsSrc;
-    if(editing){
+    // A draft has no case (editing stays false for one - see the comment above), but it still has
+    // its own saved details to prefill from. Gating this on `editing` alone skipped that entirely:
+    // reopening a draft rebuilt the form from the blank template, discarding exactly what "Save
+    // draft" had just stored - it was read into savedDetails correctly, just never reached because
+    // the block that uses it never ran.
+    if(editing||draftRow){
       const savedDetails=Array.isArray(draftRow&&draftRow.details)?draftRow.details:(Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
       if(locked){
         const byGroup={};
@@ -4716,11 +4721,13 @@
     /* A field marked upiScannerMemory (Reimbursement's "QR Code") remembers the last image a
        person uploaded, same idea as UPI Id remembering the last typed value — except there is only
        ever one of it, so it is fetched and pre-filled straight onto a brand-new instance rather
-       than offered as a pick-from-list. Never on Edit: an existing case keeps whatever it actually
-       has saved, from savedDetails above. upi_scanner_get falls back to the person's own most
-       recent past submission of THIS flow when nothing has been explicitly remembered yet, so the
-       pre-fill still works even if a save never actually reached upi_scanner_remember. */
-    if(!editing){
+       than offered as a pick-from-list. Never on Edit, and never on a draft either: both already
+       have whatever they actually saved, from savedDetails above - overwriting it here with
+       whatever was last remembered is the same bug the block above had, just for this one field.
+       upi_scanner_get falls back to the person's own most recent past submission of THIS flow when
+       nothing has been explicitly remembered yet, so the pre-fill still works even if a save never
+       actually reached upi_scanner_remember. */
+    if(!editing && !draftRow){
       const scannerField=template.find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
         try{
@@ -4764,7 +4771,11 @@
     if(commonFields.length) src=src.filter(function(t){ return !(t&&t.common); });
     rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     let editGroupsHtml='';
-    if(allowMulti && editing && src.length){
+    // Same fix as the savedDetails gate above: a draft's multi-entry values are already packed
+    // into src's stored strings (e.g. "x | y | z") - unpacking them into separate Set/Entry groups
+    // only ran on an actual edit, so a multi-entry draft reopened with everything crammed into one
+    // entry instead of split back out.
+    if(allowMulti && (editing||draftRow) && src.length){
       const setsFor={}; let nSets=1;
       src.forEach(function(t){
         const parts=wfSplitSets((t&&t.value)||'');
@@ -4803,7 +4814,9 @@
     let dateGroupsHtml='';
     if(dateMode){
       const byDate={}, dateOrder=[];
-      if(editing){
+      // Same reasoning as the plain multi-entry unpack above - Reimbursement's own date-grouped
+      // "Entry" layout, so a draft with more than one dated expense needs this too.
+      if(editing||draftRow){
         const cols={}; let nEnt=1;
         src.forEach(function(t){ const parts=wfSplitSets((t&&t.value)||''); cols[t.label]=parts; if(parts.length>nEnt) nEnt=parts.length; });
         for(let i=0;i<nEnt;i++){
