@@ -3450,7 +3450,7 @@
 
   async function wfCaseRoute(v, caseId){
     let c=null; try{ const {data}=await ACC().from('flow_cases').select('flow_id').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(!c){ toast('Not found','err'); return navTo('tasks/workflow'); }
+    if(!c){ toast('That instance no longer exists — it may have been deleted','err'); return navTo('tasks/workflow'); }
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
@@ -5061,7 +5061,7 @@
       if(minT>0 && !caseId && !DRAFT){
         const tt=wfEvtTotalCalc();
         if(tt && tt.total<minT){
-          toast('A '+N.lc+' must come to at least '+wfMoney(minT)
+          toast('A '+wfN().lc+' must come to at least '+wfMoney(minT)
             +' \u2014 this one totals '+wfMoney(tt.total),'warn');
           return;
         }
@@ -6845,7 +6845,7 @@
       toast('Moved to '+fmtDateY(newDate),'ok');
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move task','err'); }
+    }catch(e){ toast('Could not move the task: '+((e&&e.message)||e),'err'); }
   };
   // Dragging a Legal case to a new day writes straight into mis_cases (public schema, not acc —
   // see gcalCasesLoadData), into whichever of its two date columns the dragged chip came from:
@@ -6863,7 +6863,7 @@
       toast((field==='case_next_date'?'Next date':'Action date')+' moved to '+fmtDateY(newDate),'ok');
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move case','err'); }
+    }catch(e){ toast('Could not move the case: '+((e&&e.message)||e),'err'); }
   };
   // Dragging a one-time meeting onto another day's section changes its meeting_date. This resyncs
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
@@ -6948,7 +6948,7 @@
       if(m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move meeting','err'); }
+    }catch(e){ toast('Could not move the meeting: '+((e&&e.message)||e),'err'); }
   };
   /* ---- Day view: dragging a meeting block vertically changes its time ----
      Vertical-only (only one day is visible in Day view, so there's nothing to drop onto to change the
@@ -7012,7 +7012,7 @@
       if(m&&m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to update meeting time','err'); }
+    }catch(e){ toast('Could not update the meeting time: '+((e&&e.message)||e),'err'); }
   };
 
   /* ---- shell / entry point ---- */
@@ -8536,7 +8536,7 @@
     if(pv==='__new'){
       const nm=($('etNewProj').value||'').trim(); if(!nm){toast('Enter a tag name','err');return;}
       const depts=myDepts();
-      try{ const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; INS_STAGE.project=pj.id; INS_STAGE.projectLabel=nm; }catch(e){ toast('Failed to create tag','err'); return; }
+      try{ const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; INS_STAGE.project=pj.id; INS_STAGE.projectLabel=nm; }catch(e){ toast('Could not create the tag: '+((e&&e.message)||e),'err'); return; }
     } else { INS_STAGE.project=pv?Number(pv):null; INS_STAGE.projectLabel=pv?(window._etProjLabel||''):''; }
     updateInsProjBtn(); accInsToggleX(); closeModal(); const t=$('insInput'); if(t)t.focus();
   };
@@ -8558,7 +8558,7 @@
     const pv=$('etProj').value;
     if(pv==='__new'){
       const nm=($('etNewProj').value||'').trim(); if(!nm){toast('Enter a tag name','err');return;}
-      try{ const depts=myDepts(); const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; SELF_INS_STAGE.project=pj.id; SELF_INS_STAGE.projectLabel=nm; }catch(e){ toast('Failed to create tag','err'); return; }
+      try{ const depts=myDepts(); const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; SELF_INS_STAGE.project=pj.id; SELF_INS_STAGE.projectLabel=nm; }catch(e){ toast('Could not create the tag: '+((e&&e.message)||e),'err'); return; }
     } else { SELF_INS_STAGE.project=pv?Number(pv):null; SELF_INS_STAGE.projectLabel=pv?(window._etProjLabel||''):''; }
     updateSelfInsProjBtn(); accSelfInsToggleX(); closeModal(); const t=$('selfInsInput'); if(t)t.focus();
   };
@@ -8712,7 +8712,7 @@
         ACC().from('task_rank').upsert({task_id:draggedId,viewer_email:my,rank:bi},{onConflict:'task_id,viewer_email'}),
         ACC().from('task_rank').upsert({task_id:targetId,viewer_email:my,rank:ai},{onConflict:'task_id,viewer_email'})
       ]);
-    }catch(e){ toast('Failed to reorder','err'); }
+    }catch(e){ toast('Could not reorder: '+((e&&e.message)||e),'err'); }
     tasksScreen();
   }
   function wireSwapDrag(col,fullOrderIds){
@@ -8910,7 +8910,7 @@
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');
         renderPage();
-      }catch(e){ toast('Failed','err'); }
+      }catch(e){ toast('Could not delete the attachment: '+((e&&e.message)||e),'err'); }
     });
   };
   function subRow(s){ return `<div class="tp-sub-item" data-id="${s.id}"><i class="fa-solid fa-grip-vertical grip"></i><input type="checkbox" ${s.done?'checked':''} onchange="accSubToggle(${s.id},this.checked)" style="width:17px;height:17px"><div style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--slate)':''}">${esc2(s.title)}</div><button class="ac-btn ic danger" style="height:28px;width:28px" onclick="accSubDel(${s.id})"><i class="fa-solid fa-trash"></i></button></div>`; }
@@ -8920,7 +8920,7 @@
   window.accSubtasksToggle=function(){ const c=$('subCard'); if(!c)return; const show=c.style.display==='none'; c.style.display=show?'block':'none'; if(show){const i=$('stTitle'); if(i)i.focus();} };
   window.accSubCancel=function(){ const i=$('stTitle'); if(i)i.value=''; };
   window.accSubAdd=async function(tid){ const i=$('stTitle'); const title=(i&&i.value||'').trim(); if(!title){toast('Type a sub-task title','err');return;} try{const {data:mx}=await ACC().from('ptask_subtasks').select('order_index').eq('task_id',tid).order('order_index',{ascending:false}).limit(1);const nx=(mx&&mx[0]?mx[0].order_index+1:0);const firstSub=!(mx&&mx.length);await ACC().from('ptask_subtasks').insert({task_id:tid,title,order_index:nx});if(firstSub)await sysMsg(tid,'added the first sub-task');await recalc(tid);renderPage();}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} };
-  window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Failed','err');} };
+  window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Could not update the sub-task: '+((e&&e.message)||e),'err');} };
   window.accSubDel=function(sid){ accConfirm('Delete this sub-task?', async function(){ try{const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();await ACC().from('ptask_subtasks').delete().eq('id',sid);if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){} }); };
   async function recalc(tid){
     const {data:subs}=await ACC().from('ptask_subtasks').select('done').eq('task_id',tid);
@@ -8961,7 +8961,7 @@
     if(val==='__new'){ if(n){n.style.display='block';n.focus();} }
     else { if(n){n.style.display='none';n.value='';} window._etProjLabel=val?(el.querySelector('.ms-nm').textContent.trim()):''; }
   };
-  window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Failed','err');} }); };
+  window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Could not reopen the task: '+((e&&e.message)||e),'err');} }); };
   window.accRevert=function(tid){
     if(!(window._tp&&window._tp.amMember)){toast('Only someone assigned to this task can revert it','err');return;}
     accConfirm('Revert this task back to Pending? It leaves Awaiting Approval and returns to your active tasks — and the task owner\'s "Assigned by Me" list.', async function(){
@@ -9013,7 +9013,7 @@
       await ACC().from('ptask_comments').insert({task_id:tid,body:body||null,attach_path:attachPath,attach_name:attachName});
       if(i)i.value=''; accChatClearFile();
       renderPage();
-    }catch(e){toast('Failed','err');}
+    }catch(e){toast('Could not post your update: '+((e&&e.message)||e),'err');}
   };
   window.accDueHistory=function(tid){ const h=(window._tp&&window._tp.dueHist)||[]; openModal(`<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> Due date history</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,560px)">${h.length?h.map(a=>`<div style="padding:8px 0;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--body)">${esc2(a.detail||'')}<span style="float:right;color:var(--slate)">${fmtDateY(a.created_at)}</span></div>`).join(''):'<div class="ac-empty" style="cursor:default;border:0">No due-date changes</div>'}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Close</button></div>`,'md'); };
   window.accEditDesc=async function(tid){ const {data:t}=await ACC().from('ptasks').select('description').eq('id',tid).single(); openModal(`<div class="modal-head"><h3><i class="fa-solid fa-align-left"></i> Description</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(80vw,680px)"><textarea class="ac-in" id="edDesc" style="min-height:300px" placeholder="Describe the task…">${esc2((t&&t.description)||'')}</textarea></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDescSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg'); };
@@ -9021,7 +9021,7 @@
   // a plain-text excerpt of the new description, not just that a Save button was clicked.
   window.accEditDescSave=async function(tid){ try{const val=$('edDesc').value||null;await ACC().from('ptasks').update({description:val}).eq('id',tid);await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'Description updated'});await sysMsg(tid,'updated the description');
     try{ const excerpt=val?String(val).replace(/\s+/g,' ').trim():''; usageQueue('tasks.tasks.edit_task_description','update',excerpt?{description:(excerpt.length>140?excerpt.slice(0,140)+'…':excerpt)}:null); }catch(_e){}
-    closeModal();renderPage();}catch(e){toast('Failed','err');} };
+    closeModal();toast('Description saved','ok');renderPage();}catch(e){toast('Could not save the description: '+((e&&e.message)||e),'err');} };
   window.accEditTitle=async function(tid){
     const {data:t}=await ACC().from('ptasks').select('title').eq('id',tid).single();
     openModal(`<div class="modal-head"><h3>Rename task</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)"><input class="ac-in" id="rnTitle" value="${esc2((t&&t.title)||'')}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditTitleSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
@@ -9037,8 +9037,8 @@
         await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'renamed to "'+v+'"'}); await sysMsg(tid,'renamed to "'+v+'"');
         try{ usageQueue('tasks.tasks.edit_task_title','update',{title:v}); }catch(_e){}
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Task renamed','ok'); renderPage();
+    }catch(e){toast('Could not rename the task: '+((e&&e.message)||e),'err');}
   };
   window.accEditDue=async function(tid){
     const {data:t}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
@@ -9057,8 +9057,8 @@
         try{ usageQueue('tasks.tasks.edit_task_due_date','update',{due_date:due||'cleared'}); }catch(_e){}
         if(due){ const _d=parseD(due), _t=new Date(); _t.setHours(0,0,0,0); if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); toast('Task is due \u2014 members notified by email','ok'); }catch(_e){} } }
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Due date saved','ok'); renderPage();
+    }catch(e){toast('Could not update the due date: '+((e&&e.message)||e),'err');}
   };
   window.accEditProject=async function(tid){
     const [tR,pR]=await Promise.all([ACC().from('ptasks').select('project_id').eq('id',tid).single(),ACC().from('projects').select('id,name,department,created_by,owner').order('name')]);
@@ -9086,14 +9086,14 @@
         await sysMsg(tid,detail);
         try{ usageQueue('tasks.tasks.edit_task_project','update',{project:newProjName||'(removed)'}); }catch(_e){}
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Tag saved','ok'); renderPage();
+    }catch(e){toast('Could not update the tag: '+((e&&e.message)||e),'err');}
   };
   window.accEditMembers=async function(tid){ const [list,aR]=await Promise.all([people(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]); const {data:t}=await ACC().from('ptasks').select('delegator').eq('id',tid).single(); const others=list.filter(p=>!eq(p.email,(t&&t.delegator)||me())); const cur=(aR.data||[]).map(r=>r.email);
     openModal(`<div class="modal-head"><h3>Members <span style="font-size:12px;color:#94a3b8;font-weight:400">(owner cannot be a member)</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden">${msWidget('emMembers',others,cur)}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditMembersSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md'); };
   // usageQueue logged only when parts is non-empty (a real add/remove happened), after the actual
   // change, rather than through USAGE_MAP - captures who was added/removed, not just a click.
-  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Failed','err');} };
+  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
   window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
