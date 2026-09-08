@@ -4901,6 +4901,15 @@
     window._wfEvtMinTotal=Number(flow.min_total||0)||0;
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
+    /* `editing` means "this is an existing instance" and governs the title, the Save-draft button,
+       who-does-which-step, and the AI field suggestion - a resumed draft is still a CREATION, so it
+       must stay false for all of those.
+
+       But it was ALSO gating whether saved values get loaded, and a draft has no case id - so
+       reopening a draft drew an empty form and the draft's data appeared to vanish. What is needed
+       there is a different question: are there saved values to draw? A case has them; so does a
+       draft. Hence two flags. */
+    const hasSaved=!!caseId||!!draftRow;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
     // Fetched once and cached into trigger_template so every instance uses the same fields.
     let tmpl=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
@@ -4948,7 +4957,7 @@
        properly, and the editing branch now feeds it. */
     let src=[];
     let groupsSrc;
-    if(editing){
+    if(hasSaved){
       const savedDetails=Array.isArray(draftRow&&draftRow.details)?draftRow.details:(Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
       if(locked){
         const byGroup={};
@@ -4972,13 +4981,19 @@
        has saved, from savedDetails above. upi_scanner_get falls back to the person's own most
        recent past submission of THIS flow when nothing has been explicitly remembered yet, so the
        pre-fill still works even if a save never actually reached upi_scanner_remember. */
-    if(!editing){
+    /* !caseId, so this still covers a resumed draft - but it now only fills the field when the
+       draft did not already carry one. Overwriting a QR the person deliberately attached to their
+       draft with whatever was last remembered would be the same class of bug as the one above. */
+    if(!caseId){
       const scannerField=template.find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
-        try{
-          const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
-          if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
-        }catch(_e){}
+        const already=((src.find(function(t){ return t&&t.label===scannerField.label; })||{}).value||'').trim();
+        if(!already){
+          try{
+            const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
+            if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
+          }catch(_e){}
+        }
       }
     }
     // A text field can opt into a growing autocomplete list (flow.autocomplete_fields, e.g.
@@ -5016,7 +5031,7 @@
     if(commonFields.length) src=src.filter(function(t){ return !(t&&t.common); });
     rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     let editGroupsHtml='';
-    if(allowMulti && editing && src.length){
+    if(allowMulti && hasSaved && src.length){
       const setsFor={}; let nSets=1;
       src.forEach(function(t){
         const parts=wfSplitSets((t&&t.value)||'');
@@ -5055,7 +5070,7 @@
     let dateGroupsHtml='';
     if(dateMode){
       const byDate={}, dateOrder=[];
-      if(editing){
+      if(hasSaved){
         const cols={}; let nEnt=1;
         src.forEach(function(t){ const parts=wfSplitSets((t&&t.value)||''); cols[t.label]=parts; if(parts.length>nEnt) nEnt=parts.length; });
         for(let i=0;i<nEnt;i++){
