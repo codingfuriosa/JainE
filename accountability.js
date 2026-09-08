@@ -627,6 +627,40 @@
     .wf-print-att-img{display:block;width:100%;max-width:100%;height:auto;border:1px solid var(--line);
       border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
     .wf-print-att-miss{font-size:12px;color:#b91c1c}
+
+    /* booking check list */
+    .wf-aud-wait{display:flex;align-items:center;gap:14px;padding:18px 4px;font-size:13.5px}
+    .wf-aud-err{background:#fef2f2;border-left:3px solid #dc2626;border-radius:6px;padding:12px 14px;
+      color:#991b1b;font-size:13px}
+    .wf-aud-read{font-size:11.5px;color:var(--slate);margin-bottom:10px}
+    .wf-aud-warn{background:#fffbeb;border-left:3px solid #d97706;border-radius:6px;padding:10px 13px;
+      margin-bottom:12px;font-size:12.5px;color:#92400e}
+    .wf-aud-warn ul{margin:5px 0 0 16px;padding:0}
+    .wf-aud-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:7px;
+      margin-bottom:6px}
+    .wf-aud-c{border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
+    .wf-aud-c .k{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate)}
+    .wf-aud-c .v{font-size:13px;font-weight:600;margin-top:2px;overflow-wrap:anywhere}
+    .wf-aud-c .v.nil{color:var(--slate-2);font-weight:400}
+    .wf-aud-h{font-size:12px;font-weight:700;margin:16px 0 6px}
+    .wf-aud-t{width:100%;border-collapse:collapse;font-size:12.5px}
+    .wf-aud-t td{border-bottom:1px solid var(--line-2);padding:5px 7px;vertical-align:top}
+    .wf-aud-t td:last-child{text-align:right;white-space:nowrap;width:1%}
+    .wf-aud-t td.ok{color:#0a6b2d;font-weight:700}
+    .wf-aud-t td.no{color:#b91c1c;font-weight:700}
+    .wf-aud-t td.na{color:var(--slate-2)}
+    .wf-aud-t .sub{font-size:11px;color:var(--slate);font-weight:400;margin-top:2px;white-space:normal}
+    .wf-aud-ok{color:#0a6b2d;font-weight:700;font-size:11.5px}
+    .wf-aud-no{color:#b91c1c;font-weight:700;font-size:11.5px}
+    .wf-aud-na{color:var(--slate-2);font-size:11.5px}
+    .wf-aud-mini{font-size:11.5px;color:var(--slate)}
+    .wf-aud-notes{margin-top:14px;background:var(--bg,#f5f7fb);border-radius:8px;padding:10px 12px;
+      font-size:12px;color:var(--slate);line-height:1.6}
+    .wf-aud-foot{display:flex;align-items:center;gap:10px;margin-top:18px;padding-top:12px;
+      border-top:1px solid var(--line)}
+    .wf-aud-foot .ac-btn{margin-left:0}
+    .wf-aud-foot .wf-aud-mini{flex:1}
     @media (max-width:520px){
       .dp-body{flex-direction:column}
       .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
@@ -3604,8 +3638,13 @@
       &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     const printBtn='<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
+    /* Booking Form only: the checklist being filled is specific to it. Reading the attachments
+       takes a minute or two, so it is a button somebody presses - not something that runs on open. */
+    const auditBtn=(c.flow_id===41)
+      ? '<button class="wf-tlhead-x" onclick="wfAuditRun('+c.id+')" title="Read the attachments and fill the booking check list"><i class="fa-solid fa-list-check"></i></button>'
+      : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
-      +'<div class="wf-tlhead-acts">'+editBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
+      +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
       /* A returned instance is stopped and waiting on its owner, which is not something the timeline
          shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
@@ -3658,6 +3697,231 @@
         }
       }catch(_e){}
     },40);
+  };
+
+  /* ── booking check list ────────────────────────────────────────────────────────────────────
+     Reads every file attached to a Booking Form instance (booking-audit reads them server-side and
+     hands them to Gemini), shows what was found, and prints the filled check list.
+
+     Nothing here approves anything, and nothing is written back to the instance: it is a reading of
+     the documents for a person to check. Every Ok / Not Ok and every sum in the result was computed
+     in code from what was extracted, not asserted by the model - see the function's own notes. */
+  window._wfAudit=null;
+  window.wfAuditRun=async function(caseId){
+    const N=wfN();
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-list-check"></i> Booking check list</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body" style="min-width:min(94vw,720px)"><div class="wf-aud-wait">'
+      +'<div class="spin"></div><div><b>Reading the attachments&hellip;</b><br>'
+      +'<span style="color:var(--slate);font-size:12.5px">A booking file is usually 20-odd scanned '
+      +'pages, so this takes a minute or two. Leave this open.</span></div></div></div>','md');
+    let res=null, err='';
+    try{
+      const {data:{session}}=await sb.auth.getSession();
+      const token=session&&session.access_token;
+      if(!token) throw new Error('You are signed out - sign in again and retry.');
+      const r=await fetch(SUPABASE_URL+'/functions/v1/booking-audit',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},
+        body:JSON.stringify({case_id:caseId})
+      });
+      const jj=await r.json().catch(function(){ return {}; });
+      if(!r.ok||!jj||!jj.ok) throw new Error((jj&&(jj.error||jj.detail))||('the reader failed (HTTP '+r.status+')'));
+      res=jj;
+    }catch(e){ err=(e&&e.message)?String(e.message):String(e); }
+    if(!document.getElementById('wfAudBox')&&!document.querySelector('.wf-aud-wait')) return;  // closed meanwhile
+    if(err){
+      const b=document.querySelector('.modal-body');
+      if(b) b.innerHTML='<div class="wf-aud-err"><i class="fa-solid fa-circle-exclamation"></i> '
+        +esc2(err)+'</div><div class="modal-foot" style="padding:0;border:0;margin-top:14px">'
+        +'<button class="ac-btn" onclick="closeModal()">Close</button>'
+        +'<button class="ac-btn primary" onclick="wfAuditRun('+caseId+')">Try again</button></div>';
+      return;
+    }
+    window._wfAudit=res;
+    wfAuditShow(res);
+  };
+
+  function wfAudMark(v){
+    if(v===true)  return '<span class="wf-aud-ok"><i class="fa-solid fa-check"></i> Ok</span>';
+    if(v===false) return '<span class="wf-aud-no"><i class="fa-solid fa-xmark"></i> Not Ok</span>';
+    return '<span class="wf-aud-na">not checked</span>';
+  }
+  function wfAuditShow(res){
+    const f=res.fields||{}, cl=res.checklist||{};
+    const val=function(k){ const x=f[k]; return x?String(x.value):'NIL'; };
+    let h='<div id="wfAudBox">';
+
+    // what it read
+    const files=(res.read&&res.read.files)||[];
+    h+='<div class="wf-aud-read"><i class="fa-solid fa-file-lines"></i> Read '
+      +files.length+' file'+(files.length===1?'':'s')
+      +((res.read&&res.read.documents_seen&&res.read.documents_seen[0]&&res.read.documents_seen[0].pages)
+        ? (', '+res.read.documents_seen.reduce(function(a,d){return a+(Number(d.pages)||0);},0)+' pages')
+        : '')
+      +' &middot; '+esc2((res.read&&res.read.model)||'')+'</div>';
+
+    // anything typed into JAIN-E that the documents disagree with
+    const bad=(res.crosscheck||[]).filter(function(x){ return x.match===false||x.match==='partial'; });
+    if(bad.length){
+      h+='<div class="wf-aud-warn"><b><i class="fa-solid fa-triangle-exclamation"></i> '
+        +'What was typed does not match the documents</b><ul>';
+      bad.forEach(function(x){
+        h+='<li><b>'+esc2(x.field)+'</b> &mdash; form says &ldquo;'+esc2(x.typed)
+          +'&rdquo;, documents say &ldquo;'+esc2(x.in_documents)+'&rdquo;'
+          +(x.match==='partial'?' <i>(close, not identical)</i>':'')+'</li>';
+      });
+      h+='</ul></div>';
+    }
+
+    h+='<div class="wf-aud-grid">';
+    [['Customer','customer_name'],['Project','project_name'],['Block','block'],['Flat','flat'],
+     ['Floor','floor'],['Area (sq.ft.)','area_sqft'],['Base Rate','base_rate'],['PLC','plc'],
+     ['FLC','flc'],['Covered Parking','covered_parking'],['Discount','discount']
+    ].forEach(function(p){
+      h+='<div class="wf-aud-c"><div class="k">'+p[0]+'</div><div class="v'
+        +(val(p[1])==='NIL'?' nil':'')+'">'+esc2(val(p[1]))+'</div></div>';
+    });
+    h+='</div>';
+
+    // the check list itself
+    h+='<div class="wf-aud-h">Check list</div><table class="wf-aud-t"><tbody>';
+    Object.keys(cl).forEach(function(k){
+      const v=String(cl[k]);
+      const cls=v==='Ok'?'ok':(v==='Not Ok'?'no':'na');
+      h+='<tr><td>'+esc2(k)+'</td><td class="'+cls+'">'+esc2(v)+'</td></tr>';
+    });
+    h+='</tbody></table>';
+
+    // the sums, so a person can see WHY the cost sheet passed or failed
+    const ar=res.arithmetic||[];
+    const okN=ar.filter(function(x){return x.pass===true;}).length;
+    h+='<div class="wf-aud-h">Cost sheet &mdash; '+okN+' of '+ar.length+' checks passed'
+      +((res.gst&&res.gst.rates_found)
+        ? ' <span style="font-weight:400;color:var(--slate)">(GST read from the sheets: '
+          +esc2(Object.keys(res.gst.rates_found).map(function(k){return k+' '+res.gst.rates_found[k]+'%';}).join(', '))
+          +')</span>' : '')
+      +'</div><table class="wf-aud-t"><tbody>';
+    ar.forEach(function(x){
+      h+='<tr><td>'+esc2(x.check)+(x.sheet?(' <span class="sub" style="display:inline">&mdash; '+esc2(x.sheet)+'</span>'):'')
+        +(x.detail?('<div class="sub">'+esc2(x.detail)+'</div>'):'')+'</td>'
+        +'<td>'+wfAudMark(x.pass)
+        +((x.pass===false&&x.expected)?('<div class="sub">works out to '+esc2(x.expected)
+           +', sheet says '+esc2(x.printed)+'</div>'):'')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+
+    // who has which card
+    const kp=(res.kyc&&res.kyc.people)||[];
+    if(kp.length){
+      h+='<div class="wf-aud-h">KYC</div><table class="wf-aud-t"><tbody>';
+      kp.forEach(function(p){
+        h+='<tr><td>'+esc2(p.person)+(p.relation?('<div class="sub">'+esc2(p.relation)+'</div>'):'')+'</td>'
+          +'<td>'+(p.aadhaar?'<span class="wf-aud-ok">Aadhaar</span> ':'')
+          +(p.pan?'<span class="wf-aud-ok">PAN</span>':'')
+          +(p.ok?'':'<span class="wf-aud-no">no card found</span>')+'</td></tr>';
+      });
+      h+='</tbody></table>';
+      const kk=res.kyc;
+      h+='<div class="wf-aud-mini">Mobile: '+esc2((kk.mobile_numbers||[]).join(', ')||'none')
+        +' &middot; Email: '+esc2((kk.emails||[]).join(', ')||'none')
+        +' &middot; PAN: '+esc2((kk.pan_numbers||[]).join(', ')||'none')+'</div>';
+    }
+    if(res.notes) h+='<div class="wf-aud-notes"><b>Reader&rsquo;s notes</b><br>'+esc2(res.notes)+'</div>';
+    const un=(res.read&&res.read.unreadable)||[];
+    if(un.length) h+='<div class="wf-aud-warn"><b>Could not be read</b><ul>'
+      +un.map(function(u){return '<li>'+esc2(String(u))+'</li>';}).join('')+'</ul></div>';
+
+    h+='<div class="wf-aud-foot"><span class="wf-aud-mini">Nothing has been approved or saved &mdash; '
+      +'this is a reading of the documents.</span>'
+      +'<button class="ac-btn" onclick="closeModal()">Close</button>'
+      +'<button class="ac-btn primary" onclick="wfAuditPdf()"><i class="fa-solid fa-file-pdf"></i> Check list PDF</button>'
+      +'</div></div>';
+
+    const b=document.querySelector('.modal-body');
+    if(b) b.innerHTML=h;
+  }
+
+  /* JAIN-E builds the document. Laid out as the paper check list, filled from the audit result -
+     so every value on it traces to something read from the file, and none of it was written by a
+     model. Opened in its own tab to print or save as PDF, the same way instances print. */
+  window.wfAuditPdf=function(){
+    const res=window._wfAudit;
+    if(!res){ toast('Run the check list first','warn'); return; }
+    const w=window.open('','_blank');
+    if(!w){ toast('Please allow popups to make the PDF','err'); return; }
+    const f=res.fields||{}, cl=res.checklist||{};
+    const v=function(k){ const x=f[k]; return x?String(x.value):'NIL'; };
+    const line=function(t){ return '<span class="fill">'+esc2(t)+'</span>'; };
+    const cell=function(k){
+      const val=String((cl[k]!=null?cl[k]:''));
+      const cls=val==='Ok'?'ok':(val==='Not Ok'?'no':'');
+      return '<span class="fill '+cls+'">'+esc2(val)+'</span>';
+    };
+    const ar=res.arithmetic||[];
+    const html='<!DOCTYPE html><html><head><meta charset="UTF-8">'
+      +'<title>Booking check list - '+esc2(v('customer_name'))+'</title><style>'
+      +'body{font-family:Georgia,"Times New Roman",serif;color:#000;margin:34px 40px;font-size:13.5px;line-height:1.9}'
+      +'.fill{border-bottom:1px solid #000;padding:0 6px;font-family:Arial,Helvetica,sans-serif;font-weight:700}'
+      +'.fill.ok{color:#0a6b2d}.fill.no{color:#a11}'
+      +'h1{font-size:15px;margin:0 0 14px;text-decoration:underline}'
+      +'.hdr{display:flex;justify-content:space-between;margin-bottom:6px}'
+      +'.cl{margin-top:4px}.cl div{margin:3px 0}'
+      +'.ev{margin-top:26px;border-top:1px solid #999;padding-top:12px;'
+      +'font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;color:#333}'
+      +'.ev h2{font-size:11.5px;margin:0 0 6px;text-transform:uppercase;letter-spacing:.05em}'
+      +'.ev table{border-collapse:collapse;width:100%}'
+      +'.ev td{border-bottom:1px solid #ddd;padding:3px 6px;vertical-align:top}'
+      +'.ev td.r{text-align:right;white-space:nowrap}'
+      +'@page{margin:16mm}'
+      +'</style></head><body>'
+      +'<div class="hdr"><div>Date '+line(res.header&&res.header.date)+'</div></div>'
+      +'<h1>Booking form check list:-</h1>'
+      +'<div>Name of Post sales in-charge Responsible: <b>'
+        +esc2((res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH')+'</b></div>'
+      +'<div>Name of the customer : '+line(v('customer_name'))+'</div>'
+      +'<div>Project Name: '+line(v('project_name'))+' Block Name: '+line(v('block'))
+        +', FLAT; '+line(v('flat'))+' FLOOR- '+line(v('floor'))
+        +' Area ; '+line(v('area_sqft'))+' SQ.FT.</div>'
+      +'<div>Base Rate : '+line(v('base_rate'))+'/-, PLC- '+line(v('plc'))
+        +', FLC- '+line(v('flc'))+'/-, COVERED PARKING - '+line(v('covered_parking'))+'/-</div>'
+      +'<div>- DISCOUNT : '+line(v('discount'))+'/-</div>'
+      +'<div class="cl"><b>Check List:</b>'
+      +'<div>Cost Sheet '+cell('Cost Sheet')+'</div>'
+      +'<div>Market valuation Sheet '+cell('Market valuation Sheet')+'</div>'
+      +'<div>KYC of Customer '+cell('KYC of Customer')+'</div>'
+      +'<div>Mobile Number '+cell('Mobile Number')+'</div>'
+      +'<div>Email ID '+cell('Email ID')+'</div>'
+      +'<div>Pan Card No. '+cell('Pan Card No.')+'</div>'
+      +'<div>Source '+cell('Source')+'</div>'
+      +'<div>Booked in CRM - Lead ID '+cell('Booked in CRM - Lead ID')
+        +' Booking Date: '+cell('Booking Date')+'</div>'
+      +'<div>Payment Plan &ndash; '+cell('Payment Plan')+'</div>'
+      +'<div>Discount Approved '+cell('Discount Approved')+' (VC/HD)</div>'
+      +'</div>'
+      // The evidence, so the sheet can be checked rather than taken on trust.
+      +'<div class="ev"><h2>What was checked</h2><table><tbody>'
+      +ar.map(function(x){
+          return '<tr><td>'+esc2(x.check)+(x.sheet?(' &mdash; '+esc2(x.sheet)):'')
+            +(x.detail?(' &mdash; '+esc2(x.detail)):'')+'</td>'
+            +'<td class="r">'+(x.pass===true?'OK':(x.pass===false?('OUT BY '+esc2(x.difference||'')):'not checked'))+'</td></tr>';
+        }).join('')
+      +'</tbody></table>'
+      +((res.kyc&&res.kyc.people&&res.kyc.people.length)
+        ? ('<h2 style="margin-top:12px">Identity documents found</h2><table><tbody>'
+           +res.kyc.people.map(function(p){
+               return '<tr><td>'+esc2(p.person)+(p.relation?(' ('+esc2(p.relation)+')'):'')+'</td>'
+                 +'<td class="r">'+[p.aadhaar?'Aadhaar':'',p.pan?'PAN':''].filter(Boolean).join(' + ')
+                 +(p.ok?'':'none')+'</td></tr>';
+             }).join('')+'</tbody></table>') : '')
+      +'<p style="margin-top:12px">Read from '+esc2(String(((res.read&&res.read.files)||[]).length))
+      +' attached file(s) by '+esc2((res.read&&res.read.model)||'')
+      +'. Figures and every Ok / Not Ok above were computed by JAIN-E from the documents, not '
+      +'asserted by the reader. Not an approval.</p>'
+      +'</div></body></html>';
+    try{ w.document.open(); w.document.write(html); w.document.close(); }
+    catch(_e){ toast('Could not build the check list','err'); return; }
+    setTimeout(function(){ try{ w.focus(); w.print(); }catch(_e){} }, 400);
   };
 
   /* ----- Print an instance --------------------------------------------------------------------
