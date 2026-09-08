@@ -517,9 +517,15 @@
     /* ── due date + repeat picker ──────────────────────────────────────────────────────────
        How often on the left; on the right, only what that choice needs. One fixed height, so
        the panel does not grow or shrink as options are clicked. */
+    /* Capped to the window, and its own body scrolls. The panel is position:fixed, so anything
+       hanging below the fold cannot be scrolled into view - which is what made Done unreachable
+       and read as "the page will not scroll". The summary line and the footer stay put; only the
+       rail and the calendar scroll. */
     .dp-pop{width:432px;max-width:min(94vw,432px);background:#fff;border:1px solid var(--line);
-      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden}
-    .dp-body{display:flex;align-items:stretch}
+      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden;
+      display:flex;flex-direction:column;max-height:calc(100vh - 20px)}
+    .dp-body{display:flex;align-items:stretch;overflow-y:auto;min-height:0}
+    .dp-says,.dp-foot{flex:none}
     .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
       padding:8px 7px;display:flex;flex-direction:column;gap:1px}
     .dp-opt{width:100%;height:31px;padding:0 10px;border:0;border-radius:7px;background:transparent;
@@ -3744,7 +3750,10 @@
           +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
       }
     }
-    const attHtml=await wfPrintAttachmentsHtml(det);
+    /* Never let attachments take the printout down with them: a signing failure or an
+       unreadable PDF must still leave the instance's own details printable. */
+    let attHtml='';
+    try{ attHtml=await wfPrintAttachmentsHtml(det); }catch(_e){ attHtml=''; }
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
@@ -3797,7 +3806,10 @@
        already done. decode() resolves only once the image can actually be painted; falls back to
        load/error for the rare browser without it. Either way 'error' resolves too, so one broken
        image can never hang the rest of the printout. */
-    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
+    /* Attachment pages are waited on as well. This looked only for QR images, so a Booking Form
+       - which has none - made Promise.all([]) resolve immediately and print fired before a single
+       attachment page had been decoded, giving a blank printout. */
+    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img,.wf-print-att-img'));
     const imgReady=function(img){ return new Promise(function(res){
       if(typeof img.decode==='function'){ img.decode().then(res,res); return; }
       if(img.complete) return res();
@@ -3806,7 +3818,9 @@
     }); };
     Promise.race([
       Promise.all(imgs.map(imgReady)),
-      new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
+      // A rendered PDF page is a far bigger image than a QR code, so the backstop allows for
+      // the images actually present rather than the number of instances alone.
+      new Promise(function(res){ setTimeout(res, 2000+Math.min(parts.length,30)*250+Math.min(imgs.length,40)*150); })
     ]).then(doPrint);
     return true;
   };
@@ -9106,13 +9120,21 @@
     dpPaint();
     return host;
   }
-  /* openPopover positions the panel while it is still an empty div, so it measures 0 wide; a
-     432px panel opened near an edge has to be nudged back on screen once it has a size. */
+  /* openPopover positions the panel while it is still an empty div, so it measures 0 wide and
+     0 tall; a 432px panel opened near an edge has to be placed again once it has a size.
+
+     Below the button by default, above it when it would run off the bottom, and pinned to the top
+     when it fits neither. Being position:fixed, anything left off-screen can never be scrolled to
+     - .dp-pop caps its height and scrolls its own body for the same reason. */
   function dpFitPopover(el,anchor){
     if(!el||!anchor) return;
-    var r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight, m=8;
-    if(r.bottom+4+h > window.innerHeight-m) el.style.top=Math.max(m,r.top-h-4)+'px';
-    el.style.left=Math.max(m,Math.min(r.left,window.innerWidth-w-m))+'px';
+    var m=8, vw=window.innerWidth, vh=window.innerHeight;
+    var r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight;
+    var top=r.bottom+4;
+    if(top+h > vh-m) top=r.top-h-4;
+    if(top < m) top=m;
+    el.style.top=top+'px';
+    el.style.left=Math.max(m,Math.min(r.left,vw-w-m))+'px';
   }
 
   window.accInsPickDate=function(ev){
@@ -9648,7 +9670,7 @@
   let DP_EDIT=null;   // the rule the modal is holding, read back by accEditDueSave
   window.accEditDue=async function(tid){
     const {data:t}=await ACC().from('ptasks').select('due_date,created_at,recur,recur_anchor').eq('id',tid).single();
-    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(94vw,408px);padding:0"><div id="acDpBox" class="dp-inline"></div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(94vw,432px);padding:0"><div id="acDpBox" class="dp-inline"></div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
     DP_EDIT=t?{due:t.due_date,recur:t.recur}:null;
     accDpMount(document.getElementById('acDpBox'),DP_EDIT,
       {footer:false,onChange:function(r){ DP_EDIT=r; }});
