@@ -613,6 +613,14 @@
       padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
       color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
     .dp-chip-rep i{font-size:9.5px}
+
+    /* an instance's attachments, printed as pages rather than filenames */
+    .wf-print-att{margin-top:16px;page-break-inside:avoid}
+    .wf-print-att-h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:6px}
+    .wf-print-att-img{display:block;width:100%;max-width:100%;height:auto;border:1px solid var(--line);
+      border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
+    .wf-print-att-miss{font-size:12px;color:#b91c1c}
     @media (max-width:520px){
       .dp-body{flex-direction:column}
       .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
@@ -2236,8 +2244,11 @@
       // placeholder, or multiline (an exceptional case, set directly rather than via a checkbox).
       if(orig.placeholder) f.placeholder=orig.placeholder;
       if(type==='text' && orig.multiline) f.multiline=true;
-      // an attachment is never compulsory, whatever the box says
-      if(opt||type==='attachment') f.optional=true;
+      /* The Optional box governs attachments as well now. It used to be forced on whatever the
+         box said, so a workflow that genuinely needs a document - a Booking Form IS the document -
+         had no way to insist on one. Written explicitly either way, so the runtime can tell
+         "deliberately required" from "never said". */
+      f.optional=opt;
       if(type==='select'){
         // Options are stored as {label} objects — matches how the runtime (wfEvtRowHtml) reads
         // them, and how pre-existing select fields (e.g. Reimbursement's Conveyance/Food) are shaped.
@@ -3574,7 +3585,7 @@
     if(!box)return;
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     const pinned=wfOriginalAttachmentHtml(c,flow)+wfQrCodeAttachmentHtml(c,flow);
     /* The owner, or whoever it has been sent back to — not the workflow-management admins, and
        only while it is still moving; once it is Done or Cancelled it is final. Mirrors
@@ -3653,13 +3664,74 @@
      someone printing this needs to be able to scan or check by eye. Opened in a new tab rather
      than done via @media print CSS on the live page, so it doesn't have to fight the app's own
      nav/sidebar/panel chrome to hide everything else. */
+  /* Attachments printed as pages rather than filenames. An image goes straight in; a PDF is
+     rendered page by page with pdf.js (loadPdfJs() already exists in nexus-core for the Post-Sales
+     tooling) and each page embedded as an image, because a PDF cannot otherwise be folded into the
+     app's own print job - the browser will not include a cross-origin PDF in window.print().
+
+     Rendering FETCHES the file from S3, so it needs the site it is viewed from to be on the
+     bucket's allowed-origins list. Where the fetch fails the file is named instead, so the print
+     says what is missing rather than coming out silently blank. */
+  const WF_PRINT_MAX_PAGES=12;
+  function wfAttFileName(p){
+    return String(p||'').split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
+  }
+  async function wfPrintAttachmentsHtml(det){
+    let paths=[];
+    (det||[]).forEach(function(d){ paths=paths.concat(wfValuePaths(d&&d.value)); });
+    if(!paths.length) return '';
+    const blocks=[];
+    for(const p of paths){
+      const name=wfAttFileName(p);
+      const url=await wfSignedUrl(p);
+      if(!url){
+        blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
+          +'<div class="wf-print-att-miss">This file could not be opened.</div></div>');
+        continue;
+      }
+      if(/\.(png|jpe?g|gif|webp|bmp)$/i.test(name)){
+        blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
+          +'<img src="'+esc2(url)+'" class="wf-print-att-img"></div>');
+        continue;
+      }
+      if(/\.pdf$/i.test(name)){
+        let imgs=[];
+        try{
+          const lib=await loadPdfJs();
+          if(lib){
+            const pdf=await lib.getDocument({url:url}).promise;
+            const n=Math.min(pdf.numPages, WF_PRINT_MAX_PAGES);
+            for(let i=1;i<=n;i++){
+              const page=await pdf.getPage(i);
+              // 1.6 keeps a scan readable in print without a 10MB page of data URLs.
+              const vp=page.getViewport({scale:1.6});
+              const cv=document.createElement('canvas');
+              cv.width=vp.width; cv.height=vp.height;
+              await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+              imgs.push('<img src="'+cv.toDataURL('image/jpeg',0.82)+'" class="wf-print-att-img">');
+            }
+          }
+        }catch(_e){ imgs=[]; }
+        blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
+          +(imgs.length
+            ? imgs.join('')
+            : '<div class="wf-print-att-miss">Could not be rendered here \u2014 open it from the '
+              +esc2(wfN().lc)+' to print it.</div>')
+          +'</div>');
+        continue;
+      }
+      blocks.push('<div class="wf-print-att"><div class="wf-print-att-h">'+esc2(name)+'</div>'
+        +'<div class="wf-print-att-miss">Not a printable file type.</div></div>');
+    }
+    return blocks.join('');
+  }
   async function wfCasePrintSection(caseId){
     let c=null, flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
     if(!c) return null;
     if(c.flow_id){ try{ const {data}=await ACC().from('flows').select('*').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     let qrHtml='';
     const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
     const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
@@ -3672,12 +3744,13 @@
           +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
       }
     }
+    const attHtml=await wfPrintAttachmentsHtml(det);
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
         +'<h2 style="margin:0 0 4px">'+esc2(title)+'</h2>'
         +'<div style="color:#64748b;margin-bottom:14px">'+esc2(wfN().one)+' by: '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
-        +detHtml+qrHtml
+        +detHtml+qrHtml+attHtml
       +'</section>' };
   }
 
@@ -4783,8 +4856,13 @@
       template=template.concat([{label:'Attachment',type:'attachment',optional:true}]);
       try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:template}); }catch(_e){}
     }
-    // An attachment is never compulsory - a form should not be blocked for want of a file.
-    template=template.map(function(t){ return (t&&(t.type==='attachment'))?Object.assign({},t,{optional:true}):t; });
+    /* An attachment DEFAULTS to optional - no form should be blocked for want of a file - but a
+       workflow may insist on one by saving the field with optional:false. Only an unspecified
+       value gets defaulted; an explicit false is now respected. */
+    template=template.map(function(t){
+      if(!t || t.type!=='attachment') return t;
+      return (t.optional===false) ? t : Object.assign({},t,{optional:true});
+    });
     // "Multiple" lets the whole set of fields repeat — one group per entry (Entry 1, Entry 2…).
     // Grouping saved values by `d.group` (missing group = 0) also reads legacy single-group data
     // exactly as before, so this is one code path for both.
@@ -5385,6 +5463,37 @@
     }
     return '<span class="wf-att-file" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')"><i class="fa-solid fa-file-arrow-down"></i> '+esc2(name)+'</span>';
   }
+  /* Is this field already shown above the thread as a real, openable chip? The trigger-event
+     Attachment is, and so is whichever field is flagged upiScannerMemory. Listing them again in
+     the detail list gave the same file twice - once as a chip, once as raw "s3:portal/..." text. */
+  function wfDetIsPinned(label,flow){
+    if(eq(label||'','Attachment')) return true;
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qr=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    return !!(qr&&eq(label||'',qr.label||''));
+  }
+  /* Every separator a stored value can carry: '|' between entries, ',' between entries when there
+     is no pipe, and ' ; ' between several files on ONE entry. Splitting on the comma alone read
+     "s3:a ; s3:b" as a single path and rendered one chip pointing at both filenames at once. */
+  function wfValuePaths(v){
+    return String(v==null?'':v).split(/[|,;]/)
+      .map(function(x){ return x.trim(); })
+      .filter(function(x){ return x.indexOf('s3:')===0; });
+  }
+  /* The generic detail list, shared by the instance view and the printed page so the two cannot
+     drift. Any value that is really a stored file becomes openable chips rather than its path. */
+  function wfDetListHtml(det,flow){
+    const rows=(det||[]).filter(function(d){
+      return d && !(d.label && wfDetIsPinned(d.label,flow));
+    }).map(function(d){
+      const paths=wfValuePaths(d.value);
+      const val=paths.length
+        ? wfAttachmentsRowHtml(paths.map(function(p){ return {storage_path:p}; }))
+        : esc2(d.value||'');
+      return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+val+'</li>';
+    });
+    return rows.length?('<ul class="wf-detlist">'+rows.join('')+'</ul>'):'';
+  }
   function wfAttachmentsRowHtml(atts){
     if(!atts||!atts.length) return '';
     return '<div class="wf-att-row">'+atts.map(wfAttachmentHtml).join('')+'</div>';
@@ -5398,9 +5507,10 @@
     // An entry-wise instance holds one attachment PER ENTRY in this field, and the table already
     // gives each row its own. Pinning the joined value here would render one broken chip.
     if(wfIsDaywise(flow,det) || wfSplitSets(f.value).length>1) return '';
-    // A multi-entry (repeated-set) workflow can have one attachment per set, comma-joined like any
-    // other multi-entry field — split back out into one chip per file.
-    const paths=String(f.value).split(',').map(function(s){return s.trim();}).filter(function(s){return s.indexOf('s3:')===0;});
+    /* One chip per file. A `multi` field joins its files with ' ; ' and a multi-entry workflow
+       joins entries with ',' or '|' - splitting on the comma alone turned two uploaded files into
+       one chip whose path was both filenames joined, which opened nothing. */
+    const paths=wfValuePaths(f.value);
     if(!paths.length) return '';
     return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment'+(paths.length>1?'s':'')+'</div>'+wfAttachmentsRowHtml(paths.map(function(p){return {storage_path:p};}))+'</div>';
   }
