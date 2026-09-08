@@ -513,6 +513,75 @@
     .nt-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}.nt-item:hover{background:#f8fafc}.nt-item.unread{background:var(--brand-a10,#f5f7ff)}
     .nt-item.urg{background:#fef2f2}
     #notifDd{width:340px;max-width:92vw}
+
+    /* ── due date + repeat picker ──────────────────────────────────────────────────────────
+       How often on the left, which day on the right. The right side is ALWAYS just the
+       calendar, so switching options on the left never makes the panel taller. */
+    .dp-pop{width:408px;max-width:min(94vw,408px);background:#fff;border:1px solid var(--line);
+      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden}
+    .dp-body{display:flex;align-items:stretch}
+    .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
+      padding:8px 7px;display:flex;flex-direction:column;gap:1px}
+    .dp-opt{width:100%;height:31px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+    .dp-opt:hover{background:var(--brand-a10,#eef2ff)}
+    .dp-opt.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:600}
+    .dp-main{flex:1;min-width:0;padding:9px 11px 10px}
+    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:5px}
+    .dp-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}
+    .dp-nav{width:26px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;
+      border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}
+    .dp-nav:hover{background:var(--brand-a10,#eef2ff);color:var(--brand,#1d4ed8)}
+    .dp-dow{display:grid;grid-template-columns:repeat(7,1fr)}
+    .dp-dow span{text-align:center;font-size:10px;font-weight:700;color:var(--slate-2,#94a3b8);
+      padding-bottom:2px}
+    .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+    .dp-day{height:31px;border:0;border-radius:7px;background:transparent;font:inherit;
+      font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;
+      position:relative;padding:0}
+    .dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10,#eef2ff)}
+    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.42}
+    .dp-day[disabled]{color:var(--slate-2,#94a3b8);opacity:.3;cursor:default}
+    .dp-day.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:700}
+    .dp-day.today:not(.on)::after{content:'';position:absolute;left:50%;bottom:4px;width:3px;
+      height:3px;margin-left:-1.5px;border-radius:50%;background:var(--brand,#1d4ed8)}
+    .dp-quick{display:flex;gap:4px;margin-top:7px}
+    .dp-quick button{flex:1;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
+      font:inherit;font-size:11.5px;font-weight:500;color:var(--slate);cursor:pointer;
+      white-space:nowrap;padding:0}
+    .dp-quick button:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-mode{display:flex;align-items:center;gap:7px;margin-bottom:6px;padding:6px 9px;
+      border-radius:7px;background:var(--brand-50,#eff4ff);color:var(--brand-700,#1e40af);
+      font-size:11.5px;font-weight:600}
+    .dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:11.5px;
+      font-weight:600;color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline;padding:0}
+    .dp-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;
+      color:var(--slate);line-height:1.55}
+    .dp-says b{color:var(--ink);font-weight:600}
+    .dp-says .warn{color:var(--brand,#1d4ed8);margin-top:2px}
+    .dp-says .ends{margin-top:4px}
+    .dp-says .ends button{border:0;background:transparent;padding:0;font:inherit;font-size:11.5px;
+      color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline}
+    .dp-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}
+    .dp-foot .dp-clear{border:0;background:transparent;padding:0;font:inherit;font-size:12px;
+      color:var(--slate);cursor:pointer}
+    .dp-foot .dp-clear:hover{color:#dc2626}
+    .dp-foot .dp-done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;
+      background:var(--brand,#1d4ed8);color:#fff;font:inherit;font-size:12px;font-weight:600;
+      cursor:pointer}
+    .dp-inline{box-shadow:none;width:100%;max-width:100%}
+    /* the repeat, said on the task itself so a saved rule is visible without reopening the picker */
+    .dp-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+      padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
+      color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
+    .dp-chip i{font-size:9.5px}
+    @media (max-width:470px){
+      .dp-body{flex-direction:column}
+      .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
+        flex-direction:row;flex-wrap:wrap;gap:4px}
+      .dp-opt{width:auto;flex:1 1 30%;text-align:center}
+    }
     `;
     document.head.appendChild(s);
   }
@@ -8412,7 +8481,7 @@
     });
     updateInsDateBtn(); updateInsMemberBtn(); updateInsProjBtn(); updateSelfInsDateBtn(); updateSelfInsProjBtn();
   }
-  let INS_STAGE={due:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
+  let INS_STAGE={due:null,freq:'none',until:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,freq:'none',until:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
   function insInput(){
     return `<div class="ac-addrow-ghost" id="insGhost" onclick="accInsExpand()"><i class="fa-solid fa-plus"></i> Add task</div>
     <div class="ac-addrow" id="insRow" style="display:none">
@@ -8488,19 +8557,202 @@
     setTimeout(function(){ document.addEventListener('mousedown',popoverOutside,true); },0);
     return el;
   }
-  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title='Due '+fmtDate(INS_STAGE.due); } else { b.classList.remove('primary'); b.title='Set due date'; } }
+  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(INS_STAGE.due?{date:INS_STAGE.due,freq:INS_STAGE.freq,until:INS_STAGE.until}:null); dpMarkBtn(b,INS_STAGE.freq); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,'none'); } }
   function updateInsMemberBtn(){ const b=$('insMemberBtn'); if(!b)return; const n=(INS_STAGE.members||[]).length; if(n){ b.classList.add('primary'); b.title=n+' member'+(n>1?'s':'')+' selected'; } else { b.classList.remove('primary'); b.title='Pick members'; } }
   function updateInsProjBtn(){ const b=$('insProjBtn'); if(!b)return; if(INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
-  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title='Due '+fmtDate(SELF_INS_STAGE.due); } else { b.classList.remove('primary'); b.title='Set due date'; } }
+  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe({date:SELF_INS_STAGE.due,freq:SELF_INS_STAGE.freq,until:SELF_INS_STAGE.until}); dpMarkBtn(b,SELF_INS_STAGE.freq); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,'none'); } }
   function updateSelfInsProjBtn(){ const b=$('selfInsProjBtn'); if(!b)return; if(SELF_INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(SELF_INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
+  /* ── due date + repeat picker ───────────────────────────────────────────────────────────────
+     Replaces the browser's native date box on Tasks. How often on the left, which day on the
+     right - and the repeat is READ OFF the day that is clicked, so "Every month" needs no second
+     grid to say which day: the 15th already means the 15th. That is what keeps the panel one
+     fixed size whatever is chosen. proto/due-date-picker.html is the standalone version. */
+  const DP_FREQS=[['none','Does not repeat'],['daily','Every day'],['weekly','Every week'],
+                  ['monthly','Every month'],['quarterly','Every 3 months'],['yearly','Every year']];
+  const DP_DOW=['S','M','T','W','T','F','S'];
+  const DP_DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const DP_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DP_MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dpPad=n=>String(n).padStart(2,'0');
+  const dpIso=(y,m,d)=>y+'-'+dpPad(m+1)+'-'+dpPad(d);
+  const dpParse=s=>{const p=String(s).split('-');return {y:+p[0],m:+p[1]-1,d:+p[2]};};
+  const dpDaysIn=(y,m)=>new Date(y,m+1,0).getDate();
+  const dpAdd=(s,n)=>{const p=dpParse(s),d=new Date(p.y,p.m,p.d+n);return dpIso(d.getFullYear(),d.getMonth(),d.getDate());};
+  const dpShort=s=>{if(!s)return '';const p=dpParse(s);return p.d+' '+DP_MONS[p.m]+' '+p.y;};
+  const dpLong=s=>{if(!s)return '';const p=dpParse(s);return DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+DP_MONS[p.m]+' '+p.y;};
+  function dpOrd(n){n=+n;if(n%100>=11&&n%100<=13)return n+'th';return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');}
+  function dpDescribe(r){
+    if(!r||!r.date)return 'Set due date';
+    if(!r.freq||r.freq==='none')return dpLong(r.date);
+    const p=dpParse(r.date); let s='';
+    if(r.freq==='daily')s='Every day';
+    else if(r.freq==='weekly')s='Every '+DP_DOWL[new Date(p.y,p.m,p.d).getDay()];
+    else if(r.freq==='monthly')s='Every month on the '+dpOrd(p.d);
+    else if(r.freq==='quarterly')s='Every 3 months on the '+dpOrd(p.d);
+    else if(r.freq==='yearly')s='Every '+p.d+' '+DP_MONS[p.m];
+    else return dpLong(r.date);
+    if(r.until)s+=', until '+dpShort(r.until);
+    return s;
+  }
+  function dpMarkBtn(b,freq){ if(!b)return; const i=b.querySelector('i'); if(!i)return;
+    const rep=freq&&freq!=='none';
+    i.className=rep?'fa-solid fa-rotate':'fa-regular fa-calendar'; }
+  /* Mirrors acc.recur_next() in the database, clamp included. If these two ever disagree the
+     preview lies about the dates the server will actually create. */
+  function dpNextDates(r,n){
+    if(!r||!r.date)return [];
+    if(!r.freq||r.freq==='none')return [r.date];
+    const out=[],anchor=dpParse(r.anchor||r.date),base=dpParse(r.date);
+    let i=0;
+    while(out.length<n&&i<800){
+      let s;
+      if(r.freq==='daily')s=dpAdd(r.date,i);
+      else if(r.freq==='weekly')s=dpAdd(r.date,i*7);
+      else{
+        const step=r.freq==='monthly'?1:r.freq==='quarterly'?3:12;
+        let m=base.m+step*i; const y=base.y+Math.floor(m/12); m=((m%12)+12)%12;
+        s=dpIso(y,m,Math.min(anchor.d,dpDaysIn(y,m)));
+      }
+      i++;
+      if(r.until&&s>r.until)break;
+      out.push(s);
+    }
+    return out;
+  }
+
+  let DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_HOST=null, DP_OPTS=null;
+  /* istTodayISO(), not todayISO(): the floor has to be the same "today" the backend works in, or a
+     device with a skewed clock can offer a day the server treats as already past. */
+  function dpFloor(){ return istTodayISO(); }
+
+  function dpRailHtml(){
+    return '<div class="dp-rail">'+DP_FREQS.map(f=>
+      '<button type="button" class="dp-opt'+(DP_ST.freq===f[0]?' on':'')+'" data-dp="freq" data-v="'+f[0]+'">'+f[1]+'</button>'
+    ).join('')+'</div>';
+  }
+  function dpMainHtml(){
+    const sel=DP_MODE==='until'?DP_ST.until:DP_ST.date;
+    const floor=DP_MODE==='until'?(DP_ST.date||dpFloor()):dpFloor();
+    const y=DP_VIEW.y,m=DP_VIEW.m;
+    const first=new Date(y,m,1).getDay(),n=dpDaysIn(y,m);
+    const prevN=dpDaysIn(y,m===0?11:m-1),today=dpFloor();
+    let h='<div class="dp-main">';
+    if(DP_MODE==='until')h+='<div class="dp-mode"><i class="fa-solid fa-flag-checkered"></i>Choosing the last date<button type="button" data-dp="backtodate">Back</button></div>';
+    h+='<div class="dp-head">'
+      +'<button type="button" class="dp-nav" data-dp="mv" data-v="-1" title="Previous month"><i class="fa-solid fa-chevron-left"></i></button>'
+      +'<div class="dp-title">'+DP_MONL[m]+' '+y+'</div>'
+      +'<button type="button" class="dp-nav" data-dp="mv" data-v="1" title="Next month"><i class="fa-solid fa-chevron-right"></i></button>'
+      +'</div><div class="dp-dow">'+DP_DOW.map(x=>'<span>'+x+'</span>').join('')+'</div><div class="dp-grid">';
+    for(let i=0;i<first;i++)h+='<button type="button" class="dp-day pad" disabled>'+(prevN-first+i+1)+'</button>';
+    for(let d=1;d<=n;d++){
+      const iso=dpIso(y,m,d);
+      h+='<button type="button" class="dp-day'+(iso===sel?' on':'')+(iso===today?' today':'')+'" data-dp="pick" data-v="'+iso+'"'+(iso<floor?' disabled':'')+'>'+d+'</button>';
+    }
+    const tail=(first+n)%7;
+    if(tail)for(let t=1;t<=7-tail;t++)h+='<button type="button" class="dp-day pad" disabled>'+t+'</button>';
+    h+='</div>';
+    if(DP_MODE==='date'){
+      h+='<div class="dp-quick">'
+        +'<button type="button" data-dp="pick" data-v="'+dpFloor()+'">Today</button>'
+        +'<button type="button" data-dp="jump" data-v="'+dpAdd(dpFloor(),1)+'">Tomorrow</button>'
+        +'<button type="button" data-dp="jump" data-v="'+dpAdd(dpFloor(),7)+'">Next week</button>'
+        +'</div>';
+    }
+    return h+'</div>';
+  }
+  function dpSaysHtml(){
+    if(!DP_ST.freq||DP_ST.freq==='none'){
+      return '<div class="dp-says">'+(DP_ST.date?'Due <b>'+dpLong(DP_ST.date)+'</b>':'No date chosen yet.')+'</div>';
+    }
+    if(!DP_ST.date)return '<div class="dp-says">Pick the first date on the right.</div>';
+    const nx=dpNextDates(DP_ST,3);
+    let h='<b>'+dpDescribe(DP_ST)+'</b>';
+    if(nx.length)h+='<br>Next: '+nx.map(dpShort).join(' &middot; ');
+    if((DP_ST.freq==='monthly'||DP_ST.freq==='quarterly')&&dpParse(DP_ST.date).d>28)
+      h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> In a shorter month it falls on that month\u2019s last day.</div>';
+    h+='<div class="ends">'+(DP_ST.until
+      ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
+      : '<button type="button" data-dp="setend">Set an end date</button>')+'</div>';
+    return '<div class="dp-says">'+h+'</div>';
+  }
+  function dpPaint(){
+    if(!DP_HOST)return;
+    let h='<div class="dp-body">'+dpRailHtml()+dpMainHtml()+'</div>'+dpSaysHtml();
+    if(DP_OPTS.footer)h+='<div class="dp-foot"><button type="button" class="dp-clear" data-dp="clear">Clear</button><button type="button" class="dp-done" data-dp="done">Done</button></div>';
+    DP_HOST.innerHTML=h;
+    if(DP_OPTS.onChange)DP_OPTS.onChange(dpRule());
+  }
+  function dpRule(){
+    if(!DP_ST||!DP_ST.date)return null;
+    return {date:DP_ST.date,freq:DP_ST.freq||'none',until:(DP_ST.freq&&DP_ST.freq!=='none')?(DP_ST.until||null):null,anchor:DP_ST.anchor||null};
+  }
+  function dpClick(e){
+    const el=e.target.closest('[data-dp]'); if(!el)return;
+    e.preventDefault(); e.stopPropagation();
+    const a=el.getAttribute('data-dp'), v=el.getAttribute('data-v');
+    if(a==='freq'){
+      DP_ST.freq=v;
+      if(v==='none')DP_ST.until=null;
+      if(!DP_ST.date)DP_ST.date=dpFloor();
+      DP_MODE='date';
+    }
+    else if(a==='mv'){ let m=DP_VIEW.m+Number(v); DP_VIEW={y:DP_VIEW.y+Math.floor(m/12),m:((m%12)+12)%12}; }
+    else if(a==='pick'||a==='jump'){
+      if(DP_MODE==='until'){
+        DP_ST.until=v; DP_MODE='date';
+        // Back to the month being worked on, not the month the end date happened to be in.
+        const b=dpParse(DP_ST.date||v); DP_VIEW={y:b.y,m:b.m};
+      }
+      else{
+        DP_ST.date=v;
+        // A leftover end date before the start would save a series that could never run.
+        if(DP_ST.until&&DP_ST.until<v)DP_ST.until=null;
+        const q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
+      }
+    }
+    else if(a==='setend'){ DP_MODE='until'; const u=dpParse(DP_ST.until||DP_ST.date); DP_VIEW={y:u.y,m:u.m}; }
+    else if(a==='backtodate'){ DP_MODE='date'; }
+    else if(a==='noend'){ DP_ST.until=null; }
+    else if(a==='clear'){ if(DP_OPTS.onDone)DP_OPTS.onDone(null); return; }
+    else if(a==='done'){ if(DP_OPTS.onDone)DP_OPTS.onDone(dpRule()); return; }
+    dpPaint();
+  }
+  function accDpMount(host,rule,opts){
+    DP_HOST=host; DP_OPTS=opts||{};
+    DP_ST={date:(rule&&rule.date)||null,freq:(rule&&rule.freq)||'none',
+           until:(rule&&rule.until)||null,anchor:(rule&&rule.anchor)||null};
+    // Open on the month of the chosen day, but never behind today - a task whose due date has
+    // already passed would otherwise open on a month where every day is greyed out.
+    const start=(DP_ST.date&&DP_ST.date>=dpFloor())?DP_ST.date:dpFloor();
+    const p=dpParse(start); DP_VIEW={y:p.y,m:p.m}; DP_MODE='date';
+    host.classList.add('dp-pop');
+    host.addEventListener('click',dpClick);
+    dpPaint();
+    return host;
+  }
+  /* The popover is placed below its button by openPopover, which measures it while it is still
+     an empty div - so a 408px panel opened near the right or bottom edge has to be nudged back
+     on screen here, once it actually has a size. */
+  function dpFitPopover(el,anchor){
+    if(!el||!anchor)return;
+    const r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight, m=8;
+    if(r.bottom+4+h > window.innerHeight-m) el.style.top=Math.max(m,r.top-h-4)+'px';
+    el.style.left=Math.max(m,Math.min(r.left,window.innerWidth-w-m))+'px';
+  }
+
   window.accInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
-    const cur=INS_STAGE.due||'';
-    openPopover(btn,`<input type="date" id="acPopDate" min="${todayISO()}" value="${cur}" onchange="accInsDateSet(this.value)" style="opacity:0;width:36px;height:36px;border:0;padding:0;outline:none;background:transparent">`);
-    const inp=document.getElementById('acPopDate'); if(inp){ inp.focus(); try{ inp.showPicker && inp.showPicker(); }catch(_e){} }
+    const el=openPopover(btn,'<div id="acDpBox"></div>');
+    accDpMount(document.getElementById('acDpBox'),
+      {date:INS_STAGE.due,freq:INS_STAGE.freq,until:INS_STAGE.until},
+      {footer:true,onDone:function(r){ accInsDateSet(r); }});
+    dpFitPopover(el,btn);
   };
-  window.accInsDateSet=function(v){ INS_STAGE.due=v||null; updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus(); };
+  window.accInsDateSet=function(r){
+    INS_STAGE.due=r?r.date:null; INS_STAGE.freq=r?r.freq:'none'; INS_STAGE.until=r?r.until:null;
+    updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus();
+  };
   window.accInsPickMembers=async function(ev){
     ev.stopPropagation();
     const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
@@ -8525,11 +8777,16 @@
   window.accSelfInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
-    const cur=SELF_INS_STAGE.due||'';
-    openPopover(btn,`<input type="date" id="acPopSelfDate" min="${todayISO()}" value="${cur}" onchange="accSelfInsDateSet(this.value)" style="opacity:0;width:36px;height:36px;border:0;padding:0;outline:none;background:transparent">`);
-    const inp=document.getElementById('acPopSelfDate'); if(inp){ inp.focus(); try{ inp.showPicker && inp.showPicker(); }catch(_e){} }
+    const el=openPopover(btn,'<div id="acDpBox"></div>');
+    accDpMount(document.getElementById('acDpBox'),
+      {date:SELF_INS_STAGE.due,freq:SELF_INS_STAGE.freq,until:SELF_INS_STAGE.until},
+      {footer:true,onDone:function(r){ accSelfInsDateSet(r); }});
+    dpFitPopover(el,btn);
   };
-  window.accSelfInsDateSet=function(v){ SELF_INS_STAGE.due=v||null; updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus(); };
+  window.accSelfInsDateSet=function(r){
+    SELF_INS_STAGE.due=r?r.date:null; SELF_INS_STAGE.freq=r?r.freq:'none'; SELF_INS_STAGE.until=r?r.until:null;
+    updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus();
+  };
   window.accSelfInsPickProject=async function(ev){
     ev.stopPropagation();
     const {data:projectsRaw}=await ACC().from('projects').select('id,name,department,created_by,owner').order('name');
@@ -8547,8 +8804,11 @@
   window.accP3=function(k){P3=k;tasksScreen();};
   window.accInsToggleX=function(){};
   window.accSelfInsToggleX=function(){};
-  window.accInsCancel=function(){ INS_STAGE={due:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
-  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accInsCancel=function(){ INS_STAGE={due:null,freq:'none',until:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,freq:'none',until:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  // 'none' is stored as NULL so "does not repeat" reads the same as it always has in the table.
+  function dpFreqOrNull(f){ return (f&&f!=='none')?f:null; }
+  function dpUntilOrNull(st){ return (st.freq&&st.freq!=='none'&&st.until)?st.until:null; }
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -8557,14 +8817,14 @@
     const projectId=INS_STAGE.project||null;
     INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur_freq:dpFreqOrNull(INS_STAGE.freq),recur_until:dpUntilOrNull(INS_STAGE)}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert(sel.map(e=>({task_id:t.id,email:e})));
       let r;
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      INS_STAGE={due:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
+      INS_STAGE={due:null,freq:'none',until:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
   };
@@ -8575,14 +8835,14 @@
     const projectId=SELF_INS_STAGE.project||null;
     SELF_INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur_freq:dpFreqOrNull(SELF_INS_STAGE.freq),recur_until:dpUntilOrNull(SELF_INS_STAGE)}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert({task_id:t.id,email:me()});
       let r;
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      SELF_INS_STAGE={due:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
+      SELF_INS_STAGE={due:null,freq:'none',until:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
   };
@@ -8819,7 +9079,7 @@
         ${canEdit?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
         ${canEdit?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`:''}</span></h3>
       <div class="tp-grid">
-        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
+        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${(t.recur_freq&&t.recur_freq!=='none')?` <span class="dp-chip"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe({date:t.due_date,freq:t.recur_freq,until:t.recur_until}))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Created</div><div class="v">${t.created_at?wfDTFull(t.created_at):'—'}</div></div>
         <div class="tp-f"><div class="k">Owner</div><div class="v">${esc2(nameOf(list,t.delegator))}</div></div>
@@ -9013,17 +9273,28 @@
       closeModal(); toast('Saved','ok'); renderPage();
     }catch(e){toast('Failed','err');}
   };
+  let DP_EDIT=null;   // the rule the modal is holding, read back by accEditDueSave
   window.accEditDue=async function(tid){
-    const {data:t}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
-    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,360px)"><input class="ac-in" type="date" id="edDueF" min="${todayISO()}" value="${(t&&t.due_date)||''}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    const {data:t}=await ACC().from('ptasks').select('due_date,created_at,recur_freq,recur_until,recur_anchor').eq('id',tid).single();
+    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(94vw,408px);padding:0"><div id="acDpBox" class="dp-inline"></div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    DP_EDIT=t?{date:t.due_date,freq:t.recur_freq||'none',until:t.recur_until,anchor:t.recur_anchor}:null;
+    accDpMount(document.getElementById('acDpBox'),DP_EDIT,
+      {footer:false,onChange:function(r){ DP_EDIT=r; }});
   };
   window.accEditDueSave=async function(tid){
-    const due=$('edDueF').value||null;
+    const rule=DP_EDIT;
+    const due=(rule&&rule.date)||null;
     try{
-      const {data:old}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
-      if(due&&due<todayISO()){toast('Due date cannot be earlier than today','err');return;}
+      const {data:old}=await ACC().from('ptasks').select('due_date,created_at,recur_freq,recur_until').eq('id',tid).single();
+      if(due&&due<istTodayISO()){toast('Due date cannot be earlier than today','err');return;}
       const prevDue=old?old.due_date:null;
-      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false}).eq('id',tid);
+      const prevFreq=(old&&old.recur_freq)||null, newFreq=dpFreqOrNull(rule&&rule.freq);
+      // recur_anchor is left alone: the DB trigger sets it on the first save and it must not move
+      // afterwards, or a monthly 31st would re-anchor to whatever clamped date it last landed on.
+      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur_freq:newFreq,recur_until:(newFreq&&rule&&rule.until)?rule.until:null}).eq('id',tid);
+      if((prevFreq||'')!==(newFreq||'')){
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevFreq?dpDescribe({date:due||prevDue,freq:prevFreq}):'none')+' \u2192 '+(newFreq?dpDescribe({date:due,freq:newFreq,until:rule&&rule.until}):'none')});
+      }
       if((prevDue||'')!==(due||'')){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'due date changed',detail:'Due date '+(prevDue?fmtDateY(prevDue):'none')+' → '+(due?fmtDateY(due):'none')});
         await sysMsg(tid, prevDue?('changed the due date from '+fmtDateY(prevDue)+' to '+(due?fmtDateY(due):'none')):('set the due date to '+(due?fmtDateY(due):'none')));
