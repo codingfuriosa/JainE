@@ -150,3 +150,19 @@ set meta = ev.meta || jsonb_strip_nulls(jsonb_build_object('case', nullif(c.caus
     project = coalesce(ev.project, left(nullif(c.project_land_name,''),64))
 from public.mis_actions a join public.mis_cases c on c.id = a.case_id
 where ev.meta->>'ref' ~ '^misact:[0-9]+$' and a.id = split_part(ev.meta->>'ref',':',2)::bigint;
+
+-- Who each backfilled task went to. The Usability drill-down's fourth column is "Assigned to"
+-- rather than Project (only 13 of 896 tasks have a project set, so that column was dashes), and
+-- it reads meta.assignee - so the reconstructed create_task events need one too. Names where the
+-- account has one, otherwise the local part of the email.
+update public.erp_usage_events ev
+set meta = ev.meta || jsonb_build_object('assignee', w.names)
+from (
+  select t.id tid, string_agg(coalesce(nullif(u.full_name,''), split_part(a.email,'@',1)), ', ' order by a.email) names
+  from acc.ptasks t join acc.ptask_assignees a on a.task_id = t.id
+  left join adm.users u on lower(u.email)=lower(a.email)
+  group by t.id
+) w
+where ev.meta->>'ref' ~ '^ptask\.new:[0-9]+$'
+  and w.tid = split_part(ev.meta->>'ref',':',2)::bigint
+  and w.names is not null and w.names <> '';
