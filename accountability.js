@@ -1429,6 +1429,20 @@
   // Returns {short, full} — short is what's shown (clipped with an ellipsis), full is the complete
   // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
   // with no way to read the rest.
+  /* What a Booking Form instance is, in four words, out of the check list that was filled for it.
+     `pending` is not the same as blank: one means nobody has read the file yet, the other means the
+     file did not say. */
+  function wfBkFields(row){
+    const st=String((row&&row.status)||'');
+    const f=(row&&row.result&&row.result.fields)||null;
+    if(st!=='done'||!f) return {status:st||'pending'};
+    const g=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    return {status:'done', name:g('customer_name'), project:g('project_name'),
+            block:g('block'), flat:g('flat')};
+  }
+  function wfBk(caseId){ return (window._wfBk||{})[caseId]||null; }
+
   function wfTrigShort(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
@@ -1440,6 +1454,18 @@
     const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
     const sumField=(flow&&flow.tracker_sum_field||'').trim();
     let full;
+    /* Booking Form: nothing is typed but the attachment, so the row is named by whoever the
+       documents say bought which flat. Until the reading finishes it says so rather than sitting
+       blank, which would read as an empty booking. */
+    if(flow&&flow.id===41){
+      const b=wfBk(c.id);
+      full=(b&&b.status==='done')
+        ? [b.name, b.project, [b.block&&('Block '+b.block), b.flat&&('Flat '+b.flat)]
+            .filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+        : (b&&b.status==='failed' ? 'Could not be read' : 'Being read…');
+      const sh=full.length>30?full.slice(0,29)+'…':full;
+      return {short:sh, full:full};
+    }
     if(listFields){
       full=listFields.map(function(l){ return wfDetailDisp(byLabel[l]||''); }).filter(Boolean).join(', ');
     } else {
@@ -2695,7 +2721,13 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    /* Booking Form: its form has one field on it, an attachment, and the tracker drops attachments
+       — so this flow would otherwise have no columns of its own at all. Its four come from the
+       check list instead, filled once the documents have been read. */
+    const bkCols=(flow.id===41)?['Name','Project','Block','Flat']:null;
+    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}]
+      .concat(sumField?[{k:'Total Amount'}]
+        :(bkCols?bkCols.map(function(k){ return {k:k}; }):tmpl.map(function(f){ return {k:f.label}; })));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2760,6 +2792,17 @@
       const ownerTd='<td>'+esc2(wfNm(c.created_by)||'')+'</td>';
       const extraTds=ownerTd+(sumField
         ? '<td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
+        : bkCols
+        ? (function(){
+            const b=wfBk(c.id);
+            if(!b||b.status!=='done'){
+              const say=(b&&b.status==='failed')?'could not be read':'being read';
+              return '<td colspan="'+bkCols.length+'" style="color:var(--slate)">'+esc2(say)+'</td>';
+            }
+            return [b.name,b.project,b.block,b.flat].map(function(v){
+              return '<td title="'+esc2(v||'')+'">'
+                +(v?cellText(v):'<span style="color:var(--slate)">—</span>')+'</td>'; }).join('');
+          })()
         : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
@@ -3072,6 +3115,18 @@
     if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
+    /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
+       and the unit are what the documents themselves say, so they are read out of the stored
+       check list rather than typed by whoever uploaded the file. Both the Instances column and the
+       Tracker's own columns come from here; a booking still being read simply has no row yet. */
+    window._wfBk={};
+    if(id===41 && cases.length){
+      try{
+        const {data}=await ACC().from('booking_audits').select('case_id,status,result')
+          .in('case_id',cases.map(function(c){ return c.id; }));
+        (data||[]).forEach(function(r){ window._wfBk[r.case_id]=wfBkFields(r); });
+      }catch(_e){}
+    }
     let forms=[];
     try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
     window._wfForms=forms; window._wfSteps=steps;
@@ -3712,6 +3767,10 @@
     lead_id:     {x:190.2, y:218.75, s:13, w:85},
     booking_date:{x:363.6, y:218.75, s:13, w:85}
   };
+  /* The one line the blank does not print. The form's rows step down by 23.8pt and it leaves this
+     one empty between "Payment Plan" (194.95) and the sign-off rule (131.35), so a Signatures row
+     sits in its own rhythm without touching anything the form already says. */
+  const WF_CL_SIG={x:145.0, y:171.15, right:545};
 
   window.wfChecklistDownload=async function(caseId){
     let row=null;
@@ -3748,6 +3807,7 @@
     const doc=await L.PDFDocument.load(blank);
     const page=doc.getPages()[0];
     const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const helv=await doc.embedFont(L.StandardFonts.Helvetica);
     const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
 
     const f=res.fields||{}, cl=res.checklist||{};
@@ -3802,6 +3862,26 @@
     put(WF_CL.source,     short(cl['Source']||v('source')));
     put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
     put(WF_CL.booking_date, short(cl['Booking Date']));
+
+    /* Signatures are the one thing checked that the printed form has no line for. Rather than a
+       document of our own, the verdict goes in the form's OWN empty row - the blank 23.8pt step
+       between "Payment Plan" at 194.95 and the sign-off rule at 131.35 - written in the same left
+       margin and the same size as every label above it. Which pages are unsigned goes beside it,
+       because "NOT OK" on its own sends someone back through the whole file to find out where. */
+    const sg=String(cl['Signatures']||'').trim();
+    if(sg){
+      page.drawText('Signatures',{x:72.1,y:WF_CL_SIG.y,size:11,font:helv,color:black});
+      const word=sg==='Ok'?'OK':(sg==='Not Ok'?'NOT OK':'NOT CHECKED');
+      page.drawText(word,{x:WF_CL_SIG.x,y:WF_CL_SIG.y,size:11,font:helvB,color:sg==='Not Ok'?red:black});
+      const why=String((res.signatures&&res.signatures.reason)||'').trim();
+      if(why){
+        let t=why, sz=9, x=WF_CL_SIG.x+helvB.widthOfTextAtSize(word,11)+8;
+        const room=WF_CL_SIG.right-x;
+        while(t.length>1 && helv.widthOfTextAtSize(t,sz)>room) t=t.slice(0,-1);
+        if(t.length<why.length) t=t.slice(0,-1)+'…';
+        page.drawText(t,{x:x,y:WF_CL_SIG.y,size:sz,font:helv,color:L.rgb(.3,.3,.3)});
+      }
+    }
 
     /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
        stays in the stored reading; the printed sheet is the form. */
