@@ -11936,39 +11936,229 @@ window.cpaSetPasswordSave=async function(id){
 };
 
 /* ---------- Tab 3: Farvision Import ---------- */
+// ---- Real Farvision .xlsx parsing (Sales Details / Outstanding / Invoice & Receipt Register) ----
+// These four are read straight from the .xlsx via SheetJS, not converted to CSV first: every real
+// export has a several-row title/metadata block before the actual header row, and Sales Details
+// additionally uses a 3-tier merged header for its cost-sheet columns (Charge Type -> Basic/Tax ->
+// component name) - none of that survives a CSV round-trip. maintenance_bills/maintenance_receipts
+// still use the older generic CSV path below (no real maintenance export has been reconciled yet).
+function xlsxSheetRows(wb){ const ws=wb.Sheets[wb.SheetNames[0]]; return {ws,rows:XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null})}; }
+function xlsxFindHeaderRow(rows,mustContain){ for(let r=0;r<rows.length;r++){ const row=rows[r]||[]; if(row.some(v=>typeof v==='string'&&v.trim()===mustContain)) return r; } return -1; }
+function xlsxMergedLabel(ws,rows,r,c){
+  const direct=rows[r]&&rows[r][c]; if(direct!=null&&direct!=='') return direct;
+  const merges=ws['!merges']||[];
+  for(const m of merges){ if(r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c){ const a=rows[m.s.r]&&rows[m.s.r][m.s.c]; return a!=null?a:null; } }
+  return direct;
+}
+function xlsxExcelDate(v){
+  if(v==null||v==='') return null;
+  if(v instanceof Date) return v.toISOString().slice(0,10);
+  if(typeof v==='number'){ const d=window.XLSX&&XLSX.SSF&&XLSX.SSF.parse_date_code(v); if(d) return d.y+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0'); }
+  if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d.toISOString().slice(0,10); }
+  return null;
+}
+function xlsxHeaderIndex(row){ const idx={}; (row||[]).forEach((h,i)=>{ if(h!=null) idx[String(h).trim()]=i; }); return idx; }
+
+function cpaParseSalesDetails(wb){
+  const {ws,rows}=xlsxSheetRows(wb);
+  const hr=xlsxFindHeaderRow(rows,'Payment Plan');
+  if(hr<0) throw new Error('Could not find the header row (no "Payment Plan" column) — is this really a Sales Details export?');
+  const headers=rows[hr], idx=xlsxHeaderIndex(headers);
+  const need=['Business Unit','Status','Application No','Booking No','Customer Name','Unit Code','Level3','MobileNo','Email Id','Correspondence Address','Booking Date','Agreement Date','Total Basic','Total Tax'];
+  const missing=need.filter(h=>!(h in idx));
+  if(missing.length) throw new Error('Missing column(s): '+missing.join(', '));
+  const totalBasicCol=idx['Total Basic'], componentRow=hr-1, basicTaxRow=hr-2;
+  const out=[];
+  for(let r=hr+1;r<rows.length;r++){
+    const row=rows[r]; if(!row||row[idx['Business Unit']]==null||row[idx['Application No']]==null) continue;
+    const get=h=>(idx[h]!=null?row[idx[h]]:null);
+    const rec={businessUnit:get('Business Unit'),status:get('Status'),applicationNo:String(get('Application No')),
+      bookingNo:get('Booking No')!=null?String(get('Booking No')):null,customerName:get('Customer Name'),
+      typology:get('Typology'),unitCode:get('Unit Code'),tower:get('Level3'),floor:get('Floor'),
+      mobile:get('MobileNo'),email:get('Email Id'),address:get('Correspondence Address'),
+      bookingDate:xlsxExcelDate(get('Booking Date')),agreementDate:xlsxExcelDate(get('Agreement Date')),
+      superBuiltUp:get('Super Built-Up'),builtUp:get('Built-Up'),carpet:get('Carpet'),
+      totalBasic:Number(get('Total Basic')||0),totalTax:Number(get('Total Tax')||0),costItems:[]};
+    const seen={};
+    for(let c=totalBasicCol+2;c<headers.length;c++){
+      const metric=headers[c];
+      if(metric!=='Basic  Amount'&&metric!=='Basic Amount') continue; // one Basic/Tax pair per component; skip Bill/Received/Balance/Onaccount columns
+      const component=xlsxMergedLabel(ws,rows,componentRow,c);
+      const basicTax=xlsxMergedLabel(ws,rows,basicTaxRow,c);
+      if(!component) continue;
+      const key=component+'|'+basicTax; if(seen[key]) continue; seen[key]=true; // dedupes a header quirk where "Unit Cost" is labelled twice
+      const val=row[c]; if(val==null||val==='') continue;
+      const cleanName=String(component).replace(/^\d+\.\s*/,'').trim();
+      let bucket=rec.costItems.find(i=>i.component===cleanName);
+      if(!bucket){ bucket={component:cleanName,basicAmount:0,taxAmount:0}; rec.costItems.push(bucket); }
+      if(basicTax==='BASIC') bucket.basicAmount=Number(val); else bucket.taxAmount=Number(val);
+    }
+    out.push(rec);
+  }
+  return out;
+}
+function cpaParseFlatSheet(wb,anchorHeader,requiredCols){
+  const {rows}=xlsxSheetRows(wb);
+  const hr=xlsxFindHeaderRow(rows,anchorHeader);
+  if(hr<0) throw new Error('Could not find the header row (no "'+anchorHeader+'" column) — is this the right report?');
+  const headers=rows[hr], idx=xlsxHeaderIndex(headers);
+  const missing=requiredCols.filter(c=>!(c in idx));
+  if(missing.length) throw new Error('Missing column(s): '+missing.join(', '));
+  const out=[];
+  for(let r=hr+1;r<rows.length;r++){
+    const row=rows[r]; if(!row||row[idx[requiredCols[0]]]==null) continue;
+    out.push(h=>(idx[h]!=null?row[idx[h]]:null));
+  }
+  return out;
+}
+function cpaParseOutstanding(wb){
+  return cpaParseFlatSheet(wb,'Net Outstanding',['Booking No.','Customer Name','Unit No.','Customer Status','Net Outstanding']).map(get=>({
+    businessUnit:get('Business Unit'),bookingNo:get('Booking No.')!=null?String(get('Booking No.')):null,
+    customerName:get('Customer Name'),unitCode:get('Unit No.'),tower:get('Level3'),status:get('Customer Status'),
+    totalConsideration:get('Total Consideration'),billOutstanding:get('Bill Outstanding'),onAccount:get('On Account'),
+    netOutstanding:get('Net Outstanding'),lateFee:get('Late Payment Fee Accrued As on Date'),
+    noOfBills:get('No. Of Bills')!=null?Number(get('No. Of Bills')):null,
+  }));
+}
+function cpaParseInvoiceRegister(wb){
+  return cpaParseFlatSheet(wb,'Schedule Description',['Document No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),docNo:String(get('Document No')),docDate:xlsxExcelDate(get('Document Date')),
+    bookingNo:get('Booking No')!=null?String(get('Booking No')):null,customerName:get('Customer Name'),
+    unitCode:get('Unit'),tower:get('Hierarchy Level 3'),dueDate:xlsxExcelDate(get('Due Date')),
+    schedule:get('Schedule Description'),revenueHead:get('RevenueHead Description'),
+    amount:Number(get('Amount')||0),tax:Number(get('Tax')||0),netAmount:Number(get('Net Amount')||0),status:get('Status'),
+  }));
+}
+function cpaParseReceiptRegister(wb){
+  return cpaParseFlatSheet(wb,'Money Receipt No',['Money Receipt No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),receiptNo:String(get('Money Receipt No')),receiptDate:xlsxExcelDate(get('Money Receipt Date')),
+    bookingNo:get('Booking No')!=null?String(get('Booking No')):null,customerName:get('Customer Name'),
+    unitCode:get('Unit No'),tower:get('Level3'),invoiceNo:get('Invoice No')!=null?String(get('Invoice No')):null,
+    schedule:get('Schedule'),revenueHead:get('Revenue Head'),amount:Number(get('Amount')||0),
+    mode:get('PaymentMode'),isReversed:get('Is Reversed'),unitStatus:get('Unit Status'),
+  }));
+}
+// Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
+// (project, tower, unit code) only for the rare pre-Booking-No-convention record.
+function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
+  if(bookingNo){ const u=units.find(u=>u.booking_no===bookingNo); if(u) return u; }
+  if(projectId&&unitCode){
+    const norm=s=>String(s||'').trim().toLowerCase();
+    return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
+  }
+  return null;
+}
+function cpaResolveProject(projects,businessUnit){
+  if(!businessUnit) return null;
+  const norm=s=>String(s).trim().toLowerCase();
+  const bu=norm(businessUnit);
+  // farvision_project_code holds Farvision's own (often ugly, ALL-CAPS) Business Unit string, kept
+  // separate from the friendly display name staff pick for cust.projects.name - match that first.
+  return projects.find(p=>p.farvision_project_code&&norm(p.farvision_project_code)===bu)
+    ||projects.find(p=>norm(p.name)===bu)||null;
+}
+
+const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register']);
 const CPA_IMPORT_COLUMNS={
-  demand:{required:['unit_code','demand_no','milestone','demand_date','amount'],optional:['due_date','gst_amount','total_amount','status']},
-  receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_demand_no']},
-  contacts:{required:['unit_code','contact_name'],optional:['contact_phone','contact_email','contact_address','booking_date','agreement_date']},
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-// Cost sheet is NOT here - it's per-unit and differs enough per flat that it isn't a CSV-shaped
-// import; it's uploaded as a document instead (Documents tab, doc type "Cost Sheet").
-const CPA_IMPORT_LABELS={demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts'};
+const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
   if(seg&&seg[1]==='history'){ await cpaRenderImportHistory(host,projects); return; }
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const typeOpts=Object.keys(CPA_IMPORT_LABELS).map(k=>`<option value="${k}">${CPA_IMPORT_LABELS[k]}</option>`).join('');
+  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register'])
+    .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
-    <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType">${typeOpts}</select></div>
-    <div><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
-    <label>CSV file</label><input type="file" id="cpaImpFile" accept=".csv">
+    <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType" onchange="cpaImportTypeChange()">${typeOpts}</select></div>
+    <div id="cpaImpProjectWrap"><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
+    <label id="cpaImpFileLabel">File</label><input type="file" id="cpaImpFile">
     <div id="cpaImpColsHelp" style="font-size:12px;color:var(--slate);margin-top:6px"></div>
     <div style="margin-top:14px"><button class="btn btn-primary" onclick="cpaImportPreview()"><i class="fa-solid fa-magnifying-glass"></i> Preview</button></div>
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
-  const help=$('cpaImpColsHelp'),typeSel=$('cpaImpType');
-  const paintHelp=function(){const c=CPA_IMPORT_COLUMNS[typeSel.value];help.textContent='Required columns: '+c.required.join(', ')+'. Optional: '+c.optional.join(', ')+'.';};
-  typeSel.addEventListener('change',paintHelp);paintHelp();
+  window.cpaImportTypeChange();
 }
+window.cpaImportTypeChange=function(){
+  const type=$('cpaImpType').value, help=$('cpaImpColsHelp'), file=$('cpaImpFile'), projWrap=$('cpaImpProjectWrap');
+  const isXlsx=CPA_XLSX_IMPORT_TYPES.has(type);
+  file.setAttribute('accept',isXlsx?'.xlsx':'.csv');
+  $('cpaImpFileLabel').textContent=isXlsx?'Farvision .xlsx export':'CSV file';
+  // sales_details/outstanding/invoice_register/receipt_register resolve their project(s) from the
+  // file's own Business Unit column per row, so a project doesn't need picking up front - unlike the
+  // generic CSV imports, which only ever carry a bare unit_code with no project of its own.
+  if(projWrap) projWrap.style.display=isXlsx?'none':'';
+  if(isXlsx){
+    help.textContent={
+      sales_details:'Real "Sales Details" export — customer/booking master + full cost sheet, one row per booking.',
+      outstanding:'Real "Customer Outstanding Summary" export — an as-on-date balance snapshot, one row per booking.',
+      invoice_register:'Real "Invoice Register Details" export — dated demand, one row per invoice line.',
+      receipt_register:'Real "Receipt Register Details" export — dated receipts, one row per receipt-to-invoice allocation.',
+    }[type]||'';
+  }else{
+    const c=CPA_IMPORT_COLUMNS[type];
+    help.textContent=c?('Required columns: '+c.required.join(', ')+'. Optional: '+c.optional.join(', ')+'.'):'';
+  }
+};
 window.cpaImportPreview=async function(){
-  const type=$('cpaImpType').value,projectId=Number($('cpaImpProject').value);
+  const type=$('cpaImpType').value;
   const file=$('cpaImpFile').files[0];
-  if(!file){toast('Choose a CSV file','err');return;}
+  if(!file){toast('Choose a file','err');return;}
+  if(CPA_XLSX_IMPORT_TYPES.has(type)){ await cpaImportPreviewXlsx(type,file); return; }
+  await cpaImportPreviewCsv(type,file);
+};
+async function cpaImportPreviewXlsx(type,file){
+  const XL=await loadXLSX();
+  if(!XL){toast('Could not load the spreadsheet reader — check your connection','err');return;}
+  let wb,parsed;
+  try{
+    const buf=await file.arrayBuffer();
+    wb=XL.read(buf,{type:'array'});
+    parsed=type==='sales_details'?cpaParseSalesDetails(wb)
+      :type==='outstanding'?cpaParseOutstanding(wb)
+      :type==='invoice_register'?cpaParseInvoiceRegister(wb)
+      :cpaParseReceiptRegister(wb);
+  }catch(e){toast(e.message,'err');return;}
+  if(!parsed.length){toast('No data rows found in that file','err');return;}
+  const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
+  const matched=[],unmatched=[],outOfScope=[];
+  parsed.forEach(rec=>{
+    const project=cpaResolveProject(projects,rec.businessUnit);
+    if(!project){ outOfScope.push(rec); return; } // a project we don't manage in the portal yet - not an error
+    if(type==='sales_details'){
+      if(rec.status!=='Active'){ return; } // cancelled bookings don't get a portal unit
+      matched.push({rec,project});
+      return;
+    }
+    const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+    if(!unit){ unmatched.push(rec); return; }
+    matched.push({rec,project,unit});
+  });
+  CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope};
+  const sampleCols=type==='sales_details'?['Booking No','Customer','Unit','Tower','Project','Cost items']
+    :type==='outstanding'?['Booking No','Customer','Unit','Net Outstanding','On Account']
+    :type==='invoice_register'?['Doc No','Date','Booking No','Customer','Unit','Schedule','Amount']
+    :['Receipt No','Date','Booking No','Customer','Invoice No','Amount'];
+  const sampleRows=matched.slice(0,10).map(m=>{
+    const r=m.rec;
+    if(type==='sales_details') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.tower),esc(m.project.name),r.costItems.length];
+    if(type==='outstanding') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),custInr(r.netOutstanding),custInr(r.onAccount)];
+    if(type==='invoice_register') return [esc(r.docNo),fmtDate(r.docDate),esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.schedule),custInr(r.netAmount)];
+    return [esc(r.receiptNo),fmtDate(r.receiptDate),esc(r.bookingNo),esc(r.customerName),esc(r.invoiceNo||'—'),custInr(r.amount)];
+  });
+  $('cpaImpPreview').innerHTML=`<div class="card card-pad">
+    <div class="sec-title" style="margin:0 0 10px">Preview — ${parsed.length} row(s), ${matched.length} ready to import${unmatched.length?`, <span style="color:#c83232">${unmatched.length} unmatched</span>`:''}${outOfScope.length?`, ${outOfScope.length} for a project not yet in the portal`:''}</div>
+    ${unmatched.length?`<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">Could not resolve a unit for: ${esc(unmatched.slice(0,15).map(r=>r.bookingNo||r.unitCode).join(', '))}${unmatched.length>15?' …':''} — run a Sales Details import for these first.</div>`:''}
+    ${matched.length?mTable(sampleCols,sampleRows):''}
+    <div style="margin-top:12px;display:flex;gap:10px"><button class="btn" onclick="$('cpaImpPreview').innerHTML=''">Cancel</button>
+    ${matched.length?`<button class="btn btn-primary" onclick="cpaImportConfirm(this)"><i class="fa-solid fa-check"></i> Confirm import (${matched.length} row${matched.length>1?'s':''})</button>`:''}
+    </div></div>`;
+}
+async function cpaImportPreviewCsv(type,file){
   const Papa=await loadPapaParse();
   if(!Papa){toast('Could not load the CSV parser — check your connection','err');return;}
+  const projectId=Number(($('cpaImpProject')||{}).value);
   const text=await file.text();
   const parsed=Papa.parse(text,{header:true,skipEmptyLines:true,transformHeader:h=>String(h).trim().toLowerCase().replace(/\s+/g,'_')});
   if(parsed.errors&&parsed.errors.length){toast('CSV parse error: '+parsed.errors[0].message,'err');return;}
@@ -11996,45 +12186,102 @@ window.cpaImportPreview=async function(){
     <div style="margin-top:12px;display:flex;gap:10px"><button class="btn" onclick="$('cpaImpPreview').innerHTML=''">Cancel</button>
     ${matched.length?`<button class="btn btn-primary" onclick="cpaImportConfirm(this)"><i class="fa-solid fa-check"></i> Confirm import (${matched.length} row${matched.length>1?'s':''})</button>`:''}
     </div></div>`;
-};
+}
 window.cpaImportConfirm=async function(btn){
   const st=CPA_IMPORT_STATE;if(!st){toast('Nothing to import','err');return;}
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Importing…';}
   try{
-    const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
-      import_type:st.type,project_id:st.projectId,file_name:st.fileName,imported_by:state.email,
-      row_count:st.rows.length,matched_count:st.matched.length,unmatched_count:st.unmatchedCodes.length,
-      unmatched_codes:st.unmatchedCodes,raw_rows:st.rows}).select('id').single();
-    if(beErr)throw beErr;
-    const batchId=batch.id;
-    if(st.type==='demand'){
-      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,demand_no:String(m.row.demand_no),milestone:m.row.milestone||null,demand_date:m.row.demand_date||null,due_date:m.row.due_date||null,amount:m.row.amount?Number(m.row.amount):null,gst_amount:m.row.gst_amount?Number(m.row.gst_amount):null,total_amount:m.row.total_amount?Number(m.row.total_amount):null,status:m.row.status||null,raw:m.row,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('farvision_demand').upsert(rows,{onConflict:'unit_id,demand_no'});
-      if(error)throw error;
-    }else if(st.type==='receipts'){
-      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_demand_no:m.row.against_demand_no||null,raw:m.row,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('farvision_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
-      if(error)throw error;
-    }else if(st.type==='maintenance_bills'){
-      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,bill_no:String(m.row.bill_no),bill_period:m.row.bill_period||null,bill_date:m.row.bill_date||null,due_date:m.row.due_date||null,amount:m.row.amount?Number(m.row.amount):null,gst_amount:m.row.gst_amount?Number(m.row.gst_amount):null,total_amount:m.row.total_amount?Number(m.row.total_amount):null,status:m.row.status||null,raw:m.row,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('maintenance_bills').upsert(rows,{onConflict:'unit_id,bill_no'});
-      if(error)throw error;
-    }else if(st.type==='maintenance_receipts'){
-      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_bill_no:m.row.against_bill_no||null,raw:m.row,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('maintenance_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
-      if(error)throw error;
-    }else{
-      const unitIds=[...new Set(st.matched.map(m=>m.unit.id))];
-      await sb.schema('cust').from('farvision_contacts').update({is_current:false}).in('unit_id',unitIds).eq('is_current',true);
-      const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,contact_name:m.row.contact_name||null,contact_phone:m.row.contact_phone||null,contact_email:m.row.contact_email||null,contact_address:m.row.contact_address||null,booking_date:m.row.booking_date||null,agreement_date:m.row.agreement_date||null,raw:m.row,is_current:true,import_batch_id:batchId}));
-      const {error}=await sb.schema('cust').from('farvision_contacts').insert(rows);
-      if(error)throw error;
-    }
-    toast(st.matched.length+' row(s) imported','ok');
+    if(CPA_XLSX_IMPORT_TYPES.has(st.type)){ await cpaImportConfirmXlsx(st); }
+    else{ await cpaImportConfirmCsv(st); }
     CPA_IMPORT_STATE=null;
     navTo('custportal_admin/2/history');
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
 };
+async function cpaImportConfirmXlsx(st){
+  const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
+    import_type:st.type,file_name:st.fileName,imported_by:state.email,
+    row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
+    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
+    raw_rows:st.matched.map(m=>m.rec)}).select('id').single();
+  if(beErr)throw beErr;
+  const batchId=batch.id;
+
+  if(st.type==='sales_details'){
+    for(const m of st.matched){
+      const r=m.rec;
+      // Customers are matched by email — the only field guaranteed to identify one person across
+      // bookings; a row with no email can't be created here (it also couldn't get a portal login).
+      let customerId=null;
+      if(r.email){
+        const {data:existing}=await sb.schema('cust').from('customers').select('id').ilike('email',r.email).is('deleted_at',null).maybeSingle();
+        if(existing) customerId=existing.id;
+        else{
+          const {data:created,error}=await sb.schema('cust').from('customers').insert({full_name:r.customerName,email:r.email,phone:r.mobile,created_by:state.email}).select('id').single();
+          if(error)throw error; customerId=created.id;
+        }
+      }
+      const existingUnit=cpaResolveUnit(await cpaUnits(),m.project.id,r.bookingNo,r.tower,r.unitCode);
+      const unitRow={project_id:m.project.id,unit_code:r.unitCode,tower:r.tower,floor_no:r.floor||null,
+        unit_type:r.typology||null,carpet_area_sqft:r.carpet||null,super_built_up_area_sqft:r.superBuiltUp||null,
+        built_up_area_sqft:r.builtUp||null,agreement_value:r.totalBasic+r.totalTax,booking_no:r.bookingNo,
+        application_no:r.applicationNo,customer_id:customerId,updated_at:new Date().toISOString()};
+      let unitId;
+      if(existingUnit){ const {error}=await sb.schema('cust').from('units').update(unitRow).eq('id',existingUnit.id); if(error)throw error; unitId=existingUnit.id; }
+      else{ const {data:createdUnit,error}=await sb.schema('cust').from('units').insert({...unitRow,created_by:state.email}).select('id').single(); if(error)throw error; unitId=createdUnit.id; await cpaUnits(true); }
+
+      await sb.schema('cust').from('cost_sheet_items').update({is_current:false}).eq('unit_id',unitId).eq('is_current',true);
+      if(r.costItems.length){
+        const items=r.costItems.map((ci,i)=>({unit_id:unitId,component:ci.component,amount:ci.basicAmount,tax_amount:ci.taxAmount,sort_order:i,is_current:true,import_batch_id:batchId}));
+        const {error}=await sb.schema('cust').from('cost_sheet_items').insert(items); if(error)throw error;
+      }
+      await sb.schema('cust').from('farvision_contacts').update({is_current:false}).eq('unit_id',unitId).eq('is_current',true);
+      const {error:ceErr}=await sb.schema('cust').from('farvision_contacts').insert({unit_id:unitId,unit_code:r.unitCode,booking_no:r.bookingNo,
+        contact_name:r.customerName,contact_phone:r.mobile,contact_email:r.email,contact_address:r.address,
+        booking_date:r.bookingDate,agreement_date:r.agreementDate,is_current:true,import_batch_id:batchId});
+      if(ceErr)throw ceErr;
+    }
+  }else if(st.type==='outstanding'){
+    for(const m of st.matched){
+      const r=m.rec;
+      await sb.schema('cust').from('outstanding_snapshot').update({is_current:false}).eq('unit_id',m.unit.id).eq('is_current',true);
+      const {error}=await sb.schema('cust').from('outstanding_snapshot').insert({unit_id:m.unit.id,as_on_date:new Date().toISOString().slice(0,10),
+        total_consideration:r.totalConsideration,bill_outstanding:r.billOutstanding,on_account:r.onAccount,
+        net_outstanding:r.netOutstanding,late_fee_accrued:r.lateFee,no_of_bills:r.noOfBills,is_current:true,import_batch_id:batchId});
+      if(error)throw error;
+    }
+  }else if(st.type==='invoice_register'){
+    const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,demand_no:m.rec.docNo,
+      milestone:m.rec.schedule,revenue_head:m.rec.revenueHead,demand_date:m.rec.docDate,due_date:m.rec.dueDate,
+      amount:m.rec.amount,gst_amount:m.rec.tax,total_amount:m.rec.netAmount,status:m.rec.status,raw:m.rec,import_batch_id:batchId}));
+    const {error}=await sb.schema('cust').from('farvision_demand').upsert(rows,{onConflict:'unit_id,demand_no'});
+    if(error)throw error;
+  }else{ // receipt_register
+    const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,receipt_no:m.rec.receiptNo,
+      receipt_date:m.rec.receiptDate,amount:m.rec.amount,mode:m.rec.mode,against_demand_no:m.rec.invoiceNo,
+      revenue_head:m.rec.revenueHead,raw:m.rec,import_batch_id:batchId}));
+    const {error}=await sb.schema('cust').from('farvision_receipts').upsert(rows,{onConflict:'unit_id,receipt_no,against_demand_no'});
+    if(error)throw error;
+  }
+  toast(st.matched.length+' row(s) imported','ok');
+}
+async function cpaImportConfirmCsv(st){
+  const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
+    import_type:st.type,project_id:st.projectId,file_name:st.fileName,imported_by:state.email,
+    row_count:st.rows.length,matched_count:st.matched.length,unmatched_count:st.unmatchedCodes.length,
+    unmatched_codes:st.unmatchedCodes,raw_rows:st.rows}).select('id').single();
+  if(beErr)throw beErr;
+  const batchId=batch.id;
+  if(st.type==='maintenance_bills'){
+    const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,bill_no:String(m.row.bill_no),bill_period:m.row.bill_period||null,bill_date:m.row.bill_date||null,due_date:m.row.due_date||null,amount:m.row.amount?Number(m.row.amount):null,gst_amount:m.row.gst_amount?Number(m.row.gst_amount):null,total_amount:m.row.total_amount?Number(m.row.total_amount):null,status:m.row.status||null,raw:m.row,import_batch_id:batchId}));
+    const {error}=await sb.schema('cust').from('maintenance_bills').upsert(rows,{onConflict:'unit_id,bill_no'});
+    if(error)throw error;
+  }else if(st.type==='maintenance_receipts'){
+    const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,receipt_no:String(m.row.receipt_no),receipt_date:m.row.receipt_date||null,amount:m.row.amount?Number(m.row.amount):null,mode:m.row.mode||null,against_bill_no:m.row.against_bill_no||null,raw:m.row,import_batch_id:batchId}));
+    const {error}=await sb.schema('cust').from('maintenance_receipts').upsert(rows,{onConflict:'unit_id,receipt_no'});
+    if(error)throw error;
+  }
+  toast(st.matched.length+' row(s) imported','ok');
+}
 async function cpaRenderImportHistory(host,projects){
   const {data}=await sb.schema('cust').from('import_batches').select('*').order('imported_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(b=>{
@@ -12610,30 +12857,115 @@ function custUnitPicker(units,selUnitId){
   return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
     units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
 }
+// Statement of Account - modelled on Farvision's own customer portal (a Farvision export a
+// customer sent us as a reference), which frames the landing tab as a bank-statement-style
+// summary rather than a raw ledger: property value / paid-to-date / demand due / remaining, a
+// "next demand due in N days" banner, and the 5 most recent transactions - with the exhaustive
+// list left to the separate Ledger tab. Pulls entirely from data already imported by Sales
+// Details / Outstanding / Invoice & Receipt Register - no new data source.
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:demand},{data:receipts}]=await Promise.all([
-    sb.schema('cust').from('farvision_demand').select('amount').eq('unit_id',unit.id),
-    sb.schema('cust').from('farvision_receipts').select('amount').eq('unit_id',unit.id)
+  const [{data:demand},{data:receipts},{data:snapRows}]=await Promise.all([
+    sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
+    sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id),
+    sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
   ]);
-  const totalDemand=(demand||[]).reduce((s,d)=>s+Number(d.amount||0),0);
-  const totalReceipt=(receipts||[]).reduce((s,r)=>s+Number(r.amount||0),0);
-  const outstanding=totalDemand-totalReceipt;
+  const snap=snapRows||null;
+  const demandRows=demand||[], receiptRows=receipts||[];
+  const totalDemand=demandRows.reduce((s,d)=>s+Number(d.amount||0),0);
+  const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.amount||0),0);
+  // The snapshot (Farvision's own Outstanding Summary) is authoritative when we have one - it
+  // accounts for On Account and Late Payment Fee, which a plain demand-minus-receipts sum can't.
+  // Falls back to the computed figure for a unit that hasn't had an Outstanding import yet.
+  const propertyValue=snap?Number(snap.total_consideration||0):Number(unit.agreement_value||0);
+  const billOutstanding=snap?Number(snap.bill_outstanding||0):Math.max(0,totalDemand-totalReceived);
+  const netOutstanding=snap?Number(snap.net_outstanding||0):billOutstanding;
+  const lateFee=snap?Number(snap.late_fee_accrued||0):0;
+  const remaining=Math.max(0,propertyValue-totalReceived);
+  const paidPct=propertyValue?Math.round(totalReceived/propertyValue*100):(totalDemand?Math.round(totalReceived/totalDemand*100):0);
+
+  // "Demand due" banner: the most recently raised bill still outstanding, if any.
+  const nextDemand=demandRows.slice().sort((a,b)=>new Date(b.demand_date||0)-new Date(a.demand_date||0))[0];
+  let dueBanner='';
+  if(nextDemand&&billOutstanding>0){
+    const due=nextDemand.due_date?new Date(nextDemand.due_date):null;
+    const days=due?Math.round((due-new Date(new Date().toDateString()))/86400000):null;
+    const dueText=days==null?'':(days<0?Math.abs(days)+' day'+(Math.abs(days)===1?'':'s')+' overdue':days===0?'due today':'due in '+days+' day'+(days===1?'':'s'));
+    dueBanner=`<div class="card card-pad" style="background:${days!=null&&days<0?'#fef2f2':'#eff4ff'};border-color:${days!=null&&days<0?'#fecaca':'#cfe0ef'};margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(nextDemand.milestone||nextDemand.revenue_head||'')}${nextDemand.due_date?' · due '+fmtDate(nextDemand.due_date):''}</span></div>
+      ${dueText?`<span class="tag ${days!=null&&days<0?'t-red':'t-blue'}">${esc(dueText)}</span>`:''}
+    </div>`;
+  }
+
   const kpis=[
-    ['My unit',esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'')],
-    ['Agreement value',custInr(unit.agreement_value),''],
-    ['Paid to date',custInr(totalReceipt),totalDemand?Math.round(totalReceipt/totalDemand*100)+'% of demand raised':''],
-    ['Outstanding',custInr(outstanding),outstanding>0?'due now':'—',outstanding>0?'#e08600':'#16855a']
+    ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
+    ['Paid to date',custInr(totalReceived),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
+    ['Demand due',custInr(billOutstanding),nextDemand?esc(nextDemand.milestone||nextDemand.revenue_head||''):'—',billOutstanding>0?'#e08600':'#16855a'],
+    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':'incl. handover']
   ];
-  const unitRows=[[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(unit.unit_type||'—'),
-    unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',`<span class="tag t-amber">${esc(unit.status||'—')}</span>`,custInr(unit.agreement_value)]];
-  const contactRows=c?[[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]:[];
-  return mKpis(kpis)+
-    '<div class="sec-title" style="margin:18px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],unitRows)+
+
+  const entries=[].concat(demandRows.map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone||d.revenue_head,amount:Number(d.amount||0)})))
+    .concat(receiptRows.map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  let bal=0;
+  const withBalance=entries.map(e=>{bal+=e.amount;return Object.assign({},e,{balance:bal});});
+  const recent=withBalance.slice(-5).reverse();
+  const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
+    esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—',custInr(e.balance)]);
+
+  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived,billOutstanding,remaining,paidPct,c};
+  return dueBanner+mKpis(kpis)+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
+      '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
+    '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
+    (billOutstanding>0?'<button class="btn btn-primary" onclick="custPayNow()"><i class="fa-solid fa-indian-rupee-sign"></i> Pay '+custInr(billOutstanding)+' now</button>':'')+
+    '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
+    '</div>'+
+    '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],
+      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(unit.unit_type||'—'),
+        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',`<span class="tag t-amber">${esc(unit.status||'—')}</span>`,custInr(unit.agreement_value)]])+
     '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
-    (contactRows.length?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],contactRows):
+    (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
+      [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
       '<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
 }
+window.custPayNow=function(){
+  toast('Online payment isn\'t enabled yet — please contact your relationship manager to pay.','warn');
+};
+// Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
+// synchronously, before anything is awaited, or the popup blocker eats it) - the browser's own
+// print dialog covers "Download PDF" too (Save as PDF is a print destination in every browser),
+// so one button serves both actions without pulling in a PDF-generation library.
+window.custPrintStatement=function(){
+  const unit=window._custStatementUnit,snap=window._custStatementSnap;
+  if(!unit||!snap){toast('Nothing to print yet','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to print','err');return;}
+  const tableHtml=document.querySelector('#view .card table')?document.querySelector('#view .card table').outerHTML:'';
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement of Account — '+esc(unit.unit_code)+'</title><style>'+
+    'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
+    'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 20px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:8px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12.5px}'+
+    'th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.03em}'+
+    '.kpis{display:flex;gap:18px;margin:18px 0;flex-wrap:wrap}.kpi{flex:1;min-width:140px}'+
+    '.kpi .lbl{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.03em}.kpi .val{font-size:19px;font-weight:700;margin-top:2px}'+
+    '</style></head><body>'+
+    '<h1>Statement of Account — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
+    '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((snap.c&&snap.c.contact_name)||'')+' · as on '+fmtDate(new Date())+'</h2>'+
+    '<div class="kpis">'+
+      '<div class="kpi"><div class="lbl">Property value</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Paid to date</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Demand due</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Remaining</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
+    '</div>'+
+    (tableHtml||'<p>No transactions recorded yet.</p>')+
+    '</body></html>';
+  try{ w.document.open(); w.document.write(html); w.document.close(); }
+  catch(_e){ toast('Could not build the printout','err'); return; }
+  setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
+};
 async function custTabLedger(unit){
   const [{data:demand},{data:receipts}]=await Promise.all([
     sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
@@ -13098,7 +13430,7 @@ window.custModReqDecide=async function(id,decision){
 };
 VIEWS.customer=async function(v,seg){
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const tabs=['Overview','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+  const tabs=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
   // Names the active tab in the breadcrumb too - with 13 tabs in a horizontally-scrolling row,
   // the active one isn't always visible in the row itself, so this is the one place that always
