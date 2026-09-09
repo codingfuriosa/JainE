@@ -8163,10 +8163,30 @@ function usbMetaLabel(k){
 // 'assignee' is not internal - it is shown, but in its own "Assigned to" column beside Details
 // rather than repeated inside it.
 const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
+/* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
+   and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
+   a dump of fields rather than as the thing that happened. These keys are the names, so they are
+   printed bare, in this order, ahead of everything else: the workflow, then which instance of it
+   (#93 New Bill Recording), then which step. Everything a feature captured beyond the name - a
+   due date, a search query, a route - still carries its label, because those DO need saying. */
+const USB_META_NAME_ORDER=['workflow','instance','step','title','query'];
 function usbMetaHtml(meta){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
-  const parts=Object.keys(meta).filter(function(k){ return USB_META_INTERNAL_KEYS.indexOf(k)===-1 && meta[k]!=null && String(meta[k]).trim(); })
+  const has=function(k){ return meta[k]!=null && String(meta[k]).trim()!==''; };
+  const named=[];
+  USB_META_NAME_ORDER.forEach(function(k){
+    if(!has(k)) return;
+    // ref_no belongs to the instance it numbers, so it rides along with it rather than sitting on
+    // its own as "Ref No: 93" - "#93 New Bill Recording" is how people say it.
+    if(k==='instance' && has('ref_no')) named.push('#'+esc(String(meta.ref_no))+' '+esc(String(meta[k])));
+    else named.push(esc(String(meta[k])));
+  });
+  // An instance with a number but no title still deserves its number shown.
+  if(!has('instance') && has('ref_no')) named.push('#'+esc(String(meta.ref_no)));
+  const skip=USB_META_INTERNAL_KEYS.concat(USB_META_NAME_ORDER, ['ref_no']);
+  const rest=Object.keys(meta).filter(function(k){ return skip.indexOf(k)===-1 && has(k); })
     .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
+  const parts=named.concat(rest);
   return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
 }
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
@@ -16888,21 +16908,23 @@ const USAGE_MAP={
   // Inspection / Campaigns entry points that had no mapping
   inspGo:'inspection.console.start_new_inspection',
   cmpShowProjectAds:'campaigns.by_project.drill_into_a_project_s_campaigns',
-  // Accountability — Workflow
-  wfNew:'tasks.workflow.create_a_new_workflow', wfEdit:'tasks.workflow.edit_workflow_steps_owners',
-  wfDelete:'tasks.workflow.delete_a_workflow',
-  wfInstEditSel:'tasks.workflow.edit_an_instance', wfInstDelSel:'tasks.workflow.delete_an_instance',
-  wfDoReject:'tasks.workflow.reject_send_a_step_back', wfRejectConfirm:'tasks.workflow.reject_send_a_step_back',
-  wfRowReject:'tasks.workflow.reject_send_a_step_back',
-  wfDone:'tasks.workflow.mark_final_step_done', wfReopen:'tasks.workflow.reopen_a_completed_instance',
-  wfRevert:'tasks.workflow.revert_a_forwarded_step',
+  /* Accountability — Workflow.
+     Almost nothing from this tab is mapped here any more, and the reason is worth stating: a
+     generic wrapper fires on the CLICK, before the work happens and before anything is known
+     about what the work was about. On this tab that produced two whole classes of wrong number.
+       Counted the intent, not the act: wfNew and wfEdit only OPEN the builder, so abandoning the
+       form still counted as a workflow created, and three pokes at the builder read as three new
+       workflows. wfDelete, wfInstDelSel, wfDone, wfReopen and wfRevert each open a confirmation
+       dialog, so a delete somebody thought better of counted as a delete.
+       Counted the click and nothing else: every one of these logged meta:null, so the report's
+       Details column was a dash on all 1,449 workflow events - it could say a step was forwarded
+       but never which step, of which instance, of which workflow, or to whom.
+     All of them log directly in accountability.js instead: after the RPC has actually succeeded,
+     with the step/instance/workflow read from the tables and, where the question "who has it now"
+     means something (forward, reject, revert), the person it moved to. wfEventSave had to move for
+     a third reason - it both creates and edits an instance from one function, so mapped here every
+     edit was counted as "Start a new instance". */
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
-  // wfEventSave / wfReceive / wfForward / wfRowForward / wfPostUpdate / wfPrintCase /
-  // wfTrackerFilter are NOT mapped here on purpose - they log directly (accountability.js) so the
-  // event carries which step, which instance and which workflow it was about. Receive and Forward
-  // were the two busiest tracked actions in the ERP (317 and 288 events) and recorded nothing but
-  // the click. wfEventSave also had to move because it both creates and edits an instance from one
-  // function: mapped here, every edit was counted as "Start a new instance".
   wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
   // Transcription
   trUploadStart:'transcription.all_calls.upload_call_recording_s',

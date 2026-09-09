@@ -2392,6 +2392,13 @@
       // list would wipe a template that is already in use.
       const tmpl=wfTmplCollect();
       if(tmpl.length){ try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:tmpl}); }catch(_e){} }
+      /* "Create a new workflow" and "Edit workflow steps/owners" used to be counted on wfNew and
+         wfEdit - the two functions that merely OPEN the builder. Opening a form and abandoning it
+         counted as having created a workflow, and one person poking at the builder three times read
+         as three new workflows. Counted here instead, where the save has actually gone through, and
+         which of the two features it was is decided by the same editId the save itself used. */
+      try{ usageQueue(editId?'tasks.workflow.edit_workflow_steps_owners':'tasks.workflow.create_a_new_workflow',
+                      editId?'update':'create', {workflow:name}); }catch(_e){}
       toast('Workflow saved','ok');
       // Redirect to the new workflow immediately. The noun lookup ("Invoice", "Leave Request", …)
       // used to be awaited here, which held the form open while it ran; now it happens in the
@@ -3608,7 +3615,14 @@
     const word=(ids.length===1?N.lc:N.lcMany);
     wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       const doomed=await wfCaseFilePaths(ids);
+      // Same as above: read what is about to go while it is still readable. One event per instance
+      // deleted, each naming the instance — deleting four in one go is four things gone, and a
+      // single event saying "delete" would under-report it and name none of them.
+      let um=[];
+      try{ um=await Promise.all(ids.map(function(cid){ return wfCaseUsageMeta(cid); })); }catch(_e){ um=[]; }
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+      try{ (um.length?um:ids.map(function(){return null;})).forEach(function(m){
+        usageQueue('tasks.workflow.delete_an_instance','delete',m); }); }catch(_e){}
       await wfPurgeCaseFiles(doomed);
       toast('Deleted','ok'); renderPage();
     }});
@@ -4314,8 +4328,15 @@
 
   window.wfDelete=function(id){
     wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its '+wfN().lcMany+' and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      // Read the name while the workflow still exists — after the delete there is nothing left to
+      // name it by, and "Delete a workflow" with a blank Details is the report saying nothing.
+      let nm=null;
+      try{ const {data}=await ACC().from('flows').select('name').eq('id',id).maybeSingle(); nm=(data&&data.name)||null; }catch(_e){}
       try{ const {error}=await ACC().rpc('wf_delete_flow',{p_id:id}); if(error)throw error; }
       catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); return; }
+      // Counted here rather than on the click: this button opens a confirmation, and a delete that
+      // was thought better of is not a delete.
+      try{ usageQueue('tasks.workflow.delete_a_workflow','delete',nm?{workflow:nm}:null); }catch(_e){}
       window._wfDelId=null; toast('Workflow deleted','ok'); navTo('tasks/workflow');
     }});
   };
@@ -6206,9 +6227,10 @@
       onOk:async function(){
         const label=await wfComputeForwardLabel(fcsId);
         const um=await wfStepUsageMeta(fcsId);
+        const cid=await wfCaseIdOfStep(fcsId);
         try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); if(cb){cb.disabled=false;cb.checked=false;} return; }
-        try{ usageQueue('tasks.workflow.forward_a_step','update',um); }catch(_e){}
+        await wfLogForward(fcsId, um, cid);
         toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); renderPage();
       },
       onCancel:function(){ if(cb){cb.disabled=false;cb.checked=false;} }
@@ -6218,34 +6240,116 @@
   /* Receiving and forwarding a step were the two busiest tracked actions in the whole ERP - 317
      and 288 events - and both recorded nothing but the fact that a button was pressed, which
      tells a reader nothing at all. What makes them readable is WHICH step of WHICH instance of
-     WHICH workflow: "Accounts Review & Payment · Reimburse required · Reimbursement". Both reads
-     are one embedded select over the case_id/flow_id foreign keys, taken BEFORE the action so the
-     step is still the caller's; a failed read just means no detail, never a broken action. */
+     WHICH workflow: "Accounts Review & Payment · Reimburse required · Reimbursement".
+     These were written as ONE embedded select each - flow_case_steps -> flow_cases -> flows -
+     and in production that embed came back empty every single time, so every workflow event
+     logged since it went in carries meta:null and reads as a dash in the report. Three plain
+     selects along the same foreign keys cost two extra round trips on a button press and depend
+     on nothing but the tables themselves. A failed read still just means no detail, never a
+     broken action. */
+  async function wfFlowNameFor(caseRow){
+    if(!caseRow || caseRow.flow_id==null) return null;
+    try{
+      const {data}=await ACC().from('flows').select('name').eq('id',caseRow.flow_id).maybeSingle();
+      return (data&&data.name)||null;
+    }catch(_e){ return null; }
+  }
+  function wfCaseMetaFrom(c, flowName){
+    const m={};
+    if(c&&c.title) m.instance=c.title;
+    const idv=(c&&c.jaine_id!=null)?c.jaine_id:(c?c.case_no:null);
+    if(idv!=null&&String(idv).trim()!=='') m.ref_no=String(idv);
+    if(flowName) m.workflow=flowName;
+    return m;
+  }
   async function wfStepUsageMeta(fcsId){
     try{
-      const {data}=await ACC().from('flow_case_steps')
-        .select('title,flow_cases(title,case_no,flows(name))').eq('id',fcsId).maybeSingle();
-      if(!data) return null;
-      const c=data.flow_cases||{}, f=c.flows||{}, m={};
-      if(data.title) m.step=data.title;
-      if(c.title) m.instance=c.title;
-      if(c.case_no!=null&&String(c.case_no).trim()!=='') m.ref_no=String(c.case_no);
-      if(f.name) m.workflow=f.name;
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('title,case_id').eq('id',fcsId).maybeSingle();
+      if(!s) return null;
+      let c=null;
+      if(s.case_id!=null){
+        const {data}=await ACC().from('flow_cases')
+          .select('title,case_no,jaine_id,flow_id').eq('id',s.case_id).maybeSingle();
+        c=data||null;
+      }
+      const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
+      if(s.title) m.step=s.title;
       return Object.keys(m).length?m:null;
     }catch(_e){ return null; }
   }
   async function wfCaseUsageMeta(caseId){
     try{
-      const {data}=await ACC().from('flow_cases')
-        .select('title,case_no,jaine_id,flows(name)').eq('id',caseId).maybeSingle();
-      if(!data) return null;
-      const f=data.flows||{}, m={};
-      if(data.title) m.instance=data.title;
-      const idv=(data.jaine_id!=null?data.jaine_id:data.case_no);
-      if(idv!=null&&String(idv).trim()!=='') m.ref_no=String(idv);
-      if(f.name) m.workflow=f.name;
+      const {data:c}=await ACC().from('flow_cases')
+        .select('title,case_no,jaine_id,flow_id').eq('id',caseId).maybeSingle();
+      if(!c) return null;
+      const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
       return Object.keys(m).length?m:null;
     }catch(_e){ return null; }
+  }
+  /* Who a step went to. The report's fourth column asks "who is this now with", and for a forward
+     that is the step the instance moved ON to - read AFTER the forward RPC, because that is the
+     moment the next step becomes the current one. Names come from the same people list the rest of
+     this page uses, so it reads "Rabindra Nath Dey", not "accounts2".
+     A step can be owned by one person, by several (person is a comma-joined list), or by nobody yet
+     with a set of candidates to claim it - all three are worth saying, so all three are read. */
+  async function wfStepOwnerNames(fcsId){
+    if(fcsId==null) return undefined;
+    try{
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('person,candidates,claimed_by').eq('id',fcsId).maybeSingle();
+      if(!s) return undefined;
+      let emails=[];
+      if(s.claimed_by) emails=[s.claimed_by];
+      else if(s.person) emails=String(s.person).split(',');
+      else if(Array.isArray(s.candidates)) emails=s.candidates.slice();
+      emails=emails.map(function(e){ return String(e||'').trim(); }).filter(Boolean);
+      if(!emails.length) return undefined;
+      return await usageNames(emails);
+    }catch(_e){ return undefined; }
+  }
+  // The step the instance is sitting on right now, by its case. Used straight after a forward,
+  // a reject or a revert, when the interesting person is whoever it just landed with.
+  async function wfCurrentStepOwnerNames(caseId){
+    if(caseId==null) return undefined;
+    try{
+      const {data:c}=await ACC().from('flow_cases').select('current_step').eq('id',caseId).maybeSingle();
+      if(!c || c.current_step==null) return undefined;
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('id').eq('case_id',caseId).eq('seq',c.current_step).maybeSingle();
+      if(!s) return undefined;
+      return await wfStepOwnerNames(s.id);
+    }catch(_e){ return undefined; }
+  }
+  // A step's own case id, needed after the action when only the step id was passed in.
+  async function wfCaseIdOfStep(fcsId){
+    if(fcsId==null) return null;
+    try{
+      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      return (data&&data.case_id!=null)?data.case_id:null;
+    }catch(_e){ return null; }
+  }
+  /* One place that builds the whole event for a forward, whichever button did the forwarding.
+     There are four of them - the row checkbox, the send button, and the two route choices on
+     Invoice Processing - and until now only two logged anything at all, so a bill forwarded down
+     the Payment or Cheque route simply never appeared in the report. */
+  // A reject sends the step BACK, so the person worth naming is whoever it landed on - the same
+  // "who has it now" question a forward asks, answered the same way.
+  async function wfLogReject(um, caseId){
+    try{
+      const m=Object.assign({}, um||{});
+      const who=await wfCurrentStepOwnerNames(caseId);
+      if(who) m.assignee=who;
+      usageQueue('tasks.workflow.reject_send_a_step_back','update',Object.keys(m).length?m:null);
+    }catch(_e){}
+  }
+  async function wfLogForward(fcsId, um, caseId){
+    try{
+      const m=Object.assign({}, um||{});
+      const who=await wfCurrentStepOwnerNames(caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
+      if(who) m.assignee=who;
+      usageQueue('tasks.workflow.forward_a_step','update',Object.keys(m).length?m:null);
+    }catch(_e){}
   }
 
   window.wfReceive=async function(fcsId){
@@ -6259,15 +6363,19 @@
   window.wfForward=async function(fcsId){
     const label=await wfComputeForwardLabel(fcsId);
     const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
-    try{ usageQueue('tasks.workflow.forward_a_step','update',um); }catch(_e){}
+    await wfLogForward(fcsId, um, cid);
     toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
   };
 
   window.wfForwardChequeChoice=async function(fcsId,cheque){
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, Object.assign({route:cheque?'Cheque':'GST Approval only'}, um||{}), cid);
     toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
     navTo('tasks/work');
   };
@@ -6276,9 +6384,12 @@
      the bill's whole route, so it is worth being an explicit act rather than a variant of a
      forward that happens to take an argument. */
   window.wfForwardPaymentChoice=async function(fcsId,payment){
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
       {p_fcs_id:fcsId,p_payment:!!payment}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, Object.assign({route:payment?'Payment':'Direct'}, um||{}), cid);
     toast(payment
       ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
       : 'Forwarded','ok');
@@ -6286,8 +6397,10 @@
   };
 
   window.wfDone=async function(fcsId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
     toast('Workflow completed','ok'); navTo('tasks/work');
   };
 
@@ -6304,8 +6417,12 @@
       body:'This closes the reimbursement for good. Only do this once the money is actually in your account.',
       okLabel:'Yes, I received it', okClass:'ok',
       onOk:async function(){
+        const um=await wfStepUsageMeta(fcsId);
         try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not close it: '+((e&&e.message)||e),'err'); return; }
+        // Reimbursement's "I received the payment" closes the claim for good and logged nothing at
+        // all, so the confirmation step of the busiest workflow was invisible in the report.
+        try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
         toast('Confirmed — this reimbursement is complete','ok'); navTo('tasks/work');
       }});
   };
@@ -6314,8 +6431,10 @@
       body:'This goes straight back to Accounts so they can look into it. You will get it again once they have sorted it out.',
       okLabel:'Send back to Accounts', okClass:'danger',
       onOk:async function(){
+        const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
         try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
+        await wfLogReject(um, cid);
         toast('Sent back to Accounts','ok'); navTo('tasks/work');
       }});
   };
@@ -6376,12 +6495,14 @@
       return;
     }
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
     // nothing is deleted any more, so there are no files to collect first
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
       if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Send back for correction'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
+    await wfLogReject(um, cid);
     closeModal();
     toast('Sent back for correction — an email has gone out','ok');
     navTo('tasks/work');
@@ -6390,16 +6511,25 @@
   // From a task-list row: same confirmation popup, no navigation needed.
   window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
     toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
   window.wfRevert=function(fcsId){
     wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
+      const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
       try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not revert: '+((e&&e.message)||e),'err'); return; }
+      try{
+        const m=Object.assign({}, um||{});
+        const who=await wfCurrentStepOwnerNames(cid);
+        if(who) m.assignee=who;
+        usageQueue('tasks.workflow.revert_a_forwarded_step','update',Object.keys(m).length?m:null);
+      }catch(_e){}
       toast('Reverted — the task is back with you','ok');
       if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
     }});
@@ -6408,8 +6538,10 @@
   // Reopen: bring the completed final step back (instance Done -> In progress)
   window.wfReopen=function(fcsId){
     wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and this '+wfN().lc+' moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
+      const um=await wfStepUsageMeta(fcsId);
       try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
+      try{ usageQueue('tasks.workflow.reopen_a_completed_instance','update',um); }catch(_e){}
       toast('Reopened','ok'); navTo('tasks/work');
     }});
   };
