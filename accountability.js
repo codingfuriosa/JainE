@@ -3698,6 +3698,7 @@
     const auditBtn=(c.flow_id===41)
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
       : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -3880,6 +3881,33 @@
     if(paise) out+=(out?' and ':'')+under100(paise)+' Paise';
     return out;
   }
+  /* A booking form prints "Mr./Ms./Mast./M/s." as a row of options for the applicant to ring, and
+     the reader hands that whole string back when none of them is clearly ringed. Printing it would
+     address a customer as "Mr./Ms./Mast./M/s. Saptarshi Pasari". A title with a slash in it, or one
+     too long to be a title, is treated as no title at all - a name on its own is correct, an
+     invented Mr. or Mrs. is not. */
+  function salutation(raw){
+    const t=String(raw==null?'':raw).trim();
+    if(!t || t.indexOf('/')!==-1 || t.length>6) return '';
+    return t;
+  }
+  /* Everyone the flat is allotted to, addressed the way a letter addresses them. */
+  function allotteeNames(res){
+    const LT=(res&&res.letter)||{}, f=res&&res.fields||{};
+    const out=[];
+    (Array.isArray(LT.allottees)?LT.allottees:[]).forEach(function(p){
+      const nm=nameCase(p&&p.name);
+      if(!nm) return;
+      if(out.some(function(x){ return x.toUpperCase().indexOf(nm.toUpperCase())!==-1; })) return;
+      out.push([salutation(p&&p.salutation),nm].filter(Boolean).join(' '));
+    });
+    if(!out.length){
+      const one=f.customer_name&&String(f.customer_name.value||'').trim();
+      if(one && one!=='NIL') out.push(nameCase(one));
+    }
+    return out;
+  }
+
   /* A booking form prints names in capitals; a letter to a customer does not shout at them. */
   function nameCase(s){
     return String(s==null?'':s).trim().toLowerCase()
@@ -3950,11 +3978,7 @@
 
     /* Everyone the flat is being allotted to, with the titles the booking form used. When the form
        gave no title, the name goes on its own rather than inventing Mr. or Mrs. for a customer. */
-    const who=(Array.isArray(LT.allottees)?LT.allottees:[])
-      .map(function(p){ return [String(p.salutation||'').trim(),nameCase(p.name)]
-        .filter(Boolean).join(' '); })
-      .filter(Boolean);
-    if(!who.length && val('customer_name')) who.push(nameCase(val('customer_name')));
+    const who=allotteeNames(res);
     const project=val('project_name')||'________________';
     const locality=String(LT.locality||'').trim();
     const flat=val('flat')||'____', block=val('block')||'____';
@@ -4029,6 +4053,214 @@
     toast('Welcome letter downloaded','ok');
   }
 
+  /* ── allotment letter ─────────────────────────────────────────────────────────────────────────
+     The formal allotment, sent once the booking is in. Deliberately not shaped like the welcome
+     letter: that one is a note of thanks and reads as prose, this one is a notice of what has been
+     allotted at what price, so it is centred under a rule, states the property in labelled fields,
+     and sets the money in a ruled table. Same stored reading behind both.
+
+     THE MONEY. Three lines, and they must add up on the page:
+       Cost of apartment   the FLAT section's own net subtotal, plus the car parking if one was
+                           bought. NOT the cost sheet's grand total - that carries the deposits, the
+                           club and the electricity, which are not the price of the apartment.
+       Extra charge        the GST on those same two figures, taken as gross minus net rather than
+                           by applying a rate, so a change of rate cannot make this wrong.
+       Total               the gross of the same two. Equals the two lines above it, by construction.
+     Every one of them comes from the cost sheet as read; none is a rate applied by JAIN-E. */
+  window.wfAllotmentLetter=async function(caseId){
+    let row=null;
+    try{
+      const {data}=await ACC().from('booking_audits')
+        .select('status,result,error').eq('case_id',caseId).maybeSingle();
+      row=data;
+    }catch(_e){}
+    if(!row){ toast('This booking has not been read yet','warn'); return; }
+    if(row.status==='pending'||row.status==='running'){
+      toast('The attachments are still being read \u2014 try again in a minute or two.','warn'); return;
+    }
+    if(row.status!=='done'||!row.result){
+      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err'); return;
+    }
+    try{ await wfAllotmentPdf(row.result); }
+    catch(e){ toast('Could not build the allotment letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  async function wfAllotmentPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);
+    const W=595.28, H=841.89, M=58;
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const ink=L.rgb(0.10,0.10,0.11), soft=L.rgb(0.40,0.42,0.45),
+          line=L.rgb(0.72,0.74,0.77), band=L.rgb(0.94,0.95,0.96);
+
+    const f=res.fields||{}, LT=res.letter||{}, PR=(LT.price)||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const n2=function(v){ return (typeof v==='number'&&isFinite(v))
+      ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
+
+    /* NO LETTERHEAD OF OUR OWN. This goes out on the company's printed paper, so the top of the
+       page is left clear for it - no logo drawn, and no rules under one. Raise CLEAR_TOP if the
+       printed letterhead runs deeper than this. */
+    const CLEAR_TOP=118;
+    let y=H-CLEAR_TOP;
+
+    // The date this letter is written, in the form the example uses.
+    const d=new Date(), p2=function(n){ return String(n).padStart(2,'0'); };
+    const today=p2(d.getDate())+'.'+p2(d.getMonth()+1)+'.'+d.getFullYear();
+    page.drawText(today,{x:W-M-reg.widthOfTextAtSize(today,10.5),y:y,size:10.5,font:reg,color:ink});
+    y-=26;
+
+    const who=allotteeNames(res);
+
+    page.drawText('To,',{x:M,y:y,size:10.5,font:reg,color:ink}); y-=15;
+    page.drawText(who.join(' & ')||'The Applicant',{x:M,y:y,size:11,font:bold,color:ink}); y-=15;
+    /* The customer's own address, as the booking form prints it. When the form gave none the lines
+       are simply absent - a letter with an invented address is worse than one with none. */
+    const addr=(Array.isArray(LT.address)?LT.address:[]).slice(0,4);
+    addr.forEach(function(l){ page.drawText(l,{x:M,y:y,size:10.5,font:reg,color:ink}); y-=14; });
+    if(LT.pin){ page.drawText('PIN '+String(LT.pin).replace(/^PIN\s*/i,''),
+      {x:M,y:y,size:10.5,font:reg,color:ink}); y-=14; }
+    y-=16;
+
+    const title='ALLOTMENT LETTER';
+    const tw=bold.widthOfTextAtSize(title,13);
+    page.drawText(title,{x:(W-tw)/2,y:y,size:13,font:bold,color:ink});
+    page.drawLine({start:{x:(W-tw)/2-2,y:y-4},end:{x:(W+tw)/2+2,y:y-4},thickness:0.8,color:ink});
+    y-=32;
+
+    page.drawText('Dear Sir / Madam,',{x:M,y:y,size:10.5,font:reg,color:ink});
+    y-=24;
+
+    const project=val('project_name')||'________';
+    const place=String(LT.locality||'').trim();
+    const placed=project.toUpperCase()+(place?('\u201d, '+place):'\u201d');
+    /* The letter writes dates with dots - its own date at the top does, so the application date
+       should too rather than sitting beside it in slashes. */
+    const bookingDate=(res.checklist&&res.checklist['Booking Date']
+      && res.checklist['Booking Date']!=='--')
+      ? String(res.checklist['Booking Date']).replace(/[\/\-]/g,'.') : '________';
+    const flat=val('flat')||'____', block=val('block')||'____';
+    const fRaw=val('floor'), fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum?ordinal(fNum):(fRaw||'____');
+    // Type is the floor and the flat together, the way the example writes it: 6N.
+    const flatOnly=flat.replace(/^\s*\d+\s*/,'');
+    const typeTxt=(fNum && flat && !/^\d/.test(flat)) ? (fNum+flatOnly) : (flat||'____');
+    const company=String(LT.addressed_to||'').trim()||'Dream Gateway Hotels Ltd';
+
+    const para=function(text,gap){
+      const max=W-2*M, size=10.5;
+      const words=String(text).split(/\s+/);
+      let ln='';
+      words.forEach(function(w){
+        const t=ln?ln+' '+w:w;
+        if(reg.widthOfTextAtSize(t,size)>max){
+          page.drawText(ln,{x:M,y:y,size:size,font:reg,color:ink}); y-=size*1.6; ln=w;
+        } else ln=t;
+      });
+      if(ln){ page.drawText(ln,{x:M,y:y,size:size,font:reg,color:ink}); y-=size*1.6; }
+      y-=(gap===undefined?10:gap);
+    };
+
+    para('This has reference to your Application dated '+bookingDate
+      +' for booking of an Apartment in \u201c'+placed+'.');
+    para('We are pleased to allot you Flat No. '+flat+' on the '+floorTxt+' Floor in Block '+block
+      +', at '+project+(place?(', '+place):'')
+      +'. We take this opportunity to congratulate you for being a part of \u201c'
+      +project.toUpperCase()+'\u201d.');
+    para('Please find enclosed the \u201cSchedule of Payments\u201d for the captioned property. You '
+      +'are requested to kindly remit the payments as per the schedule. Also note that the payment '
+      +'has to be remitted in favour of \u201c'+company+'\u201d.',16);
+
+    page.drawText('Property Details',{x:M,y:y,size:11,font:bold,color:ink}); y-=17;
+    /* Labelled fields rather than a sentence: someone checking an allotment reads down the labels.
+       The block is what the tower is called, so it is given as the tower name and not repeated. */
+    const facts=[['Project',project+(place?(', '+place):'')],
+                 ['Super Built up area',(val('area_sqft')?(val('area_sqft')+' sq.ft.'):'________')],
+                 ['Tower Name',block],
+                 ['Type',typeTxt]];
+    facts.forEach(function(kv){
+      page.drawText(kv[0],{x:M,y:y,size:10,font:reg,color:soft});
+      page.drawText(String(kv[1]),{x:M+130,y:y,size:10.5,font:bold,color:ink});
+      y-=15;
+    });
+    y-=14;
+
+    /* The price table. Rows are drawn to a measured height so the total row can be banded and the
+       whole block ruled - a price a customer is asked to pay should look like a statement, not a
+       sentence. */
+    const flatNet=(typeof PR.flat_net==='number')?PR.flat_net:null;
+    const flatGr =(typeof PR.flat_gross==='number')?PR.flat_gross:null;
+    const parkNet=(typeof PR.parking_net==='number')?PR.parking_net:null;
+    const parkGr =(typeof PR.parking_gross==='number')?PR.parking_gross:null;
+    const hasPark=parkNet!==null||parkGr!==null;
+    const kind=String((res.parking&&res.parking.marked&&res.parking.marked.value)||'').toUpperCase();
+    const kindWord=(kind==='COVERED'||kind==='OPEN')?(kind.charAt(0)+kind.slice(1).toLowerCase()):'';
+    const costNet=(flatNet===null&&parkNet===null)?null:((flatNet||0)+(parkNet||0));
+    const costGr =(flatGr===null&&parkGr===null)?null:((flatGr||0)+(parkGr||0));
+    const extra=(costNet!==null&&costGr!==null)?(costGr-costNet):null;
+
+    const costLabel=hasPark
+      ? ('Cost of apartment including 1 '+(kindWord||'Car')+' Parking')
+      : 'Cost of apartment';
+    const rows=[[costLabel,n2(costNet)],
+                ['Extra charge (GST)',n2(extra)],
+                ['Total Purchase Price (inclusive of all)',n2(costGr)]];
+
+    const tX=M, tW=W-2*M, rowH=24, amtR=W-M-10;
+    const tTop=y;
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH*3,
+      borderColor:line,borderWidth:0.8,color:L.rgb(1,1,1)});
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH,color:band});
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH*3,
+      borderColor:line,borderWidth:0.8,opacity:0});
+    rows.forEach(function(r,i){
+      const ry=tTop-rowH*(i+1);
+      if(i) page.drawLine({start:{x:tX,y:ry+rowH},end:{x:tX+tW,y:ry+rowH},
+        thickness:0.6,color:line});
+      const last=(i===2), fnt=last?bold:reg;
+      page.drawText(r[0],{x:tX+10,y:ry+8.5,size:10,font:fnt,color:ink});
+      const amt=r[1]?('Rs. '+r[1]):'\u2014';
+      page.drawText(amt,{x:amtR-fnt.widthOfTextAtSize(amt,10.5),y:ry+8.5,size:10.5,font:fnt,color:ink});
+    });
+    y=tTop-rowH*3-16;
+
+    // The total in words, under the table, the way the example gives it.
+    if(costGr!==null){
+      const wordsTxt='('+rupeesInWords(costGr)+' only)';
+      page.drawText(wordsTxt,{x:amtR-reg.widthOfTextAtSize(wordsTxt,9.5),y:y,size:9.5,
+        font:reg,color:soft});
+      y-=22;
+    }
+
+    para('Thanking you and assuring you the best of our services at all times.',30);
+
+    page.drawText('For '+company,{x:M,y:y,size:10.5,font:bold,color:ink}); y-=46;
+    page.drawText('Authorized Signatory',{x:M,y:y,size:10.5,font:reg,color:ink});
+    y-=10;
+
+    /* The closing rule normally sits at the foot of the page, but on a letter with a long address
+       or a parking row it would otherwise creep up against "Authorized Signatory". */
+    const footY=Math.min(58, y-34);
+    page.drawLine({start:{x:M,y:footY},end:{x:W-M,y:footY},thickness:0.6,color:line});
+    const foot='THE JAIN GROUP  \u00b7  CARING FOR YOUR DREAMS';
+    page.drawText(foot,{x:(W-reg.widthOfTextAtSize(foot,7.5))/2,y:footY-13,size:7.5,font:reg,
+      color:L.rgb(.55,.57,.60)});
+
+    const bytes=await doc.save();
+    const nm=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Allotment Letter - '+nm+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    toast('Allotment letter downloaded','ok');
+  }
   window.wfChecklistDownload=async function(caseId){
     let row=null;
     try{
