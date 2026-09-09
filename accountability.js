@@ -4063,7 +4063,8 @@
     const page=doc.getPages()[0];
     const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
     const helv=await doc.embedFont(L.StandardFonts.Helvetica);
-    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
+    // The whole sheet is in one ink. It is a form, not a dashboard.
+    const black=L.rgb(0.05,0.05,0.05), grey=L.rgb(0.30,0.30,0.30);
 
     const f=res.fields||{}, cl=res.checklist||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
@@ -4090,10 +4091,10 @@
       // OK in black - it is a form, not a dashboard. NOT OK stays red so a problem still reads
       // as one at a glance.
       if(t==='Ok')      return put(slot,'OK',helvB,black);
-      if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
+      if(t==='Not Ok')  return put(slot,'NOT OK',helvB,black);
       // Nothing prints as UNKNOWN. An item that could not be settled is not a pass, so it
       // reads NOT OK and somebody looks at it.
-      if(t==='Unknown') return put(slot,'NOT OK',helvB,red);
+      if(t==='Unknown') return put(slot,'NOT OK',helvB,black);
       return put(slot,short(t),helvB,black);
     };
 
@@ -4145,7 +4146,7 @@
       let t=String((res.signatures&&res.signatures.reason)||'').trim();
       if(t){
         while(t.length>1 && helv.widthOfTextAtSize(t,sw.size)>(sw.right-sw.x)) t=t.slice(0,-1);
-        page.drawText(t,{x:sw.x,y:sw.y,size:sw.size,font:helv,color:red});
+        page.drawText(t,{x:sw.x,y:sw.y,size:sw.size,font:helv,color:grey});
       }
     }
 
