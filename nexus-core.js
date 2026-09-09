@@ -12438,17 +12438,29 @@ function cpaParseSalesDetails(wb){
       totalBasic:Number(get('Total Basic')||0),totalTax:Number(get('Total Tax')||0),costItems:[]};
     const seen={};
     for(let c=totalBasicCol+2;c<headers.length;c++){
-      const metric=headers[c];
-      if(metric!=='Basic  Amount'&&metric!=='Basic Amount') continue; // one Basic/Tax pair per component; skip Bill/Received/Balance/Onaccount columns
+      const metric=String(headers[c]||'').trim();
+      // Each component carries a BASIC tier and (for a few, e.g. Unit Cost) a TAX tier, each with
+      // its own Basic/Bill/Received/Balance/Onaccount Amount columns. amount/taxAmount come from
+      // the two tiers' "Basic Amount" metric; bill/received/balance/onaccount are summed GROSS
+      // across both tiers - a customer-facing statement wants what was billed/received/still-due
+      // for the whole charge line, not split by its own internal tax portion.
+      const field=metric==='Basic  Amount'||metric==='Basic Amount'?'amount'
+        :metric==='Bill Amount'?'bill':metric==='Received Amount'?'received'
+        :metric==='Balance Amount'?'balance':metric==='Onaccount Amount'?'onaccount':null;
+      if(!field) continue;
       const component=xlsxMergedLabel(ws,rows,componentRow,c);
       const basicTax=xlsxMergedLabel(ws,rows,basicTaxRow,c);
       if(!component) continue;
-      const key=component+'|'+basicTax; if(seen[key]) continue; seen[key]=true; // dedupes a header quirk where "Unit Cost" is labelled twice
+      const key=component+'|'+basicTax+'|'+field; if(seen[key]) continue; seen[key]=true; // dedupes a header quirk where "Unit Cost" is labelled twice
       const val=row[c]; if(val==null||val==='') continue;
       const cleanName=String(component).replace(/^\d+\.\s*/,'').trim();
       let bucket=rec.costItems.find(i=>i.component===cleanName);
-      if(!bucket){ bucket={component:cleanName,basicAmount:0,taxAmount:0}; rec.costItems.push(bucket); }
-      if(basicTax==='BASIC') bucket.basicAmount=Number(val); else bucket.taxAmount=Number(val);
+      if(!bucket){ bucket={component:cleanName,basicAmount:0,taxAmount:0,billAmount:0,receivedAmount:0,balanceAmount:0,onaccountAmount:0}; rec.costItems.push(bucket); }
+      if(field==='amount'){ if(basicTax==='BASIC') bucket.basicAmount=Number(val); else bucket.taxAmount=Number(val); }
+      else if(field==='bill') bucket.billAmount+=Number(val);
+      else if(field==='received') bucket.receivedAmount+=Number(val);
+      else if(field==='balance') bucket.balanceAmount+=Number(val);
+      else if(field==='onaccount') bucket.onaccountAmount+=Number(val);
     }
     out.push(rec);
   }
@@ -12688,7 +12700,9 @@ async function cpaImportConfirmXlsx(st){
 
       await sb.schema('cust').from('cost_sheet_items').update({is_current:false}).eq('unit_id',unitId).eq('is_current',true);
       if(r.costItems.length){
-        const items=r.costItems.map((ci,i)=>({unit_id:unitId,component:ci.component,amount:ci.basicAmount,tax_amount:ci.taxAmount,sort_order:i,is_current:true,import_batch_id:batchId}));
+        const items=r.costItems.map((ci,i)=>({unit_id:unitId,component:ci.component,amount:ci.basicAmount,tax_amount:ci.taxAmount,
+          bill_amount:ci.billAmount,received_amount:ci.receivedAmount,balance_amount:ci.balanceAmount,onaccount_amount:ci.onaccountAmount,
+          sort_order:i,is_current:true,import_batch_id:batchId}));
         const {error}=await sb.schema('cust').from('cost_sheet_items').insert(items); if(error)throw error;
       }
       await sb.schema('cust').from('farvision_contacts').update({is_current:false}).eq('unit_id',unitId).eq('is_current',true);
@@ -13322,24 +13336,35 @@ function custUnitPicker(units,selUnitId){
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:demand},{data:receipts},{data:snapRows}]=await Promise.all([
+  const [{data:demand},{data:receipts},{data:snapRows},{data:costItemRows}]=await Promise.all([
     sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
     sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id),
-    sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
+    sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
+    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order')
   ]);
   const snap=snapRows||null;
-  const demandRows=demand||[], receiptRows=receipts||[];
+  const demandRows=demand||[], receiptRows=receipts||[], costItems=costItemRows||[];
   const totalDemand=demandRows.reduce((s,d)=>s+Number(d.amount||0),0);
   const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.amount||0),0);
+  // A pre-possession project (no Invoice/Receipt Register import yet - that report only exists
+  // once a project starts maintenance billing) has no demand/receipt rows at all. The cost sheet
+  // from Sales Details already carries Billed/Received/Balance/Onaccount per charge line, so it
+  // stands in as the statement's numbers until a real demand/receipt import exists.
+  const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
+  const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
+  const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
+  const useCostSheet=!demandRows.length&&!receiptRows.length&&costItems.length>0;
   // The snapshot (Farvision's own Outstanding Summary) is authoritative when we have one - it
   // accounts for On Account and Late Payment Fee, which a plain demand-minus-receipts sum can't.
   // Falls back to the computed figure for a unit that hasn't had an Outstanding import yet.
   const propertyValue=snap?Number(snap.total_consideration||0):Number(unit.agreement_value||0);
-  const billOutstanding=snap?Number(snap.bill_outstanding||0):Math.max(0,totalDemand-totalReceived);
+  const totalReceivedFinal=useCostSheet?csiReceived:totalReceived;
+  const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalDemand-totalReceived));
   const netOutstanding=snap?Number(snap.net_outstanding||0):billOutstanding;
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
-  const remaining=Math.max(0,propertyValue-totalReceived);
-  const paidPct=propertyValue?Math.round(totalReceived/propertyValue*100):(totalDemand?Math.round(totalReceived/totalDemand*100):0);
+  const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
+  const remaining=Math.max(0,propertyValue-totalReceivedFinal);
+  const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalDemand?Math.round(totalReceivedFinal/totalDemand*100):0);
 
   // "Demand due" banner: the most recently raised bill still outstanding, if any.
   const nextDemand=demandRows.slice().sort((a,b)=>new Date(b.demand_date||0)-new Date(a.demand_date||0))[0];
@@ -13356,9 +13381,9 @@ async function custTabOverview(data,unit){
 
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
-    ['Paid to date',custInr(totalReceived),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
+    ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
     ['Demand due',custInr(billOutstanding),nextDemand?esc(nextDemand.milestone||nextDemand.revenue_head||''):'—',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':'incl. handover']
+    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'incl. handover')]
   ];
 
   const entries=[].concat(demandRows.map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone||d.revenue_head,amount:Number(d.amount||0)})))
@@ -13370,12 +13395,23 @@ async function custTabOverview(data,unit){
   const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
     esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—',custInr(e.balance)]);
 
-  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived,billOutstanding,remaining,paidPct,c};
+  // Until a real Invoice/Receipt Register import exists for this project, the cost sheet from
+  // Sales Details is the only per-charge breakdown available - shown as its own section rather
+  // than folded into "Recent transactions" above, since it has no dates, only running totals.
+  const costSheetRows=costItems.map(i=>[esc(i.component),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
+    custInr(i.bill_amount||0),custInr(i.received_amount||0),
+    Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
+  const costSheetSection=costItems.length?
+    '<div class="sec-title" style="margin:22px 0 8px">Charges &amp; payments</div>'+
+    mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
+
+  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
   return dueBanner+mKpis(kpis)+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
+    costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
