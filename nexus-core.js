@@ -14928,7 +14928,15 @@ function trcIsRegression(r){
 async function trcFetch(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
-  const PAGE=1000;let out=[],from=0;
+  /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
+     history through a chain of window functions - a cost paid IN FULL on every request to this
+     view, no matter how narrow the page's own range() slice is (a WHERE on the outer query cannot
+     push down into that windowed subquery). Chunking at 1000 rows made "All time" issue ~12
+     sequential requests, each repaying that same fixed ~6-8s cost - a minute-plus of serial
+     round trips for a table Postgres can hand back whole in one. PAGE now covers the entire table
+     in a single request; the loop (and its 50000 backstop) stays only so a future row count that
+     outgrows one page still pages correctly instead of silently truncating. */
+  const PAGE=20000;let out=[],from=0;
   try{
     for(;;){
       let q=sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
