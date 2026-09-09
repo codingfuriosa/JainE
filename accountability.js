@@ -9661,6 +9661,10 @@
   window.accSelfInsToggleX=function(){};
   window.accInsCancel=function(){ INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
   window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  // Names rather than raw emails in the Usability report's Details column, falling back to the
+  // email when the people list has not loaded yet. window.nameOf is nexus-core.js's own global
+  // helper - reached through window because this file has its own two-argument nameOf.
+  function usageWho(e){ try{ return (window.nameOf && window.nameOf(e)) || e; }catch(_x){ return e; } }
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -9676,6 +9680,16 @@
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
+      // Logged here, after the row and its assignees actually exist, so a failed save is never
+      // counted as a task that was created. The title, who it went to, the due date and the
+      // repeat only exist as staged values inside this function - a USAGE_MAP wrapper around it
+      // could never see them, which is why this logs directly.
+      try{ usageQueue('tasks.tasks.create_task','create',{
+        title:title,
+        assignee:sel.map(usageWho).join(', ')||undefined,
+        due_date:due||undefined,
+        repeat:INS_STAGE.recur?String(INS_STAGE.recur):undefined
+      }, INS_STAGE.projectLabel||undefined); }catch(_e){}
       INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
@@ -9694,6 +9708,14 @@
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
+      // Same as accInsCreate, for a task somebody adds for themselves - the assignee is always
+      // the person doing it, so it is recorded rather than left blank.
+      try{ usageQueue('tasks.tasks.create_task','create',{
+        title:title,
+        assignee:usageWho(me()),
+        due_date:due||undefined,
+        repeat:SELF_INS_STAGE.recur?String(SELF_INS_STAGE.recur):undefined
+      }, SELF_INS_STAGE.projectLabel||undefined); }catch(_e){}
       SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
@@ -10190,7 +10212,9 @@
         const detail=pid?('moved it to project '+(newProjName||'—')):'removed the project';
         await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:detail});
         await sysMsg(tid,detail);
-        try{ usageQueue('tasks.tasks.edit_task_project','update',{project:newProjName||'(removed)'}); }catch(_e){}
+        // The project also goes in the event's own project column, not only in Details, so the
+        // report can group and filter by it.
+        try{ usageQueue('tasks.tasks.edit_task_project','update',{project:newProjName||'(removed)'}, newProjName||undefined); }catch(_e){}
       }
       closeModal(); toast('Saved','ok'); renderPage();
     }catch(e){toast('Failed','err');}
@@ -10217,6 +10241,13 @@
       if(parentFiles&&parentFiles.length){ await ACC().from('ptask_files').insert(parentFiles.map(f=>({task_id:t.id,file_name:f.file_name,storage_path:f.storage_path,file_size:f.file_size,uploaded_by:f.uploaded_by}))); }
       await appendRankForMe(t.id);
       await ACC().from('ptask_activity').insert({task_id:pid,action:'delegated',detail:'Delegated to '+sel.length+' person(s)'});
+      // Was mapped through USAGE_MAP, which could only record that the button was pressed. Logged
+      // here instead so the event says which task was delegated and to whom.
+      try{ usageQueue('tasks.tasks.delegate_task_to_someone','create',{
+        title:(parent&&parent.title)||undefined,
+        delegated_to:sel.map(usageWho).join(', ')||undefined,
+        due_date:(parent&&parent.due_date)||undefined
+      }); }catch(_e){}
       closeModal(); toast('Delegated','ok'); renderPage();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };

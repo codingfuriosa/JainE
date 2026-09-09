@@ -16849,7 +16849,12 @@ const USAGE_MAP={
   // accEditTitleSave / accEditDescSave / accEditProjectSave / accEditMembersSave / accEditDueSave
   // are NOT mapped here on purpose - each now logs directly (accountability.js), only when the
   // edit actually changed something, capturing the new value itself rather than a bare click.
-  accDelegateSave:'tasks.tasks.delegate_task_to_someone',
+  // accInsCreate / accSelfInsCreate / accDelegateSave are NOT mapped here on purpose - they log
+  // directly (accountability.js) so the event carries what was actually created: the title, who
+  // it went to, its due date and its project. Creating a task through this tab logged nothing at
+  // all until now: the only create_task call in the codebase sat inside taskSave(), which writes
+  // to acc.tasks - a table with zero rows - while every real task goes to acc.ptasks from here.
+  // 103 tasks were created in the five days to 9 Sep 2026 and not one produced an event.
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
   accSubDel:'tasks.tasks.delete_sub_task',
@@ -17159,11 +17164,17 @@ const USAGE_MAX_Q=600;
 // was delegated to - not just that the feature fired. Optional and feature-by-feature: most call
 // sites still pass nothing, same as before this existed. erp_log_usage only keeps it when it is a
 // plain object, so anything else here is silently dropped rather than corrupting the row.
-function usageQueue(featureKey, action, meta){
+// project is the 4th argument rather than a meta key because erp_usage_events has had a dedicated
+// project column since the table was created - and it was still empty on every one of the 7,500+
+// rows logged so far, because nothing ever passed one. It is the project a task/record belongs to,
+// which the Usability report shows in its own column; a call site that doesn't know one passes
+// nothing, exactly as before. Trimmed to 64 chars because that is what erp_log_usage stores.
+function usageQueue(featureKey, action, meta, project){
   if(!featureKey || !(state&&state.email)) return;
   const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
                 action:action||'view', occurred_at:new Date().toISOString()};
   if(meta && typeof meta==='object') ev.meta=meta;
+  if(project) ev.project=String(project).trim().slice(0,64) || undefined;
   USAGE_Q.push(ev);
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
