@@ -14842,8 +14842,9 @@ function trcTrStatus(r){
 }
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 
-function trcTag(cls, icon, label){
-  return '<span class="tag '+cls+'">'+(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
+function trcTag(cls, icon, label, title){
+  return '<span class="tag '+cls+'"'+(title?' title="'+esc(title)+'"':'')+'>'
+    +(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
 }
 function trcTrTag(r){
   const m = TRC_TR_META[trcTrStatus(r)];
@@ -15358,9 +15359,14 @@ function trcLeadRowHtml(g,sl){
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
+    /* Danger and Status-regressed used to carry their full label alongside the CRM status tag - three
+       badges' worth of text in a column sized for one, so the middle one clipped mid-word and the
+       last one never showed at all. Icon-only here (the reasons ride along as a hover tooltip; the
+       lead detail page still spells both out in full, in trcOvHealthHtml and trcCallHtml). */
     +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
-      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')
-      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?g.regressions+' status regressions':'Status regressed'):''))
+      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
+      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
+          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
     +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
