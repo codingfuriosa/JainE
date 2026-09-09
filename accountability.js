@@ -3770,10 +3770,34 @@
 
      `w` is how much room that blank has, measured from the number of underscores in it. A value too
      wide is stepped down in size until it fits rather than running over the next label. */
-  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.pdf';
+  /* The blank arrives as a SCRIPT, not as a file to fetch. A browser refuses fetch() of a
+     same-origin file when the page itself was opened straight off the disk as file:// - it throws
+     "Failed to fetch" without making a request - so the check list could not be built at all while
+     working from the local copy. A script tag is allowed in both places. Loaded the first time
+     somebody asks for a check list, the same way pdf-lib is, not on every page load.
+     booking-check-list-blank.pdf sits beside it and remains the source of truth. */
+  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.js';
+  async function wfClBlank(){
+    if(!window.WF_CL_BLANK_B64){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=WF_CL_TEMPLATE;
+        sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the blank form could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const b64=window.WF_CL_BLANK_B64;
+    if(!b64) throw new Error('the blank form loaded but was empty');
+    const bin=atob(b64), out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    return out;
+  }
   const WF_CL={
     date:        {x:441.5, y:583.75, s:11, w:98},
-    customer:    {x:188.0, y:508.35, s:11, w:260},
+    // The underscores stop at 448 but nothing is printed to the right of them, so a name may
+    // run on to the margin before the size has to come down - two allottees stay legible.
+    customer:    {x:188.0, y:508.35, s:11, w:352},
     project:     {x:143.2, y:484.55, s:11, w:80},
     block:       {x:284.2, y:484.55, s:11, w:21},
     flat:        {x:338.7, y:484.55, s:11, w:26},
@@ -3798,8 +3822,12 @@
      between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
      form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
      anything it already says. */
-  const WF_CL_SIG ={label:'Signatures',  x:145.0, y:171.15, right:545};
-  const WF_CL_PARK={label:'Car Parking', x:145.0, y:147.35, right:545};
+  const WF_CL_ADDED={
+    x:145.0, right:545, y0:181.35, step:13.5, size:10, note:8.5,
+    rows:[ {item:'Signatures',   label:'Signatures'},
+           {item:'Car Parking',  label:'Car Parking'},
+           {item:'Unit details', label:'Unit Details'} ]
+  };
 
   window.wfChecklistDownload=async function(caseId){
     let row=null;
@@ -3829,15 +3857,13 @@
     const L=await loadPdfLib();
     if(!L) throw new Error('the PDF library could not be loaded');
 
-    const tr=await fetch(WF_CL_TEMPLATE);
-    if(!tr.ok) throw new Error('the blank form could not be loaded (HTTP '+tr.status+')');
-    const blank=await tr.arrayBuffer();
+    const blank=await wfClBlank();
 
     const doc=await L.PDFDocument.load(blank);
     const page=doc.getPages()[0];
     const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
     const helv=await doc.embedFont(L.StandardFonts.Helvetica);
-    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
+    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07), amber=L.rgb(0.70,0.42,0.0);
 
     const f=res.fields||{}, cl=res.checklist||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
@@ -3865,12 +3891,25 @@
       // as one at a glance.
       if(t==='Ok')      return put(slot,'OK',helvB,black);
       if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
-      if(t==='Unknown') return put(slot,'NOT CHECKED',helvB,black);
+      if(t==='Unknown') return put(slot,'UNKNOWN',helvB,amber);
       return put(slot,short(t),helvB,black);
     };
 
     put(WF_CL.date,      (res.header&&res.header.date)||'');
-    put(WF_CL.customer,  v('customer_name'));
+    /* EVERY allottee on the one line the form gives for it - the first applicant and anyone
+       named with them. It never wraps: the size steps down instead, so the sheet keeps the
+       shape of the form. */
+    const allottees=[];
+    [v('customer_name')].concat(Array.isArray(res.co_applicants)?res.co_applicants:[])
+      .forEach(function(n){
+        const t=String(n==null?'':n).trim();
+        if(!t||t==='NIL') return;
+        // The reader sometimes lists the applicant among the co-applicants too; printing a
+        // name twice reads as a mistake in the file rather than one in the reading.
+        if(allottees.some(function(x){ return x.toUpperCase()===t.toUpperCase(); })) return;
+        allottees.push(t);
+      });
+    put(WF_CL.customer,  allottees.join('  &  ')||'NIL');
     put(WF_CL.project,   v('project_name'));
     put(WF_CL.block,     v('block'));
     put(WF_CL.flat,      v('flat'));
@@ -3892,26 +3931,43 @@
     put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
     put(WF_CL.booking_date, short(cl['Booking Date']));
 
-    /* Signatures and car parking are checked but the printed form has no line for either. Rather
-       than a document of our own, they go in the form's OWN empty rows, in the same left margin and
-       the same size as every label above them. The finding goes beside the verdict, because
-       "NOT OK" alone sends someone back through the whole file to work out where and why. */
-    const added=function(slot,verdict,detail){
-      const t=String(verdict||'').trim();
-      if(!t) return;
-      page.drawText(slot.label,{x:72.1,y:slot.y,size:11,font:helv,color:black});
-      const word=t==='Ok'?'OK':(t==='Not Ok'?'NOT OK':'NOT CHECKED');
-      page.drawText(word,{x:slot.x,y:slot.y,size:11,font:helvB,color:t==='Not Ok'?red:black});
-      const why=String(detail||'').trim();
-      if(!why) return;
-      const x=slot.x+helvB.widthOfTextAtSize(word,11)+8, room=slot.right-x;
-      let s=why;
-      while(s.length>1 && helv.widthOfTextAtSize(s,9)>room) s=s.slice(0,-1);
-      if(s.length<why.length) s=s.slice(0,-1)+'…';
-      page.drawText(s,{x:x,y:slot.y,size:9,font:helv,color:L.rgb(.3,.3,.3)});
+    /* Three things are checked that the printed form has no line for: the signatures, the car
+       parking, and whether the booking form and the cost sheet describe the same flat. Rather than
+       a document of our own they go in the form's OWN empty space, between "Payment Plan" and the
+       sign-off rule, in the same left margin. A point smaller than the form's own rows and closer
+       together, because three of them have to fit in one row's worth of gap - and because they are
+       additions to the form, which is what they should look like.
+
+       The finding goes beside the verdict. "NOT OK" alone sends somebody back through the whole
+       file to work out where and why, and an unresolved item with no reason beside it is worse
+       still - it says nothing at all. */
+    const A=WF_CL_ADDED;
+    const itemOf=function(name){
+      const list=Array.isArray(res.item_checks)?res.item_checks:[];
+      for(let i=0;i<list.length;i++)
+        if(String(list[i]&&list[i].item||'').toLowerCase()===name.toLowerCase()) return list[i];
+      return null;
     };
-    added(WF_CL_SIG, cl['Signatures'],  (res.signatures&&res.signatures.reason)||'');
-    added(WF_CL_PARK,cl['Car Parking'], (res.parking&&res.parking.reason)||'');
+    A.rows.forEach(function(row,i){
+      const it=itemOf(row.item);
+      const t=String((it&&it.verdict)||'').trim();
+      if(!t) return;
+      const y=A.y0-i*A.step;
+      page.drawText(row.label,{x:72.1,y:y,size:A.size,font:helv,color:black});
+      /* An item nobody could resolve is NOT a pass, and printed in black beside a column of OKs it
+         gets read as one. Amber: not the red of something known to be wrong, but not something the
+         eye may skip over either - it means a person still has to look. */
+      const word=t==='Ok'?'OK':(t==='Not Ok'?'NOT OK':'UNKNOWN');
+      const col=t==='Ok'?black:(t==='Not Ok'?red:amber);
+      page.drawText(word,{x:A.x,y:y,size:A.size,font:helvB,color:col});
+      const why=String((it&&it.reason)||'').trim();
+      if(!why) return;
+      const x=A.x+helvB.widthOfTextAtSize(word,A.size)+8, room=A.right-x;
+      let s=why;
+      while(s.length>1 && helv.widthOfTextAtSize(s,A.note)>room) s=s.slice(0,-1);
+      if(s.length<why.length) s=s.slice(0,-1)+'…';
+      page.drawText(s,{x:x,y:y,size:A.note,font:helv,color:t==='Ok'?L.rgb(.3,.3,.3):col});
+    });
 
     /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
        stays in the stored reading; the printed sheet is the form. */
