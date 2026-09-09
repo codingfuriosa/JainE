@@ -14886,6 +14886,18 @@ const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'a
 let TRC_LAST_LEAD_ID=null;
 let TRC_LAST_FOLLOWUP_ID=null;
 
+/* Deliberately NOT selecting level_regression_severity/prev_status here, unlike the lead-detail fetch
+   below. Both columns come off acc.lead_level_progress_v, a view stacked six windows deep over EVERY
+   row of acc.crm_followups - a fixed ~6-8s cost paid IN FULL on every request to followup_timeline_v,
+   no matter how few rows or which lead_id the outer query asks for (confirmed with EXPLAIN ANALYZE: a
+   single lead's rows cost the same as the whole table - Postgres can't push a filter through the
+   window functions). Asking for those two columns is what forces the full chain to run; leaving them
+   out lets Postgres prune the join away entirely, cutting this query from ~6.8s to ~3s - the
+   difference between clearing the authenticated role's 8s statement_timeout and getting canceled.
+   The cost, not the row count: trcIsRegression (and so the "Status regressed" badge on a lead row)
+   simply has nothing to key off here and reads as false. The lead detail page pays the real cost
+   once, on click, with its own separate select('*') fetch, and still shows the regression tag per
+   call - see trcLeadDetail below. */
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
   +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
@@ -14893,8 +14905,7 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
   +'lost_reason_status,remarks_status,ai_assessed_status,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
-  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,'
-  +'level_regression_severity,prev_status';
+  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team';
 
 /* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
    Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
@@ -14902,7 +14913,10 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
    In Follow Up, which this tag deliberately leaves alone).
    Only applied from the day this was wired up onward: the database has always computed it, correctly,
    over the CRM's whole history, but flagging calls that were already sitting in the system before
-   anyone could act on this would just be noise, not new information. */
+   anyone could act on this would just be noise, not new information.
+   r.level_regression_severity is only ever present on rows from trcLeadDetail's own fetch (TRC_LIGHT
+   deliberately leaves it out, see above) - so on a list row this always reads undefined and simply
+   never flags, rather than throwing. */
 const TRC_REGRESSION_CUTOFF='2026-09-02';
 function trcIsRegression(r){
   return r.level_regression_severity==='not_allowed' && trcRowDate(r)>=TRC_REGRESSION_CUTOFF;
@@ -15053,6 +15067,69 @@ function trcChrono(a,b){
   return String(ta).localeCompare(String(tb)) || Number(a.follow_up_id||0)-Number(b.follow_up_id||0);
 }
 
+/* ---- skeletons. trcFetch's own floor is a few seconds (see TRC_LIGHT above) before a single row can
+   be drawn, so a bare spinner leaves the page looking empty rather than working. These stand in for
+   the KPI cards and the table body in roughly the shape the real content will take, so the page reads
+   as "loading this" rather than "loading something". ---- */
+function trcSkelBar(w,h){
+  return '<span class="skel" style="width:'+w+';height:'+(h||12)+'px"></span>';
+}
+function trcSkeletonKpis(){
+  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'
+    +Array(4).fill(0).map(function(){
+      return '<div class="kpi">'+trcSkelBar('60%',11)+'<div style="margin-top:10px">'+trcSkelBar('35%',26)+'</div>'
+        +'<div style="margin-top:9px">'+trcSkelBar('80%',11)+'</div></div>';
+    }).join('')+'</div>';
+}
+function trcSkeletonRows(n){
+  n=n||8;
+  let out='';
+  for(let i=0;i<n;i++){
+    out+='<tr>'
+      +'<td>'+trcSkelBar('16px')+'</td>'
+      +'<td>'+trcSkelBar('48px')+'</td>'
+      +'<td>'+trcSkelBar('68%')+'<div style="margin-top:6px">'+trcSkelBar('42%',9)+'</div></td>'
+      +'<td>'+trcSkelBar('72px',20)+'</td>'
+      +'<td>'+trcSkelBar('72px',20)+'</td>'
+      +'<td>'+trcSkelBar('84px',20)+'</td>'
+      +'<td>'+trcSkelBar('60%')+'</td>'
+      +'<td>'+trcSkelBar('92px')+'</td>'
+      +'<td>'+trcSkelBar('70%')+'</td>'
+      +'<td>'+trcSkelBar('80%')+'</td>'
+      +'<td>'+trcSkelBar('64px',24)+'</td>'
+    +'</tr>';
+  }
+  return out;
+}
+/* One lead's history: two queries (crm_leads + the full followup_timeline_v for this lead_id, see
+   trcLeadDetail) that pay the same fixed window-function cost as the list does - shaped like the
+   page-head, the tag strip, the lead-details table and a couple of call cards it will actually become,
+   so the page doesn't just go blank between the click and the data landing. */
+function trcLeadSkeletonHtml(){
+  const chip=function(w){return '<span class="skel" style="width:'+w+';height:22px;border-radius:999px"></span>';};
+  const kvLine=function(){
+    return '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">'
+      +trcSkelBar('110px',11)+trcSkelBar('55%',11)+'</div>';
+  };
+  const callCard=function(){
+    return '<div class="card card-pad" style="margin-top:14px">'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+        +chip('64px')+chip('150px')+chip('90px')+chip('110px')+'</div>'
+      +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:14px">'
+        +'<div class="card card-pad" style="margin:0">'+Array(5).fill(0).map(kvLine).join('')+'</div>'
+        +'<div class="card card-pad" style="margin:0">'+Array(5).fill(0).map(kvLine).join('')+'</div>'
+      +'</div></div>';
+  };
+  return '<div class="page-head"><div>'
+      +trcSkelBar('220px',26)+'<div style="margin-top:10px">'+trcSkelBar('160px',12)+'</div></div>'
+      +'<div style="display:flex;gap:10px"><span class="skel" style="width:96px;height:34px;border-radius:9px"></span>'
+      +'<span class="skel" style="width:172px;height:34px;border-radius:9px"></span></div></div>'
+    +'<div class="card card-pad" style="display:flex;gap:14px;flex-wrap:wrap">'
+      +chip('90px')+chip('90px')+chip('96px')+chip('120px')+chip('120px')+'</div>'
+    +'<div class="card card-pad" style="margin-top:16px">'+Array(4).fill(0).map(kvLine).join('')+'</div>'
+    +callCard()+callCard();
+}
+
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
@@ -15137,24 +15214,43 @@ window.trcCard=function(kind,val){
   trcRender(true);
 };
 
+/* "All time" is gone - it asked Postgres to sort and hand back the whole table (11k+ rows and
+   climbing) in one shot, the single most expensive shape of this query, and it only got slower as the
+   table grew. Previous day plus a manual From/To range covers the same ground a click at a time
+   instead of all at once, and Previous day - the day whose calls actually finished processing
+   overnight - stays the default both here and in TRC_F's own initial state above. */
 function trcDateBar(){
   const preset=function(label,f,t){
     const on=TRC_F.from===f&&TRC_F.to===t;
     return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
   };
   const y=traYesterday();
+  /* The From/To boxes no longer fire on their own onchange - picking a From date used to refetch
+     immediately with To still at its old value, then picking To refetched AGAIN with the pair that
+     was actually wanted. One button, applied once both boxes say what they're meant to, means one
+     fetch of the range someone actually asked for, not one accidental fetch per box touched. Enter in
+     either box does the same thing a click on the button would. */
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-    +preset('Previous day',y,y)+preset('All time',null,null)
+    +preset('Previous day',y,y)
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
-    +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onchange="trcSetRange(this.value||null,(document.getElementById(\'trcTo\').value||this.value||null))" style="padding:5px 8px">'
+    +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
     +'<label style="font-size:12px;color:var(--slate)">To</label>'
-    +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onchange="trcSetRange((document.getElementById(\'trcFrom\').value||this.value||null),this.value||null)" style="padding:5px 8px">'
+    +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
+    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply range</button>'
   +'</div>';
 }
+window.trcApplyRange=function(){
+  const f=($('trcFrom')&&$('trcFrom').value)||null, t=($('trcTo')&&$('trcTo').value)||null;
+  return trcSetRange(f,t);
+};
 window.trcSetRange=async function(f,t){
+  /* Manually clearing both the From and To boxes is the one remaining way to ask for f=null,t=null -
+     which used to mean "All time". Falling back to Previous day here, the same default TRC_F starts
+     with, is what keeps that door closed now that the button for it is gone. */
+  if(!f&&!t){const y=traYesterday();f=y;t=y;}
   TRC_F.from=f||null;TRC_F.to=t||null;
-  const b=$('trcRows');if(b)b.innerHTML='<tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr>';
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
   await trcFetch(false);trcRender(true);
 };
 
@@ -15202,17 +15298,31 @@ window.trcSet=function(k,v){
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';
-  TRC_F.q='';TRC_F.from=null;TRC_F.to=null;
-  const b=$('trcRows');if(b)b.innerHTML='<tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr>';
+  TRC_F.q='';
+  // Not null/null - that was "All time". Clearing the filters resets the date range to the same
+  // Previous day default the page opens with, rather than reopening that door.
+  const y=traYesterday();TRC_F.from=y;TRC_F.to=y;
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
   await trcFetch(false);trcRender(true);
 };
-window.trcRefresh=async function(){await trcFetch(true);trcRender(true);};
+window.trcRefresh=async function(){
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
+  await trcFetch(true);trcRender(true);
+};
 
 function trcTextCell(v,width){
   if(!v)return '<td><span style="color:var(--slate)">—</span></td>';
   return '<td style="max-width:'+(width||220)+'px"><div title="'+esc(String(v))+'" '
     +'style="font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'
     +esc(String(v))+'</div></td>';
+}
+/* One-line badge cells (a status tag, a mismatch label) don't wrap the way free text does - without
+   this, an unusually long value (a raw enum string landing where a short label was expected, say)
+   just overflows its fixed-width column instead of respecting it. Centred both ways (a badge floating
+   left in a wide column reads as an accident; centred reads as a deliberate column of state), and
+   clipped rather than wrapped onto a second line if it's still too long for the column. */
+function trcClipCell(inner){
+  return '<td><div style="display:flex;align-items:center;justify-content:center;gap:4px;overflow:hidden;white-space:nowrap">'+inner+'</div></td>';
 }
 
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
@@ -15240,23 +15350,23 @@ function trcLeadRowHtml(g,sl){
   const jumpTo=TRC_F.personnel!=='all'&&last.follow_up_id?'/'+last.follow_up_id:'';
   const wasOpened=TRC_LAST_LEAD_ID!=null&&String(g.lead_id)===String(TRC_LAST_LEAD_ID);
   return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'\')">'
-    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate)">'+sl+'</td>'
-    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
-    +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
+    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate);text-align:center">'+sl+'</td>'
+    +'<td style="font-variant-numeric:tabular-nums;padding-right:20px">'+esc(String(g.lead_id))+'</td>'
+    +'<td style="padding-left:6px"><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">'+n+' follow-up'+(n===1?'':'s')
         +' · '+g.recordings+' recording'+(g.recordings===1?'':'s')+' · '+g.transcribed+' transcribed</div>'
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
-    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')
-      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?g.regressions+' status regressions':'Status regressed'):'')+'</td>'
-    +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +'<td>'+(g.mismatches
+      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?g.regressions+' status regressions':'Status regressed'):''))
+    +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
-        : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
+        : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     +'<td>'+(last.recording_url
@@ -15271,31 +15381,43 @@ function trcCallRowHtml(r){
   const m=TRC_MISMATCH[String(r.mismatch_type||'')];
   const wasOpened=TRC_LAST_FOLLOWUP_ID!=null&&String(r.follow_up_id)===String(TRC_LAST_FOLLOWUP_ID);
   return '<tr id="trcCallRow'+esc(String(r.follow_up_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+r.lead_id+'/'+r.follow_up_id+'\')">'
-    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(r.lead_id))+'</td>'
-    +'<td><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
+    +'<td style="font-variant-numeric:tabular-nums;padding-right:20px">'+esc(String(r.lead_id))+'</td>'
+    +'<td style="padding-left:6px"><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">follow-up '+esc(String(r.follow_up_id))+'</div></td>'
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||'—')+'</td>'
-    +'<td>'+(r.crm_status?trcTag('t-blue','',r.crm_status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +'<td>'+(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',r.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +'<td>'+(m?trcTag(m.tag,m.icon,m.short):trcMismatchTag(r))+'</td>'
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||'—')+'</td>'
+    +trcClipCell(r.crm_status?trcTag('t-blue','',r.crm_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',r.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(m?trcTag(m.tag,m.icon,m.short):trcMismatchTag(r))
     +trcTextCell(r.crm_remarks,260)
   +'</tr>';
 }
 
-function trcTableHtml(rows){
-  const callLevel=TRC_F.match==='MISMATCH';
-  if(!rows.length){
+function trcTableHtml(items,callLevel){
+  if(!items.length){
     return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:TRC_LEAD_COLS)+'"><div class="empty" style="padding:40px">'
       +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
   }
-  if(callLevel)return rows.slice().sort(function(a,b){return trcChrono(b,a);}).map(trcCallRowHtml).join('');
-  return trcLeads(rows).map(function(g,i){return trcLeadRowHtml(g,i+1);}).join('');
+  if(callLevel)return items.map(trcCallRowHtml).join('');
+  return items.map(function(g,i){return trcLeadRowHtml(g,i+1);}).join('');
 }
 function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
-    : '<tr><th>SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
+    : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
       +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
+}
+/* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
+   on the table itself (see trcView), this is what actually stops one long value (a badge holding an
+   unusually long status string, a wide business unit name) from stretching its own column and shoving
+   every column after it sideways. Widths are relative: the browser scales them to fill the table's own
+   width, so this still fits both a wide monitor and a laptop, just proportionally. */
+function trcColsHtml(){
+  return TRC_F.match==='MISMATCH'
+    ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
+      +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
+    : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:10%">'
+      +'<col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:8%">'
+      +'<col style="width:9%"><col style="width:11%"><col style="width:5%">';
 }
 
 function trcRender(full){
@@ -15307,11 +15429,14 @@ function trcRender(full){
     const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
     const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
   }
+  const cg=$('trcCols');if(cg)cg.innerHTML=trcColsHtml();
   const h=$('trcHead');if(h)h.innerHTML=trcHeadHtml();
-  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(rows);
+  const callLevel=TRC_F.match==='MISMATCH';
+  const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(items,callLevel);
   const c=$('trcCount');
   if(c){
-    const leads=TRC_F.match==='MISMATCH'?null:trcLeads(rows).length;
+    const leads=callLevel?null:items.length;
     c.textContent=(leads===null?rows.length+' call'+(rows.length===1?'':'s')
                                :leads+' lead'+(leads===1?'':'s')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s'))
       +' of '+all.length;
@@ -15328,12 +15453,18 @@ async function trcView(v,seg){
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
       +'<div id="trcCount" style="font-size:12.5px;color:var(--slate)"></div></div>'
-      +'<div id="trcDates" style="margin-top:12px"></div></div>'
-    +'<div id="trcKpis" style="margin-top:16px"></div>'
+      +'<div id="trcDates" style="margin-top:12px">'+trcDateBar()+'</div></div>'
+    +'<div id="trcKpis" style="margin-top:16px">'+trcSkeletonKpis()+'</div>'
     +'<div id="trcFilters"></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:64vh"><table class="tbl">'
-      +'<thead id="trcHead"></thead>'
-      +'<tbody id="trcRows"><tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
+    /* overflow-x only, no max-height - the list is unpaginated, so a vertical scrollbox here would
+       just hide rows inside their own little scrollbar instead of the page's normal one.
+       table-layout:fixed + the colgroup below is what makes a max-width on a cell actually mean
+       something - without it, a table sizes each column to its widest cell (one long badge value
+       stretches its whole column, and every column after it), no matter what a <td> asks for. */
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl" style="table-layout:fixed;width:100%">'
+      +'<colgroup id="trcCols">'+trcColsHtml()+'</colgroup>'
+      +'<thead id="trcHead">'+trcHeadHtml()+'</thead>'
+      +'<tbody id="trcRows">'+trcSkeletonRows()+'</tbody>'
     +'</table></div></div>';
   /* Not a forced refetch: coming back here from a lead's detail page (the in-app Back button, or the
      browser's own back button) must not re-download the whole day's rows and drop someone at the top
@@ -15652,7 +15783,7 @@ function trcOvHealthHtml(h){
 
 async function trcLeadDetail(v,leadId,targetFollowUpId){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  v.innerHTML=trcLeadSkeletonHtml();
   const id=Number(leadId);
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
