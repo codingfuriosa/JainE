@@ -6089,361 +6089,351 @@ VIEWS.hr=async function(v,seg){
     v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1></div></div><div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600;font-size:15px;color:var(--ink)">Restricted</div><p style="max-width:420px;margin:8px auto 0">You don't have HR access. Ask a director to grant you the HR role in Settings.</p></div>`;
     return;
   }
-  const tab=seg[0]||'hs';
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1><p>H/S Candidates · Monthly Update · Interview Tracker · Resumes · Interview Qs</p></div></div>
+  // H/S Candidates is gone - it was a second, hand-kept list of the same people the Interview
+  // Tracker already holds. 'hs' still resolves, so an old bookmark or a stale link lands on
+  // Monthly Update rather than a blank page.
+  const tab=(seg[0]==='hs'?'monthly':seg[0])||'monthly';
+  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1><p>Monthly Update · Interview Tracker · Resumes · Interview Qs</p></div></div>
   <div class="tabs">
-    <div class="tab ${tab==='hs'?'active':''}" onclick="navTo('hr/hs')"><i class="fa-solid fa-user-check"></i> H/S Candidates</div>
     <div class="tab ${tab==='monthly'?'active':''}" onclick="navTo('hr/monthly')"><i class="fa-solid fa-chart-bar"></i> Monthly Update</div>
     <div class="tab ${tab==='tracker'?'active':''}" onclick="navTo('hr/tracker')"><i class="fa-solid fa-calendar-check"></i> Interview Tracker</div>
     <div class="tab ${tab==='resumes'?'active':''}" onclick="navTo('hr/resumes')"><i class="fa-solid fa-id-card-clip"></i> Resumes</div>
     <div class="tab ${tab==='interviewqs'?'active':''}" onclick="navTo('hr/interviewqs')"><i class="fa-solid fa-comments"></i> Interview Qs</div>
   </div><div id="hrBody"><div class="loader"><div class="spin"></div></div></div>`;
-  if(tab==='monthly') hrMonthlyUpdate();
-  else if(tab==='tracker') hrTracker();
+  if(tab==='tracker') hrTracker();
   else if(tab==='resumes') hrResumes();
   else if(tab==='interviewqs') hrInterviewQs();
-  else hrHS();
+  else hrMonthlyUpdate();
 };
 
-/* ── H/S Candidates ── */
-async function hrHS(){
-  const b=$('hrBody');
-  loader(b);
-  let rows=[];
-  try{const {data}=await sb.schema('hr').from('hs_candidates').select('*').order('id',{ascending:false});rows=data||[];}catch(e){}
-  window._hsRows=rows;
-  window._hsSel=new Set();
-  const statusTag=s=>{
-    const m={'Hold':'t-amber','Selected':'t-green','Offer Decline':'t-red','Backout':'t-gray','Interview Not Done':'t-blue','Not Mentioned':'t-gray'};
-    return `<span class="hs-stag hs-stag--${(m[s]||'t-amber').replace('t-','')}">${esc(s||'Hold')}</span>`;
-  };
-  b.innerHTML=`
-    <style>
-      .hs-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-      .hs-toolbar .hs-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
-      .hs-toolbar .hs-filters{display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap;min-width:0}
-      .hs-search-wrap{position:relative;display:flex;align-items:center;min-width:0}
-      .hs-search-wrap i{position:absolute;left:10px;color:var(--slate);font-size:13px;pointer-events:none}
-      .hs-search-wrap input{padding-left:30px;height:36px;min-width:200px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink)}
-      .hs-search-wrap input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
-      select.hs-sel{height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--bg-card);color:var(--ink);cursor:pointer;min-width:150px}
-      select.hs-sel:focus{outline:none;border-color:var(--brand)}
-      .hs-count{font-size:12.5px;color:var(--slate);white-space:nowrap;padding:0 4px}
-      .hs-stag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
-      .hs-stag--amber{background:#fef3c7;color:#92400e}
-      .hs-stag--green{background:#d1fae5;color:#065f46}
-      .hs-stag--red{background:#fee2e2;color:#991b1b}
-      .hs-stag--gray{background:#f1f5f9;color:#475569}
-      .hs-stag--blue{background:#dbeafe;color:#1e40af}
-      #hsTbl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
-      #hsTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:10px 12px;border-bottom:2px solid var(--line);text-align:left;white-space:nowrap}
-      #hsTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s}
-      #hsTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
-      #hsTbl tbody tr.hs-selected{background:#eff6ff}
-      #hsTbl tbody td{padding:11px 12px;vertical-align:middle;white-space:nowrap}
-      .hs-cb{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
-      @media(max-width:768px){
-        .hs-toolbar{flex-direction:column;align-items:stretch}
-        .hs-toolbar .hs-actions{width:100%}
-        .hs-toolbar .hs-actions .btn{flex:1 1 auto;justify-content:center}
-        .hs-count{width:100%;text-align:center;order:99}
-        .hs-toolbar .hs-filters{margin-left:0;width:100%}
-        .hs-search-wrap{width:100%}
-        .hs-search-wrap input{min-width:0;width:100%}
-        select.hs-sel{min-width:0;width:100%}
-        #hsTbl{min-width:600px;font-size:12.5px}
-        #hsTbl thead th,#hsTbl tbody td{padding:9px 8px}
-      }
-    </style>
-    <div class="hs-toolbar">
-      <div class="hs-actions">
-        <button class="btn btn-primary" onclick="hsCreate()"><i class="fa-solid fa-plus"></i> Add</button>
-        <button class="btn" id="hsEditBtn" onclick="hsEditSel()" disabled style="opacity:.45"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn" id="hsDelBtn" onclick="hsDeleteSel()" disabled style="opacity:.45;color:var(--err);border-color:var(--err)"><i class="fa-solid fa-trash"></i> Delete</button>
-        <span class="hs-count" id="hsCount">${rows.length} candidates</span>
-      </div>
-      <div class="hs-filters">
-        <div class="hs-search-wrap">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input id="hsSearch" placeholder="Search name, position…" oninput="hsFilter()">
-        </div>
-        <select class="hs-sel" id="hsStatusFilter" onchange="hsFilter()">
-          <option value="">All Status</option>
-          <option>Hold</option><option>Selected</option><option>Offer Decline</option><option>Backout</option><option>Interview Not Done</option>
-        </select>
-      </div>
-    </div>
-    <div class="card" style="overflow:hidden">
-      <div style="overflow-x:auto">
-      <table id="hsTbl">
-        <thead><tr>
-          <th style="width:36px"><input type="checkbox" class="hs-cb" id="hsChkAll" onchange="hsToggleAll(this)"></th>
-          <th>Name</th><th>Position</th><th>Phone</th><th>Email</th><th>Interview Date</th><th>Status</th>
-        </tr></thead>
-        <tbody id="hsTbody">
-          ${rows.map((r)=>`<tr data-id="${r.id}" data-name="${esc((r.name||'').toLowerCase())}" data-pos="${esc((r.position||'').toLowerCase())}" data-status="${esc(r.status||'')}">
-            <td><input type="checkbox" class="hs-cb hs-row-cb" data-id="${r.id}" onchange="hsRowCheck(this)"></td>
-            <td style="font-weight:600">${esc(r.name||'—')}</td>
-            <td style="color:var(--slate)">${esc(r.position||'—')}</td>
-            <td style="font-family:monospace;font-size:12px">${esc(r.number||'—')}</td>
-            <td style="font-size:12px"><a href="mailto:${esc(r.email||'')}" style="color:var(--brand)">${esc(r.email||'—')}</a></td>
-            <td style="color:var(--slate)">${esc(r.interview_date||'—')}</td>
-            <td>${statusTag(r.status)}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-      </div>
-    </div>`;
+/* ── Monthly Update ──
+   Rebuilt against hr.monthly_view. The nine columns — Tests Sent, Test Passed, Interview Scheduled,
+   Interview Done, Selected, Rejected, Hold, Backed Out, Joined — are COUNTED from hr.candidates,
+   never typed. The old screen was a grid of number boxes somebody had to keep in step with reality
+   by hand; every figure here is derived, so it cannot drift.
+   The first four columns are cumulative ("how many got at least this far") and read the candidate's
+   high-water mark, not their current stage — otherwise anybody who dropped out after their test
+   would still be counted as having been interviewed. The last five are exact outcomes. That split
+   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change. */
+let MU_MONTHS_CACHE=null, MU_CUR=null, MU_ROWS=null, MU_SEL=new Set();
+const MU_MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
+/* The nine column names come from the database (hr.tracker_stages) so the screen cannot disagree
+   with what the counts were computed against. The literal below is the same list, and is what gets
+   used if that one read fails — a stale header is better than a blank page. */
+let MU_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Done','Selected','Rejected','Hold','Backed Out','Joined'];
+let MU_STAGES_LOADED=false;
+function muMonthLabel(iso){
+  if(!iso) return '';
+  const parts=String(iso).split('-');
+  return (MU_MONTH_NAMES[parseInt(parts[1],10)-1]||'')+' '+parts[0];
 }
-window.hsRowCheck=function(cb){
-  const id=Number(cb.dataset.id);
-  if(cb.checked) window._hsSel.add(id); else window._hsSel.delete(id);
-  cb.closest('tr').classList.toggle('hs-selected',cb.checked);
-  hsUpdateToolbar();
-};
-window.hsToggleAll=function(master){
-  document.querySelectorAll('.hs-row-cb').forEach(cb=>{
-    const tr=cb.closest('tr');
-    if(tr.style.display==='none')return;
-    cb.checked=master.checked;
-    const id=Number(cb.dataset.id);
-    if(master.checked) window._hsSel.add(id); else window._hsSel.delete(id);
-    tr.classList.toggle('hs-selected',master.checked);
-  });
-  hsUpdateToolbar();
-};
-window.hsUpdateToolbar=function(){
-  const n=window._hsSel.size;
-  const editBtn=$('hsEditBtn'),delBtn=$('hsDelBtn');
-  if(editBtn){editBtn.disabled=(n!==1);editBtn.style.opacity=(n===1)?'1':'.45';}
-  if(delBtn){delBtn.disabled=(n===0);delBtn.style.opacity=(n>0)?'1':'.45';}
-};
-window.hsFilter=function(){
-  const q=($('hsSearch').value||'').toLowerCase();
-  const st=$('hsStatusFilter').value;
-  let vis=0;
-  document.querySelectorAll('#hsTbody tr').forEach(tr=>{
-    const nm=tr.dataset.name||'',pos=tr.dataset.pos||'',s=tr.dataset.status||'';
-    const show=(!q||(nm.includes(q)||pos.includes(q)))&&(!st||s===st);
-    tr.style.display=show?'':'none';if(show)vis++;
-  });
-  const c=$('hsCount');if(c)c.textContent=vis+' candidates';
-  // deselect hidden rows
-  document.querySelectorAll('#hsTbody tr').forEach(tr=>{
-    if(tr.style.display==='none'){
-      const cb=tr.querySelector('.hs-row-cb');
-      if(cb&&cb.checked){cb.checked=false;window._hsSel.delete(Number(cb.dataset.id));tr.classList.remove('hs-selected');}
-    }
-  });
-  hsUpdateToolbar();
-};
-window.hsCreate=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Add Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Full Name *</label><input id="hsFName" class="sel" placeholder="e.g. Priya Sharma"></div>
-    <div><label>Position *</label><input id="hsFPos" class="sel" placeholder="e.g. Sales Manager"></div></div>
-    <div class="two"><div><label>Phone Number</label><input id="hsFNum" class="sel" placeholder="e.g. 9876543210"></div>
-    <div><label>Email</label><input id="hsFEmail" class="sel" type="email" placeholder="e.g. priya@email.com"></div></div>
-    <div class="two"><div><label>Interview Date</label><input id="hsFDate" class="sel" placeholder="e.g. 15.07.2026"></div>
-    <div><label>Status</label><select id="hsFStatus" class="sel">
-      <option>Hold</option><option>Selected</option><option>Offer Decline</option><option>Backout</option><option>Interview Not Done</option>
-    </select></div></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="hsSaveBtn" onclick="hsSave()"><i class="fa-solid fa-check"></i> Save</button></div>`);
-};
-window.hsSave=async function(){
-  const name=($('hsFName').value||'').trim();
-  const pos=($('hsFPos').value||'').trim();
-  if(!name){toast('Enter a name','err');return;}
-  const btn=$('hsSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {error}=await sb.schema('hr').from('hs_candidates').insert({name,position:pos,number:($('hsFNum').value||'').trim(),email:($('hsFEmail').value||'').trim(),interview_date:($('hsFDate').value||'').trim(),status:$('hsFStatus').value||'Hold'});
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
-  closeModal();toast('Candidate added','ok');hrHS();
-};
-window.hsEditSel=function(){
-  const sel=[...window._hsSel];
-  if(sel.length===0){toast('Select a candidate first','err');return;}
-  if(sel.length>1){toast('Select only one candidate to edit','err');return;}
-  hsEdit(sel[0]);
-};
-window.hsEdit=async function(id){
-  const r=(window._hsRows||[]).find(x=>x.id===id);if(!r)return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-pen"></i> Edit Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Full Name *</label><input id="hsFName" class="sel" value="${esc(r.name||'')}"></div>
-    <div><label>Position</label><input id="hsFPos" class="sel" value="${esc(r.position||'')}"></div></div>
-    <div class="two"><div><label>Phone Number</label><input id="hsFNum" class="sel" value="${esc(r.number||'')}"></div>
-    <div><label>Email</label><input id="hsFEmail" class="sel" value="${esc(r.email||'')}"></div></div>
-    <div class="two"><div><label>Interview Date</label><input id="hsFDate" class="sel" value="${esc(r.interview_date||'')}"></div>
-    <div><label>Status</label><select id="hsFStatus" class="sel">
-      ${['Hold','Selected','Offer Decline','Backout','Interview Not Done'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
-    </select></div></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="hsSaveBtn" onclick="hsUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button></div>`);
-};
-window.hsUpdate=async function(id){
-  const name=($('hsFName').value||'').trim();if(!name){toast('Enter a name','err');return;}
-  const btn=$('hsSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {error}=await sb.schema('hr').from('hs_candidates').update({name,position:($('hsFPos').value||'').trim(),number:($('hsFNum').value||'').trim(),email:($('hsFEmail').value||'').trim(),interview_date:($('hsFDate').value||'').trim(),status:$('hsFStatus').value||'Hold'}).eq('id',id);
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
-  closeModal();toast('Updated','ok');hrHS();
-};
-window.hsDeleteSel=async function(){
-  const sel=[...window._hsSel];
-  if(!sel.length)return;
-  if(!await confirmDialog(`Delete ${sel.length} candidate${sel.length>1?'s':''}?`))return;
-  const {error}=await sb.schema('hr').from('hs_candidates').delete().in('id',sel);
-  if(error){toast(error.message,'err');return;}
-  toast(sel.length>1?`${sel.length} candidates deleted`:'Candidate deleted','ok');
-  hrHS();
-};
+async function muLoadStages(){
+  if(MU_STAGES_LOADED) return;
+  MU_STAGES_LOADED=true;
+  try{
+    const {data}=await sb.schema('hr').from('tracker_stages').select('seq,label').order('seq');
+    if(data&&data.length) MU_STAGES=data.map(function(s){return s.label;});
+  }catch(e){/* keep the literal order above */}
+}
 
-/* ── Monthly Update ── */
-let MU_RECORDS=null,MU_CUR=null;
-const MU_COLS=[
-  {l:'Tests Sent',          r:'RM',  t:'1 Day'},
-  {l:'Test Responses\nReceived', r:'RM', t:'3 Days'},
-  {l:'Passed Test CVs',     r:'RM',  t:'1 day'},
-  {l:'Schedule Interview',  r:'RM',  t:'1 day'},
-  {l:'Interview Done',      r:'MC',  t:'7 days'},
-  {l:'Selected',            r:'',    t:''},
-  {l:'Negotiation +\nOffer',r:'MC',  t:'1 day'},
-  {l:'Back Out',            r:'',    t:''},
-  {l:'To Join in Future',   r:'MC',  t:''},
-  {l:'Joined',              r:'MC',  t:''},
-  {l:'Joining Formalities', r:'MC',  t:'same day'},
-];
-const MU_POSITIONS=['Sales Manager','SR.Sales Advisor','Pre Sales Manager','CP Sales Executive','Backend Developer','Process Coordinator','Pre Sales Executive','Sr.Engineer','Supervisor','Wholetimer','Social Executive'];
-const MU_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-function muEmptyRows(){return [];}
 async function hrMonthlyUpdate(){
   const b=$('hrBody');
-  if(!MU_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{const {data,error}=await sb.schema('hr').from('monthly_updates').select('*').order('id',{ascending:true});
-      if(error)throw error;
-      const MU_MON_ORD=['January','February','March','April','May','June','July','August','September','October','November','December'];
-      const muSort=l=>{const[m,y]=(l||'').split(' ');return (parseInt(y)||0)*100+(MU_MON_ORD.indexOf(m)+1);};
-      MU_RECORDS=(data||[]).sort((a,b)=>muSort(a.month_label)-muSort(b.month_label));}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  if(MU_CUR!=null) return muRenderDetail(b);
+  loader(b);
+  await muLoadStages();
+  try{
+    const {data,error}=await sb.schema('hr').rpc('monthly_months');
+    if(error) throw error;
+    MU_MONTHS_CACHE=data||[];
+  }catch(e){
+    b.innerHTML='<div class="card card-pad empty" style="color:var(--err)">'+esc(e.message||String(e))+'</div>';
+    return;
   }
-  if(MU_CUR!=null){muRenderDetail(b);return;}
   muRenderList(b);
 }
+
 function muRenderList(b){
-  const rows=MU_RECORDS;
-  let html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div class="sec-title" style="margin:0">Monthly Updates</div><button class="btn btn-primary" onclick="muCreate()"><i class="fa-solid fa-plus"></i> New Month</button></div>';
-  if(!rows.length){html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No monthly records yet</div><p style="max-width:360px;margin:6px auto 0">Click <b>New Month</b> to create your first monthly update.</p></div>';}
-  else{html+='<div class="mu-grid">'+rows.map(r=>`<div class="mu-card" onclick="muViewMonth(${r.id})"><div class="mu-card-icon"><i class="fa-solid fa-calendar-days"></i></div><div class="mu-card-body"><div class="mu-card-label">${esc(r.month_label)}</div><div class="mu-card-meta">${(r.data||[]).filter(x=>x.values&&x.values.some(v=>v)).length} of ${(r.data||[]).length} positions have data</div></div><i class="fa-solid fa-chevron-right mu-card-arrow"></i></div>`).join('')+'</div>';}
+  const rows=MU_MONTHS_CACHE||[];
+  let html='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">'
+    +'<div class="sec-title" style="margin:0">Monthly Updates</div>'
+    +'<span class="mu-computed"><i class="fa-solid fa-circle-check"></i> Every figure is counted from the candidates — nothing is typed in</span>'
+    +'</div>';
+  if(!rows.length){
+    html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i>'
+      +'<div style="font-weight:600;color:var(--ink)">No months yet</div>'
+      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a ManPower requisition lands in it. '
+      +'Fill a ManPower Form in Recruitment to start one.</p></div>';
+  } else {
+    html+='<div class="mu-grid">'+rows.map(function(r){
+      const pending=Number(r.pending||0);
+      const pos=Number(r.positions||0);
+      return '<div class="mu-card" onclick="muViewMonth(\''+esc(r.row_month)+'\')">'
+        +'<div class="mu-card-icon"><i class="fa-solid fa-calendar-days"></i></div>'
+        +'<div class="mu-card-body"><div class="mu-card-label">'+esc(muMonthLabel(r.row_month))
+          +(pending?'<span class="mu-card-pending">'+pending+' to approve</span>':'')+'</div>'
+          +'<div class="mu-card-meta">'+pos+' position'+(pos===1?'':'s')+'</div></div>'
+        +'<i class="fa-solid fa-chevron-right mu-card-arrow"></i></div>';
+    }).join('')+'</div>';
+  }
   b.innerHTML=html;
 }
-function muRenderDetail(b){
-  const rec=MU_RECORDS.find(r=>r.id===MU_CUR);if(!rec)return muBack();
-  const data=rec.data||[];
-  const rows=data.length?data:[];
-  const respBadge=r=>r?`<span class="mu-resp mu-resp-${r.toLowerCase()}">${r}</span>`:'';
-  let tbl='<div class="mu-tbl-wrap"><table class="mu-tbl"><thead>';
-  tbl+='<tr><th style="width:36px;text-align:center;background:#fdf4f6" rowspan="3"><input type="checkbox" id="muChkAll" onchange="muToggleAll(this)" title="Select all"></th><th class="mu-pos-col" rowspan="3">Position</th>'+MU_COLS.map(c=>`<th class="mu-hdr-top">${respBadge(c.r)||'&nbsp;'}</th>`).join('')+'</tr>';
-  tbl+='<tr>'+MU_COLS.map(c=>`<th class="mu-hdr-mid">${esc(c.t)||'&nbsp;'}</th>`).join('')+'</tr>';
-  tbl+='<tr>'+MU_COLS.map(c=>`<th class="mu-hdr-col">${c.l.replace('\n','<br>')}</th>`).join('')+'</tr>';
-  tbl+='</thead><tbody>';
-  rows.forEach((row,ri)=>{
-    tbl+=`<tr><td style="text-align:center;padding:0 8px;vertical-align:middle"><input type="checkbox" class="mu-row-chk" data-ri="${ri}"></td><td class="mu-pos-cell">${esc(row.position)}</td>`+
-      row.values.map((v,ci)=>`<td class="mu-cell"><input class="mu-inp" type="number" min="0" value="${v!=null?v:''}" placeholder="" data-ri="${ri}" data-ci="${ci}" onchange="muSaveCell(${rec.id},${ri},${ci},this.value)"></td>`).join('')+'</tr>';
-  });
-  tbl+='</tbody></table></div>';
-  b.innerHTML=`<div class="mu-detail-bar">
-    <button class="btn" onclick="muBack()"><i class="fa-solid fa-arrow-left"></i> Back</button>
-    <h2 style="margin:0;font-size:18px;font-weight:700"><i class="fa-solid fa-calendar-days" style="color:#be123c;margin-right:8px"></i>${esc(rec.month_label)}</h2>
-    <span class="mu-autosave-hint"><i class="fa-solid fa-pencil" style="font-size:10px"></i> Cells auto-save</span>
-    <div class="mu-detail-actions">
-      <button class="btn btn-sm btn-primary" onclick="muAddRow(${rec.id})"><i class="fa-solid fa-plus"></i> Add Row</button>
-      <button class="btn btn-sm" style="color:#c83232;border-color:#fecaca" onclick="muDeleteChecked(${rec.id})"><i class="fa-solid fa-trash"></i> Delete Selected</button>
-      <button class="btn btn-sm" style="color:#c83232;border-color:#fecaca;background:#fff5f5" onclick="muDeleteMonth(${rec.id})"><i class="fa-solid fa-calendar-xmark"></i> Delete Month</button>
-    </div>
-  </div>`+tbl;
-}
-window.muToggleAll=function(el){document.querySelectorAll('.mu-row-chk').forEach(c=>c.checked=el.checked);};
-window.muAddRow=function(id){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Position Row</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div><label>Position Name *</label><input id="muRowName" class="inp" placeholder="e.g. Sales Manager"></div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="muAddRowSave(${id})"><i class="fa-solid fa-check"></i> Add</button></div>`);
-  setTimeout(()=>{const el=$('muRowName');if(el)el.focus();},50);
-};
-window.muAddRowSave=async function(id){
-  const name=($('muRowName').value||'').trim();
-  if(!name){toast('Enter a position name','err');return;}
-  const rec=MU_RECORDS.find(r=>r.id===id);if(!rec)return;
-  const data=JSON.parse(JSON.stringify(rec.data||[]));
-  if(data.find(r=>r.position===name)){toast('Position already exists','err');return;}
-  data.push({position:name,values:Array(11).fill(null)});
-  const {error}=await sb.schema('hr').from('monthly_updates').update({data}).eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  rec.data=data;closeModal();muRenderDetail($('hrBody'));
-};
-window.muDeleteChecked=async function(id){
-  const checked=[...document.querySelectorAll('.mu-row-chk:checked')].map(el=>parseInt(el.dataset.ri));
-  if(!checked.length){toast('Select at least one row to delete','err');return;}
-  if(!await confirmDialog('Delete '+checked.length+' row(s)? This cannot be undone.'))return;
-  const rec=MU_RECORDS.find(r=>r.id===id);if(!rec)return;
-  const data=(rec.data||[]).filter((_,i)=>!checked.includes(i));
-  const {error}=await sb.schema('hr').from('monthly_updates').update({data}).eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  rec.data=data;muRenderDetail($('hrBody'));
-};
-window.muViewMonth=function(id){MU_CUR=id;hrMonthlyUpdate();};
-window.muBack=function(){MU_CUR=null;hrMonthlyUpdate();};
-window.muCreate=function(){
-  const yr=new Date().getFullYear();
-  const curMo=new Date().getMonth(); // 0-indexed
-  const yrs=[yr-1,yr,yr+1];
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-calendar-plus"></i> New Monthly Update</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two">
-      <div><label>Month *</label><select id="muFMon" class="sel"><option value="">— Month —</option>${MU_MONTHS.map((m,i)=>`<option value="${m}"${i===curMo?' selected':''}>${m}</option>`).join('')}</select></div>
-      <div><label>Year *</label><select id="muFYr" class="sel">${yrs.map(y=>`<option${y===yr?' selected':''}>${y}</option>`).join('')}</select></div>
-    </div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="muSaveBtn" onclick="muSaveNew()"><i class="fa-solid fa-check"></i> Create</button></div>`);
-};
-window.muSaveNew=async function(){
-  const mon=($('muFMon').value||'').trim(), yr=($('muFYr').value||'').trim();
-  const lbl=mon&&yr?`${mon} ${yr}`:'';
-  if(!lbl){toast('Select month and year','err');return;}
-  if(MU_RECORDS&&MU_RECORDS.find(r=>r.month_label===lbl)){toast('That month already exists','err');return;}
-  const btn=$('muSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('monthly_updates').insert({month_label:lbl,data:muEmptyRows()}).select().single();
-  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Create';}return;}
-  MU_RECORDS=[...(MU_RECORDS||[]),data];
-  const MU_MON_ORD2=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const muSort2=l=>{const[m,y]=(l||'').split(' ');return (parseInt(y)||0)*100+(MU_MON_ORD2.indexOf(m)+1);};
-  MU_RECORDS.sort((a,b)=>muSort2(a.month_label)-muSort2(b.month_label));
-  closeModal();MU_CUR=data.id;hrMonthlyUpdate();
-};
-window.muSaveCell=async function(id,ri,ci,val){
-  const rec=MU_RECORDS&&MU_RECORDS.find(r=>r.id===id);if(!rec)return;
-  const data=JSON.parse(JSON.stringify(rec.data||[]));
-  // ensure row exists
-  if(!data[ri]){data[ri]={position:'',values:Array(11).fill(null)};}
-  if(!data[ri].values){data[ri].values=Array(11).fill(null);}
-  data[ri].values[ci]=val===''||val==null?null:Number(val);
-  const {error}=await sb.schema('hr').from('monthly_updates').update({data}).eq('id',id);
-  if(error){toast('Save failed: '+error.message,'err');}
-  else{
-    rec.data=data;
-    // keep the desktop table and mobile card copies of this cell in sync
-    document.querySelectorAll('.mu-inp[data-ri="'+ri+'"][data-ci="'+ci+'"]').forEach(el=>{el.value=(val===''||val==null)?'':val;});
+
+window.muViewMonth=function(iso){ MU_CUR=iso; MU_ROWS=null; MU_SEL=new Set(); hrMonthlyUpdate(); };
+window.muBack=function(){ MU_CUR=null; MU_ROWS=null; MU_SEL=new Set(); MU_MONTHS_CACHE=null; hrMonthlyUpdate(); };
+
+async function muRenderDetail(b){
+  await muLoadStages();
+  if(!MU_ROWS){
+    loader(b);
+    try{
+      const {data,error}=await sb.schema('hr').rpc('monthly_view',{p_month:MU_CUR});
+      if(error) throw error;
+      MU_ROWS=data||[];
+    }catch(e){
+      b.innerHTML='<div class="card card-pad empty" style="color:var(--err)">'+esc(e.message||String(e))+'</div>';
+      return;
+    }
   }
+  const rows=MU_ROWS, stages=MU_STAGES;
+  const depts=[...new Set(rows.map(function(r){return r.department;}).filter(Boolean))].sort();
+  const n=MU_SEL.size;
+  const dis='opacity:.45;cursor:not-allowed;pointer-events:none';
+  const canAppr=hrCan();
+
+  const head='<tr>'
+    +'<th style="width:36px"><input type="checkbox" class="mu-cb" id="muChkAll" onchange="muToggleAll(this)"></th>'
+    +'<th>Position</th><th>Vacancies</th><th>Approval</th><th>Hiring</th>'
+    +stages.map(function(s,i){ return '<th class="mu-n'+(i===0?' mu-split':'')+'">'+esc(s)+'</th>'; }).join('')
+    +'</tr>';
+
+  const body=rows.map(function(r){
+    const c=r.counts||{};
+    const st=r.approval_status||'Pending';
+    const cells=stages.map(function(s,i){
+      const v=Number(c[s]||0);
+      return '<td class="mu-n'+(i===0?' mu-split':'')+(v?'':' mu-zero')+'">'+v+'</td>';
+    }).join('');
+    let appr;
+    if(st==='Pending'){
+      appr=canAppr
+        ? '<span class="mu-appr">'
+            +'<button class="btn btn-sm btn-ok" onclick="event.stopPropagation();muApprove('+r.manpower_id+',true)"><i class="fa-solid fa-check"></i> Approve</button>'
+            +'<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();muApprove('+r.manpower_id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
+          +'</span>'
+        : '<span class="tag t-amber">Awaiting HR</span>';
+    } else if(st==='Rejected'){
+      appr='<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
+    } else {
+      appr='<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
+    }
+    const open=(r.hiring_status||'Open')==='Open';
+    const cls=[st==='Pending'?'mu-fresh':'', open?'':'mu-closed'].filter(Boolean).join(' ');
+    return '<tr data-id="'+r.row_id+'" data-pos="'+esc((r.position_title||'').toLowerCase())+'" data-dept="'+esc(r.department||'')+'"'
+      +(cls?' class="'+cls+'"':'')+'>'
+      +'<td><input type="checkbox" class="mu-cb mu-row-cb" data-id="'+r.row_id+'" onchange="muRowCheck(this)"></td>'
+      +'<td class="mu-pos">'+esc(r.position_title||'—')
+        +'<div class="mu-sub">'+esc(r.department||'No department')
+        +(r.raised_by?' · raised by '+esc(r.raised_by):'')
+        +(r.priority==='Urgent'?' · <b style="color:var(--err)">Urgent</b>':'')+'</div></td>'
+      +'<td>'+esc(r.vacancies||'—')+'</td>'
+      +'<td>'+appr+'</td>'
+      +'<td class="mu-hire">'+muHireCell(r,open,canAppr)+'</td>'
+      +cells
+      +'</tr>';
+  }).join('');
+
+  b.innerHTML='<div class="mu-detail-bar">'
+      +'<button class="btn" onclick="muBack()"><i class="fa-solid fa-arrow-left"></i> Back</button>'
+      +'<h2 style="margin:0;font-size:18px;font-weight:700"><i class="fa-solid fa-calendar-days" style="color:#be123c;margin-right:8px"></i>'+esc(muMonthLabel(MU_CUR))+'</h2>'
+      +'<div class="mu-detail-actions">'
+        +'<button class="btn btn-sm" onclick="muRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+        +'<button class="btn btn-sm" id="muDelBtn" '+(n?'':'disabled style="'+dis+'"')
+          +' onclick="muDeleteSel()"><i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'')+'</button>'
+      +'</div>'
+    +'</div>'
+    +(rows.length
+      ? '<div class="mu-filters">'
+          +'<div class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i>'
+            +'<input id="muQ" placeholder="Search position…" oninput="muFilter()"></div>'
+          +'<select class="mu-sel" id="muDeptF" onchange="muFilter()"><option value="">All Departments</option>'
+            +depts.map(function(d){return '<option>'+esc(d)+'</option>';}).join('')+'</select>'
+          +'<select class="mu-sel" id="muApprF" onchange="muFilter()"><option value="">All</option>'
+            +'<option value="Pending">To approve</option><option value="Approved">Approved</option><option value="Rejected">Rejected</option></select>'
+          +'<select class="mu-sel" id="muHireF" onchange="muFilter()"><option value="">Open and closed</option>'
+            +'<option value="Open">Still hiring</option><option value="Closed">Closed</option></select>'
+          +'<span class="mu-count" id="muCount">'+rows.length+' position'+(rows.length===1?'':'s')+'</span>'
+          +'<span class="mu-computed" style="margin-left:auto"><i class="fa-solid fa-circle-check"></i> Counted live from the Tracker</span>'
+        +'</div>'
+        +'<div class="mu-tbl-wrap"><table class="mu-tbl"><thead>'+head+'</thead><tbody id="muTbody">'+body+'</tbody></table>'
+        +'<div id="muNoMatch" class="empty" style="display:none;padding:26px">No matches</div></div>'
+      : '<div class="card card-pad empty"><i class="fa-regular fa-folder-open"></i>'
+        +'<div style="font-weight:600;color:var(--ink)">Nothing in '+esc(muMonthLabel(MU_CUR))+' yet</div>'
+        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from ManPower requisitions.</p></div>');
+}
+
+/* Closing a position is what takes its page off the website. hr.public_position only answers for
+   a requisition whose status is Open, so the moment this is closed thejaingroup.com/career/<slug>
+   stops showing the role and says it is no longer open instead. Nothing else has to be changed and
+   nothing has to be taken down by hand. */
+function muHireCell(r,open,canAppr){
+  if(!r.manpower_id) return '<span style="color:var(--slate-2)">—</span>';
+  if((r.approval_status||'Pending')!=='Approved'){
+    return '<span class="tag t-gray" title="A position is only live once it is approved">Not live</span>';
+  }
+  const live='<span class="tag t-green" title="'+esc('Live at /career/'+(r.slug||''))+'">Hiring</span>';
+  const shut='<span class="tag t-gray" title="'+esc(r.closed_at?('Closed '+muWhen(r.closed_at)):'Closed')+'">Closed</span>';
+  if(!canAppr) return open?live:shut;
+  return '<span class="mu-hire-wrap">'+(open?live:shut)
+    +'<button class="btn btn-sm" title="'+(open?'Close hiring — this takes the page off the website'
+                                              :'Reopen hiring — the page goes back up')+'"'
+    +' onclick="event.stopPropagation();muSetHiring('+r.manpower_id+','+(open?'false':'true')+')">'
+    +'<i class="fa-solid fa-'+(open?'lock':'lock-open')+'"></i></button></span>';
+}
+function muWhen(ts){
+  if(!ts) return '';
+  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return String(ts); }
+}
+window.muSetHiring=async function(manpowerId,open){
+  if(!hrCan()){ toast('Only HR can open or close a position','err'); return; }
+  const row=(MU_ROWS||[]).find(function(r){ return r.manpower_id===manpowerId; })||{};
+  const who=row.position_title||'this position';
+  const msg=open
+    ? 'Reopen hiring for “'+who+'”? Its page goes back up on the website and candidates can apply again.'
+    : 'Close hiring for “'+who+'”? Its page comes off the website immediately — anyone opening the '
+      +'link will be told the position is no longer open. Everything already recorded is kept.';
+  if(!await confirmDialog(msg, open
+      ? {title:'Reopen hiring', okLabel:'Reopen', icon:'fa-lock-open', danger:false}
+      : {title:'Close hiring',  okLabel:'Close',  icon:'fa-lock'})) return;
+  try{
+    const {error}=await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:manpowerId,p_open:open});
+    if(error) throw error;
+  }catch(e){ toast((e&&e.message)||String(e),'err'); return; }
+  toast(open?'Hiring reopened — the page is live again':'Closed — the page is off the website','ok');
+  MP_RECORDS=null;
+  muRefresh();
 };
-window.muDeleteMonth=async function(id){
-  if(!await confirmDialog('Delete this monthly record?'))return;
-  const {error}=await sb.schema('hr').from('monthly_updates').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
-  MU_RECORDS=(MU_RECORDS||[]).filter(r=>r.id!==id);
-  MU_CUR=null;hrMonthlyUpdate();toast('Deleted','ok');
+
+window.muToggleAll=function(el){
+  MU_SEL=new Set();
+  document.querySelectorAll('#muTbody tr').forEach(function(tr){
+    if(tr.style.display==='none') return;   // only what the filter is actually showing
+    const cb=tr.querySelector('.mu-row-cb'); if(!cb) return;
+    cb.checked=el.checked;
+    tr.classList.toggle('mu-selected',el.checked);
+    if(el.checked) MU_SEL.add(parseInt(cb.dataset.id,10));
+  });
+  muSyncDelBtn();
 };
-window.muReload=function(){MU_RECORDS=null;MU_CUR=null;if(PAGE==='hr')renderPage();};
+window.muRowCheck=function(cb){
+  const id=parseInt(cb.dataset.id,10);
+  if(cb.checked) MU_SEL.add(id); else MU_SEL.delete(id);
+  const tr=cb.closest('tr'); if(tr) tr.classList.toggle('mu-selected',cb.checked);
+  muSyncDelBtn();
+};
+function muSyncDelBtn(){
+  const btn=$('muDelBtn'); if(!btn) return;
+  const n=MU_SEL.size;
+  btn.disabled=!n;
+  btn.style.cssText=n?'':'opacity:.45;cursor:not-allowed;pointer-events:none';
+  btn.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');
+}
+window.muFilter=function(){
+  const q=(($('muQ')||{}).value||'').trim().toLowerCase();
+  const dept=($('muDeptF')||{}).value||'';
+  const appr=($('muApprF')||{}).value||'';
+  const hire=($('muHireF')||{}).value||'';
+  let shown=0;
+  document.querySelectorAll('#muTbody tr').forEach(function(tr){
+    const row=(MU_ROWS||[]).find(function(r){return String(r.row_id)===tr.dataset.id;})||{};
+    let ok=true;
+    if(q && (tr.dataset.pos||'').indexOf(q)===-1) ok=false;
+    if(ok && dept && (tr.dataset.dept||'')!==dept) ok=false;
+    if(ok && appr && (row.approval_status||'Pending')!==appr) ok=false;
+    if(ok && hire){
+      const isOpen=(row.hiring_status||'Open')==='Open';
+      if(hire==='Open' ? !isOpen : isOpen) ok=false;
+    }
+    tr.style.display=ok?'':'none';
+    if(ok) shown++;
+  });
+  const c=$('muCount'); if(c) c.textContent=shown+' position'+(shown===1?'':'s');
+  const nm=$('muNoMatch'); if(nm) nm.style.display=shown?'none':'block';
+};
+window.muRefresh=function(){ MU_ROWS=null; MU_SEL=new Set(); hrMonthlyUpdate(); };
+
+/* Deleting a row takes the POSITION out of this month. The candidates attached to it are the real
+   record of what happened, so this is refused rather than cascading — move or remove the people
+   first. The requisition itself is never deleted here. */
+window.muDeleteSel=async function(){
+  const ids=[...MU_SEL];
+  if(!ids.length) return;
+  if(!hrCan()){ toast('Only HR can change the Monthly Update','err'); return; }
+  const picked=(MU_ROWS||[]).filter(function(r){return ids.indexOf(r.row_id)>-1;});
+  const withPeople=picked.filter(function(r){return Number(r.candidate_total||0)>0;});
+  if(withPeople.length){
+    toast(withPeople.length===1
+      ? '“'+(withPeople[0].position_title||'That position')+'” still has '+withPeople[0].candidate_total+' candidate(s) — remove them first'
+      : withPeople.length+' of the selected positions still have candidates — remove them first','err');
+    return;
+  }
+  const what=ids.length===1
+    ? 'Remove “'+((picked[0]&&picked[0].position_title)||'this position')+'” from '+muMonthLabel(MU_CUR)+'?'
+    : 'Remove '+ids.length+' positions from '+muMonthLabel(MU_CUR)+'?';
+  if(!await confirmDialog(what+' The requisition itself is not deleted.',
+      {title:'Remove from month', okLabel:'Remove'})) return;
+  const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
+  if(error){ toast(error.message,'err'); return; }
+  toast(ids.length===1?'Position removed':ids.length+' positions removed','ok');
+  muRefresh();
+};
+
+/* Approve / Reject a fresh row. The decision is recorded against the REQUISITION, which is what the
+   emailed one-click links act on as well, so both routes land in exactly the same place. */
+window.muApprove=async function(manpowerId,ok){
+  if(!manpowerId){ toast('This row has no requisition behind it','err'); return; }
+  if(!hrCan()){ toast('Only HR can approve a requisition','err'); return; }
+  const row=(MU_ROWS||[]).find(function(r){return r.manpower_id===manpowerId;})||{};
+  const who=row.position_title||'this requisition';
+  /* confirmDialog defaults to danger:true with the OK button labelled "Delete" - which turned the
+     Approve prompt into a red delete warning. Both buttons are named for what they actually do. */
+  const okd=await confirmDialog(
+    (ok?'Approve the requisition for “':'Reject the requisition for “')+who+'”?',
+    ok ? {title:'Approve requisition', okLabel:'Approve', icon:'fa-circle-check', danger:false}
+       : {title:'Reject requisition',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
+  if(!okd) return;
+  const patch=ok
+    ? {approval_status:'Approved', approved_by:state.email, approved_at:new Date().toISOString(), rejection_reason:null}
+    : {approval_status:'Rejected', approved_by:state.email, approved_at:new Date().toISOString()};
+  const {error}=await sb.schema('hr').from('manpower_requests').update(patch).eq('id',manpowerId);
+  if(error){ toast(error.message,'err'); return; }
+  toast(ok?'Approved':'Rejected','ok');
+  MP_RECORDS=null;          // the Recruitment ManPower list shows the same status
+  muRefresh();
+};
+
+window.muReload=function(){ MU_MONTHS_CACHE=null; MU_ROWS=null; MU_CUR=null; MU_SEL=new Set(); if(PAGE==='hr')renderPage(); };
+
+/* Preview opens the CV in a tab; Download saves it under the candidate's own name rather than the
+   stamped storage filename. Both go through s3OpenSigned, which mints a short-lived signed URL -
+   the bucket itself stays private, exactly as it does for the Resumes tab. */
+function trResumeCell(r){
+  const cv=r.candidate_id?(window._trResume||{})[r.candidate_id]:null;
+  if(!cv||!cv.storage_path) return '<span style="color:var(--slate-2)">—</span>';
+  const nm=(r.candidate_name||'Candidate').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'Candidate';
+  const ext=String(cv.file_name||'').split('.').pop().toLowerCase();
+  const dl=nm+' - CV'+(ext&&ext.length<=5?'.'+ext:'');
+  return '<span style="display:inline-flex;gap:4px">'
+    +'<button class="btn btn-sm" title="Preview the CV" onclick="trResumeOpen('+r.id+',0)"><i class="fa-regular fa-eye"></i></button>'
+    +'<button class="btn btn-sm" title="Download the CV" onclick="trResumeOpen('+r.id+',1,&quot;'+esc(dl)+'&quot;)"><i class="fa-solid fa-download"></i></button>'
+    +'</span>';
+}
+window.trResumeOpen=function(trackerId,download,name){
+  const r=(window._trRows||[]).find(function(x){return x.id===trackerId;});
+  const cv=r&&r.candidate_id?(window._trResume||{})[r.candidate_id]:null;
+  if(!cv||!cv.storage_path){ toast('No CV on this row','err'); return; }
+  s3OpenSigned(cv.storage_path, download?(name||'CV'):null);
+};
 
 /* ── Interview Tracker ── */
 async function hrTracker(){
@@ -6451,6 +6441,19 @@ async function hrTracker(){
   loader(b);
   let rows=[];
   try{const {data}=await sb.schema('hr').from('interview_tracker').select('*').order('id',{ascending:false});rows=data||[];}catch(e){}
+  /* The CV for each row. interview_tracker does not hold one - the candidate does - so the resumes
+     are fetched in a single follow-up query keyed on the candidates actually on screen, rather than
+     one request per row. Applications from the careers pages arrive with a CV already attached;
+     rows typed in by hand simply have none. */
+  window._trResume={};
+  const candIds=[...new Set(rows.map(function(r){return r.candidate_id;}).filter(Boolean))];
+  if(candIds.length){
+    try{
+      const {data}=await sb.schema('hr').from('candidates')
+        .select('id,resume_id,resumes(id,file_name,storage_path)').in('id',candIds);
+      (data||[]).forEach(function(c){ if(c&&c.resumes) window._trResume[c.id]=c.resumes; });
+    }catch(e){/* the column just shows a dash */}
+  }
   window._trRows=rows;
   window._trSel=new Set();
   const fbTag=s=>{
@@ -6475,7 +6478,7 @@ async function hrTracker(){
       .tr-tag--red{background:#fee2e2;color:#991b1b}
       .tr-tag--gray{background:#f1f5f9;color:#475569}
       .tr-tag--amber{background:#fef3c7;color:#92400e}
-      #trTbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:1480px;table-layout:fixed}
+      #trTbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:1580px;table-layout:fixed}
       #trTbl thead th{background:var(--bg-subtle,#f8fafc);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--slate);padding:11px 14px;border-bottom:2px solid var(--line);text-align:left;white-space:normal;word-break:break-word;vertical-align:bottom}
       #trTbl tbody tr{border-bottom:1px solid var(--line-2);transition:background .12s}
       #trTbl tbody tr:hover{background:var(--bg-hover,#f8fafc)}
@@ -6492,7 +6495,7 @@ async function hrTracker(){
         .tr-sw{width:100%}
         .tr-sw input{min-width:0;width:100%}
         select.tr-sel{min-width:0;width:100%}
-        #trTbl{min-width:1300px;font-size:13px}
+        #trTbl{min-width:1400px;font-size:13px}
         #trTbl thead th,#trTbl tbody td{padding:9px 10px}
       }
     </style>
@@ -6520,7 +6523,7 @@ async function hrTracker(){
       <table id="trTbl">
         <thead><tr>
           <th class="tr-nowrap" style="width:36px"><input type="checkbox" class="tr-cb" id="trChkAll" onchange="trToggleAll(this)"></th>
-          <th style="width:14%">Candidate</th><th style="width:11%">Position</th><th style="width:9%">Source</th><th style="width:9%">Entity</th><th class="tr-nowrap" style="width:12%">Phone</th><th style="width:14%">Email</th><th class="tr-nowrap" style="width:14%">Date & Time</th><th class="tr-nowrap" style="width:11%">Feedback</th><th style="width:16%">Notes</th>
+          <th style="width:14%">Candidate</th><th style="width:11%">Position</th><th style="width:9%">Source</th><th style="width:9%">Entity</th><th class="tr-nowrap" style="width:12%">Phone</th><th style="width:14%">Email</th><th class="tr-nowrap" style="width:14%">Date & Time</th><th class="tr-nowrap" style="width:11%">Feedback</th><th class="tr-nowrap" style="width:9%">Resumes</th><th style="width:14%">Notes</th>
         </tr></thead>
         <tbody id="trTbody">
           ${rows.length?rows.map(r=>`<tr data-id="${r.id}" data-name="${esc((r.candidate_name||'').toLowerCase())}" data-pos="${esc((r.position||'').toLowerCase())}" data-fb="${esc(r.feedback||'')}" data-entity="${esc((r.entity||'').toLowerCase())}">
@@ -6533,8 +6536,9 @@ async function hrTracker(){
             <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
             <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
             <td class="tr-nowrap">${fbTag(r.feedback)}</td>
+            <td class="tr-nowrap">${trResumeCell(r)}</td>
             <td style="font-size:12px;color:var(--slate)">${cel(r.notes)}</td>
-          </tr>`).join(''):'<tr><td colspan="10"><div class="empty" style="padding:32px"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No interviews yet</div><p>Click <b>Add</b> to schedule the first interview.</p></div></td></tr>'}
+          </tr>`).join(''):'<tr><td colspan="11"><div class="empty" style="padding:32px"><i class="fa-regular fa-calendar"></i><div style="font-weight:600;color:var(--ink)">No interviews yet</div><p>Click <b>Add</b> to schedule the first interview.</p></div></td></tr>'}
         </tbody>
       </table>
       </div>
@@ -6685,28 +6689,43 @@ async function resumeAI(payload){
 }
 
 /* ── Resumes (AI-parsed resume bank) ── */
-let RS_ROWS=null, RS_SEARCH=null, RS_SEL=new Set();
+let RS_ROWS=null, RS_SEARCH=null, RS_SEL=new Set(), RS_Q='';
 async function hrResumes(){
   const b=$('hrBody');loader(b);
   try{const {data,error}=await sb.schema('hr').from('resumes').select('*').order('created_at',{ascending:false});if(error)throw error;RS_ROWS=data||[];}
   catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message)+'</div>';return;}
-  RS_SEARCH=null;RS_SEL=new Set();
+  RS_SEARCH=null;RS_SEL=new Set();RS_Q='';
   rsRender();
 }
+/* Resumes is a filing cabinet, not an analyser. The AI reading was never asked for and never
+   finished - rows sat on "Analyzing..." for ever because nothing retried a failed call - so it is
+   gone entirely. What a row shows now is what the file actually is. */
 function rsCard(r){
-  const status=r.ai_status;
-  const badge=status==='pending'?'<span class="tag t-amber" style="margin-left:8px"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing…</span>':status==='error'?'<span class="tag t-red" style="margin-left:8px" title="'+esc(r.ai_error||'')+'">AI failed</span>':'';
-  const matchBadge=(r._match&&r._match.score!=null)?`<span class="tag t-green" style="margin-left:8px">${r._match.score}% match</span>`:'';
-  const sub=[r.role_title,r.company,r.location].filter(Boolean).join(' · ');
+  const who=r.candidate_name||r.file_name||'Unnamed';
+  const bits=[];
+  if(r.file_name&&r.candidate_name) bits.push(r.file_name);
+  if(r.file_size) bits.push(rsSize(r.file_size));
+  if(r.created_at) bits.push(rsWhen(r.created_at));
   return `<div class="card rs-card" onclick="rsOpenDetail(${r.id})">
     <input type="checkbox" class="rs-chk" value="${r.id}" ${RS_SEL.has(r.id)?'checked':''} onclick="event.stopPropagation()" onchange="rsSyncToolbar()">
-    <div class="avatar-sm rs-card-avatar" style="background:${colorFor(r.candidate_name||r.file_name||'?')}">${esc(initials(r.candidate_name||r.file_name||'?').toUpperCase())}</div>
+    <div class="avatar-sm rs-card-avatar" style="background:${colorFor(who)}">${esc(initials(who).toUpperCase())}</div>
     <div class="rs-card-body">
-      <div class="rs-card-name">${esc(r.candidate_name||r.file_name||'Unnamed')}${badge}${matchBadge}</div>
-      <div class="rs-card-sub">${esc(sub||'—')}</div>
+      <div class="rs-card-name">${esc(who)}</div>
+      <div class="rs-card-sub">${esc(bits.join(' · ')||'—')}</div>
     </div>
-    <button class="btn btn-sm btn-ghost rs-card-eye" title="Preview resume file" onclick="event.stopPropagation();rsPreview(${r.id})"><i class="fa-solid fa-eye"></i></button>
+    <span class="rs-card-eye" style="display:inline-flex;gap:4px" onclick="event.stopPropagation()">
+      <button class="btn btn-sm btn-ghost" title="Preview" onclick="rsPreview(${r.id})"><i class="fa-regular fa-eye"></i></button>
+      <button class="btn btn-sm btn-ghost" title="Download" onclick="rsDownload(${r.id})"><i class="fa-solid fa-download"></i></button>
+    </span>
   </div>`;
+}
+function rsSize(n){
+  n=Number(n)||0;
+  return n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+}
+function rsWhen(ts){
+  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return ''; }
 }
 function rsRender(){
   const b=$('hrBody');if(!b)return;
@@ -6721,11 +6740,10 @@ function rsRender(){
     </div>
   </div>
   <div class="card card-pad rs-ai-card">
-    <label class="rs-ai-label"><i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i> Ask AI to find a candidate</label>
+    <label class="rs-ai-label"><i class="fa-solid fa-magnifying-glass" style="color:var(--slate)"></i> Find a resume</label>
     <div class="rs-ai-row">
-      <input id="rsQ" class="rs-ai-input" placeholder="e.g. someone with 3+ years in sales who knows CRM tools" onkeydown="if(event.key==='Enter')rsSearch()">
-      <button class="btn btn-primary" id="rsSearchBtn" onclick="rsSearch()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
-      ${RS_SEARCH?'<button class="btn" onclick="rsClearSearch()"><i class="fa-solid fa-xmark"></i> Clear</button>':''}
+      <input id="rsQ" class="rs-ai-input" placeholder="Name or file name…" value="${esc(RS_Q||'')}" oninput="rsFilter(this.value)">
+      ${RS_Q?'<button class="btn" onclick="rsClearFilter()"><i class="fa-solid fa-xmark"></i> Clear</button>':''}
     </div>
   </div>
   <div id="rsList" class="grid rs-list">${rows.length?rows.map(r=>rsCard(r)).join(''):'<div class="empty" style="padding:40px;grid-column:1/-1"><i class="fa-solid fa-id-card-clip"></i><div>No resumes yet — click Upload Resume</div></div>'}</div>`;
@@ -6761,61 +6779,48 @@ function rsDetailRow(label,html){
   return `<div style="margin-bottom:14px"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);font-weight:700;margin-bottom:4px">${label}</div><div style="font-size:13.5px;color:var(--ink);line-height:1.6">${html}</div></div>`;
 }
 window.rsOpenDetail=function(id){
-  const pool=(RS_SEARCH&&RS_SEARCH.length?RS_SEARCH:RS_ROWS)||[];
-  const r=pool.find(x=>x.id===id)||(RS_ROWS||[]).find(x=>x.id===id);
+  const r=(RS_ROWS||[]).find(x=>x.id===id);
   if(!r)return;
-  const a=r.analysis||{};
-  const expParts=[];
-  if(r.experience_years!=null&&r.experience_years!=='')expParts.push(esc(String(r.experience_years))+' years');
-  if(a.experience_summary)expParts.push(esc(a.experience_summary));
-  const deptParts=[];
-  if(a.recommended_departments&&a.recommended_departments.length)deptParts.push(esc(a.recommended_departments.join(', ')));
-  if(a.department_fit)deptParts.push(esc(a.department_fit));
-  const skillsHtml=(r.skills&&r.skills.length)?r.skills.map(s=>`<span class="tag t-gray" style="margin:2px 5px 2px 0;display:inline-block">${esc(s)}</span>`).join(''):'';
-  const strengthsHtml=(a.strengths&&a.strengths.length)?('<ul style="padding-left:18px;margin:0">'+a.strengths.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul>'):'';
-  const certsHtml=(r.certifications&&r.certifications.length)?esc(r.certifications.join(', ')):'';
+  /* What is actually known about the file, and nothing inferred. The AI-extracted columns
+     (role_title, skills, strengths and the rest) are left in the table but no longer read -
+     removing the analysis was the point, not rewriting the schema. */
+  const who=r.candidate_name||r.file_name||'Unnamed';
   const contact=[r.email,r.phone].filter(Boolean).map(esc).join(' · ');
-  let aiNote='';
-  if(r.ai_status==='error')aiNote=rsDetailRow('AI status','<span style="color:var(--err)">Analysis failed — '+esc(r.ai_error||'')+'</span>');
-  else if(r.ai_status==='pending')aiNote=rsDetailRow('AI status','<span style="color:#c08000">Still analyzing…</span>');
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-id-card-clip"></i> Candidate Profile</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-id-card-clip"></i> Resume</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body">
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:18px">
-      <div class="avatar-sm" style="width:52px;height:52px;font-size:18px;background:${colorFor(r.candidate_name||r.file_name||'?')}">${esc(initials(r.candidate_name||r.file_name||'?').toUpperCase())}</div>
+      <div class="avatar-sm" style="width:52px;height:52px;font-size:18px;background:${colorFor(who)}">${esc(initials(who).toUpperCase())}</div>
       <div>
-        <div style="font-weight:700;font-size:17px">${esc(r.candidate_name||r.file_name||'Unnamed')}</div>
-        <div style="color:var(--slate);font-size:13px">${esc([r.role_title,r.company].filter(Boolean).join(' at ')||'—')}</div>
+        <div style="font-weight:700;font-size:17px">${esc(who)}</div>
+        <div style="color:var(--slate);font-size:13px">${esc(r.file_name||'')}</div>
       </div>
     </div>
-    ${rsDetailRow('Department fit',deptParts.join(' — '))}
-    ${rsDetailRow('Location',esc(r.location||''))}
-    ${rsDetailRow('Experience',expParts.join(' — '))}
-    ${rsDetailRow('Credentials',esc(a.credentials||''))}
-    ${rsDetailRow('Education',esc(r.education||''))}
-    ${rsDetailRow('Summary',esc(r.summary||''))}
-    ${rsDetailRow('Strengths',strengthsHtml)}
-    ${rsDetailRow('Skills',skillsHtml)}
-    ${rsDetailRow('Certifications',certsHtml)}
     ${rsDetailRow('Contact',contact)}
-    ${aiNote}
+    ${rsDetailRow('File',esc([r.file_type?String(r.file_type).toUpperCase():'',r.file_size?rsSize(r.file_size):''].filter(Boolean).join(' · ')))}
+    ${rsDetailRow('Uploaded',esc([rsWhen(r.created_at),r.uploaded_by].filter(Boolean).join(' · ')))}
   </div>
-  <div class="modal-foot"><button class="btn" onclick="rsPreview(${r.id})"><i class="fa-solid fa-eye"></i> Preview file</button><button class="btn btn-primary" onclick="closeModal()">Close</button></div>`,'lg');
+  <div class="modal-foot">
+    <button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn" onclick="rsDownload(${r.id})"><i class="fa-solid fa-download"></i> Download</button>
+    <button class="btn btn-primary" onclick="rsPreview(${r.id})"><i class="fa-regular fa-eye"></i> Preview</button>
+  </div>`);
 };
-window.rsClearSearch=function(){RS_SEARCH=null;rsRender();};
-window.rsSearch=async function(){
-  const q=($('rsQ')||{}).value?.trim();if(!q)return;
-  const btn=$('rsSearchBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Searching…';
-  try{
-    const candidates=(RS_ROWS||[]).map(r=>({id:r.id,candidate_name:r.candidate_name,role_title:r.role_title,company:r.company,experience_years:r.experience_years,location:r.location,skills:r.skills,summary:r.summary,department_fit:r.analysis&&r.analysis.department_fit,recommended_departments:r.analysis&&r.analysis.recommended_departments}));
-    const out=await resumeAI({action:'search',query:q,candidates});
-    const results=out.results||[];
-    const byId={};(RS_ROWS||[]).forEach(r=>byId[r.id]=r);
-    RS_SEARCH=results.map(x=>{const r=byId[x.id];if(!r)return null;return {...r,_match:{score:x.score,reason:x.reason}};}).filter(Boolean);
-    if(!RS_SEARCH.length)toast('No strong matches found','');
-  }catch(e){toast('Search failed: '+e.message,'err');}
-  const btn2=$('rsSearchBtn');if(btn2){btn2.disabled=false;btn2.innerHTML='<i class="fa-solid fa-magnifying-glass"></i> Search';}
+
+/* Was an AI search that sent every resume's text to a model to rank them. Now a plain filter over
+   what is already loaded: no request, no cost, instant, and it cannot fail. */
+window.rsFilter=function(q){
+  RS_Q=String(q||'');
+  const t=RS_Q.trim().toLowerCase();
+  RS_SEARCH=t?(RS_ROWS||[]).filter(function(r){
+    return String(r.candidate_name||'').toLowerCase().indexOf(t)>-1
+        || String(r.file_name||'').toLowerCase().indexOf(t)>-1
+        || String(r.email||'').toLowerCase().indexOf(t)>-1;
+  }):null;
   rsRender();
+  // rsRender rebuilds the box, so put the caret back where the person left it
+  const el=$('rsQ'); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length); }
 };
+window.rsClearFilter=function(){ rsFilter(''); };
 window.rsUploadModal=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload Resume</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
@@ -6823,38 +6828,40 @@ window.rsUploadModal=function(){
     <input type="file" id="rsFile" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="document.getElementById('rsFName').textContent=this.files[0]?this.files[0].name:'Click to choose a PDF, Word doc, or image'">
     <p style="font-size:12px;color:var(--slate);margin-top:10px">AI will automatically read the resume and fill in name, contact info, skills, experience and a summary — no need to type it in.</p>
   </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload & Analyze</button></div>`);
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>`);
 };
 window.rsUploadSave=async function(){
-  const fEl=$('rsFile');const f=fEl&&fEl.files&&fEl.files[0];if(!f){toast('Choose a file first','err');return;}
+  const fEl=$('rsFile');const f=fEl&&fEl.files&&fEl.files[0];
+  if(!f){toast('Choose a file first','err');return;}
   const btn=$('rsUpBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
   const key=s3KeyForResume(f.name);
   const {data:upData,error:upErr}=await uploadFileToS3(key,f);
-  if(upErr){toast('Upload failed: '+upErr.message,'err');btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload & Analyze';return;}
-  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Reading file…';
-  const ctext=await extractFileText(f);
-  const {data:row,error}=await sb.schema('hr').from('resumes').insert({file_name:f.name,storage_path:upData.path,file_size:f.size,file_type:f.name.split('.').pop(),uploaded_by:state.email,content_text:ctext,ai_status:'pending'}).select().single();
-  if(error){toast('Saved file but record failed: '+error.message,'err');closeModal();hrResumes();return;}
-  closeModal();toast('Resume uploaded — analyzing with AI…','ok');
-  RS_ROWS=[row,...(RS_ROWS||[])];rsRender();
-  if(!ctext||ctext.replace(/\s/g,'').length<20){
-    await sb.schema('hr').from('resumes').update({ai_status:'error',ai_error:'Could not read text from this file'}).eq('id',row.id);
-    const idx=(RS_ROWS||[]).findIndex(x=>x.id===row.id);if(idx>-1){RS_ROWS[idx].ai_status='error';RS_ROWS[idx].ai_error='Could not read text from this file';}
-    rsRender();return;
+  if(upErr){
+    toast('Upload failed: '+upErr.message,'err');
+    btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+    return;
   }
-  try{
-    const out=await resumeAI({action:'analyze',text:ctext});
-    const p=out.profile||{};
-    const patch={ai_status:'done',ai_error:null,candidate_name:p.candidate_name||null,email:p.email||null,phone:p.phone||null,location:p.location||null,role_title:p.role_title||null,company:p.company||null,experience_years:p.experience_years||null,education:p.education||null,summary:p.summary||null,skills:p.skills||[],certifications:p.certifications||[],analysis:p};
-    await sb.schema('hr').from('resumes').update(patch).eq('id',row.id);
-    const idx=(RS_ROWS||[]).findIndex(x=>x.id===row.id);if(idx>-1)RS_ROWS[idx]={...RS_ROWS[idx],...patch};
-    toast('Resume analyzed','ok');
-  }catch(e){
-    await sb.schema('hr').from('resumes').update({ai_status:'error',ai_error:e.message}).eq('id',row.id);
-    const idx=(RS_ROWS||[]).findIndex(x=>x.id===row.id);if(idx>-1){RS_ROWS[idx].ai_status='error';RS_ROWS[idx].ai_error=e.message;}
-    toast('AI analysis failed: '+e.message,'err');
-  }
-  rsRender();
+  /* Nothing is read out of the file and nothing is sent to a model. The AI columns stay null,
+     which is why no row can sit on "Analyzing" any more - there is nothing to wait for. */
+  const {data:row,error}=await sb.schema('hr').from('resumes').insert({
+    file_name:f.name, storage_path:upData.path, file_size:f.size,
+    file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:null
+  }).select().single();
+  if(error){ toast('Saved the file but the record failed: '+error.message,'err'); closeModal(); hrResumes(); return; }
+  closeModal();
+  toast('Resume uploaded','ok');
+  RS_ROWS=[row,...(RS_ROWS||[])];
+  if(RS_Q) rsFilter(RS_Q); else rsRender();
+};
+
+/* Download keeps the candidate's own name on the file rather than the stamped storage name, the
+   same as the Tracker's Resumes column does. */
+window.rsDownload=function(id){
+  const r=(RS_ROWS||[]).find(x=>x.id===id);
+  if(!r||!r.storage_path){ toast('No file on this row','err'); return; }
+  const base=(r.candidate_name||r.file_name||'Resume').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'Resume';
+  const ext=String(r.file_name||'').split('.').pop().toLowerCase();
+  s3OpenSigned(r.storage_path, base+(base.toLowerCase().endsWith('.'+ext)?'':(ext&&ext.length<=5?'.'+ext:'')));
 };
 async function rsGet(id){const {data}=await sb.schema('hr').from('resumes').select('*').eq('id',id).single();return data;}
 window.rsPreview=async function(id){
@@ -9343,11 +9350,12 @@ const DEFAULT_JDS=[]; // all JDs now stored in Supabase (recruit.job_description
 let REC_SEL=new Set();
 VIEWS.recruitment=async function(v,seg){
   setCrumb(['People','Recruitment (ATS)']);
-  const tabs=['Tests','Descriptions','ManPower Form'];const ti=mTab(seg,tabs.length);
+  const tabs=['Tests','Descriptions','ManPower Form','Referrals'];const ti=mTab(seg,tabs.length);
   v.innerHTML=REC_RO_CSS+mHead('fa-user-plus','#0369a1','Recruitment (ATS)')
     +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Read-only — adding, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
     +mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
+  if(ti===3){recReferrals();return;}
   if(ti===2){recManpower();return;}
   if(ti===0){await recTests();return;}
   await recLoadJDs(v);
@@ -9798,6 +9806,7 @@ window.mpShowDetail=function(id,e){
     </div>
     ${rec.job_description?`<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em;margin-bottom:6px">Job Description / KPI</div><div style="font-size:13.5px;white-space:pre-wrap;line-height:1.6;color:var(--ink)">${esc(rec.job_description)}</div></div>`:''}
     ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
+    ${mpAiPanel(rec)}
   </div>`;
 };
 window.mpCloseDetail=function(){
@@ -9901,6 +9910,410 @@ window.mpDeleteOne=async function(id){if(!recGuard())return;
 };
 window.mpDelete=window.mpDeleteOne;
 window.mpReload=function(){MP_RECORDS=null;if(PAGE==='recruitment')renderPage();};
+
+/* ── ManPower: the AI-written JD, post text and creative ──
+   The generation itself is the manpower-ai-generate edge function: it reads the requisition, takes
+   up to three of our past Job Descriptions as style examples, and writes the JD, the shorter
+   job-board post text and a creative. It stores all three and stamps ai_status on the requisition.
+   Nothing was ever calling it, so this is the button. */
+function mpAiPanel(rec){
+  const st=rec.ai_status||'pending';
+  // The document is built from the JSON in the browser, so that - not the stored file - is what
+  // decides whether there is anything to show.
+  const hasJd=!!rec.ai_job_description_json;
+  const badge={pending:'<span class="tag t-gray">Not generated</span>',
+               generating:'<span class="tag t-blue"><i class="fa-solid fa-spinner fa-spin"></i> Writing…</span>',
+               ready:'<span class="tag t-green">Ready</span>',
+               failed:'<span class="tag t-red">Failed</span>'}[st]||'';
+  let inner;
+  if(st==='ready'&&hasJd){
+    inner='<div class="mp-ai-acts">'
+      +'<button class="btn btn-sm btn-primary" onclick="mpJdDownload('+rec.id+')"><i class="fa-solid fa-file-lines"></i> Job Description</button>'
+      +(rec.ai_creative_path
+        ? '<button class="btn btn-sm" onclick="mpCreativePng('+rec.id+')"><i class="fa-solid fa-image"></i> Creative</button>'
+        : '')
+      +'<button class="btn btn-sm" onclick="mpAiCopyPost('+rec.id+')"><i class="fa-solid fa-copy"></i> Copy post text</button>'
+      +'<button class="btn btn-sm" onclick="mpAiGenerate('+rec.id+',true)"><i class="fa-solid fa-rotate"></i> Rewrite</button>'
+      +'</div>'
+      +(rec.ai_platform_post_text
+        ? '<div class="mp-ai-post"><div class="mp-ai-lbl">Post text — for LinkedIn, Naukri or Indeed</div>'
+          +'<div class="mp-ai-post-body" id="mpAiPost'+rec.id+'">'+esc(rec.ai_platform_post_text)+'</div></div>'
+        : '');
+  } else if(st==='generating'){
+    inner='<div class="mp-ai-note">Writing the Job Description now. It takes a few seconds — press Refresh when it settles.</div>'
+      +'<div class="mp-ai-acts"><button class="btn btn-sm" onclick="mpReload()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>';
+  } else {
+    inner='<div class="mp-ai-note">'
+      +(st==='failed'
+        ? 'The last attempt failed. Trying again is safe — nothing was saved.'
+        : 'Writes a full Job Description in our house style, the shorter text for a job board, and a creative to post with it.')
+      +'</div>'
+      +'<div class="mp-ai-acts"><button class="btn btn-sm btn-primary" onclick="mpAiGenerate('+rec.id+')">'
+      +'<i class="fa-solid fa-wand-magic-sparkles"></i> '+(st==='failed'?'Try again':'Generate')+'</button></div>';
+  }
+  return '<div class="mp-ai"><div class="mp-ai-hd"><i class="fa-solid fa-wand-magic-sparkles"></i> Job Description &amp; creative '+badge+'</div>'+inner+'</div>';
+}
+
+window.mpAiCopyPost=function(id){
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  const txt=(rec&&rec.ai_platform_post_text)||'';
+  if(!txt){ toast('No post text yet','err'); return; }
+  // navigator.clipboard needs a secure context and can be refused; the textarea fallback works
+  // everywhere, so a copy never silently does nothing.
+  const done=function(){ toast('Post text copied','ok'); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done,function(){ mpCopyFallback(txt,done); });
+  } else { mpCopyFallback(txt,done); }
+};
+function mpCopyFallback(txt,done){
+  const ta=document.createElement('textarea');
+  ta.value=txt; ta.style.position='fixed'; ta.style.top='-1000px';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }
+  catch(e){ toast('Could not copy — select the text and copy it by hand','err'); }
+  document.body.removeChild(ta);
+}
+
+window.mpAiGenerate=async function(id,isRewrite){
+  if(!recGuard()) return;
+  if(isRewrite && !await confirmDialog(
+      'Rewrite the Job Description, post text and creative for this requisition? The current ones are replaced.',
+      {title:'Rewrite', okLabel:'Rewrite', icon:'fa-rotate', danger:false})) return;
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  if(rec){ rec.ai_status='generating'; mpShowDetail(id); }
+  toast('Writing the Job Description…','ok');
+  try{
+    const {data,error}=await sb.functions.invoke('manpower-ai-generate',
+      {body:{request_id:id, requested_by:state.email}});
+    if(error) throw error;
+    if(data&&data.error) throw new Error(data.error);
+    toast('Job Description ready','ok');
+  }catch(e){
+    // The requisition's own ai_status is set to 'failed' by the function, so the reload below
+    // shows the real state rather than whatever this screen last guessed.
+    toast('Could not generate: '+((e&&e.message)||e),'err');
+  }
+  MP_RECORDS=null;
+  if(PAGE==='recruitment') await recManpower();
+  const still=$('mpDetail');
+  if(still) mpShowDetail(id);
+};
+
+/* The Job Description document, built in the browser.
+   It used to be an HTML file uploaded to public storage, and that can never work: Supabase serves
+   HTML out of a public bucket as text/plain on purpose (it stops a stored page running scripts on
+   the storage domain). The browser therefore showed the raw source - which is the "no CSS, opens
+   some Supabase code" everybody was seeing. Verified: that URL returns Content-Type: text/plain,
+   while the SVG creative beside it correctly returns image/svg+xml.
+   So the document is assembled here instead, from ai_job_description_json which is already stored
+   on the requisition. Print gives a PDF, Download gives a real file, and neither depends on how
+   storage chooses to serve a content type. */
+const JD_LOGO='https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/recruitment-creatives/brand/jain-group-logo.webp';
+
+function mpJdDocHtml(rec){
+  const s=rec.ai_job_description_json||{};
+  const q=s.qualifications||{};
+  const li=function(arr){
+    return (Array.isArray(arr)&&arr.length)
+      ? '<ul>'+arr.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>' : '';
+  };
+  const resp=(s.responsibilities||[]).map(function(r){
+    return '<li>'+(r.label?'<b>'+esc(r.label)+'</b>: ':'')+esc(r.detail||'')+'</li>';
+  }).join('');
+  const qual=[];
+  if(q.education) qual.push('<p><b>Educational Background:</b> '+esc(q.education)+'</p>');
+  if(q.experience) qual.push('<p><b>Professional Experience:</b> '+esc(q.experience)+'</p>');
+  if(q.skills&&q.skills.length) qual.push('<p><b>Skills:</b></p>'+li(q.skills));
+  if(q.personal_attributes&&q.personal_attributes.length)
+    qual.push('<p><b>Personal Attributes:</b></p>'+li(q.personal_attributes));
+
+  return '<!doctype html><html><head><meta charset="utf-8">'
+    +'<title>'+esc(s.job_title||rec.job_title||'Job Description')+' — Jain Group</title>'
+    +'<style>'
+      +'@page{margin:18mm 16mm}'
+      +'*{box-sizing:border-box}'
+      +'body{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#111;max-width:820px;margin:0 auto;padding:44px 52px;line-height:1.6}'
+      +'.lh{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;'
+        +'border-bottom:3px solid #D21F3C;padding-bottom:16px;margin-bottom:26px}'
+      +'.lh img{height:42px}'
+      +'h1{font-size:23px;margin:0 0 3px;letter-spacing:-.2px}'
+      +'.dept{color:#555;font-size:14px}'
+      +'h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#D21F3C;'
+        +'border-bottom:1px solid #eee;padding-bottom:5px;margin:26px 0 10px}'
+      +'p,li{font-size:14px}'
+      +'ul{margin:4px 0 4px;padding-left:20px}'
+      +'li{margin-bottom:4px}'
+      +'.foot{margin-top:38px;padding-top:13px;border-top:1px solid #eee;font-size:11.5px;color:#888}'
+      /* the print button is for the person reading it on screen and must never appear on paper */
+      +'.noprint{position:fixed;top:14px;right:14px}'
+      +'.noprint button{font:600 13px Inter,Arial,sans-serif;padding:9px 15px;border-radius:8px;'
+        +'border:0;background:#D21F3C;color:#fff;cursor:pointer}'
+      +'@media print{.noprint{display:none}body{padding:0}}'
+    +'</style></head><body>'
+    +'<div class="noprint"><button onclick="window.print()">Print / Save as PDF</button></div>'
+    +'<div class="lh"><div><h1>'+esc(s.job_title||rec.job_title||'')+'</h1>'
+      +'<div class="dept">'+esc(s.department||rec.department||'')+'</div></div>'
+      +'<img src="'+JD_LOGO+'" alt="Jain Group"></div>'
+    +'<h2>Job Summary</h2><p>'+esc(s.job_summary||'')+'</p>'
+    +(resp?'<h2>Key Responsibilities</h2><ul>'+resp+'</ul>':'')
+    +(qual.length?'<h2>Required Qualifications</h2>'+qual.join(''):'')
+    +(s.compensation?'<h2>Compensation and Benefits</h2><p>'+esc(s.compensation)+'</p>':'')
+    +'<div class="foot">Jain Group — Caring for your dreams. '
+      +esc([rec.location?'Location: '+rec.location:'',
+            rec.no_of_vacancy?'Vacancies: '+rec.no_of_vacancy:''].filter(Boolean).join(' · '))
+      +'</div></body></html>';
+}
+
+function mpJdRec(id){
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  if(!rec||!rec.ai_job_description_json){ toast('No Job Description generated yet','err'); return null; }
+  return rec;
+}
+
+/* Last resort only. The Job Description is a download, not something that opens in a tab - but if
+   the browser refuses the blob download there has to be some way to get at the document, so it is
+   opened instead and the print dialog offered. */
+function mpJdOpenFallback(rec){
+  const w=window.open('','_blank');
+  if(!w) return false;
+  w.document.open(); w.document.write(mpJdDocHtml(rec)); w.document.close();
+  return true;
+}
+
+// Saves a real file. A Blob URL downloads whatever the server would have argued about.
+window.mpJdDownload=function(id){
+  const rec=mpJdRec(id); if(!rec) return;
+  if(!('download' in document.createElement('a'))){
+    if(!mpJdOpenFallback(rec)) toast('Your browser will not download it — allow pop-ups for JAIN-E','err');
+    return;
+  }
+  const name=String((rec.ai_job_description_json.job_title||rec.job_title||'Job Description'))
+    .replace(/[^A-Za-z0-9 .()-]/g,'').trim().replace(/\s+/g,'_');
+  const blob=new Blob([mpJdDocHtml(rec)],{type:'text/html;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=(name||'Job_Description')+' — Jain Group.html';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); },4000);
+  toast('Downloaded','ok');
+};
+
+/* The creative is stored as SVG - text stays crisp at any size and the poster can be re-rendered
+   from it - but what anybody actually posts to LinkedIn or WhatsApp is a PNG. The conversion runs
+   here rather than on the server: rasterising in Deno would mean adding an image library, whereas
+   the browser already has one.
+   The SVG is fetched as TEXT and handed back as a same-origin blob. Pointing an <img> at the
+   storage URL directly would taint the canvas and toBlob() would then be refused - the file is
+   cross-origin even though storage does send permissive CORS headers. */
+window.mpCreativePng=async function(id){
+  const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
+  if(!rec||!rec.ai_creative_path){ toast('No creative generated yet','err'); return; }
+  const btn=event&&event.currentTarget;
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Building…'; }
+  let url=null;
+  try{
+    const res=await fetch(rec.ai_creative_path,{cache:'no-store'});
+    if(!res.ok) throw new Error('could not read the creative ('+res.status+')');
+    const svg=await res.text();
+    url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml;charset=utf-8'}));
+    const img=new Image();
+    await new Promise(function(ok,bad){
+      img.onload=ok;
+      img.onerror=function(){ bad(new Error('the creative would not render')); };
+      img.src=url;
+    });
+    // 1122x1402 is the artwork's own size, so this is a straight one-to-one raster, no resampling.
+    const c=document.createElement('canvas'); c.width=1122; c.height=1402;
+    const g=c.getContext('2d');
+    g.drawImage(img,0,0,c.width,c.height);
+    const blob=await new Promise(function(r){ c.toBlob(r,'image/png'); });
+    if(!blob) throw new Error('the browser would not produce a PNG');
+    const name=String(rec.job_title||'Hiring').replace(/[^A-Za-z0-9 ()-]/g,'').trim().replace(/\s+/g,'_');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=(name||'Hiring')+' - We Are Hiring.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); },4000);
+    toast('PNG downloaded','ok');
+  }catch(e){
+    toast('Could not make the PNG: '+((e&&e.message)||e),'err');
+  }finally{
+    if(url) URL.revokeObjectURL(url);
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-image"></i> Creative'; }
+  }
+};
+
+/* ── Referrals ──
+   Anyone signed in may refer somebody for an open position. A referral submitted by HR, the
+   Administrator or Management is approved on the way in (hr.submission_self_approves); everyone
+   else's waits for HR.
+   A referral is recorded HERE AND NOWHERE ELSE - it does not create a candidate and does not appear
+   in the Interview Tracker or in any Monthly Update column. Somebody has to pick it up deliberately. */
+let REF_RECORDS=null, REF_POSITIONS=null;
+
+async function recReferrals(){
+  const b=$('recBody');
+  if(!REF_RECORDS){
+    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    try{
+      const q=await sb.schema('hr').from('referrals').select('*').order('created_at',{ascending:false});
+      if(q.error) throw q.error;
+      REF_RECORDS=q.data||[];
+    }catch(e){
+      b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc(e.message||String(e))+'</div>';
+      return;
+    }
+  }
+  const rows=REF_RECORDS;
+  const mine=rows.filter(function(r){return (r.referred_by||'').toLowerCase()===(state.email||'').toLowerCase();}).length;
+  const waiting=rows.filter(function(r){return (r.approval_status||'Pending')==='Pending';}).length;
+  const canDecide=hrCan();
+
+  const stTag=function(r){
+    const s=r.approval_status||'Pending';
+    if(s==='Approved') return '<span class="tag t-green" title="'+esc('Approved by '+(r.approved_by||'—'))+'">Approved</span>';
+    if(s==='Rejected') return '<span class="tag t-red" title="'+esc(r.rejection_reason||'')+'">Rejected</span>';
+    return '<span class="tag t-amber">Waiting for HR</span>';
+  };
+
+  b.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0">Referrals <span class="tag t-gray" style="margin-left:4px">'+rows.length+'</span>'
+        +(waiting?' <span class="tag t-amber" style="margin-left:4px">'+waiting+' waiting</span>':'')+'</div>'
+      +'<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button class="btn btn-primary" onclick="refForm()"><i class="fa-solid fa-user-plus"></i> Refer someone</button>'
+      +'</div>'
+    +'</div>'
+    +'<div class="ref-note"><i class="fa-solid fa-circle-info"></i> '
+      +'A referral is kept here only. It does not create a candidate and is not counted in the Interview Tracker '
+      +'or the Monthly Update until someone takes it forward.'
+      +(mine?' You have referred '+mine+' '+(mine===1?'person':'people')+'.':'')
+    +'</div>'
+    +(rows.length
+      ? '<div class="card" style="overflow:hidden"><div style="overflow-x:auto"><table class="tbl">'
+        +'<thead><tr><th>Name</th><th>Position</th><th>Phone</th><th>Email</th>'
+          +'<th>Referred by</th><th>When</th><th>Status</th>'+(canDecide?'<th></th>':'')+'</tr></thead><tbody>'
+        +rows.map(function(r){
+          const pend=(r.approval_status||'Pending')==='Pending';
+          return '<tr>'
+            +'<td style="font-weight:600">'+esc(r.referred_name||'—')+'</td>'
+            +'<td>'+esc(r.position||'—')+'</td>'
+            +'<td style="white-space:nowrap">'+esc(r.referred_phone||'—')+'</td>'
+            +'<td style="font-size:12px">'+esc(r.referred_email||'—')+'</td>'
+            +'<td style="font-size:12px;color:var(--slate)">'+esc(r.referred_by||'—')+'</td>'
+            +'<td style="white-space:nowrap;font-size:12px;color:var(--slate)">'+esc(refWhen(r.created_at))+'</td>'
+            +'<td>'+stTag(r)+'</td>'
+            +(canDecide
+              ? '<td style="white-space:nowrap">'
+                +(pend
+                  ? '<button class="btn btn-sm btn-ok" onclick="refDecide('+r.id+',true)"><i class="fa-solid fa-check"></i> Approve</button> '
+                    +'<button class="btn btn-sm btn-danger" onclick="refDecide('+r.id+',false)"><i class="fa-solid fa-xmark"></i> Reject</button>'
+                  : '<button class="btn btn-sm btn-danger" onclick="refDelete('+r.id+')" title="Delete this referral"><i class="fa-solid fa-trash"></i></button>')
+                +'</td>'
+              : '')
+            +'</tr>';
+        }).join('')
+        +'</tbody></table></div></div>'
+      : '<div class="card card-pad empty"><i class="fa-solid fa-user-plus"></i>'
+        +'<div style="font-weight:600;color:var(--ink)">No referrals yet</div>'
+        +'<p style="max-width:400px;margin:6px auto 0">Know somebody good for an open role? Click <b>Refer someone</b>.</p></div>');
+}
+
+function refWhen(ts){
+  if(!ts) return '—';
+  try{ return new Date(ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return String(ts); }
+}
+
+window.refForm=async function(){
+  if(!REF_POSITIONS){
+    try{
+      const {data}=await sb.schema('hr').rpc('open_positions');
+      REF_POSITIONS=data||[];
+    }catch(e){ REF_POSITIONS=[]; }
+  }
+  const opts=REF_POSITIONS.map(function(p){
+    return '<option value="'+p.manpower_id+'">'+esc(p.job_title+(p.department?' — '+p.department:''))+'</option>';
+  }).join('');
+  const selfAppr=hrCan();
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer someone</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+      +'<div><label>Their name *</label><input id="refFName" class="inp" placeholder="Full name"></div>'
+      +'<div class="two">'
+        +'<div><label>Phone</label><input id="refFPhone" class="inp" placeholder="10-digit mobile"></div>'
+        +'<div><label>Email</label><input id="refFEmail" class="inp" type="email" placeholder="name@example.com"></div>'
+      +'</div>'
+      +'<div><label>Position *</label><select id="refFPos" class="sel">'
+        +(opts?'<option value="">— Choose an open position —</option>'+opts
+              :'<option value="">No open positions right now</option>')
+        +'</select></div>'
+      +'<div><label>Anything we should know</label>'
+        +'<textarea id="refFNotes" class="inp" rows="3" placeholder="How you know them, what they do now, why they would suit it"></textarea></div>'
+      +'<div style="font-size:12.5px;color:var(--slate);margin-top:4px">'
+        +(selfAppr
+          ? 'You are in HR or Management, so this is approved as soon as you submit it.'
+          : 'HR will see this and approve or reject it.')
+      +'</div>'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="refSaveBtn" onclick="refSave()"><i class="fa-solid fa-check"></i> Submit</button></div>');
+  setTimeout(function(){ const el=$('refFName'); if(el) el.focus(); },50);
+};
+
+window.refSave=async function(){
+  const name=(($('refFName')||{}).value||'').trim();
+  const posId=(($('refFPos')||{}).value||'').trim();
+  const phone=(($('refFPhone')||{}).value||'').trim();
+  const email=(($('refFEmail')||{}).value||'').trim();
+  if(!name){ toast('Enter their name','err'); return; }
+  if(!posId){ toast('Choose the position','err'); return; }
+  if(!phone&&!email){ toast('Give a phone number or an email — otherwise nobody can reach them','err'); return; }
+  const pos=(REF_POSITIONS||[]).find(function(p){return String(p.manpower_id)===posId;});
+  const btn=$('refSaveBtn');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  const {error}=await sb.schema('hr').from('referrals').insert({
+    referred_name:name, referred_phone:phone||null, referred_email:email||null,
+    position:(pos&&pos.job_title)||null, manpower_request_id:parseInt(posId,10),
+    referred_by:state.email, notes:(($('refFNotes')||{}).value||'').trim()||null
+  });
+  if(error){
+    toast(error.message,'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i> Submit'; }
+    return;
+  }
+  closeModal();
+  toast(hrCan()?'Referral added and approved':'Referral sent to HR','ok');
+  REF_RECORDS=null; recReferrals();
+};
+
+window.refDecide=async function(id,ok){
+  if(!hrCan()){ toast('Only HR can approve a referral','err'); return; }
+  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
+  const who=r.referred_name||'this referral';
+  if(!await confirmDialog((ok?'Approve the referral for ':'Reject the referral for ')+'“'+who+'”?',
+      ok ? {title:'Approve referral', okLabel:'Approve', icon:'fa-circle-check', danger:false}
+         : {title:'Reject referral',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true})) return;
+  const {error}=await sb.schema('hr').from('referrals').update({
+    approval_status: ok?'Approved':'Rejected',
+    approved_by: state.email,
+    approved_at: new Date().toISOString()
+  }).eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  toast(ok?'Approved':'Rejected','ok');
+  REF_RECORDS=null; recReferrals();
+};
+
+window.refDelete=async function(id){
+  if(!hrCan()){ toast('Only HR can delete a referral','err'); return; }
+  const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
+  if(!await confirmDialog('Delete the referral for “'+(r.referred_name||'this person')+'”? This cannot be undone.')) return;
+  const {error}=await sb.schema('hr').from('referrals').delete().eq('id',id);
+  if(error){ toast(error.message,'err'); return; }
+  toast('Referral deleted','ok');
+  REF_RECORDS=null; recReferrals();
+};
+
+window.refReload=function(){ REF_RECORDS=null; REF_POSITIONS=null; if(PAGE==='recruitment')renderPage(); };
 
 async function recLoadJDs(v){
   REC_SEL=new Set();
@@ -14761,8 +15174,9 @@ function trcTrStatus(r){
 }
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
 
-function trcTag(cls, icon, label){
-  return '<span class="tag '+cls+'">'+(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
+function trcTag(cls, icon, label, title){
+  return '<span class="tag '+cls+'"'+(title?' title="'+esc(title)+'"':'')+'>'
+    +(icon?'<i class="fa-solid '+icon+'"></i> ':'')+esc(label)+'</span>';
 }
 function trcTrTag(r){
   const m = TRC_TR_META[trcTrStatus(r)];
@@ -14804,7 +15218,26 @@ const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'a
    exact row someone came from instead of dropping them back at the top of the table. */
 let TRC_LAST_LEAD_ID=null;
 let TRC_LAST_FOLLOWUP_ID=null;
+/* TRC_LAST_LEAD_ID promises the exact row survives a reload or a pasted URL, but the default (and
+   every) date window can legitimately exclude that lead entirely - its last call may not fall in
+   the range currently selected. TRC_PIN_ROWS is that one lead's rows, fetched by lead_id alone with
+   no date filter, kept only for as long as TRC_LAST_LEAD_ID names a lead the ranged fetch didn't
+   already include - see trcEnsurePinnedLead. */
+let TRC_PIN_ID=null;
+let TRC_PIN_ROWS=null;
 
+/* Deliberately NOT selecting level_regression_severity/prev_status here, unlike the lead-detail fetch
+   below. Both columns come off acc.lead_level_progress_v, a view stacked six windows deep over EVERY
+   row of acc.crm_followups - a fixed ~6-8s cost paid IN FULL on every request to followup_timeline_v,
+   no matter how few rows or which lead_id the outer query asks for (confirmed with EXPLAIN ANALYZE: a
+   single lead's rows cost the same as the whole table - Postgres can't push a filter through the
+   window functions). Asking for those two columns is what forces the full chain to run; leaving them
+   out lets Postgres prune the join away entirely, cutting this query from ~6.8s to ~3s - the
+   difference between clearing the authenticated role's 8s statement_timeout and getting canceled.
+   The cost, not the row count: trcIsRegression (and so the "Status regressed" badge on a lead row)
+   simply has nothing to key off here and reads as false. The lead detail page pays the real cost
+   once, on click, with its own separate select('*') fetch, and still shows the regression tag per
+   call - see trcLeadDetail below. */
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
   +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
@@ -14812,8 +15245,7 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
   +'lost_reason_status,remarks_status,ai_assessed_status,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
-  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,'
-  +'level_regression_severity,prev_status';
+  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team';
 
 /* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
    Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
@@ -14821,7 +15253,10 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
    In Follow Up, which this tag deliberately leaves alone).
    Only applied from the day this was wired up onward: the database has always computed it, correctly,
    over the CRM's whole history, but flagging calls that were already sitting in the system before
-   anyone could act on this would just be noise, not new information. */
+   anyone could act on this would just be noise, not new information.
+   r.level_regression_severity is only ever present on rows from trcLeadDetail's own fetch (TRC_LIGHT
+   deliberately leaves it out, see above) - so on a list row this always reads undefined and simply
+   never flags, rather than throwing. */
 const TRC_REGRESSION_CUTOFF='2026-09-02';
 function trcIsRegression(r){
   return r.level_regression_severity==='not_allowed' && trcRowDate(r)>=TRC_REGRESSION_CUTOFF;
@@ -14847,7 +15282,15 @@ function trcIsRegression(r){
 async function trcFetch(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
-  const PAGE=1000;let out=[],from=0;
+  /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
+     history through a chain of window functions - a cost paid IN FULL on every request to this
+     view, no matter how narrow the page's own range() slice is (a WHERE on the outer query cannot
+     push down into that windowed subquery). Chunking at 1000 rows made "All time" issue ~12
+     sequential requests, each repaying that same fixed ~6-8s cost - a minute-plus of serial
+     round trips for a table Postgres can hand back whole in one. PAGE now covers the entire table
+     in a single request; the loop (and its 50000 backstop) stays only so a future row count that
+     outgrows one page still pages correctly instead of silently truncating. */
+  const PAGE=20000;let out=[],from=0;
   try{
     for(;;){
       let q=sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT)
@@ -14873,6 +15316,24 @@ async function trcFetch(force){
 
 function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
+}
+
+/* Makes good on the promise above: if the lead a deep link names isn't in the date-ranged fetch at
+   all, go get it by lead_id alone (cheap - indexed, one lead's rows, no window functions to prune)
+   so trcRender can still put its row on screen. Skipped entirely once the lead is already there, and
+   not re-fetched on every render once it's been pinned for this id. */
+async function trcEnsurePinnedLead(){
+  const id=TRC_LAST_LEAD_ID;
+  if(id==null){TRC_PIN_ID=null;TRC_PIN_ROWS=null;return;}
+  if((TRC_ROWS||[]).some(function(r){return String(r.lead_id)===String(id);})){
+    TRC_PIN_ID=null;TRC_PIN_ROWS=null;return;
+  }
+  if(TRC_PIN_ID===String(id))return;
+  try{
+    const {data,error}=await sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT).eq('lead_id',id);
+    if(error)throw error;
+    TRC_PIN_ID=String(id);TRC_PIN_ROWS=data||[];
+  }catch(e){TRC_PIN_ID=null;TRC_PIN_ROWS=null;}
 }
 
 /* There used to be a lead-level gate here mirroring crm_build_queue's: a call was dropped whenever the
@@ -14964,6 +15425,69 @@ function trcChrono(a,b){
   return String(ta).localeCompare(String(tb)) || Number(a.follow_up_id||0)-Number(b.follow_up_id||0);
 }
 
+/* ---- skeletons. trcFetch's own floor is a few seconds (see TRC_LIGHT above) before a single row can
+   be drawn, so a bare spinner leaves the page looking empty rather than working. These stand in for
+   the KPI cards and the table body in roughly the shape the real content will take, so the page reads
+   as "loading this" rather than "loading something". ---- */
+function trcSkelBar(w,h){
+  return '<span class="skel" style="width:'+w+';height:'+(h||12)+'px"></span>';
+}
+function trcSkeletonKpis(){
+  return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'
+    +Array(4).fill(0).map(function(){
+      return '<div class="kpi">'+trcSkelBar('60%',11)+'<div style="margin-top:10px">'+trcSkelBar('35%',26)+'</div>'
+        +'<div style="margin-top:9px">'+trcSkelBar('80%',11)+'</div></div>';
+    }).join('')+'</div>';
+}
+function trcSkeletonRows(n){
+  n=n||8;
+  let out='';
+  for(let i=0;i<n;i++){
+    out+='<tr>'
+      +'<td>'+trcSkelBar('16px')+'</td>'
+      +'<td>'+trcSkelBar('48px')+'</td>'
+      +'<td>'+trcSkelBar('68%')+'<div style="margin-top:6px">'+trcSkelBar('42%',9)+'</div></td>'
+      +'<td>'+trcSkelBar('72px',20)+'</td>'
+      +'<td>'+trcSkelBar('72px',20)+'</td>'
+      +'<td>'+trcSkelBar('84px',20)+'</td>'
+      +'<td>'+trcSkelBar('60%')+'</td>'
+      +'<td>'+trcSkelBar('92px')+'</td>'
+      +'<td>'+trcSkelBar('70%')+'</td>'
+      +'<td>'+trcSkelBar('80%')+'</td>'
+      +'<td>'+trcSkelBar('64px',24)+'</td>'
+    +'</tr>';
+  }
+  return out;
+}
+/* One lead's history: two queries (crm_leads + the full followup_timeline_v for this lead_id, see
+   trcLeadDetail) that pay the same fixed window-function cost as the list does - shaped like the
+   page-head, the tag strip, the lead-details table and a couple of call cards it will actually become,
+   so the page doesn't just go blank between the click and the data landing. */
+function trcLeadSkeletonHtml(){
+  const chip=function(w){return '<span class="skel" style="width:'+w+';height:22px;border-radius:999px"></span>';};
+  const kvLine=function(){
+    return '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">'
+      +trcSkelBar('110px',11)+trcSkelBar('55%',11)+'</div>';
+  };
+  const callCard=function(){
+    return '<div class="card card-pad" style="margin-top:14px">'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+        +chip('64px')+chip('150px')+chip('90px')+chip('110px')+'</div>'
+      +'<div class="grid trc-two" style="grid-template-columns:1fr 1fr;gap:14px">'
+        +'<div class="card card-pad" style="margin:0">'+Array(5).fill(0).map(kvLine).join('')+'</div>'
+        +'<div class="card card-pad" style="margin:0">'+Array(5).fill(0).map(kvLine).join('')+'</div>'
+      +'</div></div>';
+  };
+  return '<div class="page-head"><div>'
+      +trcSkelBar('220px',26)+'<div style="margin-top:10px">'+trcSkelBar('160px',12)+'</div></div>'
+      +'<div style="display:flex;gap:10px"><span class="skel" style="width:96px;height:34px;border-radius:9px"></span>'
+      +'<span class="skel" style="width:172px;height:34px;border-radius:9px"></span></div></div>'
+    +'<div class="card card-pad" style="display:flex;gap:14px;flex-wrap:wrap">'
+      +chip('90px')+chip('90px')+chip('96px')+chip('120px')+chip('120px')+'</div>'
+    +'<div class="card card-pad" style="margin-top:16px">'+Array(4).fill(0).map(kvLine).join('')+'</div>'
+    +callCard()+callCard();
+}
+
 /* ---- the dashboard. Same four cards and the same chips as before; what changed underneath is that
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
@@ -15048,24 +15572,43 @@ window.trcCard=function(kind,val){
   trcRender(true);
 };
 
+/* "All time" is gone - it asked Postgres to sort and hand back the whole table (11k+ rows and
+   climbing) in one shot, the single most expensive shape of this query, and it only got slower as the
+   table grew. Previous day plus a manual From/To range covers the same ground a click at a time
+   instead of all at once, and Previous day - the day whose calls actually finished processing
+   overnight - stays the default both here and in TRC_F's own initial state above. */
 function trcDateBar(){
   const preset=function(label,f,t){
     const on=TRC_F.from===f&&TRC_F.to===t;
     return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
   };
   const y=traYesterday();
+  /* The From/To boxes no longer fire on their own onchange - picking a From date used to refetch
+     immediately with To still at its old value, then picking To refetched AGAIN with the pair that
+     was actually wanted. One button, applied once both boxes say what they're meant to, means one
+     fetch of the range someone actually asked for, not one accidental fetch per box touched. Enter in
+     either box does the same thing a click on the button would. */
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-    +preset('Previous day',y,y)+preset('All time',null,null)
+    +preset('Previous day',y,y)
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
-    +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onchange="trcSetRange(this.value||null,(document.getElementById(\'trcTo\').value||this.value||null))" style="padding:5px 8px">'
+    +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
     +'<label style="font-size:12px;color:var(--slate)">To</label>'
-    +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onchange="trcSetRange((document.getElementById(\'trcFrom\').value||this.value||null),this.value||null)" style="padding:5px 8px">'
+    +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
+    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply range</button>'
   +'</div>';
 }
+window.trcApplyRange=function(){
+  const f=($('trcFrom')&&$('trcFrom').value)||null, t=($('trcTo')&&$('trcTo').value)||null;
+  return trcSetRange(f,t);
+};
 window.trcSetRange=async function(f,t){
+  /* Manually clearing both the From and To boxes is the one remaining way to ask for f=null,t=null -
+     which used to mean "All time". Falling back to Previous day here, the same default TRC_F starts
+     with, is what keeps that door closed now that the button for it is gone. */
+  if(!f&&!t){const y=traYesterday();f=y;t=y;}
   TRC_F.from=f||null;TRC_F.to=t||null;
-  const b=$('trcRows');if(b)b.innerHTML='<tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr>';
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
   await trcFetch(false);trcRender(true);
 };
 
@@ -15113,17 +15656,31 @@ window.trcSet=function(k,v){
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';
-  TRC_F.q='';TRC_F.from=null;TRC_F.to=null;
-  const b=$('trcRows');if(b)b.innerHTML='<tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr>';
+  TRC_F.q='';
+  // Not null/null - that was "All time". Clearing the filters resets the date range to the same
+  // Previous day default the page opens with, rather than reopening that door.
+  const y=traYesterday();TRC_F.from=y;TRC_F.to=y;
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
   await trcFetch(false);trcRender(true);
 };
-window.trcRefresh=async function(){await trcFetch(true);trcRender(true);};
+window.trcRefresh=async function(){
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
+  await trcFetch(true);trcRender(true);
+};
 
 function trcTextCell(v,width){
   if(!v)return '<td><span style="color:var(--slate)">—</span></td>';
   return '<td style="max-width:'+(width||220)+'px"><div title="'+esc(String(v))+'" '
     +'style="font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">'
     +esc(String(v))+'</div></td>';
+}
+/* One-line badge cells (a status tag, a mismatch label) don't wrap the way free text does - without
+   this, an unusually long value (a raw enum string landing where a short label was expected, say)
+   just overflows its fixed-width column instead of respecting it. Centred both ways (a badge floating
+   left in a wide column reads as an accident; centred reads as a deliberate column of state), and
+   clipped rather than wrapped onto a second line if it's still too long for the column. */
+function trcClipCell(inner){
+  return '<td><div style="display:flex;align-items:center;justify-content:center;gap:4px;overflow:hidden;white-space:nowrap">'+inner+'</div></td>';
 }
 
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
@@ -15150,24 +15707,29 @@ function trcLeadRowHtml(g,sl){
      matching call - jumping straight to it instead of the top of the lead's whole history. */
   const jumpTo=TRC_F.personnel!=='all'&&last.follow_up_id?'/'+last.follow_up_id:'';
   const wasOpened=TRC_LAST_LEAD_ID!=null&&String(g.lead_id)===String(TRC_LAST_LEAD_ID);
-  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'\')">'
-    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate)">'+sl+'</td>'
-    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(g.lead_id))+'</td>'
-    +'<td><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
+  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'/r'+sl+'\')">'
+    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate);text-align:center" title="Row '+sl+' in the current, filtered list">'+sl+'</td>'
+    +'<td style="font-variant-numeric:tabular-nums;padding-right:20px">'+esc(String(g.lead_id))+'</td>'
+    +'<td style="padding-left:6px"><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">'+n+' follow-up'+(n===1?'':'s')
         +' · '+g.recordings+' recording'+(g.recordings===1?'':'s')+' · '+g.transcribed+' transcribed</div>'
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
     +'</td>'
-    +'<td>'+(g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
-      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','Danger'):'')
-      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?g.regressions+' status regressions':'Status regressed'):'')+'</td>'
-    +'<td>'+(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +'<td>'+(g.mismatches
+    /* Danger and Status-regressed used to carry their full label alongside the CRM status tag - three
+       badges' worth of text in a column sized for one, so the middle one clipped mid-word and the
+       last one never showed at all. Icon-only here (the reasons ride along as a hover tooltip; the
+       lead detail page still spells both out in full, in trcOvHealthHtml and trcCallHtml). */
+    +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
+      +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
+      +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
+          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
+    +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
-        : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))+'</td>'
+        : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     +'<td>'+(last.recording_url
@@ -15182,47 +15744,69 @@ function trcCallRowHtml(r){
   const m=TRC_MISMATCH[String(r.mismatch_type||'')];
   const wasOpened=TRC_LAST_FOLLOWUP_ID!=null&&String(r.follow_up_id)===String(TRC_LAST_FOLLOWUP_ID);
   return '<tr id="trcCallRow'+esc(String(r.follow_up_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+r.lead_id+'/'+r.follow_up_id+'\')">'
-    +'<td style="font-variant-numeric:tabular-nums">'+esc(String(r.lead_id))+'</td>'
-    +'<td><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
+    +'<td style="font-variant-numeric:tabular-nums;padding-right:20px">'+esc(String(r.lead_id))+'</td>'
+    +'<td style="padding-left:6px"><div style="font-weight:600">'+esc(r.lead_name||('Lead '+r.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">follow-up '+esc(String(r.follow_up_id))+'</div></td>'
-    +'<td style="white-space:nowrap;font-size:12.5px">'+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||'—')+'</td>'
-    +'<td>'+(r.crm_status?trcTag('t-blue','',r.crm_status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +'<td>'+(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',r.ai_assessed_status):'<span style="color:var(--slate)">—</span>')+'</td>'
-    +'<td>'+(m?trcTag(m.tag,m.icon,m.short):trcMismatchTag(r))+'</td>'
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||'—')+'</td>'
+    +trcClipCell(r.crm_status?trcTag('t-blue','',r.crm_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',r.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(m?trcTag(m.tag,m.icon,m.short):trcMismatchTag(r))
     +trcTextCell(r.crm_remarks,260)
   +'</tr>';
 }
 
-function trcTableHtml(rows){
-  const callLevel=TRC_F.match==='MISMATCH';
-  if(!rows.length){
+function trcTableHtml(items,callLevel){
+  if(!items.length){
     return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:TRC_LEAD_COLS)+'"><div class="empty" style="padding:40px">'
       +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
   }
-  if(callLevel)return rows.slice().sort(function(a,b){return trcChrono(b,a);}).map(trcCallRowHtml).join('');
-  return trcLeads(rows).map(function(g,i){return trcLeadRowHtml(g,i+1);}).join('');
+  if(callLevel)return items.map(trcCallRowHtml).join('');
+  return items.map(function(g,i){return trcLeadRowHtml(g,i+1);}).join('');
 }
 function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
-    : '<tr><th>SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
+    : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
       +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
+}
+/* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
+   on the table itself (see trcView), this is what actually stops one long value (a badge holding an
+   unusually long status string, a wide business unit name) from stretching its own column and shoving
+   every column after it sideways. Widths are relative: the browser scales them to fill the table's own
+   width, so this still fits both a wide monitor and a laptop, just proportionally. */
+function trcColsHtml(){
+  return TRC_F.match==='MISMATCH'
+    ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
+      +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
+    : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:10%">'
+      +'<col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:8%">'
+      +'<col style="width:9%"><col style="width:11%"><col style="width:5%">';
 }
 
 function trcRender(full){
   const all=TRC_ROWS||[];
-  const rows=trcApply(all);
+  let rows=trcApply(all);
   const scope=trcApply(all,true);
   const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope);
   if(full!==false){
     const f=$('trcFilters');if(f)f.innerHTML=trcFilterBar(all);
     const d=$('trcDates');if(d)d.innerHTML=trcDateBar();
   }
+  const cg=$('trcCols');if(cg)cg.innerHTML=trcColsHtml();
   const h=$('trcHead');if(h)h.innerHTML=trcHeadHtml();
-  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(rows);
+  const callLevel=TRC_F.match==='MISMATCH';
+  /* The pinned lead rides in on top of the ranged/filtered set, never into the KPI cards above (scope
+     stays about the selected window's own numbers) - only so the exact row a deep link named is on
+     screen to scroll to. */
+  if(!callLevel&&TRC_LAST_LEAD_ID!=null&&TRC_PIN_ID===String(TRC_LAST_LEAD_ID)&&TRC_PIN_ROWS&&TRC_PIN_ROWS.length
+     &&!rows.some(function(r){return String(r.lead_id)===String(TRC_LAST_LEAD_ID);})){
+    rows=rows.concat(TRC_PIN_ROWS);
+  }
+  const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(items,callLevel);
   const c=$('trcCount');
   if(c){
-    const leads=TRC_F.match==='MISMATCH'?null:trcLeads(rows).length;
+    const leads=callLevel?null:items.length;
     c.textContent=(leads===null?rows.length+' call'+(rows.length===1?'':'s')
                                :leads+' lead'+(leads===1?'':'s')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s'))
       +' of '+all.length;
@@ -15239,18 +15823,25 @@ async function trcView(v,seg){
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
       +'<div id="trcCount" style="font-size:12.5px;color:var(--slate)"></div></div>'
-      +'<div id="trcDates" style="margin-top:12px"></div></div>'
-    +'<div id="trcKpis" style="margin-top:16px"></div>'
+      +'<div id="trcDates" style="margin-top:12px">'+trcDateBar()+'</div></div>'
+    +'<div id="trcKpis" style="margin-top:16px">'+trcSkeletonKpis()+'</div>'
     +'<div id="trcFilters"></div>'
-    +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:64vh"><table class="tbl">'
-      +'<thead id="trcHead"></thead>'
-      +'<tbody id="trcRows"><tr><td colspan="11"><div class="loader"><div class="spin"></div></div></td></tr></tbody>'
+    /* overflow-x only, no max-height - the list is unpaginated, so a vertical scrollbox here would
+       just hide rows inside their own little scrollbar instead of the page's normal one.
+       table-layout:fixed + the colgroup below is what makes a max-width on a cell actually mean
+       something - without it, a table sizes each column to its widest cell (one long badge value
+       stretches its whole column, and every column after it), no matter what a <td> asks for. */
+    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl" style="table-layout:fixed;width:100%">'
+      +'<colgroup id="trcCols">'+trcColsHtml()+'</colgroup>'
+      +'<thead id="trcHead">'+trcHeadHtml()+'</thead>'
+      +'<tbody id="trcRows">'+trcSkeletonRows()+'</tbody>'
     +'</table></div></div>';
   /* Not a forced refetch: coming back here from a lead's detail page (the in-app Back button, or the
      browser's own back button) must not re-download the whole day's rows and drop someone at the top
      of the table while it loads - trcFetch already caches, and the explicit Refresh button still
      forces a reload when the data itself might actually be stale. */
   await trcFetch(false);
+  await trcEnsurePinnedLead();
   trcRender(true);
   /* The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one
      row per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to. */
@@ -15561,14 +16152,17 @@ function trcOvHealthHtml(h){
   +'</div>';
 }
 
-async function trcLeadDetail(v,leadId,targetFollowUpId){
+async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  v.innerHTML=trcLeadSkeletonHtml();
   const id=Number(leadId);
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
   /* Carried on every "Back"/"All leads" link below, so the list can restore the exact row - the lead
-     row it left from, or, if this page was opened off the call-level Mismatch table, that call row. */
+     row it left from, or, if this page was opened off the call-level Mismatch table, that call row.
+     Restoring is keyed on the lead id, not rowHint (a render-only position that a re-sort or a
+     changed filter can hand to a different lead entirely) - rowHint only ever labels what the row
+     happened to be called at the moment this page was opened. */
   const backRoute='transcription/0/'+id+(targetFollowUpId?'/'+targetFollowUpId:'');
   let lead=null,rows=[];
   try{
@@ -15606,7 +16200,8 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   rows.forEach(function(r){const s=r.crm_status;if(s&&trail[trail.length-1]!==s)trail.push(s);});
 
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
-      +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
+      +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')
+        +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
@@ -15736,7 +16331,16 @@ VIEWS.transcription=async function(v,seg){
   /* Detail routes, checked before the tab index because neither 'lead' nor 'auto' is a number.
      'lead' is the snapshot pipeline, keyed on the CRM's own lead_id. 'auto' still serves rows
      imported by the previous pipeline into acc.transcriptions, so an old link still resolves. */
-  if(seg[0]==='lead'&&seg[1]){return trcLeadDetail(v,seg[1],seg[2]);}
+  if(seg[0]==='lead'&&seg[1]){
+    /* The list's SL NO column shows the row's on-screen position as "#N" - purely a display label,
+       recomputed on every render (see trcLeadRowHtml), never an identifier. The lead click carries it
+       along as a trailing 'rN' segment so the detail page can echo "Row #N" back for reference; a real
+       follow-up id (the personnel filter's jump-to-latest-call) can ride alongside it in either slot,
+       so both trailing segments are scanned rather than assumed to be in a fixed order. */
+    let followUpId=null,rowHint=null;
+    seg.slice(2).forEach(function(s){const m=/^r(\d+)$/i.exec(s);if(m)rowHint=m[1];else if(!followUpId)followUpId=s;});
+    return trcLeadDetail(v,seg[1],followUpId,rowHint);
+  }
   if(seg[0]==='auto'&&seg[1]){return traDetail(v,seg[1]);}
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
   const tabs=TRA_TABS;
@@ -16838,19 +17442,24 @@ const USAGE_MAP={
   advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
   advFilter:'legal.advocates.search_advocates',
   // Human Resources
-  hsSave:'hr.h_s_candidates.add_candidate', hsUpdate:'hr.h_s_candidates.edit_candidate',
-  hsDeleteSel:'hr.h_s_candidates.delete_candidate_s', hsFilter:'hr.h_s_candidates.search_filter_candidates',
-  muSaveNew:'hr.monthly_update.create_new_month_record', muAddRowSave:'hr.monthly_update.add_position_row',
-  muSaveCell:'hr.monthly_update.edit_tracking_values',
-  muDeleteChecked:'hr.monthly_update.delete_rows_or_whole_month',
-  muDeleteMonth:'hr.monthly_update.delete_rows_or_whole_month',
+  // H/S Candidates was removed - nothing left to log.
+  // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
+  // candidates - so the old create-month / add-row / edit-cell actions have nothing to log.
+  muViewMonth:'hr.monthly_update.open_a_month',
+  muDeleteSel:'hr.monthly_update.remove_position_from_month',
+  muApprove:'hr.monthly_update.approve_reject_requisition',
+  muSetHiring:'hr.monthly_update.close_reopen_hiring',
+  muFilter:'hr.monthly_update.search_filter_positions',
   trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
   trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
   trackerFilter:'hr.interview_tracker.search_filter_interviews',
+  trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
   rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
   rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
-  rsBulkDelete:'hr.resumes.delete_resume_s', rsSearch:'hr.resumes.ai_natural_language_resume_search',
+  rsBulkDelete:'hr.resumes.delete_resume_s',
+  // the AI resume search is gone - a plain name/file filter replaced it
+  rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
   rtSave:'recruitment.tests.add_test', rtRename:'recruitment.tests.rename_test',
@@ -16863,6 +17472,10 @@ const USAGE_MAP={
   mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:'recruitment.manpower_form.edit_requisition',
   mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
   mpDeleteOne:'recruitment.manpower_form.delete_requisition_s',
+  mpAiGenerate:'recruitment.manpower_form.generate_jd_post_text_creative',
+  mpAiCopyPost:'recruitment.manpower_form.copy_platform_post_text',
+  refSave:'recruitment.referrals.refer_someone', refDecide:'recruitment.referrals.approve_reject_referral',
+  refDelete:'recruitment.referrals.delete_referral',
   // Inspection
   inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
   inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',

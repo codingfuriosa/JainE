@@ -513,6 +513,134 @@
     .nt-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}.nt-item:hover{background:#f8fafc}.nt-item.unread{background:var(--brand-a10,#f5f7ff)}
     .nt-item.urg{background:#fef2f2}
     #notifDd{width:340px;max-width:92vw}
+
+    /* ── due date + repeat picker ──────────────────────────────────────────────────────────
+       How often on the left; on the right, only what that choice needs. One fixed height, so
+       the panel does not grow or shrink as options are clicked. */
+    /* Capped to the window, and its own body scrolls. The panel is position:fixed, so anything
+       hanging below the fold cannot be scrolled into view - which is what made Done unreachable
+       and read as "the page will not scroll". The summary line and the footer stay put; only the
+       rail and the calendar scroll. */
+    .dp-pop{width:432px;max-width:min(94vw,432px);background:#fff;border:1px solid var(--line);
+      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden;
+      display:flex;flex-direction:column;max-height:calc(100vh - 20px)}
+    .dp-body{display:flex;align-items:stretch;overflow-y:auto;min-height:0}
+    .dp-says,.dp-foot{flex:none}
+    .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
+      padding:8px 7px;display:flex;flex-direction:column;gap:1px}
+    .dp-opt{width:100%;height:31px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+    .dp-opt:hover{background:var(--brand-a10,#eef2ff)}
+    .dp-opt.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:600}
+    .dp-main{flex:1;min-width:0;padding:10px 12px 12px;min-height:314px;display:flex;flex-direction:column}
+    .dp-ask{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:8px}
+    .dp-ask .req{color:var(--brand,#1d4ed8);letter-spacing:0;text-transform:none;font-weight:600}
+    .dp-note{font-size:11.5px;color:var(--slate);line-height:1.55}
+    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:4px}
+    .dp-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}
+    .dp-nav{width:25px;height:25px;flex:none;display:flex;align-items:center;justify-content:center;
+      border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}
+    .dp-nav:hover{background:var(--brand-a10,#eef2ff);color:var(--brand,#1d4ed8)}
+    .dp-dow{display:grid;grid-template-columns:repeat(7,1fr)}
+    .dp-dow span{text-align:center;font-size:10px;font-weight:700;color:var(--slate-2,#94a3b8);
+      padding-bottom:2px}
+    .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+    .dp-day{height:30px;border:0;border-radius:7px;background:transparent;font:inherit;
+      font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;
+      position:relative;padding:0}
+    .dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10,#eef2ff)}
+    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.4}
+    .dp-day[disabled]{color:var(--slate-2,#94a3b8);opacity:.3;cursor:default}
+    .dp-day.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:700}
+    .dp-day.today:not(.on)::after{content:'';position:absolute;left:50%;bottom:4px;width:3px;
+      height:3px;margin-left:-1.5px;border-radius:50%;background:var(--brand,#1d4ed8)}
+    /* the multi-select grids: weekdays, dates of the month, months of the year */
+    .dp-chips{display:grid;gap:4px}
+    .dp-chips.dow{grid-template-columns:repeat(7,1fr)}
+    .dp-chips.dom{grid-template-columns:repeat(7,1fr)}
+    /* six across, two rows: twelve months in half the height, which is what leaves room for the
+       chosen month's dates underneath without the panel growing */
+    .dp-chips.mon{grid-template-columns:repeat(6,1fr)}
+    .dp-chips.mon .dp-chip{font-size:11px;height:28px;flex-direction:column;gap:0;line-height:1}
+    .dp-chip{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;font:inherit;
+      font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;padding:0;
+      display:flex;align-items:center;justify-content:center}
+    .dp-chip:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-chip.on{background:var(--brand,#1d4ed8);border-color:var(--brand,#1d4ed8);color:#fff;
+      font-weight:700}
+    .dp-chip.wide{grid-column:span 3}
+    /* a dot, not a number: at 44px wide a count would crowd the month name */
+    .dp-chip .pip{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.75;
+      margin-top:2px}
+    /* which month the date grid belongs to */
+    .dp-chip.active{box-shadow:0 0 0 2px var(--brand-a10,#eef2ff),0 0 0 3px var(--brand,#1d4ed8)}
+    .dp-sub{display:flex;align-items:baseline;gap:8px;margin:11px 0 7px;padding-top:10px;
+      border-top:1px solid var(--line)}
+    .dp-sub .lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate)}
+    .dp-sub .rm{margin-left:auto;border:0;background:transparent;padding:0;font:inherit;font-size:11px;
+      color:var(--slate-2,#94a3b8);cursor:pointer;text-decoration:underline}
+    .dp-sub .rm:hover{color:#dc2626}
+    .dp-empty{margin-top:11px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;
+      color:var(--slate);line-height:1.55}
+    .dp-quick{display:flex;gap:4px;margin-top:7px}
+    .dp-quick button{flex:1;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
+      font:inherit;font-size:11.5px;font-weight:500;color:var(--slate);cursor:pointer;
+      white-space:nowrap;padding:0}
+    .dp-quick button:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-mode{display:flex;align-items:center;gap:7px;margin-bottom:6px;padding:6px 9px;
+      border-radius:7px;background:var(--brand-50,#eff4ff);color:var(--brand-700,#1e40af);
+      font-size:11.5px;font-weight:600}
+    .dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:11.5px;
+      font-weight:600;color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline;padding:0}
+    /* min-height so the footer does not shuffle as the sentence wraps */
+    .dp-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;
+      color:var(--slate);line-height:1.55;min-height:56px}
+    .dp-says b{color:var(--ink);font-weight:600}
+    .dp-says .warn{color:var(--brand,#1d4ed8);margin-top:2px}
+    .dp-says .miss{color:#dc2626;font-weight:600}
+    .dp-says .ends{margin-top:4px}
+    .dp-says .ends button{border:0;background:transparent;padding:0;font:inherit;font-size:11.5px;
+      color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline}
+    .dp-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}
+    .dp-foot .dp-clear{border:0;background:transparent;padding:0;font:inherit;font-size:12px;
+      color:var(--slate);cursor:pointer}
+    .dp-foot .dp-clear:hover{color:#dc2626}
+    .dp-foot .dp-done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;
+      background:var(--brand,#1d4ed8);color:#fff;font:inherit;font-size:12px;font-weight:600;
+      cursor:pointer}
+    .dp-foot .dp-done[disabled]{opacity:.45;cursor:not-allowed}
+    .dp-inline{box-shadow:none;width:100%;max-width:100%}
+    /* the repeat, said on the task itself so a saved rule is visible without reopening the picker */
+    .dp-chip-rep{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+      padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
+      color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
+    .dp-chip-rep i{font-size:9.5px}
+
+    /* an instance's attachments, printed as pages rather than filenames */
+    .wf-print-att{margin-top:16px;page-break-inside:avoid}
+    .wf-print-att-h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:6px}
+    .wf-print-att-img{display:block;width:100%;max-width:100%;height:auto;border:1px solid var(--line);
+      border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
+    .wf-print-att-miss{font-size:12px;color:#b91c1c}
+
+      color:#991b1b;font-size:13px}
+      margin-bottom:12px;font-size:12.5px;color:#92400e}
+      margin-bottom:6px}
+      color:var(--slate)}
+      font-size:12px;color:var(--slate);line-height:1.6}
+      border-top:1px solid var(--line)}
+    @media (max-width:520px){
+      .dp-body{flex-direction:column}
+      .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
+        flex-direction:row;flex-wrap:wrap;gap:4px}
+      .dp-opt{width:auto;flex:1 1 30%;text-align:center}
+      .dp-main{min-height:0}
+    }
     `;
     document.head.appendChild(s);
   }
@@ -1148,6 +1276,12 @@
     // creator/step-owners, the same class of bug already fixed in canEvent.
     const trigList=(f.trigger_owner||'').split(',').map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
     const trigOk = f.trigger_owner==='__ALL__' || trigList.indexOf(String(me()||'').toLowerCase())!==-1;
+    /* The Administrator sees every workflow. The database already agreed - acc.wf_can_see_flow
+       starts at app.can_read('acc'), which a superadmin passes - but this client-side filter did
+       not, so a flow whose created_by was not the Administrator was served and then hidden. That
+       happens to any flow inserted by a migration rather than through the builder, which has no
+       logged-in user to record. Checked here so it cannot depend on who happened to create it. */
+    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
     return eq(f.created_by||'',me()) || trigOk || o.some(function(e){return eq(e,me());})
       // A flow can be opened up to whole departments (e.g. Invoice Processing -> Systems +
       // Administration) instead of just its creator/trigger-owner/step-owners — mirrors the
@@ -1295,6 +1429,20 @@
   // Returns {short, full} — short is what's shown (clipped with an ellipsis), full is the complete
   // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
   // with no way to read the rest.
+  /* What a Booking Form instance is, in four words, out of the check list that was filled for it.
+     `pending` is not the same as blank: one means nobody has read the file yet, the other means the
+     file did not say. */
+  function wfBkFields(row){
+    const st=String((row&&row.status)||'');
+    const f=(row&&row.result&&row.result.fields)||null;
+    if(st!=='done'||!f) return {status:st||'pending'};
+    const g=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    return {status:'done', name:g('customer_name'), project:g('project_name'),
+            block:g('block'), flat:g('flat')};
+  }
+  function wfBk(caseId){ return (window._wfBk||{})[caseId]||null; }
+
   function wfTrigShort(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
@@ -1306,6 +1454,18 @@
     const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
     const sumField=(flow&&flow.tracker_sum_field||'').trim();
     let full;
+    /* Booking Form: nothing is typed but the attachment, so the row is named by whoever the
+       documents say bought which flat. Until the reading finishes it says so rather than sitting
+       blank, which would read as an empty booking. */
+    if(flow&&flow.id===41){
+      const b=wfBk(c.id);
+      full=(b&&b.status==='done')
+        ? [b.name, b.project, [b.block&&('Block '+b.block), b.flat&&('Flat '+b.flat)]
+            .filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+        : (b&&b.status==='failed' ? 'Could not be read' : 'Being read…');
+      const sh=full.length>30?full.slice(0,29)+'…':full;
+      return {short:sh, full:full};
+    }
     if(listFields){
       full=listFields.map(function(l){ return wfDetailDisp(byLabel[l]||''); }).filter(Boolean).join(', ');
     } else {
@@ -2123,8 +2283,11 @@
       // placeholder, or multiline (an exceptional case, set directly rather than via a checkbox).
       if(orig.placeholder) f.placeholder=orig.placeholder;
       if(type==='text' && orig.multiline) f.multiline=true;
-      // an attachment is never compulsory, whatever the box says
-      if(opt||type==='attachment') f.optional=true;
+      /* The Optional box governs attachments as well now. It used to be forced on whatever the
+         box said, so a workflow that genuinely needs a document - a Booking Form IS the document -
+         had no way to insist on one. Written explicitly either way, so the runtime can tell
+         "deliberately required" from "never said". */
+      f.optional=opt;
       if(type==='select'){
         // Options are stored as {label} objects — matches how the runtime (wfEvtRowHtml) reads
         // them, and how pre-existing select fields (e.g. Reimbursement's Conveyance/Food) are shaped.
@@ -2558,7 +2721,13 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    /* Booking Form: its form has one field on it, an attachment, and the tracker drops attachments
+       — so this flow would otherwise have no columns of its own at all. Its four come from the
+       check list instead, filled once the documents have been read. */
+    const bkCols=(flow.id===41)?['Name','Project','Block','Flat']:null;
+    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}]
+      .concat(sumField?[{k:'Total Amount'}]
+        :(bkCols?bkCols.map(function(k){ return {k:k}; }):tmpl.map(function(f){ return {k:f.label}; })));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2623,6 +2792,17 @@
       const ownerTd='<td>'+esc2(wfNm(c.created_by)||'')+'</td>';
       const extraTds=ownerTd+(sumField
         ? '<td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
+        : bkCols
+        ? (function(){
+            const b=wfBk(c.id);
+            if(!b||b.status!=='done'){
+              const say=(b&&b.status==='failed')?'could not be read':'being read';
+              return '<td colspan="'+bkCols.length+'" style="color:var(--slate)">'+esc2(say)+'</td>';
+            }
+            return [b.name,b.project,b.block,b.flat].map(function(v){
+              return '<td title="'+esc2(v||'')+'">'
+                +(v?cellText(v):'<span style="color:var(--slate)">—</span>')+'</td>'; }).join('');
+          })()
         : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
@@ -2935,6 +3115,18 @@
     if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
+    /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
+       and the unit are what the documents themselves say, so they are read out of the stored
+       check list rather than typed by whoever uploaded the file. Both the Instances column and the
+       Tracker's own columns come from here; a booking still being read simply has no row yet. */
+    window._wfBk={};
+    if(id===41 && cases.length){
+      try{
+        const {data}=await ACC().from('booking_audits').select('case_id,status,result')
+          .in('case_id',cases.map(function(c){ return c.id; }));
+        (data||[]).forEach(function(r){ window._wfBk[r.case_id]=wfBkFields(r); });
+      }catch(_e){}
+    }
     let forms=[];
     try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
     window._wfForms=forms; window._wfSteps=steps;
@@ -3461,7 +3653,7 @@
     if(!box)return;
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     const pinned=wfOriginalAttachmentHtml(c,flow)+wfQrCodeAttachmentHtml(c,flow);
     /* The owner, or whoever it has been sent back to — not the workflow-management admins, and
        only while it is still moving; once it is Done or Cancelled it is final. Mirrors
@@ -3474,8 +3666,13 @@
       &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
     const printBtn='<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
+    /* Booking Form only: the checklist being filled is specific to it. Reading the attachments
+       takes a minute or two, so it is a button somebody presses - not something that runs on open. */
+    const auditBtn=(c.flow_id===41)
+      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
+      : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
-      +'<div class="wf-tlhead-acts">'+editBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
+      +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
       /* A returned instance is stopped and waiting on its owner, which is not something the timeline
          shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
@@ -3530,6 +3727,209 @@
     },40);
   };
 
+  /* ── booking check list ────────────────────────────────────────────────────────────────────
+     The icon downloads the filled check list. No popup: the reading already happened in the
+     background when the booking was raised (acc.booking_audits + a trigger + a cron worker), so
+     there is nothing to wait for and nothing to confirm.
+
+     The file is the FORM ITSELF - assets/forms/booking-check-list-blank.pdf, the blank you use,
+     with values written onto its blanks. That keeps the logo, the Carlito type and the exact
+     layout, instead of a redrawing that could drift from it.
+
+     Every coordinate in WF_CL was measured out of that PDF by walking its content stream and adding
+     up the font's own glyph widths, then checked against the positions the PDF records for the
+     chunks it does start a new text object for: computed 136.6 against a recorded 136.7, and 117.0
+     against 117.1. So a value starts where its underscores start, to a tenth of a point.
+
+     `w` is how much room that blank has, measured from the number of underscores in it. A value too
+     wide is stepped down in size until it fits rather than running over the next label. */
+  /* The blank arrives as a SCRIPT, not as a file to fetch. A browser refuses fetch() of a
+     same-origin file when the page itself was opened straight off the disk as file:// - it throws
+     "Failed to fetch" without making a request - so the check list could not be built at all while
+     working from the local copy. A script tag is allowed in both places. Loaded the first time
+     somebody asks for a check list, the same way pdf-lib is, not on every page load.
+     booking-check-list-blank.pdf sits beside it and remains the source of truth. */
+  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.js';
+  async function wfClBlank(){
+    if(!window.WF_CL_BLANK_B64){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=WF_CL_TEMPLATE;
+        sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the blank form could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const b64=window.WF_CL_BLANK_B64;
+    if(!b64) throw new Error('the blank form loaded but was empty');
+    const bin=atob(b64), out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    return out;
+  }
+  const WF_CL={
+    date:        {x:441.5, y:583.75, s:11, w:98},
+    // The underscores stop at 448 but nothing is printed to the right of them, so a name may
+    // run on to the margin before the size has to come down - two allottees stay legible.
+    customer:    {x:188.0, y:508.35, s:11, w:352},
+    project:     {x:143.2, y:484.55, s:11, w:80},
+    block:       {x:284.2, y:484.55, s:11, w:21},
+    flat:        {x:338.7, y:484.55, s:11, w:26},
+    floor:       {x:405.2, y:484.55, s:11, w:21},
+    area:        {x:459.2, y:484.55, s:11, w:32},
+    base_rate:   {x:125.0, y:460.75, s:11, w:49},
+    plc:         {x:211.6, y:460.75, s:11, w:38},
+    flc:         {x:276.6, y:460.75, s:11, w:38},
+    parking:     {x:429.4, y:460.75, s:11, w:49},
+    discount:    {x:151.4, y:436.95, s:13, w:150},
+    cost:        {x:122.1, y:385.35, s:11, w:130},
+    market:      {x:179.1, y:361.55, s:11, w:120},
+    kyc:         {x:149.1, y:337.75, s:11, w:130},
+    mobile:      {x:145.3, y:313.95, s:11, w:130},
+    email:       {x:111.1, y:290.15, s:11, w:142},
+    pan:         {x:132.7, y:266.35, s:11, w:130},
+    source:      {x:105.1, y:242.55, s:11, w:185},
+    lead_id:     {x:190.2, y:218.75, s:13, w:85},
+    booking_date:{x:363.6, y:218.75, s:13, w:85},
+    signatures:  {x:122.1, y:194.95, s:11, w:130}
+  };
+  // Where a failing signature check says WHERE, past the end of that row's underscores.
+  const WF_CL_SIG_WHY={x:262.0, y:194.95, size:8.5, right:545};
+  /* The two lines the blank does not print. Its rows step down by 23.8pt and it leaves the space
+     between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
+     form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
+     anything it already says. */
+
+  window.wfChecklistDownload=async function(caseId){
+    let row=null;
+    try{
+      const {data}=await ACC().from('booking_audits')
+        .select('status,result,error,queued_at,attempts').eq('case_id',caseId).maybeSingle();
+      row=data;
+    }catch(_e){}
+
+    if(!row){ toast('This booking has not been queued for reading yet','warn'); return; }
+    if(row.status==='pending'||row.status==='running'){
+      toast('The attachments are still being read \u2014 queued '+fmtDate(row.queued_at)
+        +'. Try again in a minute or two.','warn');
+      return;
+    }
+    if(row.status!=='done'||!row.result){
+      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err');
+      return;
+    }
+    try{ await wfChecklistPdf(row.result); }
+    catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* Fills the blank and downloads it. JAIN-E writes every value here from the stored reading, so
+     nothing on the sheet was produced by a model. */
+  async function wfChecklistPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+
+    const blank=await wfClBlank();
+
+    const doc=await L.PDFDocument.load(blank);
+    const page=doc.getPages()[0];
+    const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const helv=await doc.embedFont(L.StandardFonts.Helvetica);
+    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
+
+    const f=res.fields||{}, cl=res.checklist||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
+    /* A pending CRM field, or a skipped one, is left as a dash - "-- awaiting the CRM API --" does
+       not belong on a printed form and would not fit the blank anyway. */
+    const short=function(t){
+      const x=String(t==null?'':t).trim();
+      if(!x||/^--.*--$/.test(x)) return '\u2014';
+      return x;
+    };
+    // Step the size down until it fits its blank; truncate only as a last resort.
+    const put=function(slot,text,font,col){
+      if(!slot) return;
+      let t=String(text==null?'':text);
+      if(!t) return;
+      const fo=font||helvB;
+      let sz=slot.s;
+      while(sz>6 && fo.widthOfTextAtSize(t,sz)>slot.w) sz-=0.5;
+      while(t.length>1 && fo.widthOfTextAtSize(t,sz)>slot.w) t=t.slice(0,-1);
+      page.drawText(t,{x:slot.x,y:slot.y,size:sz,font:fo,color:col||black});
+    };
+    const verdict=function(slot,key){
+      const t=String(cl[key]!=null?cl[key]:'').trim();
+      // OK in black - it is a form, not a dashboard. NOT OK stays red so a problem still reads
+      // as one at a glance.
+      if(t==='Ok')      return put(slot,'OK',helvB,black);
+      if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
+      // Nothing prints as UNKNOWN. An item that could not be settled is not a pass, so it
+      // reads NOT OK and somebody looks at it.
+      if(t==='Unknown') return put(slot,'NOT OK',helvB,red);
+      return put(slot,short(t),helvB,black);
+    };
+
+    put(WF_CL.date,      (res.header&&res.header.date)||'');
+    /* EVERY allottee on the one line the form gives for it - the first applicant and anyone
+       named with them. It never wraps: the size steps down instead, so the sheet keeps the
+       shape of the form. */
+    const allottees=[];
+    [v('customer_name')].concat(Array.isArray(res.co_applicants)?res.co_applicants:[])
+      .forEach(function(n){
+        const t=String(n==null?'':n).trim();
+        if(!t||t==='NIL') return;
+        // The reader sometimes lists the applicant among the co-applicants too; printing a
+        // name twice reads as a mistake in the file rather than one in the reading.
+        if(allottees.some(function(x){ return x.toUpperCase()===t.toUpperCase(); })) return;
+        allottees.push(t);
+      });
+    put(WF_CL.customer,  allottees.join('  &  ')||'NIL');
+    put(WF_CL.project,   v('project_name'));
+    put(WF_CL.block,     v('block'));
+    put(WF_CL.flat,      v('flat'));
+    put(WF_CL.floor,     v('floor'));
+    put(WF_CL.area,      v('area_sqft'));
+    put(WF_CL.base_rate, v('base_rate'));
+    put(WF_CL.plc,       v('plc'));
+    put(WF_CL.flc,       v('flc'));
+    put(WF_CL.parking,   v('covered_parking'));
+    put(WF_CL.discount,  v('discount'));
+
+    verdict(WF_CL.cost,   'Cost Sheet');
+    verdict(WF_CL.market, 'Market valuation Sheet');
+    verdict(WF_CL.kyc,    'KYC of Customer');
+    verdict(WF_CL.mobile, 'Mobile Number');
+    verdict(WF_CL.email,  'Email ID');
+    verdict(WF_CL.pan,    'Pan Card No.');
+    put(WF_CL.source,     short(cl['Source']||v('source')));
+    put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
+    put(WF_CL.booking_date, short(cl['Booking Date']));
+
+    /* The blank now prints a Signatures row of its own, between "Booked in CRM" and "Payment
+       Plan", so it is filled like any other item rather than appended underneath. When it fails it
+       also says where, in small type past the end of the row - "NOT OK" alone sends somebody back
+       through the whole file. A clean sheet stays exactly as plain as the form. */
+    verdict(WF_CL.signatures, 'Signatures');
+    if(String(cl['Signatures']||'').trim()==='Not Ok'){
+      const sw=WF_CL_SIG_WHY;
+      let t=String((res.signatures&&res.signatures.reason)||'').trim();
+      if(t){
+        while(t.length>1 && helv.widthOfTextAtSize(t,sw.size)>(sw.right-sw.x)) t=t.slice(0,-1);
+        page.drawText(t,{x:sw.x,y:sw.y,size:sw.size,font:helv,color:red});
+      }
+    }
+
+    /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
+       stays in the stored reading; the printed sheet is the form. */
+    const bytes=await doc.save();
+    const who=String(v('customer_name')||'booking').replace(/[^\w \-]/g,'').trim()||'booking';
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Booking Form Check List - '+who+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    toast('Check list downloaded','ok');
+  }
+
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
      flow like Reimbursement, or the detail-card grid for anything else) plus the whole injected
@@ -3540,13 +3940,131 @@
      someone printing this needs to be able to scan or check by eye. Opened in a new tab rather
      than done via @media print CSS on the live page, so it doesn't have to fight the app's own
      nav/sidebar/panel chrome to hide everything else. */
+  /* Attachments printed as pages rather than filenames. An image goes straight in; a PDF is
+     rendered page by page with pdf.js (loadPdfJs() already exists in nexus-core for the Post-Sales
+     tooling) and each page embedded as an image, because a PDF cannot otherwise be folded into the
+     app's own print job - the browser will not include a cross-origin PDF in window.print().
+
+     Rendering FETCHES the file from S3, so it needs the site it is viewed from to be on the
+     bucket's allowed-origins list. Where the fetch fails the file is named instead, so the print
+     says what is missing rather than coming out silently blank. */
+  const WF_PRINT_MAX_PAGES=12;
+  /* Pages embedded across ONE print job, however many instances it covers. Printing a single
+     booking form never comes near it; Accounts printing a month of invoices would, and without a
+     ceiling that job means dozens of fetches and megabytes of embedded images. Reset per job in
+     wfPrintCases. */
+  const WF_PRINT_PAGE_BUDGET=45;
+  let WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;
+  function wfAttFileName(p){
+    return String(p||'').split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
+  }
+  /* Reads one stored file's BYTES through the s3-fetch edge function rather than letting the
+     browser fetch it from S3 directly.
+
+     pdf.js has to fetch a PDF to render it, and a direct fetch is cross-origin - so it only worked
+     from the one site the bucket's CORS rules name, and printing anywhere else failed with
+     "Could not be rendered here". Reading it server-side takes CORS out of the decision entirely.
+     Images are left on their signed URL: a plain <img src> is not a CORS request, and nothing here
+     reads its pixels. */
+  async function wfFetchAttachmentBytes(path){
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    if(!token) throw new Error('not signed in');
+    const res=await fetch(SUPABASE_URL+'/functions/v1/s3-fetch',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},
+      body:JSON.stringify({key:String(path||'').replace(/^s3:/,'')})
+    });
+    if(!res.ok){
+      let msg='';
+      try{ msg=((await res.json())||{}).error||''; }catch(_e){}
+      throw new Error(msg||('could not be read (HTTP '+res.status+')'));
+    }
+    return await res.arrayBuffer();
+  }
+  /* Attachments printed as pages rather than filenames - the Booking Form IS the attachment, so a
+     print listing "rajib_upadhay.pdf" and nothing else was not a printed booking form. Images go
+     straight in; a PDF is rendered page by page with pdf.js (loadPdfJs() already exists in
+     nexus-core for the Post-Sales tooling), because a browser will not include a cross-origin PDF
+     in its own print job.
+
+     Whatever field is flagged upiScannerMemory is skipped: Reimbursement's QR Code already prints
+     as its own image block above, and printing it here as well put the same code on the sheet
+     twice. */
+  async function wfPrintAttachmentsHtml(det,flow){
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    const qrLabel=(qrField&&qrField.label)||'';
+    let paths=[];
+    (det||[]).forEach(function(d){
+      if(!d) return;
+      if(qrLabel && eq(d.label||'', qrLabel)) return;
+      paths=paths.concat(wfValuePaths(d.value));
+    });
+    if(!paths.length) return '';
+
+    const blocks=[];
+    for(const p of paths){
+      const name=wfAttFileName(p);
+      const head='<div class="wf-print-att-h">'+esc2(name)+'</div>';
+
+      if(/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)){
+        const url=await wfSignedUrl(p);
+        blocks.push('<div class="wf-print-att">'+head
+          +(url?('<img src="'+esc2(url)+'" class="wf-print-att-img">')
+               :'<div class="wf-print-att-miss">This file could not be opened.</div>')
+          +'</div>');
+        continue;
+      }
+
+      if(/\.pdf$/i.test(name)){
+        if(WF_PRINT_PAGES_LEFT<=0){
+          blocks.push('<div class="wf-print-att">'+head
+            +'<div class="wf-print-att-miss">Not printed \u2014 this job already covers '
+            +WF_PRINT_PAGE_BUDGET+' pages. Print this one on its own to include it.</div></div>');
+          continue;
+        }
+        let imgs=[], why='';
+        try{
+          const lib=await loadPdfJs();
+          if(!lib) throw new Error('the PDF renderer did not load');
+          const buf=await wfFetchAttachmentBytes(p);
+          const pdf=await lib.getDocument({data:new Uint8Array(buf)}).promise;
+          const n=Math.min(pdf.numPages, WF_PRINT_MAX_PAGES, WF_PRINT_PAGES_LEFT);
+          for(let i=1;i<=n;i++){
+            const page=await pdf.getPage(i);
+            // 1.6 keeps a scan readable in print without a page of 10MB data URLs.
+            const vp=page.getViewport({scale:1.6});
+            const cv=document.createElement('canvas');
+            cv.width=vp.width; cv.height=vp.height;
+            await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+            imgs.push('<img src="'+cv.toDataURL('image/jpeg',0.82)+'" class="wf-print-att-img">');
+          }
+          WF_PRINT_PAGES_LEFT-=imgs.length;
+          if(pdf.numPages>n) imgs.push('<div class="wf-print-att-miss">Only the first '+n
+            +' of '+pdf.numPages+' pages are printed.</div>');
+        }catch(e){ imgs=[]; why=(e&&e.message)?String(e.message):'it could not be read'; }
+        blocks.push('<div class="wf-print-att">'+head
+          +(imgs.length
+            ? imgs.join('')
+            // Say WHY. "Could not be rendered here" sent us looking in the wrong place once already.
+            : '<div class="wf-print-att-miss">Not printed \u2014 '+esc2(why)+'.</div>')
+          +'</div>');
+        continue;
+      }
+
+      blocks.push('<div class="wf-print-att">'+head
+        +'<div class="wf-print-att-miss">Not a printable file type \u2014 open it to view.</div></div>');
+    }
+    return blocks.join('');
+  }
   async function wfCasePrintSection(caseId){
     let c=null, flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
     if(!c) return null;
     if(c.flow_id){ try{ const {data}=await ACC().from('flows').select('*').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     let qrHtml='';
     const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
     const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
@@ -3559,12 +4077,16 @@
           +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
       }
     }
+    /* Never let attachments take the printout down with them: a signing failure or an
+       unreadable PDF must still leave the instance's own details printable. */
+    let attHtml='';
+    try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
         +'<h2 style="margin:0 0 4px">'+esc2(title)+'</h2>'
         +'<div style="color:#64748b;margin-bottom:14px">'+esc2(wfN().one)+' by: '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
-        +detHtml+qrHtml
+        +detHtml+qrHtml+attHtml
       +'</section>' };
   }
 
@@ -3581,6 +4103,7 @@
     if(!w){ toast('Please allow popups to print','err'); return false; }
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
+    WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;   // a fresh allowance for each print job
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
     if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
@@ -3611,7 +4134,10 @@
        already done. decode() resolves only once the image can actually be painted; falls back to
        load/error for the rare browser without it. Either way 'error' resolves too, so one broken
        image can never hang the rest of the printout. */
-    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
+    /* Attachment pages are waited on as well. This looked only for QR images, so a Booking Form
+       - which has none - made Promise.all([]) resolve immediately and print fired before a single
+       attachment page had been decoded, giving a blank printout. */
+    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img,.wf-print-att-img'));
     const imgReady=function(img){ return new Promise(function(res){
       if(typeof img.decode==='function'){ img.decode().then(res,res); return; }
       if(img.complete) return res();
@@ -3620,7 +4146,9 @@
     }); };
     Promise.race([
       Promise.all(imgs.map(imgReady)),
-      new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
+      // A rendered PDF page is a far bigger image than a QR code, so the backstop allows for
+      // the images actually present rather than the number of instances alone.
+      new Promise(function(res){ setTimeout(res, 2000+Math.min(parts.length,30)*250+Math.min(imgs.length,40)*150); })
     ]).then(doPrint);
     return true;
   };
@@ -4643,6 +5171,15 @@
     window._wfEvtMinTotal=Number(flow.min_total||0)||0;
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
+    /* `editing` means "this is an existing instance" and governs the title, the Save-draft button,
+       who-does-which-step, and the AI field suggestion - a resumed draft is still a CREATION, so it
+       must stay false for all of those.
+
+       But it was ALSO gating whether saved values get loaded, and a draft has no case id - so
+       reopening a draft drew an empty form and the draft's data appeared to vanish. What is needed
+       there is a different question: are there saved values to draw? A case has them; so does a
+       draft. Hence two flags. */
+    const hasSaved=!!caseId||!!draftRow;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
     // Fetched once and cached into trigger_template so every instance uses the same fields.
     let tmpl=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
@@ -4670,8 +5207,13 @@
       template=template.concat([{label:'Attachment',type:'attachment',optional:true}]);
       try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:template}); }catch(_e){}
     }
-    // An attachment is never compulsory - a form should not be blocked for want of a file.
-    template=template.map(function(t){ return (t&&(t.type==='attachment'))?Object.assign({},t,{optional:true}):t; });
+    /* An attachment DEFAULTS to optional - no form should be blocked for want of a file - but a
+       workflow may insist on one by saving the field with optional:false. Only an unspecified
+       value gets defaulted; an explicit false is now respected. */
+    template=template.map(function(t){
+      if(!t || t.type!=='attachment') return t;
+      return (t.optional===false) ? t : Object.assign({},t,{optional:true});
+    });
     // "Multiple" lets the whole set of fields repeat — one group per entry (Entry 1, Entry 2…).
     // Grouping saved values by `d.group` (missing group = 0) also reads legacy single-group data
     // exactly as before, so this is one code path for both.
@@ -4685,7 +5227,7 @@
        properly, and the editing branch now feeds it. */
     let src=[];
     let groupsSrc;
-    if(editing){
+    if(hasSaved){
       const savedDetails=Array.isArray(draftRow&&draftRow.details)?draftRow.details:(Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
       if(locked){
         const byGroup={};
@@ -4709,13 +5251,19 @@
        has saved, from savedDetails above. upi_scanner_get falls back to the person's own most
        recent past submission of THIS flow when nothing has been explicitly remembered yet, so the
        pre-fill still works even if a save never actually reached upi_scanner_remember. */
-    if(!editing){
+    /* !caseId, so this still covers a resumed draft - but it now only fills the field when the
+       draft did not already carry one. Overwriting a QR the person deliberately attached to their
+       draft with whatever was last remembered would be the same class of bug as the one above. */
+    if(!caseId){
       const scannerField=template.find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
-        try{
-          const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
-          if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
-        }catch(_e){}
+        const already=((src.find(function(t){ return t&&t.label===scannerField.label; })||{}).value||'').trim();
+        if(!already){
+          try{
+            const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
+            if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
+          }catch(_e){}
+        }
       }
     }
     // A text field can opt into a growing autocomplete list (flow.autocomplete_fields, e.g.
@@ -4753,7 +5301,7 @@
     if(commonFields.length) src=src.filter(function(t){ return !(t&&t.common); });
     rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     let editGroupsHtml='';
-    if(allowMulti && editing && src.length){
+    if(allowMulti && hasSaved && src.length){
       const setsFor={}; let nSets=1;
       src.forEach(function(t){
         const parts=wfSplitSets((t&&t.value)||'');
@@ -4792,7 +5340,7 @@
     let dateGroupsHtml='';
     if(dateMode){
       const byDate={}, dateOrder=[];
-      if(editing){
+      if(hasSaved){
         const cols={}; let nEnt=1;
         src.forEach(function(t){ const parts=wfSplitSets((t&&t.value)||''); cols[t.label]=parts; if(parts.length>nEnt) nEnt=parts.length; });
         for(let i=0;i<nEnt;i++){
@@ -5272,6 +5820,37 @@
     }
     return '<span class="wf-att-file" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')"><i class="fa-solid fa-file-arrow-down"></i> '+esc2(name)+'</span>';
   }
+  /* Is this field already shown above the thread as a real, openable chip? The trigger-event
+     Attachment is, and so is whichever field is flagged upiScannerMemory. Listing them again in
+     the detail list gave the same file twice - once as a chip, once as raw "s3:portal/..." text. */
+  function wfDetIsPinned(label,flow){
+    if(eq(label||'','Attachment')) return true;
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qr=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    return !!(qr&&eq(label||'',qr.label||''));
+  }
+  /* Every separator a stored value can carry: '|' between entries, ',' between entries when there
+     is no pipe, and ' ; ' between several files on ONE entry. Splitting on the comma alone read
+     "s3:a ; s3:b" as a single path and rendered one chip pointing at both filenames at once. */
+  function wfValuePaths(v){
+    return String(v==null?'':v).split(/[|,;]/)
+      .map(function(x){ return x.trim(); })
+      .filter(function(x){ return x.indexOf('s3:')===0; });
+  }
+  /* The generic detail list, shared by the instance view and the printed page so the two cannot
+     drift. Any value that is really a stored file becomes openable chips rather than its path. */
+  function wfDetListHtml(det,flow){
+    const rows=(det||[]).filter(function(d){
+      return d && !(d.label && wfDetIsPinned(d.label,flow));
+    }).map(function(d){
+      const paths=wfValuePaths(d.value);
+      const val=paths.length
+        ? wfAttachmentsRowHtml(paths.map(function(p){ return {storage_path:p}; }))
+        : esc2(d.value||'');
+      return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+val+'</li>';
+    });
+    return rows.length?('<ul class="wf-detlist">'+rows.join('')+'</ul>'):'';
+  }
   function wfAttachmentsRowHtml(atts){
     if(!atts||!atts.length) return '';
     return '<div class="wf-att-row">'+atts.map(wfAttachmentHtml).join('')+'</div>';
@@ -5285,9 +5864,10 @@
     // An entry-wise instance holds one attachment PER ENTRY in this field, and the table already
     // gives each row its own. Pinning the joined value here would render one broken chip.
     if(wfIsDaywise(flow,det) || wfSplitSets(f.value).length>1) return '';
-    // A multi-entry (repeated-set) workflow can have one attachment per set, comma-joined like any
-    // other multi-entry field — split back out into one chip per file.
-    const paths=String(f.value).split(',').map(function(s){return s.trim();}).filter(function(s){return s.indexOf('s3:')===0;});
+    /* One chip per file. A `multi` field joins its files with ' ; ' and a multi-entry workflow
+       joins entries with ',' or '|' - splitting on the comma alone turned two uploaded files into
+       one chip whose path was both filenames joined, which opened nothing. */
+    const paths=wfValuePaths(f.value);
     if(!paths.length) return '';
     return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment'+(paths.length>1?'s':'')+'</div>'+wfAttachmentsRowHtml(paths.map(function(p){return {storage_path:p};}))+'</div>';
   }
@@ -8406,7 +8986,7 @@
     });
     updateInsDateBtn(); updateInsMemberBtn(); updateInsProjBtn(); updateSelfInsDateBtn(); updateSelfInsProjBtn();
   }
-  let INS_STAGE={due:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
+  let INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
   function insInput(){
     return `<div class="ac-addrow-ghost" id="insGhost" onclick="accInsExpand()"><i class="fa-solid fa-plus"></i> Add task</div>
     <div class="ac-addrow" id="insRow" style="display:none">
@@ -8482,19 +9062,437 @@
     setTimeout(function(){ document.addEventListener('mousedown',popoverOutside,true); },0);
     return el;
   }
-  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title='Due '+fmtDate(INS_STAGE.due); } else { b.classList.remove('primary'); b.title='Set due date'; } }
+  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(INS_STAGE.recur||{freq:'none',date:INS_STAGE.due}); dpMarkBtn(b,INS_STAGE.recur); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,null); } }
   function updateInsMemberBtn(){ const b=$('insMemberBtn'); if(!b)return; const n=(INS_STAGE.members||[]).length; if(n){ b.classList.add('primary'); b.title=n+' member'+(n>1?'s':'')+' selected'; } else { b.classList.remove('primary'); b.title='Pick members'; } }
   function updateInsProjBtn(){ const b=$('insProjBtn'); if(!b)return; if(INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
-  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title='Due '+fmtDate(SELF_INS_STAGE.due); } else { b.classList.remove('primary'); b.title='Set due date'; } }
+  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(SELF_INS_STAGE.recur||{freq:'none',date:SELF_INS_STAGE.due}); dpMarkBtn(b,SELF_INS_STAGE.recur); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,null); } }
   function updateSelfInsProjBtn(){ const b=$('selfInsProjBtn'); if(!b)return; if(SELF_INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(SELF_INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
+  /* ── due date + repeat picker ───────────────────────────────────────────────────────────────
+     Replaces the browser's native date box on Tasks. How often on the left; on the right, only
+     what that choice actually needs:
+
+       Does not repeat  a date, required
+       Every day        nothing
+       Every week       which weekdays
+       Every month      which dates of the month (several allowed, plus "last day")
+       Every 3 months   the same, every third month counted from the first one
+       Every year       which months, and for each of them its own dates
+
+     What gets saved is a due_date (the next real occurrence) plus a rule stored as jsonb in
+     acc.ptasks.recur. dpMatches() below is a deliberate mirror of acc.recur_matches() in the
+     database - both walk a day at a time and test the same predicate, so the dates shown here are
+     the dates the server will actually create. Change one and you must change the other.
+     proto/due-date-picker.html is the standalone version. */
+  const DP_FREQS=[
+    {k:'none',      label:'Does not repeat', asks:'date'},
+    {k:'daily',     label:'Every day',       asks:'nothing'},
+    {k:'weekly',    label:'Every week',      asks:'weekdays'},
+    {k:'monthly',   label:'Every month',     asks:'monthdays'},
+    {k:'quarterly', label:'Every 3 months',  asks:'monthdays'},
+    {k:'yearly',    label:'Every year',      asks:'monthdates'}
+  ];
+  const DP_DOW=['S','M','T','W','T','F','S'];
+  const DP_DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const DP_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DP_MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function dpAsks(f){ for(var i=0;i<DP_FREQS.length;i++) if(DP_FREQS[i].k===f) return DP_FREQS[i].asks; return 'date'; }
+  const dpPad=n=>String(n).padStart(2,'0');
+  const dpIso=(y,m,d)=>y+'-'+dpPad(m+1)+'-'+dpPad(d);
+  const dpParse=s=>{const p=String(s).split('-');return {y:+p[0],m:+p[1]-1,d:+p[2]};};
+  const dpDaysIn=(y,m)=>new Date(y,m+1,0).getDate();
+  const dpAdd=(s,n)=>{const p=dpParse(s),d=new Date(p.y,p.m,p.d+n);return dpIso(d.getFullYear(),d.getMonth(),d.getDate());};
+  const dpShort=s=>{if(!s)return '';const p=dpParse(s);return p.d+' '+DP_MONS[p.m]+' '+p.y;};
+  const dpLong=s=>{if(!s)return '';const p=dpParse(s);return DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+DP_MONS[p.m]+' '+p.y;};
+  /* istTodayISO(), not todayISO(): the floor has to be the same "today" the backend works in, or a
+     device with a skewed clock offers a day the server already treats as past. */
+  function dpFloor(){ return istTodayISO(); }
+  function dpOrd(n){
+    if(n==='last') return 'last day';
+    n=+n;
+    if(n%100>=11&&n%100<=13) return n+'th';
+    return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');
+  }
+  function dpList(a){
+    if(!a.length) return '';
+    if(a.length===1) return a[0];
+    return a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+  }
+  function dpSortDays(a){
+    return (a||[]).slice().sort(function(x,y){
+      if(x==='last') return 1;
+      if(y==='last') return -1;
+      return x-y;
+    });
+  }
+  // A day number placed inside a real month: 'last', or clamped so the 31st survives February.
+  function dpDayIn(y,m,day){ return day==='last' ? dpDaysIn(y,m) : Math.min(+day, dpDaysIn(y,m)); }
+  function dpDaysForMonth(rule,y,m){
+    var src = rule.freq==='yearly' ? ((rule.monthdates||{})[m]||[]) : (rule.monthdays||[]);
+    var out=[];
+    dpSortDays(src).forEach(function(d){
+      var n=dpDayIn(y,m,d);
+      if(out.indexOf(n)<0) out.push(n);
+    });
+    return out;
+  }
+
+  /* Mirror of acc.recur_matches(). */
+  function dpMatches(rule,isoDate,anchor){
+    if(!rule||!rule.freq) return false;
+    var p=dpParse(isoDate);
+    if(rule.freq==='daily') return true;
+    if(rule.freq==='weekly') return (rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())>-1;
+    if(rule.freq==='monthly'||rule.freq==='quarterly'){
+      if(rule.freq==='quarterly'){
+        var a=dpParse(anchor||isoDate);
+        var months=(p.y*12+p.m)-(a.y*12+a.m);
+        if(((months%3)+3)%3!==0) return false;
+      }
+      return dpDaysForMonth(rule,p.y,p.m).indexOf(p.d)>-1;
+    }
+    if(rule.freq==='yearly') return dpDaysForMonth(rule,p.y,p.m).indexOf(p.d)>-1;
+    return false;
+  }
+  /* The next n dates on or after `from`. Same day-walk as the database, so the two agree. */
+  function dpOccurrences(rule,n,from,anchor){
+    if(!rule) return [];
+    if(rule.freq==='none'||!rule.freq) return rule.date?[rule.date]:[];
+    var out=[], cur=from||dpFloor(), guard=0;
+    while(out.length<n && guard++<800){
+      if(rule.until && cur>rule.until) break;
+      if(dpMatches(rule,cur,anchor||from)) out.push(cur);
+      cur=dpAdd(cur,1);
+    }
+    return out;
+  }
+  function dpFirst(rule){
+    var o=dpOccurrences(rule,1,dpFloor(),null);
+    return o.length?o[0]:null;
+  }
+
+  function dpDescribe(r){
+    if(!r) return 'Set due date';
+    if(!r.freq||r.freq==='none') return r.date?dpLong(r.date):'Set due date';
+    var s='';
+    if(r.freq==='daily') s='Every day';
+    else if(r.freq==='weekly')
+      s='Every '+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
+    else if(r.freq==='monthly'||r.freq==='quarterly'){
+      var ds=dpList(dpSortDays(r.monthdays).map(dpOrd));
+      s=(r.freq==='quarterly')?('The '+ds+', every 3 months'):('The '+ds+' of every month');
+    }
+    else if(r.freq==='yearly'){
+      var ms=Object.keys(r.monthdates||{}).map(Number).sort(function(a,b){return a-b;});
+      s=dpList(ms.map(function(m){
+        var ds2=dpSortDays((r.monthdates||{})[m]||[]);
+        var nums=ds2.filter(function(d){return d!=='last';});
+        var parts=[];
+        if(nums.length) parts.push(dpList(nums.map(String))+' '+DP_MONS[m]);
+        if(ds2.indexOf('last')>-1) parts.push('the last day of '+DP_MONS[m]);
+        return dpList(parts);
+      }))+' each year';
+      s=s.charAt(0).toUpperCase()+s.slice(1);
+    }
+    if(r.until) s+=', until '+dpShort(r.until);
+    return s;
+  }
+  function dpMarkBtn(b,rule){
+    if(!b) return;
+    var i=b.querySelector('i'); if(!i) return;
+    var rep=!!(rule&&rule.freq&&rule.freq!=='none');
+    i.className=rep?'fa-solid fa-rotate':'fa-regular fa-calendar';
+  }
+
+  var DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_AM=null, DP_HOST=null, DP_OPTS=null;
+
+  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null}; }
+
+  function dpMissing(r){
+    var a=dpAsks(r.freq);
+    if(a==='date')      return r.date?null:'Pick the date it is due.';
+    if(a==='nothing')   return null;
+    if(a==='weekdays')  return r.weekdays.length?null:'Pick at least one day of the week.';
+    if(a==='monthdays') return r.monthdays.length?null:'Pick at least one date of the month.';
+    if(a==='monthdates'){
+      var ms=Object.keys(r.monthdates);
+      if(!ms.length) return 'Pick at least one month.';
+      for(var i=0;i<ms.length;i++){
+        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the dates in '+DP_MONL[+ms[i]]+'.';
+      }
+      return null;
+    }
+    return null;
+  }
+
+  function dpFirstChosenMonth(){
+    var k=Object.keys(DP_ST.monthdates).map(Number).sort(function(a,b){return a-b;});
+    return k.length?k[0]:null;
+  }
+
+  function dpAskLbl(t,req){
+    return '<div class="dp-ask">'+t+(req?' <span class="req">required</span>':'')+'</div>';
+  }
+
+  function dpCalendar(){
+    var sel   = DP_MODE==='until' ? DP_ST.until : DP_ST.date;
+    var floor = DP_MODE==='until' ? (dpFirst(dpRuleOf(DP_ST))||dpFloor()) : dpFloor();
+    var y=DP_VIEW.y, m=DP_VIEW.m;
+    var first=new Date(y,m,1).getDay(), n=dpDaysIn(y,m);
+    var prevN=dpDaysIn(y,m===0?11:m-1), today=dpFloor(), i, d;
+    var h='<div class="dp-head">'
+      +'<button type="button" class="dp-nav" data-dp="mv" data-v="-1" title="Previous month"><i class="fa-solid fa-chevron-left"></i></button>'
+      +'<div class="dp-title">'+DP_MONL[m]+' '+y+'</div>'
+      +'<button type="button" class="dp-nav" data-dp="mv" data-v="1" title="Next month"><i class="fa-solid fa-chevron-right"></i></button>'
+      +'</div><div class="dp-dow">'+DP_DOW.map(function(x){return '<span>'+x+'</span>';}).join('')+'</div><div class="dp-grid">';
+    for(i=0;i<first;i++) h+='<button type="button" class="dp-day pad" disabled>'+(prevN-first+i+1)+'</button>';
+    for(d=1;d<=n;d++){
+      var iso=dpIso(y,m,d);
+      h+='<button type="button" class="dp-day'+(iso===sel?' on':'')+(iso===today?' today':'')+'"'
+        +' data-dp="pick" data-v="'+iso+'"'+(iso<floor?' disabled':'')+'>'+d+'</button>';
+    }
+    var tail=(first+n)%7;
+    if(tail) for(i=1;i<=7-tail;i++) h+='<button type="button" class="dp-day pad" disabled>'+i+'</button>';
+    return h+'</div>';
+  }
+
+  function dpPane(){
+    var a=dpAsks(DP_ST.freq), h='<div class="dp-main">', i;
+
+    if(DP_MODE==='until'){
+      return h+'<div class="dp-mode"><i class="fa-solid fa-flag-checkered"></i>Choosing the last date'
+        +'<button type="button" data-dp="backtodate">Back</button></div>'+dpCalendar()+'</div>';
+    }
+
+    if(a==='date'){
+      h+=dpAskLbl('Due date',true)+dpCalendar()
+        +'<div class="dp-quick">'
+        +'<button type="button" data-dp="pick" data-v="'+dpFloor()+'">Today</button>'
+        +'<button type="button" data-dp="pick" data-v="'+dpAdd(dpFloor(),1)+'">Tomorrow</button>'
+        +'<button type="button" data-dp="pick" data-v="'+dpAdd(dpFloor(),7)+'">Next week</button>'
+        +'</div>';
+    }
+    else if(a==='nothing'){
+      h+=dpAskLbl('Every day')
+        +'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>';
+    }
+    else if(a==='weekdays'){
+      h+=dpAskLbl('Which days',true)+'<div class="dp-chips dow">';
+      for(i=0;i<7;i++)
+        h+='<button type="button" class="dp-chip'+(DP_ST.weekdays.indexOf(i)>-1?' on':'')+'"'
+          +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
+      h+='</div><div class="dp-note" style="margin-top:9px">Twice a week is two days, not two tasks.</div>';
+    }
+    else if(a==='monthdays'){
+      h+=dpAskLbl('Which dates',true)+'<div class="dp-chips dom">';
+      for(i=1;i<=31;i++)
+        h+='<button type="button" class="dp-chip'+(DP_ST.monthdays.indexOf(i)>-1?' on':'')+'"'
+          +' data-dp="dom" data-v="'+i+'">'+i+'</button>';
+      h+='<button type="button" class="dp-chip wide'+(DP_ST.monthdays.indexOf('last')>-1?' on':'')+'"'
+        +' data-dp="dom" data-v="last">Last day</button></div>';
+    }
+    else if(a==='monthdates'){
+      h+=dpAskLbl('Which months',true)+'<div class="dp-chips mon">';
+      for(i=0;i<12;i++){
+        var picked=DP_ST.monthdates[i]!==undefined;
+        var hasDates=picked&&(DP_ST.monthdates[i]||[]).length>0;
+        h+='<button type="button" class="dp-chip'+(picked?' on':'')+(DP_AM===i?' active':'')+'"'
+          +' data-dp="mon" data-v="'+i+'" title="'+DP_MONL[i]+'">'+DP_MONS[i]
+          +(hasDates?'<span class="pip"></span>':'')+'</button>';
+      }
+      h+='</div>';
+      /* One 1-to-31 grid for whichever month is highlighted - the same grid "Every month" uses, so
+         choosing ten months does not make the panel ten rows taller. */
+      if(DP_AM!==null && DP_ST.monthdates[DP_AM]!==undefined){
+        var sel=DP_ST.monthdates[DP_AM]||[];
+        h+='<div class="dp-sub"><span class="lbl">Dates in '+DP_MONL[DP_AM]+'</span>'
+          +'<button type="button" class="rm" data-dp="unmon" data-v="'+DP_AM+'">Remove month</button></div>'
+          +'<div class="dp-chips dom">';
+        for(i=1;i<=31;i++)
+          h+='<button type="button" class="dp-chip'+(sel.indexOf(i)>-1?' on':'')+'"'
+            +' data-dp="ymd" data-v="'+i+'">'+i+'</button>';
+        h+='<button type="button" class="dp-chip wide'+(sel.indexOf('last')>-1?' on':'')+'"'
+          +' data-dp="ymd" data-v="last">Last day</button></div>';
+      } else {
+        h+='<div class="dp-empty">Pick a month above, then choose its dates here.<br>'
+          +'Each month keeps its own &mdash; 15 and 30 June, just the 1st in December.</div>';
+      }
+    }
+    return h+'</div>';
+  }
+
+  function dpSays(){
+    var miss=dpMissing(DP_ST);
+    if(miss) return '<div class="dp-says"><span class="miss">'+miss+'</span></div>';
+    var rule=dpRuleOf(DP_ST);
+    var h='<b>'+dpDescribe(DP_ST)+'</b>';
+    var nx=(DP_ST.freq==='none')?[DP_ST.date]:dpOccurrences(rule,3,dpFloor(),null);
+    if(nx.length&&nx[0]) h+='<br>Next: '+nx.map(dpShort).join(' &middot; ');
+    if(dpUsesShortMonth()) h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +(dpAsks(DP_ST.freq)==='monthdates'
+         ? 'In February it falls on the 28th, or the 29th in a leap year.'
+         : 'A 29th, 30th or 31st falls on the last day of a shorter month.')+'</div>';
+    if(DP_ST.freq==='quarterly') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +'Every 3 months, counting from the first one.</div>';
+    if(DP_ST.freq!=='none'){
+      h+='<div class="ends">'+(DP_ST.until
+        ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
+        : '<button type="button" data-dp="setend">Set an end date</button>')+'</div>';
+    }
+    return '<div class="dp-says">'+h+'</div>';
+  }
+  function dpUsesShortMonth(){
+    var a=dpAsks(DP_ST.freq), i, m, ds;
+    if(a==='monthdays') for(i=0;i<DP_ST.monthdays.length;i++){ if(+DP_ST.monthdays[i]>28) return true; }
+    if(a==='monthdates'){
+      // Only February can be short of a 29th/30th/31st; January the 31st is the 31st every year.
+      ds=DP_ST.monthdates[1]||[];
+      for(i=0;i<ds.length;i++){ if(+ds[i]>28) return true; }
+    }
+    return false;
+  }
+
+  // The rule as it will be stored: only the fields its own option uses, so nothing stale rides along.
+  function dpRuleOf(st){
+    var a=dpAsks(st.freq);
+    if(a==='date') return null;                    // no repeat; the due date carries it
+    var r={freq:st.freq};
+    if(a==='weekdays')        r.weekdays=st.weekdays.slice().sort(function(x,y){return x-y;});
+    else if(a==='monthdays')  r.monthdays=dpSortDays(st.monthdays);
+    else if(a==='monthdates') r.monthdates=JSON.parse(JSON.stringify(st.monthdates));
+    if(st.until) r.until=st.until;
+    return r;
+  }
+  // What a caller gets back: the due date to store, and the rule (or null).
+  function dpResult(){
+    if(dpMissing(DP_ST)) return null;
+    var rule=dpRuleOf(DP_ST);
+    return rule ? {due:dpFirst(rule), recur:rule} : {due:DP_ST.date, recur:null};
+  }
+
+  function dpPaint(){
+    if(!DP_HOST) return;
+    var railH='<div class="dp-rail">'+DP_FREQS.map(function(f){
+      return '<button type="button" class="dp-opt'+(DP_ST.freq===f.k?' on':'')+'" data-dp="freq" data-v="'+f.k+'">'+f.label+'</button>';
+    }).join('')+'</div>';
+    var h='<div class="dp-body">'+railH+dpPane()+'</div>'+dpSays();
+    if(DP_OPTS.footer)
+      h+='<div class="dp-foot"><button type="button" class="dp-clear" data-dp="clear">Clear</button>'
+        +'<button type="button" class="dp-done" data-dp="done"'+(dpMissing(DP_ST)?' disabled':'')+'>Done</button></div>';
+    DP_HOST.innerHTML=h;
+    if(DP_OPTS.onChange) DP_OPTS.onChange(dpResult());
+  }
+
+  function dpToggle(arr,v){ var i=arr.indexOf(v); if(i>-1) arr.splice(i,1); else arr.push(v); }
+
+  function dpClick(e){
+    var el=e.target.closest('[data-dp]'); if(!el) return;
+    e.preventDefault(); e.stopPropagation();
+    var a=el.getAttribute('data-dp'), v=el.getAttribute('data-v'), m;
+
+    if(a==='freq'){
+      DP_ST.freq=v; DP_MODE='date';
+      if(dpAsks(v)==='date') DP_ST.until=null;          // a one-off has nothing to end
+      if(dpAsks(v)==='monthdates') DP_AM=dpFirstChosenMonth();
+    }
+    else if(a==='mv'){ m=DP_VIEW.m+Number(v); DP_VIEW={y:DP_VIEW.y+Math.floor(m/12),m:((m%12)+12)%12}; }
+    else if(a==='pick'){
+      if(DP_MODE==='until'){
+        DP_ST.until=v; DP_MODE='date';
+      } else {
+        DP_ST.date=v;
+        if(DP_ST.until&&DP_ST.until<v) DP_ST.until=null;
+        var q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
+      }
+    }
+    else if(a==='dow') dpToggle(DP_ST.weekdays,Number(v));
+    else if(a==='dom') dpToggle(DP_ST.monthdays, v==='last'?'last':Number(v));
+    else if(a==='mon'){
+      /* Clicking a month always selects it and points the grid at it; removing is the explicit
+         "Remove month", so one click cannot quietly discard dates already set for a month you
+         only meant to look at. */
+      m=Number(v);
+      if(DP_ST.monthdates[m]===undefined) DP_ST.monthdates[m]=[];
+      DP_AM=m;
+    }
+    else if(a==='ymd'){
+      if(DP_AM===null) return;
+      if(!DP_ST.monthdates[DP_AM]) DP_ST.monthdates[DP_AM]=[];
+      dpToggle(DP_ST.monthdates[DP_AM], v==='last'?'last':Number(v));
+    }
+    else if(a==='unmon'){
+      delete DP_ST.monthdates[v];
+      if(DP_AM===Number(v)) DP_AM=dpFirstChosenMonth();
+    }
+    else if(a==='setend'){
+      DP_MODE='until';
+      var f=dpParse(DP_ST.until||dpFirst(dpRuleOf(DP_ST))||dpFloor()); DP_VIEW={y:f.y,m:f.m};
+    }
+    else if(a==='backtodate'){ DP_MODE='date'; }
+    else if(a==='noend'){ DP_ST.until=null; }
+    else if(a==='clear'){ if(DP_OPTS.onDone) DP_OPTS.onDone(null); return; }
+    else if(a==='done'){ if(dpMissing(DP_ST)) return; if(DP_OPTS.onDone) DP_OPTS.onDone(dpResult()); return; }
+    dpPaint();
+  }
+
+  /* rule = {due, recur} as stored on the task, or null. */
+  function accDpMount(host,cur,opts){
+    DP_HOST=host; DP_OPTS=opts||{};
+    DP_ST=dpBlank();
+    var recur=cur&&cur.recur;
+    if(recur&&recur.freq){
+      DP_ST.freq=recur.freq;
+      DP_ST.weekdays=(recur.weekdays||[]).slice();
+      DP_ST.monthdays=(recur.monthdays||[]).slice();
+      DP_ST.monthdates={};
+      if(recur.monthdates) for(var k in recur.monthdates){
+        var vv=recur.monthdates[k];
+        DP_ST.monthdates[k]=Array.isArray(vv)?vv.slice():(vv==null?[]:[vv]);
+      }
+      DP_ST.until=recur.until||null;
+    } else {
+      DP_ST.freq='none';
+      DP_ST.date=(cur&&cur.due)||dpFloor();
+    }
+    // Never open on a month already behind today, or every day in view is greyed out.
+    var start=(DP_ST.date&&DP_ST.date>=dpFloor())?DP_ST.date:dpFloor();
+    var p=dpParse(start);
+    DP_VIEW={y:p.y,m:p.m}; DP_MODE='date'; DP_AM=dpFirstChosenMonth();
+    host.classList.add('dp-pop');
+    host.addEventListener('click',dpClick);
+    dpPaint();
+    return host;
+  }
+  /* openPopover positions the panel while it is still an empty div, so it measures 0 wide and
+     0 tall; a 432px panel opened near an edge has to be placed again once it has a size.
+
+     Below the button by default, above it when it would run off the bottom, and pinned to the top
+     when it fits neither. Being position:fixed, anything left off-screen can never be scrolled to
+     - .dp-pop caps its height and scrolls its own body for the same reason. */
+  function dpFitPopover(el,anchor){
+    if(!el||!anchor) return;
+    var m=8, vw=window.innerWidth, vh=window.innerHeight;
+    var r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight;
+    var top=r.bottom+4;
+    if(top+h > vh-m) top=r.top-h-4;
+    if(top < m) top=m;
+    el.style.top=top+'px';
+    el.style.left=Math.max(m,Math.min(r.left,vw-w-m))+'px';
+  }
+
   window.accInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
-    const cur=INS_STAGE.due||'';
-    openPopover(btn,`<input type="date" id="acPopDate" min="${todayISO()}" value="${cur}" onchange="accInsDateSet(this.value)" style="opacity:0;width:36px;height:36px;border:0;padding:0;outline:none;background:transparent">`);
-    const inp=document.getElementById('acPopDate'); if(inp){ inp.focus(); try{ inp.showPicker && inp.showPicker(); }catch(_e){} }
+    const el=openPopover(btn,'<div id="acDpBox"></div>');
+    accDpMount(document.getElementById('acDpBox'),
+      {due:INS_STAGE.due,recur:INS_STAGE.recur},
+      {footer:true,onDone:function(r){ accInsDateSet(r); }});
+    dpFitPopover(el,btn);
   };
-  window.accInsDateSet=function(v){ INS_STAGE.due=v||null; updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus(); };
+  window.accInsDateSet=function(r){
+    INS_STAGE.due=r?r.due:null; INS_STAGE.recur=r?r.recur:null;
+    updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus();
+  };
   window.accInsPickMembers=async function(ev){
     ev.stopPropagation();
     const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
@@ -8519,11 +9517,16 @@
   window.accSelfInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
-    const cur=SELF_INS_STAGE.due||'';
-    openPopover(btn,`<input type="date" id="acPopSelfDate" min="${todayISO()}" value="${cur}" onchange="accSelfInsDateSet(this.value)" style="opacity:0;width:36px;height:36px;border:0;padding:0;outline:none;background:transparent">`);
-    const inp=document.getElementById('acPopSelfDate'); if(inp){ inp.focus(); try{ inp.showPicker && inp.showPicker(); }catch(_e){} }
+    const el=openPopover(btn,'<div id="acDpBox"></div>');
+    accDpMount(document.getElementById('acDpBox'),
+      {due:SELF_INS_STAGE.due,recur:SELF_INS_STAGE.recur},
+      {footer:true,onDone:function(r){ accSelfInsDateSet(r); }});
+    dpFitPopover(el,btn);
   };
-  window.accSelfInsDateSet=function(v){ SELF_INS_STAGE.due=v||null; updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus(); };
+  window.accSelfInsDateSet=function(r){
+    SELF_INS_STAGE.due=r?r.due:null; SELF_INS_STAGE.recur=r?r.recur:null;
+    updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus();
+  };
   window.accSelfInsPickProject=async function(ev){
     ev.stopPropagation();
     const {data:projectsRaw}=await ACC().from('projects').select('id,name,department,created_by,owner').order('name');
@@ -8541,8 +9544,8 @@
   window.accP3=function(k){P3=k;tasksScreen();};
   window.accInsToggleX=function(){};
   window.accSelfInsToggleX=function(){};
-  window.accInsCancel=function(){ INS_STAGE={due:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
-  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accInsCancel=function(){ INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -8551,14 +9554,14 @@
     const projectId=INS_STAGE.project||null;
     INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur:INS_STAGE.recur||null}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert(sel.map(e=>({task_id:t.id,email:e})));
       let r;
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      INS_STAGE={due:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
+      INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
   };
@@ -8569,14 +9572,14 @@
     const projectId=SELF_INS_STAGE.project||null;
     SELF_INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur:SELF_INS_STAGE.recur||null}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert({task_id:t.id,email:me()});
       let r;
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      SELF_INS_STAGE={due:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
+      SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
   };
@@ -8813,7 +9816,7 @@
         ${canEdit?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
         ${canEdit?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`:''}</span></h3>
       <div class="tp-grid">
-        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
+        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${t.recur?` <span class="dp-chip-rep"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe(t.recur))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Created</div><div class="v">${t.created_at?wfDTFull(t.created_at):'—'}</div></div>
         <div class="tp-f"><div class="k">Owner</div><div class="v">${esc2(nameOf(list,t.delegator))}</div></div>
@@ -9007,17 +10010,29 @@
       closeModal(); toast('Saved','ok'); renderPage();
     }catch(e){toast('Failed','err');}
   };
+  let DP_EDIT=null;   // the rule the modal is holding, read back by accEditDueSave
   window.accEditDue=async function(tid){
-    const {data:t}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
-    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,360px)"><input class="ac-in" type="date" id="edDueF" min="${todayISO()}" value="${(t&&t.due_date)||''}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    const {data:t}=await ACC().from('ptasks').select('due_date,created_at,recur,recur_anchor').eq('id',tid).single();
+    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(94vw,432px);padding:0"><div id="acDpBox" class="dp-inline"></div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    DP_EDIT=t?{due:t.due_date,recur:t.recur}:null;
+    accDpMount(document.getElementById('acDpBox'),DP_EDIT,
+      {footer:false,onChange:function(r){ DP_EDIT=r; }});
   };
   window.accEditDueSave=async function(tid){
-    const due=$('edDueF').value||null;
+    const res=DP_EDIT;
+    const due=(res&&res.due)||null;
     try{
-      const {data:old}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
-      if(due&&due<todayISO()){toast('Due date cannot be earlier than today','err');return;}
+      const {data:old}=await ACC().from('ptasks').select('due_date,created_at,recur').eq('id',tid).single();
+      if(due&&due<istTodayISO()){toast('Due date cannot be earlier than today','err');return;}
       const prevDue=old?old.due_date:null;
-      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false}).eq('id',tid);
+      const prevRecur=(old&&old.recur)||null, newRecur=(res&&res.recur)||null;
+      /* recur_anchor is left alone on purpose: the trigger sets it on the first save and it must
+         not move afterwards, or a quarterly rule would re-phase and a clamped monthly 31st would
+         re-anchor to whatever short month it last landed on. */
+      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur}).eq('id',tid);
+      if(JSON.stringify(prevRecur)!==JSON.stringify(newRecur)){
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevRecur?dpDescribe(prevRecur):'none')+' \u2192 '+(newRecur?dpDescribe(newRecur):'none')});
+      }
       if((prevDue||'')!==(due||'')){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'due date changed',detail:'Due date '+(prevDue?fmtDateY(prevDue):'none')+' → '+(due?fmtDateY(due):'none')});
         await sysMsg(tid, prevDue?('changed the due date from '+fmtDateY(prevDue)+' to '+(due?fmtDateY(due):'none')):('set the due date to '+(due?fmtDateY(due):'none')));
