@@ -9724,10 +9724,19 @@
   window.accSelfInsToggleX=function(){};
   window.accInsCancel=function(){ INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
   window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
-  // Names rather than raw emails in the Usability report's Details column, falling back to the
-  // email when the people list has not loaded yet. window.nameOf is nexus-core.js's own global
-  // helper - reached through window because this file has its own two-argument nameOf.
-  function usageWho(e){ try{ return (window.nameOf && window.nameOf(e)) || e; }catch(_x){ return e; } }
+  // Full names, not email fragments, in the Usability report's "Assigned to" column.
+  // This deliberately uses THIS file's people() + nameOf rather than nexus-core's global nameOf:
+  // that one reads the PEOPLE global, which is filled by getPeople() and nothing on the
+  // Accountability page ever calls it - so PEOPLE stays null and its fallback returned the local
+  // part of the address, which is how "Prerna Gupta" came out as "businessanalyst". people() is
+  // cached with a TTL and is already loaded on these screens, so this costs no extra round trip;
+  // an email with no matching account falls back to the address itself, which at least identifies
+  // the person.
+  async function usageNames(emails){
+    let list=[]; try{ list=await people(); }catch(_x){ list=[]; }
+    const out=(emails||[]).filter(Boolean).map(function(e){ return nameOf(list,e); });
+    return out.length?out.join(', '):undefined;
+  }
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -9750,7 +9759,7 @@
       // them, which is why this logs directly.
       try{ usageQueue('tasks.tasks.create_task','create',{
         title:title,
-        assignee:sel.map(usageWho).join(', ')||undefined
+        assignee:await usageNames(sel)
       }); }catch(_e){}
       INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
@@ -9774,7 +9783,7 @@
       // the person doing it, so it is recorded rather than left blank.
       try{ usageQueue('tasks.tasks.create_task','create',{
         title:title,
-        assignee:usageWho(me())
+        assignee:await usageNames([me()])
       }); }catch(_e){}
       SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
@@ -10305,7 +10314,7 @@
       // here instead so the event says which task was delegated and to whom.
       try{ usageQueue('tasks.tasks.delegate_task_to_someone','create',{
         title:(parent&&parent.title)||undefined,
-        assignee:sel.map(usageWho).join(', ')||undefined
+        assignee:await usageNames(sel)
       }); }catch(_e){}
       closeModal(); toast('Delegated','ok'); renderPage();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
