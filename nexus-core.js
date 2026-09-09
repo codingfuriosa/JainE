@@ -15375,8 +15375,8 @@ function trcLeadRowHtml(g,sl){
      matching call - jumping straight to it instead of the top of the lead's whole history. */
   const jumpTo=TRC_F.personnel!=='all'&&last.follow_up_id?'/'+last.follow_up_id:'';
   const wasOpened=TRC_LAST_LEAD_ID!=null&&String(g.lead_id)===String(TRC_LAST_LEAD_ID);
-  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'\')">'
-    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate);text-align:center">'+sl+'</td>'
+  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'/r'+sl+'\')">'
+    +'<td style="font-variant-numeric:tabular-nums;color:var(--slate);text-align:center" title="Row '+sl+' in the current, filtered list">#'+sl+'</td>'
     +'<td style="font-variant-numeric:tabular-nums;padding-right:20px">'+esc(String(g.lead_id))+'</td>'
     +'<td style="padding-left:6px"><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
       +'<div style="font-size:11.5px;color:var(--slate)">'+n+' follow-up'+(n===1?'':'s')
@@ -15820,14 +15820,17 @@ function trcOvHealthHtml(h){
   +'</div>';
 }
 
-async function trcLeadDetail(v,leadId,targetFollowUpId){
+async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
   v.innerHTML=trcLeadSkeletonHtml();
   const id=Number(leadId);
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
   /* Carried on every "Back"/"All leads" link below, so the list can restore the exact row - the lead
-     row it left from, or, if this page was opened off the call-level Mismatch table, that call row. */
+     row it left from, or, if this page was opened off the call-level Mismatch table, that call row.
+     Restoring is keyed on the lead id, not rowHint (a render-only position that a re-sort or a
+     changed filter can hand to a different lead entirely) - rowHint only ever labels what the row
+     happened to be called at the moment this page was opened. */
   const backRoute='transcription/0/'+id+(targetFollowUpId?'/'+targetFollowUpId:'');
   let lead=null,rows=[];
   try{
@@ -15865,7 +15868,8 @@ async function trcLeadDetail(v,leadId,targetFollowUpId){
   rows.forEach(function(r){const s=r.crm_status;if(s&&trail[trail.length-1]!==s)trail.push(s);});
 
   const head='<div class="page-head"><div><h1><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(name)+'</h1>'
-      +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')+'</p></div>'
+      +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')
+        +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
@@ -15995,7 +15999,16 @@ VIEWS.transcription=async function(v,seg){
   /* Detail routes, checked before the tab index because neither 'lead' nor 'auto' is a number.
      'lead' is the snapshot pipeline, keyed on the CRM's own lead_id. 'auto' still serves rows
      imported by the previous pipeline into acc.transcriptions, so an old link still resolves. */
-  if(seg[0]==='lead'&&seg[1]){return trcLeadDetail(v,seg[1],seg[2]);}
+  if(seg[0]==='lead'&&seg[1]){
+    /* The list's SL NO column shows the row's on-screen position as "#N" - purely a display label,
+       recomputed on every render (see trcLeadRowHtml), never an identifier. The lead click carries it
+       along as a trailing 'rN' segment so the detail page can echo "Row #N" back for reference; a real
+       follow-up id (the personnel filter's jump-to-latest-call) can ride alongside it in either slot,
+       so both trailing segments are scanned rather than assumed to be in a fixed order. */
+    let followUpId=null,rowHint=null;
+    seg.slice(2).forEach(function(s){const m=/^r(\d+)$/i.exec(s);if(m)rowHint=m[1];else if(!followUpId)followUpId=s;});
+    return trcLeadDetail(v,seg[1],followUpId,rowHint);
+  }
   if(seg[0]==='auto'&&seg[1]){return traDetail(v,seg[1]);}
   if(seg[0]==='view'&&seg[1]){return trDetail(v,seg[1]);}
   const tabs=TRA_TABS;
