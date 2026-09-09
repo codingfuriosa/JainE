@@ -3747,9 +3747,8 @@
 
     const doc=await L.PDFDocument.load(blank);
     const page=doc.getPages()[0];
-    const helv=await doc.embedFont(L.StandardFonts.Helvetica);
     const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    const black=L.rgb(0.05,0.05,0.05), green=L.rgb(0.04,0.42,0.18), red=L.rgb(0.67,0.07,0.07);
+    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
 
     const f=res.fields||{}, cl=res.checklist||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
@@ -3773,9 +3772,10 @@
     };
     const verdict=function(slot,key){
       const t=String(cl[key]!=null?cl[key]:'').trim();
-      if(t==='Ok')      return put(slot,'OK',helvB,green);
+      // OK in black - it is a form, not a dashboard. NOT OK stays red so a problem still reads
+      // as one at a glance.
+      if(t==='Ok')      return put(slot,'OK',helvB,black);
       if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
-      // Nothing checked it, so it must not look like a pass.
       if(t==='Unknown') return put(slot,'NOT CHECKED',helvB,black);
       return put(slot,short(t),helvB,black);
     };
@@ -3803,151 +3803,8 @@
     put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
     put(WF_CL.booking_date, short(cl['Booking Date']));
 
-    /* An annexure, not a redesign of the form: page 1 is your blank, untouched in layout. This is
-       the working behind it - every sum, the GST rates read off the sheets, which cost sheet each
-       check refers to, and anything the documents disagree with. It is what makes the OK / NOT OK
-       on page 1 checkable instead of something to be taken on trust. */
-    const p2=doc.addPage([612,792]);
-    let y=744;
-    const wrap=function(t,max,size){
-      const words=String(t).split(/\s+/), out=[]; let line='';
-      words.forEach(function(w){
-        const test=line?(line+' '+w):w;
-        if(helv.widthOfTextAtSize(test,size)>max){ if(line)out.push(line); line=w; } else line=test;
-      });
-      if(line)out.push(line);
-      return out;
-    };
-    const head=function(t){
-      if(y<80){ y=744; }
-      p2.drawText(t,{x:56,y:y,size:11,font:helvB}); y-=7;
-      p2.drawLine({start:{x:56,y:y},end:{x:556,y:y},thickness:.6,color:black}); y-=15;
-    };
-    p2.drawText('Annexure to the booking check list',{x:56,y:y,size:13,font:helvB}); y-=14;
-    p2.drawText('Page 1 is the check list itself. This page is the working behind it.',
-      {x:56,y:y,size:9,font:helv,color:L.rgb(.35,.35,.35)}); y-=22;
-
-    const bad=(res.crosscheck||[]).filter(function(x){ return x.match===false||x.match==='partial'; });
-    if(bad.length){
-      head('The booking form and the documents disagree');
-      bad.forEach(function(x){
-        wrap(x.field+': the form says "'+x.typed+'", the documents say "'+x.in_documents+'"'
-          +(x.match==='partial'?' (close, not identical)':''),490,9.5).forEach(function(ln){
-          p2.drawText(ln,{x:56,y:y,size:9.5,font:helv,color:red}); y-=12;
-        });
-        y-=3;
-      });
-      y-=8;
-    }
-
-    const items=res.item_checks||[];
-    if(items.length){
-      head('The check list items, and why');
-      items.forEach(function(it){
-        if(y<70){ y=744; }
-        const ok=it.verdict==='Ok', no=it.verdict==='Not Ok';
-        p2.drawText(it.item,{x:56,y:y,size:9.5,font:helvB});
-        p2.drawText(ok?'OK':(no?'NOT OK':'NOT CHECKED'),
-          {x:462,y:y,size:9.5,font:helvB,color:ok?green:(no?red:black)});
-        y-=12;
-        if(it.reason) wrap(it.reason,395,9).forEach(function(ln){
-          if(y<70){ y=744; }
-          p2.drawText(ln,{x:66,y:y,size:9,font:helv,color:L.rgb(.3,.3,.3)}); y-=11;
-        });
-        y-=3;
-      });
-      y-=8;
-    }
-
-    /* Which card, whose name, which date of birth, and whether the PAN matched - the detail behind
-       the single OK on page 1. A card with no date of birth printed on it shows a dash rather than
-       a cross, because nothing failed. */
-    const kp2=(res.kyc&&res.kyc.people)||[];
-    if(kp2.length){
-      head('KYC \u2014 what was matched against the booking form');
-      const yn=function(v){ return v===true?'yes':(v===false?'NO':'\u2014'); };
-      kp2.forEach(function(p){
-        if(y<80){ y=744; }
-        p2.drawText(String(p.person)+(p.relation?(' ('+p.relation+')'):''),
-          {x:56,y:y,size:9.5,font:helvB});
-        p2.drawText(p.ok?'OK':'NOT OK',{x:462,y:y,size:9.5,font:helvB,color:p.ok?green:red});
-        y-=11;
-        p2.drawText('Aadhaar '+(p.aadhaar?'yes':'no')+'   PAN '+(p.pan?'yes':'no')
-          +'   name '+yn(p.name_matches)+'   date of birth '+yn(p.dob_matches)
-          +'   PAN number '+yn(p.pan_matches),
-          {x:66,y:y,size:9,font:helv,color:L.rgb(.3,.3,.3)});
-        y-=11;
-        if(p.reason) wrap(p.reason,390,9).forEach(function(ln){
-          if(y<70){ y=744; }
-          p2.drawText(ln,{x:66,y:y,size:9,font:helv,color:L.rgb(.3,.3,.3)}); y-=11;
-        });
-        y-=4;
-      });
-      const docs=(res.kyc&&res.kyc.documents)||[];
-      if(docs.length){
-        y-=4;
-        p2.drawText('Cards seen (numbers shown as last four only):',{x:56,y:y,size:9,font:helvB}); y-=12;
-        docs.forEach(function(d){
-          if(y<70){ y=744; }
-          p2.drawText([d.doc_type,d.name_on_card,d.dob_on_card,d.number].filter(Boolean).join('   '),
-            {x:66,y:y,size:9,font:helv}); y-=11;
-        });
-      }
-      y-=10;
-    }
-
-    const cns=res.concerns||[];
-    if(cns.length){
-      head('Worth a look');
-      cns.forEach(function(t){
-        wrap(String(t),490,9.5).forEach(function(ln){
-          if(y<70){ y=744; }
-          p2.drawText(ln,{x:56,y:y,size:9.5,font:helv}); y-=12;
-        });
-        y-=3;
-      });
-      y-=8;
-    }
-
-    head('What was checked');
-    (res.arithmetic||[]).forEach(function(x){
-      const ok=x.pass===true, no=x.pass===false;
-      const txt=x.check+(x.sheet?(' \u2014 '+x.sheet):'')+(x.detail?(' \u2014 '+x.detail):'');
-      const lines=wrap(txt,395,9.5);
-      lines.forEach(function(ln,i){
-        if(y<70){ y=744; }
-        p2.drawText(ln,{x:56,y:y,size:9.5,font:helv});
-        if(i===0) p2.drawText(ok?'OK':(no?('OUT BY '+(x.difference||'')):'not checked'),
-          {x:462,y:y,size:9.5,font:helvB,color:ok?green:(no?red:black)});
-        y-=12;
-      });
-      y-=3;
-    });
-
-    const kk=res.kyc||{};
-    y-=6;
-    wrap('Mobile: '+((kk.mobile_numbers||[]).join(', ')||'none')
-      +'   Email: '+((kk.emails||[]).join(', ')||'none'),490,9).forEach(function(ln){
-      if(y<70){ y=744; }
-      p2.drawText(ln,{x:56,y:y,size:9,font:helv}); y-=11;
-    });
-    if(res.notes){
-      y-=10; head('Reader\u2019s notes');
-      wrap(res.notes,490,9).forEach(function(ln){
-        if(y<70){ y=744; }
-        p2.drawText(ln,{x:56,y:y,size:9,font:helv}); y-=11;
-      });
-    }
-    y-=14;
-    wrap('Read from '+(((res.read&&res.read.files)||[]).length)+' attached file(s) by '
-      +((res.read&&res.read.model)||'')+'; the check list items were checked by '
-      +((res.read&&res.read.checker)||'nothing - the checker could not be reached')
-      +'. Every figure and the Cost Sheet verdict were computed by JAIN-E from the documents, not '
-      +'asserted by either model. This is not an approval.',
-      490,8.5).forEach(function(ln){
-      p2.drawText(ln,{x:56,y:y,size:8.5,font:helv,color:L.rgb(.35,.35,.35)}); y-=10;
-    });
-
+    /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
+       stays in the stored reading; the printed sheet is the form. */
     const bytes=await doc.save();
     const who=String(v('customer_name')||'booking').replace(/[^\w \-]/g,'').trim()||'booking';
     const blob=new Blob([bytes],{type:'application/pdf'});
