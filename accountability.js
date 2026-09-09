@@ -3816,18 +3816,15 @@
     pan:         {x:132.7, y:266.35, s:11, w:130},
     source:      {x:105.1, y:242.55, s:11, w:185},
     lead_id:     {x:190.2, y:218.75, s:13, w:85},
-    booking_date:{x:363.6, y:218.75, s:13, w:85}
+    booking_date:{x:363.6, y:218.75, s:13, w:85},
+    signatures:  {x:122.1, y:194.95, s:11, w:130}
   };
+  // Where a failing signature check says WHERE, past the end of that row's underscores.
+  const WF_CL_SIG_WHY={x:262.0, y:194.95, size:8.5, right:545};
   /* The two lines the blank does not print. Its rows step down by 23.8pt and it leaves the space
      between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
      form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
      anything it already says. */
-  const WF_CL_ADDED={
-    x:145.0, right:545, y0:181.35, step:13.5, size:10, note:8.5,
-    rows:[ {item:'Signatures',   label:'Signatures'},
-           {item:'Car Parking',  label:'Car Parking'},
-           {item:'Unit details', label:'Unit Details'} ]
-  };
 
   window.wfChecklistDownload=async function(caseId){
     let row=null;
@@ -3863,7 +3860,7 @@
     const page=doc.getPages()[0];
     const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
     const helv=await doc.embedFont(L.StandardFonts.Helvetica);
-    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07), amber=L.rgb(0.70,0.42,0.0);
+    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
 
     const f=res.fields||{}, cl=res.checklist||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
@@ -3891,7 +3888,9 @@
       // as one at a glance.
       if(t==='Ok')      return put(slot,'OK',helvB,black);
       if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
-      if(t==='Unknown') return put(slot,'UNKNOWN',helvB,amber);
+      // Nothing prints as UNKNOWN. An item that could not be settled is not a pass, so it
+      // reads NOT OK and somebody looks at it.
+      if(t==='Unknown') return put(slot,'NOT OK',helvB,red);
       return put(slot,short(t),helvB,black);
     };
 
@@ -3931,43 +3930,19 @@
     put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
     put(WF_CL.booking_date, short(cl['Booking Date']));
 
-    /* Three things are checked that the printed form has no line for: the signatures, the car
-       parking, and whether the booking form and the cost sheet describe the same flat. Rather than
-       a document of our own they go in the form's OWN empty space, between "Payment Plan" and the
-       sign-off rule, in the same left margin. A point smaller than the form's own rows and closer
-       together, because three of them have to fit in one row's worth of gap - and because they are
-       additions to the form, which is what they should look like.
-
-       The finding goes beside the verdict. "NOT OK" alone sends somebody back through the whole
-       file to work out where and why, and an unresolved item with no reason beside it is worse
-       still - it says nothing at all. */
-    const A=WF_CL_ADDED;
-    const itemOf=function(name){
-      const list=Array.isArray(res.item_checks)?res.item_checks:[];
-      for(let i=0;i<list.length;i++)
-        if(String(list[i]&&list[i].item||'').toLowerCase()===name.toLowerCase()) return list[i];
-      return null;
-    };
-    A.rows.forEach(function(row,i){
-      const it=itemOf(row.item);
-      const t=String((it&&it.verdict)||'').trim();
-      if(!t) return;
-      const y=A.y0-i*A.step;
-      page.drawText(row.label,{x:72.1,y:y,size:A.size,font:helv,color:black});
-      /* An item nobody could resolve is NOT a pass, and printed in black beside a column of OKs it
-         gets read as one. Amber: not the red of something known to be wrong, but not something the
-         eye may skip over either - it means a person still has to look. */
-      const word=t==='Ok'?'OK':(t==='Not Ok'?'NOT OK':'UNKNOWN');
-      const col=t==='Ok'?black:(t==='Not Ok'?red:amber);
-      page.drawText(word,{x:A.x,y:y,size:A.size,font:helvB,color:col});
-      const why=String((it&&it.reason)||'').trim();
-      if(!why) return;
-      const x=A.x+helvB.widthOfTextAtSize(word,A.size)+8, room=A.right-x;
-      let s=why;
-      while(s.length>1 && helv.widthOfTextAtSize(s,A.note)>room) s=s.slice(0,-1);
-      if(s.length<why.length) s=s.slice(0,-1)+'…';
-      page.drawText(s,{x:x,y:y,size:A.note,font:helv,color:t==='Ok'?L.rgb(.3,.3,.3):col});
-    });
+    /* The blank now prints a Signatures row of its own, between "Booked in CRM" and "Payment
+       Plan", so it is filled like any other item rather than appended underneath. When it fails it
+       also says where, in small type past the end of the row - "NOT OK" alone sends somebody back
+       through the whole file. A clean sheet stays exactly as plain as the form. */
+    verdict(WF_CL.signatures, 'Signatures');
+    if(String(cl['Signatures']||'').trim()==='Not Ok'){
+      const sw=WF_CL_SIG_WHY;
+      let t=String((res.signatures&&res.signatures.reason)||'').trim();
+      if(t){
+        while(t.length>1 && helv.widthOfTextAtSize(t,sw.size)>(sw.right-sw.x)) t=t.slice(0,-1);
+        page.drawText(t,{x:sw.x,y:sw.y,size:sw.size,font:helv,color:red});
+      }
+    }
 
     /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
        stays in the stored reading; the printed sheet is the form. */
