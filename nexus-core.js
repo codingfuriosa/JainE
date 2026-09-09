@@ -13377,7 +13377,6 @@ async function custTabOverview(data,unit){
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
-    (billOutstanding>0?'<button class="btn btn-primary" onclick="custPayNow()"><i class="fa-solid fa-indian-rupee-sign"></i> Pay '+custInr(billOutstanding)+' now</button>':'')+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
     '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],
@@ -13388,9 +13387,6 @@ async function custTabOverview(data,unit){
       [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
       '<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
 }
-window.custPayNow=function(){
-  toast('Online payment isn\'t enabled yet — please contact your relationship manager to pay.','warn');
-};
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
 // synchronously, before anything is awaited, or the popup blocker eats it) - the browser's own
 // print dialog covers "Download PDF" too (Save as PDF is a print destination in every browser),
