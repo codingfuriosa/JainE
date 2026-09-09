@@ -628,39 +628,12 @@
       border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
     .wf-print-att-miss{font-size:12px;color:#b91c1c}
 
-    /* booking check list */
-    .wf-aud-wait{display:flex;align-items:center;gap:14px;padding:18px 4px;font-size:13.5px}
-    .wf-aud-err{background:#fef2f2;border-left:3px solid #dc2626;border-radius:6px;padding:12px 14px;
       color:#991b1b;font-size:13px}
-    .wf-aud-read{font-size:11.5px;color:var(--slate);margin-bottom:10px}
-    .wf-aud-warn{background:#fffbeb;border-left:3px solid #d97706;border-radius:6px;padding:10px 13px;
       margin-bottom:12px;font-size:12.5px;color:#92400e}
-    .wf-aud-warn ul{margin:5px 0 0 16px;padding:0}
-    .wf-aud-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:7px;
       margin-bottom:6px}
-    .wf-aud-c{border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
-    .wf-aud-c .k{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
       color:var(--slate)}
-    .wf-aud-c .v{font-size:13px;font-weight:600;margin-top:2px;overflow-wrap:anywhere}
-    .wf-aud-c .v.nil{color:var(--slate-2);font-weight:400}
-    .wf-aud-h{font-size:12px;font-weight:700;margin:16px 0 6px}
-    .wf-aud-t{width:100%;border-collapse:collapse;font-size:12.5px}
-    .wf-aud-t td{border-bottom:1px solid var(--line-2);padding:5px 7px;vertical-align:top}
-    .wf-aud-t td:last-child{text-align:right;white-space:nowrap;width:1%}
-    .wf-aud-t td.ok{color:#0a6b2d;font-weight:700}
-    .wf-aud-t td.no{color:#b91c1c;font-weight:700}
-    .wf-aud-t td.na{color:var(--slate-2)}
-    .wf-aud-t .sub{font-size:11px;color:var(--slate);font-weight:400;margin-top:2px;white-space:normal}
-    .wf-aud-ok{color:#0a6b2d;font-weight:700;font-size:11.5px}
-    .wf-aud-no{color:#b91c1c;font-weight:700;font-size:11.5px}
-    .wf-aud-na{color:var(--slate-2);font-size:11.5px}
-    .wf-aud-mini{font-size:11.5px;color:var(--slate)}
-    .wf-aud-notes{margin-top:14px;background:var(--bg,#f5f7fb);border-radius:8px;padding:10px 12px;
       font-size:12px;color:var(--slate);line-height:1.6}
-    .wf-aud-foot{display:flex;align-items:center;gap:10px;margin-top:18px;padding-top:12px;
       border-top:1px solid var(--line)}
-    .wf-aud-foot .ac-btn{margin-left:0}
-    .wf-aud-foot .wf-aud-mini{flex:1}
     @media (max-width:520px){
       .dp-body{flex-direction:column}
       .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
@@ -1467,6 +1440,20 @@
   // Returns {short, full} — short is what's shown (clipped with an ellipsis), full is the complete
   // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
   // with no way to read the rest.
+  /* What a Booking Form instance is, in four words, out of the check list that was filled for it.
+     `pending` is not the same as blank: one means nobody has read the file yet, the other means the
+     file did not say. */
+  function wfBkFields(row){
+    const st=String((row&&row.status)||'');
+    const f=(row&&row.result&&row.result.fields)||null;
+    if(st!=='done'||!f) return {status:st||'pending'};
+    const g=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    return {status:'done', name:g('customer_name'), project:g('project_name'),
+            block:g('block'), flat:g('flat')};
+  }
+  function wfBk(caseId){ return (window._wfBk||{})[caseId]||null; }
+
   function wfTrigShort(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
@@ -1478,6 +1465,18 @@
     const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
     const sumField=(flow&&flow.tracker_sum_field||'').trim();
     let full;
+    /* Booking Form: nothing is typed but the attachment, so the row is named by whoever the
+       documents say bought which flat. Until the reading finishes it says so rather than sitting
+       blank, which would read as an empty booking. */
+    if(flow&&flow.id===41){
+      const b=wfBk(c.id);
+      full=(b&&b.status==='done')
+        ? [b.name, b.project, [b.block&&('Block '+b.block), b.flat&&('Flat '+b.flat)]
+            .filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+        : (b&&b.status==='failed' ? 'Could not be read' : 'Being read…');
+      const sh=full.length>30?full.slice(0,29)+'…':full;
+      return {short:sh, full:full};
+    }
     if(listFields){
       full=listFields.map(function(l){ return wfDetailDisp(byLabel[l]||''); }).filter(Boolean).join(', ');
     } else {
@@ -2740,7 +2739,13 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    /* Booking Form: its form has one field on it, an attachment, and the tracker drops attachments
+       — so this flow would otherwise have no columns of its own at all. Its four come from the
+       check list instead, filled once the documents have been read. */
+    const bkCols=(flow.id===41)?['Name','Project','Block','Flat']:null;
+    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}]
+      .concat(sumField?[{k:'Total Amount'}]
+        :(bkCols?bkCols.map(function(k){ return {k:k}; }):tmpl.map(function(f){ return {k:f.label}; })));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2805,6 +2810,17 @@
       const ownerTd='<td>'+esc2(wfNm(c.created_by)||'')+'</td>';
       const extraTds=ownerTd+(sumField
         ? '<td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
+        : bkCols
+        ? (function(){
+            const b=wfBk(c.id);
+            if(!b||b.status!=='done'){
+              const say=(b&&b.status==='failed')?'could not be read':'being read';
+              return '<td colspan="'+bkCols.length+'" style="color:var(--slate)">'+esc2(say)+'</td>';
+            }
+            return [b.name,b.project,b.block,b.flat].map(function(v){
+              return '<td title="'+esc2(v||'')+'">'
+                +(v?cellText(v):'<span style="color:var(--slate)">—</span>')+'</td>'; }).join('');
+          })()
         : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
@@ -3119,6 +3135,18 @@
     if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
+    /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
+       and the unit are what the documents themselves say, so they are read out of the stored
+       check list rather than typed by whoever uploaded the file. Both the Instances column and the
+       Tracker's own columns come from here; a booking still being read simply has no row yet. */
+    window._wfBk={};
+    if(id===41 && cases.length){
+      try{
+        const {data}=await ACC().from('booking_audits').select('case_id,status,result')
+          .in('case_id',cases.map(function(c){ return c.id; }));
+        (data||[]).forEach(function(r){ window._wfBk[r.case_id]=wfBkFields(r); });
+      }catch(_e){}
+    }
     let forms=[];
     try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
     window._wfForms=forms; window._wfSteps=steps;
@@ -3668,7 +3696,7 @@
     /* Booking Form only: the checklist being filled is specific to it. Reading the attachments
        takes a minute or two, so it is a button somebody presses - not something that runs on open. */
     const auditBtn=(c.flow_id===41)
-      ? '<button class="wf-tlhead-x" onclick="wfAuditRun('+c.id+')" title="Booking Form Checklist"><i class="fa-solid fa-list-check"></i></button>'
+      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
       : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -3727,339 +3755,176 @@
   };
 
   /* ── booking check list ────────────────────────────────────────────────────────────────────
-     The reading happens in the BACKGROUND. A Booking Form is queued the moment it is raised
-     (acc.booking_audits + a trigger), a cron worker reads the attachments a couple of minutes
-     later, and the result is stored - so opening the check list here is instant instead of a
-     two-minute wait, and it does not depend on anybody having the instance open.
+     The icon downloads the filled check list. No popup: the reading already happened in the
+     background when the booking was raised (acc.booking_audits + a trigger + a cron worker), so
+     there is nothing to wait for and nothing to confirm.
 
-     Nothing here approves anything. Every Ok / Not Ok and every figure was computed in code from
-     what was extracted from the documents, not asserted by the model - see booking-audit's notes. */
-  window._wfAudit=null;
-  window.wfAuditRun=async function(caseId, force){
-    openModal('<div class="modal-head"><h3><i class="fa-solid fa-list-check"></i> Booking check list</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
-      +'<div class="modal-body" style="min-width:min(94vw,720px)"><div class="wf-aud-wait">'
-      +'<div class="spin"></div><div><b>Fetching the check list&hellip;</b></div></div></div>','md');
+     The file is the FORM ITSELF - assets/forms/booking-check-list-blank.pdf, the blank you use,
+     with values written onto its blanks. That keeps the logo, the Carlito type and the exact
+     layout, instead of a redrawing that could drift from it.
 
-    // What the background worker already did, unless a fresh read was asked for.
+     Every coordinate in WF_CL was measured out of that PDF by walking its content stream and adding
+     up the font's own glyph widths, then checked against the positions the PDF records for the
+     chunks it does start a new text object for: computed 136.6 against a recorded 136.7, and 117.0
+     against 117.1. So a value starts where its underscores start, to a tenth of a point.
+
+     `w` is how much room that blank has, measured from the number of underscores in it. A value too
+     wide is stepped down in size until it fits rather than running over the next label. */
+  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.pdf';
+  const WF_CL={
+    date:        {x:441.5, y:583.75, s:11, w:98},
+    customer:    {x:188.0, y:508.35, s:11, w:260},
+    project:     {x:143.2, y:484.55, s:11, w:80},
+    block:       {x:284.2, y:484.55, s:11, w:21},
+    flat:        {x:338.7, y:484.55, s:11, w:26},
+    floor:       {x:405.2, y:484.55, s:11, w:21},
+    area:        {x:459.2, y:484.55, s:11, w:32},
+    base_rate:   {x:125.0, y:460.75, s:11, w:49},
+    plc:         {x:211.6, y:460.75, s:11, w:38},
+    flc:         {x:276.6, y:460.75, s:11, w:38},
+    parking:     {x:429.4, y:460.75, s:11, w:49},
+    discount:    {x:151.4, y:436.95, s:13, w:150},
+    cost:        {x:122.1, y:385.35, s:11, w:130},
+    market:      {x:179.1, y:361.55, s:11, w:120},
+    kyc:         {x:149.1, y:337.75, s:11, w:130},
+    mobile:      {x:145.3, y:313.95, s:11, w:130},
+    email:       {x:111.1, y:290.15, s:11, w:142},
+    pan:         {x:132.7, y:266.35, s:11, w:130},
+    source:      {x:105.1, y:242.55, s:11, w:185},
+    lead_id:     {x:190.2, y:218.75, s:13, w:85},
+    booking_date:{x:363.6, y:218.75, s:13, w:85}
+  };
+  /* The two lines the blank does not print. Its rows step down by 23.8pt and it leaves the space
+     between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
+     form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
+     anything it already says. */
+  const WF_CL_SIG ={label:'Signatures',  x:145.0, y:171.15, right:545};
+  const WF_CL_PARK={label:'Car Parking', x:145.0, y:147.35, right:545};
+
+  window.wfChecklistDownload=async function(caseId){
     let row=null;
-    if(!force){
-      try{
-        const {data}=await ACC().from('booking_audits')
-          .select('status,result,model,error,queued_at,finished_at,attempts').eq('case_id',caseId).maybeSingle();
-        row=data;
-      }catch(_e){}
-      if(row&&row.status==='done'&&row.result){
-        window._wfAudit=row.result;
-        wfAuditShow(row.result,row);
-        return;
-      }
-    }
-
-    const waiting = !force && row && (row.status==='pending'||row.status==='running');
-    if(waiting){
-      const b=document.querySelector('.modal-body');
-      if(b) b.innerHTML='<div class="wf-aud-warn"><b><i class="fa-solid fa-hourglass-half"></i> '
-        +'Still being read</b><br>The attachments were queued '
-        +esc2(fmtDate(row.queued_at))+' and take a minute or two to read. '
-        +'It will be here when you come back.</div>'
-        +'<div class="wf-aud-foot"><span class="wf-aud-mini"></span>'
-        +'<button class="ac-btn" onclick="closeModal()">Close</button>'
-        +'<button class="ac-btn primary" onclick="wfAuditRun('+caseId+',1)">Read it now</button></div>';
-      return;
-    }
-
-    // Read now: no stored result, it failed, or a fresh one was asked for.
-    const b0=document.querySelector('.modal-body');
-    if(b0) b0.innerHTML='<div class="wf-aud-wait"><div class="spin"></div><div>'
-      +'<b>Reading the attachments&hellip;</b><br><span style="color:var(--slate);font-size:12.5px">'
-      +'A booking file is usually 20-odd scanned pages, so this takes a minute or two. '
-      +'Leave this open.</span></div></div>';
-    let res=null, err='';
     try{
-      const {data:{session}}=await sb.auth.getSession();
-      const token=session&&session.access_token;
-      if(!token) throw new Error('You are signed out - sign in again and retry.');
-      const r=await fetch(SUPABASE_URL+'/functions/v1/booking-audit',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},
-        body:JSON.stringify({case_id:caseId, store:true})
-      });
-      const jj=await r.json().catch(function(){ return {}; });
-      if(!r.ok||!jj||!jj.ok) throw new Error((jj&&(jj.error||jj.detail))||('the reader failed (HTTP '+r.status+')'));
-      res=jj;
-    }catch(e){ err=(e&&e.message)?String(e.message):String(e); }
-    if(!document.querySelector('.modal-body')) return;   // closed meanwhile
-    if(err){
-      const b=document.querySelector('.modal-body');
-      if(b) b.innerHTML='<div class="wf-aud-err"><i class="fa-solid fa-circle-exclamation"></i> '
-        +esc2(err)+'</div>'
-        +((row&&row.error)?('<div class="wf-aud-mini" style="margin-top:8px">Background attempt '
-          +esc2(String(row.attempts||0))+': '+esc2(row.error)+'</div>'):'')
-        +'<div class="wf-aud-foot"><span class="wf-aud-mini"></span>'
-        +'<button class="ac-btn" onclick="closeModal()">Close</button>'
-        +'<button class="ac-btn primary" onclick="wfAuditRun('+caseId+',1)">Try again</button></div>';
+      const {data}=await ACC().from('booking_audits')
+        .select('status,result,error,queued_at,attempts').eq('case_id',caseId).maybeSingle();
+      row=data;
+    }catch(_e){}
+
+    if(!row){ toast('This booking has not been queued for reading yet','warn'); return; }
+    if(row.status==='pending'||row.status==='running'){
+      toast('The attachments are still being read \u2014 queued '+fmtDate(row.queued_at)
+        +'. Try again in a minute or two.','warn');
       return;
     }
-    window._wfAudit=res;
-    wfAuditShow(res,null);
+    if(row.status!=='done'||!row.result){
+      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err');
+      return;
+    }
+    try{ await wfChecklistPdf(row.result); }
+    catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
-  function wfAudMark(v){
-    if(v===true)  return '<span class="wf-aud-ok"><i class="fa-solid fa-check"></i> Ok</span>';
-    if(v===false) return '<span class="wf-aud-no"><i class="fa-solid fa-xmark"></i> Not Ok</span>';
-    return '<span class="wf-aud-na">not checked</span>';
-  }
-  function wfAuditShow(res,row){
+  /* Fills the blank and downloads it. JAIN-E writes every value here from the stored reading, so
+     nothing on the sheet was produced by a model. */
+  async function wfChecklistPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+
+    const tr=await fetch(WF_CL_TEMPLATE);
+    if(!tr.ok) throw new Error('the blank form could not be loaded (HTTP '+tr.status+')');
+    const blank=await tr.arrayBuffer();
+
+    const doc=await L.PDFDocument.load(blank);
+    const page=doc.getPages()[0];
+    const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const helv=await doc.embedFont(L.StandardFonts.Helvetica);
+    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
+
     const f=res.fields||{}, cl=res.checklist||{};
-    const val=function(k){ const x=f[k]; return x?String(x.value):'NIL'; };
-    let h='<div id="wfAudBox">';
+    const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
+    /* A pending CRM field, or a skipped one, is left as a dash - "-- awaiting the CRM API --" does
+       not belong on a printed form and would not fit the blank anyway. */
+    const short=function(t){
+      const x=String(t==null?'':t).trim();
+      if(!x||/^--.*--$/.test(x)) return '\u2014';
+      return x;
+    };
+    // Step the size down until it fits its blank; truncate only as a last resort.
+    const put=function(slot,text,font,col){
+      if(!slot) return;
+      let t=String(text==null?'':text);
+      if(!t) return;
+      const fo=font||helvB;
+      let sz=slot.s;
+      while(sz>6 && fo.widthOfTextAtSize(t,sz)>slot.w) sz-=0.5;
+      while(t.length>1 && fo.widthOfTextAtSize(t,sz)>slot.w) t=t.slice(0,-1);
+      page.drawText(t,{x:slot.x,y:slot.y,size:sz,font:fo,color:col||black});
+    };
+    const verdict=function(slot,key){
+      const t=String(cl[key]!=null?cl[key]:'').trim();
+      // OK in black - it is a form, not a dashboard. NOT OK stays red so a problem still reads
+      // as one at a glance.
+      if(t==='Ok')      return put(slot,'OK',helvB,black);
+      if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
+      if(t==='Unknown') return put(slot,'NOT CHECKED',helvB,black);
+      return put(slot,short(t),helvB,black);
+    };
 
-    const files=(res.read&&res.read.files)||[];
-    const pages=((res.read&&res.read.documents_seen)||[]).reduce(function(a,d){return a+(Number(d.pages)||0);},0);
-    h+='<div class="wf-aud-read"><i class="fa-solid fa-file-lines"></i> '
-      +files.length+' file'+(files.length===1?'':'s')+(pages?(', '+pages+' pages'):'')
-      +' &middot; '+esc2((res.read&&res.read.model)||'')
-      +(row&&row.finished_at?(' &middot; read '+esc2(fmtDate(row.finished_at))):' &middot; just read')
-      +'</div>';
+    put(WF_CL.date,      (res.header&&res.header.date)||'');
+    put(WF_CL.customer,  v('customer_name'));
+    put(WF_CL.project,   v('project_name'));
+    put(WF_CL.block,     v('block'));
+    put(WF_CL.flat,      v('flat'));
+    put(WF_CL.floor,     v('floor'));
+    put(WF_CL.area,      v('area_sqft'));
+    put(WF_CL.base_rate, v('base_rate'));
+    put(WF_CL.plc,       v('plc'));
+    put(WF_CL.flc,       v('flc'));
+    put(WF_CL.parking,   v('covered_parking'));
+    put(WF_CL.discount,  v('discount'));
 
-    const bad=(res.crosscheck||[]).filter(function(x){ return x.match===false||x.match==='partial'; });
-    if(bad.length){
-      h+='<div class="wf-aud-warn"><b><i class="fa-solid fa-triangle-exclamation"></i> '
-        +'What was typed does not match the documents</b><ul>';
-      bad.forEach(function(x){
-        h+='<li><b>'+esc2(x.field)+'</b> &mdash; form says &ldquo;'+esc2(x.typed)
-          +'&rdquo;, documents say &ldquo;'+esc2(x.in_documents)+'&rdquo;'
-          +(x.match==='partial'?' <i>(close, not identical)</i>':'')+'</li>';
-      });
-      h+='</ul></div>';
-    }
+    verdict(WF_CL.cost,   'Cost Sheet');
+    verdict(WF_CL.market, 'Market valuation Sheet');
+    verdict(WF_CL.kyc,    'KYC of Customer');
+    verdict(WF_CL.mobile, 'Mobile Number');
+    verdict(WF_CL.email,  'Email ID');
+    verdict(WF_CL.pan,    'Pan Card No.');
+    put(WF_CL.source,     short(cl['Source']||v('source')));
+    put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
+    put(WF_CL.booking_date, short(cl['Booking Date']));
 
-    h+='<div class="wf-aud-grid">';
-    [['Customer','customer_name'],['Project','project_name'],['Block','block'],['Flat','flat'],
-     ['Floor','floor'],['Area (sq.ft.)','area_sqft'],['Base Rate','base_rate'],['PLC','plc'],
-     ['FLC','flc'],['Covered Parking','covered_parking'],['Discount','discount']
-    ].forEach(function(p){
-      h+='<div class="wf-aud-c"><div class="k">'+p[0]+'</div><div class="v'
-        +(val(p[1])==='NIL'?' nil':'')+'">'+esc2(val(p[1]))+'</div></div>';
-    });
-    h+='</div>';
+    /* Signatures and car parking are checked but the printed form has no line for either. Rather
+       than a document of our own, they go in the form's OWN empty rows, in the same left margin and
+       the same size as every label above them. The finding goes beside the verdict, because
+       "NOT OK" alone sends someone back through the whole file to work out where and why. */
+    const added=function(slot,verdict,detail){
+      const t=String(verdict||'').trim();
+      if(!t) return;
+      page.drawText(slot.label,{x:72.1,y:slot.y,size:11,font:helv,color:black});
+      const word=t==='Ok'?'OK':(t==='Not Ok'?'NOT OK':'NOT CHECKED');
+      page.drawText(word,{x:slot.x,y:slot.y,size:11,font:helvB,color:t==='Not Ok'?red:black});
+      const why=String(detail||'').trim();
+      if(!why) return;
+      const x=slot.x+helvB.widthOfTextAtSize(word,11)+8, room=slot.right-x;
+      let s=why;
+      while(s.length>1 && helv.widthOfTextAtSize(s,9)>room) s=s.slice(0,-1);
+      if(s.length<why.length) s=s.slice(0,-1)+'…';
+      page.drawText(s,{x:x,y:slot.y,size:9,font:helv,color:L.rgb(.3,.3,.3)});
+    };
+    added(WF_CL_SIG, cl['Signatures'],  (res.signatures&&res.signatures.reason)||'');
+    added(WF_CL_PARK,cl['Car Parking'], (res.parking&&res.parking.reason)||'');
 
-    h+='<div class="wf-aud-h">Check list</div><table class="wf-aud-t"><tbody>';
-    Object.keys(cl).forEach(function(k){
-      const v=String(cl[k]);
-      const cls=v==='Ok'?'ok':(v==='Not Ok'?'no':'na');
-      h+='<tr><td>'+esc2(k)+'</td><td class="'+cls+'">'+esc2(v)+'</td></tr>';
-    });
-    h+='</tbody></table>';
-
-    const ar=res.arithmetic||[];
-    const okN=ar.filter(function(x){return x.pass===true;}).length;
-    h+='<div class="wf-aud-h">Cost sheet &mdash; '+okN+' of '+ar.length+' checks passed'
-      +((res.gst&&res.gst.rates_found)
-        ? ' <span style="font-weight:400;color:var(--slate)">(GST read from the sheets: '
-          +esc2(Object.keys(res.gst.rates_found).map(function(k){return k+' '+res.gst.rates_found[k]+'%';}).join(', '))
-          +')</span>' : '')
-      +'</div><table class="wf-aud-t"><tbody>';
-    ar.forEach(function(x){
-      h+='<tr><td>'+esc2(x.check)+(x.sheet?(' <span class="sub" style="display:inline">&mdash; '+esc2(x.sheet)+'</span>'):'')
-        +(x.detail?('<div class="sub">'+esc2(x.detail)+'</div>'):'')+'</td>'
-        +'<td>'+wfAudMark(x.pass)
-        +((x.pass===false&&x.expected)?('<div class="sub">works out to '+esc2(x.expected)
-           +', sheet says '+esc2(x.printed)+'</div>'):'')+'</td></tr>';
-    });
-    h+='</tbody></table>';
-
-    const kp=(res.kyc&&res.kyc.people)||[];
-    if(kp.length){
-      h+='<div class="wf-aud-h">KYC</div><table class="wf-aud-t"><tbody>';
-      kp.forEach(function(p){
-        h+='<tr><td>'+esc2(p.person)+(p.relation?('<div class="sub">'+esc2(p.relation)+'</div>'):'')+'</td>'
-          +'<td>'+(p.aadhaar?'<span class="wf-aud-ok">Aadhaar</span> ':'')
-          +(p.pan?'<span class="wf-aud-ok">PAN</span>':'')
-          +(p.ok?'':'<span class="wf-aud-no">no card found</span>')+'</td></tr>';
-      });
-      h+='</tbody></table>';
-      const kk=res.kyc;
-      h+='<div class="wf-aud-mini">Mobile: '+esc2((kk.mobile_numbers||[]).join(', ')||'none')
-        +' &middot; Email: '+esc2((kk.emails||[]).join(', ')||'none')
-        +' &middot; PAN: '+esc2((kk.pan_numbers||[]).join(', ')||'none')+'</div>';
-    }
-    if(res.notes) h+='<div class="wf-aud-notes"><b>Reader&rsquo;s notes</b><br>'+esc2(res.notes)+'</div>';
-    const un=(res.read&&res.read.unreadable)||[];
-    if(un.length) h+='<div class="wf-aud-warn"><b>Could not be read</b><ul>'
-      +un.map(function(u){return '<li>'+esc2(String(u))+'</li>';}).join('')+'</ul></div>';
-
-    h+='<div class="wf-aud-foot"><span class="wf-aud-mini">Nothing has been approved &mdash; '
-      +'this is a reading of the documents.</span>'
-      +'<button class="ac-btn" onclick="wfAuditRun('+((res.instance&&res.instance.case_id)||0)+',1)" '
-      +'title="Read the attachments again"><i class="fa-solid fa-rotate"></i></button>'
-      +'<button class="ac-btn" onclick="closeModal()">Close</button>'
-      +'<button class="ac-btn primary" onclick="wfAuditPdf()"><i class="fa-solid fa-file-pdf"></i> Booking Form Checklist</button>'
-      +'</div></div>';
-
-    const b=document.querySelector('.modal-body');
-    if(b) b.innerHTML=h;
+    /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
+       stays in the stored reading; the printed sheet is the form. */
+    const bytes=await doc.save();
+    const who=String(v('customer_name')||'booking').replace(/[^\w \-]/g,'').trim()||'booking';
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Booking Form Check List - '+who+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    toast('Check list downloaded','ok');
   }
-
-  /* ── the check list as a real PDF, downloaded ───────────────────────────────────────────────
-     Laid out on the blank form's own geometry, measured off Booking_Form_Check_List_BLANK_1.pdf:
-     US Letter 612x792, left margin x=72.1, the Date at x=417.4, and each line on the same baseline
-     it occupies on the blank (583.8 down to 131.3) at the same 11/12/13pt sizes.
-
-     Each line is drawn as a RUN of pieces - label in Times, value in Helvetica-Bold and underlined
-     where the blank was - advancing x by the measured width of each piece. Positioning values into
-     fixed slots would risk one long value running into the next label; composing the line left to
-     right cannot overlap, and if a whole line would pass the right margin its value pieces are
-     stepped down a point at a time until it fits.
-
-     JAIN-E builds this, not the model: every value comes from the stored audit result. */
-  const WF_CL_GEOM={
-    date:583.8, title:558.0, incharge:532.1, customer:508.4, project:484.6, rate:460.8,
-    discount:436.9, checkhd:411.1, cost:385.4, market:361.6, kyc:337.8, mobile:313.9,
-    email:290.1, pan:266.4, source:242.6, crm:218.8, plan:194.9, approved:131.3
-  };
-  window.wfAuditPdf=async function(){
-    const res=window._wfAudit;
-    if(!res){ toast('Open the check list first','warn'); return; }
-    let L=null;
-    try{ L=await loadPdfLib(); }catch(_e){}
-    if(!L){ toast('The PDF library could not be loaded','err'); return; }
-    try{
-      const doc=await L.PDFDocument.create();
-      const page=doc.addPage([612,792]);
-      const times=await doc.embedFont(L.StandardFonts.TimesRoman);
-      const timesB=await doc.embedFont(L.StandardFonts.TimesRomanBold);
-      const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
-      const black=L.rgb(0,0,0), green=L.rgb(0.04,0.42,0.18), red=L.rgb(0.67,0.07,0.07);
-      const RIGHT=612-56;
-
-      const f=res.fields||{}, cl=res.checklist||{};
-      const v=function(k){ const x=f[k]; return x?String(x.value):'NIL'; };
-      const mark=function(k){
-        const t=String(cl[k]!=null?cl[k]:'');
-        return {t:t||'—', col:(t==='Ok'?green:(t==='Not Ok'?red:black))};
-      };
-      /* One line, left to right. `size` may be reduced for the value pieces only, so a long name
-         cannot push the line off the page. */
-      const run=function(x,y,pieces){
-        let size=0;
-        for(let drop=0; drop<6; drop++){
-          let w=0;
-          pieces.forEach(function(p){
-            const fo=p.fill?helvB:(p.bold?timesB:times);
-            const sz=(p.size||11)-(p.fill?drop:0);
-            w+=fo.widthOfTextAtSize(String(p.t==null?'':p.t), sz);
-          });
-          if(x+w<=RIGHT||drop===5){ size=drop; break; }
-        }
-        let cx=x;
-        pieces.forEach(function(p){
-          const fo=p.fill?helvB:(p.bold?timesB:times);
-          const sz=(p.size||11)-(p.fill?size:0);
-          const t=String(p.t==null?'':p.t);
-          page.drawText(t,{x:cx,y:y,size:sz,font:fo,color:p.col||black});
-          const w=fo.widthOfTextAtSize(t,sz);
-          // echo the blank: a rule under whatever was filled in
-          if(p.fill&&t) page.drawLine({start:{x:cx,y:y-2.2},end:{x:cx+w,y:y-2.2},thickness:.6,color:black});
-          cx+=w;
-        });
-      };
-      const G=WF_CL_GEOM;
-      run(417.4,G.date,[{t:'Date '},{t:(res.header&&res.header.date)||'',fill:1}]);
-      page.drawText('Booking form check list:-',{x:72.1,y:G.title,size:12,font:timesB});
-      page.drawLine({start:{x:72.1,y:G.title-2.4},
-                     end:{x:72.1+timesB.widthOfTextAtSize('Booking form check list:-',12),y:G.title-2.4},
-                     thickness:.7});
-      run(72.1,G.incharge,[{t:'Name of Post sales in-charge Responsible: '},
-                           {t:(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH',bold:1}]);
-      run(72.1,G.customer,[{t:'Name of the customer   :  '},{t:v('customer_name'),fill:1}]);
-      run(72.1,G.project,[{t:'Project  Name: '},{t:v('project_name'),fill:1},
-                          {t:' Block Name:'},{t:v('block'),fill:1},
-                          {t:', FLAT; '},{t:v('flat'),fill:1},
-                          {t:' FLOOR- '},{t:v('floor'),fill:1},
-                          {t:' Area ; '},{t:v('area_sqft'),fill:1},{t:' SQ.FT.'}]);
-      run(72.1,G.rate,[{t:'Base Rate  :'},{t:v('base_rate'),fill:1},{t:'/-,   PLC-'},
-                       {t:v('plc'),fill:1},{t:',  FLC-'},{t:v('flc'),fill:1},
-                       {t:'/-,     COVERED PARKING -'},{t:v('covered_parking'),fill:1},{t:'/-'}]);
-      run(72.1,G.discount,[{t:'- ',size:11},{t:'DISCOUNT :',size:13},
-                           {t:v('discount'),fill:1,size:13},{t:'/-',size:13}]);
-      page.drawText('Check List:',{x:72.1,y:G.checkhd,size:12,font:timesB});
-      const row=function(y,label,key){
-        const m=mark(key);
-        run(72.1,y,[{t:label+' '},{t:m.t,fill:1,col:m.col}]);
-      };
-      row(G.cost,  'Cost Sheet',             'Cost Sheet');
-      row(G.market,'Market valuation Sheet', 'Market valuation Sheet');
-      row(G.kyc,   'KYC of Customer',        'KYC of Customer');
-      row(G.mobile,'Mobile Number',          'Mobile Number');
-      row(G.email, 'Email ID',               'Email ID');
-      row(G.pan,   'Pan Card No.',           'Pan Card No.');
-      row(G.source,'Source',                 'Source');
-      run(72.1,G.crm,[{t:' Booked in CRM - Lead ID  '},{t:mark('Booked in CRM - Lead ID').t,fill:1},
-                      {t:'  Booking Date: '},{t:mark('Booking Date').t,fill:1}]);
-      run(72.1,G.plan,[{t:'Payment Plan\u2014'},{t:mark('Payment Plan').t,fill:1,size:13}]);
-      run(72.1,G.approved,[{t:'Discount Approved        '},{t:mark('Discount Approved').t,fill:1},
-                           {t:'  (VC/HD)'}]);
-
-      /* Page 2: what was actually checked. The check list itself is the form, unchanged; the
-         evidence goes behind it so the sheet can be verified rather than taken on trust. */
-      const p2=doc.addPage([612,792]);
-      let y=740;
-      p2.drawText('What was checked',{x:56,y:y,size:12,font:timesB}); y-=8;
-      p2.drawLine({start:{x:56,y:y},end:{x:556,y:y},thickness:.6}); y-=16;
-      const wrap=function(t,max,size){
-        const words=String(t).split(/\s+/), out=[]; let line='';
-        words.forEach(function(w){
-          const test=line?(line+' '+w):w;
-          if(times.widthOfTextAtSize(test,size)>max){ if(line)out.push(line); line=w; } else line=test;
-        });
-        if(line)out.push(line);
-        return out;
-      };
-      (res.arithmetic||[]).forEach(function(x){
-        if(y<70){ y=740; doc.addPage([612,792]); }
-        const verdict=x.pass===true?'OK':(x.pass===false?('OUT BY '+(x.difference||'')):'not checked');
-        const txt=x.check+(x.sheet?(' \u2014 '+x.sheet):'')+(x.detail?(' \u2014 '+x.detail):'');
-        const lines=wrap(txt,400,9.5);
-        lines.forEach(function(ln,i){
-          p2.drawText(ln,{x:56,y:y,size:9.5,font:times});
-          if(i===0) p2.drawText(verdict,{x:470,y:y,size:9.5,font:helvB,
-            color:x.pass===true?green:(x.pass===false?red:black)});
-          y-=12;
-        });
-        y-=3;
-      });
-      const kp=(res.kyc&&res.kyc.people)||[];
-      if(kp.length){
-        y-=8; p2.drawText('Identity documents found',{x:56,y:y,size:12,font:timesB}); y-=8;
-        p2.drawLine({start:{x:56,y:y},end:{x:556,y:y},thickness:.6}); y-=16;
-        kp.forEach(function(p){
-          p2.drawText(p.person+(p.relation?(' ('+p.relation+')'):''),{x:56,y:y,size:9.5,font:times});
-          p2.drawText([p.aadhaar?'Aadhaar':'',p.pan?'PAN':''].filter(Boolean).join(' + ')||'none',
-            {x:470,y:y,size:9.5,font:helvB,color:p.ok?green:red});
-          y-=13;
-        });
-      }
-      y-=14;
-      wrap('Read from '+(((res.read&&res.read.files)||[]).length)+' attached file(s) by '
-        +((res.read&&res.read.model)||'')+'. The figures and every Ok / Not Ok above were computed '
-        +'by JAIN-E from the documents, not asserted by the reader. This is not an approval.',
-        500,9).forEach(function(ln){ p2.drawText(ln,{x:56,y:y,size:9,font:times}); y-=12; });
-
-      const bytes=await doc.save();
-      const who=String(v('customer_name')||'booking').replace(/[^\w \-]/g,'').trim()||'booking';
-      const blob=new Blob([bytes],{type:'application/pdf'});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url; a.download='Booking Form Check List - '+who+'.pdf';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} }, 4000);
-      toast('Check list downloaded','ok');
-    }catch(e){
-      toast('Could not build the PDF: '+((e&&e.message)||e),'err');
-    }
-  };
 
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
