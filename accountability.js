@@ -3743,10 +3743,34 @@
 
      `w` is how much room that blank has, measured from the number of underscores in it. A value too
      wide is stepped down in size until it fits rather than running over the next label. */
-  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.pdf';
+  /* The blank arrives as a SCRIPT, not as a file to fetch. A browser refuses fetch() of a
+     same-origin file when the page itself was opened straight off the disk as file:// - it throws
+     "Failed to fetch" without making a request - so the check list could not be built at all while
+     working from the local copy. A script tag is allowed in both places. Loaded the first time
+     somebody asks for a check list, the same way pdf-lib is, not on every page load.
+     booking-check-list-blank.pdf sits beside it and remains the source of truth. */
+  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.js';
+  async function wfClBlank(){
+    if(!window.WF_CL_BLANK_B64){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=WF_CL_TEMPLATE;
+        sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the blank form could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const b64=window.WF_CL_BLANK_B64;
+    if(!b64) throw new Error('the blank form loaded but was empty');
+    const bin=atob(b64), out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    return out;
+  }
   const WF_CL={
     date:        {x:441.5, y:583.75, s:11, w:98},
-    customer:    {x:188.0, y:508.35, s:11, w:260},
+    // The underscores stop at 448 but nothing is printed to the right of them, so a name may
+    // run on to the margin before the size has to come down - two allottees stay legible.
+    customer:    {x:188.0, y:508.35, s:11, w:352},
     project:     {x:143.2, y:484.55, s:11, w:80},
     block:       {x:284.2, y:484.55, s:11, w:21},
     flat:        {x:338.7, y:484.55, s:11, w:26},
@@ -3802,9 +3826,7 @@
     const L=await loadPdfLib();
     if(!L) throw new Error('the PDF library could not be loaded');
 
-    const tr=await fetch(WF_CL_TEMPLATE);
-    if(!tr.ok) throw new Error('the blank form could not be loaded (HTTP '+tr.status+')');
-    const blank=await tr.arrayBuffer();
+    const blank=await wfClBlank();
 
     const doc=await L.PDFDocument.load(blank);
     const page=doc.getPages()[0];
@@ -3843,7 +3865,20 @@
     };
 
     put(WF_CL.date,      (res.header&&res.header.date)||'');
-    put(WF_CL.customer,  v('customer_name'));
+    /* EVERY allottee on the one line the form gives for it - the first applicant and anyone
+       named with them. It never wraps: the size steps down instead, so the sheet keeps the
+       shape of the form. */
+    const allottees=[];
+    [v('customer_name')].concat(Array.isArray(res.co_applicants)?res.co_applicants:[])
+      .forEach(function(n){
+        const t=String(n==null?'':n).trim();
+        if(!t||t==='NIL') return;
+        // The reader sometimes lists the applicant among the co-applicants too; printing a
+        // name twice reads as a mistake in the file rather than one in the reading.
+        if(allottees.some(function(x){ return x.toUpperCase()===t.toUpperCase(); })) return;
+        allottees.push(t);
+      });
+    put(WF_CL.customer,  allottees.join('  &  ')||'NIL');
     put(WF_CL.project,   v('project_name'));
     put(WF_CL.block,     v('block'));
     put(WF_CL.flat,      v('flat'));
