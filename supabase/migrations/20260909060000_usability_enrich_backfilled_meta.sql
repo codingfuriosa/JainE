@@ -133,3 +133,20 @@ update public.erp_usage_events ev
 set meta = ev.meta || jsonb_strip_nulls(jsonb_build_object('trigger', nullif(r.source,''), 'result', nullif(r.status,'')))
 from public.net_test_requests r
 where ev.meta->>'ref' ~ '^netreq:[0-9]+$' and r.id = split_part(ev.meta->>'ref',':',2)::bigint;
+
+-- Legal, reached through the folder: mis_case_files -> mis_case_folders -> mis_cases. The case
+-- carries project_land_name, which is the project a case belongs to - so these events can have a
+-- project even though the file row itself has no such column. 133 of 179 cases have one.
+update public.erp_usage_events ev
+set meta = ev.meta || jsonb_strip_nulls(jsonb_build_object('case', nullif(c.cause_title,''), 'project', nullif(c.project_land_name,''))),
+    project = coalesce(ev.project, left(nullif(c.project_land_name,''),64))
+from public.mis_case_files f
+     join public.mis_case_folders fo on fo.id = f.folder_id
+     join public.mis_cases c on c.id = fo.case_id
+where ev.meta->>'ref' ~ '^misf:[0-9]+$' and f.id = split_part(ev.meta->>'ref',':',2)::bigint;
+
+update public.erp_usage_events ev
+set meta = ev.meta || jsonb_strip_nulls(jsonb_build_object('case', nullif(c.cause_title,''), 'action', nullif(a.action_needed,''), 'project', nullif(c.project_land_name,''))),
+    project = coalesce(ev.project, left(nullif(c.project_land_name,''),64))
+from public.mis_actions a join public.mis_cases c on c.id = a.case_id
+where ev.meta->>'ref' ~ '^misact:[0-9]+$' and a.id = split_part(ev.meta->>'ref',':',2)::bigint;
