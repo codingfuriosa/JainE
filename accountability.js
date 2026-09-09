@@ -1228,6 +1228,13 @@
      given to is one where the handling roster is sensitive. Every other workflow has no such list and
      is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
   function wfRosterAccess(f, steps, fcs){
+    // Invoice Processing: the Tracker (and People row) was hidden from anyone who wasn't a raiser,
+    // a fixed step owner, or already a step-person on some existing case - which in practice meant
+    // most people who could open this workflow at all still couldn't see it. Reaching this function
+    // already means the page itself let them in, so anyone who has access to the workflow gets the
+    // Tracker too, same as any flow that never restricted trigger_step_assignable_to in the first
+    // place (the branch right below this one).
+    if(f && f.id===26) return {show:true,scope:'all'};
     const assign=String((f&&f.trigger_step_assignable_to)||'')
       .split(',').map(function(x){return x.trim();}).filter(Boolean);
     if(!assign.length) return {show:true,scope:'all'};    // flow doesn't restrict handover — unchanged
