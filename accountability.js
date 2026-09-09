@@ -3697,6 +3697,7 @@
        takes a minute or two, so it is a button somebody presses - not something that runs on open. */
     const auditBtn=(c.flow_id===41)
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
       : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -3806,7 +3807,9 @@
     base_rate:   {x:125.0, y:460.75, s:11, w:49},
     plc:         {x:211.6, y:460.75, s:11, w:38},
     flc:         {x:276.6, y:460.75, s:11, w:38},
-    parking:     {x:429.4, y:460.75, s:11, w:49},
+    // The form no longer presumes covered parking, so its label is just "PARKING" and the blank
+    // begins 45pt earlier with room for the kind as well as the amount.
+    parking:     {x:384.1, y:460.75, s:11, w:155},
     discount:    {x:151.4, y:436.95, s:13, w:150},
     cost:        {x:122.1, y:385.35, s:11, w:130},
     market:      {x:179.1, y:361.55, s:11, w:120},
@@ -3825,6 +3828,206 @@
      between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
      form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
      anything it already says. */
+
+  /* ── welcome letter ───────────────────────────────────────────────────────────────────────
+     The letter Post Sales sends a customer once their booking is in. Same source as the check
+     list - the stored reading of their own documents - so the two can never disagree about who
+     bought what, and the same on-demand loading, so it builds from the local copy too. */
+  const JG_LOGO='assets/brand/jaingroup-logo.js';
+  async function jgLogo(){
+    if(!window.JG_LOGO_B64){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=JG_LOGO; sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the letterhead logo could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const b=window.JG_LOGO_B64;
+    if(!b) throw new Error('the letterhead logo loaded but was empty');
+    const bin=atob(b), out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    return out;
+  }
+
+  /* Indian numbering, in words: lakh and crore, not million. Written out here rather than asked of
+     a model because it has exactly one right answer, and because a letter that tells a customer the
+     wrong amount in words is a serious thing to get wrong. */
+  const RUP_ONES=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven',
+    'Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const RUP_TENS=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function under100(n){
+    if(n<20) return RUP_ONES[n];
+    return RUP_TENS[Math.floor(n/10)]+(n%10?' '+RUP_ONES[n%10]:'');
+  }
+  function under1000(n){
+    if(n<100) return under100(n);
+    return RUP_ONES[Math.floor(n/100)]+' Hundred'+(n%100?' '+under100(n%100):'');
+  }
+  function rupeesInWords(amount){
+    let n=Math.floor(Math.abs(Number(amount)||0));
+    const paise=Math.round((Math.abs(Number(amount)||0)-n)*100);
+    if(!n && !paise) return 'Zero';
+    const parts=[];
+    const crore=Math.floor(n/10000000); n-=crore*10000000;
+    const lakh=Math.floor(n/100000);    n-=lakh*100000;
+    const thou=Math.floor(n/1000);      n-=thou*1000;
+    if(crore) parts.push(under1000(crore)+' Crore');
+    if(lakh)  parts.push(under1000(lakh)+' Lakh');
+    if(thou)  parts.push(under1000(thou)+' Thousand');
+    if(n)     parts.push(under1000(n));
+    let out=parts.join(' ');
+    if(paise) out+=(out?' and ':'')+under100(paise)+' Paise';
+    return out;
+  }
+  /* A booking form prints names in capitals; a letter to a customer does not shout at them. */
+  function nameCase(s){
+    return String(s==null?'':s).trim().toLowerCase()
+      .replace(/(^|[\s.'\-])([a-z])/g,function(_m,a,b){ return a+b.toUpperCase(); });
+  }
+  // 7 -> 7th. The letter reads "7th floor", not "floor 7".
+  function ordinal(n){
+    const v=Math.floor(Math.abs(Number(n)));
+    if(!isFinite(v)||!v) return null;
+    const t=v%100;
+    if(t>=11&&t<=13) return v+'th';
+    return v+({1:'st',2:'nd',3:'rd'}[v%10]||'th');
+  }
+
+  window.wfWelcomeLetter=async function(caseId){
+    let row=null;
+    try{
+      const {data}=await ACC().from('booking_audits')
+        .select('status,result,error,queued_at').eq('case_id',caseId).maybeSingle();
+      row=data;
+    }catch(_e){}
+    if(!row){ toast('This booking has not been read yet','warn'); return; }
+    if(row.status==='pending'||row.status==='running'){
+      toast('The attachments are still being read \u2014 try again in a minute or two.','warn'); return;
+    }
+    if(row.status!=='done'||!row.result){
+      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err'); return;
+    }
+    try{ await wfWelcomePdf(row.result); }
+    catch(e){ toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
+     by a model. Anything the documents did not state is left as a blank to be filled by hand rather
+     than guessed, because this letter goes to the customer. */
+  async function wfWelcomePdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+    const logoBytes=await jgLogo();
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);          // A4
+    const W=595.28, M=64;                              // margins
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const ink=L.rgb(0.12,0.12,0.13), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.80,0.13,0.16);
+
+    const logo=await doc.embedPng(logoBytes);
+    const lw=176, lh=lw*logo.height/logo.width;
+    page.drawImage(logo,{x:M,y:841.89-56-lh,width:lw,height:lh});
+
+    let y=841.89-56-lh-26;
+    page.drawLine({start:{x:M,y:y},end:{x:W-M,y:y},thickness:1.6,color:rule});
+    y-=30;
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+
+    // The date the letter is written, in the form a letter uses.
+    const d=new Date();
+    const MON=['January','February','March','April','May','June','July','August','September',
+               'October','November','December'];
+    page.drawText(d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear(),
+      {x:W-M-reg.widthOfTextAtSize(d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear(),10.5),
+       y:y,size:10.5,font:reg,color:soft});
+    y-=34;
+
+    /* Everyone the flat is being allotted to, with the titles the booking form used. When the form
+       gave no title, the name goes on its own rather than inventing Mr. or Mrs. for a customer. */
+    const who=(Array.isArray(LT.allottees)?LT.allottees:[])
+      .map(function(p){ return [String(p.salutation||'').trim(),nameCase(p.name)]
+        .filter(Boolean).join(' '); })
+      .filter(Boolean);
+    if(!who.length && val('customer_name')) who.push(nameCase(val('customer_name')));
+    const project=val('project_name')||'________________';
+    const locality=String(LT.locality||'').trim();
+    const flat=val('flat')||'____', block=val('block')||'____';
+    /* A booking form writes the floor as "5", as "3rd" or as "3rd FLOOR". The letter says "3rd
+       floor" in every case - taking the number out and rebuilding it avoids "3rd FLOOR floor". */
+    const fRaw=val('floor');
+    const fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum ? (ordinal(fNum)+' floor')
+                        : (fRaw ? (nameCase(fRaw)+' floor') : '____ floor');
+    const tokenNum=(LT.token&&typeof LT.token.value==='number'&&isFinite(LT.token.value))
+      ? LT.token.value : null;
+    const tokenFig=tokenNum!==null
+      ? tokenNum.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})
+      : '________';
+    /* The words the form itself printed are preferred - that is what the customer signed against -
+       and only worked out from the figure when the form printed none. */
+    const tokenWords=String((LT.token&&LT.token.in_words)||'').trim()
+      || (tokenNum!==null ? rupeesInWords(tokenNum) : '________________');
+
+    page.drawText('Dear '+(who.join(' & ')||'Sir / Madam')+',',{x:M,y:y,size:11.5,font:bold,color:ink});
+    y-=30;
+
+    // Wraps to the page width; returns the new baseline.
+    const para=function(text,size,font,gap){
+      font=font||reg;
+      const max=W-2*M;
+      const words=String(text).split(/\s+/);
+      let line='';
+      words.forEach(function(w){
+        const t=line?line+' '+w:w;
+        if(font.widthOfTextAtSize(t,size)>max){
+          page.drawText(line,{x:M,y:y,size:size,font:font,color:ink});
+          y-=size*1.55; line=w;
+        } else line=t;
+      });
+      if(line) { page.drawText(line,{x:M,y:y,size:size,font:font,color:ink}); y-=size*1.55; }
+      y-=(gap===undefined?11:gap);
+    };
+
+    para('Greetings from The Jain Group!',11);
+    para('Whilst expressing our deep appreciation towards your investment in \u2018'+project
+      +'\u2019, we further feel privileged for having placed your trust on us in selecting your '
+      +'Dream Home.',11,reg);
+    para('By way of this letter, please be informed that we have received the application for '
+      +'Flat No. '+flat+', '+floorTxt+', Block-'+block+' of '+project
+      +(locality?(' '+locality):'')+'.',11,reg);
+    para('We have received a token amount of '+tokenFig+' ('+tokenWords
+      +' only) against the above mentioned booking.',11,reg);
+    para('Please feel free to get in touch with the undersigned with any queries / feedback or for '
+      +'assistance. It is always our pleasure to be of service to you today and in the future.',11,reg);
+    para('Once again we warmly welcome you to the growing Jain Group family.',11,reg,26);
+
+    para('Thanking you,',11,reg,34);
+    page.drawText('Pallabita Ghosh',{x:M,y:y,size:11.5,font:bold,color:ink}); y-=15;
+    page.drawText('Manager \u2013 Post Sales',{x:M,y:y,size:10.5,font:reg,color:soft}); y-=14;
+    page.drawText('Reach me @ 8420541541',{x:M,y:y,size:10.5,font:reg,color:soft});
+
+    // Footer rule, so the page reads as a letterhead rather than as a page of text.
+    page.drawLine({start:{x:M,y:64},end:{x:W-M,y:64},thickness:0.7,color:L.rgb(.85,.86,.88)});
+    const foot='THE JAIN GROUP  \u00b7  CARING FOR YOUR DREAMS';
+    page.drawText(foot,{x:(W-reg.widthOfTextAtSize(foot,8))/2,y:50,size:8,font:reg,
+      color:L.rgb(.55,.57,.60)});
+
+    const bytes=await doc.save();
+    const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Welcome Letter - '+name+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    toast('Welcome letter downloaded','ok');
+  }
 
   window.wfChecklistDownload=async function(caseId){
     let row=null;
@@ -3917,7 +4120,9 @@
     put(WF_CL.base_rate, v('base_rate'));
     put(WF_CL.plc,       v('plc'));
     put(WF_CL.flc,       v('flc'));
-    put(WF_CL.parking,   v('covered_parking'));
+    /* "COVERED 1,50,000" or "OPEN 1,50,000" - the kind comes from what the customer ticked on the
+       booking form, not from the cost sheet's wording, and stays off when neither was ticked. */
+    put(WF_CL.parking,   res.parking_value || v('covered_parking'));
     put(WF_CL.discount,  v('discount'));
 
     verdict(WF_CL.cost,   'Cost Sheet');
