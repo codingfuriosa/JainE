@@ -2878,6 +2878,8 @@
      bill fields it happens to carry. */
   window.wfTrackerFilter=function(){
     const q=((($('wfTkSearch')||{}).value)||'').trim().toLowerCase();
+    // Wired to oninput, so it logs the settled query once rather than a fragment per keystroke.
+    try{ usageQueueDebounced('tasks.workflow.search_filter_the_tracker', q); }catch(_e){}
     const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
     let shown=0;
     rows.forEach(function(r){
@@ -4267,7 +4269,13 @@
     ]).then(doPrint);
     return true;
   };
-  window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
+  window.wfPrintCase=function(caseId){
+    // Which instance was printed, rather than only that something was.
+    wfCaseUsageMeta(caseId).then(function(um){
+      try{ usageQueue('tasks.workflow.print_an_instance','export',um); }catch(_e){}
+    });
+    return window.wfPrintCases([caseId]);
+  };
   /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
@@ -5838,6 +5846,10 @@
         // a file uploaded during this edit and then taken off again before saving
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
+        // Editing an existing instance is its own catalog feature. It used to be counted as
+        // "Start a new instance", because USAGE_MAP could only see that wfEventSave ran and not
+        // which of its two jobs it had just done.
+        try{ usageQueue('tasks.workflow.edit_an_instance','update', await wfCaseUsageMeta(caseId)); }catch(_e){}
         toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
@@ -5879,6 +5891,9 @@
             if(v!=null&&String(v).trim()!=='') newIdText=String(v);
           }
         }catch(_e){}    // the bill exists either way; a missing id is no reason to look like a failure
+        // Logged here rather than through USAGE_MAP: only this branch knows the instance was
+        // created rather than edited, and the id it was given.
+        try{ usageQueue('tasks.workflow.start_a_new_instance','create', await wfCaseUsageMeta(newCaseId)); }catch(_e){}
         toast(newIdText
           ? ('New '+N.one+' created — Id: '+newIdText)
           : (N.one+' created — first step assigned'),'ok');
@@ -6190,24 +6205,63 @@
     wfConfirm({ title:'Forward this step?', body:'This completes your step and passes the workflow to the next person.', okLabel:'Forward', okClass:'primary',
       onOk:async function(){
         const label=await wfComputeForwardLabel(fcsId);
+        const um=await wfStepUsageMeta(fcsId);
         try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); if(cb){cb.disabled=false;cb.checked=false;} return; }
+        try{ usageQueue('tasks.workflow.forward_a_step','update',um); }catch(_e){}
         toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); renderPage();
       },
       onCancel:function(){ if(cb){cb.disabled=false;cb.checked=false;} }
     });
   };
 
+  /* Receiving and forwarding a step were the two busiest tracked actions in the whole ERP - 317
+     and 288 events - and both recorded nothing but the fact that a button was pressed, which
+     tells a reader nothing at all. What makes them readable is WHICH step of WHICH instance of
+     WHICH workflow: "Accounts Review & Payment · Reimburse required · Reimbursement". Both reads
+     are one embedded select over the case_id/flow_id foreign keys, taken BEFORE the action so the
+     step is still the caller's; a failed read just means no detail, never a broken action. */
+  async function wfStepUsageMeta(fcsId){
+    try{
+      const {data}=await ACC().from('flow_case_steps')
+        .select('title,flow_cases(title,case_no,flows(name))').eq('id',fcsId).maybeSingle();
+      if(!data) return null;
+      const c=data.flow_cases||{}, f=c.flows||{}, m={};
+      if(data.title) m.step=data.title;
+      if(c.title) m.instance=c.title;
+      if(c.case_no!=null&&String(c.case_no).trim()!=='') m.ref_no=String(c.case_no);
+      if(f.name) m.workflow=f.name;
+      return Object.keys(m).length?m:null;
+    }catch(_e){ return null; }
+  }
+  async function wfCaseUsageMeta(caseId){
+    try{
+      const {data}=await ACC().from('flow_cases')
+        .select('title,case_no,jaine_id,flows(name)').eq('id',caseId).maybeSingle();
+      if(!data) return null;
+      const f=data.flows||{}, m={};
+      if(data.title) m.instance=data.title;
+      const idv=(data.jaine_id!=null?data.jaine_id:data.case_no);
+      if(idv!=null&&String(idv).trim()!=='') m.ref_no=String(idv);
+      if(f.name) m.workflow=f.name;
+      return Object.keys(m).length?m:null;
+    }catch(_e){ return null; }
+  }
+
   window.wfReceive=async function(fcsId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_receive',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not receive: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.receive_a_step','update',um); }catch(_e){}
     toast('Received — timer started','ok'); renderPage();
   };
 
   window.wfForward=async function(fcsId){
     const label=await wfComputeForwardLabel(fcsId);
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.forward_a_step','update',um); }catch(_e){}
     toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
   };
 
@@ -6381,6 +6435,15 @@
         if(insErr) throw insErr;
       }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
     }
+    // What the update was about, not just that one was posted - the instance it is on, plus a
+    // short excerpt of the text and how many files came with it.
+    try{
+      const um=(await wfCaseUsageMeta(caseId))||{};
+      if(body) um.update=body.replace(/\s+/g,' ').trim().slice(0,140);
+      if(files.length) um.attachments=String(files.length);
+      usageQueue('tasks.workflow.post_an_update_comment_on_an_instance','create',
+                 Object.keys(um).length?um:null);
+    }catch(_e){}
     if(inp)inp.value=''; if(fileInput)fileInput.value='';
     // Posted from the Tracker's case panel (not a step task page) — refresh just that panel in
     // place so the selected row and its position in the table survive, instead of a full

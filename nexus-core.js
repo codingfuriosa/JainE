@@ -16882,17 +16882,19 @@ const USAGE_MAP={
   cmpShowProjectAds:'campaigns.by_project.drill_into_a_project_s_campaigns',
   // Accountability — Workflow
   wfNew:'tasks.workflow.create_a_new_workflow', wfEdit:'tasks.workflow.edit_workflow_steps_owners',
-  wfDelete:'tasks.workflow.delete_a_workflow', wfEventSave:'tasks.workflow.start_a_new_instance',
+  wfDelete:'tasks.workflow.delete_a_workflow',
   wfInstEditSel:'tasks.workflow.edit_an_instance', wfInstDelSel:'tasks.workflow.delete_an_instance',
-  wfReceive:'tasks.workflow.receive_a_step',
-  wfForward:'tasks.workflow.forward_a_step', wfRowForward:'tasks.workflow.forward_a_step',
   wfDoReject:'tasks.workflow.reject_send_a_step_back', wfRejectConfirm:'tasks.workflow.reject_send_a_step_back',
   wfRowReject:'tasks.workflow.reject_send_a_step_back',
   wfDone:'tasks.workflow.mark_final_step_done', wfReopen:'tasks.workflow.reopen_a_completed_instance',
   wfRevert:'tasks.workflow.revert_a_forwarded_step',
-  wfPostUpdate:'tasks.workflow.post_an_update_comment_on_an_instance',
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
-  wfPrintCase:'tasks.workflow.print_an_instance', wfTrackerFilter:'tasks.workflow.search_filter_the_tracker',
+  // wfEventSave / wfReceive / wfForward / wfRowForward / wfPostUpdate / wfPrintCase /
+  // wfTrackerFilter are NOT mapped here on purpose - they log directly (accountability.js) so the
+  // event carries which step, which instance and which workflow it was about. Receive and Forward
+  // were the two busiest tracked actions in the ERP (317 and 288 events) and recorded nothing but
+  // the click. wfEventSave also had to move because it both creates and edits an instance from one
+  // function: mapped here, every edit was counted as "Start a new instance".
   wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
   // Transcription
   trUploadStart:'transcription.all_calls.upload_call_recording_s',
