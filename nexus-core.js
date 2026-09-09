@@ -14886,6 +14886,13 @@ const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'a
    exact row someone came from instead of dropping them back at the top of the table. */
 let TRC_LAST_LEAD_ID=null;
 let TRC_LAST_FOLLOWUP_ID=null;
+/* TRC_LAST_LEAD_ID promises the exact row survives a reload or a pasted URL, but the default (and
+   every) date window can legitimately exclude that lead entirely - its last call may not fall in
+   the range currently selected. TRC_PIN_ROWS is that one lead's rows, fetched by lead_id alone with
+   no date filter, kept only for as long as TRC_LAST_LEAD_ID names a lead the ranged fetch didn't
+   already include - see trcEnsurePinnedLead. */
+let TRC_PIN_ID=null;
+let TRC_PIN_ROWS=null;
 
 /* Deliberately NOT selecting level_regression_severity/prev_status here, unlike the lead-detail fetch
    below. Both columns come off acc.lead_level_progress_v, a view stacked six windows deep over EVERY
@@ -14977,6 +14984,24 @@ async function trcFetch(force){
 
 function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
+}
+
+/* Makes good on the promise above: if the lead a deep link names isn't in the date-ranged fetch at
+   all, go get it by lead_id alone (cheap - indexed, one lead's rows, no window functions to prune)
+   so trcRender can still put its row on screen. Skipped entirely once the lead is already there, and
+   not re-fetched on every render once it's been pinned for this id. */
+async function trcEnsurePinnedLead(){
+  const id=TRC_LAST_LEAD_ID;
+  if(id==null){TRC_PIN_ID=null;TRC_PIN_ROWS=null;return;}
+  if((TRC_ROWS||[]).some(function(r){return String(r.lead_id)===String(id);})){
+    TRC_PIN_ID=null;TRC_PIN_ROWS=null;return;
+  }
+  if(TRC_PIN_ID===String(id))return;
+  try{
+    const {data,error}=await sb.schema('acc').from('followup_timeline_v').select(TRC_LIGHT).eq('lead_id',id);
+    if(error)throw error;
+    TRC_PIN_ID=String(id);TRC_PIN_ROWS=data||[];
+  }catch(e){TRC_PIN_ID=null;TRC_PIN_ROWS=null;}
 }
 
 /* There used to be a lead-level gate here mirroring crm_build_queue's: a call was dropped whenever the
@@ -15428,7 +15453,7 @@ function trcColsHtml(){
 
 function trcRender(full){
   const all=TRC_ROWS||[];
-  const rows=trcApply(all);
+  let rows=trcApply(all);
   const scope=trcApply(all,true);
   const k=$('trcKpis');if(k)k.innerHTML=trcKpiHtml(scope);
   if(full!==false){
@@ -15438,6 +15463,13 @@ function trcRender(full){
   const cg=$('trcCols');if(cg)cg.innerHTML=trcColsHtml();
   const h=$('trcHead');if(h)h.innerHTML=trcHeadHtml();
   const callLevel=TRC_F.match==='MISMATCH';
+  /* The pinned lead rides in on top of the ranged/filtered set, never into the KPI cards above (scope
+     stays about the selected window's own numbers) - only so the exact row a deep link named is on
+     screen to scroll to. */
+  if(!callLevel&&TRC_LAST_LEAD_ID!=null&&TRC_PIN_ID===String(TRC_LAST_LEAD_ID)&&TRC_PIN_ROWS&&TRC_PIN_ROWS.length
+     &&!rows.some(function(r){return String(r.lead_id)===String(TRC_LAST_LEAD_ID);})){
+    rows=rows.concat(TRC_PIN_ROWS);
+  }
   const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
   const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(items,callLevel);
   const c=$('trcCount');
@@ -15477,6 +15509,7 @@ async function trcView(v,seg){
      of the table while it loads - trcFetch already caches, and the explicit Refresh button still
      forces a reload when the data itself might actually be stale. */
   await trcFetch(false);
+  await trcEnsurePinnedLead();
   trcRender(true);
   /* The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one
      row per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to. */
