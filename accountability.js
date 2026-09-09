@@ -4873,16 +4873,21 @@
        Asking the same question once per step made the form long and invited answering it
        differently for steps that are meant to be handled by the same person. */
     /* The restriction is for the people who RAISE these day to day - a bill may only be handed to
-       the two named people, so the picker offers only those two and the question cannot be answered
+       the named people, so the picker offers only those and the question cannot be answered
        wrongly. Systems is exempt: they are the ones who have to put things right when a bill has
        gone to the wrong person, and a picker that cannot name anyone else leaves them unable to.
        Uma Chatterjee is exempt too: she is a trigger owner on Invoice Processing but not one of the
        day-to-day store raisers the restriction targets, so her picker offers everyone — matches
        acc.wf_create_instance's own exemption exactly, or the server would reject what this form let
-       her pick. An empty list means the workflow never restricted the picker, and nothing changes. */
+       her pick. An empty list means the workflow never restricted the picker, and nothing changes.
+       trigger_step_assignable_overrides adds names for ONE specific raiser without touching the
+       shared list anyone else sees - keyed by that raiser's own email, lowercased, same lookup the
+       server does in acc.wf_create_instance. */
     const stepAssignRestrict=(wfInDept('Systems')||eq(me(),'ayushruia1@gmail.com')||eq(me(),'frontoffice@thejaingroup.com'))
       ? []
-      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean)
+          .concat(Array.isArray(flow.trigger_step_assignable_overrides&&flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()])
+            ? flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()] : []);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
           +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
