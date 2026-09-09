@@ -2870,6 +2870,7 @@ window.legalActionsFilter=function(){
     +'<td style="color:var(--slate)"><span class="lg-clamp" title="'+esc(r.remarks||'')+'">'+esc(r.remarks||'')+'</span></td>'
   +'</tr>').join('');
   const em=$('actEmpty'); if(em)em.style.display=list.length?'none':'';
+  usageQueueDebounced('legal.actions.view_search_filter_case_actions', q);
 };
 
 /* ---------- Advocates ----------------------------------------------------------------------- */
@@ -2930,6 +2931,7 @@ window.advFilter=function(){
     +'</td>'
   +'</tr>').join('');
   const em=$('advEmpty'); if(em)em.style.display=list.length?'none':'';
+  usageQueueDebounced('legal.advocates.search_advocates', q);
 };
 window.advModal=function(id){
   const r=(window._advRows||[]).filter(x=>String(x.id)===String(id))[0]||{};
@@ -3344,6 +3346,7 @@ window.misFilter=function(){
   // other half of what made the list flicker.
   const skipAi=parsed.openQuote || (parsed.phrases&&parsed.phrases.length);
   if(raw&&raw.length>=3&&!skipAi) window._misAiT=setTimeout(()=>misAiSearch(raw),500);
+  usageQueueDebounced('legal.mis.search_cases_incl_ai_semantic_search', raw);
 };
 window.misAiSearch=async function(raw){
   const statusEl=$('misAiStatus');
@@ -6583,6 +6586,7 @@ window.trackerFilter=function(){
   });
   const c=$('trCount');if(c)c.textContent=vis+' entries';
   trUpdateToolbar();
+  usageQueueDebounced('hr.interview_tracker.search_filter_interviews', q);
 };
 window.trackerCreate=function(){
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-calendar-check"></i> Schedule Interview</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -7088,6 +7092,7 @@ window.inspRespFilter=function(){
   const respRow=({x,i})=>'<tr class="rowlink" onclick="inspOpenSub('+i+')"><td>'+esc(fmtDate(x.ts))+'</td><td>'+esc(x.ins)+'</td><td>'+x.loc+'</td><td>'+esc(x.cat)+'</td><td style="color:#16855a;font-weight:600">'+x.ok+'</td><td style="color:#c83232;font-weight:600">'+x.no+'</td><td style="font-weight:600">'+(x.ok+x.no)+'</td><td style="text-align:right"><i class="fa-solid fa-chevron-right" style="color:#cbd5e1"></i></td></tr>';
   const tb=$('respTbody'); if(tb)tb.innerHTML=shown.length?shown.map(respRow).join(''):'<tr><td colspan="8"><div class="empty">No submissions match this search/filter.</div></td></tr>';
   const sub=$('respSecSub'); if(sub)sub.textContent=shown.length+' of '+INSP_SUBS.length+' submissions · click a row to open it';
+  usageQueueDebounced('inspection.responses.search_filter_submissions', q);
 };
 window.inspRespFilterClear=function(){ INSP_RESP_FILTER={q:'',work:'All'}; if(PAGE==='inspection')renderPage(); };
 function inspEditView(v,s){
@@ -7171,6 +7176,7 @@ window.inspLogFilter=function(){
   const shown=inspLogFiltered(INSP_ROWS||[]);
   const tb=$('logTbody'); if(tb)tb.innerHTML=shown.length?shown.map(inspLogRow).join(''):'<tr><td colspan="8"><div class="empty">No checks match this search/filter.</div></td></tr>';
   const sub=$('logSecSub'); if(sub)sub.textContent=shown.length+' of '+(INSP_ROWS||[]).length+' checks';
+  usageQueueDebounced('inspection.log.search_filter_inspection_log', INSP_LOG_FILTER.q);
 };
 window.inspLogFilterClear=function(){ INSP_LOG_FILTER={q:'',block:'All',cat:'All',status:'All',section:'All'}; if(PAGE==='inspection')renderPage(); };
 const PM_PROJECT_MAP={
@@ -8124,11 +8130,17 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Project</th></tr></thead><tbody>'
+  // The 4th column was Project, and it was blank on nearly every row - only 13 of 896 tasks have a
+  // project (tag) set at all, so on the Tasks features it never said anything. What a reader of
+  // "Create task" actually wants next to the task's name is WHO it went to, which the event now
+  // captures as meta.assignee. Read from meta rather than the project column, and left out of
+  // Details so it appears once, in its own column.
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
+      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8143,10 +8155,38 @@ function usbMetaLabel(k){
   return String(k).replace(/_/g,' ').replace(/([a-z])([A-Z])/g,'$1 $2')
     .replace(/\w\S*/g, function(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); });
 }
+// A one-time historical backfill stamped {ref:'<table>.<action>:<id>', backfill:true} onto
+// thousands of old events across nearly every feature - an internal pointer back to the row it
+// was reconstructed from, not a real captured detail (no title, no assignee, nothing a person
+// would recognise). It was never meant to be user-facing; showing it read as corrupted, garbled
+// data rather than the honest "nothing was captured for this one" that an old event actually is.
+// 'assignee' is not internal - it is shown, but in its own "Assigned to" column beside Details
+// rather than repeated inside it.
+const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
+/* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
+   and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
+   a dump of fields rather than as the thing that happened. These keys are the names, so they are
+   printed bare, in this order, ahead of everything else: the workflow, then which instance of it
+   (#93 New Bill Recording), then which step. Everything a feature captured beyond the name - a
+   due date, a search query, a route - still carries its label, because those DO need saying. */
+const USB_META_NAME_ORDER=['workflow','instance','step','title','query'];
 function usbMetaHtml(meta){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
-  const parts=Object.keys(meta).filter(function(k){ return meta[k]!=null && String(meta[k]).trim(); })
+  const has=function(k){ return meta[k]!=null && String(meta[k]).trim()!==''; };
+  const named=[];
+  USB_META_NAME_ORDER.forEach(function(k){
+    if(!has(k)) return;
+    // ref_no belongs to the instance it numbers, so it rides along with it rather than sitting on
+    // its own as "Ref No: 93" - "#93 New Bill Recording" is how people say it.
+    if(k==='instance' && has('ref_no')) named.push('#'+esc(String(meta.ref_no))+' '+esc(String(meta[k])));
+    else named.push(esc(String(meta[k])));
+  });
+  // An instance with a number but no title still deserves its number shown.
+  if(!has('instance') && has('ref_no')) named.push('#'+esc(String(meta.ref_no)));
+  const skip=USB_META_INTERNAL_KEYS.concat(USB_META_NAME_ORDER, ['ref_no']);
+  const rest=Object.keys(meta).filter(function(k){ return skip.indexOf(k)===-1 && has(k); })
     .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
+  const parts=named.concat(rest);
   return parts.length ? parts.join(' · ') : '<span style="color:var(--slate-2)">—</span>';
 }
 /* usbOpenUserEvents above is one feature's worth of one person's events. This is the same idea
@@ -8175,11 +8215,15 @@ window.usbOpenUserActivity=async function(){
   const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th></tr></thead><tbody>'
+  // Assigned to is a column here too, for the same reason as on the per-feature drill-down: the
+  // person an action went to is left out of Details deliberately, so without a column of its own
+  // it would simply not appear anywhere in this list.
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td></tr>';
+      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -11577,7 +11621,7 @@ window.compSetDate=function(which,val){
   }
   compPaint();
 };
-window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); };
+window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
 VIEWS.competitors=async function(v,seg){
   setCrumb(['Growth & Strategy','Competitor Ads']);
@@ -14224,6 +14268,7 @@ window.orgSetPageId=function(v){ORG_PAGE=v;ORG_PG=0;renderPage();};
 window.orgSetSort=function(v){ORG_SORT=v;ORG_PG=0;renderPage();};
 window.orgSearch=function(v){ORG_Q=v;ORG_PG=0;
   clearTimeout(window._orgQT); window._orgQT=setTimeout(function(){renderPage(); const el=document.getElementById('orgQ'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} },320);
+  usageQueueDebounced('organic.all_content.search_caption_or_page', v);
 };
 window.orgGo=function(d){ORG_PG=Math.max(0,ORG_PG+d);renderPage();};
 
@@ -17356,13 +17401,21 @@ const USAGE_MAP={
      through these, so several catalog rows (edit title/description/members, delegate, sub-tasks,
      search) had a live feature and zero events against it, not because nobody used them but because
      nothing was watching this half of the app. */
-  accEditTitleSave:'tasks.tasks.edit_task_title', accEditDescSave:'tasks.tasks.edit_task_description',
-  accEditProjectSave:'tasks.tasks.edit_task_project', accEditMembersSave:'tasks.tasks.edit_task_members_assignees',
-  accEditDueSave:'tasks.tasks.edit_task_due_date', accDelegateSave:'tasks.tasks.delegate_task_to_someone',
+  // accEditTitleSave / accEditDescSave / accEditProjectSave / accEditMembersSave / accEditDueSave
+  // are NOT mapped here on purpose - each now logs directly (accountability.js), only when the
+  // edit actually changed something, capturing the new value itself rather than a bare click.
+  // accInsCreate / accSelfInsCreate / accDelegateSave are NOT mapped here on purpose - they log
+  // directly (accountability.js) so the event carries what was actually created: the title, who
+  // it went to, its due date and its project. Creating a task through this tab logged nothing at
+  // all until now: the only create_task call in the codebase sat inside taskSave(), which writes
+  // to acc.tasks - a table with zero rows - while every real task goes to acc.ptasks from here.
+  // 103 tasks were created in the five days to 9 Sep 2026 and not one produced an event.
   accInsPickProject:'tasks.tasks.edit_task_project', accSelfInsPickProject:'tasks.tasks.edit_task_project',
   accSubAdd:'tasks.tasks.add_checklist_sub_task_item', accSubToggle:'tasks.tasks.mark_sub_task_complete',
   accSubDel:'tasks.tasks.delete_sub_task',
-  accTaskSearch:{key:'tasks.tasks.search_tasks', meta:function(val){ return val?{query:String(val)}:null; }},
+  // accTaskSearch is NOT mapped here on purpose - it fires on every keystroke for instant
+  // filtering, and the generic wrapper logging every keystroke turned one real search into a
+  // burst of single-character fragments; it logs directly instead, debounced to the settled query.
   // accP3(k) switches the Tasks tab between its three groupings - Priority is the tab's own default
   // view (already implied by simply landing on the tab), so only the other two are worth a feature
   // of their own; returning nothing for 'priority' means switching back to it logs no event.
@@ -17382,19 +17435,23 @@ const USAGE_MAP={
   // Inspection / Campaigns entry points that had no mapping
   inspGo:'inspection.console.start_new_inspection',
   cmpShowProjectAds:'campaigns.by_project.drill_into_a_project_s_campaigns',
-  // Accountability — Workflow
-  wfNew:'tasks.workflow.create_a_new_workflow', wfEdit:'tasks.workflow.edit_workflow_steps_owners',
-  wfDelete:'tasks.workflow.delete_a_workflow', wfEventSave:'tasks.workflow.start_a_new_instance',
-  wfInstEditSel:'tasks.workflow.edit_an_instance', wfInstDelSel:'tasks.workflow.delete_an_instance',
-  wfReceive:'tasks.workflow.receive_a_step',
-  wfForward:'tasks.workflow.forward_a_step', wfRowForward:'tasks.workflow.forward_a_step',
-  wfDoReject:'tasks.workflow.reject_send_a_step_back', wfRejectConfirm:'tasks.workflow.reject_send_a_step_back',
-  wfRowReject:'tasks.workflow.reject_send_a_step_back',
-  wfDone:'tasks.workflow.mark_final_step_done', wfReopen:'tasks.workflow.reopen_a_completed_instance',
-  wfRevert:'tasks.workflow.revert_a_forwarded_step',
-  wfPostUpdate:'tasks.workflow.post_an_update_comment_on_an_instance',
+  /* Accountability — Workflow.
+     Almost nothing from this tab is mapped here any more, and the reason is worth stating: a
+     generic wrapper fires on the CLICK, before the work happens and before anything is known
+     about what the work was about. On this tab that produced two whole classes of wrong number.
+       Counted the intent, not the act: wfNew and wfEdit only OPEN the builder, so abandoning the
+       form still counted as a workflow created, and three pokes at the builder read as three new
+       workflows. wfDelete, wfInstDelSel, wfDone, wfReopen and wfRevert each open a confirmation
+       dialog, so a delete somebody thought better of counted as a delete.
+       Counted the click and nothing else: every one of these logged meta:null, so the report's
+       Details column was a dash on all 1,449 workflow events - it could say a step was forwarded
+       but never which step, of which instance, of which workflow, or to whom.
+     All of them log directly in accountability.js instead: after the RPC has actually succeeded,
+     with the step/instance/workflow read from the tables and, where the question "who has it now"
+     means something (forward, reject, revert), the person it moved to. wfEventSave had to move for
+     a third reason - it both creates and edits an instance from one function, so mapped here every
+     edit was counted as "Start a new instance". */
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
-  wfPrintCase:'tasks.workflow.print_an_instance', wfTrackerFilter:'tasks.workflow.search_filter_the_tracker',
   wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
   // Transcription
   trUploadStart:'transcription.all_calls.upload_call_recording_s',
@@ -17429,8 +17486,6 @@ const USAGE_MAP={
   misSave:'legal.mis.add_case', misUpdate:'legal.mis.edit_case', misDeleteSel:'legal.mis.delete_case_s',
   misSetRange:'legal.mis.filter_cases_by_hearing_date_range',
   misRangePick:'legal.mis.filter_cases_by_hearing_date_range',
-  misFilter:'legal.mis.search_cases_incl_ai_semantic_search',
-  misAiSearch:'legal.mis.search_cases_incl_ai_semantic_search',
   misActionExecute:'legal.mis.record_execute_a_case_action',
   misActionSave:'legal.mis.record_execute_a_case_action',
   misSwipeToggle:'legal.mis.mark_case_complete_reopen',
@@ -17438,9 +17493,12 @@ const USAGE_MAP={
   // misExportCauselist / misViewCauselist are NOT mapped here on purpose - they log directly,
   // after misBuildCauselist actually produces a sheet, so a click warned off for no date
   // range or no matching hearings doesn't count as a use the way the generic wrapper would.
-  legalActionsFilter:'legal.actions.view_search_filter_case_actions',
+  // misFilter / misAiSearch, legalActionsFilter, advFilter, hsFilter, trackerFilter,
+  // inspRespFilter, inspLogFilter, compSearch, orgSearch are likewise NOT mapped here - every one
+  // of them is wired to oninput for instant live filtering, and the generic wrapper logging on
+  // every keystroke turned one real search into a burst of single/two-character fragments a few
+  // milliseconds apart. Each logs directly via usageQueueDebounced, once typing actually settles.
   advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
-  advFilter:'legal.advocates.search_advocates',
   // Human Resources
   // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
@@ -17453,7 +17511,7 @@ const USAGE_MAP={
   trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
   trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
-  trackerFilter:'hr.interview_tracker.search_filter_interviews',
+  // trackerFilter is NOT mapped here - it logs directly via usageQueueDebounced.
   trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
   rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
   rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
@@ -17479,13 +17537,11 @@ const USAGE_MAP={
   // Inspection
   inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
   inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',
-  inspRespFilter:'inspection.responses.search_filter_submissions',
   inspOpenSub:'inspection.responses.open_and_edit_a_submission',
   inspEditSub:'inspection.responses.open_and_edit_a_submission',
   inspUpdateSub:'inspection.responses.update_check_status_per_item',
   inspBulkE:'inspection.responses.bulk_mark_all_checks_ok',
   inspBulk:'inspection.new_inspection.bulk_mark_all_items_ok',
-  inspLogFilter:'inspection.log.search_filter_inspection_log',
   inspPick:'inspection.new_inspection.mark_item_ok_not_ok_n_a',
   inspLevelPick:'inspection.new_inspection.select_project_block_floor_flat_work_category',
   inspOpenPhoto:'inspection.responses.add_replace_defect_photo',
@@ -17519,20 +17575,20 @@ const USAGE_MAP={
   compShowOnly:'competitors.overview.drill_into_a_single_competitor',
   compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
   compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
-  compSearch:'competitors.overview.search_ad_text_headline_or_page',
   compOpenDetail:'competitors.overview.view_ad_detail',
   // compSave and compRunSync (compSyncFiltered/compRefreshMedia) are NOT mapped here on purpose -
   // both have real validation/network failure paths and log directly, after success is actually
-  // confirmed, same as misExportCauselist/taskSave above.
+  // confirmed, same as misExportCauselist/taskSave above. compSearch is likewise unmapped - see
+  // the oninput/usageQueueDebounced note further up.
   orgSetPeriod:'organic.all_content.filter_by_date_range',
   orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetPageId:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetSort:'organic.all_content.sort_content_by_metric',
-  orgSearch:'organic.all_content.search_caption_or_page',
   orgOpen:'organic.all_content.view_post_detail'
   // orgApplyCustom is NOT mapped here on purpose - it has real validation (missing dates, From
-  // after To) and logs directly, same reason as compSave above. Scaling Up and Playbook are both
+  // after To) and logs directly, same reason as compSave above. orgSearch is likewise unmapped -
+  // see the oninput/usageQueueDebounced note further up. Scaling Up and Playbook are both
   // entirely static, hardcoded screens (no wired buttons at all) - see USAGE_VIEWS instead.
 };
 /* Some features ARE looking at something — Archive, the Scoreboard, the Calendar, the campaign and
@@ -17667,16 +17723,38 @@ const USAGE_MAX_Q=600;
 // was delegated to - not just that the feature fired. Optional and feature-by-feature: most call
 // sites still pass nothing, same as before this existed. erp_log_usage only keeps it when it is a
 // plain object, so anything else here is silently dropped rather than corrupting the row.
-function usageQueue(featureKey, action, meta){
+// project is the 4th argument rather than a meta key because erp_usage_events has had a dedicated
+// project column since the table was created - and it was still empty on every one of the 7,500+
+// rows logged so far, because nothing ever passed one. It is the project a task/record belongs to,
+// which the Usability report shows in its own column; a call site that doesn't know one passes
+// nothing, exactly as before. Trimmed to 64 chars because that is what erp_log_usage stores.
+function usageQueue(featureKey, action, meta, project){
   if(!featureKey || !(state&&state.email)) return;
   const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
                 action:action||'view', occurred_at:new Date().toISOString()};
   if(meta && typeof meta==='object') ev.meta=meta;
+  if(project) ev.project=String(project).trim().slice(0,64) || undefined;
   USAGE_Q.push(ev);
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
   else if(!USAGE_TIMER){ USAGE_TIMER=setTimeout(usageFlush, 8000); }
+}
+// For a search/filter box wired to oninput (fires on every keystroke): logging through the
+// generic USAGE_MAP wrapper turned one real search into a burst of near-duplicate events a few
+// milliseconds apart (typing "182" logged "1", "18" and "182" as three separate uses) - both
+// inflating the count wildly and flooding the Usability report's per-person Details view with
+// noise. This logs only the SETTLED value, once typing actually pauses; a fresh keystroke
+// within the delay cancels the pending log and restarts the wait, same idea as debouncing a
+// live-filter re-render, just applied to telemetry instead of the DOM. Empty/cleared input logs
+// nothing - clearing a search box is not itself a search.
+const USAGE_DEBOUNCE_T={};
+function usageQueueDebounced(featureKey, val, action, delay){
+  clearTimeout(USAGE_DEBOUNCE_T[featureKey]);
+  if(!val) return;
+  USAGE_DEBOUNCE_T[featureKey]=setTimeout(function(){
+    try{ usageQueue(featureKey, action||'search', {query:String(val)}); }catch(_e){}
+  }, delay||800);
 }
 /* A failed send used to just discard its batch — one network blip during the retry window silently
    erased that activity from the report, with nothing anywhere to show it had ever happened. A failed

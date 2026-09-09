@@ -993,6 +993,17 @@
       const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
       g.style.display=hasVisible?'':'none';
     });
+    // Logged directly, debounced to the settled query, rather than through USAGE_MAP - this fires
+    // on every keystroke for instant filtering, and logging every keystroke turned one real search
+    // into a burst of single/two-character fragments milliseconds apart (typing "182" logged "1",
+    // "18" and "182" as three separate searches), flooding the Usability report's per-person
+    // Details view with noise instead of one clean "searched for 182" entry.
+    clearTimeout(window._accSearchLogT);
+    if(val){
+      window._accSearchLogT=setTimeout(function(){
+        try{ usageQueue('tasks.tasks.search_tasks','search',{query:String(val)}); }catch(_e){}
+      },800);
+    }
   };
 
   /* ---------- WORKFLOW ----------
@@ -2380,6 +2391,13 @@
       // list would wipe a template that is already in use.
       const tmpl=wfTmplCollect();
       if(tmpl.length){ try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:tmpl}); }catch(_e){} }
+      /* "Create a new workflow" and "Edit workflow steps/owners" used to be counted on wfNew and
+         wfEdit - the two functions that merely OPEN the builder. Opening a form and abandoning it
+         counted as having created a workflow, and one person poking at the builder three times read
+         as three new workflows. Counted here instead, where the save has actually gone through, and
+         which of the two features it was is decided by the same editId the save itself used. */
+      try{ usageQueue(editId?'tasks.workflow.edit_workflow_steps_owners':'tasks.workflow.create_a_new_workflow',
+                      editId?'update':'create', {workflow:name}); }catch(_e){}
       toast('Workflow saved','ok');
       // Redirect to the new workflow immediately. The noun lookup ("Invoice", "Leave Request", …)
       // used to be awaited here, which held the form open while it ran; now it happens in the
@@ -2883,6 +2901,8 @@
      bill fields it happens to carry. */
   window.wfTrackerFilter=function(){
     const q=((($('wfTkSearch')||{}).value)||'').trim().toLowerCase();
+    // Wired to oninput, so it logs the settled query once rather than a fragment per keystroke.
+    try{ usageQueueDebounced('tasks.workflow.search_filter_the_tracker', q); }catch(_e){}
     const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
     let shown=0;
     rows.forEach(function(r){
@@ -3623,7 +3643,14 @@
     const word=(ids.length===1?N.lc:N.lcMany);
     wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       const doomed=await wfCaseFilePaths(ids);
+      // Same as above: read what is about to go while it is still readable. One event per instance
+      // deleted, each naming the instance — deleting four in one go is four things gone, and a
+      // single event saying "delete" would under-report it and name none of them.
+      let um=[];
+      try{ um=await Promise.all(ids.map(function(cid){ return wfCaseUsageMeta(cid); })); }catch(_e){ um=[]; }
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+      try{ (um.length?um:ids.map(function(){return null;})).forEach(function(m){
+        usageQueue('tasks.workflow.delete_an_instance','delete',m); }); }catch(_e){}
       await wfPurgeCaseFiles(doomed);
       toast('Deleted','ok'); renderPage();
     }});
@@ -4152,7 +4179,13 @@
     ]).then(doPrint);
     return true;
   };
-  window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
+  window.wfPrintCase=function(caseId){
+    // Which instance was printed, rather than only that something was.
+    wfCaseUsageMeta(caseId).then(function(um){
+      try{ usageQueue('tasks.workflow.print_an_instance','export',um); }catch(_e){}
+    });
+    return window.wfPrintCases([caseId]);
+  };
   /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
@@ -4191,8 +4224,15 @@
 
   window.wfDelete=function(id){
     wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its '+wfN().lcMany+' and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      // Read the name while the workflow still exists — after the delete there is nothing left to
+      // name it by, and "Delete a workflow" with a blank Details is the report saying nothing.
+      let nm=null;
+      try{ const {data}=await ACC().from('flows').select('name').eq('id',id).maybeSingle(); nm=(data&&data.name)||null; }catch(_e){}
       try{ const {error}=await ACC().rpc('wf_delete_flow',{p_id:id}); if(error)throw error; }
       catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); return; }
+      // Counted here rather than on the click: this button opens a confirmation, and a delete that
+      // was thought better of is not a delete.
+      try{ usageQueue('tasks.workflow.delete_a_workflow','delete',nm?{workflow:nm}:null); }catch(_e){}
       window._wfDelId=null; toast('Workflow deleted','ok'); navTo('tasks/workflow');
     }});
   };
@@ -5723,6 +5763,10 @@
         // a file uploaded during this edit and then taken off again before saving
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
+        // Editing an existing instance is its own catalog feature. It used to be counted as
+        // "Start a new instance", because USAGE_MAP could only see that wfEventSave ran and not
+        // which of its two jobs it had just done.
+        try{ usageQueue('tasks.workflow.edit_an_instance','update', await wfCaseUsageMeta(caseId)); }catch(_e){}
         toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
@@ -5764,6 +5808,9 @@
             if(v!=null&&String(v).trim()!=='') newIdText=String(v);
           }
         }catch(_e){}    // the bill exists either way; a missing id is no reason to look like a failure
+        // Logged here rather than through USAGE_MAP: only this branch knows the instance was
+        // created rather than edited, and the id it was given.
+        try{ usageQueue('tasks.workflow.start_a_new_instance','create', await wfCaseUsageMeta(newCaseId)); }catch(_e){}
         toast(newIdText
           ? ('New '+N.one+' created — Id: '+newIdText)
           : (N.one+' created — first step assigned'),'ok');
@@ -6075,30 +6122,156 @@
     wfConfirm({ title:'Forward this step?', body:'This completes your step and passes the workflow to the next person.', okLabel:'Forward', okClass:'primary',
       onOk:async function(){
         const label=await wfComputeForwardLabel(fcsId);
+        const um=await wfStepUsageMeta(fcsId);
+        const cid=await wfCaseIdOfStep(fcsId);
         try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); if(cb){cb.disabled=false;cb.checked=false;} return; }
+        await wfLogForward(fcsId, um, cid);
         toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); renderPage();
       },
       onCancel:function(){ if(cb){cb.disabled=false;cb.checked=false;} }
     });
   };
 
+  /* Receiving and forwarding a step were the two busiest tracked actions in the whole ERP - 317
+     and 288 events - and both recorded nothing but the fact that a button was pressed, which
+     tells a reader nothing at all. What makes them readable is WHICH step of WHICH instance of
+     WHICH workflow: "Accounts Review & Payment · Reimburse required · Reimbursement".
+     These were written as ONE embedded select each - flow_case_steps -> flow_cases -> flows -
+     and in production that embed came back empty every single time, so every workflow event
+     logged since it went in carries meta:null and reads as a dash in the report. Three plain
+     selects along the same foreign keys cost two extra round trips on a button press and depend
+     on nothing but the tables themselves. A failed read still just means no detail, never a
+     broken action. */
+  async function wfFlowNameFor(caseRow){
+    if(!caseRow || caseRow.flow_id==null) return null;
+    try{
+      const {data}=await ACC().from('flows').select('name').eq('id',caseRow.flow_id).maybeSingle();
+      return (data&&data.name)||null;
+    }catch(_e){ return null; }
+  }
+  function wfCaseMetaFrom(c, flowName){
+    const m={};
+    if(c&&c.title) m.instance=c.title;
+    const idv=(c&&c.jaine_id!=null)?c.jaine_id:(c?c.case_no:null);
+    if(idv!=null&&String(idv).trim()!=='') m.ref_no=String(idv);
+    if(flowName) m.workflow=flowName;
+    return m;
+  }
+  async function wfStepUsageMeta(fcsId){
+    try{
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('title,case_id').eq('id',fcsId).maybeSingle();
+      if(!s) return null;
+      let c=null;
+      if(s.case_id!=null){
+        const {data}=await ACC().from('flow_cases')
+          .select('title,case_no,jaine_id,flow_id').eq('id',s.case_id).maybeSingle();
+        c=data||null;
+      }
+      const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
+      if(s.title) m.step=s.title;
+      return Object.keys(m).length?m:null;
+    }catch(_e){ return null; }
+  }
+  async function wfCaseUsageMeta(caseId){
+    try{
+      const {data:c}=await ACC().from('flow_cases')
+        .select('title,case_no,jaine_id,flow_id').eq('id',caseId).maybeSingle();
+      if(!c) return null;
+      const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
+      return Object.keys(m).length?m:null;
+    }catch(_e){ return null; }
+  }
+  /* Who a step went to. The report's fourth column asks "who is this now with", and for a forward
+     that is the step the instance moved ON to - read AFTER the forward RPC, because that is the
+     moment the next step becomes the current one. Names come from the same people list the rest of
+     this page uses, so it reads "Rabindra Nath Dey", not "accounts2".
+     A step can be owned by one person, by several (person is a comma-joined list), or by nobody yet
+     with a set of candidates to claim it - all three are worth saying, so all three are read. */
+  async function wfStepOwnerNames(fcsId){
+    if(fcsId==null) return undefined;
+    try{
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('person,candidates,claimed_by').eq('id',fcsId).maybeSingle();
+      if(!s) return undefined;
+      let emails=[];
+      if(s.claimed_by) emails=[s.claimed_by];
+      else if(s.person) emails=String(s.person).split(',');
+      else if(Array.isArray(s.candidates)) emails=s.candidates.slice();
+      emails=emails.map(function(e){ return String(e||'').trim(); }).filter(Boolean);
+      if(!emails.length) return undefined;
+      return await usageNames(emails);
+    }catch(_e){ return undefined; }
+  }
+  // The step the instance is sitting on right now, by its case. Used straight after a forward,
+  // a reject or a revert, when the interesting person is whoever it just landed with.
+  async function wfCurrentStepOwnerNames(caseId){
+    if(caseId==null) return undefined;
+    try{
+      const {data:c}=await ACC().from('flow_cases').select('current_step').eq('id',caseId).maybeSingle();
+      if(!c || c.current_step==null) return undefined;
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('id').eq('case_id',caseId).eq('seq',c.current_step).maybeSingle();
+      if(!s) return undefined;
+      return await wfStepOwnerNames(s.id);
+    }catch(_e){ return undefined; }
+  }
+  // A step's own case id, needed after the action when only the step id was passed in.
+  async function wfCaseIdOfStep(fcsId){
+    if(fcsId==null) return null;
+    try{
+      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      return (data&&data.case_id!=null)?data.case_id:null;
+    }catch(_e){ return null; }
+  }
+  /* One place that builds the whole event for a forward, whichever button did the forwarding.
+     There are four of them - the row checkbox, the send button, and the two route choices on
+     Invoice Processing - and until now only two logged anything at all, so a bill forwarded down
+     the Payment or Cheque route simply never appeared in the report. */
+  // A reject sends the step BACK, so the person worth naming is whoever it landed on - the same
+  // "who has it now" question a forward asks, answered the same way.
+  async function wfLogReject(um, caseId){
+    try{
+      const m=Object.assign({}, um||{});
+      const who=await wfCurrentStepOwnerNames(caseId);
+      if(who) m.assignee=who;
+      usageQueue('tasks.workflow.reject_send_a_step_back','update',Object.keys(m).length?m:null);
+    }catch(_e){}
+  }
+  async function wfLogForward(fcsId, um, caseId){
+    try{
+      const m=Object.assign({}, um||{});
+      const who=await wfCurrentStepOwnerNames(caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
+      if(who) m.assignee=who;
+      usageQueue('tasks.workflow.forward_a_step','update',Object.keys(m).length?m:null);
+    }catch(_e){}
+  }
+
   window.wfReceive=async function(fcsId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_receive',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not receive: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.receive_a_step','update',um); }catch(_e){}
     toast('Received — timer started','ok'); renderPage();
   };
 
   window.wfForward=async function(fcsId){
     const label=await wfComputeForwardLabel(fcsId);
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, um, cid);
     toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
   };
 
   window.wfForwardChequeChoice=async function(fcsId,cheque){
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, Object.assign({route:cheque?'Cheque':'GST Approval only'}, um||{}), cid);
     toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
     navTo('tasks/work');
   };
@@ -6107,9 +6280,12 @@
      the bill's whole route, so it is worth being an explicit act rather than a variant of a
      forward that happens to take an argument. */
   window.wfForwardPaymentChoice=async function(fcsId,payment){
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
       {p_fcs_id:fcsId,p_payment:!!payment}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, Object.assign({route:payment?'Payment':'Direct'}, um||{}), cid);
     toast(payment
       ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
       : 'Forwarded','ok');
@@ -6117,8 +6293,10 @@
   };
 
   window.wfDone=async function(fcsId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
     toast('Workflow completed','ok'); navTo('tasks/work');
   };
 
@@ -6135,8 +6313,12 @@
       body:'This closes the reimbursement for good. Only do this once the money is actually in your account.',
       okLabel:'Yes, I received it', okClass:'ok',
       onOk:async function(){
+        const um=await wfStepUsageMeta(fcsId);
         try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not close it: '+((e&&e.message)||e),'err'); return; }
+        // Reimbursement's "I received the payment" closes the claim for good and logged nothing at
+        // all, so the confirmation step of the busiest workflow was invisible in the report.
+        try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
         toast('Confirmed — this reimbursement is complete','ok'); navTo('tasks/work');
       }});
   };
@@ -6145,8 +6327,10 @@
       body:'This goes straight back to Accounts so they can look into it. You will get it again once they have sorted it out.',
       okLabel:'Send back to Accounts', okClass:'danger',
       onOk:async function(){
+        const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
         try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
+        await wfLogReject(um, cid);
         toast('Sent back to Accounts','ok'); navTo('tasks/work');
       }});
   };
@@ -6207,12 +6391,14 @@
       return;
     }
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
     // nothing is deleted any more, so there are no files to collect first
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
       if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Send back for correction'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
+    await wfLogReject(um, cid);
     closeModal();
     toast('Sent back for correction — an email has gone out','ok');
     navTo('tasks/work');
@@ -6221,16 +6407,25 @@
   // From a task-list row: same confirmation popup, no navigation needed.
   window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
     toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
   window.wfRevert=function(fcsId){
     wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
+      const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
       try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not revert: '+((e&&e.message)||e),'err'); return; }
+      try{
+        const m=Object.assign({}, um||{});
+        const who=await wfCurrentStepOwnerNames(cid);
+        if(who) m.assignee=who;
+        usageQueue('tasks.workflow.revert_a_forwarded_step','update',Object.keys(m).length?m:null);
+      }catch(_e){}
       toast('Reverted — the task is back with you','ok');
       if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
     }});
@@ -6239,8 +6434,10 @@
   // Reopen: bring the completed final step back (instance Done -> In progress)
   window.wfReopen=function(fcsId){
     wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and this '+wfN().lc+' moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
+      const um=await wfStepUsageMeta(fcsId);
       try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
+      try{ usageQueue('tasks.workflow.reopen_a_completed_instance','update',um); }catch(_e){}
       toast('Reopened','ok'); navTo('tasks/work');
     }});
   };
@@ -6266,6 +6463,15 @@
         if(insErr) throw insErr;
       }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
     }
+    // What the update was about, not just that one was posted - the instance it is on, plus a
+    // short excerpt of the text and how many files came with it.
+    try{
+      const um=(await wfCaseUsageMeta(caseId))||{};
+      if(body) um.update=body.replace(/\s+/g,' ').trim().slice(0,140);
+      if(files.length) um.attachments=String(files.length);
+      usageQueue('tasks.workflow.post_an_update_comment_on_an_instance','create',
+                 Object.keys(um).length?um:null);
+    }catch(_e){}
     if(inp)inp.value=''; if(fileInput)fileInput.value='';
     // Posted from the Tracker's case panel (not a step task page) — refresh just that panel in
     // place so the selected row and its position in the table survive, instead of a full
@@ -9546,6 +9752,19 @@
   window.accSelfInsToggleX=function(){};
   window.accInsCancel=function(){ INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
   window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  // Full names, not email fragments, in the Usability report's "Assigned to" column.
+  // This deliberately uses THIS file's people() + nameOf rather than nexus-core's global nameOf:
+  // that one reads the PEOPLE global, which is filled by getPeople() and nothing on the
+  // Accountability page ever calls it - so PEOPLE stays null and its fallback returned the local
+  // part of the address, which is how "Prerna Gupta" came out as "businessanalyst". people() is
+  // cached with a TTL and is already loaded on these screens, so this costs no extra round trip;
+  // an email with no matching account falls back to the address itself, which at least identifies
+  // the person.
+  async function usageNames(emails){
+    let list=[]; try{ list=await people(); }catch(_x){ list=[]; }
+    const out=(emails||[]).filter(Boolean).map(function(e){ return nameOf(list,e); });
+    return out.length?out.join(', '):undefined;
+  }
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -9561,6 +9780,15 @@
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
+      // Logged here, after the row and its assignees actually exist, so a failed save is never
+      // counted as a task that was created. Two things and no more: the task's name, which is what
+      // Details is read for, and who it went to, which the report shows in its own column. Both
+      // only exist as staged values inside this function - a USAGE_MAP wrapper could never see
+      // them, which is why this logs directly.
+      try{ usageQueue('tasks.tasks.create_task','create',{
+        title:title,
+        assignee:await usageNames(sel)
+      }); }catch(_e){}
       INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
@@ -9579,6 +9807,12 @@
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
+      // Same as accInsCreate, for a task somebody adds for themselves - the assignee is always
+      // the person doing it, so it is recorded rather than left blank.
+      try{ usageQueue('tasks.tasks.create_task','create',{
+        title:title,
+        assignee:await usageNames([me()])
+      }); }catch(_e){}
       SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
@@ -9996,17 +10230,26 @@
   };
   window.accDueHistory=function(tid){ const h=(window._tp&&window._tp.dueHist)||[]; openModal(`<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> Due date history</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,560px)">${h.length?h.map(a=>`<div style="padding:8px 0;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--body)">${esc2(a.detail||'')}<span style="float:right;color:var(--slate)">${fmtDateY(a.created_at)}</span></div>`).join(''):'<div class="ac-empty" style="cursor:default;border:0">No due-date changes</div>'}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Close</button></div>`,'md'); };
   window.accEditDesc=async function(tid){ const {data:t}=await ACC().from('ptasks').select('description').eq('id',tid).single(); openModal(`<div class="modal-head"><h3><i class="fa-solid fa-align-left"></i> Description</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(80vw,680px)"><textarea class="ac-in" id="edDesc" style="min-height:300px" placeholder="Describe the task…">${esc2((t&&t.description)||'')}</textarea></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDescSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg'); };
-  window.accEditDescSave=async function(tid){ try{await ACC().from('ptasks').update({description:$('edDesc').value||null}).eq('id',tid);await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'Description updated'});await sysMsg(tid,'updated the description');closeModal();renderPage();}catch(e){toast('Failed','err');} };
+  // Logged directly, after the update actually succeeds, rather than through USAGE_MAP - captures
+  // a plain-text excerpt of the new description, not just that a Save button was clicked.
+  window.accEditDescSave=async function(tid){ try{const val=$('edDesc').value||null;await ACC().from('ptasks').update({description:val}).eq('id',tid);await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'Description updated'});await sysMsg(tid,'updated the description');
+    try{ const excerpt=val?String(val).replace(/\s+/g,' ').trim():''; usageQueue('tasks.tasks.edit_task_description','update',excerpt?{description:(excerpt.length>140?excerpt.slice(0,140)+'…':excerpt)}:null); }catch(_e){}
+    closeModal();renderPage();}catch(e){toast('Failed','err');} };
   window.accEditTitle=async function(tid){
     const {data:t}=await ACC().from('ptasks').select('title').eq('id',tid).single();
     openModal(`<div class="modal-head"><h3>Rename task</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)"><input class="ac-in" id="rnTitle" value="${esc2((t&&t.title)||'')}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditTitleSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
   };
+  // Logged directly, after the update succeeds and only when the title actually changed (same
+  // gate the activity log/sysMsg already use) - captures the new title itself, not just a click.
   window.accEditTitleSave=async function(tid){
     const v=($('rnTitle').value||'').trim(); if(!v){toast('Title required','err');return;}
     try{
       const {data:old}=await ACC().from('ptasks').select('title').eq('id',tid).single();
       await ACC().from('ptasks').update({title:v}).eq('id',tid);
-      if(old&&old.title!==v){ await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'renamed to "'+v+'"'}); await sysMsg(tid,'renamed to "'+v+'"'); }
+      if(old&&old.title!==v){
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'renamed to "'+v+'"'}); await sysMsg(tid,'renamed to "'+v+'"');
+        try{ usageQueue('tasks.tasks.edit_task_title','update',{title:v}); }catch(_e){}
+      }
       closeModal(); toast('Saved','ok'); renderPage();
     }catch(e){toast('Failed','err');}
   };
@@ -10036,6 +10279,7 @@
       if((prevDue||'')!==(due||'')){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'due date changed',detail:'Due date '+(prevDue?fmtDateY(prevDue):'none')+' → '+(due?fmtDateY(due):'none')});
         await sysMsg(tid, prevDue?('changed the due date from '+fmtDateY(prevDue)+' to '+(due?fmtDateY(due):'none')):('set the due date to '+(due?fmtDateY(due):'none')));
+        try{ usageQueue('tasks.tasks.edit_task_due_date','update',{due_date:due||'cleared'}); }catch(_e){}
         if(due){ const _d=parseD(due), _t=new Date(); _t.setHours(0,0,0,0); if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); toast('Task is due \u2014 members notified by email','ok'); }catch(_e){} } }
       }
       closeModal(); toast('Saved','ok'); renderPage();
@@ -10065,13 +10309,18 @@
         const detail=pid?('moved it to project '+(newProjName||'—')):'removed the project';
         await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:detail});
         await sysMsg(tid,detail);
+        // The project also goes in the event's own project column, not only in Details, so the
+        // report can group and filter by it.
+        try{ usageQueue('tasks.tasks.edit_task_project','update',{project:newProjName||'(removed)'}, newProjName||undefined); }catch(_e){}
       }
       closeModal(); toast('Saved','ok'); renderPage();
     }catch(e){toast('Failed','err');}
   };
   window.accEditMembers=async function(tid){ const [list,aR]=await Promise.all([people(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]); const {data:t}=await ACC().from('ptasks').select('delegator').eq('id',tid).single(); const others=list.filter(p=>!eq(p.email,(t&&t.delegator)||me())); const cur=(aR.data||[]).map(r=>r.email);
     openModal(`<div class="modal-head"><h3>Members <span style="font-size:12px;color:#94a3b8;font-weight:400">(owner cannot be a member)</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden">${msWidget('emMembers',others,cur)}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditMembersSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md'); };
-  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length)await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Failed','err');} };
+  // usageQueue logged only when parts is non-empty (a real add/remove happened), after the actual
+  // change, rather than through USAGE_MAP - captures who was added/removed, not just a click.
+  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Failed','err');} };
   window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
@@ -10089,6 +10338,12 @@
       if(parentFiles&&parentFiles.length){ await ACC().from('ptask_files').insert(parentFiles.map(f=>({task_id:t.id,file_name:f.file_name,storage_path:f.storage_path,file_size:f.file_size,uploaded_by:f.uploaded_by}))); }
       await appendRankForMe(t.id);
       await ACC().from('ptask_activity').insert({task_id:pid,action:'delegated',detail:'Delegated to '+sel.length+' person(s)'});
+      // Was mapped through USAGE_MAP, which could only record that the button was pressed. Logged
+      // here instead so the event says which task was delegated and to whom.
+      try{ usageQueue('tasks.tasks.delegate_task_to_someone','create',{
+        title:(parent&&parent.title)||undefined,
+        assignee:await usageNames(sel)
+      }); }catch(_e){}
       closeModal(); toast('Delegated','ok'); renderPage();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };
