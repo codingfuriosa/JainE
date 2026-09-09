@@ -3767,10 +3767,12 @@
     lead_id:     {x:190.2, y:218.75, s:13, w:85},
     booking_date:{x:363.6, y:218.75, s:13, w:85}
   };
-  /* The one line the blank does not print. The form's rows step down by 23.8pt and it leaves this
-     one empty between "Payment Plan" (194.95) and the sign-off rule (131.35), so a Signatures row
-     sits in its own rhythm without touching anything the form already says. */
-  const WF_CL_SIG={x:145.0, y:171.15, right:545};
+  /* The two lines the blank does not print. Its rows step down by 23.8pt and it leaves the space
+     between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
+     form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
+     anything it already says. */
+  const WF_CL_SIG ={label:'Signatures',  x:145.0, y:171.15, right:545};
+  const WF_CL_PARK={label:'Car Parking', x:145.0, y:147.35, right:545};
 
   window.wfChecklistDownload=async function(caseId){
     let row=null;
@@ -3863,25 +3865,26 @@
     put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
     put(WF_CL.booking_date, short(cl['Booking Date']));
 
-    /* Signatures are the one thing checked that the printed form has no line for. Rather than a
-       document of our own, the verdict goes in the form's OWN empty row - the blank 23.8pt step
-       between "Payment Plan" at 194.95 and the sign-off rule at 131.35 - written in the same left
-       margin and the same size as every label above it. Which pages are unsigned goes beside it,
-       because "NOT OK" on its own sends someone back through the whole file to find out where. */
-    const sg=String(cl['Signatures']||'').trim();
-    if(sg){
-      page.drawText('Signatures',{x:72.1,y:WF_CL_SIG.y,size:11,font:helv,color:black});
-      const word=sg==='Ok'?'OK':(sg==='Not Ok'?'NOT OK':'NOT CHECKED');
-      page.drawText(word,{x:WF_CL_SIG.x,y:WF_CL_SIG.y,size:11,font:helvB,color:sg==='Not Ok'?red:black});
-      const why=String((res.signatures&&res.signatures.reason)||'').trim();
-      if(why){
-        let t=why, sz=9, x=WF_CL_SIG.x+helvB.widthOfTextAtSize(word,11)+8;
-        const room=WF_CL_SIG.right-x;
-        while(t.length>1 && helv.widthOfTextAtSize(t,sz)>room) t=t.slice(0,-1);
-        if(t.length<why.length) t=t.slice(0,-1)+'…';
-        page.drawText(t,{x:x,y:WF_CL_SIG.y,size:sz,font:helv,color:L.rgb(.3,.3,.3)});
-      }
-    }
+    /* Signatures and car parking are checked but the printed form has no line for either. Rather
+       than a document of our own, they go in the form's OWN empty rows, in the same left margin and
+       the same size as every label above them. The finding goes beside the verdict, because
+       "NOT OK" alone sends someone back through the whole file to work out where and why. */
+    const added=function(slot,verdict,detail){
+      const t=String(verdict||'').trim();
+      if(!t) return;
+      page.drawText(slot.label,{x:72.1,y:slot.y,size:11,font:helv,color:black});
+      const word=t==='Ok'?'OK':(t==='Not Ok'?'NOT OK':'NOT CHECKED');
+      page.drawText(word,{x:slot.x,y:slot.y,size:11,font:helvB,color:t==='Not Ok'?red:black});
+      const why=String(detail||'').trim();
+      if(!why) return;
+      const x=slot.x+helvB.widthOfTextAtSize(word,11)+8, room=slot.right-x;
+      let s=why;
+      while(s.length>1 && helv.widthOfTextAtSize(s,9)>room) s=s.slice(0,-1);
+      if(s.length<why.length) s=s.slice(0,-1)+'…';
+      page.drawText(s,{x:x,y:slot.y,size:9,font:helv,color:L.rgb(.3,.3,.3)});
+    };
+    added(WF_CL_SIG, cl['Signatures'],  (res.signatures&&res.signatures.reason)||'');
+    added(WF_CL_PARK,cl['Car Parking'], (res.parking&&res.parking.reason)||'');
 
     /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
        stays in the stored reading; the printed sheet is the form. */
