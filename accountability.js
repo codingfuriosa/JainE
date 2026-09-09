@@ -9744,15 +9744,14 @@
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
       // Logged here, after the row and its assignees actually exist, so a failed save is never
-      // counted as a task that was created. The title, who it went to, the due date and the
-      // repeat only exist as staged values inside this function - a USAGE_MAP wrapper around it
-      // could never see them, which is why this logs directly.
+      // counted as a task that was created. Two things and no more: the task's name, which is what
+      // Details is read for, and who it went to, which the report shows in its own column. Both
+      // only exist as staged values inside this function - a USAGE_MAP wrapper could never see
+      // them, which is why this logs directly.
       try{ usageQueue('tasks.tasks.create_task','create',{
         title:title,
-        assignee:sel.map(usageWho).join(', ')||undefined,
-        due_date:due||undefined,
-        repeat:INS_STAGE.recur?String(INS_STAGE.recur):undefined
-      }, INS_STAGE.projectLabel||undefined); }catch(_e){}
+        assignee:sel.map(usageWho).join(', ')||undefined
+      }); }catch(_e){}
       INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
@@ -9775,10 +9774,8 @@
       // the person doing it, so it is recorded rather than left blank.
       try{ usageQueue('tasks.tasks.create_task','create',{
         title:title,
-        assignee:usageWho(me()),
-        due_date:due||undefined,
-        repeat:SELF_INS_STAGE.recur?String(SELF_INS_STAGE.recur):undefined
-      }, SELF_INS_STAGE.projectLabel||undefined); }catch(_e){}
+        assignee:usageWho(me())
+      }); }catch(_e){}
       SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
@@ -10308,8 +10305,7 @@
       // here instead so the event says which task was delegated and to whom.
       try{ usageQueue('tasks.tasks.delegate_task_to_someone','create',{
         title:(parent&&parent.title)||undefined,
-        delegated_to:sel.map(usageWho).join(', ')||undefined,
-        due_date:(parent&&parent.due_date)||undefined
+        assignee:sel.map(usageWho).join(', ')||undefined
       }); }catch(_e){}
       closeModal(); toast('Delegated','ok'); renderPage();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }

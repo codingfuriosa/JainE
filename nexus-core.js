@@ -8130,11 +8130,17 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Project</th></tr></thead><tbody>'
+  // The 4th column was Project, and it was blank on nearly every row - only 13 of 896 tasks have a
+  // project (tag) set at all, so on the Tasks features it never said anything. What a reader of
+  // "Create task" actually wants next to the task's name is WHO it went to, which the event now
+  // captures as meta.assignee. Read from meta rather than the project column, and left out of
+  // Details so it appears once, in its own column.
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(e.project||'—')+'</td></tr>';
+      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8154,7 +8160,9 @@ function usbMetaLabel(k){
 // was reconstructed from, not a real captured detail (no title, no assignee, nothing a person
 // would recognise). It was never meant to be user-facing; showing it read as corrupted, garbled
 // data rather than the honest "nothing was captured for this one" that an old event actually is.
-const USB_META_INTERNAL_KEYS=['ref','backfill'];
+// 'assignee' is not internal - it is shown, but in its own "Assigned to" column beside Details
+// rather than repeated inside it.
+const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
 function usbMetaHtml(meta){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
   const parts=Object.keys(meta).filter(function(k){ return USB_META_INTERNAL_KEYS.indexOf(k)===-1 && meta[k]!=null && String(meta[k]).trim(); })
