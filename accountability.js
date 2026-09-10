@@ -4138,6 +4138,10 @@
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
     WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;   // a fresh allowance for each print job
+    // Deliberately sequential, NOT Promise.all - wfCasePrintSection's attachment rendering reads
+    // and decrements the shared WF_PRINT_PAGES_LEFT budget as it goes, so which case sees how much
+    // budget is left (and which one gets the "not printed, budget exceeded" message) depends on
+    // processing them in order. Running them in parallel would race that shared counter.
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
     if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
