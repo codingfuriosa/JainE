@@ -3189,6 +3189,10 @@
     // a separate pre-existing concept unrelated to this pair).
     const canManage = eq(mySelf,'ayushruia1@gmail.com') || eq(mySelf,'businessanalyst@thejaingroup.com');
     window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
+    /* Whether "New <noun>" opens the file chooser instead of a form - see wfNewInstance. Decided
+       here, where the workflow has already been fetched, because the button's press has to act on
+       it in the same tick or the browser refuses to open a chooser at all. */
+    window._wfAttachOnly = wfAttachOnly(flow);
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
     // older workflows saved before this feature have no word yet — learn it once, quietly
@@ -3383,7 +3387,7 @@
       +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
+      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -3716,6 +3720,8 @@
        takes a minute or two, so it is a button somebody presses - not something that runs on open. */
     const auditBtn=(c.flow_id===41)
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
       : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -3776,206 +3782,725 @@
   /* ── booking check list ────────────────────────────────────────────────────────────────────
      The icon downloads the filled check list. No popup: the reading already happened in the
      background when the booking was raised (acc.booking_audits + a trigger + a cron worker), so
-     there is nothing to wait for and nothing to confirm.
-
-     The file is the FORM ITSELF - assets/forms/booking-check-list-blank.pdf, the blank you use,
-     with values written onto its blanks. That keeps the logo, the Carlito type and the exact
-     layout, instead of a redrawing that could drift from it.
-
-     Every coordinate in WF_CL was measured out of that PDF by walking its content stream and adding
-     up the font's own glyph widths, then checked against the positions the PDF records for the
-     chunks it does start a new text object for: computed 136.6 against a recorded 136.7, and 117.0
-     against 117.1. So a value starts where its underscores start, to a tenth of a point.
-
-     `w` is how much room that blank has, measured from the number of underscores in it. A value too
-     wide is stepped down in size until it fits rather than running over the next label. */
-  /* The blank arrives as a SCRIPT, not as a file to fetch. A browser refuses fetch() of a
-     same-origin file when the page itself was opened straight off the disk as file:// - it throws
-     "Failed to fetch" without making a request - so the check list could not be built at all while
-     working from the local copy. A script tag is allowed in both places. Loaded the first time
-     somebody asks for a check list, the same way pdf-lib is, not on every page load.
-     booking-check-list-blank.pdf sits beside it and remains the source of truth. */
-  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.js';
-  async function wfClBlank(){
-    if(!window.WF_CL_BLANK_B64){
+     there is nothing to wait for and nothing to confirm. */
+  /* ── welcome letter ───────────────────────────────────────────────────────────────────────
+     The letter Post Sales sends a customer once their booking is in. Same source as the check
+     list - the stored reading of their own documents - so the two can never disagree about who
+     bought what, and the same on-demand loading, so it builds from the local copy too. */
+  /* Two marks, and they are not interchangeable. The customer letters carry the CURRENT logo
+     ("Caring For Your Dreams"); the check list carries the CLASSIC one that is printed on the form
+     itself ("Your Dream. Our Commitment."), lifted out of the blank so the sheet looks like the
+     sheet it replaces. Both are loaded on demand and only when a document is actually built. */
+  const JG_LOGOS={
+    current: {src:'assets/brand/jaingroup-logo.js',         key:'JG_LOGO_B64'},
+    classic: {src:'assets/brand/jaingroup-logo-classic.js', key:'JG_LOGO_CLASSIC_B64'}
+  };
+  async function jgLogo(which){
+    const L=JG_LOGOS[which||'current'];
+    if(!window[L.key]){
       await new Promise(function(res,rej){
         const sc=document.createElement('script');
-        sc.src=WF_CL_TEMPLATE;
-        sc.onload=res;
-        sc.onerror=function(){ rej(new Error('the blank form could not be loaded')); };
+        sc.src=L.src; sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the letterhead logo could not be loaded')); };
         document.head.appendChild(sc);
       });
     }
-    const b64=window.WF_CL_BLANK_B64;
-    if(!b64) throw new Error('the blank form loaded but was empty');
-    const bin=atob(b64), out=new Uint8Array(bin.length);
+    const b=window[L.key];
+    if(!b) throw new Error('the letterhead logo loaded but was empty');
+    const bin=atob(b), out=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
     return out;
   }
-  const WF_CL={
-    date:        {x:441.5, y:583.75, s:11, w:98},
-    // The underscores stop at 448 but nothing is printed to the right of them, so a name may
-    // run on to the margin before the size has to come down - two allottees stay legible.
-    customer:    {x:188.0, y:508.35, s:11, w:352},
-    project:     {x:143.2, y:484.55, s:11, w:80},
-    block:       {x:284.2, y:484.55, s:11, w:21},
-    flat:        {x:338.7, y:484.55, s:11, w:26},
-    floor:       {x:405.2, y:484.55, s:11, w:21},
-    area:        {x:459.2, y:484.55, s:11, w:32},
-    base_rate:   {x:125.0, y:460.75, s:11, w:49},
-    plc:         {x:211.6, y:460.75, s:11, w:38},
-    flc:         {x:276.6, y:460.75, s:11, w:38},
-    parking:     {x:429.4, y:460.75, s:11, w:49},
-    discount:    {x:151.4, y:436.95, s:13, w:150},
-    cost:        {x:122.1, y:385.35, s:11, w:130},
-    market:      {x:179.1, y:361.55, s:11, w:120},
-    kyc:         {x:149.1, y:337.75, s:11, w:130},
-    mobile:      {x:145.3, y:313.95, s:11, w:130},
-    email:       {x:111.1, y:290.15, s:11, w:142},
-    pan:         {x:132.7, y:266.35, s:11, w:130},
-    source:      {x:105.1, y:242.55, s:11, w:185},
-    lead_id:     {x:190.2, y:218.75, s:13, w:85},
-    booking_date:{x:363.6, y:218.75, s:13, w:85},
-    signatures:  {x:122.1, y:194.95, s:11, w:130}
-  };
-  // Where a failing signature check says WHERE, past the end of that row's underscores.
-  const WF_CL_SIG_WHY={x:262.0, y:194.95, size:8.5, right:545};
-  /* The two lines the blank does not print. Its rows step down by 23.8pt and it leaves the space
-     between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
-     form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
-     anything it already says. */
 
-  window.wfChecklistDownload=async function(caseId){
+  /* Indian numbering, in words: lakh and crore, not million. Written out here rather than asked of
+     a model because it has exactly one right answer, and because a letter that tells a customer the
+     wrong amount in words is a serious thing to get wrong. */
+  const RUP_ONES=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven',
+    'Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const RUP_TENS=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function under100(n){
+    if(n<20) return RUP_ONES[n];
+    return RUP_TENS[Math.floor(n/10)]+(n%10?' '+RUP_ONES[n%10]:'');
+  }
+  function under1000(n){
+    if(n<100) return under100(n);
+    return RUP_ONES[Math.floor(n/100)]+' Hundred'+(n%100?' '+under100(n%100):'');
+  }
+  function rupeesInWords(amount){
+    let n=Math.floor(Math.abs(Number(amount)||0));
+    const paise=Math.round((Math.abs(Number(amount)||0)-n)*100);
+    if(!n && !paise) return 'Zero';
+    const parts=[];
+    const crore=Math.floor(n/10000000); n-=crore*10000000;
+    const lakh=Math.floor(n/100000);    n-=lakh*100000;
+    const thou=Math.floor(n/1000);      n-=thou*1000;
+    if(crore) parts.push(under1000(crore)+' Crore');
+    if(lakh)  parts.push(under1000(lakh)+' Lakh');
+    if(thou)  parts.push(under1000(thou)+' Thousand');
+    if(n)     parts.push(under1000(n));
+    let out=parts.join(' ');
+    if(paise) out+=(out?' and ':'')+under100(paise)+' Paise';
+    return out;
+  }
+  /* A booking form prints "Mr./Ms./Mast./M/s." as a row of options for the applicant to ring, and
+     the reader hands that whole string back when none of them is clearly ringed. Printing it would
+     address a customer as "Mr./Ms./Mast./M/s. Saptarshi Pasari". A title with a slash in it, or one
+     too long to be a title, is treated as no title at all - a name on its own is correct, an
+     invented Mr. or Mrs. is not. */
+  function salutation(raw){
+    const t=String(raw==null?'':raw).trim();
+    if(!t || t.indexOf('/')!==-1 || t.length>6) return '';
+    return t;
+  }
+  /* Everyone the flat is allotted to, addressed the way a letter addresses them. */
+  function allotteeNames(res){
+    const LT=(res&&res.letter)||{}, f=res&&res.fields||{};
+    const out=[];
+    (Array.isArray(LT.allottees)?LT.allottees:[]).forEach(function(p){
+      const nm=nameCase(p&&p.name);
+      if(!nm) return;
+      if(out.some(function(x){ return x.toUpperCase().indexOf(nm.toUpperCase())!==-1; })) return;
+      out.push([salutation(p&&p.salutation),nm].filter(Boolean).join(' '));
+    });
+    if(!out.length){
+      const one=f.customer_name&&String(f.customer_name.value||'').trim();
+      if(one && one!=='NIL') out.push(nameCase(one));
+    }
+    return out;
+  }
+
+  /* A booking form prints names in capitals; a letter to a customer does not shout at them. */
+  function nameCase(s){
+    return String(s==null?'':s).trim().toLowerCase()
+      .replace(/(^|[\s.'\-])([a-z])/g,function(_m,a,b){ return a+b.toUpperCase(); });
+  }
+  // 7 -> 7th. The letter reads "7th floor", not "floor 7".
+  function ordinal(n){
+    const v=Math.floor(Math.abs(Number(n)));
+    if(!isFinite(v)||!v) return null;
+    const t=v%100;
+    if(t>=11&&t<=13) return v+'th';
+    return v+({1:'st',2:'nd',3:'rd'}[v%10]||'th');
+  }
+
+  /* WHAT A DOCUMENT BUTTON SAYS WHILE THE READING IS STILL RUNNING.
+
+     Reading a booking takes about two and a half minutes - a shade under two for Gemini to read the
+     scans, a few seconds for ChatGPT to check them, the rest fetching the files. Submitting a
+     booking pokes the worker straight away (acc.booking_audit_kick), so that is normally the whole
+     wait; the five-minute cron behind it is only the safety net.
+
+     So the message says how long it has actually been and roughly how much is left. The old wording
+     - "try again in a minute or two" - read the same whether the reading had started five seconds
+     ago or had been stuck for an hour. One place decides it and all three buttons ask, so a new
+     document only has to ask for the reading. */
+  const WF_READ_SECONDS=150;
+  function wfAgo(ts){
+    const s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000));
+    if(s<60) return s+' second'+(s===1?'':'s');
+    const m=Math.round(s/60);
+    return m+' minute'+(m===1?'':'s');
+  }
+  /* Returns the stored reading, or throws with a sentence worth showing the person. */
+  async function wfBookingReading(caseId){
     let row=null;
     try{
       const {data}=await ACC().from('booking_audits')
-        .select('status,result,error,queued_at,attempts').eq('case_id',caseId).maybeSingle();
+        .select('status,result,error,queued_at,started_at,attempts')
+        .eq('case_id',caseId).maybeSingle();
       row=data;
-    }catch(_e){}
+    }catch(_e){
+      throw new Error('The reading could not be looked up just now \u2014 try again in a moment.');
+    }
+    if(!row) throw new Error('This booking has not been queued for reading yet.');
 
-    if(!row){ toast('This booking has not been queued for reading yet','warn'); return; }
     if(row.status==='pending'||row.status==='running'){
-      toast('The attachments are still being read \u2014 queued '+fmtDate(row.queued_at)
-        +'. Try again in a minute or two.','warn');
-      return;
+      const running=(row.status==='running');
+      const from=(running&&row.started_at)||row.queued_at;
+      const left=WF_READ_SECONDS-Math.round((Date.now()-new Date(from).getTime())/1000);
+      const mins=Math.max(1,Math.round(left/60));
+      /* Past the usual time is not the same as broken - a bigger file simply takes longer - so it
+         says so plainly rather than either promising a minute or crying failure. */
+      const eta=(left<=0) ? 'this one is taking longer than usual'
+              : (left<30) ? 'nearly done'
+              : ('about '+mins+' more minute'+(mins===1?'':'s'));
+      throw new Error((running?'Reading the attachments \u2014 started ':'Queued for reading ')
+        +wfAgo(from)+' ago, '+eta+'.');
     }
     if(row.status!=='done'||!row.result){
-      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err');
-      return;
+      throw new Error('The attachments could not be read: '+(row.error||'unknown reason')
+        +((row.attempts>1)?(' (tried '+row.attempts+' times)'):''));
     }
-    try{ await wfChecklistPdf(row.result); }
+    return row.result;
+  }
+
+  window.wfWelcomeLetter=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfWelcomePdf(res); }
+    catch(e){ toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
+     by a model. Anything the documents did not state is left as a blank to be filled by hand rather
+     than guessed, because this letter goes to the customer. */
+  async function wfWelcomePdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+    const logoBytes=await jgLogo();
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);          // A4
+    const W=595.28, M=64;                              // margins
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const ink=L.rgb(0.12,0.12,0.13), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.80,0.13,0.16);
+
+    const logo=await doc.embedPng(logoBytes);
+    const lw=176, lh=lw*logo.height/logo.width;
+    page.drawImage(logo,{x:M,y:841.89-56-lh,width:lw,height:lh});
+
+    let y=841.89-56-lh-26;
+    page.drawLine({start:{x:M,y:y},end:{x:W-M,y:y},thickness:1.6,color:rule});
+    y-=30;
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+
+    // The date the letter is written, in the form a letter uses.
+    const d=new Date();
+    const MON=['January','February','March','April','May','June','July','August','September',
+               'October','November','December'];
+    page.drawText(d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear(),
+      {x:W-M-reg.widthOfTextAtSize(d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear(),10.5),
+       y:y,size:10.5,font:reg,color:soft});
+    y-=34;
+
+    /* Everyone the flat is being allotted to, with the titles the booking form used. When the form
+       gave no title, the name goes on its own rather than inventing Mr. or Mrs. for a customer. */
+    const who=allotteeNames(res);
+    const project=val('project_name')||'________________';
+    const locality=String(LT.locality||'').trim();
+    const flat=val('flat')||'____', block=val('block')||'____';
+    /* A booking form writes the floor as "5", as "3rd" or as "3rd FLOOR". The letter says "3rd
+       floor" in every case - taking the number out and rebuilding it avoids "3rd FLOOR floor". */
+    const fRaw=val('floor');
+    const fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum ? (ordinal(fNum)+' floor')
+                        : (fRaw ? (nameCase(fRaw)+' floor') : '____ floor');
+    const tokenNum=(LT.token&&typeof LT.token.value==='number'&&isFinite(LT.token.value))
+      ? LT.token.value : null;
+    const tokenFig=tokenNum!==null
+      ? tokenNum.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})
+      : '________';
+    /* The words the form itself printed are preferred - that is what the customer signed against -
+       and only worked out from the figure when the form printed none. */
+    const tokenWords=String((LT.token&&LT.token.in_words)||'').trim()
+      || (tokenNum!==null ? rupeesInWords(tokenNum) : '________________');
+
+    page.drawText('Dear '+(who.join(' & ')||'Sir / Madam')+',',{x:M,y:y,size:11.5,font:bold,color:ink});
+    y-=30;
+
+    // Wraps to the page width; returns the new baseline.
+    const para=function(text,size,font,gap){
+      font=font||reg;
+      const max=W-2*M;
+      const words=String(text).split(/\s+/);
+      let line='';
+      words.forEach(function(w){
+        const t=line?line+' '+w:w;
+        if(font.widthOfTextAtSize(t,size)>max){
+          page.drawText(line,{x:M,y:y,size:size,font:font,color:ink});
+          y-=size*1.55; line=w;
+        } else line=t;
+      });
+      if(line) { page.drawText(line,{x:M,y:y,size:size,font:font,color:ink}); y-=size*1.55; }
+      y-=(gap===undefined?11:gap);
+    };
+
+    para('Greetings from The Jain Group!',11);
+    para('Whilst expressing our deep appreciation towards your investment in \u2018'+project
+      +'\u2019, we further feel privileged for having placed your trust on us in selecting your '
+      +'Dream Home.',11,reg);
+    para('By way of this letter, please be informed that we have received the application for '
+      +'Flat No. '+flat+', '+floorTxt+', Block-'+block+' of '+project
+      +(locality?(' '+locality):'')+'.',11,reg);
+    para('We have received a token amount of '+tokenFig+' ('+tokenWords
+      +' only) against the above mentioned booking.',11,reg);
+    para('Please feel free to get in touch with the undersigned with any queries / feedback or for '
+      +'assistance. It is always our pleasure to be of service to you today and in the future.',11,reg);
+    para('Once again we warmly welcome you to the growing Jain Group family.',11,reg,26);
+
+    para('Thanking you,',11,reg,34);
+    page.drawText('Pallabita Ghosh',{x:M,y:y,size:11.5,font:bold,color:ink}); y-=15;
+    page.drawText('Manager \u2013 Post Sales',{x:M,y:y,size:10.5,font:reg,color:soft}); y-=14;
+    page.drawText('Reach me @ 8420541541',{x:M,y:y,size:10.5,font:reg,color:soft});
+
+    // Footer rule, so the page reads as a letterhead rather than as a page of text.
+    page.drawLine({start:{x:M,y:64},end:{x:W-M,y:64},thickness:0.7,color:L.rgb(.85,.86,.88)});
+    const foot='THE JAIN GROUP  \u00b7  CARING FOR YOUR DREAMS';
+    page.drawText(foot,{x:(W-reg.widthOfTextAtSize(foot,8))/2,y:50,size:8,font:reg,
+      color:L.rgb(.55,.57,.60)});
+
+    const bytes=await doc.save();
+    const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Welcome Letter - '+name+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    toast('Welcome letter downloaded','ok');
+  }
+
+  /* ── allotment letter ─────────────────────────────────────────────────────────────────────────
+     The formal allotment, sent once the booking is in. Deliberately not shaped like the welcome
+     letter: that one is a note of thanks and reads as prose, this one is a notice of what has been
+     allotted at what price, so it is centred under a rule, states the property in labelled fields,
+     and sets the money in a ruled table. Same stored reading behind both.
+
+     THE MONEY. Three lines, and they must add up on the page:
+       Cost of apartment   the FLAT section's own net subtotal, plus the car parking if one was
+                           bought. NOT the cost sheet's grand total - that carries the deposits, the
+                           club and the electricity, which are not the price of the apartment.
+       Extra charge        the GST on those same two figures, taken as gross minus net rather than
+                           by applying a rate, so a change of rate cannot make this wrong.
+       Total               the gross of the same two. Equals the two lines above it, by construction.
+     Every one of them comes from the cost sheet as read; none is a rate applied by JAIN-E. */
+  /* THE APARTMENT, ITS PARKING, AND THE TWO TOGETHER - read off the cost sheet as stored.
+
+     A cost sheet is laid out as "Unit Charges Details", then "Parking Details" with its own TOTAL,
+     then "TOTAL FLAT VALUE" covering both. The reading already carries every row; what went wrong
+     on Arup Bhawal's letter was choosing among them. It took the first subtotal in the flat
+     section - which on that layout is the PARKING group's total - as the price of the apartment,
+     so the letter quoted the flat at 5,00,000 (the price of his car park) and then added the car
+     park to it a second time.
+
+     So the apartment is ADDED UP from the charge rows with the parking rows left out, and the two
+     can no longer be confused however the sheet is laid out. Where the sheet prints its own total
+     of the pair, that is kept and preferred: it is the figure the customer signed against, and it
+     beats anything totted up here.
+
+     Computed from res.cost_sheets rather than the reading's stored letter.price, so every booking
+     already read is right the moment this ships - nothing has to be read again. */
+  function wfSheetMoney(res){
+    const sheets=Array.isArray(res&&res.cost_sheets)?res.cost_sheets:[];
+    const norm=function(l){ return String(l==null?'':l).toUpperCase().replace(/[^A-Z0-9]/g,''); };
+    const byBasis=function(want){
+      for(let i=0;i<sheets.length;i++)
+        if(String((sheets[i]&&sheets[i].basis)||'').toUpperCase()===want) return sheets[i];
+      return null;
+    };
+    const one=function(sheet){
+      const items=Array.isArray(sheet&&sheet.line_items)?sheet.line_items:[];
+      const isPark=function(it){ return /PARKING|GARAGE/.test(norm(it&&it.label)); };
+      let parking=null,total=null,sum=0,any=false,sub=null;
+      items.forEach(function(it){
+        const amt=(typeof (it&&it.amount)==='number')?it.amount:null;
+        if(amt===null) return;
+        const kind=String((it&&it.kind)||'CHARGE').toUpperCase();
+        const sec=String((it&&it.section)||'').toUpperCase();
+        if(kind==='CHARGE'&&isPark(it)){ parking=(parking||0)+amt; return; }
+        if(kind==='CHARGE'&&sec==='FLAT'){ sum+=amt; any=true; return; }
+        if(kind!=='CHARGE'&&/FLATVALUE|TOTALFLAT/.test(norm(it&&it.label))&&total===null) total=amt;
+        else if(kind==='SUBTOTAL'&&sec==='FLAT'&&sub===null&&!isPark(it)) sub=amt;
+      });
+      // A sheet that itemises nothing but its parking: take the parking back out of the lump.
+      const flat=any?sum:((sub!==null)?(sub-(parking||0)):null);
+      return {flat:flat, parking:parking, total:total};
+    };
+    return {net:one(byBasis('NET')||sheets[0]||null), gross:one(byBasis('GROSS'))};
+  }
+  window.wfAllotmentLetter=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAllotmentPdf(res); }
+    catch(e){ toast('Could not build the allotment letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  async function wfAllotmentPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);
+    const W=595.28, H=841.89, M=58;
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const ink=L.rgb(0.10,0.10,0.11), soft=L.rgb(0.40,0.42,0.45),
+          line=L.rgb(0.72,0.74,0.77), band=L.rgb(0.94,0.95,0.96);
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const n2=function(v){ return (typeof v==='number'&&isFinite(v))
+      ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
+
+    /* NO LETTERHEAD OF OUR OWN. This goes out on the company's printed paper, so the top of the
+       page is left clear for it - no logo drawn, and no rules under one. Raise CLEAR_TOP if the
+       printed letterhead runs deeper than this. */
+    const CLEAR_TOP=118;
+    let y=H-CLEAR_TOP;
+
+    // The date this letter is written, in the form the example uses.
+    const d=new Date(), p2=function(n){ return String(n).padStart(2,'0'); };
+    const today=p2(d.getDate())+'.'+p2(d.getMonth()+1)+'.'+d.getFullYear();
+    page.drawText(today,{x:W-M-reg.widthOfTextAtSize(today,10.5),y:y,size:10.5,font:reg,color:ink});
+    y-=26;
+
+    const who=allotteeNames(res);
+
+    page.drawText('To,',{x:M,y:y,size:10.5,font:reg,color:ink}); y-=15;
+    page.drawText(who.join(' & ')||'The Applicant',{x:M,y:y,size:11,font:bold,color:ink}); y-=15;
+    /* The customer's own address, as the booking form prints it. When the form gave none the lines
+       are simply absent - a letter with an invented address is worse than one with none. */
+    const addr=(Array.isArray(LT.address)?LT.address:[]).slice(0,4);
+    addr.forEach(function(l){ page.drawText(l,{x:M,y:y,size:10.5,font:reg,color:ink}); y-=14; });
+    if(LT.pin){ page.drawText('PIN '+String(LT.pin).replace(/^PIN\s*/i,''),
+      {x:M,y:y,size:10.5,font:reg,color:ink}); y-=14; }
+    y-=16;
+
+    const title='ALLOTMENT LETTER';
+    const tw=bold.widthOfTextAtSize(title,13);
+    page.drawText(title,{x:(W-tw)/2,y:y,size:13,font:bold,color:ink});
+    page.drawLine({start:{x:(W-tw)/2-2,y:y-4},end:{x:(W+tw)/2+2,y:y-4},thickness:0.8,color:ink});
+    y-=32;
+
+    page.drawText('Dear Sir / Madam,',{x:M,y:y,size:10.5,font:reg,color:ink});
+    y-=24;
+
+    const project=val('project_name')||'________';
+    const place=String(LT.locality||'').trim();
+    const placed=project.toUpperCase()+(place?('\u201d, '+place):'\u201d');
+    /* The letter writes dates with dots - its own date at the top does, so the application date
+       should too rather than sitting beside it in slashes. */
+    const bookingDate=(res.checklist&&res.checklist['Booking Date']
+      && res.checklist['Booking Date']!=='--')
+      ? String(res.checklist['Booking Date']).replace(/[\/\-]/g,'.') : '________';
+    const flat=val('flat')||'____', block=val('block')||'____';
+    const fRaw=val('floor'), fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum?ordinal(fNum):(fRaw||'____');
+    // Type is the floor and the flat together, the way the example writes it: 6N.
+    const flatOnly=flat.replace(/^\s*\d+\s*/,'');
+    const typeTxt=(fNum && flat && !/^\d/.test(flat)) ? (fNum+flatOnly) : (flat||'____');
+    const company=String(LT.addressed_to||'').trim()||'Dream Gateway Hotels Ltd';
+
+    const para=function(text,gap){
+      const max=W-2*M, size=10.5;
+      const words=String(text).split(/\s+/);
+      let ln='';
+      words.forEach(function(w){
+        const t=ln?ln+' '+w:w;
+        if(reg.widthOfTextAtSize(t,size)>max){
+          page.drawText(ln,{x:M,y:y,size:size,font:reg,color:ink}); y-=size*1.6; ln=w;
+        } else ln=t;
+      });
+      if(ln){ page.drawText(ln,{x:M,y:y,size:size,font:reg,color:ink}); y-=size*1.6; }
+      y-=(gap===undefined?10:gap);
+    };
+
+    para('This has reference to your Application dated '+bookingDate
+      +' for booking of an Apartment in \u201c'+placed+'.');
+    para('We are pleased to allot you Flat No. '+flat+' on the '+floorTxt+' Floor in Block '+block
+      +', at '+project+(place?(', '+place):'')
+      +'. We take this opportunity to congratulate you for being a part of \u201c'
+      +project.toUpperCase()+'\u201d.');
+    para('Please find enclosed the \u201cSchedule of Payments\u201d for the captioned property. You '
+      +'are requested to kindly remit the payments as per the schedule. Also note that the payment '
+      +'has to be remitted in favour of \u201c'+company+'\u201d.',16);
+
+    page.drawText('Property Details',{x:M,y:y,size:11,font:bold,color:ink}); y-=17;
+    /* Labelled fields rather than a sentence: someone checking an allotment reads down the labels.
+       The block is what the tower is called, so it is given as the tower name and not repeated. */
+    const facts=[['Project',project+(place?(', '+place):'')],
+                 ['Super Built up area',(val('area_sqft')?(val('area_sqft')+' sq.ft.'):'________')],
+                 ['Tower Name',block],
+                 ['Type',typeTxt]];
+    facts.forEach(function(kv){
+      page.drawText(kv[0],{x:M,y:y,size:10,font:reg,color:soft});
+      page.drawText(String(kv[1]),{x:M+130,y:y,size:10.5,font:bold,color:ink});
+      y-=15;
+    });
+    y-=14;
+
+    /* The price table. Rows are drawn to a measured height so the total row can be banded and the
+       whole block ruled - a price a customer is asked to pay should look like a statement, not a
+       sentence. */
+    /* Every figure here comes from the cost sheet's own rows. The reading also carries a
+       precomputed letter.price, but that is what got Arup Bhawal's letter wrong and it is
+       deliberately not consulted, even as a fallback: a sheet nobody could read leaves these
+       null and the table prints a dash, which is the truth. A wrong price on a letter to a
+       customer is worse than a blank one. */
+    const SM=wfSheetMoney(res);
+    const flatNet=SM.net.flat,      flatGr=SM.gross.flat;
+    const parkNet=SM.net.parking,   parkGr=SM.gross.parking;
+    const hasPark=parkNet!==null||parkGr!==null;
+    const kind=String((res.parking&&res.parking.marked&&res.parking.marked.value)||'').toUpperCase();
+    const kindWord=(kind==='COVERED'||kind==='OPEN')?(kind.charAt(0)+kind.slice(1).toLowerCase()):'';
+    /* The sheet's own "TOTAL FLAT VALUE" is the apartment and its parking together, and it wins:
+       it is the figure the customer signed against, so it beats one added up here. Only a sheet
+       that prints no such row falls back to adding the two. */
+    const totNet=SM.net.total, totGr=SM.gross.total;
+    const costNet=(totNet!==null)?totNet
+                 :((flatNet===null&&parkNet===null)?null:((flatNet||0)+(parkNet||0)));
+    const costGr =(totGr!==null)?totGr
+                 :((flatGr===null&&parkGr===null)?null:((flatGr||0)+(parkGr||0)));
+    const extra=(costNet!==null&&costGr!==null)?(costGr-costNet):null;
+
+    const costLabel=hasPark
+      ? ('Cost of apartment including 1 '+(kindWord||'Car')+' Parking')
+      : 'Cost of apartment';
+    const rows=[[costLabel,n2(costNet)],
+                ['Extra charge (GST)',n2(extra)],
+                ['Total Purchase Price (inclusive of all)',n2(costGr)]];
+
+    const tX=M, tW=W-2*M, rowH=24, amtR=W-M-10;
+    const tTop=y;
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH*3,
+      borderColor:line,borderWidth:0.8,color:L.rgb(1,1,1)});
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH,color:band});
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH*3,
+      borderColor:line,borderWidth:0.8,opacity:0});
+    rows.forEach(function(r,i){
+      const ry=tTop-rowH*(i+1);
+      if(i) page.drawLine({start:{x:tX,y:ry+rowH},end:{x:tX+tW,y:ry+rowH},
+        thickness:0.6,color:line});
+      const last=(i===2), fnt=last?bold:reg;
+      page.drawText(r[0],{x:tX+10,y:ry+8.5,size:10,font:fnt,color:ink});
+      const amt=r[1]?('Rs. '+r[1]):'\u2014';
+      page.drawText(amt,{x:amtR-fnt.widthOfTextAtSize(amt,10.5),y:ry+8.5,size:10.5,font:fnt,color:ink});
+    });
+    y=tTop-rowH*3-16;
+
+    // The total in words, under the table, the way the example gives it.
+    if(costGr!==null){
+      const wordsTxt='('+rupeesInWords(costGr)+' only)';
+      page.drawText(wordsTxt,{x:amtR-reg.widthOfTextAtSize(wordsTxt,9.5),y:y,size:9.5,
+        font:reg,color:soft});
+      y-=22;
+    }
+
+    para('Thanking you and assuring you the best of our services at all times.',30);
+
+    page.drawText('For '+company,{x:M,y:y,size:10.5,font:bold,color:ink}); y-=46;
+    page.drawText('Authorized Signatory',{x:M,y:y,size:10.5,font:reg,color:ink});
+    y-=10;
+
+    /* The closing rule normally sits at the foot of the page, but on a letter with a long address
+       or a parking row it would otherwise creep up against "Authorized Signatory". */
+    const footY=Math.min(58, y-34);
+    page.drawLine({start:{x:M,y:footY},end:{x:W-M,y:footY},thickness:0.6,color:line});
+    const foot='THE JAIN GROUP  \u00b7  CARING FOR YOUR DREAMS';
+    page.drawText(foot,{x:(W-reg.widthOfTextAtSize(foot,7.5))/2,y:footY-13,size:7.5,font:reg,
+      color:L.rgb(.55,.57,.60)});
+
+    const bytes=await doc.save();
+    const nm=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='Allotment Letter - '+nm+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    toast('Allotment letter downloaded','ok');
+  }
+  window.wfChecklistDownload=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfChecklistPdf(res); }
     catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
-  /* Fills the blank and downloads it. JAIN-E writes every value here from the stored reading, so
-     nothing on the sheet was produced by a model. */
+  /* Typeset at A4 and downloaded. Every value comes from the stored reading; nothing on the sheet
+     is written by a model.
+
+     WHY THIS IS SET RATHER THAN OVERLAID. It used to be drawn by writing values onto a scan of the
+     printed blank. On a scan the gaps are fixed at whatever width they were printed, so a value sat
+     hard against the underscores with no space before it, two ran into each other when both blanks
+     were too narrow - PLC and FLC came out as "100 100" - and a long one was cut mid-word, "3rd
+     FLOOR" printing as "3rd FL". Setting the page gives each label its room, puts every value in
+     one column, and lets a line grow when its value is long.
+
+     The wording, the items and their order are the form's own and are not to be improved on;
+     assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
   async function wfChecklistPdf(res){
     const L=await loadPdfLib();
     if(!L) throw new Error('the PDF library could not be loaded');
 
-    const blank=await wfClBlank();
-
-    const doc=await L.PDFDocument.load(blank);
-    const page=doc.getPages()[0];
-    const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    const helv=await doc.embedFont(L.StandardFonts.Helvetica);
-    const black=L.rgb(0.05,0.05,0.05), red=L.rgb(0.67,0.07,0.07);
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);
+    const W=595.28, H=841.89, M=58, R=W-M;
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    /* One ink, as on any form - a check list is not a dashboard, and it gets photocopied. Grey is
+       for a value nobody has filled in yet, never for a warning. */
+    const ink=L.rgb(0.07,0.07,0.08), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.55,0.57,0.60);
 
     const f=res.fields||{}, cl=res.checklist||{};
-    const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
-    /* A pending CRM field, or a skipped one, is left as a dash - "-- awaiting the CRM API --" does
-       not belong on a printed form and would not fit the blank anyway. */
-    const short=function(t){
-      const x=String(t==null?'':t).trim();
-      if(!x||/^--.*--$/.test(x)) return '\u2014';
-      return x;
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const dots=function(t){ return String(t==null?'':t).trim().replace(/[\/\-]/g,'.'); };
+    const grp=function(t){
+      const str=String(t==null?'':t).trim();
+      if(!str) return '';
+      const n=Number(str.replace(/,/g,''));
+      return isFinite(n)?n.toLocaleString('en-IN'):str;
     };
-    // Step the size down until it fits its blank; truncate only as a last resort.
-    const put=function(slot,text,font,col){
-      if(!slot) return;
-      let t=String(text==null?'':text);
-      if(!t) return;
-      const fo=font||helvB;
-      let sz=slot.s;
-      while(sz>6 && fo.widthOfTextAtSize(t,sz)>slot.w) sz-=0.5;
-      while(t.length>1 && fo.widthOfTextAtSize(t,sz)>slot.w) t=t.slice(0,-1);
-      page.drawText(t,{x:slot.x,y:slot.y,size:sz,font:fo,color:col||black});
-    };
-    const verdict=function(slot,key){
-      const t=String(cl[key]!=null?cl[key]:'').trim();
-      // OK in black - it is a form, not a dashboard. NOT OK stays red so a problem still reads
-      // as one at a glance.
-      if(t==='Ok')      return put(slot,'OK',helvB,black);
-      if(t==='Not Ok')  return put(slot,'NOT OK',helvB,red);
-      // Nothing prints as UNKNOWN. An item that could not be settled is not a pass, so it
-      // reads NOT OK and somebody looks at it.
-      if(t==='Unknown') return put(slot,'NOT OK',helvB,red);
-      return put(slot,short(t),helvB,black);
-    };
+    const said=function(t){ const x=String(t==null?'':t).trim();
+      return (x && x!=='NIL' && !/^--.*--$/.test(x)) ? x : ''; };
 
-    put(WF_CL.date,      (res.header&&res.header.date)||'');
-    /* EVERY allottee on the one line the form gives for it - the first applicant and anyone
-       named with them. It never wraps: the size steps down instead, so the sheet keeps the
-       shape of the form. */
-    const allottees=[];
-    [v('customer_name')].concat(Array.isArray(res.co_applicants)?res.co_applicants:[])
-      .forEach(function(n){
-        const t=String(n==null?'':n).trim();
-        if(!t||t==='NIL') return;
-        // The reader sometimes lists the applicant among the co-applicants too; printing a
-        // name twice reads as a mistake in the file rather than one in the reading.
-        if(allottees.some(function(x){ return x.toUpperCase()===t.toUpperCase(); })) return;
-        allottees.push(t);
+    /* The mark the form itself carries, top left, at the size and place the printed blank put it:
+       109.5 x 131.25 points against the left margin. This one is an internal sheet, so it prints
+       its own letterhead rather than assuming company paper the way the letters do. */
+    const logo=await doc.embedJpg(await jgLogo('classic'));
+    const lw=109.5, lh=131.25, logoTop=H-52;
+    page.drawImage(logo,{x:M,y:logoTop-lh,width:lw,height:lh});
+    let y=logoTop-lh-26;
+
+    (function(){
+      const lab='Date  :  ', val=dots((res.header&&res.header.date)||'')||'\u2014';
+      const lw=reg.widthOfTextAtSize(lab,10.5), w=lw+bold.widthOfTextAtSize(val,10.5);
+      page.drawText(lab,{x:R-w,y:y,size:10.5,font:reg,color:ink});
+      page.drawText(val,{x:R-w+lw,y:y,size:10.5,font:bold,color:ink});
+    })();
+    y-=30;
+
+    page.drawText('Booking form check list :-',{x:M,y:y,size:11.5,font:bold,color:ink});
+    y-=26;
+
+    // The two header lines, colons in one column so each pair reads as a pair.
+    const mLab=['Name of Post sales in-charge Responsible','Name of the customer'];
+    const mVal=[(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH',
+                allotteeNames(res).join('  &  ')||'\u2014'];
+    const colonX=M+Math.max.apply(null,mLab.map(function(t){
+      return reg.widthOfTextAtSize(t,10.5); }))+12;
+    mLab.forEach(function(lab,i){
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(':',{x:colonX,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(mVal[i]),{x:colonX+12,y:y,size:10.5,font:bold,color:ink});
+      y-=17;
+    });
+    y-=11;
+
+    /* Label : Value, comma separated, with real space around the colon. Drawn as a run of chunks
+       so the labels can stay light and the values bold on the one line. */
+    const runLine=function(pairs){
+      let x=M;
+      pairs.forEach(function(p,i){
+        /* An explicit NIL is an answer and prints as one - the form's own way of saying there is
+           no discount, no parking. Only a genuinely empty value becomes a dash. */
+        const lab=p[0]+' : ';
+        const val=(p[1]==null||String(p[1]).trim()==='') ? '\u2014' : String(p[1]).trim();
+        page.drawText(lab,{x:x,y:y,size:10.5,font:reg,color:soft});
+        x+=reg.widthOfTextAtSize(lab,10.5);
+        page.drawText(val,{x:x,y:y,size:10.5,font:bold,color:ink});
+        x+=bold.widthOfTextAtSize(val,10.5);
+        if(i<pairs.length-1){
+          page.drawText(',    ',{x:x,y:y,size:10.5,font:reg,color:ink});
+          x+=reg.widthOfTextAtSize(',    ',10.5);
+        }
       });
-    put(WF_CL.customer,  allottees.join('  &  ')||'NIL');
-    put(WF_CL.project,   v('project_name'));
-    put(WF_CL.block,     v('block'));
-    put(WF_CL.flat,      v('flat'));
-    put(WF_CL.floor,     v('floor'));
-    put(WF_CL.area,      v('area_sqft'));
-    put(WF_CL.base_rate, v('base_rate'));
-    put(WF_CL.plc,       v('plc'));
-    put(WF_CL.flc,       v('flc'));
-    put(WF_CL.parking,   v('covered_parking'));
-    put(WF_CL.discount,  v('discount'));
+      y-=17;
+    };
+    // The floor is the number the booking form gives - not "3rd FLOOR" clipped to "3rd FL".
+    const floorNo=(String(v('floor')).match(/\d+/)||[v('floor')])[0]||'';
+    runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
+             ['Floor',floorNo],
+             ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
+    /* WHICH parking belongs in the label, not the value. The reading gives "COVERED 5,00,000",
+       which printed as "Parking : COVERED 5,00,000" - reading as though COVERED were part of the
+       amount. What was ticked is the name of the thing being charged for, so it goes with the
+       word: "COVERED Parking : 5,00,000". Nothing ticked stays plain "Parking". */
+    const pv=String(res.parking_value||v('covered_parking')||'').trim();
+    const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
+    const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
+    const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
+    runLine([['Base Rate',v('base_rate')?(grp(v('base_rate'))+'/-'):''],
+             ['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+             [parkLabel,parkValue]]);
+    runLine([['Discount',v('discount')||'NIL']]);
+    y-=13;
 
-    verdict(WF_CL.cost,   'Cost Sheet');
-    verdict(WF_CL.market, 'Market valuation Sheet');
-    verdict(WF_CL.kyc,    'KYC of Customer');
-    verdict(WF_CL.mobile, 'Mobile Number');
-    verdict(WF_CL.email,  'Email ID');
-    verdict(WF_CL.pan,    'Pan Card No.');
-    put(WF_CL.source,     short(cl['Source']||v('source')));
-    put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
-    put(WF_CL.booking_date, short(cl['Booking Date']));
+    page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
+    y-=23;
 
-    /* The blank now prints a Signatures row of its own, between "Booked in CRM" and "Payment
-       Plan", so it is filled like any other item rather than appended underneath. When it fails it
-       also says where, in small type past the end of the row - "NOT OK" alone sends somebody back
-       through the whole file. A clean sheet stays exactly as plain as the form. */
-    verdict(WF_CL.signatures, 'Signatures');
-    if(String(cl['Signatures']||'').trim()==='Not Ok'){
-      const sw=WF_CL_SIG_WHY;
-      let t=String((res.signatures&&res.signatures.reason)||'').trim();
-      if(t){
-        while(t.length>1 && helv.widthOfTextAtSize(t,sw.size)>(sw.right-sw.x)) t=t.slice(0,-1);
-        page.drawText(t,{x:sw.x,y:sw.y,size:sw.size,font:helv,color:red});
-      }
-    }
+    /* A dash between the label and the rule, and the value written ON the rule - which is what a
+       filled form looks like. Every value starts in the same column, so they read straight down
+       instead of being hunted for. */
+    const LBL=152, VX=M+LBL+18;
+    const row=function(label,value,dim,edge){
+      page.drawText(label,{x:M,y:y,size:10.5,font:reg,color:ink});
+      page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
+      page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
+    };
+    // Nothing prints as UNKNOWN: a check that could not be settled reads NOT OK. See the reader.
+    const verdict=function(key){
+      const t=String(cl[key]==null?'':cl[key]).trim();
+      if(t==='Ok')     return ['OK',false];
+      if(t==='Not Ok') return ['NOT OK',false];
+      if(!t||/^--.*--$/.test(t)) return ['\u2014',true];
+      return [t,false];
+    };
+    ['Cost Sheet','Market valuation Sheet','KYC of Customer','Mobile Number','Email ID',
+     'Pan Card No.'].forEach(function(k){
+      const d=verdict(k); row(k,d[0],d[1]); y-=22;
+    });
+    (function(){ const src=said(cl['Source']); row('Source',src||'\u2014',!src); y-=22; })();
 
-    /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
-       stays in the stored reading; the printed sheet is the form. */
+    // The one row the form itself puts two pairs on.
+    (function(){
+      const lead=said(cl['Booked in CRM - Lead ID']), mid=VX+112;
+      row('Booked in CRM \u2013 Lead ID', lead||'awaiting the CRM', !lead, mid);
+      const bx=mid+26, blab='Booking Date';
+      page.drawText(blab,{x:bx,y:y,size:10.5,font:reg,color:ink});
+      const bvx=bx+reg.widthOfTextAtSize(blab,10.5)+12;
+      page.drawText('\u2013',{x:bvx,y:y,size:10.5,font:reg,color:soft});
+      const bd=said(cl['Booking Date']) ? dots(cl['Booking Date']) : '';
+      page.drawText(bd||'\u2014',{x:bvx+14,y:y,size:10.5,font:bd?bold:reg,color:bd?ink:soft});
+      page.drawLine({start:{x:bvx+14,y:y-4},end:{x:R,y:y-4},thickness:0.6,color:rule});
+      y-=22;
+    })();
+    (function(){ const d=verdict('Signatures'); row('Signatures',d[0],d[1]); y-=32; })();
+
+    (function(){
+      /* The form prints a small arrow here that the standard PDF fonts cannot encode; a colon
+         says the same thing and matches every other label on the sheet. */
+      const lab='Payment Plan   :   ';
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(cl['Payment Plan']||'AS PER COST SHEET /'),
+        {x:M+reg.widthOfTextAtSize(lab,10.5),y:y,size:10.5,font:bold,color:ink});
+      y-=42;
+    })();
+
+    /* Discount Approved is a line for VC / HD to sign, not a value to fill - so it stays a line,
+       with whoever the documents named written on it when they named anybody. */
+    (function(){
+      const lab='Discount Approved', vchd='(VC / HD)';
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:ink});
+      const x1=M+reg.widthOfTextAtSize(lab,10.5)+18;
+      const x2=R-reg.widthOfTextAtSize(vchd,10.5)-16;
+      const who=said(cl['Discount Approved']);
+      if(who) page.drawText(who,{x:x1+8,y:y,size:10.5,font:bold,color:ink});
+      page.drawLine({start:{x:x1,y:y-4},end:{x:x2,y:y-4},thickness:0.6,color:rule});
+      page.drawText(vchd,{x:x2+16,y:y,size:10.5,font:reg,color:soft});
+    })();
+
     const bytes=await doc.save();
-    const who=String(v('customer_name')||'booking').replace(/[^\w \-]/g,'').trim()||'booking';
+    const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
+      .replace(/[^\w \-]/g,'').trim()||'booking';
     const blob=new Blob([bytes],{type:'application/pdf'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url; a.download='Booking Form Check List - '+who+'.pdf';
+    a.href=url; a.download='Booking Form Check List - '+nm+'.pdf';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
     toast('Check list downloaded','ok');
   }
-
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
      flow like Reimbursement, or the detail-card grid for anything else) plus the whole injected
@@ -4289,7 +4814,7 @@
     if(e.key==='Delete'){ if(!window._wfDelId)return; window.wfDelete(window._wfDelId); }
     // N = start a new instance of the workflow currently open, same as clicking "New <Noun>" —
     // only when this account is actually allowed to (mirrors the button's own canEvent gate).
-    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfEventOpen(window._wfFlowId); }
+    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfNewInstance(window._wfFlowId); }
   }); }
 
   window.wfDelete=function(id){
@@ -5254,6 +5779,186 @@
       } else if(gs.length<2 && x){ x.remove(); }
     });
   }
+  /* ── STARTING ONE WHEN THE FORM ASKS FOR NOTHING BUT FILES ────────────────────────────────
+     A Booking Form is a scan and nothing else: everything a person could have typed - the name,
+     the project, the flat - is read off the document afterwards, and typing it again would only
+     create a second version to disagree with. So for a workflow whose whole form is attachments,
+     pressing "New Booking Form" opens the file chooser itself. Pick the scans, and the booking is
+     created and the reading starts; no dialog is drawn at any point.
+
+     WHY THE CHOOSER OPENS FROM HERE AND NOT FROM THE FORM. A browser only opens a file chooser
+     while a click is still fresh - within the same tick as the press. The earlier attempt clicked
+     the form's own box once the dialog had been drawn, which is several database reads later, by
+     which time the click is spent and nothing happens. Everything up to .click() below is
+     therefore synchronous; the uploading and the creating happen after, when the wait no longer
+     costs anything.
+
+     Every other workflow has questions to answer and still opens its form. */
+  function wfAttachOnly(flow){
+    const t=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    return t.length>0 && t.every(function(f){ return f && f.type==='attachment'; });
+  }
+  window.wfNewInstance=function(flowId){
+    if(window._wfAttachOnly && Number(flowId)===Number(window._wfFlowId)) return wfQuickAttach(flowId);
+    return wfEventOpen(flowId);
+  };
+  window.wfQuickAttach=function(flowId){
+    const inp=document.createElement('input');
+    inp.type='file'; inp.multiple=true;
+    inp.style.cssText='position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(inp);
+    let picked=false;
+    inp.addEventListener('change',function(){
+      picked=true;
+      const files=[].slice.call(inp.files||[]);
+      try{ inp.remove(); }catch(_e){}
+      if(files.length) wfQuickAttachSubmit(flowId, files);
+    });
+    /* Cancelling a file chooser fires no event at all, so the input would otherwise sit in the
+       page for the rest of the session. Coming back to the window is the only signal there is. */
+    window.addEventListener('focus',function tidy(){
+      window.removeEventListener('focus',tidy);
+      setTimeout(function(){ if(!picked) try{ inp.remove(); }catch(_e){} },500);
+    });
+    inp.click();
+  };
+  /* THE CARD THAT SAYS WHAT IS HAPPENING TO THE FILES.
+
+     Without a dialog there is nothing on screen to show that anything is going on, and a toast is
+     gone in a few seconds. A booking form is a scan of several megabytes, so there can be a long
+     quiet minute between choosing the file and the instance appearing - during which the only
+     reasonable thing a person can conclude is that it did not work, and reload the page. Reloading
+     abandons the upload, which is exactly how a booking ends up neither created nor reported.
+
+     So the card stays until the work is finished: one line per file with its own percentage, then
+     the creating step. A failure keeps the card on screen with the reason spelled out, rather than
+     a message that has already faded by the time anybody looks. */
+  function wfWorkCard(title){
+    let el=document.getElementById('wfWorkCard');
+    if(el) el.remove();
+    el=document.createElement('div');
+    el.id='wfWorkCard';
+    /* It LIVES IN THE TOAST STACK rather than floating over it. Both sit bottom-right, so a card
+       of its own covered every toast that appeared while it was up - including the ones saying
+       what had gone wrong. In #toasts it is one more item in the same column and they push each
+       other along; a page without that stack still gets a card, fixed in the corner. */
+    const stack=document.getElementById('toasts');
+    el.style.cssText=(stack?'':'position:fixed;right:18px;bottom:18px;z-index:99999;')
+      +'min-width:280px;max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
+      +'border:1px solid var(--line,#e3e3e3);border-radius:12px;padding:12px 14px;'
+      +'box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13px;line-height:1.5';
+    el.innerHTML='<div style="font-weight:600;margin-bottom:6px" class="wfwc-t"></div>'
+      +'<div class="wfwc-b"></div>';
+    el.querySelector('.wfwc-t').textContent=title;
+    (stack||document.body).appendChild(el);
+    return {
+      say:function(html){ const b=el.querySelector('.wfwc-b'); if(b) b.innerHTML=html; },
+      title:function(t){ const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t; },
+      close:function(){ try{ el.remove(); }catch(_e){} },
+      /* A failure is not swept away on a timer - it waits to be read and dismissed. What is
+         already on the card STAYS: the per-file reasons are the useful part, and replacing them
+         with a summary that points at them would leave nothing to point at. */
+      stop:function(t,html){
+        const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t;
+        const b=el.querySelector('.wfwc-b');
+        if(b) b.innerHTML=b.innerHTML+'<div style="margin-top:8px">'+html+'</div>'
+          +'<div style="margin-top:10px"><button class="ac-btn" '
+          +'onclick="(function(e){var c=document.getElementById(\'wfWorkCard\'); if(c)c.remove();})()">'
+          +'Close</button></div>';
+      }
+    };
+  }
+  async function wfQuickAttachSubmit(flowId, files){
+    const N=window._wfNoun||{one:'instance',lc:'instance'};
+    const many=(files.length>1);
+    const card=wfWorkCard('Filing this '+N.lc);
+    const state=files.map(function(f){ return {name:f.name, pct:0, done:false, failed:''}; });
+    const draw=function(extra){
+      card.say(state.map(function(s){
+        const right = s.failed ? ('<span style="color:#c0392b">'+esc2(s.failed)+'</span>')
+                    : s.done   ? '<span style="color:#1e8e3e">done</span>'
+                               : (s.pct+'%');
+        return '<div style="display:flex;gap:10px;justify-content:space-between">'
+          +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px">'
+          +esc2(s.name)+'</span>'+right+'</div>';
+      }).join('')+(extra?('<div style="margin-top:8px">'+extra+'</div>'):''));
+    };
+    draw('Uploading — please keep this page open.');
+    /* A reload part-way through loses the upload silently. The browser will not let a page say
+       why, but it does ask, and being asked at all is the warning. */
+    const guard=function(e){ e.preventDefault(); e.returnValue=''; return ''; };
+    window.addEventListener('beforeunload',guard);
+    /* Stored under the label the workflow's own field carries, so the instance reads back exactly
+       as one filed through the form would. */
+    let label='Attachment';
+    try{
+      const {data}=await ACC().from('flows').select('trigger_template').eq('id',flowId).maybeSingle();
+      const f=(Array.isArray(data&&data.trigger_template)?data.trigger_template:[])
+        .filter(function(x){ return x && x.type==='attachment'; })[0];
+      if(f&&f.label) label=f.label;
+    }catch(_e){}
+    /* One failure is reported and the rest still go: losing three good pages because the fourth
+       timed out would be worse than a booking that is short one scan and can be edited. */
+    const paths=[];
+    for(let i=0;i<files.length;i++){
+      const file=files[i];
+      try{
+        const key=s3KeyForFlowEvent(String(flowId), file.name);
+        const {data,error}=await uploadFileToS3(key,file,function(pct){
+          state[i].pct=pct; draw('Uploading — please keep this page open.');
+        });
+        if(error) throw error;
+        state[i].done=true; draw('Uploading — please keep this page open.');
+        paths.push(data.path);
+      }catch(e){
+        state[i].failed=((e&&e.message)||String(e)); draw('Uploading — please keep this page open.');
+      }
+    }
+    if(!paths.length){
+      window.removeEventListener('beforeunload',guard);
+      draw('');   // the "keep this page open" line has had its day
+      card.stop('No '+N.lc+' was created',
+        'None of the files reached storage, so nothing was filed — the reason is beside each one '
+        +'above. Nothing was lost; choose them again once it is sorted out.');
+      return;
+    }
+    draw('Creating the '+esc2(N.lc)+'…');
+    try{
+      const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
+        {p_flow_id:flowId, p_details:[{label:label, value:paths.join(WF_ATT_SEP)}], p_step_members:null});
+      if(error) throw error;
+      window.removeEventListener('beforeunload',guard);
+      // Same as the form's own save: say WHICH id it got, read back from the created row rather
+      // than guessed, because numbers are handed out at the moment of saving.
+      let newIdText='';
+      try{
+        if(newCaseId!=null){
+          const {data:mk}=await ACC().from('flow_cases').select('jaine_id,case_no')
+            .eq('id',newCaseId).maybeSingle();
+          const v=mk&&(mk.jaine_id!=null?mk.jaine_id:mk.case_no);
+          if(v!=null&&String(v).trim()!=='') newIdText=String(v);
+        }
+      }catch(_e){}
+      try{ usageQueue('tasks.workflow.start_a_new_instance','create', await wfCaseUsageMeta(newCaseId)); }catch(_e){}
+      /* Inserting the case queues the reading and pokes the reader straight away (the triggers on
+         flow_cases and booking_audits), so there is nothing to start from here - only to say so,
+         since the person is about to press Check List and would otherwise wonder. */
+      card.title(newIdText?('New '+N.one+' — Id '+newIdText):(N.one+' created'));
+      card.say('Reading the '+(many?'attachments':'attachment')+' now — about two and a half '
+        +'minutes. You can carry on; the check list will be ready when you come back.');
+      setTimeout(function(){ card.close(); },12000);
+      if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
+    }catch(e){
+      window.removeEventListener('beforeunload',guard);
+      draw('');
+      /* The files ARE in storage - only the instance failed - so the message says so rather than
+         leaving someone to wonder whether the scans need finding again. */
+      card.stop('The '+N.lc+' could not be created',
+        esc2((e&&e.message)||String(e))
+        +'<br><br>The files did upload, so nothing is lost; try once more.');
+    }
+  }
+
   window.wfEventOpen=async function(flowId, caseId, draftId){
     wfInjectCss();
     /* Anything left over from a previous session that was closed without Cancel - the overlay,
@@ -6775,14 +7480,23 @@
     .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
     .wf-mini-lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
     /* timeline panel */
-    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
+    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+    /* min-width:0 lets the title actually shrink. Without it a long instance number holds the row
+       open at its full width and pushes the buttons off the side of a phone. */
+    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
     .wf-tlhead-t i{color:var(--slate)}
     /* Edit + close sit together as one action group on the right, not spread apart by the
        header's own space-between (which only expects two children: the title, and this group). */
-    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:none}
-    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px}
+    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}
+    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px;flex:none}
     .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
+    /* On a phone this row carries six buttons - edit, check list, welcome letter, allotment
+       letter, print, close - which will not fit beside the title. They take a row of their own,
+       left-aligned like everything else, and grow to a size a thumb can actually hit. */
+    @media (max-width:560px){
+      .wf-tlhead-acts{width:100%;justify-content:flex-start}
+      .wf-tlhead-x{width:36px;height:36px;font-size:14px}
+    }
     .wf-timeline{display:flex;flex-direction:column}
     /* Slim timeline row: one line on a normal screen, wrapping to two on a phone. */
     .wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
