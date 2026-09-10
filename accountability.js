@@ -1362,6 +1362,13 @@
      given to is one where the handling roster is sensitive. Every other workflow has no such list and
      is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
   function wfRosterAccess(f, steps, fcs){
+    // Invoice Processing: the Tracker (and People row) was hidden from anyone who wasn't a raiser,
+    // a fixed step owner, or already a step-person on some existing case - which in practice meant
+    // most people who could open this workflow at all still couldn't see it. Reaching this function
+    // already means the page itself let them in, so anyone who has access to the workflow gets the
+    // Tracker too, same as any flow that never restricted trigger_step_assignable_to in the first
+    // place (the branch right below this one).
+    if(f && f.id===26) return {show:true,scope:'all'};
     const assign=String((f&&f.trigger_step_assignable_to)||'')
       .split(',').map(function(x){return x.trim();}).filter(Boolean);
     if(!assign.length) return {show:true,scope:'all'};    // flow doesn't restrict handover — unchanged
@@ -2518,9 +2525,18 @@
       if(info) return wfForwardLabel(info);
       const {data:cur}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       if(!cur) return 'Forwarded to the next person';
-      const {data:steps}=await ACC().from('flow_case_steps').select('seq,person,candidates,title,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').eq('case_id',cur.case_id).order('seq',{ascending:true});
+      const {data:kase}=await ACC().from('flow_cases').select('flow_id').eq('id',cur.case_id).maybeSingle();
+      const {data:steps}=await ACC().from('flow_case_steps').select('seq,person,candidates,title').eq('case_id',cur.case_id).order('seq',{ascending:true});
       const nxt=(steps||[]).find(function(s){return s.seq>cur.seq;});
-      return nxt?wfForwardLabel({nextWho:wfWhoOfStep(nxt)}):'Forwarded to the next person';
+      if(!nxt) return 'Forwarded to the next person';
+      // owner_from_trigger/owner_emails/etc. are on the step DEFINITION (flow_steps), never on
+      // flow_case_steps - merged in by flow+seq, same as the Tasks-list version of this lookup.
+      let def=null;
+      if(kase&&kase.flow_id!=null){
+        const {data:d}=await ACC().from('flow_steps').select('seq,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').eq('flow_id',kase.flow_id).eq('seq',nxt.seq).maybeSingle();
+        def=d;
+      }
+      return wfForwardLabel({nextWho:wfWhoOfStep(Object.assign({},def,nxt))});
     }catch(_e){ return 'Forwarded to the next person'; }
   }
   /* Who holds a LIVE step. wfStepWhoText was written for the flow definition and reads
@@ -3263,6 +3279,9 @@
        exactly the people who need them. Nothing is disclosed by it either: it can only print rows
        already visible on this page, which visibility has already decided. */
     const canPrintBulk=isStepHolder || eq(mySelf,'ayushruia1@gmail.com')
+      // businessanalyst@ isn't a step owner here (deliberately, see the removal further up in this
+      // file's history) but still needs to run "Print New Reimbursements", same as cfo@ already can.
+      || (id===39 && eq(mySelf,'businessanalyst@thejaingroup.com'))
       || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
     const showChk=anyActionable||canPrintBulk;
     /* FINISHED WORK MOVES OUT OF THE WAY.
@@ -3658,7 +3677,7 @@
 
   async function wfCaseRoute(v, caseId){
     let c=null; try{ const {data}=await ACC().from('flow_cases').select('flow_id').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(!c){ toast('Not found','err'); return navTo('tasks/workflow'); }
+    if(!c){ toast('That instance no longer exists — it may have been deleted','err'); return navTo('tasks/workflow'); }
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
@@ -4095,19 +4114,35 @@
     let qrHtml='';
     const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
     const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    // The whole point of this section is the QR code Accounts hands over - if it can't be shown,
+    // that must say so on the printout, not leave a silent gap that looks like it just never
+    // existed. Signing can fail outright (missing/renamed object); the image can also sign fine
+    // and still fail to load at print time (S3 answers AccessDenied rather than Not Found, so
+    // that only ever shows up as a broken <img> at render) - onerror catches that second case.
     if(qrField){
       const raw=det.find(function(d){ return d&&eq(d.label,qrField.label); });
       const paths=wfSplitSets((raw&&raw.value)||'').filter(function(p){ return String(p).trim().indexOf('s3:')===0; });
+      // Built via DOM API (not an HTML string) so the message text never has to be embedded inside
+      // the onerror attribute itself - that would mean nesting one quoting scheme inside another.
+      const missingOnerror="var d=document.createElement('div');d.className='wf-print-qr-missing';"
+        +"d.textContent='QR code image not available — ask them to re-upload it';this.replaceWith(d);";
+      const missingHtml='<div class="wf-print-qr-missing">QR code image not available — ask them to re-upload it</div>';
+      let body=missingHtml;
       if(paths.length){
         const urls=(await Promise.all(paths.map(function(p){ return wfSignedUrl(p); }))).filter(Boolean);
-        if(urls.length) qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'
-          +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
+        if(urls.length) body=urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img" onerror="'+missingOnerror+'">'; }).join('');
       }
+      qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'+body+'</div>';
     }
     /* Never let attachments take the printout down with them: a signing failure or an
-       unreadable PDF must still leave the instance's own details printable. */
+       unreadable PDF must still leave the instance's own details printable.
+       Reimbursement (flow 39) prints the QR code only - every other attachment (bill photos,
+       receipts) is deliberately left off the bulk printout; only the code the QR field itself
+       carries is meant to go on the sheet Accounts hands over. */
     let attHtml='';
-    try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
+    if(!(flow&&flow.id===39)){
+      try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
+    }
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
@@ -4131,6 +4166,10 @@
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
     WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;   // a fresh allowance for each print job
+    // Deliberately sequential, NOT Promise.all - wfCasePrintSection's attachment rendering reads
+    // and decrements the shared WF_PRINT_PAGES_LEFT budget as it goes, so which case sees how much
+    // budget is left (and which one gets the "not printed, budget exceeded" message) depends on
+    // processing them in order. Running them in parallel would race that shared counter.
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
     if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
@@ -4140,6 +4179,7 @@
       +'body{margin:24px;font-family:Inter,system-ui,sans-serif;color:#0f172a;background:#fff}'
       +'.wf-print-qr{margin-top:18px}.wf-print-qr-h{font-weight:700;margin-bottom:8px}'
       +'.wf-print-qr-img{max-width:260px;display:block;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px}'
+      +'.wf-print-qr-missing{max-width:260px;padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#b91c1c;font-size:13px;margin-bottom:10px}'
       // Each claim starts its own sheet, so one can be handed to one person - except the last,
       // which would otherwise throw a blank page at the end of every print job.
       +'.wf-print-case{break-after:page;page-break-after:always}'
@@ -4186,31 +4226,61 @@
     });
     return window.wfPrintCases([caseId]);
   };
+  /* The last batch this button actually handed over - same "one UPDATE, one now()" timestamp
+     for every case in that job, so grouping on bulk_printed_at recovers exactly that set even
+     though there's no dedicated batch-id column. Used only to offer a reprint; never touched
+     when there's genuinely new stuff to print. */
+  async function wfLastPrintedBatch(){
+    let last=null;
+    try{
+      const {data}=await ACC().from('flow_cases').select('id,bulk_printed_at').eq('flow_id',39)
+        .not('bulk_printed_at','is',null).order('bulk_printed_at',{ascending:false}).limit(1).maybeSingle();
+      last=data;
+    }catch(e){}
+    if(!last) return [];
+    let rows=[];
+    try{
+      const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).eq('bulk_printed_at',last.bulk_printed_at);
+      rows=data||[];
+    }catch(e){}
+    return rows.map(function(r){ return r.id; });
+  }
   /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
      eye to find what changed. Marking done happens AFTER the print job is actually handed to the
      browser, not before - a popup blocked or a build failure must leave every claim eligible for
-     the next attempt, not silently drop it from every future run. */
+     the next attempt, not silently drop it from every future run. When there's nothing new, offer
+     to reprint the last batch instead of a dead-end toast - reprinting doesn't re-stamp
+     bulk_printed_at, so it can't be mistaken for a second "new" batch next time this runs. */
   window.wfBulkPrintNewReceipts=async function(){
     let cases=[];
     try{
       const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).is('bulk_printed_at',null);
       cases=data||[];
     }catch(e){ toast('Could not load claims','err'); return; }
-    if(!cases.length){ toast('Nothing new to print','warn'); return; }
-    const ids=cases.map(function(c){ return c.id; });
-    let steps=[];
-    try{
-      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
-      steps=data||[];
-    }catch(e){ toast('Could not check receipt status','err'); return; }
-    const eligible=steps.map(function(s){ return s.case_id; });
-    if(!eligible.length){ toast('Nothing new to print','warn'); return; }
-    const ok=await window.wfPrintCases(eligible);
-    if(!ok) return;
-    try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
-    catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+    let eligible=[];
+    if(cases.length){
+      const ids=cases.map(function(c){ return c.id; });
+      let steps=[];
+      try{
+        const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
+        steps=data||[];
+      }catch(e){ toast('Could not check receipt status','err'); return; }
+      eligible=steps.map(function(s){ return s.case_id; });
+    }
+    if(eligible.length){
+      const ok=await window.wfPrintCases(eligible);
+      if(!ok) return;
+      try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
+      catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+      return;
+    }
+    const lastIds=await wfLastPrintedBatch();
+    if(!lastIds.length){ toast('Nothing new to print','warn'); return; }
+    wfConfirm({ title:'Nothing new to print', okLabel:'Print last batch', okClass:'primary',
+      body:'Every received claim has already been printed. Print the last batch ('+lastIds.length+' claim'+(lastIds.length===1?'':'s')+') again?',
+      onOk:function(){ window.wfPrintCases(lastIds); } });
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
@@ -5437,16 +5507,21 @@
        Asking the same question once per step made the form long and invited answering it
        differently for steps that are meant to be handled by the same person. */
     /* The restriction is for the people who RAISE these day to day - a bill may only be handed to
-       the two named people, so the picker offers only those two and the question cannot be answered
+       the named people, so the picker offers only those and the question cannot be answered
        wrongly. Systems is exempt: they are the ones who have to put things right when a bill has
        gone to the wrong person, and a picker that cannot name anyone else leaves them unable to.
        Uma Chatterjee is exempt too: she is a trigger owner on Invoice Processing but not one of the
        day-to-day store raisers the restriction targets, so her picker offers everyone — matches
        acc.wf_create_instance's own exemption exactly, or the server would reject what this form let
-       her pick. An empty list means the workflow never restricted the picker, and nothing changes. */
+       her pick. An empty list means the workflow never restricted the picker, and nothing changes.
+       trigger_step_assignable_overrides adds names for ONE specific raiser without touching the
+       shared list anyone else sees - keyed by that raiser's own email, lowercased, same lookup the
+       server does in acc.wf_create_instance. */
     const stepAssignRestrict=(wfInDept('Systems')||eq(me(),'ayushruia1@gmail.com')||eq(me(),'frontoffice@thejaingroup.com'))
       ? []
-      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean)
+          .concat(Array.isArray(flow.trigger_step_assignable_overrides&&flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()])
+            ? flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()] : []);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
           +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
@@ -5625,8 +5700,7 @@
       if(minT>0 && !caseId && !DRAFT){
         const tt=wfEvtTotalCalc();
         if(tt && tt.total<minT){
-          toast('A '+N.lc+' must come to at least '+wfMoney(minT)
-            +' \u2014 this one totals '+wfMoney(tt.total),'warn');
+          toast('Your total should be at least '+wfMoney(minT),'warn');
           return;
         }
       }
@@ -7607,7 +7681,7 @@
       toast('Moved to '+fmtDateY(newDate),'ok');
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move task','err'); }
+    }catch(e){ toast('Could not move the task: '+((e&&e.message)||e),'err'); }
   };
   // Dragging a Legal case to a new day writes straight into mis_cases (public schema, not acc —
   // see gcalCasesLoadData), into whichever of its two date columns the dragged chip came from:
@@ -7625,7 +7699,7 @@
       toast((field==='case_next_date'?'Next date':'Action date')+' moved to '+fmtDateY(newDate),'ok');
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move case','err'); }
+    }catch(e){ toast('Could not move the case: '+((e&&e.message)||e),'err'); }
   };
   // Dragging a one-time meeting onto another day's section changes its meeting_date. This resyncs
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
@@ -7710,7 +7784,7 @@
       if(m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move meeting','err'); }
+    }catch(e){ toast('Could not move the meeting: '+((e&&e.message)||e),'err'); }
   };
   /* ---- Day view: dragging a meeting block vertically changes its time ----
      Vertical-only (only one day is visible in Day view, so there's nothing to drop onto to change the
@@ -7774,7 +7848,7 @@
       if(m&&m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to update meeting time','err'); }
+    }catch(e){ toast('Could not update the meeting time: '+((e&&e.message)||e),'err'); }
   };
 
   /* ---- shell / entry point ---- */
@@ -8898,10 +8972,12 @@
       if(wfIds.length){
         const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at,forwarded_at,title').in('id',wfIds);
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
-        // person/candidates/owner_from_trigger come along so the Forward button can name who the
-        // step is about to go to, rather than saying "the next person".
+        // person/candidates come along so the Forward button can name who the step is about to
+        // go to, rather than saying "the next person" - owner_from_trigger and the rest of the
+        // step DEFINITION aren't columns on this table at all (flow_steps only), so they're
+        // looked up from stepDefByFlowSeq below instead of selected here.
         let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-          .select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title')
+          .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
           .in('case_id',caseIds).order('id',{ascending:true}); }); }
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
@@ -8917,8 +8993,8 @@
            not see simply was not there, so a middle step looked like the end of the line and got
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
-        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={};
-        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only').in('flow_id',flowIds);
+        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={}, stepDefByFlowSeq={};
+        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds);
           (((r&&r.data)||[])).forEach(function(s){
             if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
             if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
@@ -8926,6 +9002,10 @@
             // DEFINITION for the same reason the bounds are: an instance's own rows may not be
             // readable, and guessing wrong here would offer the wrong buttons entirely.
             if(s.confirm_only) confirmOnly[s.flow_id+':'+s.seq]=true;
+            // owner_from_trigger/owner_emails/etc. live only on the DEFINITION, never on the
+            // instance's own flow_case_steps row - kept here, keyed by flow+seq, so nextWho below
+            // can be worked out without selecting those columns off a table that doesn't have them.
+            stepDefByFlowSeq[s.flow_id+':'+s.seq]=s;
           }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
@@ -8972,7 +9052,10 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
+          // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
+          const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -9716,7 +9799,7 @@
     if(pv==='__new'){
       const nm=($('etNewProj').value||'').trim(); if(!nm){toast('Enter a tag name','err');return;}
       const depts=myDepts();
-      try{ const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; INS_STAGE.project=pj.id; INS_STAGE.projectLabel=nm; }catch(e){ toast('Failed to create tag','err'); return; }
+      try{ const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; INS_STAGE.project=pj.id; INS_STAGE.projectLabel=nm; }catch(e){ toast('Could not create the tag: '+((e&&e.message)||e),'err'); return; }
     } else { INS_STAGE.project=pv?Number(pv):null; INS_STAGE.projectLabel=pv?(window._etProjLabel||''):''; }
     updateInsProjBtn(); accInsToggleX(); closeModal(); const t=$('insInput'); if(t)t.focus();
   };
@@ -9743,7 +9826,7 @@
     const pv=$('etProj').value;
     if(pv==='__new'){
       const nm=($('etNewProj').value||'').trim(); if(!nm){toast('Enter a tag name','err');return;}
-      try{ const depts=myDepts(); const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; SELF_INS_STAGE.project=pj.id; SELF_INS_STAGE.projectLabel=nm; }catch(e){ toast('Failed to create tag','err'); return; }
+      try{ const depts=myDepts(); const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; SELF_INS_STAGE.project=pj.id; SELF_INS_STAGE.projectLabel=nm; }catch(e){ toast('Could not create the tag: '+((e&&e.message)||e),'err'); return; }
     } else { SELF_INS_STAGE.project=pv?Number(pv):null; SELF_INS_STAGE.projectLabel=pv?(window._etProjLabel||''):''; }
     updateSelfInsProjBtn(); accSelfInsToggleX(); closeModal(); const t=$('selfInsInput'); if(t)t.focus();
   };
@@ -9925,7 +10008,7 @@
         ACC().from('task_rank').upsert({task_id:draggedId,viewer_email:my,rank:bi},{onConflict:'task_id,viewer_email'}),
         ACC().from('task_rank').upsert({task_id:targetId,viewer_email:my,rank:ai},{onConflict:'task_id,viewer_email'})
       ]);
-    }catch(e){ toast('Failed to reorder','err'); }
+    }catch(e){ toast('Could not reorder: '+((e&&e.message)||e),'err'); }
     tasksScreen();
   }
   function wireSwapDrag(col,fullOrderIds){
@@ -10123,7 +10206,7 @@
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');
         renderPage();
-      }catch(e){ toast('Failed','err'); }
+      }catch(e){ toast('Could not delete the attachment: '+((e&&e.message)||e),'err'); }
     });
   };
   function subRow(s){ return `<div class="tp-sub-item" data-id="${s.id}"><i class="fa-solid fa-grip-vertical grip"></i><input type="checkbox" ${s.done?'checked':''} onchange="accSubToggle(${s.id},this.checked)" style="width:17px;height:17px"><div style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--slate)':''}">${esc2(s.title)}</div><button class="ac-btn ic danger" style="height:28px;width:28px" onclick="accSubDel(${s.id})"><i class="fa-solid fa-trash"></i></button></div>`; }
@@ -10133,7 +10216,7 @@
   window.accSubtasksToggle=function(){ const c=$('subCard'); if(!c)return; const show=c.style.display==='none'; c.style.display=show?'block':'none'; if(show){const i=$('stTitle'); if(i)i.focus();} };
   window.accSubCancel=function(){ const i=$('stTitle'); if(i)i.value=''; };
   window.accSubAdd=async function(tid){ const i=$('stTitle'); const title=(i&&i.value||'').trim(); if(!title){toast('Type a sub-task title','err');return;} try{const {data:mx}=await ACC().from('ptask_subtasks').select('order_index').eq('task_id',tid).order('order_index',{ascending:false}).limit(1);const nx=(mx&&mx[0]?mx[0].order_index+1:0);const firstSub=!(mx&&mx.length);await ACC().from('ptask_subtasks').insert({task_id:tid,title,order_index:nx});if(firstSub)await sysMsg(tid,'added the first sub-task');await recalc(tid);renderPage();}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} };
-  window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Failed','err');} };
+  window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Could not update the sub-task: '+((e&&e.message)||e),'err');} };
   window.accSubDel=function(sid){ accConfirm('Delete this sub-task?', async function(){ try{const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();await ACC().from('ptask_subtasks').delete().eq('id',sid);if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){} }); };
   async function recalc(tid){
     const {data:subs}=await ACC().from('ptask_subtasks').select('done').eq('task_id',tid);
@@ -10174,7 +10257,7 @@
     if(val==='__new'){ if(n){n.style.display='block';n.focus();} }
     else { if(n){n.style.display='none';n.value='';} window._etProjLabel=val?(el.querySelector('.ms-nm').textContent.trim()):''; }
   };
-  window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Failed','err');} }); };
+  window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Could not reopen the task: '+((e&&e.message)||e),'err');} }); };
   window.accRevert=function(tid){
     if(!(window._tp&&window._tp.amMember)){toast('Only someone assigned to this task can revert it','err');return;}
     accConfirm('Revert this task back to Pending? It leaves Awaiting Approval and returns to your active tasks — and the task owner\'s "Assigned by Me" list.', async function(){
@@ -10226,7 +10309,7 @@
       await ACC().from('ptask_comments').insert({task_id:tid,body:body||null,attach_path:attachPath,attach_name:attachName});
       if(i)i.value=''; accChatClearFile();
       renderPage();
-    }catch(e){toast('Failed','err');}
+    }catch(e){toast('Could not post your update: '+((e&&e.message)||e),'err');}
   };
   window.accDueHistory=function(tid){ const h=(window._tp&&window._tp.dueHist)||[]; openModal(`<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> Due date history</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,560px)">${h.length?h.map(a=>`<div style="padding:8px 0;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--body)">${esc2(a.detail||'')}<span style="float:right;color:var(--slate)">${fmtDateY(a.created_at)}</span></div>`).join(''):'<div class="ac-empty" style="cursor:default;border:0">No due-date changes</div>'}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Close</button></div>`,'md'); };
   window.accEditDesc=async function(tid){ const {data:t}=await ACC().from('ptasks').select('description').eq('id',tid).single(); openModal(`<div class="modal-head"><h3><i class="fa-solid fa-align-left"></i> Description</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(80vw,680px)"><textarea class="ac-in" id="edDesc" style="min-height:300px" placeholder="Describe the task…">${esc2((t&&t.description)||'')}</textarea></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDescSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg'); };
@@ -10234,7 +10317,7 @@
   // a plain-text excerpt of the new description, not just that a Save button was clicked.
   window.accEditDescSave=async function(tid){ try{const val=$('edDesc').value||null;await ACC().from('ptasks').update({description:val}).eq('id',tid);await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'Description updated'});await sysMsg(tid,'updated the description');
     try{ const excerpt=val?String(val).replace(/\s+/g,' ').trim():''; usageQueue('tasks.tasks.edit_task_description','update',excerpt?{description:(excerpt.length>140?excerpt.slice(0,140)+'…':excerpt)}:null); }catch(_e){}
-    closeModal();renderPage();}catch(e){toast('Failed','err');} };
+    closeModal();toast('Description saved','ok');renderPage();}catch(e){toast('Could not save the description: '+((e&&e.message)||e),'err');} };
   window.accEditTitle=async function(tid){
     const {data:t}=await ACC().from('ptasks').select('title').eq('id',tid).single();
     openModal(`<div class="modal-head"><h3>Rename task</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)"><input class="ac-in" id="rnTitle" value="${esc2((t&&t.title)||'')}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditTitleSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
@@ -10250,8 +10333,8 @@
         await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'renamed to "'+v+'"'}); await sysMsg(tid,'renamed to "'+v+'"');
         try{ usageQueue('tasks.tasks.edit_task_title','update',{title:v}); }catch(_e){}
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Task renamed','ok'); renderPage();
+    }catch(e){toast('Could not rename the task: '+((e&&e.message)||e),'err');}
   };
   let DP_EDIT=null;   // the rule the modal is holding, read back by accEditDueSave
   window.accEditDue=async function(tid){
@@ -10282,8 +10365,8 @@
         try{ usageQueue('tasks.tasks.edit_task_due_date','update',{due_date:due||'cleared'}); }catch(_e){}
         if(due){ const _d=parseD(due), _t=new Date(); _t.setHours(0,0,0,0); if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); toast('Task is due \u2014 members notified by email','ok'); }catch(_e){} } }
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Due date saved','ok'); renderPage();
+    }catch(e){toast('Could not update the due date: '+((e&&e.message)||e),'err');}
   };
   window.accEditProject=async function(tid){
     const [tR,pR]=await Promise.all([ACC().from('ptasks').select('project_id').eq('id',tid).single(),ACC().from('projects').select('id,name,department,created_by,owner').order('name')]);
@@ -10313,14 +10396,14 @@
         // report can group and filter by it.
         try{ usageQueue('tasks.tasks.edit_task_project','update',{project:newProjName||'(removed)'}, newProjName||undefined); }catch(_e){}
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Tag saved','ok'); renderPage();
+    }catch(e){toast('Could not update the tag: '+((e&&e.message)||e),'err');}
   };
   window.accEditMembers=async function(tid){ const [list,aR]=await Promise.all([people(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]); const {data:t}=await ACC().from('ptasks').select('delegator').eq('id',tid).single(); const others=list.filter(p=>!eq(p.email,(t&&t.delegator)||me())); const cur=(aR.data||[]).map(r=>r.email);
     openModal(`<div class="modal-head"><h3>Members <span style="font-size:12px;color:#94a3b8;font-weight:400">(owner cannot be a member)</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden">${msWidget('emMembers',others,cur)}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditMembersSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md'); };
   // usageQueue logged only when parts is non-empty (a real add/remove happened), after the actual
   // change, rather than through USAGE_MAP - captures who was added/removed, not just a click.
-  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Failed','err');} };
+  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
   window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
