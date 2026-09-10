@@ -502,9 +502,14 @@ window.notifMarkAllGeneralRead=async function(){
   // acc.notif_dismissed_tasks shows that link has never been clicked once, so the feature read 0
   // uses while thousands of notifications were being cleared here. .select() is what makes the
   // count knowable; with nothing unread the click is a no-op and is not counted.
+  // Counted BEFORE the update, with a plain select, rather than from what the update returns:
+  // an update's returning rows depend on the row-level policy still matching the row after the
+  // change, and read:true is exactly what changed. A count taken first cannot be caught by that.
   let n=0;
-  try{const {data}=await sb.schema('acc').from('notifications').update({read:true}).eq('recipient',state.email).eq('read',false).select('id');n=(data||[]).length;}catch(e){}
-  if(n){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:n+' notification'+(n>1?'s':'')}); }catch(_e){} }
+  try{const {data:un}=await sb.schema('acc').from('notifications').select('id').eq('recipient',state.email).eq('read',false);n=(un||[]).length;}catch(e){}
+  let ok=false;
+  try{const {error}=await sb.schema('acc').from('notifications').update({read:true}).eq('recipient',state.email).eq('read',false);ok=!error;}catch(e){}
+  if(n&&ok){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:n+' notification'+(n>1?'s':'')}); }catch(_e){} }
   await renderNotifDropdown();refreshNotifState();
 };
 function notifIsHighlight(t){
