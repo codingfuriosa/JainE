@@ -4133,50 +4133,45 @@
   const WF_SMALL=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'];
   const wfCountWord=function(n){ return WF_SMALL[n]||String(n); };
 
-  /* THE ALLOTTEES' OWN PARAGRAPH, which is the one place the agreement's shape depends on the
-     data rather than the template: one allottee or three, each with a father, a PAN, an Aadhaar,
-     an age and an address of their own, joined by AND the way the executed copy does it. */
-  function wfAgAllottees(res){
+  /* THE ALLOTTEE'S OWN PARAGRAPH - the one place the agreement's wording depends on the data.
+
+     THE FIRST APPLICANT AND NOBODY ELSE. It used to run every allottee, joined by AND, the way
+     the executed specimen does for a joint booking. That is wrong here: a second applicant's
+     particulars are not on the booking form to be had, so the paragraph filled up with rules for
+     a person who may not even be party to the deed. One applicant; a joint booking is added by
+     hand by whoever settles the draft.
+
+     S/O, D/O, W/O, C/O ALL APPEAR, because the form does not say which applies and a deed has to
+     be right about a person's relation to the name beside it. Whoever completes the draft strikes
+     out the three that do not. */
+  function wfAgAllottee(res){
     const f=res.fields||{}, LT=res.letter||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
       return (!t||t==='NIL')?'':t; };
-    /* allottees_detail carries each person's own father, PAN, date of birth, occupation and
-       address; letter.allottees carries only the names. Prefer the detailed list - a second
-       allottee's particulars are their own, not the first applicant's. */
     const detail=Array.isArray(res.allottees_detail)?res.allottees_detail:[];
-    const people=detail.length ? detail
-      : ((Array.isArray(LT.allottees)&&LT.allottees.length)
-          ? LT.allottees : [{salutation:null, name:v('customer_name')}]);
-    const home=(Array.isArray(LT.address)?LT.address:[]).join(', ').replace(/\s+/g,' ').trim();
+    const p=detail[0] || (Array.isArray(LT.allottees)&&LT.allottees[0])
+      || {salutation:null, name:v('customer_name')};
     /* A BLANK HAS TO BE VISIBLE. Spaces would leave the sentence looking complete and quietly
        wrong - "S/O , PAN No. ," reads as a mistake, not as something waiting to be written. An
-       underscored rule reads as what it is: a line for a person to fill in by hand. */
+       underscored rule reads as what it is: a line to fill in by hand. */
     const blank=function(n){ return new Array((n||18)+1).join('_'); };
-    return people.map(function(p,i){
-      const sal=salutation(p&&p.salutation)||'';
-      const name=nameCase((p&&p.name)||'')||blank(24);
-      /* Each person's own particulars where the form states them, falling back to the booking
-         form's headline fields for the first applicant only. Anything the form does not state
-         is a rule, never another person's value.
-
-         The Aadhaar is always a rule: the reader compares id numbers and discards them rather
-         than storing them, and an agreement is not a reason to change that. */
-      const first=(i===0);
-      const own=function(k,fb){ const t=String((p&&p[k])||'').trim();
-        return t||((first&&fb)?fb:''); };
-      const father=own('father_name')?nameCase(own('father_name')):blank(22);
-      const pan=own('pan',v('customer_pan'))||blank(12);
-      const aadhaar=blank(16);
-      const age=wfAgeFrom(own('dob',v('customer_dob')));
-      const occ=own('occupation')?nameCase(own('occupation')):blank(12);
-      const mine=(Array.isArray(p&&p.address_lines)?p.address_lines:[])
-        .join(', ').replace(/\s+/g,' ').trim();
-      return (sal?(sal+' '):'')+name+' S/O '+father
-        +', PAN No. '+pan+', Aadhaar No. '+aadhaar
-        +', by caste –, Occupation - '+occ
-        +', aged about '+(age?String(age):blank(4))+' years, residing at '
-        +(mine||(first?home:'')||blank(40));
-    }).join('\n AND\n');
+    const own=function(k,fb){ const t=String((p&&p[k])||'').trim(); return t||fb||''; };
+    const sal=salutation(p&&p.salutation)||'';
+    const name=nameCase(own('name',v('customer_name')))||blank(24);
+    const father=own('father_name',v('father_name'));
+    const pan=own('pan',v('customer_pan'))||blank(12);
+    /* The Aadhaar is always a rule: the reader compares id numbers and discards them rather than
+       storing them, and an agreement is not a reason to change that. */
+    const aadhaar=blank(16);
+    const age=wfAgeFrom(own('dob',v('customer_dob')));
+    const occ=own('occupation',v('occupation'));
+    const home=((Array.isArray(p&&p.address_lines)&&p.address_lines.length)
+      ? p.address_lines : (Array.isArray(LT.address)?LT.address:[]))
+      .join(', ').replace(/\s+/g,' ').trim();
+    return (sal?(sal+' '):'')+name+' S/O, D/O, W/O, C/O '+(father?nameCase(father):blank(22))
+      +', PAN No. '+pan+', Aadhaar No. '+aadhaar
+      +', by caste \u2013, Occupation - '+(occ?nameCase(occ):blank(12))
+      +', aged about '+(age?String(age):blank(4))+' years, residing at '+(home||blank(40));
   }
 
   /* Every token the template can carry, worked out once. A token with nothing behind it becomes a
@@ -4189,13 +4184,19 @@
     const park=res.parking||{};
     const kind=String((park.marked&&park.marked.value)||'').toUpperCase();
     const rows=Array.isArray(park.rows)?park.rows:[];
-    /* How many car parks. The cost sheet writes it into the row's own label - "1-Covered Car
-       Parking", "2 Covered Car Parking" - so it is read from there and falls back to one row,
-       one park. Two is rare but does happen, and the agreement states the number twice. */
+    /* HOW MANY CAR PARKS, counted from the LABELS AND NOT BY ADDING THE ROWS UP.
+
+       The reader reports a parking row per cost sheet, and a booking has two sheets - the net
+       column and the gross column - so the same single car park appears twice. Added up, one
+       covered park became "2 (Two) Covered parking", which the agreement then states twice.
+
+       The count is in the label the sheet prints: "1-Covered Car Parking". So each row is read
+       for its own number and the LARGEST is taken, which is the same figure whether the file
+       carries one sheet or four. A row with no number in its label counts as one park. */
     let count=0;
     rows.forEach(function(r){
       const m=String((r&&r.label)||'').match(/(\d+)\s*[-\s]?\s*(?:nos?\.?\s*)?(?:covered|open|car)/i);
-      count+=m?Number(m[1]):1;
+      count=Math.max(count, m?Number(m[1]):1);
     });
     if(!count && kind) count=1;
     const areas=res.unit_areas||{};
@@ -4207,7 +4208,7 @@
     return {
       exec_day:rule(6), exec_month:rule(14), exec_year:String(today.getFullYear()),
       exec_place:rule(16),
-      ALLOTTEES:wfAgAllottees(res),
+      ALLOTTEES:wfAgAllottee(res),
       flat:v('flat')||rule(8), block:v('block')||rule(6),
       floor_ord:floorNo?ordinal(floorNo):rule(6),
       park_count:count?String(count):rule(3),
