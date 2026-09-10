@@ -3764,17 +3764,25 @@
      The letter Post Sales sends a customer once their booking is in. Same source as the check
      list - the stored reading of their own documents - so the two can never disagree about who
      bought what, and the same on-demand loading, so it builds from the local copy too. */
-  const JG_LOGO='assets/brand/jaingroup-logo.js';
-  async function jgLogo(){
-    if(!window.JG_LOGO_B64){
+  /* Two marks, and they are not interchangeable. The customer letters carry the CURRENT logo
+     ("Caring For Your Dreams"); the check list carries the CLASSIC one that is printed on the form
+     itself ("Your Dream. Our Commitment."), lifted out of the blank so the sheet looks like the
+     sheet it replaces. Both are loaded on demand and only when a document is actually built. */
+  const JG_LOGOS={
+    current: {src:'assets/brand/jaingroup-logo.js',         key:'JG_LOGO_B64'},
+    classic: {src:'assets/brand/jaingroup-logo-classic.js', key:'JG_LOGO_CLASSIC_B64'}
+  };
+  async function jgLogo(which){
+    const L=JG_LOGOS[which||'current'];
+    if(!window[L.key]){
       await new Promise(function(res,rej){
         const sc=document.createElement('script');
-        sc.src=JG_LOGO; sc.onload=res;
+        sc.src=L.src; sc.onload=res;
         sc.onerror=function(){ rej(new Error('the letterhead logo could not be loaded')); };
         document.head.appendChild(sc);
       });
     }
-    const b=window.JG_LOGO_B64;
+    const b=window[L.key];
     if(!b) throw new Error('the letterhead logo loaded but was empty');
     const bin=atob(b), out=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
@@ -4251,8 +4259,13 @@
     const said=function(t){ const x=String(t==null?'':t).trim();
       return (x && x!=='NIL' && !/^--.*--$/.test(x)) ? x : ''; };
 
-    // No letterhead drawn: this prints on the company's own paper, which needs the top left clear.
-    let y=H-112;
+    /* The mark the form itself carries, top left, at the size and place the printed blank put it:
+       109.5 x 131.25 points against the left margin. This one is an internal sheet, so it prints
+       its own letterhead rather than assuming company paper the way the letters do. */
+    const logo=await doc.embedJpg(await jgLogo('classic'));
+    const lw=109.5, lh=131.25, logoTop=H-52;
+    page.drawImage(logo,{x:M,y:logoTop-lh,width:lw,height:lh});
+    let y=logoTop-lh-26;
 
     (function(){
       const lab='Date  :  ', val=dots((res.header&&res.header.date)||'')||'\u2014';
