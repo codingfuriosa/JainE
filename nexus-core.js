@@ -209,18 +209,33 @@ async function boot(){
   startSessionGuard();
   promptSetPassword();
 }
-// A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
-// so the existing CSS just works, but with a single nav item, no search box, and a sign-out-only
-// profile menu instead of the full staff renderShell()/effectiveNav() (which reads adm.users data
-// a customer session never fetches — see the customer-detection block in boot() above).
-function renderCustomerShell(){
+// The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
+// with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
+// now, one item per section; .sb-nav is already flex:1+overflow-y:auto (same as the staff nav with
+// its own long lists), so this scrolls for free with no CSS changes.
+const CUST_TABS=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+function custSidebarTabs(ti){
   const nav=$('sbNav');
-  if(nav){
-    nav.innerHTML='';
-    nav.appendChild(el('div','sb-group','Portal'));
-    const a=el('a','sb-item active','<i class="fa-solid fa-user-tie"></i> Customer Portal');
-    a.href='customer.html';nav.appendChild(a);
-  }
+  if(!nav)return;
+  nav.innerHTML='';
+  nav.appendChild(el('div','sb-group','Customer Portal'));
+  CUST_TABS.forEach(function(t,i){
+    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> '+t);
+    a.href='javascript:void(0)';
+    a.onclick=function(){navTo('customer/'+i);};
+    nav.appendChild(a);
+  });
+  // Same "tap a nav item, close the mobile drawer" behavior renderShell() wires up for staff pages
+  // (nexus-core.js:432) - this sidebar is rebuilt fresh on every render so it needs its own copy.
+  nav.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
+}
+// A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
+// so the existing CSS just works, but with the section list instead of a search box, and a
+// sign-out-only profile menu instead of the full staff renderShell()/effectiveNav() (which reads
+// adm.users data a customer session never fetches — see the customer-detection block in boot() above).
+function renderCustomerShell(){
+  custSidebarTabs(0);
   // During impersonation, show the CUSTOMER's identity throughout (matching the "viewing as X"
   // banner in VIEWS.customer) rather than the staff member's own — seeing your own email here while
   // the banner says you're previewing someone else read as a bug, even though it wasn't one: the
@@ -246,6 +261,10 @@ function renderCustomerShell(){
   }
   const nb=$('notifBtn');if(nb)nb.style.display='none';
   const gsBox=$('globalSearch');if(gsBox){const box=gsBox.closest('.search-box');if(box)box.style.display='none';}
+  // .search-box normally carries margin-left:auto, which is what pushes .topbar-actions to the
+  // right edge - hiding it here removes that spacer, leaving the profile avatar sitting right next
+  // to the breadcrumb instead of in the corner. Put the same push directly on topbar-actions.
+  const ta=document.querySelector('.topbar-actions');if(ta)ta.style.marginLeft='auto';
   const hb=$('hamburger');if(hb)hb.onclick=function(e){e.stopPropagation();document.body.classList.toggle('nav-open');};
   const bd=$('sbBackdrop');if(bd)bd.onclick=function(){document.body.classList.remove('nav-open');};
 }
@@ -636,10 +655,11 @@ function route(){renderPage();}
 window.addEventListener('hashchange',renderPage);
 // Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
 // tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
-// otherwise a page with enough tabs to overflow (e.g. the 13-tab customer portal) leaves the active
-// one wherever the row was last scrolled to, sometimes off-screen with no visual sign which tab is
-// actually selected. Runs off a MutationObserver rather than only at navigation time because several
-// views replace just their own tab row's innerHTML after loading data, not the whole page.
+// otherwise a page with enough tabs to overflow (e.g. Campaign Analytics' source/period sub-tabs)
+// leaves the active one wherever the row was last scrolled to, sometimes off-screen with no visual
+// sign which tab is actually selected. Runs off a MutationObserver rather than only at navigation
+// time because several views replace just their own tab row's innerHTML after loading data, not the
+// whole page. (Customer Portal's sections moved to the sidebar and no longer use this row at all.)
 (function(){
   const viewEl=document.getElementById('view');
   if(!viewEl)return;
@@ -12490,17 +12510,29 @@ function cpaParseSalesDetails(wb){
       totalBasic:Number(get('Total Basic')||0),totalTax:Number(get('Total Tax')||0),costItems:[]};
     const seen={};
     for(let c=totalBasicCol+2;c<headers.length;c++){
-      const metric=headers[c];
-      if(metric!=='Basic  Amount'&&metric!=='Basic Amount') continue; // one Basic/Tax pair per component; skip Bill/Received/Balance/Onaccount columns
+      const metric=String(headers[c]||'').trim();
+      // Each component carries a BASIC tier and (for a few, e.g. Unit Cost) a TAX tier, each with
+      // its own Basic/Bill/Received/Balance/Onaccount Amount columns. amount/taxAmount come from
+      // the two tiers' "Basic Amount" metric; bill/received/balance/onaccount are summed GROSS
+      // across both tiers - a customer-facing statement wants what was billed/received/still-due
+      // for the whole charge line, not split by its own internal tax portion.
+      const field=metric==='Basic  Amount'||metric==='Basic Amount'?'amount'
+        :metric==='Bill Amount'?'bill':metric==='Received Amount'?'received'
+        :metric==='Balance Amount'?'balance':metric==='Onaccount Amount'?'onaccount':null;
+      if(!field) continue;
       const component=xlsxMergedLabel(ws,rows,componentRow,c);
       const basicTax=xlsxMergedLabel(ws,rows,basicTaxRow,c);
       if(!component) continue;
-      const key=component+'|'+basicTax; if(seen[key]) continue; seen[key]=true; // dedupes a header quirk where "Unit Cost" is labelled twice
+      const key=component+'|'+basicTax+'|'+field; if(seen[key]) continue; seen[key]=true; // dedupes a header quirk where "Unit Cost" is labelled twice
       const val=row[c]; if(val==null||val==='') continue;
       const cleanName=String(component).replace(/^\d+\.\s*/,'').trim();
       let bucket=rec.costItems.find(i=>i.component===cleanName);
-      if(!bucket){ bucket={component:cleanName,basicAmount:0,taxAmount:0}; rec.costItems.push(bucket); }
-      if(basicTax==='BASIC') bucket.basicAmount=Number(val); else bucket.taxAmount=Number(val);
+      if(!bucket){ bucket={component:cleanName,basicAmount:0,taxAmount:0,billAmount:0,receivedAmount:0,balanceAmount:0,onaccountAmount:0}; rec.costItems.push(bucket); }
+      if(field==='amount'){ if(basicTax==='BASIC') bucket.basicAmount=Number(val); else bucket.taxAmount=Number(val); }
+      else if(field==='bill') bucket.billAmount+=Number(val);
+      else if(field==='received') bucket.receivedAmount+=Number(val);
+      else if(field==='balance') bucket.balanceAmount+=Number(val);
+      else if(field==='onaccount') bucket.onaccountAmount+=Number(val);
     }
     out.push(rec);
   }
@@ -12740,7 +12772,9 @@ async function cpaImportConfirmXlsx(st){
 
       await sb.schema('cust').from('cost_sheet_items').update({is_current:false}).eq('unit_id',unitId).eq('is_current',true);
       if(r.costItems.length){
-        const items=r.costItems.map((ci,i)=>({unit_id:unitId,component:ci.component,amount:ci.basicAmount,tax_amount:ci.taxAmount,sort_order:i,is_current:true,import_batch_id:batchId}));
+        const items=r.costItems.map((ci,i)=>({unit_id:unitId,component:ci.component,amount:ci.basicAmount,tax_amount:ci.taxAmount,
+          bill_amount:ci.billAmount,received_amount:ci.receivedAmount,balance_amount:ci.balanceAmount,onaccount_amount:ci.onaccountAmount,
+          sort_order:i,is_current:true,import_batch_id:batchId}));
         const {error}=await sb.schema('cust').from('cost_sheet_items').insert(items); if(error)throw error;
       }
       await sb.schema('cust').from('farvision_contacts').update({is_current:false}).eq('unit_id',unitId).eq('is_current',true);
@@ -13374,24 +13408,35 @@ function custUnitPicker(units,selUnitId){
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:demand},{data:receipts},{data:snapRows}]=await Promise.all([
+  const [{data:demand},{data:receipts},{data:snapRows},{data:costItemRows}]=await Promise.all([
     sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
     sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id),
-    sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
+    sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
+    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order')
   ]);
   const snap=snapRows||null;
-  const demandRows=demand||[], receiptRows=receipts||[];
+  const demandRows=demand||[], receiptRows=receipts||[], costItems=costItemRows||[];
   const totalDemand=demandRows.reduce((s,d)=>s+Number(d.amount||0),0);
   const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.amount||0),0);
+  // A pre-possession project (no Invoice/Receipt Register import yet - that report only exists
+  // once a project starts maintenance billing) has no demand/receipt rows at all. The cost sheet
+  // from Sales Details already carries Billed/Received/Balance/Onaccount per charge line, so it
+  // stands in as the statement's numbers until a real demand/receipt import exists.
+  const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
+  const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
+  const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
+  const useCostSheet=!demandRows.length&&!receiptRows.length&&costItems.length>0;
   // The snapshot (Farvision's own Outstanding Summary) is authoritative when we have one - it
   // accounts for On Account and Late Payment Fee, which a plain demand-minus-receipts sum can't.
   // Falls back to the computed figure for a unit that hasn't had an Outstanding import yet.
   const propertyValue=snap?Number(snap.total_consideration||0):Number(unit.agreement_value||0);
-  const billOutstanding=snap?Number(snap.bill_outstanding||0):Math.max(0,totalDemand-totalReceived);
+  const totalReceivedFinal=useCostSheet?csiReceived:totalReceived;
+  const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalDemand-totalReceived));
   const netOutstanding=snap?Number(snap.net_outstanding||0):billOutstanding;
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
-  const remaining=Math.max(0,propertyValue-totalReceived);
-  const paidPct=propertyValue?Math.round(totalReceived/propertyValue*100):(totalDemand?Math.round(totalReceived/totalDemand*100):0);
+  const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
+  const remaining=Math.max(0,propertyValue-totalReceivedFinal);
+  const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalDemand?Math.round(totalReceivedFinal/totalDemand*100):0);
 
   // "Demand due" banner: the most recently raised bill still outstanding, if any.
   const nextDemand=demandRows.slice().sort((a,b)=>new Date(b.demand_date||0)-new Date(a.demand_date||0))[0];
@@ -13408,9 +13453,9 @@ async function custTabOverview(data,unit){
 
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
-    ['Paid to date',custInr(totalReceived),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
+    ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
     ['Demand due',custInr(billOutstanding),nextDemand?esc(nextDemand.milestone||nextDemand.revenue_head||''):'—',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':'incl. handover']
+    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'incl. handover')]
   ];
 
   const entries=[].concat(demandRows.map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone||d.revenue_head,amount:Number(d.amount||0)})))
@@ -13422,12 +13467,23 @@ async function custTabOverview(data,unit){
   const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
     esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—',custInr(e.balance)]);
 
-  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived,billOutstanding,remaining,paidPct,c};
+  // Until a real Invoice/Receipt Register import exists for this project, the cost sheet from
+  // Sales Details is the only per-charge breakdown available - shown as its own section rather
+  // than folded into "Recent transactions" above, since it has no dates, only running totals.
+  const costSheetRows=costItems.map(i=>[esc(i.component),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
+    custInr(i.bill_amount||0),custInr(i.received_amount||0),
+    Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
+  const costSheetSection=costItems.length?
+    '<div class="sec-title" style="margin:22px 0 8px">Charges &amp; payments</div>'+
+    mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
+
+  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
   return dueBanner+mKpis(kpis)+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
+    costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
@@ -13935,21 +13991,23 @@ window.custModReqDecide=async function(id,decision){
 };
 VIEWS.customer=async function(v,seg){
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const tabs=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+  const tabs=CUST_TABS;
   const ti=mTab(seg,tabs.length);
-  // Names the active tab in the breadcrumb too - with 13 tabs in a horizontally-scrolling row,
-  // the active one isn't always visible in the row itself, so this is the one place that always
-  // says which section you're actually looking at.
+  // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
+  // whichever section is actually showing, including a same-page link like the Statement tab's
+  // "View full ledger" jumping straight to navTo('customer/1').
+  custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
-  // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
-  // WHO it's a preview of, or the empty state and the profile menu tell two different stories.
+  // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
+  // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
+  // customer's own real session said nothing they don't already know from the profile menu, so it's
+  // gone (hoisted above the no-units early-return too, same reasoning as before).
   const banner=state.impersonating?
-    `<div class="card card-pad" style="background:#fffbeb;border-color:#f0dfa8;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-eye"></i> Staff preview — viewing the portal as <b>${esc((state.customer&&state.customer.full_name)||'this customer')}</b>. Read-only monitoring; this is not their real session. <a href="custportal-admin.html" style="margin-left:8px;font-weight:600">Exit preview</a></div>`:
-    `<div class="card card-pad" style="background:#eff4ff;border-color:#cfe0ef;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-user"></i> Signed in as <b>${esc(state.email||'')}</b>. You see only your own unit(s) and documents.</div>`;
+    `<div class="card card-pad" style="background:#fffbeb;border-color:#f0dfa8;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-eye"></i> Staff preview — viewing the portal as <b>${esc((state.customer&&state.customer.full_name)||'this customer')}</b>. Read-only monitoring; this is not their real session. <a href="custportal-admin.html" style="margin-left:8px;font-weight:600">Exit preview</a></div>`:'';
   if(!data.units.length){
-    v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+banner+
-      '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div>';
+    v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+banner+
+      '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div></div>';
     return;
   }
   if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
@@ -13968,10 +14026,10 @@ VIEWS.customer=async function(v,seg){
   else if(ti===10)body=await custTabReferrals(unit);
   else if(ti===11)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+  v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
-    mTabs('customer',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
+    '<div style="margin-top:14px">'+body+'</div></div>';
 };
 VIEWS.supplier=function(v,seg){
   setCrumb(['Stakeholder Portals','Supplier Portal']);

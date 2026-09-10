@@ -3722,6 +3722,7 @@
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfAgreement('+c.id+')" title="Download the Agreement for Sale — a draft to be checked and completed, not a final deed"><i class="fa-solid fa-file-contract"></i></button>'
       : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
       +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
@@ -4069,6 +4070,434 @@
                            by applying a rate, so a change of rate cannot make this wrong.
        Total               the gross of the same two. Equals the two lines above it, by construction.
      Every one of them comes from the cost sheet as read; none is a rate applied by JAIN-E. */
+  /* ── AGREEMENT FOR SALE ───────────────────────────────────────────────────────────────────
+     The agreement is the only one of these documents that is a CONTRACT, so it is built
+     differently from the check list and the two letters.
+
+     Its words are not written here. assets/forms/agreement-gurukul.js carries the executed Dream
+     Gurukul agreement verbatim - thirty pages of it - with a {{token}} at each of the nineteen
+     places a customer's own particulars belong. This file only typesets that and fills the
+     tokens. Nothing about the obligations can be changed by anything in here, which is the point:
+     a generator that could rephrase a clause would be a liability.
+
+     One project, one template. The recitals differ project by project - the land, the development
+     agreement, the sanction, the RERA number - so Ananta and the rest each need their own file
+     rather than a switch inside this one. Asked for a project with no template, it says so
+     instead of quietly serving Gurukul's terms for a flat in Joka.
+
+     WHAT IS LEFT BLANK, AND WHY. A blank on a draft contract is a line for someone to complete;
+     a wrong value is a term of sale nobody agreed. So anything the documents do not state prints
+     as a rule to be filled in by hand, and the covering note names them. */
+  /* EVERY BOOKING USES THE DREAM GURUKUL TEMPLATE FOR NOW, whichever project it is for. That is
+     deliberate and temporary: it is the only agreement supplied so far, and a draft on the wrong
+     recitals is more use to the person checking it than no draft at all. The recitals really do
+     differ project by project - the land, the development agreement, the sanction, the RERA
+     number - so a draft for another project has to be read against that project's own terms
+     before it goes anywhere near a customer. The download says which template was used when it
+     is not the booking's own project, so nobody has to remember.
+
+     TEMPLATES is keyed by project so adding the next one is a line here and a file beside it;
+     FALLBACK is what makes today's behaviour temporary rather than baked in. */
+  const AG_TEMPLATES={'Dream Gurukul':{src:'assets/forms/agreement-gurukul.js', key:'AGREEMENT_GURUKUL'}};
+  const AG_FALLBACK='Dream Gurukul';
+  async function wfAgTemplate(project){
+    const T=AG_TEMPLATES[project]||AG_TEMPLATES[AG_FALLBACK];
+    if(!T) throw new Error('no agreement template is available');
+    if(!window[T.key]){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=T.src; sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the agreement template could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const t=window[T.key];
+    if(!t||!Array.isArray(t.blocks)) throw new Error('the agreement template loaded but was empty');
+    return t;
+  }
+
+  /* An age in completed years on today's date, from a date of birth written dd/mm/yyyy. The
+     agreement says "aged about N years" and N has to be the age now, not at booking. */
+  function wfAgeFrom(dob){
+    const m=String(dob==null?'':dob).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if(!m) return null;
+    const b=new Date(+m[3], +m[2]-1, +m[1]);
+    if(isNaN(b)) return null;
+    const now=new Date();
+    let a=now.getFullYear()-b.getFullYear();
+    const before=(now.getMonth()<b.getMonth())
+      || (now.getMonth()===b.getMonth() && now.getDate()<b.getDate());
+    if(before) a--;
+    return (a>0 && a<120) ? a : null;
+  }
+  const WF_SMALL=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'];
+  const wfCountWord=function(n){ return WF_SMALL[n]||String(n); };
+
+  /* THE ALLOTTEES' OWN PARAGRAPH, which is the one place the agreement's shape depends on the
+     data rather than the template: one allottee or three, each with a father, a PAN, an Aadhaar,
+     an age and an address of their own, joined by AND the way the executed copy does it. */
+  function wfAgAllottees(res){
+    const f=res.fields||{}, LT=res.letter||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    /* allottees_detail carries each person's own father, PAN, date of birth, occupation and
+       address; letter.allottees carries only the names. Prefer the detailed list - a second
+       allottee's particulars are their own, not the first applicant's. */
+    const detail=Array.isArray(res.allottees_detail)?res.allottees_detail:[];
+    const people=detail.length ? detail
+      : ((Array.isArray(LT.allottees)&&LT.allottees.length)
+          ? LT.allottees : [{salutation:null, name:v('customer_name')}]);
+    const home=(Array.isArray(LT.address)?LT.address:[]).join(', ').replace(/\s+/g,' ').trim();
+    /* A BLANK HAS TO BE VISIBLE. Spaces would leave the sentence looking complete and quietly
+       wrong - "S/O , PAN No. ," reads as a mistake, not as something waiting to be written. An
+       underscored rule reads as what it is: a line for a person to fill in by hand. */
+    const blank=function(n){ return new Array((n||18)+1).join('_'); };
+    return people.map(function(p,i){
+      const sal=salutation(p&&p.salutation)||'';
+      const name=nameCase((p&&p.name)||'')||blank(24);
+      /* Each person's own particulars where the form states them, falling back to the booking
+         form's headline fields for the first applicant only. Anything the form does not state
+         is a rule, never another person's value.
+
+         The Aadhaar is always a rule: the reader compares id numbers and discards them rather
+         than storing them, and an agreement is not a reason to change that. */
+      const first=(i===0);
+      const own=function(k,fb){ const t=String((p&&p[k])||'').trim();
+        return t||((first&&fb)?fb:''); };
+      const father=own('father_name')?nameCase(own('father_name')):blank(22);
+      const pan=own('pan',v('customer_pan'))||blank(12);
+      const aadhaar=blank(16);
+      const age=wfAgeFrom(own('dob',v('customer_dob')));
+      const occ=own('occupation')?nameCase(own('occupation')):blank(12);
+      const mine=(Array.isArray(p&&p.address_lines)?p.address_lines:[])
+        .join(', ').replace(/\s+/g,' ').trim();
+      return (sal?(sal+' '):'')+name+' S/O '+father
+        +', PAN No. '+pan+', Aadhaar No. '+aadhaar
+        +', by caste –, Occupation - '+occ
+        +', aged about '+(age?String(age):blank(4))+' years, residing at '
+        +(mine||(first?home:'')||blank(40));
+    }).join('\n AND\n');
+  }
+
+  /* Every token the template can carry, worked out once. A token with nothing behind it becomes a
+     rule of the right length rather than an empty gap or, worse, a plausible guess. */
+  function wfAgValues(res){
+    const f=res.fields||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const rule=function(n){ return new Array((n||14)+1).join('_'); };
+    const park=res.parking||{};
+    const kind=String((park.marked&&park.marked.value)||'').toUpperCase();
+    const rows=Array.isArray(park.rows)?park.rows:[];
+    /* How many car parks. The cost sheet writes it into the row's own label - "1-Covered Car
+       Parking", "2 Covered Car Parking" - so it is read from there and falls back to one row,
+       one park. Two is rare but does happen, and the agreement states the number twice. */
+    let count=0;
+    rows.forEach(function(r){
+      const m=String((r&&r.label)||'').match(/(\d+)\s*[-\s]?\s*(?:nos?\.?\s*)?(?:covered|open|car)/i);
+      count+=m?Number(m[1]):1;
+    });
+    if(!count && kind) count=1;
+    const areas=res.unit_areas||{};
+    const num=function(x){ const n=Number(String(x==null?'':x).replace(/[^0-9.]/g,''));
+      return isFinite(n)&&n>0?String(n):''; };
+    const floorNo=(String(v('floor')).match(/\d+/)||[''])[0];
+    const tok=((res.letter||{}).token||{}).value;
+    const today=new Date();
+    return {
+      exec_day:rule(6), exec_month:rule(14), exec_year:String(today.getFullYear()),
+      exec_place:rule(16),
+      ALLOTTEES:wfAgAllottees(res),
+      flat:v('flat')||rule(8), block:v('block')||rule(6),
+      floor_ord:floorNo?ordinal(floorNo):rule(6),
+      park_count:count?String(count):rule(3),
+      park_words:count?wfCountWord(count):rule(6),
+      park_s:(count===1?'':'s'),
+      park_kind:kind?(kind.charAt(0)+kind.slice(1).toLowerCase()):rule(8),
+      park_kind_word:kind?(kind.charAt(0)+kind.slice(1).toLowerCase()):rule(8),
+      carpet:num(areas.carpet_sqft)||rule(9),
+      balcony:num(areas.balcony_sqft)||rule(9),
+      cupboard:num(areas.cupboard_sqft)||rule(9),
+      builtup:num(areas.builtup_sqft)||rule(9),
+      sba:num(v('area_sqft'))||num(areas.sba_sqft)||rule(9),
+      application_no:v('application_no')||rule(22),
+      /* The booking amount as the agreement states it: figures and words. The words are written
+         out here rather than copied from the form, which prints them only sometimes - and an
+         agreement that says one sum in words and another in figures is a dispute waiting. */
+      token_figures:(typeof tok==='number')?wfRs2(tok):rule(12),
+      token_words:(typeof tok==='number')?('Rupees '+rupeesInWords(tok)+' only'):rule(30)
+    };
+  }
+
+  /* The three tables whose figures come from the cost sheet. Everything in them is a figure the
+     sheet prints; nothing is a rate applied here, so a change of GST cannot make the agreement
+     disagree with what the customer signed. */
+  /* Money on a contract is written to the paisa, the way the cost sheet writes it. n2 inside the
+     allotment letter does the same job, but it is a local of that function; this is the module's
+     own so the agreement does not depend on another document's internals. */
+  const wfRs2=function(v){ return (typeof v==='number'&&isFinite(v))
+    ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
+  function wfAgTables(res){
+    const SM=wfSheetMoney(res);
+    const f=res.fields||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const sheets=Array.isArray(res.cost_sheets)?res.cost_sheets:[];
+    const basis=function(b){ for(let i=0;i<sheets.length;i++)
+      if(String((sheets[i]&&sheets[i].basis)||'').toUpperCase()===b) return sheets[i]; return null; };
+    const money=function(n){ return (typeof n==='number')?(wfRs2(n)):'—'; };
+    const bhk=v('bhk')?(v('bhk').replace(/\s*BHK\s*/i,'')+' BHK'):'';
+    const areas=res.unit_areas||{};
+    const carpet=Number(String(areas.carpet_sqft==null?'':areas.carpet_sqft).replace(/[^0-9.]/g,''));
+
+    /* PART I - the unit's own price. Net, the GST on it, and the two together: the same three
+       lines the executed copy prints, and the same three the allotment letter quotes. */
+    const net=SM.net, gross=SM.gross;
+    const uNet=(net.total!==null)?net.total:((net.flat||0)+(net.parking||0));
+    const uGr =(gross.total!==null)?gross.total:((gross.flat||0)+(gross.parking||0));
+    const price=[
+      ['1.', 'Price of the Said '+(bhk||'—')+' Unit/Residential Unit'
+             +(isFinite(carpet)&&carpet>0?(' calculated on the carpet area admeasuring '+carpet+' sqft'):''),
+             money(uNet)],
+      ['2.', 'GST', (typeof uNet==='number'&&typeof uGr==='number')?wfRs2(uGr-uNet):'—'],
+      ['3.', 'Total', money(uGr)],
+    ];
+
+    /* THE EDC TABLE is whatever the cost sheet's own other-charges section lists, row for row.
+       Not a fixed list: a sheet may carry seven of them, or none, and the agreement should show
+       what this customer is actually being charged rather than a menu. */
+    const edcSheet=basis('NET')||sheets[0]||null;
+    const edcRows=[];
+    ((edcSheet&&edcSheet.line_items)||[]).forEach(function(it){
+      if(String((it&&it.kind)||'CHARGE').toUpperCase()!=='CHARGE') return;
+      if(String((it&&it.section)||'').toUpperCase()!=='OTHER') return;
+      if(typeof it.amount!=='number') return;
+      edcRows.push([String(it.label||'').trim(), wfRs2(it.amount)]);
+    });
+
+    /* THE PAYMENT PLAN comes from the cost sheet's own schedule. Each row states what the
+       instalment is FOR and what percentage it is, and the amount is the gross - which is what
+       the customer actually pays on that date. */
+    const plan=[];
+    (Array.isArray(res.payment_schedule)?res.payment_schedule:[]).forEach(function(r,i){
+      if(!r) return;
+      const pct=(r.percent===null||r.percent===undefined||r.percent==='')
+        ? (i===0?'Booking Amount':'')
+        : (String(r.percent).replace(/%$/,'')+'%');
+      const note=[pct, (r.plus_gst===false?'':'Plus GST'), (r.less_booking?'(Less Booking Amount)':'')]
+        .filter(Boolean).join(' ');
+      plan.push([String.fromCharCode(65+i), String(r.milestone||'').trim(), note,
+                 (typeof r.amount==='number')?wfRs2(r.amount):'—']);
+    });
+    if(plan.length){
+      const tot=(Array.isArray(res.payment_schedule)?res.payment_schedule:[])
+        .reduce(function(a,r){ return a+((r&&typeof r.amount==='number')?r.amount:0); },0);
+      const pctTot=(Array.isArray(res.payment_schedule)?res.payment_schedule:[])
+        .reduce(function(a,r){ const p=Number(String((r&&r.percent)||'').replace(/[^0-9.]/g,''));
+          return a+(isFinite(p)?p:0); },0);
+      plan.push(['', 'Total Price', (pctTot?(Math.round(pctTot)+'%'):''), wfRs2(tot)]);
+    }
+    return {price:price, edc:edcRows, plan:plan};
+  }
+
+  window.wfAgreement=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAgreementPdf(res); }
+    catch(e){ toast('Could not build the agreement: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* A4, thirty-odd pages, numbered. Serif, because it is a deed and every executed copy of one
+     is set in serif; justified, for the same reason. */
+  async function wfAgreementPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+    const f=res.fields||{};
+    const project=String(((f.project_name||{}).value)||'').trim();
+    const tmpl=await wfAgTemplate(project);
+    const vals=wfAgValues(res), tables=wfAgTables(res);
+
+    const doc=await L.PDFDocument.create();
+    const reg =await doc.embedFont(L.StandardFonts.TimesRoman);
+    const bold=await doc.embedFont(L.StandardFonts.TimesRomanBold);
+    const W=595.28, H=841.89, M=64, RIGHT=W-M, CW=W-2*M;
+    const ink=L.rgb(0.06,0.07,0.10), soft=L.rgb(0.35,0.38,0.44), line=L.rgb(0.72,0.75,0.80);
+    const SZ=10, LEAD=14.2;
+
+    let page=null, y=0, pageNo=0;
+    const newPage=function(){
+      if(page) foot();
+      page=doc.addPage([W,H]); pageNo++; y=H-M;
+    };
+    const foot=function(){
+      const t=String(pageNo);
+      page.drawText(t,{x:(W-reg.widthOfTextAtSize(t,9))/2,y:34,size:9,font:reg,color:soft});
+    };
+    const room=function(n){ if(y-(n||LEAD)<M+26) newPage(); };
+
+    /* Words into lines of a given width, then the line painted word by word so the spaces carry
+       the slack - which is what justified means. The last line of a paragraph is left alone. */
+    const wrap=function(text,font,size,width){
+      const out=[];
+      String(text==null?'':text).split('\n').forEach(function(para){
+        const words=para.split(/\s+/).filter(function(w){ return w!==''; });
+        if(!words.length){ out.push({words:[],last:true}); return; }
+        let cur=[];
+        words.forEach(function(w){
+          const trial=cur.concat([w]).join(' ');
+          if(cur.length && font.widthOfTextAtSize(trial,size)>width){
+            out.push({words:cur,last:false}); cur=[w];
+          } else cur.push(w);
+        });
+        out.push({words:cur,last:true});
+      });
+      return out;
+    };
+    /* A LINE IS DRAWN AS ONE STRING, never word by word.
+
+       It was justified first, placing each word at a measured offset so the line came out flush
+       on both margins. On one line of the recitals PRIVATE and LIMITED came out touching, and I
+       could not account for the two points that went missing - the width function and the drawn
+       glyphs agreed when measured directly. On a contract an unexplained gap between two words
+       of a company's legal name is not a cosmetic matter, so the mechanism that can produce one
+       is gone rather than patched. Set ragged right, the words are whatever the font says they
+       are and cannot touch. */
+    const drawLine=function(ln,x,size,font,colour){
+      if(!ln.words.length) return;
+      page.drawText(ln.words.join(' '),{x:x,y:y,size:size,font:font,color:colour});
+    };
+    const para=function(text,opt){
+      const o=opt||{};
+      const font=o.bold?bold:reg, size=o.size||SZ, lead=o.lead||LEAD;
+      const x=M+(o.indent||0), width=CW-(o.indent||0);
+      wrap(text,font,size,width).forEach(function(ln){
+        room(lead);
+        drawLine(ln,x,size,font,o.colour||ink);
+        y-=lead;
+      });
+      y-=(o.gap===undefined?6:o.gap);
+    };
+    const heading=function(text){
+      room(LEAD*2);
+      y-=6;
+      const t=String(text||'').trim();
+      const w=bold.widthOfTextAtSize(t,10.5);
+      page.drawText(t,{x:M+(CW-w)/2,y:y,size:10.5,font:bold,color:ink});
+      y-=LEAD+4;
+    };
+
+    /* A table draws its own rows, and a row that will not fit starts a fresh page WITH the
+       header repeated - a price table whose heading is on the page before is unreadable. */
+    const table=function(head,rows,widths){
+      if(!rows||!rows.length) return;
+      const cols=widths.slice();
+      const fixed=cols.reduce(function(a,b){ return a+b; },0);
+      const flexAt=cols.indexOf(0);
+      if(flexAt>=0) cols[flexAt]=CW-fixed;
+      const cellLines=function(r,font,size){
+        return r.map(function(c,i){ return wrap(c,font,size,cols[i]-10); });
+      };
+      const rowH=function(lines){ return Math.max.apply(null,
+        lines.map(function(ls){ return ls.length; }))*12.6+8; };
+      const drawRow=function(r,font,size,fill){
+        const lines=cellLines(r,font,size), h=rowH(lines);
+        if(y-h<M+26){ newPage(); drawRow(head,bold,9.5,true); }
+        if(fill) page.drawRectangle({x:M,y:y-h,width:CW,height:h,color:L.rgb(0.96,0.96,0.97)});
+        page.drawRectangle({x:M,y:y-h,width:CW,height:h,borderColor:line,borderWidth:0.7,opacity:0});
+        let cx=M;
+        lines.forEach(function(ls,i){
+          let cy=y-14;
+          ls.forEach(function(ln){
+            if(!ln.words.length) return;
+            const t=ln.words.join(' ');
+            /* the money column is the last one and reads right-aligned, as money does */
+            const rightAligned=(i===r.length-1 && /^[\d,.—%]+$/.test(t));
+            const tx=rightAligned?(cx+cols[i]-5-font.widthOfTextAtSize(t,size)):(cx+5);
+            page.drawText(t,{x:tx,y:cy,size:size,font:font,color:ink});
+            cy-=12.6;
+          });
+          cx+=cols[i];
+        });
+        // the column rules
+        let rx=M;
+        for(let i=0;i<cols.length-1;i++){
+          rx+=cols[i];
+          page.drawLine({start:{x:rx,y:y},end:{x:rx,y:y-h},thickness:0.7,color:line});
+        }
+        y-=h;
+      };
+      room(60);
+      drawRow(head,bold,9.5,true);
+      rows.forEach(function(r,i){
+        const lastRow=(i===rows.length-1);
+        drawRow(r, (lastRow && /total/i.test(String(r[1]||r[0]||'')))?bold:reg, 9.5, false);
+      });
+      y-=10;
+    };
+
+    const fill=function(text){
+      return String(text==null?'':text).replace(/\{\{(\w+)\}\}/g, function(_m,k){
+        return (vals[k]===undefined||vals[k]===null)?('{{'+k+'}}'):String(vals[k]);
+      });
+    };
+
+    newPage();
+    tmpl.blocks.forEach(function(b){
+      if(!b) return;
+      if(b.t==='h'){ heading(fill(b.x)); return; }
+      if(b.t==='table'){
+        if(b.id==='specs') table(b.head,b.rows,b.w);
+        else if(b.id==='price') table(b.head,tables.price,b.w);
+        else if(b.id==='edc')   table(b.head,tables.edc,b.w);
+        else if(b.id==='plan')  table(b.head,tables.plan,b.w);
+        return;
+      }
+      const t=fill(b.x);
+      /* The allottees' block is set as its own paragraph per person, and the ANDs between them
+         are centred the way the executed copy sets them. */
+      if(b.x==='{{ALLOTTEES}}'){
+        t.split('\n').forEach(function(chunk){
+          const c=chunk.trim();
+          if(c==='AND'){ heading('AND'); return; }
+          para(c,{gap:8});
+        });
+        return;
+      }
+      para(t);
+    });
+
+    /* The execution block. Three signatures, each with room to actually sign. */
+    room(200);
+    y-=10;
+    [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
+     ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED PROMOTER','IN THE PRESENCE OF:'],
+     ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED ALLOTTEE','IN THE PRESENCE OF:']]
+      .forEach(function(blk){
+        room(96);
+        blk.forEach(function(l){ page.drawText(l,{x:M,y:y,size:9.5,font:bold,color:ink}); y-=12.6; });
+        y-=44;
+        page.drawLine({start:{x:M,y:y},end:{x:M+210,y:y},thickness:0.8,color:line});
+        y-=26;
+      });
+    foot();
+
+    const bytes=await doc.save();
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    const who=allotteeNames(res)[0]||'agreement';
+    const a=document.createElement('a');
+    a.href=url; a.download='Agreement for Sale - '+who.replace(/[^A-Za-z0-9 ]/g,'')+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
+    /* Said at the moment of download rather than printed on the deed: a line on the face of an
+       agreement saying which template it came from would travel with it to the customer. */
+    const onGurukul=(tmpl.project===project);
+    toast('Agreement downloaded — the blanks on it are for the values the documents do not state'
+      +(onGurukul?'' : ('. It is set on the '+tmpl.project+' template, not '
+        +(project||'this booking’s project')+' — check the recitals before it goes out')),'ok');
+  }
+
   /* THE APARTMENT, ITS PARKING, AND THE TWO TOGETHER - read off the cost sheet as stored.
 
      A cost sheet is laid out as "Unit Charges Details", then "Parking Details" with its own TOTAL,
@@ -5838,14 +6267,19 @@
     if(el) el.remove();
     el=document.createElement('div');
     el.id='wfWorkCard';
-    el.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;min-width:280px;'
-      +'max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
+    /* It LIVES IN THE TOAST STACK rather than floating over it. Both sit bottom-right, so a card
+       of its own covered every toast that appeared while it was up - including the ones saying
+       what had gone wrong. In #toasts it is one more item in the same column and they push each
+       other along; a page without that stack still gets a card, fixed in the corner. */
+    const stack=document.getElementById('toasts');
+    el.style.cssText=(stack?'':'position:fixed;right:18px;bottom:18px;z-index:99999;')
+      +'min-width:280px;max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
       +'border:1px solid var(--line,#e3e3e3);border-radius:12px;padding:12px 14px;'
       +'box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13px;line-height:1.5';
     el.innerHTML='<div style="font-weight:600;margin-bottom:6px" class="wfwc-t"></div>'
       +'<div class="wfwc-b"></div>';
     el.querySelector('.wfwc-t').textContent=title;
-    document.body.appendChild(el);
+    (stack||document.body).appendChild(el);
     return {
       say:function(html){ const b=el.querySelector('.wfwc-b'); if(b) b.innerHTML=html; },
       title:function(t){ const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t; },
