@@ -13356,6 +13356,16 @@ async function custLoadData(customerId,force){
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
+// Farvision's Typology column comes through as e.g. "3.00BHK" (always two decimals, even for a
+// whole number) - a customer doesn't need to see that precision. Left as-is for anything that
+// isn't the plain "<number>BHK" shape (the staff admin screens keep showing/editing the raw value,
+// since that's the actual source-of-truth field).
+function custFormatUnitType(t){
+  if(!t)return t;
+  const m=String(t).trim().match(/^(\d+(?:\.\d+)?)\s*BHK$/i);
+  if(!m)return t;
+  return (parseFloat(m[1]))+' BHK';
+}
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
   return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
@@ -13449,8 +13459,13 @@ async function custTabOverview(data,unit){
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
     '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],
-      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(unit.unit_type||'—'),
-        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',`<span class="tag t-amber">${esc(unit.status||'—')}</span>`,custInr(unit.agreement_value)]])+
+      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
+        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
+        // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
+        // purchase - a status badge that says so on every single statement is just noise. Worth
+        // flagging only once something has actually gone wrong with the booking.
+        unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
+        custInr(unit.agreement_value)]])+
     '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
     (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
       [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
