@@ -30,8 +30,12 @@ a{color:inherit;text-decoration:none}
 .sb-item i{width:18px;text-align:center;font-size:14.5px;color:#8f8f94}
 .sb-item:hover{background:var(--sb-red-dim);color:#fff}
 .sb-item:hover i{color:var(--sb-red)}
-.sb-item.active{background:var(--sb-red);color:#fff}
+.sb-item.active{background:var(--sb-red);color:#fff;animation:sbItemActivate .35s ease}
 .sb-item.active i{color:#fff}
+/* .sb-nav is rebuilt from scratch on every render (see custSidebarTabs in nexus-core.js), so the
+   newly-active item is always a freshly-inserted node - an `animation` (unlike a `transition`)
+   plays on insertion, no extra JS needed to "restart" it. */
+@keyframes sbItemActivate{0%{transform:translateX(-6px);opacity:.5;box-shadow:0 0 0 0 rgba(224,18,28,.45)}60%{transform:translateX(0);opacity:1}100%{box-shadow:0 0 0 7px rgba(224,18,28,0)}}
 .sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#7a7a7f}
 /* topbar */
 .main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease;overflow-x:hidden}
@@ -151,6 +155,11 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
 .notif .n-ic{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
 /* content */
 .view{padding:26px 28px;flex:1}
+/* Applied to Customer Portal's content wrapper (nexus-core.js, VIEWS.customer) - #view itself is
+   never replaced, only its innerHTML, so every section change inserts a brand-new element and this
+   plays automatically, same reasoning as sbItemActivate above. */
+@keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.cust-view-fade{animation:custViewFade .28s ease}
 .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
 .page-head h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
 .page-head p{color:var(--slate);font-size:13.5px;margin-top:4px}
