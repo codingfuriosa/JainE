@@ -3173,6 +3173,10 @@
     // a separate pre-existing concept unrelated to this pair).
     const canManage = eq(mySelf,'ayushruia1@gmail.com') || eq(mySelf,'businessanalyst@thejaingroup.com');
     window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
+    /* Whether "New <noun>" opens the file chooser instead of a form - see wfNewInstance. Decided
+       here, where the workflow has already been fetched, because the button's press has to act on
+       it in the same tick or the browser refuses to open a chooser at all. */
+    window._wfAttachOnly = wfAttachOnly(flow);
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
     // older workflows saved before this feature have no word yet — learn it once, quietly
@@ -3364,7 +3368,7 @@
       +'</span>'):'')
       +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
                   +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
+      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -4678,7 +4682,7 @@
     if(e.key==='Delete'){ if(!window._wfDelId)return; window.wfDelete(window._wfDelId); }
     // N = start a new instance of the workflow currently open, same as clicking "New <Noun>" —
     // only when this account is actually allowed to (mirrors the button's own canEvent gate).
-    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfEventOpen(window._wfFlowId); }
+    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfNewInstance(window._wfFlowId); }
   }); }
 
   window.wfDelete=function(id){
@@ -5643,6 +5647,99 @@
       } else if(gs.length<2 && x){ x.remove(); }
     });
   }
+  /* ── STARTING ONE WHEN THE FORM ASKS FOR NOTHING BUT FILES ────────────────────────────────
+     A Booking Form is a scan and nothing else: everything a person could have typed - the name,
+     the project, the flat - is read off the document afterwards, and typing it again would only
+     create a second version to disagree with. So for a workflow whose whole form is attachments,
+     pressing "New Booking Form" opens the file chooser itself. Pick the scans, and the booking is
+     created and the reading starts; no dialog is drawn at any point.
+
+     WHY THE CHOOSER OPENS FROM HERE AND NOT FROM THE FORM. A browser only opens a file chooser
+     while a click is still fresh - within the same tick as the press. The earlier attempt clicked
+     the form's own box once the dialog had been drawn, which is several database reads later, by
+     which time the click is spent and nothing happens. Everything up to .click() below is
+     therefore synchronous; the uploading and the creating happen after, when the wait no longer
+     costs anything.
+
+     Every other workflow has questions to answer and still opens its form. */
+  function wfAttachOnly(flow){
+    const t=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    return t.length>0 && t.every(function(f){ return f && f.type==='attachment'; });
+  }
+  window.wfNewInstance=function(flowId){
+    if(window._wfAttachOnly && Number(flowId)===Number(window._wfFlowId)) return wfQuickAttach(flowId);
+    return wfEventOpen(flowId);
+  };
+  window.wfQuickAttach=function(flowId){
+    const inp=document.createElement('input');
+    inp.type='file'; inp.multiple=true;
+    inp.style.cssText='position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(inp);
+    let picked=false;
+    inp.addEventListener('change',function(){
+      picked=true;
+      const files=[].slice.call(inp.files||[]);
+      try{ inp.remove(); }catch(_e){}
+      if(files.length) wfQuickAttachSubmit(flowId, files);
+    });
+    /* Cancelling a file chooser fires no event at all, so the input would otherwise sit in the
+       page for the rest of the session. Coming back to the window is the only signal there is. */
+    window.addEventListener('focus',function tidy(){
+      window.removeEventListener('focus',tidy);
+      setTimeout(function(){ if(!picked) try{ inp.remove(); }catch(_e){} },500);
+    });
+    inp.click();
+  };
+  async function wfQuickAttachSubmit(flowId, files){
+    const N=window._wfNoun||{one:'instance',lc:'instance'};
+    const many=(files.length>1);
+    toast('Uploading '+files.length+(many?' files':' file')+'…','ok');
+    /* Stored under the label the workflow's own field carries, so the instance reads back exactly
+       as one filed through the form would. */
+    let label='Attachment';
+    try{
+      const {data}=await ACC().from('flows').select('trigger_template').eq('id',flowId).maybeSingle();
+      const f=(Array.isArray(data&&data.trigger_template)?data.trigger_template:[])
+        .filter(function(x){ return x && x.type==='attachment'; })[0];
+      if(f&&f.label) label=f.label;
+    }catch(_e){}
+    /* One failure is reported and the rest still go: losing three good pages because the fourth
+       timed out would be worse than a booking that is short one scan and can be edited. */
+    const paths=[];
+    for(const file of files){
+      try{
+        const key=s3KeyForFlowEvent(String(flowId), file.name);
+        const {data,error}=await uploadFileToS3(key,file);
+        if(error) throw error;
+        paths.push(data.path);
+      }catch(e){ toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err'); }
+    }
+    if(!paths.length){ toast('Nothing was uploaded, so no '+N.lc+' was created','err'); return; }
+    try{
+      const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
+        {p_flow_id:flowId, p_details:[{label:label, value:paths.join(WF_ATT_SEP)}], p_step_members:null});
+      if(error) throw error;
+      // Same as the form's own save: say WHICH id it got, read back from the created row rather
+      // than guessed, because numbers are handed out at the moment of saving.
+      let newIdText='';
+      try{
+        if(newCaseId!=null){
+          const {data:mk}=await ACC().from('flow_cases').select('jaine_id,case_no')
+            .eq('id',newCaseId).maybeSingle();
+          const v=mk&&(mk.jaine_id!=null?mk.jaine_id:mk.case_no);
+          if(v!=null&&String(v).trim()!=='') newIdText=String(v);
+        }
+      }catch(_e){}
+      try{ usageQueue('tasks.workflow.start_a_new_instance','create', await wfCaseUsageMeta(newCaseId)); }catch(_e){}
+      /* Inserting the case queues the reading and pokes the reader straight away (the triggers on
+         flow_cases and booking_audits), so there is nothing to start from here - only to say so,
+         since the person is about to press Check List and would otherwise wonder. */
+      toast((newIdText?('New '+N.one+' created — Id: '+newIdText):(N.one+' created'))
+        +' — reading the '+(many?'attachments':'attachment')+' now, about two and a half minutes','ok');
+      if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
+    }catch(e){ toast('Could not create the '+N.lc+': '+((e&&e.message)||e),'err'); }
+  }
+
   window.wfEventOpen=async function(flowId, caseId, draftId){
     wfInjectCss();
     /* Anything left over from a previous session that was closed without Cancel - the overlay,
@@ -5958,26 +6055,6 @@
         f.addEventListener('input', function(){ wfAmtSyncAll(); });
       } })();
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
-
-    /* STRAIGHT TO THE FILE CHOOSER when the form asks for nothing but attachments - which is the
-       Booking Form, where a dialog holding one "Choose a file" box is a click in the way. Only on
-       a NEW instance, and only when every field is an attachment: a form with anything to type
-       must not have the chooser jump in front of it.
-
-       This is an attempt, not a guarantee. A browser only opens a file chooser while a click is
-       still "fresh", and opening this dialog waits on a few database reads first - if that spends
-       the click, nothing happens and the box is sitting right there to press. Nothing is lost
-       either way, so it is not worth blocking the dialog on. */
-    if(!editing){
-      const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
-      const allFiles=tmpl.length && tmpl.every(function(x){ return x && x.type==='attachment'; });
-      if(allFiles) setTimeout(function(){
-        try{
-          const inp=document.querySelector('.wf-evt-form .wf-evt-attinput');
-          if(inp) inp.click();
-        }catch(_e){}
-      },60);
-    }
   };
 
   /* A claim is a stack of expenses across several days, and until now the only way to know what
