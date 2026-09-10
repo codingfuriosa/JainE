@@ -9789,6 +9789,17 @@
         title:title,
         assignee:await usageNames(sel)
       }); }catch(_e){}
+      // "Insert a task at a specific position" - the "+ Add task here" strip that appears between
+      // two rows. r is non-null only when rankBetweenIds actually placed this task between real
+      // neighbours, so an ordinary add at the end of the list is not counted as one. Logged here
+      // rather than on the strip's own click (accGapOpen): opening the composer and then typing
+      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to a
+      // global called taskReorderDrop that no longer exists anywhere in the app, which is why this
+      // feature read 0 uses while people were using it daily.
+      if(r!=null){ try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','create',{
+        title:title,
+        assignee:await usageNames(sel)
+      }); }catch(_e){} }
       INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
@@ -9813,6 +9824,17 @@
         title:title,
         assignee:await usageNames([me()])
       }); }catch(_e){}
+      // "Insert a task at a specific position" - the "+ Add task here" strip that appears between
+      // two rows. r is non-null only when rankBetweenIds actually placed this task between real
+      // neighbours, so an ordinary add at the end of the list is not counted as one. Logged here
+      // rather than on the strip's own click (accGapOpen): opening the composer and then typing
+      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to a
+      // global called taskReorderDrop that no longer exists anywhere in the app, which is why this
+      // feature read 0 uses while people were using it daily.
+      if(r!=null){ try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','create',{
+        title:title,
+        assignee:await usageNames([me()])
+      }); }catch(_e){} }
       SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }

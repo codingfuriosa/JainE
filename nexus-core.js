@@ -486,13 +486,25 @@ async function fetchNotifTasks(){
 window.notifDismissAllDue=async function(){
   const items=await fetchNotifTasks();
   if(!items.length)return;
-  try{await sb.schema('acc').from('notif_dismissed_tasks').upsert(items.map(t=>({email:state.email,task_id:t.id})));}catch(e){}
+  let ok=false;
+  try{const {error}=await sb.schema('acc').from('notif_dismissed_tasks').upsert(items.map(t=>({email:state.email,task_id:t.id})));ok=!error;}catch(e){}
+  // Logged here rather than through USAGE_MAP so both "Mark all read" links - this one and the
+  // Updates one below - record the same feature with the same verb, and so a click that saved
+  // nothing is not counted. How many were cleared is the only detail worth keeping.
+  if(ok){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:items.length+' due reminder'+(items.length>1?'s':'')}); }catch(_e){} }
   await renderNotifDropdown();refreshNotifState();
 };
 // "Mark all read" for the Updates bucket (project-added / task-delegated) — Approvals are deliberately
 // excluded, since those need an actual Approve/Decline action, not just dismissal.
 window.notifMarkAllGeneralRead=async function(){
-  try{await sb.schema('acc').from('notifications').update({read:true}).eq('recipient',state.email).eq('read',false);}catch(e){}
+  // This is the "Mark all read" people actually press - the Updates bucket - and it was the one
+  // the usage catalog never watched: only notifDismissAllDue (the Due bucket) was mapped, and
+  // acc.notif_dismissed_tasks shows that link has never been clicked once, so the feature read 0
+  // uses while thousands of notifications were being cleared here. .select() is what makes the
+  // count knowable; with nothing unread the click is a no-op and is not counted.
+  let n=0;
+  try{const {data}=await sb.schema('acc').from('notifications').update({read:true}).eq('recipient',state.email).eq('read',false).select('id');n=(data||[]).length;}catch(e){}
+  if(n){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:n+' notification'+(n>1?'s':'')}); }catch(_e){} }
   await renderNotifDropdown();refreshNotifState();
 };
 function notifIsHighlight(t){
@@ -17394,7 +17406,10 @@ const USAGE_MAP={
   taskReorderDrop:'tasks.tasks.insert_a_task_at_a_specific_position',
   cmAdd:'tasks.tasks.comment_on_a_task', taskAttachUpload:'tasks.tasks.attach_file_to_a_task_or_comment',
   taskAttachDelete:'tasks.tasks.delete_attached_file', taskAttachDeleteSel:'tasks.tasks.delete_attached_file',
-  notifDismissAllDue:'tasks.tasks.mark_all_notifications_as_read',
+  // notifDismissAllDue and notifMarkAllGeneralRead both log 'mark all notifications as read'
+  // directly at their source instead - see the note on each. Mapped here they would have carried
+  // two different verbs ('delete' vs 'view', read off their names) for one feature, and would have
+  // counted clicks that cleared nothing.
   /* The Accountability module's OWN Tasks tab (accountability.js, table ptasks) turned out to have a
      second, separate implementation of most of these actions from the Projects/Goals one above
      (table acc.tasks) - global functions, just never added here. Real day-to-day task editing goes
