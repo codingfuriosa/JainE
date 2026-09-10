@@ -5145,7 +5145,7 @@ function wireProjTaskDrag(parentType,parentId){
           window._dragging=false; row.classList.remove('dragging');
           document.removeEventListener('pointermove',move);
           document.removeEventListener('pointerup',up);
-          persistProjTaskOrder(list,parentType,parentId);
+          persistProjTaskOrder(list,parentType,parentId,Number(row.dataset.id));
         }
         document.addEventListener('pointermove',move);
         document.addEventListener('pointerup',up);
@@ -5153,14 +5153,30 @@ function wireProjTaskDrag(parentType,parentId){
     });
   });
 }
-async function persistProjTaskOrder(list,parentType,parentId){
+async function persistProjTaskOrder(list,parentType,parentId,movedId){
+  const ids=[...list.querySelectorAll('.drag-row')].map(r=>Number(r.dataset.id));
+  /* The order the list was rendered in, which renderTaskDragList keeps. This runs on every
+     pointerup on a grip - including a plain click, and a drag that was put back where it started -
+     and both leave the order untouched. Without this comparison every one of those would have been
+     counted as a reorder. */
+  const was=(parentType==='project'?window.__PJT_ORDER:window.__GL_ORDER)||[];
+  const moved=(was.length!==ids.length)||ids.some(function(id,i){return id!==was[i];});
+  await Promise.all(ids.map((tid,i)=>sb.schema('acc').from('tasks').update({sort_order:i}).eq('id',tid)));
   // Logged directly rather than through USAGE_MAP's window[fn] wrapping: the drag reorder this
   // serves fires a pointerdown handler bound to this exact function reference at render time, and
   // usageAction() would misclassify it as 'view' anyway (nothing in "persistProjTaskOrder" matches
-  // its verb regexes). See the same note on crystallizeAndSwap in accountability.js.
-  try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
-  const ids=[...list.querySelectorAll('.drag-row')].map(r=>Number(r.dataset.id));
-  await Promise.all(ids.map((tid,i)=>sb.schema('acc').from('tasks').update({sort_order:i}).eq('id',tid)));
+  // its verb regexes). See the same note on crystallizeAndSwap in accountability.js. The moved
+  // task's own name is recorded, so the report's Details column has something to show.
+  if(moved){
+    try{
+      let title=null;
+      if(movedId!=null&&!isNaN(movedId)){
+        const {data:mt}=await sb.schema('acc').from('tasks').select('title').eq('id',movedId).single();
+        title=(mt&&mt.title)||null;
+      }
+      usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update',title?{title:title}:null);
+    }catch(e){}
+  }
   if(parentType==='project')projectDetail($('view'),parentId); else goalDetail($('view'),parentId);
 }
 window.taskDragOver=function(e,row){

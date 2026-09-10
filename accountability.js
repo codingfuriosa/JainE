@@ -10489,12 +10489,6 @@
      matching its current order, then the drag swap is applied on top. ---- */
   async function crystallizeAndSwap(draggedId,targetId,orderIds){
     if(!targetId||draggedId===targetId) return;
-    // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
-    // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can never
-    // see it - the "Insert a task at a specific position" feature was mapped to a different,
-    // long-dead global (taskReorderDrop) instead, which is why real drag-reorder usage never showed.
-    // usageQueue is nexus-core.js's own global helper, reachable here like any other global.
-    try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
     try{
       const my=me();
       const {data:existing}=await ACC().from('task_rank').select('task_id').eq('viewer_email',my).in('task_id',orderIds);
@@ -10512,6 +10506,17 @@
         ACC().from('task_rank').upsert({task_id:draggedId,viewer_email:my,rank:bi},{onConflict:'task_id,viewer_email'}),
         ACC().from('task_rank').upsert({task_id:targetId,viewer_email:my,rank:ai},{onConflict:'task_id,viewer_email'})
       ]);
+      // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
+      // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can
+      // never see it - the "Insert a task at a specific position" feature was mapped to a
+      // different, long-dead global (taskReorderDrop) instead, which is why real drag-reorder
+      // usage never showed. usageQueue is nexus-core.js's own global helper, reachable here like
+      // any other global. Logged at this point and not on entry, so a drag that failed partway is
+      // not counted as a position somebody set; the task's own name is what Details is read for.
+      try{
+        const {data:dt}=await ACC().from('ptasks').select('title').eq('id',draggedId).single();
+        usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update',(dt&&dt.title)?{title:dt.title}:null);
+      }catch(_e){}
     }catch(e){ toast('Failed to reorder','err'); }
     tasksScreen();
   }
