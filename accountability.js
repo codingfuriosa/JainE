@@ -4114,14 +4114,25 @@
     let qrHtml='';
     const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
     const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    // The whole point of this section is the QR code Accounts hands over - if it can't be shown,
+    // that must say so on the printout, not leave a silent gap that looks like it just never
+    // existed. Signing can fail outright (missing/renamed object); the image can also sign fine
+    // and still fail to load at print time (S3 answers AccessDenied rather than Not Found, so
+    // that only ever shows up as a broken <img> at render) - onerror catches that second case.
     if(qrField){
       const raw=det.find(function(d){ return d&&eq(d.label,qrField.label); });
       const paths=wfSplitSets((raw&&raw.value)||'').filter(function(p){ return String(p).trim().indexOf('s3:')===0; });
+      // Built via DOM API (not an HTML string) so the message text never has to be embedded inside
+      // the onerror attribute itself - that would mean nesting one quoting scheme inside another.
+      const missingOnerror="var d=document.createElement('div');d.className='wf-print-qr-missing';"
+        +"d.textContent='QR code image not available — ask them to re-upload it';this.replaceWith(d);";
+      const missingHtml='<div class="wf-print-qr-missing">QR code image not available — ask them to re-upload it</div>';
+      let body=missingHtml;
       if(paths.length){
         const urls=(await Promise.all(paths.map(function(p){ return wfSignedUrl(p); }))).filter(Boolean);
-        if(urls.length) qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'
-          +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
+        if(urls.length) body=urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img" onerror="'+missingOnerror+'">'; }).join('');
       }
+      qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'+body+'</div>';
     }
     /* Never let attachments take the printout down with them: a signing failure or an
        unreadable PDF must still leave the instance's own details printable.
@@ -4168,6 +4179,7 @@
       +'body{margin:24px;font-family:Inter,system-ui,sans-serif;color:#0f172a;background:#fff}'
       +'.wf-print-qr{margin-top:18px}.wf-print-qr-h{font-weight:700;margin-bottom:8px}'
       +'.wf-print-qr-img{max-width:260px;display:block;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px}'
+      +'.wf-print-qr-missing{max-width:260px;padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#b91c1c;font-size:13px;margin-bottom:10px}'
       // Each claim starts its own sheet, so one can be handed to one person - except the last,
       // which would otherwise throw a blank page at the end of every print job.
       +'.wf-print-case{break-after:page;page-break-after:always}'
