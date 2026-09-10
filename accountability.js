@@ -3270,6 +3270,9 @@
        exactly the people who need them. Nothing is disclosed by it either: it can only print rows
        already visible on this page, which visibility has already decided. */
     const canPrintBulk=isStepHolder || eq(mySelf,'ayushruia1@gmail.com')
+      // businessanalyst@ isn't a step owner here (deliberately, see the removal further up in this
+      // file's history) but still needs to run "Print New Reimbursements", same as cfo@ already can.
+      || (id===39 && eq(mySelf,'businessanalyst@thejaingroup.com'))
       || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
     const showChk=anyActionable||canPrintBulk;
     /* FINISHED WORK MOVES OUT OF THE WAY.
@@ -4112,9 +4115,14 @@
       }
     }
     /* Never let attachments take the printout down with them: a signing failure or an
-       unreadable PDF must still leave the instance's own details printable. */
+       unreadable PDF must still leave the instance's own details printable.
+       Reimbursement (flow 39) prints the QR code only - every other attachment (bill photos,
+       receipts) is deliberately left off the bulk printout; only the code the QR field itself
+       carries is meant to go on the sheet Accounts hands over. */
     let attHtml='';
-    try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
+    if(!(flow&&flow.id===39)){
+      try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
+    }
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
@@ -4197,31 +4205,61 @@
     });
     return window.wfPrintCases([caseId]);
   };
+  /* The last batch this button actually handed over - same "one UPDATE, one now()" timestamp
+     for every case in that job, so grouping on bulk_printed_at recovers exactly that set even
+     though there's no dedicated batch-id column. Used only to offer a reprint; never touched
+     when there's genuinely new stuff to print. */
+  async function wfLastPrintedBatch(){
+    let last=null;
+    try{
+      const {data}=await ACC().from('flow_cases').select('id,bulk_printed_at').eq('flow_id',39)
+        .not('bulk_printed_at','is',null).order('bulk_printed_at',{ascending:false}).limit(1).maybeSingle();
+      last=data;
+    }catch(e){}
+    if(!last) return [];
+    let rows=[];
+    try{
+      const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).eq('bulk_printed_at',last.bulk_printed_at);
+      rows=data||[];
+    }catch(e){}
+    return rows.map(function(r){ return r.id; });
+  }
   /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
      eye to find what changed. Marking done happens AFTER the print job is actually handed to the
      browser, not before - a popup blocked or a build failure must leave every claim eligible for
-     the next attempt, not silently drop it from every future run. */
+     the next attempt, not silently drop it from every future run. When there's nothing new, offer
+     to reprint the last batch instead of a dead-end toast - reprinting doesn't re-stamp
+     bulk_printed_at, so it can't be mistaken for a second "new" batch next time this runs. */
   window.wfBulkPrintNewReceipts=async function(){
     let cases=[];
     try{
       const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).is('bulk_printed_at',null);
       cases=data||[];
     }catch(e){ toast('Could not load claims','err'); return; }
-    if(!cases.length){ toast('Nothing new to print','warn'); return; }
-    const ids=cases.map(function(c){ return c.id; });
-    let steps=[];
-    try{
-      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
-      steps=data||[];
-    }catch(e){ toast('Could not check receipt status','err'); return; }
-    const eligible=steps.map(function(s){ return s.case_id; });
-    if(!eligible.length){ toast('Nothing new to print','warn'); return; }
-    const ok=await window.wfPrintCases(eligible);
-    if(!ok) return;
-    try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
-    catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+    let eligible=[];
+    if(cases.length){
+      const ids=cases.map(function(c){ return c.id; });
+      let steps=[];
+      try{
+        const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
+        steps=data||[];
+      }catch(e){ toast('Could not check receipt status','err'); return; }
+      eligible=steps.map(function(s){ return s.case_id; });
+    }
+    if(eligible.length){
+      const ok=await window.wfPrintCases(eligible);
+      if(!ok) return;
+      try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
+      catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+      return;
+    }
+    const lastIds=await wfLastPrintedBatch();
+    if(!lastIds.length){ toast('Nothing new to print','warn'); return; }
+    wfConfirm({ title:'Nothing new to print', okLabel:'Print last batch', okClass:'primary',
+      body:'Every received claim has already been printed. Print the last batch ('+lastIds.length+' claim'+(lastIds.length===1?'':'s')+') again?',
+      onOk:function(){ window.wfPrintCases(lastIds); } });
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
