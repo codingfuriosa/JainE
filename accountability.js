@@ -2525,9 +2525,18 @@
       if(info) return wfForwardLabel(info);
       const {data:cur}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       if(!cur) return 'Forwarded to the next person';
-      const {data:steps}=await ACC().from('flow_case_steps').select('seq,person,candidates,title,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').eq('case_id',cur.case_id).order('seq',{ascending:true});
+      const {data:kase}=await ACC().from('flow_cases').select('flow_id').eq('id',cur.case_id).maybeSingle();
+      const {data:steps}=await ACC().from('flow_case_steps').select('seq,person,candidates,title').eq('case_id',cur.case_id).order('seq',{ascending:true});
       const nxt=(steps||[]).find(function(s){return s.seq>cur.seq;});
-      return nxt?wfForwardLabel({nextWho:wfWhoOfStep(nxt)}):'Forwarded to the next person';
+      if(!nxt) return 'Forwarded to the next person';
+      // owner_from_trigger/owner_emails/etc. are on the step DEFINITION (flow_steps), never on
+      // flow_case_steps - merged in by flow+seq, same as the Tasks-list version of this lookup.
+      let def=null;
+      if(kase&&kase.flow_id!=null){
+        const {data:d}=await ACC().from('flow_steps').select('seq,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').eq('flow_id',kase.flow_id).eq('seq',nxt.seq).maybeSingle();
+        def=d;
+      }
+      return wfForwardLabel({nextWho:wfWhoOfStep(Object.assign({},def,nxt))});
     }catch(_e){ return 'Forwarded to the next person'; }
   }
   /* Who holds a LIVE step. wfStepWhoText was written for the flow definition and reads
@@ -8951,10 +8960,12 @@
       if(wfIds.length){
         const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at,forwarded_at,title').in('id',wfIds);
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
-        // person/candidates/owner_from_trigger come along so the Forward button can name who the
-        // step is about to go to, rather than saying "the next person".
+        // person/candidates come along so the Forward button can name who the step is about to
+        // go to, rather than saying "the next person" - owner_from_trigger and the rest of the
+        // step DEFINITION aren't columns on this table at all (flow_steps only), so they're
+        // looked up from stepDefByFlowSeq below instead of selected here.
         let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-          .select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title')
+          .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
           .in('case_id',caseIds).order('id',{ascending:true}); }); }
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
@@ -8970,8 +8981,8 @@
            not see simply was not there, so a middle step looked like the end of the line and got
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
-        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={};
-        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only').in('flow_id',flowIds);
+        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={}, stepDefByFlowSeq={};
+        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds);
           (((r&&r.data)||[])).forEach(function(s){
             if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
             if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
@@ -8979,6 +8990,10 @@
             // DEFINITION for the same reason the bounds are: an instance's own rows may not be
             // readable, and guessing wrong here would offer the wrong buttons entirely.
             if(s.confirm_only) confirmOnly[s.flow_id+':'+s.seq]=true;
+            // owner_from_trigger/owner_emails/etc. live only on the DEFINITION, never on the
+            // instance's own flow_case_steps row - kept here, keyed by flow+seq, so nextWho below
+            // can be worked out without selecting those columns off a table that doesn't have them.
+            stepDefByFlowSeq[s.flow_id+':'+s.seq]=s;
           }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
@@ -9025,7 +9040,10 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
+          // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
+          const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
