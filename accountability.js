@@ -5838,14 +5838,19 @@
     if(el) el.remove();
     el=document.createElement('div');
     el.id='wfWorkCard';
-    el.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;min-width:280px;'
-      +'max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
+    /* It LIVES IN THE TOAST STACK rather than floating over it. Both sit bottom-right, so a card
+       of its own covered every toast that appeared while it was up - including the ones saying
+       what had gone wrong. In #toasts it is one more item in the same column and they push each
+       other along; a page without that stack still gets a card, fixed in the corner. */
+    const stack=document.getElementById('toasts');
+    el.style.cssText=(stack?'':'position:fixed;right:18px;bottom:18px;z-index:99999;')
+      +'min-width:280px;max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
       +'border:1px solid var(--line,#e3e3e3);border-radius:12px;padding:12px 14px;'
       +'box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13px;line-height:1.5';
     el.innerHTML='<div style="font-weight:600;margin-bottom:6px" class="wfwc-t"></div>'
       +'<div class="wfwc-b"></div>';
     el.querySelector('.wfwc-t').textContent=title;
-    document.body.appendChild(el);
+    (stack||document.body).appendChild(el);
     return {
       say:function(html){ const b=el.querySelector('.wfwc-b'); if(b) b.innerHTML=html; },
       title:function(t){ const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t; },
