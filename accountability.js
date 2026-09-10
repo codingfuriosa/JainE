@@ -4133,6 +4133,15 @@
   const WF_SMALL=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'];
   const wfCountWord=function(n){ return WF_SMALL[n]||String(n); };
 
+  /* Where the areas come from, in one place, because two documents ask for them. */
+  function wfUnitAreas(res){
+    const cs=((res.unit||{}).cost_sheet)||{}, ua=res.unit_areas||{};
+    const pick=function(k){ return (ua[k]===null||ua[k]===undefined||ua[k]==='') ? cs[k] : ua[k]; };
+    return {carpet_sqft:pick('carpet_sqft'), builtup_sqft:pick('builtup_sqft'),
+            balcony_sqft:pick('balcony_sqft'), cupboard_sqft:pick('cupboard_sqft'),
+            sba_sqft:pick('sba_sqft')};
+  }
+
   /* THE ALLOTTEE'S OWN PARAGRAPH - the one place the agreement's wording depends on the data.
 
      THE FIRST APPLICANT AND NOBODY ELSE. It used to run every allottee, joined by AND, the way
@@ -4199,7 +4208,12 @@
       count=Math.max(count, m?Number(m[1]):1);
     });
     if(!count && kind) count=1;
-    const areas=res.unit_areas||{};
+    /* The areas, from wherever the reading put them. unit_areas is where the reader files them
+       now; unit.cost_sheet is where the built-up has always been, as the string the sheet prints
+       ("709.0") - which the reader's own number check rejected for not being a number, so
+       unit_areas came back empty. Taken field by field rather than by merging the two objects:
+       a null in the newer one would otherwise wipe out a good value in the older. */
+    const areas=wfUnitAreas(res);
     const num=function(x){ const n=Number(String(x==null?'':x).replace(/[^0-9.]/g,''));
       return isFinite(n)&&n>0?String(n):''; };
     const floorNo=(String(v('floor')).match(/\d+/)||[''])[0];
@@ -4248,7 +4262,12 @@
       if(String((sheets[i]&&sheets[i].basis)||'').toUpperCase()===b) return sheets[i]; return null; };
     const money=function(n){ return (typeof n==='number')?(wfRs2(n)):'—'; };
     const bhk=v('bhk')?(v('bhk').replace(/\s*BHK\s*/i,'')+' BHK'):'';
-    const areas=res.unit_areas||{};
+    /* The areas, from wherever the reading put them. unit_areas is where the reader files them
+       now; unit.cost_sheet is where the built-up has always been, as the string the sheet prints
+       ("709.0") - which the reader's own number check rejected for not being a number, so
+       unit_areas came back empty. Taken field by field rather than by merging the two objects:
+       a null in the newer one would otherwise wipe out a good value in the older. */
+    const areas=wfUnitAreas(res);
     const carpet=Number(String(areas.carpet_sqft==null?'':areas.carpet_sqft).replace(/[^0-9.]/g,''));
 
     /* PART I - the unit's own price. Net, the GST on it, and the two together: the same three
