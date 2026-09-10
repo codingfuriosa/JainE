@@ -10440,9 +10440,9 @@
       // two rows. r is non-null only when rankBetweenIds actually placed this task between real
       // neighbours, so an ordinary add at the end of the list is not counted as one. Logged here
       // rather than on the strip's own click (accGapOpen): opening the composer and then typing
-      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to a
-      // global called taskReorderDrop that no longer exists anywhere in the app, which is why this
-      // feature read 0 uses while people were using it daily.
+      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to
+      // taskReorderDrop, a handler that still exists in nexus-core.js but that nothing calls any
+      // more, which is why this feature read 0 uses while people were using it daily.
       if(r!=null){ try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','create',{
         title:title,
         assignee:await usageNames(sel)
@@ -10475,9 +10475,9 @@
       // two rows. r is non-null only when rankBetweenIds actually placed this task between real
       // neighbours, so an ordinary add at the end of the list is not counted as one. Logged here
       // rather than on the strip's own click (accGapOpen): opening the composer and then typing
-      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to a
-      // global called taskReorderDrop that no longer exists anywhere in the app, which is why this
-      // feature read 0 uses while people were using it daily.
+      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to
+      // taskReorderDrop, a handler that still exists in nexus-core.js but that nothing calls any
+      // more, which is why this feature read 0 uses while people were using it daily.
       if(r!=null){ try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','create',{
         title:title,
         assignee:await usageNames([me()])
@@ -10590,9 +10590,9 @@
       ]);
       // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
       // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can
-      // never see it - the "Insert a task at a specific position" feature was mapped to a
-      // different, long-dead global (taskReorderDrop) instead, which is why real drag-reorder
-      // usage never showed. usageQueue is nexus-core.js's own global helper, reachable here like
+      // never see it - the "Insert a task at a specific position" feature was mapped instead to
+      // taskReorderDrop, a handler nothing calls any more, which is why real drag-reorder usage
+      // never showed. usageQueue is nexus-core.js's own global helper, reachable here like
       // any other global. Logged at this point and not on entry, so a drag that failed partway is
       // not counted as a position somebody set; the task's own name is what Details is read for.
       try{

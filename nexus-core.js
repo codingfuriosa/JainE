@@ -17856,11 +17856,14 @@ const USAGE_MAP={
   // silently inflating that count every time someone reopened a task by mistake.
   taskMarkComplete:function(id,makeComplete){ return makeComplete ? 'tasks.tasks.mark_task_done_send_for_approval' : 'tasks.tasks.revert_reopen_a_task'; },
   taskApprove:'tasks.tasks.approve_a_completed_task', taskDecline:'tasks.tasks.decline_a_completed_task',
-  // taskReorderDrop no longer exists anywhere in the app - this entry is what made "Insert a
-  // task at a specific position" read 0 uses for months, because the wrapper had nothing to
-  // wrap and nothing said so. The three places the feature really happens (the "+ Add task
-  // here" strip in accountability.js, and the two drag reorders) log themselves at the point
-  // the position is saved.
+  // This entry is what made "Insert a task at a specific position" read 0 uses for months.
+  // window.taskReorderDrop is still defined further up this file, so the wrapper installed
+  // cleanly and nothing ever looked wrong - but no element carries an ondrop for it any more:
+  // the HTML5 drag it belonged to was replaced by the pointer-events one (wireProjTaskDrag),
+  // and the old handler was left behind unreachable. A wrapped function that is never called
+  // logs nothing. The three places the feature really happens - the "+ Add task here" strip
+  // and the swap drag in accountability.js, and persistProjTaskOrder here - log themselves at
+  // the point the position is actually saved.
   cmAdd:'tasks.tasks.comment_on_a_task', taskAttachUpload:'tasks.tasks.attach_file_to_a_task_or_comment',
   taskAttachDelete:'tasks.tasks.delete_attached_file', taskAttachDeleteSel:'tasks.tasks.delete_attached_file',
   // notifDismissAllDue and notifMarkAllGeneralRead both log 'mark all notifications as read'
