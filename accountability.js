@@ -7139,14 +7139,23 @@
     .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
     .wf-mini-lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
     /* timeline panel */
-    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
+    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+    /* min-width:0 lets the title actually shrink. Without it a long instance number holds the row
+       open at its full width and pushes the buttons off the side of a phone. */
+    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
     .wf-tlhead-t i{color:var(--slate)}
     /* Edit + close sit together as one action group on the right, not spread apart by the
        header's own space-between (which only expects two children: the title, and this group). */
-    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:none}
-    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px}
+    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}
+    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px;flex:none}
     .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
+    /* On a phone this row carries six buttons - edit, check list, welcome letter, allotment
+       letter, print, close - which will not fit beside the title. They take a row of their own,
+       left-aligned like everything else, and grow to a size a thumb can actually hit. */
+    @media (max-width:560px){
+      .wf-tlhead-acts{width:100%;justify-content:flex-start}
+      .wf-tlhead-x{width:36px;height:36px;font-size:14px}
+    }
     .wf-timeline{display:flex;flex-direction:column}
     /* Slim timeline row: one line on a normal screen, wrapping to two on a phone. */
     .wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
