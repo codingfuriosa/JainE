@@ -4088,11 +4088,21 @@
      WHAT IS LEFT BLANK, AND WHY. A blank on a draft contract is a line for someone to complete;
      a wrong value is a term of sale nobody agreed. So anything the documents do not state prints
      as a rule to be filled in by hand, and the covering note names them. */
+  /* EVERY BOOKING USES THE DREAM GURUKUL TEMPLATE FOR NOW, whichever project it is for. That is
+     deliberate and temporary: it is the only agreement supplied so far, and a draft on the wrong
+     recitals is more use to the person checking it than no draft at all. The recitals really do
+     differ project by project - the land, the development agreement, the sanction, the RERA
+     number - so a draft for another project has to be read against that project's own terms
+     before it goes anywhere near a customer. The download says which template was used when it
+     is not the booking's own project, so nobody has to remember.
+
+     TEMPLATES is keyed by project so adding the next one is a line here and a file beside it;
+     FALLBACK is what makes today's behaviour temporary rather than baked in. */
+  const AG_TEMPLATES={'Dream Gurukul':{src:'assets/forms/agreement-gurukul.js', key:'AGREEMENT_GURUKUL'}};
+  const AG_FALLBACK='Dream Gurukul';
   async function wfAgTemplate(project){
-    const TEMPLATES={'Dream Gurukul':{src:'assets/forms/agreement-gurukul.js', key:'AGREEMENT_GURUKUL'}};
-    const T=TEMPLATES[project];
-    if(!T) throw new Error('there is no agreement template for '+(project||'this project')
-      +' yet — only Dream Gurukul has one');
+    const T=AG_TEMPLATES[project]||AG_TEMPLATES[AG_FALLBACK];
+    if(!T) throw new Error('no agreement template is available');
     if(!window[T.key]){
       await new Promise(function(res,rej){
         const sc=document.createElement('script');
@@ -4480,7 +4490,12 @@
     a.href=url; a.download='Agreement for Sale - '+who.replace(/[^A-Za-z0-9 ]/g,'')+'.pdf';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
-    toast('Agreement downloaded — the blanks on it are for the values the documents do not state','ok');
+    /* Said at the moment of download rather than printed on the deed: a line on the face of an
+       agreement saying which template it came from would travel with it to the customer. */
+    const onGurukul=(tmpl.project===project);
+    toast('Agreement downloaded — the blanks on it are for the values the documents do not state'
+      +(onGurukul?'' : ('. It is set on the '+tmpl.project+' template, not '
+        +(project||'this booking’s project')+' — check the recitals before it goes out')),'ok');
   }
 
   /* THE APARTMENT, ITS PARKING, AND THE TWO TOGETHER - read off the cost sheet as stored.
