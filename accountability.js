@@ -4130,8 +4130,13 @@
     const f=res.fields||{}, LT=res.letter||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
       return (!t||t==='NIL')?'':t; };
-    const people=(Array.isArray(LT.allottees)&&LT.allottees.length)
-      ? LT.allottees : [{salutation:null, name:v('customer_name')}];
+    /* allottees_detail carries each person's own father, PAN, date of birth, occupation and
+       address; letter.allottees carries only the names. Prefer the detailed list - a second
+       allottee's particulars are their own, not the first applicant's. */
+    const detail=Array.isArray(res.allottees_detail)?res.allottees_detail:[];
+    const people=detail.length ? detail
+      : ((Array.isArray(LT.allottees)&&LT.allottees.length)
+          ? LT.allottees : [{salutation:null, name:v('customer_name')}]);
     const home=(Array.isArray(LT.address)?LT.address:[]).join(', ').replace(/\s+/g,' ').trim();
     /* A BLANK HAS TO BE VISIBLE. Spaces would leave the sentence looking complete and quietly
        wrong - "S/O , PAN No. ," reads as a mistake, not as something waiting to be written. An
@@ -4140,19 +4145,27 @@
     return people.map(function(p,i){
       const sal=salutation(p&&p.salutation)||'';
       const name=nameCase((p&&p.name)||'')||blank(24);
-      /* Only the FIRST applicant's particulars are stated on a booking form; a second allottee's
-         father, PAN and date of birth are simply not in the file, so those print as rules. */
+      /* Each person's own particulars where the form states them, falling back to the booking
+         form's headline fields for the first applicant only. Anything the form does not state
+         is a rule, never another person's value.
+
+         The Aadhaar is always a rule: the reader compares id numbers and discards them rather
+         than storing them, and an agreement is not a reason to change that. */
       const first=(i===0);
-      const father=(first&&v('father_name'))?nameCase(v('father_name')):blank(22);
-      const pan=(first&&v('customer_pan'))?v('customer_pan'):blank(12);
-      const aadhaar=(first&&v('aadhaar_no'))?v('aadhaar_no'):blank(16);
-      const age=first?wfAgeFrom(v('customer_dob')):null;
-      const occ=(first&&v('occupation'))?nameCase(v('occupation')):blank(12);
+      const own=function(k,fb){ const t=String((p&&p[k])||'').trim();
+        return t||((first&&fb)?fb:''); };
+      const father=own('father_name')?nameCase(own('father_name')):blank(22);
+      const pan=own('pan',v('customer_pan'))||blank(12);
+      const aadhaar=blank(16);
+      const age=wfAgeFrom(own('dob',v('customer_dob')));
+      const occ=own('occupation')?nameCase(own('occupation')):blank(12);
+      const mine=(Array.isArray(p&&p.address_lines)?p.address_lines:[])
+        .join(', ').replace(/\s+/g,' ').trim();
       return (sal?(sal+' '):'')+name+' S/O '+father
         +', PAN No. '+pan+', Aadhaar No. '+aadhaar
         +', by caste –, Occupation - '+occ
         +', aged about '+(age?String(age):blank(4))+' years, residing at '
-        +(first?(home||blank(40)):blank(40));
+        +(mine||(first?home:'')||blank(40));
     }).join('\n AND\n');
   }
 
