@@ -14820,9 +14820,8 @@ function traRowHtml(r){
     +traTextCell(r.crm_lost_reason,200)
     +traTextCell(r.crm_remarks,240)
     +'<td onclick="event.stopPropagation()" style="white-space:nowrap">'
-      +(r.recording_url
-        ? '<button class="btn btn-sm" onclick="traCopyUrl('+r.id+')" title="Copy this call\'s recording URL"><i class="fa-regular fa-copy"></i> Copy URL</button>'
-        : '<span style="color:var(--slate);font-size:12px">no recording</span>')
+      +trRecLink(r.recording_url,{file:trRecFile(r),
+          missing:'<span style="color:var(--slate);font-size:12px">no recording</span>'})
     +'</td>'
   +'</tr>';
 }
@@ -14863,9 +14862,66 @@ window.traCopy=async function(id){
   await traClip(JSON.stringify(payload,null,2),'CRM response copied');
 };
 
-/* One clipboard write, used by both copy buttons. navigator.clipboard needs a secure context and a
-   permission that is not always granted, and silently doing nothing is the worst outcome for a
-   button whose entire job is to copy - so there is a fallback that always works. */
+/* ============ HOW A CALL RECORDING IS OFFERED, everywhere in this module ============
+   A real <a href>, not a button. Clicking it downloads the audio, and so do all the things a link
+   gets for free and a button never had: middle-click, Save link as, right-click Copy link address,
+   dragging it into a chat. This replaced a set of "Copy URL" buttons that handed over the address
+   and left the reader to paste it somewhere else to actually hear the call.
+
+   The href is the KNOWLARITY url, deliberately, and never the file it redirects to. That redirect
+   target is a presigned S3 URL that expires about ten minutes after it is minted, so an address
+   captured from it is dead almost immediately; the Knowlarity one keeps working and is handed a
+   fresh signature every time it is followed.
+
+   What decides download-versus-playback is the Content-Disposition the recording host answers with,
+   not this markup: following a Knowlarity link has always produced a file rather than a player,
+   which is what makes a plain link enough here. download= cannot change that - browsers honour the
+   attribute same-origin only - so it is intent for the day these are served from our own origin.
+   target=_blank is the safety net for the other case: a host that ever did answer inline would then
+   render in a new tab instead of replacing the app in this one. */
+function trRecFile(r){
+  /* A name the reader can find again in a downloads folder, rather than the opaque id the host uses.
+     Only honoured same-origin (see above), so this is intent, not a promise. */
+  const id=(r&&(r.follow_up_id||r.callid||r.id));
+  return 'call-recording'+(id?'-'+String(id).replace(/[^A-Za-z0-9_-]/g,''):'')+'.mp3';
+}
+/* opts: label (button text, '' for icon only), icon (defaults to a download arrow), cls (defaults to
+   a small button), file (download filename), feat (the USAGE_MAP feature key to log this particular
+   link under, when its context is one that was being counted before), missing (what to render when
+   there is no recording at all). */
+function trRecLink(url,opts){
+  opts=opts||{};
+  if(!url)return opts.missing||'';
+  const label=(opts.label===undefined?'Download':opts.label);
+  return '<a class="'+(opts.cls||'btn btn-sm')+'" href="'+esc(url)+'"'
+    +' download="'+esc(opts.file||'call-recording.mp3')+'"'
+    +' target="_blank" rel="noopener noreferrer"'
+    +' title="'+esc(opts.title||'Download this call recording')+'"'
+    +' onclick="trRecClick(event,\''+esc(opts.feat||'')+'\')">'
+    +'<i class="fa-solid '+esc(opts.icon||'fa-download')+'"></i>'+(label?' '+esc(label):'')
+  +'</a>';
+}
+/* The same link as free-flowing text, for the detail views that print the URL itself in a
+   label/value row - the address stays readable and copyable, and is now also clickable. */
+function trRecLinkText(url){
+  return '<a href="'+esc(url)+'" download="call-recording.mp3" target="_blank" rel="noopener noreferrer"'
+    +' title="Download this call recording" onclick="trRecClick(event,\'\')"'
+    +' style="color:#0d9488;text-decoration:underline">'+esc(url)+'</a>';
+}
+/* Everything the anchor cannot do for itself. It does NOT preventDefault - the navigation IS the
+   download - it only stops the click reaching a clickable <tr> underneath, which would otherwise
+   open the lead instead of fetching the audio. It is also where USAGE_MAP now hangs the telemetry
+   that used to sit on the copy button: the feature key travels from the call site rather than being
+   fixed here, because these links appear in several views that count as different features (and in
+   some that were never counted at all, which pass '' and log nothing). */
+window.trRecClick=function(ev,feat){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+};
+
+/* One clipboard write, used by the two Copy CRM response buttons (the recording URLs are download
+   links now, see above). navigator.clipboard needs a secure context and a permission that is not
+   always granted, and silently doing nothing is the worst outcome for a button whose entire job is
+   to copy - so there is a fallback that always works. */
 async function traClip(text,okMsg){
   try{
     await navigator.clipboard.writeText(text);
@@ -14879,15 +14935,6 @@ async function traClip(text,okMsg){
     ta.remove();
   }
 }
-
-/* The Knowlarity link, which is the STABLE one. It 302s to a presigned S3 URL that expires in about
-   ten minutes, so copying the redirect target would hand someone a link that is dead by the time
-   they paste it. This is why the row stores the Knowlarity URL and not the redirect. */
-window.traCopyUrl=async function(id){
-  const r=(TRA_ROWS||[]).find(function(x){return x.id===id;});
-  if(!r||!r.recording_url)return toast('No recording URL on this call','warn');
-  await traClip(r.recording_url,'Recording URL copied');
-};
 
 /* Retry - hands the call back to the same pipeline. The backend re-queues it at the BACK of the
    FIFO queue and increments the attempt count; nothing here duplicates a row or clears a result. */
@@ -14933,11 +14980,19 @@ async function traView(v,seg){
 }
 
 /* ---- detail: everything known about one lead, in one place ---- */
+/* mono is only ever set for the URL-shaped fields (the recording URL rows, and any CRM key whose
+   name matches /url/i), so that flag is also the signal to make an http(s) value a real download link
+   instead of a block of monospace text nobody can do anything with. Anything else, URL-shaped or not,
+   is still printed verbatim. */
 function traKV(label,value,mono){
+  const str=(value===null||value===undefined)?'':String(value);
+  const body=str===''
+    ? '<span style="color:var(--slate)">—</span>'
+    : (mono&&/^https?:\/\//i.test(str)?trRecLinkText(str):esc(str));
   return '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">'
     +'<div style="min-width:170px;font-size:12.5px;color:var(--slate)">'+esc(label)+'</div>'
     +'<div style="flex:1;font-size:13.5px;'+(mono?'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;':'')+'">'
-    +(value===null||value===undefined||value===''?'<span style="color:var(--slate)">—</span>':esc(String(value)))+'</div></div>';
+    +body+'</div></div>';
 }
 function traSection(icon,title,inner){
   return '<div class="card card-pad" style="margin-top:16px"><div class="sec-title" style="margin:0 0 10px">'
@@ -15273,13 +15328,13 @@ let TRC_ROWS_RANGE=null;
 
 /* TRC_ROWS/TR_ROWS only survive as long as this tab's JS does - a reload throws the fetch away and
    pays the full CRM-join + transcription cost again even one minute later. sessionStorage backs the
-   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 3h of
-   the last real fetch reads from the browser instead of hitting Supabase again. 3h, not "until the
+   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 2h of
+   the last real fetch reads from the browser instead of hitting Supabase again. 2h, not "until the
    tab closes", because the underlying data does keep changing (new calls come in, transcriptions
    complete) - it just doesn't need re-checking on every reload.
    sessionStorage (not localStorage): this is a cache of one tab's own last fetch, not something that
    should leak into a different tab that might be looking at a different filter/date range. */
-const TRC_CACHE_TTL_MS=3*60*60*1000;
+const TRC_CACHE_TTL_MS=2*60*60*1000;
 function trCacheRead(key,matchKey){
   try{
     const c=JSON.parse(sessionStorage.getItem(key)||'null');
@@ -15295,9 +15350,154 @@ function trCacheWrite(key,matchKey,rows){
 }
 /* Every place that changes TR_ROWS/TRC_ROWS without going through a real trFetch/trcFetch
    (delete, restore, a fresh upload, a poll that just finished) has to drop the cached copy too -
-   otherwise a reload in the next 3h would resurrect a deleted call, or hide one just restored or
+   otherwise a reload in the next 2h would resurrect a deleted call, or hide one just restored or
    just uploaded, straight out of the stale snapshot. */
 function trCacheClear(key){try{sessionStorage.removeItem(key);}catch(e){}}
+
+/* ---- one lead's WHOLE follow-up history, cached under the same 2h expiry as the list itself.
+   The list's own fetch (TRC_LIGHT) deliberately leaves out the transcripts and the five QA blobs,
+   so opening a lead has always meant a second, per-lead round trip for select('*') - and clicking
+   the same lead twice, or backing out and clicking back in, paid for it again every time. Every
+   request to followup_timeline_v costs the same fixed ~3-7s no matter how many rows it returns (the
+   window-function chain in lead_level_progress_v can't be pruned by the outer filter, see TRC_LIGHT),
+   so a cache here is worth far more than the row count suggests: it is a whole request saved.
+   In memory AND in sessionStorage, for two different jobs. Memory is the one that always works and
+   holds a full day of transcripts without complaint; sessionStorage is what lets a RELOAD inside the
+   window skip the fetch too, and is allowed to fail (quota, private browsing) without the caller
+   ever knowing - the rows are already in hand either way. One key per lead rather than one map:
+   writing a lead must not mean re-serialising every other lead already cached. */
+const TRC_LEAD_CACHE_PREFIX='trc_lead_';
+let TRC_LEAD_MEM=Object.create(null);
+function trcLeadCacheRead(id){
+  const k=String(id);
+  const hit=TRC_LEAD_MEM[k];
+  if(hit&&Date.now()-hit.ts<=TRC_CACHE_TTL_MS)return hit;
+  try{
+    const c=JSON.parse(sessionStorage.getItem(TRC_LEAD_CACHE_PREFIX+k)||'null');
+    if(!c||Date.now()-c.ts>TRC_CACHE_TTL_MS)return null;
+    TRC_LEAD_MEM[k]=c;                       // promote, so the next read never re-parses the JSON
+    return c;
+  }catch(e){return null;}
+}
+function trcLeadCacheWrite(id,lead,rows){
+  const k=String(id),entry={ts:Date.now(),lead:lead||null,rows:rows||[]};
+  TRC_LEAD_MEM[k]=entry;
+  try{sessionStorage.setItem(TRC_LEAD_CACHE_PREFIX+k,JSON.stringify(entry));}catch(e){
+    /* Out of room - a day of transcripts genuinely can be more than sessionStorage will hold. Drop
+       the entries that are already past their expiry and try this one once more; if it still won't
+       fit, memory keeps it for this tab's lifetime and only a reload pays the fetch again. */
+    trcLeadCacheSweep(true);
+    try{sessionStorage.setItem(TRC_LEAD_CACHE_PREFIX+k,JSON.stringify(entry));}catch(e2){}
+  }
+}
+/* Prefixed keys only, so this can never touch the list caches or anything else in sessionStorage.
+   Collected before removing: removeItem inside a live sessionStorage.key(i) walk reindexes it and
+   silently skips entries. */
+function trcLeadCacheSweep(expiredOnly){
+  try{
+    const kill=[];
+    for(let i=0;i<sessionStorage.length;i++){
+      const k=sessionStorage.key(i);
+      if(!k||k.indexOf(TRC_LEAD_CACHE_PREFIX)!==0)continue;
+      if(!expiredOnly){kill.push(k);continue;}
+      let c=null;try{c=JSON.parse(sessionStorage.getItem(k)||'null');}catch(e){}
+      if(!c||Date.now()-c.ts>TRC_CACHE_TTL_MS)kill.push(k);
+    }
+    kill.forEach(function(k){try{sessionStorage.removeItem(k);}catch(e){}});
+  }catch(e){}
+}
+/* Anything that makes a lead's stored history wrong (an explicit Refresh, a Retry that re-runs the
+   pipeline for one call) has to drop it here too - otherwise the detail page would render the
+   pre-change snapshot straight back out of the cache for the next 2h. */
+function trcLeadCacheDrop(id){
+  const k=String(id);
+  delete TRC_LEAD_MEM[k];
+  try{sessionStorage.removeItem(TRC_LEAD_CACHE_PREFIX+k);}catch(e){}
+}
+function trcLeadCacheClearAll(){
+  TRC_LEAD_MEM=Object.create(null);
+  trcLeadCacheSweep(false);
+}
+
+/* Fills that cache for the whole list up front, in the background, so the first click on a lead is
+   as instant as the second. Runs AFTER the table is on screen and never blocks it.
+   Why this is affordable at all: the fixed per-request cost described above is paid per REQUEST, not
+   per lead - so one select('*') for 25 leads costs about what one lead costs, and 25 clicks' worth of
+   waiting collapses into a single trip. What it is NOT free in is bytes: these rows carry the full
+   turn-by-turn transcripts, so a wide date range is a real download. Hence: sequential chunks rather
+   than a burst of parallel requests, leads already cached skipped entirely, and a generation counter
+   so leaving the page (or changing the filters) abandons the rest instead of finishing a download
+   nobody is waiting for. */
+const TRC_PREFETCH_CHUNK=25;
+let TRC_PREFETCH_GEN=0;
+/* Bumping the generation is all a cancel is: the in-flight loop compares against it after every
+   await and returns the moment it no longer owns the prefetch. */
+function trcPrefetchCancel(){TRC_PREFETCH_GEN++;}
+async function trcPrefetchHistories(leadIds){
+  const gen=++TRC_PREFETCH_GEN;
+  const todo=[];
+  const seen=Object.create(null);
+  (leadIds||[]).forEach(function(id){
+    const k=String(id);
+    if(id==null||seen[k])return;
+    seen[k]=1;
+    if(!trcLeadCacheRead(id))todo.push(id);
+  });
+  if(!todo.length)return;
+  for(let i=0;i<todo.length;i+=TRC_PREFETCH_CHUNK){
+    if(gen!==TRC_PREFETCH_GEN)return;            // a newer prefetch (or a page change) owns this now
+    const ids=todo.slice(i,i+TRC_PREFETCH_CHUNK);
+    try{
+      /* The same two queries the detail page runs, just for 25 leads instead of one. crm_leads is a
+         plain indexed lookup and costs next to nothing; the timeline view is the expensive half, and
+         this is the whole point of batching it.
+         Both are PAGED to completion rather than taken as-returned. A single-lead query can safely
+         assume one page; a 25-lead one cannot, and PostgREST answers an over-long result by silently
+         truncating it at its own max-rows - which here would mean caching a lead's history with its
+         oldest calls quietly missing, and the detail page then showing that as the whole story. A
+         short page is the only proof there is nothing more to fetch. */
+      const [leadsAll,rowsAll]=await Promise.all([
+        trcFetchAllPages(function(from,to){
+          return sb.schema('acc').from('crm_leads').select('*').in('lead_id',ids).order('lead_id').range(from,to);
+        }),
+        trcFetchAllPages(function(from,to){
+          return sb.schema('acc').from('followup_timeline_v').select('*').in('lead_id',ids)
+            .order('follow_up_id').range(from,to);
+        })
+      ]);
+      if(gen!==TRC_PREFETCH_GEN)return;
+      const leadById=Object.create(null);
+      leadsAll.forEach(function(l){leadById[String(l.lead_id)]=l;});
+      const rowsById=Object.create(null);
+      rowsAll.forEach(function(r){(rowsById[String(r.lead_id)]||(rowsById[String(r.lead_id)]=[])).push(r);});
+      /* Written for every id asked for, not just the ones that came back with rows - a lead with no
+         follow-up history at all is a real answer, and caching it is what stops the detail page
+         re-asking for that same empty answer on every click. */
+      ids.forEach(function(id){
+        const k=String(id);
+        trcLeadCacheWrite(id,leadById[k]||null,(rowsById[k]||[]).slice().sort(trcChrono));
+      });
+    }catch(e){
+      /* Silent by design: nothing on screen is waiting for this, and the detail page still fetches
+         for itself on click. A failed chunk simply stays uncached. */
+    }
+  }
+}
+
+/* Runs a range()d query to exhaustion. build(from,to) has to apply a stable order() as well as the
+   range - paging an unordered query is how rows get both duplicated and dropped between pages. */
+async function trcFetchAllPages(build){
+  const PAGE=1000;let out=[],from=0;
+  for(;;){
+    const {data,error}=await build(from,from+PAGE-1);
+    if(error)throw error;
+    const batch=data||[];out=out.concat(batch);
+    if(batch.length<PAGE)break;
+    from+=PAGE;
+    if(from>50000)break;                       // backstop, never a real workload for 25 leads
+  }
+  return out;
+}
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
 /* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
    recently opened from this list, so coming back from its detail page (the in-app Back button, or
@@ -15305,6 +15505,12 @@ const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'a
    exact row someone came from instead of dropping them back at the top of the table. */
 let TRC_LAST_LEAD_ID=null;
 let TRC_LAST_FOLLOWUP_ID=null;
+/* Set on the way INTO a lead and consumed on the way back out, so the list can tell "I came back
+   from a lead" apart from "I just opened this page". The in-app Back button says so in its route
+   (#/r12, #/back), but the BROWSER's back button doesn't: it restores whatever hash the list had
+   before the click, which for anyone who arrived from the sidebar is a bare #/ with nothing in it to
+   go on. Both buttons have to land on the same row, so this is what the bare case reads instead. */
+let TRC_FROM_DETAIL=false;
 /* TRC_LAST_LEAD_ID promises the exact row survives a reload or a pasted URL, but the default (and
    every) date window can legitimately exclude that lead entirely - its last call may not fall in
    the range currently selected. TRC_PIN_ROWS is that one lead's rows, fetched by lead_id alone with
@@ -15323,20 +15529,29 @@ let TRC_PIN_ROWS=null;
    also allowed to simply not be there (a pasted link in a fresh browser), which is what the position
    fallback in trcView is still for. */
 const TRC_BACK_KEY='trc_back_row';
+/* sl is optional. The call-level Mismatch table has no SL NO column to hand over, and a visit from
+   there still deserves to land back on its own row - so the lead id (and the follow-up id, which is
+   what identifies a row in that table) is written down whether or not a number came with it. */
 function trcRememberRow(sl,leadId,followUpId){
-  if(!sl||leadId==null)return;
+  if(leadId==null)return;
   try{
     sessionStorage.setItem(TRC_BACK_KEY,JSON.stringify(
-      {sl:Number(sl),leadId:leadId,followUpId:followUpId||null,f:Object.assign({},TRC_F)}));
+      {sl:sl?Number(sl):null,leadId:leadId,followUpId:followUpId||null,f:Object.assign({},TRC_F)}));
   }catch(e){}
+}
+/* Whatever was last opened from the list, with the filters it was opened under - what #/back
+   resolves through, and the only thing that can put an exact row back after a reload. */
+function trcRecallAny(){
+  try{
+    const m=JSON.parse(sessionStorage.getItem(TRC_BACK_KEY)||'null');
+    return (m&&m.leadId!=null)?m:null;
+  }catch(e){return null;}
 }
 /* Only answers for the SL NO it was written for - a number that doesn't match is a link from some
    other list state, and guessing a lead for it would be worse than falling back to the position. */
 function trcRecallRow(sl){
-  try{
-    const m=JSON.parse(sessionStorage.getItem(TRC_BACK_KEY)||'null');
-    return (m&&Number(m.sl)===Number(sl)&&m.leadId!=null)?m:null;
-  }catch(e){return null;}
+  const m=trcRecallAny();
+  return (m&&Number(m.sl)===Number(sl))?m:null;
 }
 
 /* Deliberately NOT selecting level_regression_severity/prev_status here, unlike the lead-detail fetch
@@ -15550,12 +15765,38 @@ function trcChrono(a,b){
 function trcSkelBar(w,h){
   return '<span class="skel" style="width:'+w+';height:'+(h||12)+'px"></span>';
 }
+/* Stands in for everything #trcKpis holds, not just the four cards: the five status pills and the two
+   counters beside them live in that same block (see trcKpiHtml) and are just as much a per-range
+   number, so leaving them out of the skeleton left a row of real-looking counts sitting under four
+   loading cards. The pill widths vary because the real ones are sized by their labels - a row of
+   identical bars reads as a progress bar rather than as the buttons it is about to become. */
 function trcSkeletonKpis(){
+  const pill=function(w){
+    return '<span class="btn btn-sm" style="pointer-events:none">'+trcSkelBar(w,11)+'</span>';
+  };
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'
     +Array(4).fill(0).map(function(){
       return '<div class="kpi">'+trcSkelBar('60%',11)+'<div style="margin-top:10px">'+trcSkelBar('35%',26)+'</div>'
         +'<div style="margin-top:9px">'+trcSkelBar('80%',11)+'</div></div>';
-    }).join('')+'</div>';
+    }).join('')+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">'
+    +['58px','82px','96px','44px','70px'].map(pill).join('')
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +trcSkelBar('90px',11)+trcSkelBar('150px',11)
+    +'</div>';
+}
+/* Everything on this page that is a NUMBER FOR THE SELECTED RANGE, put back into its loading state
+   together. The date handlers below used to skeleton the table body alone, which left the KPI cards,
+   the status pills and the row count reading out the PREVIOUS range's totals - and reading them
+   confidently, in their normal styling - for the several seconds the new range takes to come back.
+   Same set on every path that refetches (a new range, Clear filters, Refresh), because a stale total
+   is equally wrong whichever of them asked for the data. */
+function trcShowLoading(){
+  const k=$('trcKpis');if(k)k.innerHTML=trcSkeletonKpis();
+  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
+  /* Emptied rather than skeletoned: it is one short line of text at the top of the card, and a grey
+     bar where a sentence goes looks like a rendering fault rather than like waiting. */
+  const c=$('trcCount');if(c)c.textContent='';
 }
 function trcSkeletonRows(n){
   n=n||8;
@@ -15572,7 +15813,6 @@ function trcSkeletonRows(n){
       +'<td>'+trcSkelBar('92px')+'</td>'
       +'<td>'+trcSkelBar('70%')+'</td>'
       +'<td>'+trcSkelBar('80%')+'</td>'
-      +'<td>'+trcSkelBar('64px',24)+'</td>'
     +'</tr>';
   }
   return out;
@@ -15721,8 +15961,11 @@ window.trcSetRange=async function(f,t){
      with, is what keeps that door closed now that the button for it is gone. */
   if(!f&&!t){const y=traYesterday();f=y;t=y;}
   TRC_F.from=f||null;TRC_F.to=t||null;
-  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
+  trcShowLoading();
   await trcFetch(false);trcRender(true);
+  /* A different window is a different set of leads, so the background history prefetch has to be
+     re-aimed at them - trcPrefetchHistories abandons whatever the old range had left to download. */
+  trcPrefetchListedHistories();
 };
 
 function trcFilterBar(all){
@@ -15773,12 +16016,18 @@ window.trcClear=async function(){
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
   const y=traYesterday();TRC_F.from=y;TRC_F.to=y;
-  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
+  trcShowLoading();
   await trcFetch(false);trcRender(true);
+  trcPrefetchListedHistories();
 };
+/* The one button that means "I don't trust what's on screen" - so it drops BOTH caches, the list's
+   and every lead history cached under it, rather than refetching the table and then still handing
+   out 2h-old transcripts on the next click. */
 window.trcRefresh=async function(){
-  const b=$('trcRows');if(b)b.innerHTML=trcSkeletonRows();
+  trcShowLoading();
+  trcLeadCacheClearAll();
   await trcFetch(true);trcRender(true);
+  trcPrefetchListedHistories();
 };
 
 function trcTextCell(v,width){
@@ -15799,15 +16048,7 @@ function trcClipCell(inner){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
-
-/* Stops the row's own onclick (navigate to the lead) from firing when the copy button inside it is
-   clicked - the button and the row share the same <tr>, so the click would otherwise bubble up. */
-window.trcCopyRec=function(ev,url){
-  ev.stopPropagation();
-  if(!url)return toast('No recording URL on the latest call','warn');
-  return traClip(url,'Recording URL copied');
-};
+const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
 
 /* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
    so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
@@ -15845,9 +16086,10 @@ function trcLeadRowHtml(g,sl){
     +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
-    +'<td>'+(last.recording_url
-        ?'<button class="btn btn-sm" onclick="trcCopyRec(event,\''+esc(last.recording_url).replace(/'/g,"\\'")+'\')"><i class="fa-regular fa-copy"></i> Copy</button>'
-        :'<span style="color:var(--slate)">—</span>')+'</td>'
+    /* No Recording column. A per-lead download only ever offered the LATEST call's audio, which is
+       an odd thing for a row that summarises a whole history - and the lead's own page lists every
+       call with its own download link, which is where someone picking a recording is going anyway.
+       The row still says how many recordings the lead has, in the Lead cell above. */
   +'</tr>';
 }
 
@@ -15880,7 +16122,7 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th><th>Recording</th></tr>';
+      +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
 }
 /* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
    on the table itself (see trcView), this is what actually stops one long value (a badge holding an
@@ -15891,9 +16133,9 @@ function trcColsHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
       +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
-    : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:10%">'
-      +'<col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:8%">'
-      +'<col style="width:9%"><col style="width:11%"><col style="width:5%">';
+    : '<col style="width:4%"><col style="width:7%"><col style="width:16%"><col style="width:10%">'
+      +'<col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:8%">'
+      +'<col style="width:10%"><col style="width:13%">';
 }
 
 function trcRender(full){
@@ -15927,29 +16169,43 @@ function trcRender(full){
 }
 
 async function trcView(v,seg){
-  /* #/r<SL NO> - what backing out of a lead's detail page arrives as, naming the row it was opened
-     from and nothing else. It is a position rather than an identity, so it is only used if nothing
-     better is in memory; what it buys is a landing spot after a full page reload or a pasted URL,
-     which the in-memory TRC_LAST_LEAD_ID/TRC_LAST_FOLLOWUP_ID alone never could.
-     The older #/0/<leadId>/<followUpId> shape names its row by id, which is exact - so it is still
-     honoured, and is the branch a live link from elsewhere in the app takes. */
+  /* THE WAYS BACK INTO THIS LIST, and the one rule they share: the list only moves the page when it
+     is actually a return trip. Arriving any other way - the tab strip, the sidebar, a filter change -
+     leaves the scroll alone and lands at the top like any other page.
+       #/r<SL NO>  a lead opened from the SL NO table, backing out. The number names the row it was
+                   opened from; it is a POSITION, not an identity, so it is only trusted as a last
+                   resort, but it is what survives a reload or a pasted URL.
+       #/back      a lead opened from the call-level Mismatch table, which has no SL NO column to
+                   put in a URL. Nothing to resolve but "whatever was last opened", which is exactly
+                   what the memo holds.
+       #/0/<leadId>[/<followUpId>]  names its row by id, which is exact - the shape a live link from
+                   elsewhere in the app takes, still honoured.
+       a bare #/   the browser's own back button, which restores the hash the list had before the
+                   click and so says nothing at all. TRC_FROM_DETAIL is what identifies that one. */
   const rowMatch=/^r(\d+)$/i.exec(String((seg&&seg[0])||''));
   const rowHint=rowMatch?Number(rowMatch[1]):null;
-  if(!rowMatch&&seg&&seg[1]){TRC_LAST_LEAD_ID=seg[1];TRC_LAST_FOLLOWUP_ID=seg[2]||null;}
+  const isBack=String((seg&&seg[0])||'')==='back';
+  const hasLeadSeg=!rowMatch&&!isBack&&!!(seg&&seg[1]);
+  if(hasLeadSeg){TRC_LAST_LEAD_ID=seg[1];TRC_LAST_FOLLOWUP_ID=seg[2]||null;}
   /* An in-app back click still has the lead in memory, which is already exact. A reload, or the URL
-     opened cold in this tab, does not - so recover which row the number named, and the window it was
-     counted in. Restoring the filters is the point, not a side effect: without them the lead may not
-     even be in the fetched range, and the row genuinely is not the 79th of anything on screen.
+     opened cold in this tab, does not - so recover which row was opened, and the window it was
+     opened under. Restoring the filters is the point, not a side effect: without them the lead may
+     not even be in the fetched range, and the row genuinely is not the 79th of anything on screen.
      trcFetch keys its cache on the date range, so putting these back before it runs is what makes it
      go and get the right window; trcEnsurePinnedLead then covers a lead the window still excludes. */
-  if(rowHint&&TRC_LAST_LEAD_ID==null){
-    const memo=trcRecallRow(rowHint);
+  if((rowHint||isBack)&&TRC_LAST_LEAD_ID==null){
+    const memo=isBack?trcRecallAny():trcRecallRow(rowHint);
     if(memo){
       Object.assign(TRC_F,memo.f||{});
       TRC_LAST_LEAD_ID=memo.leadId;
       TRC_LAST_FOLLOWUP_ID=memo.followUpId||null;
     }
   }
+  /* Only a return trip restores a row. Landing on the list any other way must not yank the page down
+     to whatever lead happened to be opened last - that lead is still highlighted in the table either
+     way, which is the part worth keeping. */
+  const wantsRow=rowHint!=null||isBack||hasLeadSeg||TRC_FROM_DETAIL;
+  TRC_FROM_DETAIL=false;   // consumed: a later filter change or tab click is not a return trip
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
@@ -15974,23 +16230,72 @@ async function trcView(v,seg){
   await trcFetch(false);
   await trcEnsurePinnedLead();
   trcRender(true);
-  /* The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one
-     row per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to. */
-  let row=(TRC_F.match==='MISMATCH'&&TRC_LAST_FOLLOWUP_ID!=null)
-    ? $('trcCallRow'+TRC_LAST_FOLLOWUP_ID)
-    : (TRC_LAST_LEAD_ID!=null ? $('trcLeadRow'+TRC_LAST_LEAD_ID) : null);
-  /* Nothing in memory to match a lead on - a reload, or someone opening #/r12 cold - so fall back to
-     the position the number names. It is the same lead only if the list rendered the same way. */
-  if(!row&&rowHint){const b=$('trcRows');row=(b&&b.children[rowHint-1])||null;}
-  if(row)row.scrollIntoView({block:'center'});
+  /* Only ever after a render that was asked to restore a row (see wantsRow above). */
+  if(wantsRow)trcScrollToRow(rowHint);
+  /* Last, and deliberately not awaited: the table is already on screen and interactive, and this is
+     a background download of every listed lead's full call history so the first click into one is
+     instant. Kicked off from here rather than from trcFetch so a filter change that reuses the
+     cached rows still re-aims it at the leads now on screen. */
+  trcPrefetchListedHistories();
+}
+
+/* Puts the exact row someone came back from on screen, and nothing else - no smooth scroll (this is
+   a restore, not a journey) and no scroll at all if the row isn't there to scroll to.
+   The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one row
+   per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to.
+   rAF, not straight after the render: the tab-strip MutationObserver (see the top of this file) runs
+   as a microtask right after the innerHTML that queued it, and the browser has not laid the new rows
+   out yet at that point. One frame later the table has real geometry and block:'center' means what it
+   says. */
+function trcScrollToRow(rowHint){
+  const find=function(){
+    let row=(TRC_F.match==='MISMATCH'&&TRC_LAST_FOLLOWUP_ID!=null)
+      ? $('trcCallRow'+TRC_LAST_FOLLOWUP_ID)
+      : (TRC_LAST_LEAD_ID!=null ? $('trcLeadRow'+TRC_LAST_LEAD_ID) : null);
+    /* Nothing in memory to match a lead on - a reload, or someone opening #/r12 cold - so fall back
+       to the position the number names. It is the same lead only if the list rendered the same way. */
+    if(!row&&rowHint){const b=$('trcRows');row=(b&&b.children[rowHint-1])||null;}
+    return row;
+  };
+  requestAnimationFrame(function(){
+    const row=find();
+    if(row)row.scrollIntoView({block:'center'});
+  });
+}
+
+/* The leads the table is showing right now, in the order they are shown, so the prefetch warms the
+   rows someone is most likely to click first. Reads the rendered rows rather than re-deriving the
+   grouping, so it can never disagree with what is on screen. */
+function trcPrefetchListedHistories(){
+  const b=$('trcRows');
+  if(!b)return;
+  const ids=[];
+  if(TRC_F.match==='MISMATCH'){
+    /* The Mismatch card puts one row per CALL on screen, keyed by follow_up_id - there are no lead
+       rows to read ids off, so the filtered rows themselves are the list (the cache is per lead, and
+       several of those rows can belong to the same one). */
+    trcApply(TRC_ROWS||[]).forEach(function(r){if(r.lead_id!=null)ids.push(r.lead_id);});
+  }else{
+    Array.prototype.forEach.call(b.children,function(tr){
+      const m=/^trcLeadRow(.+)$/.exec(tr.id||'');
+      if(m)ids.push(m[1]);
+    });
+  }
+  if(ids.length)trcPrefetchHistories(ids);
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
+/* Same rule as traKV above: mono marks the URL-shaped fields, so an http(s) value there is rendered
+   as a download link rather than as monospace text. */
 function trcKV(label,value,mono){
+  const str=(value===null||value===undefined)?'':String(value);
+  const body=str===''
+    ? '<span style="color:var(--slate)">—</span>'
+    : (mono&&/^https?:\/\//i.test(str)?trRecLinkText(str):esc(str));
   return '<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)">'
     +'<div style="min-width:170px;font-size:12.5px;color:var(--slate)">'+esc(label)+'</div>'
     +'<div style="flex:1;min-width:0;font-size:13.5px;'+(mono?'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;':'')+'">'
-    +(value===null||value===undefined||value===''?'<span style="color:var(--slate)">—</span>':esc(String(value)))+'</div></div>';
+    +body+'</div></div>';
 }
 /* The complete conversation, in order, with the MM:SS timestamps the transcriber returned. Never a
    summary - being able to read what was actually said is the point of the whole pipeline. */
@@ -16159,7 +16464,8 @@ function trcCallHtml(r,i,total){
     +(m?trcTag(m.tag,m.icon,m.short):'')
     +(trcIsRegression(r)?trcTag('t-red','fa-arrow-turn-down','Status regressed from '+(r.prev_status||'—')):'')
     +'<div class="grow"></div>'
-    +(r.recording_url?'<button class="btn btn-sm" onclick="trcCopy(\'url\','+r.follow_up_id+')"><i class="fa-regular fa-copy"></i> Copy URL</button>':'')
+    +trRecLink(r.recording_url,{label:'Download recording',file:trRecFile(r),
+        feat:'transcription.call_detail.play_download_recording'})
     +((r.queue_status==='failed')?'<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'')
   +'</div>';
 
@@ -16288,37 +16594,56 @@ function trcOvHealthHtml(h){
 
 async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
-  v.innerHTML=trcLeadSkeletonHtml();
   const id=Number(leadId);
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
+  /* Set before anything can fail: backing out of "Lead not found" or a failed fetch still has to put
+     the reader back on the row they clicked. */
+  TRC_FROM_DETAIL=true;
+  /* This page always opens AT ITS TOP. Nothing resets the window's scroll between views - the router
+     just swaps #view's innerHTML - so clicking a lead from row 60 of a long list used to render this
+     page and leave the reader wherever the list had been scrolled to: somewhere in the middle of a
+     lead's call history, or clamped to the bottom of a page shorter than the list was. Opening a
+     lead means starting at the lead. */
+  try{window.scrollTo(0,0);}catch(e){}
   /* Where every "Back"/"Back to all leads" link below goes: the list section this page was opened
      from and nothing more. The lead's own id is deliberately left off - it belongs to this page, not
      to the list - so backing out lands on #/r12 rather than a list URL still naming one lead.
      A row number is a render-only position that a re-sort or a changed filter can hand to a different
      lead entirely, so the list restores by lead id whenever it still has one in memory and only falls
      back to the position on a reload (see trcView). A visit that arrived off the call-level Mismatch
-     table carries no row number at all, and goes back to the top of the list. */
-  const backRoute=rowHint?('transcription/r'+rowHint):'transcription/0';
+     table has no row number to put in a URL, so it backs out to #/back, which restores the row from
+     the memo instead of from the URL - either way the list returns to the row this page came from. */
+  const backRoute=rowHint?('transcription/r'+rowHint):'transcription/back';
   /* Written here rather than off the row's click handler because this is the last moment TRC_F is
      still the list's own filter state - nothing on this page touches it, and the number in backRoute
      is only meaningful against it. */
   trcRememberRow(rowHint,id,targetFollowUpId);
   let lead=null,rows=[];
-  try{
-    const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
-    lead=r1.data||null;
-    /* `*` here, unlike the list: this is the one place the transcripts and the five QA blobs are
-       actually read, and asking for them by name would silently drop whatever the pipeline starts
-       storing tomorrow. */
-    const r2=await sb.schema('acc').from('followup_timeline_v').select('*').eq('lead_id',id);
-    rows=(r2.data||[]).slice().sort(trcChrono);
-  }catch(e){
-    v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
-      +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i>'
-      +'<div>Could not load this lead: '+esc((e&&e.message)||String(e))+'</div>'
-      +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
-    return;
+  /* Already fetched, within the last 2h - by an earlier visit to this same lead, or by the list's
+     own background prefetch (see trcPrefetchHistories). Nothing is awaited on this path, so the
+     skeleton below is never even reached: the page renders in the same task as the click. */
+  const cached=trcLeadCacheRead(id);
+  if(cached){
+    lead=cached.lead;rows=cached.rows||[];
+  }else{
+    v.innerHTML=trcLeadSkeletonHtml();
+    try{
+      const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
+      lead=r1.data||null;
+      /* `*` here, unlike the list: this is the one place the transcripts and the five QA blobs are
+         actually read, and asking for them by name would silently drop whatever the pipeline starts
+         storing tomorrow. */
+      const r2=await sb.schema('acc').from('followup_timeline_v').select('*').eq('lead_id',id);
+      rows=(r2.data||[]).slice().sort(trcChrono);
+      trcLeadCacheWrite(id,lead,rows);
+    }catch(e){
+      v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
+        +'<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i>'
+        +'<div>Could not load this lead: '+esc((e&&e.message)||String(e))+'</div>'
+        +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
+      return;
+    }
   }
   if(!lead&&!rows.length){
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
@@ -16344,7 +16669,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
         +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
-        +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
+        +'<button class="btn" onclick="trcCopy()"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
   /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
@@ -16402,33 +16727,27 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   }
 
   /* Coming here from a personnel filter or a mismatch drill-down means one specific call is the
-     reason for the click, not the lead in general - scroll to it and flash it so it's obvious which
-     one of possibly dozens of calls is the match, instead of leaving the reader to hunt for it. */
+     reason for the click, so that call is RINGED - but the page is not scrolled to it. This page
+     opens at the top, on the lead, every time: someone who clicked a lead's name asked to see the
+     lead, and being dropped part-way down a history with the header off-screen reads as a broken
+     page rather than as a helpful jump. The ring is what answers "which one of these is the
+     match" once they scroll, and unlike the old two-second flash it is still there when they get
+     to it. */
   if(targetFollowUpId){
-    setTimeout(function(){
-      const el=document.getElementById('trc-call-'+targetFollowUpId);
-      if(!el)return;
-      el.scrollIntoView({behavior:'smooth',block:'start'});
-      const prevShadow=el.style.boxShadow;
-      el.style.boxShadow='0 0 0 3px #0d9488';
-      setTimeout(function(){el.style.boxShadow=prevShadow;},2000);
-    },40);
+    const el=document.getElementById('trc-call-'+targetFollowUpId);
+    if(el)el.style.boxShadow='0 0 0 3px #0d9488';
   }
 }
 
 /* Copy, never download - the same rule the rest of this page follows. */
-window.trcCopy=async function(what,id){
+/* Only the CRM response now. This used to copy a call's recording URL too, which is what every
+   Copy URL button on this page called - those are download links (see trRecLink), so that branch
+   had no caller left. */
+window.trcCopy=async function(){
   if(!TRC_LEAD)return toast('Nothing loaded to copy','warn');
-  if(what==='lead'){
-    const payload=(TRC_LEAD.lead&&TRC_LEAD.lead.raw)||null;
-    if(!payload)return toast('No CRM response stored for this lead','warn');
-    return traClip(JSON.stringify(payload,null,2),'CRM response copied');
-  }
-  const r=TRC_LEAD.rows.find(function(x){return Number(x.follow_up_id)===Number(id);});
-  if(!r||!r.recording_url)return toast('No recording URL on this call','warn');
-  /* The Knowlarity link, which is the STABLE one - it 302s to a presigned S3 URL that expires in
-     about ten minutes, so copying the redirect target hands over a link already dead on arrival. */
-  return traClip(r.recording_url,'Recording URL copied');
+  const payload=(TRC_LEAD.lead&&TRC_LEAD.lead.raw)||null;
+  if(!payload)return toast('No CRM response stored for this lead','warn');
+  return traClip(JSON.stringify(payload,null,2),'CRM response copied');
 };
 
 /* Retry sends the follow-up back to the pipeline, which resumes at the PHASE that failed: a QA
@@ -16453,6 +16772,10 @@ window.trcRetry=async function(followUpId){
   const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   TRC_ROWS=null;
   trCacheClear('trc_fetch_cache');
+  /* And this lead's own cached history - the whole point of the retry is that the call's rows are
+     about to change, so re-rendering the detail page off the 2h snapshot would show the reader the
+     exact state they just asked to have redone. */
+  if(lead)trcLeadCacheDrop(lead);
   if(lead)await trcLeadDetail($('view'),lead);
 };
 
@@ -16476,7 +16799,11 @@ VIEWS.transcription=async function(v,seg){
      the tab index (#/1 is Manual Upload), so '3' there could not mean row 3 without also meaning the
      Deleted tab. The SL NO itself is only a display label, recomputed on every render (see
      trcLeadRowHtml) and never an identifier - the detail page echoes it back as "Row #N", and the
-     list treats it as a position of last resort (see trcView). */
+     list treats it as a position of last resort (see trcView).
+     #/back is the fourth shape and the only one that is not a page of its own: it is the way back to
+     the list for a lead that was opened WITHOUT a row number (the call-level Mismatch table has no
+     SL NO column to put in a URL). It carries nothing, resolves to the list through mTab like any
+     unrecognised first segment, and trcView restores the row from the memo instead. */
   const rowSeg=/^r(\d+)$/i.exec(String(seg[0]||''));
   if(rowSeg&&seg[1]){return trcLeadDetail(v,seg[1],seg[2]||null,rowSeg[1]);}
   /* 'lead' is the older shape of that same page, still resolving so an existing link or bookmark
@@ -16494,6 +16821,10 @@ VIEWS.transcription=async function(v,seg){
   const tabs=TRA_TABS;
   const ti=mTab(seg,tabs.length);
   if(ti===0){return trcView(v,seg);}
+  /* Left the leads list for one of the other tabs: nothing here will read a lead's history, so stop
+     the background prefetch mid-flight rather than finish downloading transcripts for a table that
+     is no longer on screen. Leaving the module entirely is a real page load, which kills it anyway. */
+  trcPrefetchCancel();
   /* No banner. This page is for watching calls move through the pipeline, and a paragraph of
      product copy above the numbers is not that. */
   const banner='';
@@ -16758,7 +17089,14 @@ function trRowHtml(r,mode){
     +'<td>'+trFmtDur(r.duration_seconds)+'</td>'
     +'<td style="color:var(--slate);font-size:12px">'+fmtDate(r.created_at)+'</td>'
     +'<td style="white-space:nowrap" onclick="event.stopPropagation()">'
-      +(r.recording_url?'<button class="btn btn-sm btn-ghost" title="Copy the recording link — paste it to download the audio" onclick="trCopyUrl('+r.id+')"><i class="fa-solid fa-link"></i></button> ':'')
+      /* Icon only, like every other control in this cell, and an audio-file icon rather than the
+         download arrow - the button immediately after this one downloads the REPORT and already owns
+         that arrow here, so two identical icons side by side would say nothing about which is which.
+         feat carries the key trCopyUrl used to be counted under, so replacing the button with a link
+         does not silently end that measurement. */
+      +(r.recording_url?trRecLink(r.recording_url,{cls:'btn btn-sm btn-ghost',label:'',icon:'fa-file-audio',
+          title:'Download this call recording',file:trRecFile(r),
+          feat:'transcription.all_calls.download_call_report_or_copy_link'})+' ':'')
       +(r.status==='done'?'<button class="btn btn-sm btn-ghost" title="Download report" onclick="trDownloadReport('+r.id+')"><i class="fa-solid fa-download"></i></button> ':'')
       +(mode==='folder'?'<button class="btn btn-sm btn-ghost" title="Remove from folder" onclick="trRemoveFromFolder('+r.id+')"><i class="fa-solid fa-xmark"></i></button> ':'')
       +(r.status==='error'?'<button class="btn btn-sm" title="Retry analysis" onclick="trRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button> ':'')
@@ -17089,7 +17427,7 @@ function trStartPolling(id){
     const st=out&&(out.status||(out.row&&out.row.status));
     if(st==='done'||st==='error'){
       delete TR_TIMERS[id];
-      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 3h cache now
+      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 2h cache now
       if(PAGE==='transcription')renderPage();
       return;
     }
@@ -17277,7 +17615,7 @@ window.trUploadStart=async function(){
         if(!res.ok||!out.row) throw new Error(out.error||'could not start');
         if(!TR_ROWS)TR_ROWS=[];
         TR_ROWS.unshift(out.row);
-        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 3h cache - trStartPolling re-freezes it once it's actually done
+        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 2h cache - trStartPolling re-freezes it once it's actually done
         trStartPolling(out.row.id);
         done++;
       }catch(e){ failed++; }
@@ -17451,19 +17789,6 @@ function trTranscriptHtml(r,lang){
   return '<div style="color:var(--slate);font-size:13px">Transcript not available.</div>';
 }
 
-/* The Knowlarity link, which downloads the recording when opened. Copied rather than offered as a
-   download button: the link is what is useful to paste into a chat or a browser, and a page-driven
-   download would be blocked in some views anyway. */
-window.trCopyUrl=async function(id){
-  const r=(TR_ROWS||[]).concat(TR_DELETED_ROWS||[]).find(function(x){return x.id===id;});
-  const url=r&&r.recording_url;
-  if(!url){ toast('This call has no recording link','err'); return; }
-  try{ await navigator.clipboard.writeText(url); toast('Recording link copied — paste it anywhere to download','ok'); }
-  catch(e){
-    // clipboard is refused without a user gesture or over plain http; show it so it can be copied by hand
-    try{ window.prompt('Copy the recording link:', url); }catch(_e){ toast('Could not copy the link','err'); }
-  }
-};
 window.trSetLang=function(lang){
   if(!TR_DETAIL_ROW)return;
   const b=$('trTranscriptBody');if(b)b.innerHTML=trTranscriptHtml(TR_DETAIL_ROW,lang);
@@ -17572,7 +17897,11 @@ const USAGE_MAP={
   trPinSelected:'transcription.all_calls.pin_unpin_calls',
   trAssignToFolder:'transcription.all_calls.add_calls_to_a_folder',
   trDownloadReport:'transcription.all_calls.download_call_report_or_copy_link',
-  trCopyUrl:'transcription.all_calls.download_call_report_or_copy_link',
+  /* Every recording download link routes its click through trRecClick (see trRecLink). One handler
+     serves several views that are different features, so the key travels in the call site's own
+     `feat` and this resolver just passes it through - a link from a view that was never counted
+     passes '' and, since the wrapper skips a falsy key, logs nothing. */
+  trRecClick:function(ev,feat){return feat||'';},
   trRetry:'transcription.all_calls.retry_failed_transcription', trDelete:'transcription.all_calls.delete_a_call',
   trFolderRenameSave:'transcription.folders.rename_delete_a_folder',
   trFolderDeleteConfirm:'transcription.folders.rename_delete_a_folder',
