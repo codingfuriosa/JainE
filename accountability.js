@@ -3759,77 +3759,7 @@
   /* ── booking check list ────────────────────────────────────────────────────────────────────
      The icon downloads the filled check list. No popup: the reading already happened in the
      background when the booking was raised (acc.booking_audits + a trigger + a cron worker), so
-     there is nothing to wait for and nothing to confirm.
-
-     The file is the FORM ITSELF - assets/forms/booking-check-list-blank.pdf, the blank you use,
-     with values written onto its blanks. That keeps the logo, the Carlito type and the exact
-     layout, instead of a redrawing that could drift from it.
-
-     Every coordinate in WF_CL was measured out of that PDF by walking its content stream and adding
-     up the font's own glyph widths, then checked against the positions the PDF records for the
-     chunks it does start a new text object for: computed 136.6 against a recorded 136.7, and 117.0
-     against 117.1. So a value starts where its underscores start, to a tenth of a point.
-
-     `w` is how much room that blank has, measured from the number of underscores in it. A value too
-     wide is stepped down in size until it fits rather than running over the next label. */
-  /* The blank arrives as a SCRIPT, not as a file to fetch. A browser refuses fetch() of a
-     same-origin file when the page itself was opened straight off the disk as file:// - it throws
-     "Failed to fetch" without making a request - so the check list could not be built at all while
-     working from the local copy. A script tag is allowed in both places. Loaded the first time
-     somebody asks for a check list, the same way pdf-lib is, not on every page load.
-     booking-check-list-blank.pdf sits beside it and remains the source of truth. */
-  const WF_CL_TEMPLATE='assets/forms/booking-check-list-blank.js';
-  async function wfClBlank(){
-    if(!window.WF_CL_BLANK_B64){
-      await new Promise(function(res,rej){
-        const sc=document.createElement('script');
-        sc.src=WF_CL_TEMPLATE;
-        sc.onload=res;
-        sc.onerror=function(){ rej(new Error('the blank form could not be loaded')); };
-        document.head.appendChild(sc);
-      });
-    }
-    const b64=window.WF_CL_BLANK_B64;
-    if(!b64) throw new Error('the blank form loaded but was empty');
-    const bin=atob(b64), out=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
-    return out;
-  }
-  const WF_CL={
-    date:        {x:441.5, y:583.75, s:11, w:98},
-    // The underscores stop at 448 but nothing is printed to the right of them, so a name may
-    // run on to the margin before the size has to come down - two allottees stay legible.
-    customer:    {x:188.0, y:508.35, s:11, w:352},
-    project:     {x:143.2, y:484.55, s:11, w:80},
-    block:       {x:284.2, y:484.55, s:11, w:21},
-    flat:        {x:338.7, y:484.55, s:11, w:26},
-    floor:       {x:405.2, y:484.55, s:11, w:21},
-    area:        {x:459.2, y:484.55, s:11, w:32},
-    base_rate:   {x:125.0, y:460.75, s:11, w:49},
-    plc:         {x:211.6, y:460.75, s:11, w:38},
-    flc:         {x:276.6, y:460.75, s:11, w:38},
-    // The form no longer presumes covered parking, so its label is just "PARKING" and the blank
-    // begins 45pt earlier with room for the kind as well as the amount.
-    parking:     {x:384.1, y:460.75, s:11, w:155},
-    discount:    {x:151.4, y:436.95, s:13, w:150},
-    cost:        {x:122.1, y:385.35, s:11, w:130},
-    market:      {x:179.1, y:361.55, s:11, w:120},
-    kyc:         {x:149.1, y:337.75, s:11, w:130},
-    mobile:      {x:145.3, y:313.95, s:11, w:130},
-    email:       {x:111.1, y:290.15, s:11, w:142},
-    pan:         {x:132.7, y:266.35, s:11, w:130},
-    source:      {x:105.1, y:242.55, s:11, w:185},
-    lead_id:     {x:190.2, y:218.75, s:13, w:85},
-    booking_date:{x:363.6, y:218.75, s:13, w:85},
-    signatures:  {x:122.1, y:194.95, s:11, w:130}
-  };
-  // Where a failing signature check says WHERE, past the end of that row's underscores.
-  const WF_CL_SIG_WHY={x:262.0, y:194.95, size:8.5, right:545};
-  /* The two lines the blank does not print. Its rows step down by 23.8pt and it leaves the space
-     between "Payment Plan" (194.95) and the sign-off rule (131.35) empty, so these sit in the
-     form's own rhythm - 171.15 for the signatures, 147.35 for the parking - without touching
-     anything it already says. */
-
+     there is nothing to wait for and nothing to confirm. */
   /* ── welcome letter ───────────────────────────────────────────────────────────────────────
      The letter Post Sales sends a customer once their booking is in. Same source as the check
      list - the stored reading of their own documents - so the two can never disagree about who
@@ -4283,118 +4213,179 @@
     catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
-  /* Fills the blank and downloads it. JAIN-E writes every value here from the stored reading, so
-     nothing on the sheet was produced by a model. */
+  /* Typeset at A4 and downloaded. Every value comes from the stored reading; nothing on the sheet
+     is written by a model.
+
+     WHY THIS IS SET RATHER THAN OVERLAID. It used to be drawn by writing values onto a scan of the
+     printed blank. On a scan the gaps are fixed at whatever width they were printed, so a value sat
+     hard against the underscores with no space before it, two ran into each other when both blanks
+     were too narrow - PLC and FLC came out as "100 100" - and a long one was cut mid-word, "3rd
+     FLOOR" printing as "3rd FL". Setting the page gives each label its room, puts every value in
+     one column, and lets a line grow when its value is long.
+
+     The wording, the items and their order are the form's own and are not to be improved on;
+     assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
   async function wfChecklistPdf(res){
     const L=await loadPdfLib();
     if(!L) throw new Error('the PDF library could not be loaded');
 
-    const blank=await wfClBlank();
-
-    const doc=await L.PDFDocument.load(blank);
-    const page=doc.getPages()[0];
-    const helvB=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    const helv=await doc.embedFont(L.StandardFonts.Helvetica);
-    // The whole sheet is in one ink. It is a form, not a dashboard.
-    const black=L.rgb(0.05,0.05,0.05), grey=L.rgb(0.30,0.30,0.30);
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);
+    const W=595.28, H=841.89, M=58, R=W-M;
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    /* One ink, as on any form - a check list is not a dashboard, and it gets photocopied. Grey is
+       for a value nobody has filled in yet, never for a warning. */
+    const ink=L.rgb(0.07,0.07,0.08), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.55,0.57,0.60);
 
     const f=res.fields||{}, cl=res.checklist||{};
-    const v=function(k){ const x=f[k]; const t=x?String(x.value):''; return (!t||t==='NIL')?'NIL':t; };
-    /* A pending CRM field, or a skipped one, is left as a dash - "-- awaiting the CRM API --" does
-       not belong on a printed form and would not fit the blank anyway. */
-    const short=function(t){
-      const x=String(t==null?'':t).trim();
-      if(!x||/^--.*--$/.test(x)) return '\u2014';
-      return x;
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const dots=function(t){ return String(t==null?'':t).trim().replace(/[\/\-]/g,'.'); };
+    const grp=function(t){
+      const str=String(t==null?'':t).trim();
+      if(!str) return '';
+      const n=Number(str.replace(/,/g,''));
+      return isFinite(n)?n.toLocaleString('en-IN'):str;
     };
-    // Step the size down until it fits its blank; truncate only as a last resort.
-    const put=function(slot,text,font,col){
-      if(!slot) return;
-      let t=String(text==null?'':text);
-      if(!t) return;
-      const fo=font||helvB;
-      let sz=slot.s;
-      while(sz>6 && fo.widthOfTextAtSize(t,sz)>slot.w) sz-=0.5;
-      while(t.length>1 && fo.widthOfTextAtSize(t,sz)>slot.w) t=t.slice(0,-1);
-      page.drawText(t,{x:slot.x,y:slot.y,size:sz,font:fo,color:col||black});
-    };
-    const verdict=function(slot,key){
-      const t=String(cl[key]!=null?cl[key]:'').trim();
-      // OK in black - it is a form, not a dashboard. NOT OK stays red so a problem still reads
-      // as one at a glance.
-      if(t==='Ok')      return put(slot,'OK',helvB,black);
-      if(t==='Not Ok')  return put(slot,'NOT OK',helvB,black);
-      // Nothing prints as UNKNOWN. An item that could not be settled is not a pass, so it
-      // reads NOT OK and somebody looks at it.
-      if(t==='Unknown') return put(slot,'NOT OK',helvB,black);
-      return put(slot,short(t),helvB,black);
-    };
+    const said=function(t){ const x=String(t==null?'':t).trim();
+      return (x && x!=='NIL' && !/^--.*--$/.test(x)) ? x : ''; };
 
-    put(WF_CL.date,      (res.header&&res.header.date)||'');
-    /* EVERY allottee on the one line the form gives for it - the first applicant and anyone
-       named with them. It never wraps: the size steps down instead, so the sheet keeps the
-       shape of the form. */
-    const allottees=[];
-    [v('customer_name')].concat(Array.isArray(res.co_applicants)?res.co_applicants:[])
-      .forEach(function(n){
-        const t=String(n==null?'':n).trim();
-        if(!t||t==='NIL') return;
-        // The reader sometimes lists the applicant among the co-applicants too; printing a
-        // name twice reads as a mistake in the file rather than one in the reading.
-        if(allottees.some(function(x){ return x.toUpperCase()===t.toUpperCase(); })) return;
-        allottees.push(t);
+    // No letterhead drawn: this prints on the company's own paper, which needs the top left clear.
+    let y=H-112;
+
+    (function(){
+      const lab='Date  :  ', val=dots((res.header&&res.header.date)||'')||'\u2014';
+      const lw=reg.widthOfTextAtSize(lab,10.5), w=lw+bold.widthOfTextAtSize(val,10.5);
+      page.drawText(lab,{x:R-w,y:y,size:10.5,font:reg,color:ink});
+      page.drawText(val,{x:R-w+lw,y:y,size:10.5,font:bold,color:ink});
+    })();
+    y-=30;
+
+    page.drawText('Booking form check list :-',{x:M,y:y,size:11.5,font:bold,color:ink});
+    y-=26;
+
+    // The two header lines, colons in one column so each pair reads as a pair.
+    const mLab=['Name of Post sales in-charge Responsible','Name of the customer'];
+    const mVal=[(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH',
+                allotteeNames(res).join('  &  ')||'\u2014'];
+    const colonX=M+Math.max.apply(null,mLab.map(function(t){
+      return reg.widthOfTextAtSize(t,10.5); }))+12;
+    mLab.forEach(function(lab,i){
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(':',{x:colonX,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(mVal[i]),{x:colonX+12,y:y,size:10.5,font:bold,color:ink});
+      y-=17;
+    });
+    y-=11;
+
+    /* Label : Value, comma separated, with real space around the colon. Drawn as a run of chunks
+       so the labels can stay light and the values bold on the one line. */
+    const runLine=function(pairs){
+      let x=M;
+      pairs.forEach(function(p,i){
+        /* An explicit NIL is an answer and prints as one - the form's own way of saying there is
+           no discount, no parking. Only a genuinely empty value becomes a dash. */
+        const lab=p[0]+' : ';
+        const val=(p[1]==null||String(p[1]).trim()==='') ? '\u2014' : String(p[1]).trim();
+        page.drawText(lab,{x:x,y:y,size:10.5,font:reg,color:soft});
+        x+=reg.widthOfTextAtSize(lab,10.5);
+        page.drawText(val,{x:x,y:y,size:10.5,font:bold,color:ink});
+        x+=bold.widthOfTextAtSize(val,10.5);
+        if(i<pairs.length-1){
+          page.drawText(',    ',{x:x,y:y,size:10.5,font:reg,color:ink});
+          x+=reg.widthOfTextAtSize(',    ',10.5);
+        }
       });
-    put(WF_CL.customer,  allottees.join('  &  ')||'NIL');
-    put(WF_CL.project,   v('project_name'));
-    put(WF_CL.block,     v('block'));
-    put(WF_CL.flat,      v('flat'));
-    put(WF_CL.floor,     v('floor'));
-    put(WF_CL.area,      v('area_sqft'));
-    put(WF_CL.base_rate, v('base_rate'));
-    put(WF_CL.plc,       v('plc'));
-    put(WF_CL.flc,       v('flc'));
-    /* "COVERED 1,50,000" or "OPEN 1,50,000" - the kind comes from what the customer ticked on the
-       booking form, not from the cost sheet's wording, and stays off when neither was ticked. */
-    put(WF_CL.parking,   res.parking_value || v('covered_parking'));
-    put(WF_CL.discount,  v('discount'));
+      y-=17;
+    };
+    // The floor is the number the booking form gives - not "3rd FLOOR" clipped to "3rd FL".
+    const floorNo=(String(v('floor')).match(/\d+/)||[v('floor')])[0]||'';
+    runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
+             ['Floor',floorNo],
+             ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
+    runLine([['Base Rate',v('base_rate')?(grp(v('base_rate'))+'/-'):''],
+             ['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+             ['Parking',res.parking_value||v('covered_parking')||'NIL']]);
+    runLine([['Discount',v('discount')||'NIL']]);
+    y-=13;
 
-    verdict(WF_CL.cost,   'Cost Sheet');
-    verdict(WF_CL.market, 'Market valuation Sheet');
-    verdict(WF_CL.kyc,    'KYC of Customer');
-    verdict(WF_CL.mobile, 'Mobile Number');
-    verdict(WF_CL.email,  'Email ID');
-    verdict(WF_CL.pan,    'Pan Card No.');
-    put(WF_CL.source,     short(cl['Source']||v('source')));
-    put(WF_CL.lead_id,      short(cl['Booked in CRM - Lead ID']));
-    put(WF_CL.booking_date, short(cl['Booking Date']));
+    page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
+    y-=23;
 
-    /* The blank now prints a Signatures row of its own, between "Booked in CRM" and "Payment
-       Plan", so it is filled like any other item rather than appended underneath. When it fails it
-       also says where, in small type past the end of the row - "NOT OK" alone sends somebody back
-       through the whole file. A clean sheet stays exactly as plain as the form. */
-    verdict(WF_CL.signatures, 'Signatures');
-    if(String(cl['Signatures']||'').trim()==='Not Ok'){
-      const sw=WF_CL_SIG_WHY;
-      let t=String((res.signatures&&res.signatures.reason)||'').trim();
-      if(t){
-        while(t.length>1 && helv.widthOfTextAtSize(t,sw.size)>(sw.right-sw.x)) t=t.slice(0,-1);
-        page.drawText(t,{x:sw.x,y:sw.y,size:sw.size,font:helv,color:grey});
-      }
-    }
+    /* A dash between the label and the rule, and the value written ON the rule - which is what a
+       filled form looks like. Every value starts in the same column, so they read straight down
+       instead of being hunted for. */
+    const LBL=152, VX=M+LBL+18;
+    const row=function(label,value,dim,edge){
+      page.drawText(label,{x:M,y:y,size:10.5,font:reg,color:ink});
+      page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
+      page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
+    };
+    // Nothing prints as UNKNOWN: a check that could not be settled reads NOT OK. See the reader.
+    const verdict=function(key){
+      const t=String(cl[key]==null?'':cl[key]).trim();
+      if(t==='Ok')     return ['OK',false];
+      if(t==='Not Ok') return ['NOT OK',false];
+      if(!t||/^--.*--$/.test(t)) return ['\u2014',true];
+      return [t,false];
+    };
+    ['Cost Sheet','Market valuation Sheet','KYC of Customer','Mobile Number','Email ID',
+     'Pan Card No.'].forEach(function(k){
+      const d=verdict(k); row(k,d[0],d[1]); y-=22;
+    });
+    (function(){ const src=said(cl['Source']); row('Source',src||'\u2014',!src); y-=22; })();
 
-    /* Page 1 and nothing else. The working behind it - the sums, the GST rates, the KYC matching -
-       stays in the stored reading; the printed sheet is the form. */
+    // The one row the form itself puts two pairs on.
+    (function(){
+      const lead=said(cl['Booked in CRM - Lead ID']), mid=VX+112;
+      row('Booked in CRM \u2013 Lead ID', lead||'awaiting the CRM', !lead, mid);
+      const bx=mid+26, blab='Booking Date';
+      page.drawText(blab,{x:bx,y:y,size:10.5,font:reg,color:ink});
+      const bvx=bx+reg.widthOfTextAtSize(blab,10.5)+12;
+      page.drawText('\u2013',{x:bvx,y:y,size:10.5,font:reg,color:soft});
+      const bd=said(cl['Booking Date']) ? dots(cl['Booking Date']) : '';
+      page.drawText(bd||'\u2014',{x:bvx+14,y:y,size:10.5,font:bd?bold:reg,color:bd?ink:soft});
+      page.drawLine({start:{x:bvx+14,y:y-4},end:{x:R,y:y-4},thickness:0.6,color:rule});
+      y-=22;
+    })();
+    (function(){ const d=verdict('Signatures'); row('Signatures',d[0],d[1]); y-=32; })();
+
+    (function(){
+      /* The form prints a small arrow here that the standard PDF fonts cannot encode; a colon
+         says the same thing and matches every other label on the sheet. */
+      const lab='Payment Plan   :   ';
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(cl['Payment Plan']||'AS PER COST SHEET /'),
+        {x:M+reg.widthOfTextAtSize(lab,10.5),y:y,size:10.5,font:bold,color:ink});
+      y-=42;
+    })();
+
+    /* Discount Approved is a line for VC / HD to sign, not a value to fill - so it stays a line,
+       with whoever the documents named written on it when they named anybody. */
+    (function(){
+      const lab='Discount Approved', vchd='(VC / HD)';
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:ink});
+      const x1=M+reg.widthOfTextAtSize(lab,10.5)+18;
+      const x2=R-reg.widthOfTextAtSize(vchd,10.5)-16;
+      const who=said(cl['Discount Approved']);
+      if(who) page.drawText(who,{x:x1+8,y:y,size:10.5,font:bold,color:ink});
+      page.drawLine({start:{x:x1,y:y-4},end:{x:x2,y:y-4},thickness:0.6,color:rule});
+      page.drawText(vchd,{x:x2+16,y:y,size:10.5,font:reg,color:soft});
+    })();
+
     const bytes=await doc.save();
-    const who=String(v('customer_name')||'booking').replace(/[^\w \-]/g,'').trim()||'booking';
+    const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
+      .replace(/[^\w \-]/g,'').trim()||'booking';
     const blob=new Blob([bytes],{type:'application/pdf'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=url; a.download='Booking Form Check List - '+who+'.pdf';
+    a.href=url; a.download='Booking Form Check List - '+nm+'.pdf';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
     toast('Check list downloaded','ok');
   }
-
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
      flow like Reimbursement, or the detail-card grid for anything else) plus the whole injected
