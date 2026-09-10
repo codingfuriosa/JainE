@@ -3860,21 +3860,62 @@
     return v+({1:'st',2:'nd',3:'rd'}[v%10]||'th');
   }
 
-  window.wfWelcomeLetter=async function(caseId){
+  /* WHAT A DOCUMENT BUTTON SAYS WHILE THE READING IS STILL RUNNING.
+
+     Reading a booking takes about two and a half minutes - a shade under two for Gemini to read the
+     scans, a few seconds for ChatGPT to check them, the rest fetching the files. Submitting a
+     booking pokes the worker straight away (acc.booking_audit_kick), so that is normally the whole
+     wait; the five-minute cron behind it is only the safety net.
+
+     So the message says how long it has actually been and roughly how much is left. The old wording
+     - "try again in a minute or two" - read the same whether the reading had started five seconds
+     ago or had been stuck for an hour. One place decides it and all three buttons ask, so a new
+     document only has to ask for the reading. */
+  const WF_READ_SECONDS=150;
+  function wfAgo(ts){
+    const s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000));
+    if(s<60) return s+' second'+(s===1?'':'s');
+    const m=Math.round(s/60);
+    return m+' minute'+(m===1?'':'s');
+  }
+  /* Returns the stored reading, or throws with a sentence worth showing the person. */
+  async function wfBookingReading(caseId){
     let row=null;
     try{
       const {data}=await ACC().from('booking_audits')
-        .select('status,result,error,queued_at').eq('case_id',caseId).maybeSingle();
+        .select('status,result,error,queued_at,started_at,attempts')
+        .eq('case_id',caseId).maybeSingle();
       row=data;
-    }catch(_e){}
-    if(!row){ toast('This booking has not been read yet','warn'); return; }
+    }catch(_e){
+      throw new Error('The reading could not be looked up just now \u2014 try again in a moment.');
+    }
+    if(!row) throw new Error('This booking has not been queued for reading yet.');
+
     if(row.status==='pending'||row.status==='running'){
-      toast('The attachments are still being read \u2014 try again in a minute or two.','warn'); return;
+      const running=(row.status==='running');
+      const from=(running&&row.started_at)||row.queued_at;
+      const left=WF_READ_SECONDS-Math.round((Date.now()-new Date(from).getTime())/1000);
+      const mins=Math.max(1,Math.round(left/60));
+      /* Past the usual time is not the same as broken - a bigger file simply takes longer - so it
+         says so plainly rather than either promising a minute or crying failure. */
+      const eta=(left<=0) ? 'this one is taking longer than usual'
+              : (left<30) ? 'nearly done'
+              : ('about '+mins+' more minute'+(mins===1?'':'s'));
+      throw new Error((running?'Reading the attachments \u2014 started ':'Queued for reading ')
+        +wfAgo(from)+' ago, '+eta+'.');
     }
     if(row.status!=='done'||!row.result){
-      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err'); return;
+      throw new Error('The attachments could not be read: '+(row.error||'unknown reason')
+        +((row.attempts>1)?(' (tried '+row.attempts+' times)'):''));
     }
-    try{ await wfWelcomePdf(row.result); }
+    return row.result;
+  }
+
+  window.wfWelcomeLetter=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfWelcomePdf(res); }
     catch(e){ toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
   };
 
@@ -4006,20 +4047,10 @@
        Total               the gross of the same two. Equals the two lines above it, by construction.
      Every one of them comes from the cost sheet as read; none is a rate applied by JAIN-E. */
   window.wfAllotmentLetter=async function(caseId){
-    let row=null;
-    try{
-      const {data}=await ACC().from('booking_audits')
-        .select('status,result,error').eq('case_id',caseId).maybeSingle();
-      row=data;
-    }catch(_e){}
-    if(!row){ toast('This booking has not been read yet','warn'); return; }
-    if(row.status==='pending'||row.status==='running'){
-      toast('The attachments are still being read \u2014 try again in a minute or two.','warn'); return;
-    }
-    if(row.status!=='done'||!row.result){
-      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err'); return;
-    }
-    try{ await wfAllotmentPdf(row.result); }
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAllotmentPdf(res); }
     catch(e){ toast('Could not build the allotment letter: '+((e&&e.message)||e),'err'); }
   };
 
@@ -4200,24 +4231,10 @@
     toast('Allotment letter downloaded','ok');
   }
   window.wfChecklistDownload=async function(caseId){
-    let row=null;
-    try{
-      const {data}=await ACC().from('booking_audits')
-        .select('status,result,error,queued_at,attempts').eq('case_id',caseId).maybeSingle();
-      row=data;
-    }catch(_e){}
-
-    if(!row){ toast('This booking has not been queued for reading yet','warn'); return; }
-    if(row.status==='pending'||row.status==='running'){
-      toast('The attachments are still being read \u2014 queued '+fmtDate(row.queued_at)
-        +'. Try again in a minute or two.','warn');
-      return;
-    }
-    if(row.status!=='done'||!row.result){
-      toast('The attachments could not be read: '+((row.error||'unknown reason')),'err');
-      return;
-    }
-    try{ await wfChecklistPdf(row.result); }
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfChecklistPdf(res); }
     catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
@@ -5941,6 +5958,26 @@
         f.addEventListener('input', function(){ wfAmtSyncAll(); });
       } })();
     setTimeout(function(){ const f=document.querySelector('.wf-evt-form'); if(f){ f.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); wfEventSave(flowId, caseId||null); } }); const fv=f.querySelector('.wf-evt-value'); if(fv)try{fv.focus();}catch(_){} } },30);
+
+    /* STRAIGHT TO THE FILE CHOOSER when the form asks for nothing but attachments - which is the
+       Booking Form, where a dialog holding one "Choose a file" box is a click in the way. Only on
+       a NEW instance, and only when every field is an attachment: a form with anything to type
+       must not have the chooser jump in front of it.
+
+       This is an attempt, not a guarantee. A browser only opens a file chooser while a click is
+       still "fresh", and opening this dialog waits on a few database reads first - if that spends
+       the click, nothing happens and the box is sitting right there to press. Nothing is lost
+       either way, so it is not worth blocking the dialog on. */
+    if(!editing){
+      const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+      const allFiles=tmpl.length && tmpl.every(function(x){ return x && x.type==='attachment'; });
+      if(allFiles) setTimeout(function(){
+        try{
+          const inp=document.querySelector('.wf-evt-form .wf-evt-attinput');
+          if(inp) inp.click();
+        }catch(_e){}
+      },60);
+    }
   };
 
   /* A claim is a stack of expenses across several days, and until now the only way to know what
