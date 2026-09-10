@@ -261,6 +261,10 @@ function renderCustomerShell(){
   }
   const nb=$('notifBtn');if(nb)nb.style.display='none';
   const gsBox=$('globalSearch');if(gsBox){const box=gsBox.closest('.search-box');if(box)box.style.display='none';}
+  // .search-box normally carries margin-left:auto, which is what pushes .topbar-actions to the
+  // right edge - hiding it here removes that spacer, leaving the profile avatar sitting right next
+  // to the breadcrumb instead of in the corner. Put the same push directly on topbar-actions.
+  const ta=document.querySelector('.topbar-actions');if(ta)ta.style.marginLeft='auto';
   const hb=$('hamburger');if(hb)hb.onclick=function(e){e.stopPropagation();document.body.classList.toggle('nav-open');};
   const bd=$('sbBackdrop');if(bd)bd.onclick=function(){document.body.classList.remove('nav-open');};
 }
@@ -13956,14 +13960,15 @@ VIEWS.customer=async function(v,seg){
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
-  // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
-  // WHO it's a preview of, or the empty state and the profile menu tell two different stories.
+  // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
+  // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
+  // customer's own real session said nothing they don't already know from the profile menu, so it's
+  // gone (hoisted above the no-units early-return too, same reasoning as before).
   const banner=state.impersonating?
-    `<div class="card card-pad" style="background:#fffbeb;border-color:#f0dfa8;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-eye"></i> Staff preview — viewing the portal as <b>${esc((state.customer&&state.customer.full_name)||'this customer')}</b>. Read-only monitoring; this is not their real session. <a href="custportal-admin.html" style="margin-left:8px;font-weight:600">Exit preview</a></div>`:
-    `<div class="card card-pad" style="background:#eff4ff;border-color:#cfe0ef;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-user"></i> Signed in as <b>${esc(state.email||'')}</b>. You see only your own unit(s) and documents.</div>`;
+    `<div class="card card-pad" style="background:#fffbeb;border-color:#f0dfa8;margin-bottom:16px;font-size:13.5px"><i class="fa-solid fa-eye"></i> Staff preview — viewing the portal as <b>${esc((state.customer&&state.customer.full_name)||'this customer')}</b>. Read-only monitoring; this is not their real session. <a href="custportal-admin.html" style="margin-left:8px;font-weight:600">Exit preview</a></div>`:'';
   if(!data.units.length){
-    v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+banner+
-      '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div>';
+    v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+banner+
+      '<div class="card card-pad empty"><i class="fa-solid fa-circle-info"></i><div style="margin-top:8px">No unit is linked to '+(state.impersonating?'this customer':'your account')+' yet'+(state.impersonating?'.':'. Please contact your relationship manager.')+'</div></div></div>';
     return;
   }
   if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
@@ -13982,10 +13987,10 @@ VIEWS.customer=async function(v,seg){
   else if(ti===10)body=await custTabReferrals(unit);
   else if(ti===11)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+  v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
-    '<div style="margin-top:14px">'+body+'</div>';
+    '<div style="margin-top:14px">'+body+'</div></div>';
 };
 VIEWS.supplier=function(v,seg){
   setCrumb(['Stakeholder Portals','Supplier Portal']);
