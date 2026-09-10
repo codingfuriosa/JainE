@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Accountability · Nexus-RE · Jain Group</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/* ═══ Copied out of nexus.css and accountability.js — not approximated ═══ */
+:root{
+  --navy:#0f1e3d; --navy-2:#16294f; --ink:#0b1220; --slate:#64748b; --slate-2:#94a3b8;
+  --line:#e6eaf1; --line-2:#eef1f6; --bg:#f5f7fb; --card:#ffffff; --bg-card:#ffffff;
+  --brand:#1d4ed8; --brand-700:#1e40af; --brand-50:#eff4ff; --brand-a10:#eef2ff; --gold:#b8902f;
+  --ok:#16a34a; --ok-50:#f0fdf4; --warn:#d97706; --warn-50:#fffbeb; --err:#dc2626; --err-50:#fef2f2;
+  --sidebar:264px; --topbar:60px; --radius:11px;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.06);
+  --shadow-lg:0 10px 30px rgba(16,24,40,.12);
+  --bg-subtle:#f1f5f9;
+  --sb-red:#e0121c; --sb-red-dim:rgba(224,18,28,.16);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cdd5e1;border-radius:8px}::-webkit-scrollbar-track{background:transparent}
+[hidden]{display:none!important}
+
+/* ---------- App shell ---------- */
+#shell{min-height:100vh}
+.sidebar{position:fixed;top:0;left:0;width:var(--sidebar);height:100vh;background:linear-gradient(180deg,#0a0a0c,#171719);color:#c7c7ca;display:flex;flex-direction:column;z-index:60;border-right:1px solid rgba(224,18,28,.18)}
+.sb-brand{height:auto;min-height:var(--topbar);display:flex;align-items:center;justify-content:flex-start;padding:13px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sb-brand .sb-logo-img{width:150px;height:auto;display:block}
+.sb-nav{flex:1;overflow-y:auto;padding:14px 12px}
+.sb-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:#7a7a7f;margin:16px 12px 7px;font-weight:600}
+.sb-item{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:9px;color:#c7c7ca;font-weight:500;cursor:pointer;margin-bottom:2px;transition:.13s;font-size:13.5px}
+.sb-item i{width:18px;text-align:center;font-size:14.5px;color:#8f8f94}
+.sb-item:hover{background:var(--sb-red-dim);color:#fff}
+.sb-item:hover i{color:var(--sb-red)}
+.sb-item.active{background:var(--sb-red);color:#fff}
+.sb-item.active i{color:#fff}
+.sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#7a7a7f}
+.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
+.topbar{position:sticky;top:0;height:var(--topbar);background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 24px;z-index:30}
+.crumb{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--slate);font-weight:500}
+.crumb .cur{color:var(--ink);font-weight:600}
+.crumb i{font-size:10px;color:var(--slate-2)}
+.search-box{margin-left:auto;position:relative;width:330px;max-width:36vw}
+.search-box i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#9aa6bb;font-size:13px}
+.search-box input{width:100%;height:38px;border:1px solid var(--line);border-radius:9px;padding:0 14px 0 38px;font-size:13.5px;font-family:inherit;background:#f8fafc}
+.search-box input:focus{outline:none;border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px rgba(29,78,216,.1)}
+.topbar-actions{display:flex;align-items:center;gap:8px}
+.ic-btn{width:38px;height:38px;border-radius:9px;border:1px solid var(--line);background:#fff;color:#475569;cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative;font-size:15px}
+.ic-btn:hover{background:#f8fafc}
+.avatar{width:34px;height:34px;border-radius:9px;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;cursor:pointer}
+.view{padding:26px 28px;flex:1}
+
+.btn,.ac-btn{font-family:inherit}
+.ac-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border:1px solid var(--line);border-radius:9px;background:var(--bg-card);color:var(--ink);font-size:13px;font-weight:600;cursor:pointer}
+.ac-btn:hover{background:#f8fafc}
+.ac-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.ac-btn.primary:hover{background:var(--brand-700)}
+.ac-btn.ic{width:36px;padding:0;justify-content:center}
+.ac-btn.danger{color:var(--err);border-color:#f3c7c7}
+.ac-btn.danger:hover{background:var(--err-50)}
+.ac-btn.sm{height:32px;padding:0 12px;font-size:12.5px}
+.ac-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+.ac-in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.1)}
+textarea.ac-in{min-height:70px;resize:vertical}
+.ac-empty{color:var(--slate);font-size:12.5px;text-align:center;padding:14px 8px;border:1px dashed var(--line);border-radius:10px}
+.wf-tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--slate);color:#fff;font:italic 700 11px/1 Georgia,'Times New Roman',serif;letter-spacing:0;text-transform:none;cursor:pointer;position:relative;flex:none;margin-left:5px;vertical-align:middle;user-select:none;padding-right:1px}
+.wf-tip:hover{background:var(--brand)}
+
+/* ---------- workflow page ---------- */
+.wf-page{width:100%}
+.wf-page-head{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap}
+.wf-page-head h1{font-size:18px;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:9px;flex:1;min-width:0;letter-spacing:-.01em}
+.wf-page-head h1 i{color:var(--brand);font-size:16px}
+.wf-card{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+.wf-card.wf-meta{padding:14px 18px}
+.wf-card.wf-tlcard{padding:16px 18px}
+.wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+.wf-card-hd i{color:var(--slate);font-size:13px}
+.wf-card-hd .cnt{background:var(--brand-a10);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
+.wf-desc{color:var(--slate);font-size:13.5px;margin-bottom:12px;line-height:1.6}
+.wf-trig-box{background:var(--brand-a10);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px}
+.wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
+.wf-mini-lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
+.wf-circles{display:inline-flex;align-items:center}
+.wf-circle{width:28px;height:28px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid var(--bg-card);margin-left:-7px}
+.wf-circle:first-child{margin-left:0}
+
+.wf-tabs{display:flex;gap:4px;margin:26px 0 14px;padding:4px;background:var(--bg-subtle);border-radius:11px;overflow-x:auto}
+.wf-tab{flex:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border:0;border-radius:8px;background:transparent;color:var(--slate);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .14s,color .14s,box-shadow .14s}
+.wf-tab i{font-size:12px}
+.wf-tab:hover{color:var(--ink)}
+.wf-tab.on{background:var(--bg-card);color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+.wf-tab .cnt{background:var(--brand-a10);color:var(--brand);border-radius:20px;padding:1px 8px;font-size:11px}
+
+/* timeline */
+.wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
+.wf-tlhead-t i{color:var(--slate)}
+.wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
+.wf-tl-item:last-child{padding-bottom:0}
+.wf-tl-item:not(:last-child)::before{content:'';position:absolute;left:12px;top:26px;bottom:0;width:2px;background:var(--line)}
+.wf-tl-done:not(:last-child)::before{background:#bbf7d0}
+.wf-tl-num{flex:0 0 26px;height:26px;border-radius:50%;background:#cbd5e1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;z-index:1;margin-top:5px}
+.wf-tl-cur .wf-tl-num{background:var(--brand);box-shadow:0 0 0 4px var(--brand-a10)}
+.wf-tl-done .wf-tl-num{background:#16a34a}
+.wf-tl-wait .wf-tl-num{background:#cbd5e1}
+.wf-tl-body{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 15px;display:flex;flex-direction:column;gap:7px}
+.wf-tl-row{display:flex;align-items:center;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;min-width:0}
+.wf-tl-times{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;min-width:0;padding-top:7px;border-top:1px dashed var(--line)}
+.wf-tl-times:empty{display:none}
+.wf-tl-cur .wf-tl-body{background:var(--brand-a10);border-color:var(--brand)}
+.wf-tl-cur .wf-tl-times{border-top-color:#c7d2fe}
+.wf-tl-title{font-weight:650;font-size:13.5px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px;flex:1 1 auto;min-width:0}
+.wf-tl-meta{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap;min-width:0;flex:0 1 auto}
+.wf-tl-when{font-size:11.5px;color:var(--slate);display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.wf-tl-when b{font-weight:700;color:var(--ink);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
+.wf-tl-when.done b{color:#16a34a}
+.wf-who{display:inline-flex;align-items:center;min-width:0;max-width:100%}
+.wf-av{width:22px;height:22px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;margin-right:7px;flex:none}
+.wf-who-nm{font-size:12.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-dur{font-size:12.5px;color:var(--slate);display:inline-flex;align-items:center;gap:6px}
+.wf-badge{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:none;letter-spacing:0}
+.wf-badge.ok{background:#dcfce7;color:#166534}.wf-badge.cur{background:#dbeafe;color:#1e40af}.wf-badge.wait{background:#eef2f6;color:#94a3b8}
+
+/* filter bar */
+.wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px}
+.wf-inst-filter-search{position:relative;flex:1;min-width:180px}
+.wf-inst-filter-search i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--slate);font-size:12px;pointer-events:none}
+.wf-inst-filter-search .ac-in{width:100%;padding-left:30px}
+.wf-inst-filter-dates{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.wf-inst-filterbar .wf-lbl{font-size:11px;font-weight:600;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;display:flex;flex-direction:column;gap:5px;margin:0}
+.wf-inst-filterbar .wf-lbl .ac-in{min-width:140px}
+.wf-daterange-sep{color:var(--slate);font-size:12px;margin:0 -2px 9px}
+.wf-inst-filter-dates .ac-btn.primary{height:38px}
+.wf-inst-tools{margin-left:auto;display:flex;gap:6px}
+
+/* tables */
+.wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
+.wf-itable{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+.wf-itable th{text-align:left;padding:11px 14px;background:var(--bg);color:var(--slate);font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
+.wf-itable td{padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;color:var(--ink)}
+.wf-itable tbody tr{cursor:pointer;transition:background .12s;border-left:3px solid transparent}
+.wf-itable tbody tr:hover{background:var(--bg)}
+.wf-itable tbody tr.sel{background:var(--brand-a10)}
+.wf-itable tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+.wf-itable tbody tr:last-child td{border-bottom:0}
+.wf-trigcell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.wf-itable tbody tr.wf-draft-row:hover{background:var(--bg-subtle)}
+
+.wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.wf-pill.ok{background:#dcfce7;color:#166534}
+.wf-pill.cur{background:#dbeafe;color:#1e40af}
+.wf-pill.wait{background:#f1f5f9;color:#64748b;padding:3px 12px}
+.wf-pill.wt{background:#fef3c7;color:#92400e}
+.wf-pill.back{background:#fef3c7;color:#92400e}
+
+/* tracker */
+.wf-tk-wrap{max-height:72vh;overflow:auto;border-radius:10px}
+.wf-tktable{min-width:100%;font-size:12px}
+.wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
+.wf-tktable thead th{background:var(--bg-subtle)}
+.wf-tktable tbody tr:nth-child(even){background:#fafbfc}
+.wf-tktable tbody tr:hover{background:var(--brand-a10)}
+.wf-tktable th.wf-tk-gap,.wf-tktable td.wf-tk-gap{border-left:2px solid var(--line)}
+.wf-tk-band th{text-align:center;text-transform:none;letter-spacing:0;font-weight:600;font-size:11px;color:var(--slate);max-width:260px;white-space:normal;line-height:1.45;vertical-align:middle}
+.wf-tk-bandlbl{text-align:left!important;color:var(--ink)!important;font-weight:800!important;letter-spacing:.06em!important;text-transform:uppercase!important;white-space:nowrap!important;font-size:10.5px!important}
+.wf-tk-cols th{border-bottom:2px solid var(--line);font-size:10.5px}
+.wf-tk-late{color:#dc2626;font-weight:700}
+.wf-tk-ok{color:#16a34a;font-weight:700}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---------- the event modal ---------- */
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.42);z-index:80;display:flex;align-items:flex-start;justify-content:center;padding:28px 16px;overflow:auto}
+.modal{background:#fff;border-radius:14px;width:100%;max-width:700px;box-shadow:var(--shadow-lg);overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:9px;padding:15px 18px;border-bottom:1px solid var(--line);font-size:15px;font-weight:700}
+.modal-head i{color:var(--brand)}
+.modal-head .x{margin-left:auto;background:none;border:0;color:var(--slate-2);font-size:16px;cursor:pointer;padding:4px 6px}
+.modal-body{padding:16px 18px;max-height:min(62vh,620px);overflow:auto}
+.modal-foot{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:13px 18px;border-top:1px solid var(--line);background:#fcfdff}
+.wf-lbl{display:block;font-size:12px;font-weight:700;color:var(--ink);margin:14px 0 5px}
+.wf-lbl:first-child{margin-top:0}
+.wf-fld input.ac-in,.wf-evt-form input.ac-in{height:40px;padding-top:0;padding-bottom:0}
+.wf-evt-common{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.wf-evt-dgroup{border:1px solid var(--line);border-radius:10px;padding:10px 11px 11px;margin-bottom:12px;background:var(--card)}
+.wf-evt-group-hd{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;margin:-2px 0 8px}
+.wf-evt-group-hd .rm{margin-left:auto;background:none;border:0;color:var(--slate-2);cursor:pointer}
+.wf-evt-exps{display:flex;flex-direction:column;gap:9px}
+.wf-evt-exp{border:1px dashed var(--line);border-radius:9px;padding:9px 10px 10px;background:var(--bg)}
+.wf-evt-exp-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
+.wf-duo-opt{color:var(--slate);font-weight:400;text-transform:none;letter-spacing:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--slate);cursor:pointer;font-family:inherit}
+.chip.on{background:var(--brand-50);border-color:#bfd3fb;color:var(--brand)}
+.exp-row{display:grid;grid-template-columns:minmax(0,1fr) 130px 40px;gap:9px}
+.wf-add-exp{margin-top:9px}
+.wf-add-date{margin-top:2px}
+.wf-evt-total{display:flex;align-items:center;gap:9px;margin-right:auto;font-size:13px;color:var(--slate)}
+.wf-evt-total b{font-size:17px;color:var(--ink);font-weight:800;letter-spacing:-.2px;font-variant-numeric:tabular-nums}
+.wf-evt-total-k{font-weight:600}
+.wf-evt-total-miss{font-size:11px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 9px;border-radius:20px}
+
+/* ---------- prototype-only strip (not part of JAIN-E) ---------- */
+.proto{position:fixed;left:var(--sidebar);right:0;bottom:0;z-index:70;display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:8px 24px;background:#0b1220;color:#94a3b8;font-size:11.5px;border-top:1px solid #1e293b}
+.proto b{color:#93b4fd;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:10px}
+.proto button{background:#111c31;border:1px solid #22304a;color:#cbd5e1;border-radius:7px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit}
+.proto button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.view{padding-bottom:70px}
+
+@media(max-width:1024px){
+  .sidebar{transform:translateX(-100%)}
+  .main{margin-left:0}
+  .proto{left:0}
+}
+@media(max-width:640px){ .search-box{display:none} .view{padding:14px 11px 70px} }
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div id="shell">
+  <aside class="sidebar">
+    <a href="#" class="sb-brand" title="Back to Home">
+      <img src="../assets/jaine-logo-full-white.png" alt="JAIN-E" class="sb-logo-img">
+    </a>
+    <nav class="sb-nav">
+      <div class="sb-group">Overview</div>
+      <a class="sb-item"><i class="fa-solid fa-gauge-high"></i> Home / Dashboards</a>
+      <a class="sb-item active"><i class="fa-solid fa-clipboard-check"></i> Accountability</a>
+      <div class="sb-group">Sales</div>
+      <a class="sb-item"><i class="fa-solid fa-brain"></i> GTD</a>
+      <a class="sb-item"><i class="fa-solid fa-handshake"></i> CRM &amp; Sales</a>
+      <a class="sb-item"><i class="fa-solid fa-headset"></i> Post Sales</a>
+      <div class="sb-group">Operations</div>
+      <a class="sb-item"><i class="fa-solid fa-building"></i> Projects</a>
+      <a class="sb-item"><i class="fa-solid fa-helmet-safety"></i> Construction</a>
+      <a class="sb-item"><i class="fa-solid fa-boxes-stacked"></i> Inventory</a>
+      <a class="sb-item"><i class="fa-solid fa-cart-shopping"></i> Procurement</a>
+      <div class="sb-group">People</div>
+      <a class="sb-item"><i class="fa-solid fa-users"></i> Human Resources</a>
+      <a class="sb-item"><i class="fa-solid fa-user-plus"></i> Recruitment (ATS)</a>
+      <div class="sb-group">Governance</div>
+      <a class="sb-item"><i class="fa-solid fa-indian-rupee-sign"></i> Finance Vault</a>
+      <a class="sb-item"><i class="fa-solid fa-scale-balanced"></i> Legal</a>
+      <a class="sb-item"><i class="fa-solid fa-calendar-check"></i> Renewals &amp; Compliance</a>
+      <div class="sb-group">Knowledge</div>
+      <a class="sb-item"><i class="fa-solid fa-folder-open"></i> Document Library</a>
+      <a class="sb-item"><i class="fa-solid fa-headset"></i> AI Help Desk</a>
+      <div class="sb-group">System</div>
+      <a class="sb-item"><i class="fa-solid fa-gear"></i> Settings</a>
+    </nav>
+    <div class="sb-foot">v1.0 · Operations Portal</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb"><span>Accountability</span> <i class="fa-solid fa-chevron-right"></i> <span class="cur">Reimbursement</span></div>
+      <div class="search-box"><i class="fa-solid fa-magnifying-glass"></i>
+        <input placeholder="Search documents, tasks, people…"></div>
+      <div class="topbar-actions">
+        <button class="ic-btn" title="Notifications"><i class="fa-regular fa-bell"></i></button>
+        <div class="avatar" style="background:#0369a1">RR</div>
+      </div>
+    </header>
+
+    <main class="view">
+      <div class="wf-page">
+
+        <div class="wf-page-head">
+          <button class="ac-btn ic" title="Back"><i class="fa-solid fa-arrow-left"></i></button>
+          <h1><i class="fa-solid fa-diagram-project"></i> Reimbursement</h1>
+          <button class="ac-btn primary" id="newBtn"><i class="fa-solid fa-bolt"></i> New Reimbursement</button>
+        </div>
+
+        <div class="wf-card wf-meta">
+          <div class="wf-desc">Claim travel and meal expenses. HR reviews it, Accounts pays it, and you confirm the money reached you.</div>
+          <div class="wf-trig-box"><i class="fa-solid fa-bolt"></i> <b>Triggering event:</b> Expense Incurred</div>
+          <div class="wf-members-row"><span class="wf-mini-lbl">People</span>
+            <span class="wf-circles">
+              <span class="wf-circle" style="background:#7c3aed" title="Shuchandra Das">SD</span>
+              <span class="wf-circle" style="background:#0369a1" title="GyanPrakash Sah">GS</span>
+              <span class="wf-circle" style="background:#94a3b8" title="Anyone in the company">+</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="wf-tabs">
+          <button class="wf-tab on" data-tab="main"><i class="fa-solid fa-list-check"></i> Reimbursements</button>
+          <button class="wf-tab" data-tab="tracker"><i class="fa-solid fa-table-columns"></i> Tracker</button>
+          <button class="wf-tab" data-tab="drafts"><i class="fa-regular fa-floppy-disk"></i> Drafts <span class="cnt">2</span></button>
+          <button class="wf-tab" data-tab="archive"><i class="fa-solid fa-box-archive"></i> Archive <span class="cnt">11</span></button>
+        </div>
+
+        <!-- ══ MAIN ══════════════════════════════════════════════ -->
+        <div data-pane="main">
+
+          <div class="wf-card wf-tlcard">
+            <div id="wfTL">
+              <div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-list-ol"></i> Workflow steps
+                <span class="wf-tip" title="The steps every reimbursement goes through, in order, with who does each one and how long they have. Click a row in the table below to see how a particular reimbursement is progressing.">i</span></div></div>
+              <div id="tlBox">
+                <div class="wf-tl-item">
+                  <div class="wf-tl-num">1</div>
+                  <div class="wf-tl-body">
+                    <div class="wf-tl-row">
+                      <div class="wf-tl-title">HR Review</div>
+                      <div class="wf-tl-meta">
+                        <span class="wf-who"><span class="wf-av" style="background:#7c3aed">SD</span><span class="wf-who-nm">Shuchandra Das</span></span>
+                        <span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span>
+                      </div>
+                    </div>
+                    <div class="wf-tl-times"></div>
+                  </div>
+                </div>
+                <div class="wf-tl-item">
+                  <div class="wf-tl-num">2</div>
+                  <div class="wf-tl-body">
+                    <div class="wf-tl-row">
+                      <div class="wf-tl-title">Accounts Review &amp; Payment</div>
+                      <div class="wf-tl-meta">
+                        <span class="wf-who"><span class="wf-av" style="background:#0369a1">GS</span><span class="wf-who-nm">GyanPrakash Sah</span></span>
+                        <span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span>
+                      </div>
+                    </div>
+                    <div class="wf-tl-times"></div>
+                  </div>
+                </div>
+                <div class="wf-tl-item">
+                  <div class="wf-tl-num">3</div>
+                  <div class="wf-tl-body">
+                    <div class="wf-tl-row">
+                      <div class="wf-tl-title">Payment Received</div>
+                      <div class="wf-tl-meta">
+                        <span class="wf-who-nm" style="color:var(--slate)"><i class="fa-solid fa-bolt"></i> Named when started</span>
+                        <span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span>
+                      </div>
+                    </div>
+                    <div class="wf-tl-times"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="wf-card">
+            <div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span>Reimbursements</span> <span class="cnt">25</span>
+              <span class="wf-tip" title="One row per reimbursement. Can’t be deleted once its first step is received, or edited once it’s completed.">i</span>
+              <span class="wf-inst-tools">
+                <button class="ac-btn ic" title="Print selected" disabled><i class="fa-solid fa-print"></i></button>
+                <button class="ac-btn" title="Print every claim Accounts has received that has not been printed before"><i class="fa-solid fa-print"></i> Print New Reimbursements</button>
+              </span>
+            </div>
+
+            <div class="wf-inst-filterbar">
+              <div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i>
+                <input class="ac-in" placeholder="Search by No., anyone it is with, amount, description or anything it was raised with…"></div>
+              <div class="wf-inst-filter-dates">
+                <label class="wf-lbl">From<input type="date" class="ac-in" value="2026-08-01"></label>
+                <i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>
+                <label class="wf-lbl">To<input type="date" class="ac-in" value="2026-09-05"></label>
+                <button class="ac-btn primary"><i class="fa-solid fa-check"></i> Update</button>
+                <button class="ac-btn ic" title="Clear filters"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+            </div>
+
+            <div class="wf-tablewrap">
+              <table class="wf-itable">
+                <thead><tr><th>No.</th><th>Reimbursement</th>
+                  <th>HR Review</th><th>Accounts Review &amp; Payment</th><th>Payment Received</th></tr></thead>
+                <tbody id="listBody">
+                  <tr data-open="38"><td><b>39</b></td>
+                    <td class="wf-trigcell" title="Prerna Gupta · Office to J W Marriot and back · ₹315">Prerna Gupta · Office to J W Marriot and back · ₹315</td>
+                    <td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>
+                    <td><span class="wf-pill wait">·</span></td><td><span class="wf-pill wait">·</span></td></tr>
+                  <tr data-open="38"><td><b>38</b></td>
+                    <td class="wf-trigcell" title="Riya Roy · Head Office to Dream World City for car parking details · ₹347">Riya Roy · HO to Dream World City, car parking · ₹347</td>
+                    <td><span class="wf-pill cur"><i class="fa-solid fa-inbox"></i> Received</span></td>
+                    <td><span class="wf-pill wait">·</span></td><td><span class="wf-pill wait">·</span></td></tr>
+                  <tr data-open="38"><td><b>37</b></td>
+                    <td class="wf-trigcell" title="Biswajit Banerjee · Home to Palazzo to Office · ₹1,092">Biswajit Banerjee · Home to Palazzo to Office · ₹1,092</td>
+                    <td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>
+                    <td><span class="wf-pill wait">·</span></td><td><span class="wf-pill wait">·</span></td></tr>
+                  <tr data-open="38"><td><b>36</b></td>
+                    <td class="wf-trigcell" title="Sadique Shamim · DWC site to client for booking collection · ₹420">Sadique Shamim · DWC site to client, booking · ₹420</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill back"><i class="fa-solid fa-rotate-left"></i> Sent back</span></td>
+                    <td><span class="wf-pill wait">·</span></td></tr>
+                  <tr data-open="38"><td><b>35</b></td>
+                    <td class="wf-trigcell" title="Shafat Mehar · Pickup and drop for the Scaling Up seminar · ₹448">Shafat Mehar · Pickup and drop, Scaling Up · ₹448</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td></tr>
+                  <tr data-open="38"><td><b>33</b></td>
+                    <td class="wf-trigcell" title="Manash Choudury · Vendor visit, Howrah · ₹268">Manash Choudury · Vendor visit, Howrah · ₹268</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill wt"><i class="fa-solid fa-hourglass-half"></i> Waiting</span></td>
+                    <td><span class="wf-pill wait">·</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ TRACKER ═══════════════════════════════════════════ -->
+        <div data-pane="tracker" hidden>
+          <div class="wf-card">
+            <div class="wf-card-hd"><i class="fa-solid fa-table-columns"></i> Tracker <span class="cnt">25</span>
+              <span class="wf-tip" title="Every reimbursement against every step: when the step was due (Planned), when it was actually forwarded on (Actual), and by how much it ran over (Time Delay). Scroll sideways to see all the steps.">i</span></div>
+            <div class="wf-tablewrap wf-tk-wrap">
+              <table class="wf-itable wf-tktable">
+                <thead>
+                  <tr class="wf-tk-band">
+                    <th class="wf-tk-bandlbl" colspan="4">Reimbursement</th>
+                    <th colspan="3" class="wf-tk-gap">HR Review</th>
+                    <th colspan="3" class="wf-tk-gap">Accounts Review &amp; Payment</th>
+                    <th colspan="3" class="wf-tk-gap">Payment Received</th>
+                  </tr>
+                  <tr class="wf-tk-cols">
+                    <th>No.</th><th>Timestamp</th><th>Owner</th><th>Total Amount</th>
+                    <th class="wf-tk-gap">Planned</th><th>Actual</th><th>Time Delay</th>
+                    <th class="wf-tk-gap">Planned</th><th>Actual</th><th>Time Delay</th>
+                    <th class="wf-tk-gap">Planned</th><th>Actual</th><th>Time Delay</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td><b>39</b></td><td class="num">03/09/26 11:20</td><td>Prerna Gupta</td><td class="num"><b>₹315</b></td>
+                    <td class="wf-tk-gap num">04/09/26</td><td class="num">—</td><td>—</td>
+                    <td class="wf-tk-gap num">—</td><td class="num">—</td><td>—</td>
+                    <td class="wf-tk-gap num">—</td><td class="num">—</td><td>—</td></tr>
+                  <tr><td><b>38</b></td><td class="num">03/09/26 10:05</td><td>Riya Roy</td><td class="num"><b>₹347</b></td>
+                    <td class="wf-tk-gap num">04/09/26</td><td class="num">—</td><td>—</td>
+                    <td class="wf-tk-gap num">—</td><td class="num">—</td><td>—</td>
+                    <td class="wf-tk-gap num">—</td><td class="num">—</td><td>—</td></tr>
+                  <tr><td><b>35</b></td><td class="num">26/08/26 16:40</td><td>Shafat Mehar</td><td class="num"><b>₹448</b></td>
+                    <td class="wf-tk-gap num">27/08/26</td><td class="num">27/08/26</td><td class="wf-tk-ok">0.0</td>
+                    <td class="wf-tk-gap num">28/08/26</td><td class="num">29/08/26</td><td class="wf-tk-late">1.4</td>
+                    <td class="wf-tk-gap num">30/08/26</td><td class="num">—</td><td>—</td></tr>
+                  <tr><td><b>34</b></td><td class="num">31/08/26 09:12</td><td>Avishek Das</td><td class="num"><b>₹2,193</b></td>
+                    <td class="wf-tk-gap num">01/09/26</td><td class="num">01/09/26</td><td class="wf-tk-ok">0.0</td>
+                    <td class="wf-tk-gap num">02/09/26</td><td class="num">02/09/26</td><td class="wf-tk-ok">0.0</td>
+                    <td class="wf-tk-gap num">03/09/26</td><td class="num">03/09/26</td><td class="wf-tk-ok">0.0</td></tr>
+                  <tr><td><b>33</b></td><td class="num">30/08/26 14:02</td><td>Manash Choudury</td><td class="num"><b>₹268</b></td>
+                    <td class="wf-tk-gap num">31/08/26</td><td class="num">31/08/26</td><td class="wf-tk-ok">0.0</td>
+                    <td class="wf-tk-gap num">01/09/26</td><td class="num">—</td><td class="wf-tk-late">4.1</td>
+                    <td class="wf-tk-gap num">—</td><td class="num">—</td><td>—</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ DRAFTS ════════════════════════════════════════════ -->
+        <div data-pane="drafts" hidden>
+          <div class="wf-card">
+            <div class="wf-card-hd"><i class="fa-regular fa-floppy-disk"></i> Drafts <span class="cnt">2</span>
+              <span class="wf-tip" title="Your own unfinished reimbursements. A draft is not sent to anyone, takes no reimbursement number, and the minimum does not apply to it. It becomes a real reimbursement when you open it and submit it.">i</span></div>
+            <div class="wf-tablewrap">
+              <table class="wf-itable">
+                <thead><tr><th>No.</th><th>Amount</th><th>What is in it</th><th>Filled</th><th>Last saved</th><th></th></tr></thead>
+                <tbody>
+                  <tr class="wf-draft-row" title="Open this draft" data-open="draft">
+                    <td><b>1</b></td><td><b>₹210</b></td>
+                    <td class="wf-trigcell">Auto · Site visit — Dream Gurukul · Lunch</td>
+                    <td>4 of 5 filled</td><td>3 Sep, 2:50 pm</td>
+                    <td style="white-space:nowrap"><button class="ac-btn danger ic" title="Delete this draft" onclick="event.stopPropagation()"><i class="fa-solid fa-trash"></i></button></td>
+                  </tr>
+                  <tr class="wf-draft-row" title="Open this draft" data-open="draft">
+                    <td><b>2</b></td><td><b>—</b></td>
+                    <td class="wf-trigcell"><span style="color:var(--slate)">nothing filled in yet</span></td>
+                    <td>0 of 4 filled</td><td>2 Sep, 10:35 pm</td>
+                    <td style="white-space:nowrap"><button class="ac-btn danger ic" title="Delete this draft" onclick="event.stopPropagation()"><i class="fa-solid fa-trash"></i></button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ ARCHIVE ═══════════════════════════════════════════ -->
+        <div data-pane="archive" hidden>
+          <div class="wf-card">
+            <div class="wf-card-hd"><i class="fa-solid fa-box-archive"></i> Archive <span class="cnt">11</span>
+              <span class="wf-tip" title="Reimbursements whose every step is complete. They come out of the working list so only the live ones are in front of you.">i</span></div>
+            <div class="wf-tablewrap">
+              <table class="wf-itable">
+                <thead><tr><th>No.</th><th>Reimbursement</th><th>HR Review</th>
+                  <th>Accounts Review &amp; Payment</th><th>Payment Received</th></tr></thead>
+                <tbody>
+                  <tr data-open="38"><td><b>34</b></td><td class="wf-trigcell">Avishek Das · CP meets, 7 journeys · ₹2,193</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td></tr>
+                  <tr data-open="38"><td><b>31</b></td><td class="wf-trigcell">Uma Chatterjee · Bank and registry runs · ₹640</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td></tr>
+                  <tr data-open="38"><td><b>28</b></td><td class="wf-trigcell">Sandeep Sharma · Site audit travel · ₹1,410</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td></tr>
+                  <tr data-open="38"><td><b>27</b></td><td class="wf-trigcell">Tanushree Chatterjee · Cheque deposit runs · ₹390</td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td>
+                    <td><span class="wf-pill ok"><i class="fa-solid fa-check"></i> Done</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ══ NEW REIMBURSEMENT (the event modal) ══════════════════════ -->
+<div class="overlay" id="ov" hidden>
+  <div class="modal wf-evt-modal" role="dialog" aria-modal="true" aria-label="New Reimbursement">
+    <div class="modal-head"><i class="fa-solid fa-bolt"></i> New Reimbursement
+      <button class="x" id="closeBtn" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+
+    <div class="modal-body wf-evt-form">
+      <div class="wf-evt-dgroup">
+        <div class="wf-evt-group-hd"><i class="fa-solid fa-calendar-day"></i> Tuesday, 2 September 2026
+          <button class="rm" title="Remove this day"><i class="fa-solid fa-xmark"></i></button></div>
+
+        <div class="wf-evt-exps">
+          <div class="wf-evt-exp">
+            <div class="wf-evt-exp-hd"><span>Expense 1</span><span class="wf-duo-opt">Transport or Food — one of the two</span></div>
+            <div class="chips" data-grp>
+              <button class="chip on">Auto</button><button class="chip">Bus</button><button class="chip">Train</button>
+              <button class="chip">Metro</button><button class="chip">Cab / Uber</button><button class="chip">Flight</button>
+              <button class="chip">Personal Vehicle</button><button class="chip">Others</button>
+              <button class="chip">Breakfast</button><button class="chip">Lunch</button><button class="chip">Dinner</button>
+            </div>
+            <div class="exp-row">
+              <textarea class="ac-in" aria-label="Description of Expense">Head Office to Dream World City for car parking details</textarea>
+              <input class="ac-in amtin" aria-label="Amount" value="181">
+              <button class="ac-btn ic" title="Attachment" style="height:100%"><i class="fa-solid fa-paperclip"></i></button>
+            </div>
+          </div>
+
+          <div class="wf-evt-exp">
+            <div class="wf-evt-exp-hd"><span>Expense 2</span><span class="wf-duo-opt">Transport or Food — one of the two</span></div>
+            <div class="chips" data-grp>
+              <button class="chip">Auto</button><button class="chip">Bus</button><button class="chip">Train</button>
+              <button class="chip">Metro</button><button class="chip on">Cab / Uber</button><button class="chip">Flight</button>
+              <button class="chip">Personal Vehicle</button><button class="chip">Others</button>
+              <button class="chip">Breakfast</button><button class="chip">Lunch</button><button class="chip">Dinner</button>
+            </div>
+            <div class="exp-row">
+              <textarea class="ac-in" aria-label="Description of Expense">Dream World City back to Head Office</textarea>
+              <input class="ac-in amtin" aria-label="Amount" value="166">
+              <button class="ac-btn ic" title="Attachment" style="height:100%"><i class="fa-solid fa-paperclip"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <button class="ac-btn sm wf-add-exp"><i class="fa-solid fa-plus"></i> Add expense</button>
+      </div>
+
+      <button class="ac-btn wf-add-date"><i class="fa-solid fa-calendar-plus"></i> Add another date</button>
+
+      <div class="wf-evt-common">
+        <label class="wf-lbl">UPI Id</label>
+        <input class="ac-in" value="9830012345@okhdfc">
+        <label class="wf-lbl">Phone Number</label>
+        <input class="ac-in" value="9830012345">
+        <label class="wf-lbl">QR Code</label>
+        <button class="ac-btn"><i class="fa-solid fa-upload"></i> Attach</button>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <div class="wf-evt-total"><span class="wf-evt-total-k">Total Amount</span><b id="tot">₹347</b></div>
+      <button class="ac-btn" id="cancelBtn">Cancel</button>
+      <button class="ac-btn ic" title="Save draft — keep this and finish it later"><i class="fa-regular fa-floppy-disk"></i></button>
+      <button class="ac-btn primary"><i class="fa-solid fa-bolt"></i> Create Reimbursement</button>
+    </div>
+  </div>
+</div>
+
+<!-- prototype-only strip -->
+<div class="proto">
+  <b>Prototype</b>
+  <span>Reimbursement as it is in JAIN-E today. Tabs, the form and opening a claim all work; nothing saves.</span>
+  <button class="on" data-goto="main">Reimbursements</button>
+  <button data-goto="tracker">Tracker</button>
+  <button data-goto="drafts">Drafts</button>
+  <button data-goto="archive">Archive</button>
+  <button data-goto="open">Open a claim</button>
+  <button data-goto="form">New Reimbursement</button>
+</div>
+
+<script>
+(function(){
+  var $=function(s,r){return (r||document).querySelector(s);};
+  var $$=function(s,r){return [].slice.call((r||document).querySelectorAll(s));};
+
+  /* ---- tabs ---- */
+  function tab(name){
+    $$('.wf-tab').forEach(function(b){ b.classList.toggle('on', b.dataset.tab===name); });
+    $$('[data-pane]').forEach(function(p){ p.hidden = p.dataset.pane!==name; });
+    mark(name); window.scrollTo(0,0);
+  }
+  $$('.wf-tab').forEach(function(b){ b.onclick=function(){ tab(b.dataset.tab); }; });
+
+  /* ---- clicking a row swaps the timeline card for that claim's own progress,
+          exactly as wfShowCase does in the real page ---- */
+  var defTL = $('#tlBox').innerHTML;
+  function av(bg,ini){ return '<span class="wf-av" style="background:'+bg+'">'+ini+'</span>'; }
+  var liveTL =
+    '<div class="wf-tl-item wf-tl-done">'
+      +'<div class="wf-tl-num">1</div><div class="wf-tl-body">'
+      +'<div class="wf-tl-row"><div class="wf-tl-title">HR Review <span class="wf-badge ok">Done</span></div>'
+      +'<div class="wf-tl-meta"><span class="wf-who">'+av('#7c3aed','SD')+'<span class="wf-who-nm">Shuchandra Das</span></span>'
+      +'<span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span></div></div>'
+      +'<div class="wf-tl-times">'
+        +'<span class="wf-tl-when"><b>Received</b> 3 Sep 2026, 11:04 am</span>'
+        +'<span class="wf-tl-when done"><b>Done</b> 3 Sep 2026, 4:22 pm</span>'
+        +'<span class="wf-tl-when"><b>Transition</b> 0.1</span>'
+        +'<span class="wf-tl-when done"><b>Retention</b> 0.5</span>'
+      +'</div></div></div>'
+    +'<div class="wf-tl-item wf-tl-cur">'
+      +'<div class="wf-tl-num">2</div><div class="wf-tl-body">'
+      +'<div class="wf-tl-row"><div class="wf-tl-title">Accounts Review &amp; Payment <span class="wf-badge cur">In progress</span></div>'
+      +'<div class="wf-tl-meta"><span class="wf-who">'+av('#0369a1','GS')+'<span class="wf-who-nm">GyanPrakash Sah</span></span>'
+      +'<span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span></div></div>'
+      +'<div class="wf-tl-times">'
+        +'<span class="wf-tl-when"><b>Received</b> 4 Sep 2026, 9:40 am</span>'
+        +'<span class="wf-tl-when"><b>Transition</b> 0.17</span>'
+        +'<span class="wf-tl-when"><b>Retention</b> 1.2 · running</span>'
+      +'</div></div></div>'
+    +'<div class="wf-tl-item wf-tl-wait">'
+      +'<div class="wf-tl-num">3</div><div class="wf-tl-body">'
+      +'<div class="wf-tl-row"><div class="wf-tl-title">Payment Received <span class="wf-badge wait">Waiting</span></div>'
+      +'<div class="wf-tl-meta"><span class="wf-who">'+av('#be185d','RR')+'<span class="wf-who-nm">Riya Roy</span></span>'
+      +'<span class="wf-dur"><i class="fa-regular fa-clock"></i> 1 day</span></div></div>'
+      +'<div class="wf-tl-times"></div></div></div>';
+
+  function openCase(tr){
+    $$('.wf-itable tbody tr.sel').forEach(function(r){ r.classList.remove('sel'); });
+    if(tr) tr.classList.add('sel');
+    $('#tlBox').innerHTML = liveTL;
+    $('.wf-tlhead-t').innerHTML =
+      '<i class="fa-solid fa-timeline"></i> Reimbursement No. 38 · Riya Roy'
+      +'<span class="wf-tip" title="Where this reimbursement has reached.">i</span>';
+    $('.wf-tlcard').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  function closeCase(){
+    $('#tlBox').innerHTML = defTL;
+    $('.wf-tlhead-t').innerHTML =
+      '<i class="fa-solid fa-list-ol"></i> Workflow steps'
+      +'<span class="wf-tip" title="The steps every reimbursement goes through, in order, with who does each one and how long they have.">i</span>';
+    $$('.wf-itable tbody tr.sel').forEach(function(r){ r.classList.remove('sel'); });
+  }
+  $$('[data-open]').forEach(function(tr){
+    tr.onclick=function(){
+      if(tr.dataset.open==='draft'){ openForm(); return; }
+      tab('main'); openCase($('#listBody tr:nth-child(2)')); mark('open');
+    };
+  });
+
+  /* ---- the modal ---- */
+  function openForm(){ $('#ov').hidden=false; mark('form'); }
+  function closeForm(){ $('#ov').hidden=true; }
+  $('#newBtn').onclick=openForm;
+  $('#closeBtn').onclick=closeForm;
+  $('#cancelBtn').onclick=closeForm;
+  $('#ov').onclick=function(e){ if(e.target===this) closeForm(); };
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeForm(); });
+
+  /* Transport and Food are one exclusive choice per expense — the duo field */
+  $$('[data-grp]').forEach(function(g){
+    $$('.chip',g).forEach(function(c){
+      c.onclick=function(){
+        var was=c.classList.contains('on');
+        $$('.chip',g).forEach(function(o){ o.classList.remove('on'); });
+        if(!was) c.classList.add('on');
+      };
+    });
+  });
+
+  /* the running total in the footer */
+  function retotal(){
+    var sum=0, miss=0;
+    $$('.amtin').forEach(function(i){
+      var v=parseFloat(String(i.value).replace(/[^0-9.]/g,''));
+      if(isNaN(v)) miss++; else sum+=v;
+    });
+    $('#tot').textContent='₹'+sum.toLocaleString('en-IN');
+    var chip=$('.wf-evt-total-miss');
+    if(miss){
+      if(!chip){ chip=document.createElement('span'); chip.className='wf-evt-total-miss'; $('.wf-evt-total').appendChild(chip); }
+      chip.textContent=miss+' still to fill';
+    } else if(chip){ chip.remove(); }
+  }
+  $$('.amtin').forEach(function(i){ i.oninput=retotal; });
+  retotal();
+
+  /* ---- the prototype strip ---- */
+  function mark(name){
+    $$('.proto [data-goto]').forEach(function(b){ b.classList.toggle('on', b.dataset.goto===name); });
+  }
+  $$('.proto [data-goto]').forEach(function(b){
+    b.onclick=function(){
+      var g=b.dataset.goto;
+      if(g==='form'){ closeCase(); tab('main'); openForm(); return; }
+      closeForm();
+      if(g==='open'){ tab('main'); openCase($('#listBody tr:nth-child(2)')); mark('open'); return; }
+      closeCase(); tab(g);
+    };
+  });
+})();
+</script>
+</body>
+</html>
