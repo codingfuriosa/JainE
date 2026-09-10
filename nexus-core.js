@@ -209,18 +209,33 @@ async function boot(){
   startSessionGuard();
   promptSetPassword();
 }
-// A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
-// so the existing CSS just works, but with a single nav item, no search box, and a sign-out-only
-// profile menu instead of the full staff renderShell()/effectiveNav() (which reads adm.users data
-// a customer session never fetches — see the customer-detection block in boot() above).
-function renderCustomerShell(){
+// The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
+// with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
+// now, one item per section; .sb-nav is already flex:1+overflow-y:auto (same as the staff nav with
+// its own long lists), so this scrolls for free with no CSS changes.
+const CUST_TABS=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+function custSidebarTabs(ti){
   const nav=$('sbNav');
-  if(nav){
-    nav.innerHTML='';
-    nav.appendChild(el('div','sb-group','Portal'));
-    const a=el('a','sb-item active','<i class="fa-solid fa-user-tie"></i> Customer Portal');
-    a.href='customer.html';nav.appendChild(a);
-  }
+  if(!nav)return;
+  nav.innerHTML='';
+  nav.appendChild(el('div','sb-group','Customer Portal'));
+  CUST_TABS.forEach(function(t,i){
+    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> '+t);
+    a.href='javascript:void(0)';
+    a.onclick=function(){navTo('customer/'+i);};
+    nav.appendChild(a);
+  });
+  // Same "tap a nav item, close the mobile drawer" behavior renderShell() wires up for staff pages
+  // (nexus-core.js:432) - this sidebar is rebuilt fresh on every render so it needs its own copy.
+  nav.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
+}
+// A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
+// so the existing CSS just works, but with the section list instead of a search box, and a
+// sign-out-only profile menu instead of the full staff renderShell()/effectiveNav() (which reads
+// adm.users data a customer session never fetches — see the customer-detection block in boot() above).
+function renderCustomerShell(){
+  custSidebarTabs(0);
   // During impersonation, show the CUSTOMER's identity throughout (matching the "viewing as X"
   // banner in VIEWS.customer) rather than the staff member's own — seeing your own email here while
   // the banner says you're previewing someone else read as a bug, even though it wasn't one: the
@@ -619,10 +634,11 @@ function route(){renderPage();}
 window.addEventListener('hashchange',renderPage);
 // Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
 // tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
-// otherwise a page with enough tabs to overflow (e.g. the 13-tab customer portal) leaves the active
-// one wherever the row was last scrolled to, sometimes off-screen with no visual sign which tab is
-// actually selected. Runs off a MutationObserver rather than only at navigation time because several
-// views replace just their own tab row's innerHTML after loading data, not the whole page.
+// otherwise a page with enough tabs to overflow (e.g. Campaign Analytics' source/period sub-tabs)
+// leaves the active one wherever the row was last scrolled to, sometimes off-screen with no visual
+// sign which tab is actually selected. Runs off a MutationObserver rather than only at navigation
+// time because several views replace just their own tab row's innerHTML after loading data, not the
+// whole page. (Customer Portal's sections moved to the sidebar and no longer use this row at all.)
 (function(){
   const viewEl=document.getElementById('view');
   if(!viewEl)return;
@@ -13919,11 +13935,12 @@ window.custModReqDecide=async function(id,decision){
 };
 VIEWS.customer=async function(v,seg){
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const tabs=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+  const tabs=CUST_TABS;
   const ti=mTab(seg,tabs.length);
-  // Names the active tab in the breadcrumb too - with 13 tabs in a horizontally-scrolling row,
-  // the active one isn't always visible in the row itself, so this is the one place that always
-  // says which section you're actually looking at.
+  // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
+  // whichever section is actually showing, including a same-page link like the Statement tab's
+  // "View full ledger" jumping straight to navTo('customer/1').
+  custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
   // Hoisted above the no-units early-return too — a preview with nothing to show still needs to say
@@ -13955,7 +13972,7 @@ VIEWS.customer=async function(v,seg){
   v.innerHTML=mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
-    mTabs('customer',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
+    '<div style="margin-top:14px">'+body+'</div>';
 };
 VIEWS.supplier=function(v,seg){
   setCrumb(['Stakeholder Portals','Supplier Portal']);
