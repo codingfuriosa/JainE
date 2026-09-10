@@ -5690,10 +5690,67 @@
     });
     inp.click();
   };
+  /* THE CARD THAT SAYS WHAT IS HAPPENING TO THE FILES.
+
+     Without a dialog there is nothing on screen to show that anything is going on, and a toast is
+     gone in a few seconds. A booking form is a scan of several megabytes, so there can be a long
+     quiet minute between choosing the file and the instance appearing - during which the only
+     reasonable thing a person can conclude is that it did not work, and reload the page. Reloading
+     abandons the upload, which is exactly how a booking ends up neither created nor reported.
+
+     So the card stays until the work is finished: one line per file with its own percentage, then
+     the creating step. A failure keeps the card on screen with the reason spelled out, rather than
+     a message that has already faded by the time anybody looks. */
+  function wfWorkCard(title){
+    let el=document.getElementById('wfWorkCard');
+    if(el) el.remove();
+    el=document.createElement('div');
+    el.id='wfWorkCard';
+    el.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;min-width:280px;'
+      +'max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
+      +'border:1px solid var(--line,#e3e3e3);border-radius:12px;padding:12px 14px;'
+      +'box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13px;line-height:1.5';
+    el.innerHTML='<div style="font-weight:600;margin-bottom:6px" class="wfwc-t"></div>'
+      +'<div class="wfwc-b"></div>';
+    el.querySelector('.wfwc-t').textContent=title;
+    document.body.appendChild(el);
+    return {
+      say:function(html){ const b=el.querySelector('.wfwc-b'); if(b) b.innerHTML=html; },
+      title:function(t){ const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t; },
+      close:function(){ try{ el.remove(); }catch(_e){} },
+      /* A failure is not swept away on a timer - it waits to be read and dismissed. What is
+         already on the card STAYS: the per-file reasons are the useful part, and replacing them
+         with a summary that points at them would leave nothing to point at. */
+      stop:function(t,html){
+        const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t;
+        const b=el.querySelector('.wfwc-b');
+        if(b) b.innerHTML=b.innerHTML+'<div style="margin-top:8px">'+html+'</div>'
+          +'<div style="margin-top:10px"><button class="ac-btn" '
+          +'onclick="(function(e){var c=document.getElementById(\'wfWorkCard\'); if(c)c.remove();})()">'
+          +'Close</button></div>';
+      }
+    };
+  }
   async function wfQuickAttachSubmit(flowId, files){
     const N=window._wfNoun||{one:'instance',lc:'instance'};
     const many=(files.length>1);
-    toast('Uploading '+files.length+(many?' files':' file')+'…','ok');
+    const card=wfWorkCard('Filing this '+N.lc);
+    const state=files.map(function(f){ return {name:f.name, pct:0, done:false, failed:''}; });
+    const draw=function(extra){
+      card.say(state.map(function(s){
+        const right = s.failed ? ('<span style="color:#c0392b">'+esc2(s.failed)+'</span>')
+                    : s.done   ? '<span style="color:#1e8e3e">done</span>'
+                               : (s.pct+'%');
+        return '<div style="display:flex;gap:10px;justify-content:space-between">'
+          +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px">'
+          +esc2(s.name)+'</span>'+right+'</div>';
+      }).join('')+(extra?('<div style="margin-top:8px">'+extra+'</div>'):''));
+    };
+    draw('Uploading — please keep this page open.');
+    /* A reload part-way through loses the upload silently. The browser will not let a page say
+       why, but it does ask, and being asked at all is the warning. */
+    const guard=function(e){ e.preventDefault(); e.returnValue=''; return ''; };
+    window.addEventListener('beforeunload',guard);
     /* Stored under the label the workflow's own field carries, so the instance reads back exactly
        as one filed through the form would. */
     let label='Attachment';
@@ -5706,19 +5763,34 @@
     /* One failure is reported and the rest still go: losing three good pages because the fourth
        timed out would be worse than a booking that is short one scan and can be edited. */
     const paths=[];
-    for(const file of files){
+    for(let i=0;i<files.length;i++){
+      const file=files[i];
       try{
         const key=s3KeyForFlowEvent(String(flowId), file.name);
-        const {data,error}=await uploadFileToS3(key,file);
+        const {data,error}=await uploadFileToS3(key,file,function(pct){
+          state[i].pct=pct; draw('Uploading — please keep this page open.');
+        });
         if(error) throw error;
+        state[i].done=true; draw('Uploading — please keep this page open.');
         paths.push(data.path);
-      }catch(e){ toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err'); }
+      }catch(e){
+        state[i].failed=((e&&e.message)||String(e)); draw('Uploading — please keep this page open.');
+      }
     }
-    if(!paths.length){ toast('Nothing was uploaded, so no '+N.lc+' was created','err'); return; }
+    if(!paths.length){
+      window.removeEventListener('beforeunload',guard);
+      draw('');   // the "keep this page open" line has had its day
+      card.stop('No '+N.lc+' was created',
+        'None of the files reached storage, so nothing was filed — the reason is beside each one '
+        +'above. Nothing was lost; choose them again once it is sorted out.');
+      return;
+    }
+    draw('Creating the '+esc2(N.lc)+'…');
     try{
       const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
         {p_flow_id:flowId, p_details:[{label:label, value:paths.join(WF_ATT_SEP)}], p_step_members:null});
       if(error) throw error;
+      window.removeEventListener('beforeunload',guard);
       // Same as the form's own save: say WHICH id it got, read back from the created row rather
       // than guessed, because numbers are handed out at the moment of saving.
       let newIdText='';
@@ -5734,10 +5806,20 @@
       /* Inserting the case queues the reading and pokes the reader straight away (the triggers on
          flow_cases and booking_audits), so there is nothing to start from here - only to say so,
          since the person is about to press Check List and would otherwise wonder. */
-      toast((newIdText?('New '+N.one+' created — Id: '+newIdText):(N.one+' created'))
-        +' — reading the '+(many?'attachments':'attachment')+' now, about two and a half minutes','ok');
+      card.title(newIdText?('New '+N.one+' — Id '+newIdText):(N.one+' created'));
+      card.say('Reading the '+(many?'attachments':'attachment')+' now — about two and a half '
+        +'minutes. You can carry on; the check list will be ready when you come back.');
+      setTimeout(function(){ card.close(); },12000);
       if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
-    }catch(e){ toast('Could not create the '+N.lc+': '+((e&&e.message)||e),'err'); }
+    }catch(e){
+      window.removeEventListener('beforeunload',guard);
+      draw('');
+      /* The files ARE in storage - only the instance failed - so the message says so rather than
+         leaving someone to wonder whether the scans need finding again. */
+      card.stop('The '+N.lc+' could not be created',
+        esc2((e&&e.message)||String(e))
+        +'<br><br>The files did upload, so nothing is lost; try once more.');
+    }
   }
 
   window.wfEventOpen=async function(flowId, caseId, draftId){
