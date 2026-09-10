@@ -4050,6 +4050,50 @@
                            by applying a rate, so a change of rate cannot make this wrong.
        Total               the gross of the same two. Equals the two lines above it, by construction.
      Every one of them comes from the cost sheet as read; none is a rate applied by JAIN-E. */
+  /* THE APARTMENT, ITS PARKING, AND THE TWO TOGETHER - read off the cost sheet as stored.
+
+     A cost sheet is laid out as "Unit Charges Details", then "Parking Details" with its own TOTAL,
+     then "TOTAL FLAT VALUE" covering both. The reading already carries every row; what went wrong
+     on Arup Bhawal's letter was choosing among them. It took the first subtotal in the flat
+     section - which on that layout is the PARKING group's total - as the price of the apartment,
+     so the letter quoted the flat at 5,00,000 (the price of his car park) and then added the car
+     park to it a second time.
+
+     So the apartment is ADDED UP from the charge rows with the parking rows left out, and the two
+     can no longer be confused however the sheet is laid out. Where the sheet prints its own total
+     of the pair, that is kept and preferred: it is the figure the customer signed against, and it
+     beats anything totted up here.
+
+     Computed from res.cost_sheets rather than the reading's stored letter.price, so every booking
+     already read is right the moment this ships - nothing has to be read again. */
+  function wfSheetMoney(res){
+    const sheets=Array.isArray(res&&res.cost_sheets)?res.cost_sheets:[];
+    const norm=function(l){ return String(l==null?'':l).toUpperCase().replace(/[^A-Z0-9]/g,''); };
+    const byBasis=function(want){
+      for(let i=0;i<sheets.length;i++)
+        if(String((sheets[i]&&sheets[i].basis)||'').toUpperCase()===want) return sheets[i];
+      return null;
+    };
+    const one=function(sheet){
+      const items=Array.isArray(sheet&&sheet.line_items)?sheet.line_items:[];
+      const isPark=function(it){ return /PARKING|GARAGE/.test(norm(it&&it.label)); };
+      let parking=null,total=null,sum=0,any=false,sub=null;
+      items.forEach(function(it){
+        const amt=(typeof (it&&it.amount)==='number')?it.amount:null;
+        if(amt===null) return;
+        const kind=String((it&&it.kind)||'CHARGE').toUpperCase();
+        const sec=String((it&&it.section)||'').toUpperCase();
+        if(kind==='CHARGE'&&isPark(it)){ parking=(parking||0)+amt; return; }
+        if(kind==='CHARGE'&&sec==='FLAT'){ sum+=amt; any=true; return; }
+        if(kind!=='CHARGE'&&/FLATVALUE|TOTALFLAT/.test(norm(it&&it.label))&&total===null) total=amt;
+        else if(kind==='SUBTOTAL'&&sec==='FLAT'&&sub===null&&!isPark(it)) sub=amt;
+      });
+      // A sheet that itemises nothing but its parking: take the parking back out of the lump.
+      const flat=any?sum:((sub!==null)?(sub-(parking||0)):null);
+      return {flat:flat, parking:parking, total:total};
+    };
+    return {net:one(byBasis('NET')||sheets[0]||null), gross:one(byBasis('GROSS'))};
+  }
   window.wfAllotmentLetter=async function(caseId){
     let res=null;
     try{ res=await wfBookingReading(caseId); }
@@ -4070,7 +4114,7 @@
     const ink=L.rgb(0.10,0.10,0.11), soft=L.rgb(0.40,0.42,0.45),
           line=L.rgb(0.72,0.74,0.77), band=L.rgb(0.94,0.95,0.96);
 
-    const f=res.fields||{}, LT=res.letter||{}, PR=(LT.price)||{};
+    const f=res.fields||{}, LT=res.letter||{};
     const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
       return (!t||t==='NIL')?'':t; };
     const n2=function(v){ return (typeof v==='number'&&isFinite(v))
@@ -4166,15 +4210,25 @@
     /* The price table. Rows are drawn to a measured height so the total row can be banded and the
        whole block ruled - a price a customer is asked to pay should look like a statement, not a
        sentence. */
-    const flatNet=(typeof PR.flat_net==='number')?PR.flat_net:null;
-    const flatGr =(typeof PR.flat_gross==='number')?PR.flat_gross:null;
-    const parkNet=(typeof PR.parking_net==='number')?PR.parking_net:null;
-    const parkGr =(typeof PR.parking_gross==='number')?PR.parking_gross:null;
+    /* Every figure here comes from the cost sheet's own rows. The reading also carries a
+       precomputed letter.price, but that is what got Arup Bhawal's letter wrong and it is
+       deliberately not consulted, even as a fallback: a sheet nobody could read leaves these
+       null and the table prints a dash, which is the truth. A wrong price on a letter to a
+       customer is worse than a blank one. */
+    const SM=wfSheetMoney(res);
+    const flatNet=SM.net.flat,      flatGr=SM.gross.flat;
+    const parkNet=SM.net.parking,   parkGr=SM.gross.parking;
     const hasPark=parkNet!==null||parkGr!==null;
     const kind=String((res.parking&&res.parking.marked&&res.parking.marked.value)||'').toUpperCase();
     const kindWord=(kind==='COVERED'||kind==='OPEN')?(kind.charAt(0)+kind.slice(1).toLowerCase()):'';
-    const costNet=(flatNet===null&&parkNet===null)?null:((flatNet||0)+(parkNet||0));
-    const costGr =(flatGr===null&&parkGr===null)?null:((flatGr||0)+(parkGr||0));
+    /* The sheet's own "TOTAL FLAT VALUE" is the apartment and its parking together, and it wins:
+       it is the figure the customer signed against, so it beats one added up here. Only a sheet
+       that prints no such row falls back to adding the two. */
+    const totNet=SM.net.total, totGr=SM.gross.total;
+    const costNet=(totNet!==null)?totNet
+                 :((flatNet===null&&parkNet===null)?null:((flatNet||0)+(parkNet||0)));
+    const costGr =(totGr!==null)?totGr
+                 :((flatGr===null&&parkGr===null)?null:((flatGr||0)+(parkGr||0)));
     const extra=(costNet!==null&&costGr!==null)?(costGr-costNet):null;
 
     const costLabel=hasPark
@@ -4338,9 +4392,17 @@
     runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
              ['Floor',floorNo],
              ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
+    /* WHICH parking belongs in the label, not the value. The reading gives "COVERED 5,00,000",
+       which printed as "Parking : COVERED 5,00,000" - reading as though COVERED were part of the
+       amount. What was ticked is the name of the thing being charged for, so it goes with the
+       word: "COVERED Parking : 5,00,000". Nothing ticked stays plain "Parking". */
+    const pv=String(res.parking_value||v('covered_parking')||'').trim();
+    const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
+    const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
+    const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
     runLine([['Base Rate',v('base_rate')?(grp(v('base_rate'))+'/-'):''],
              ['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
-             ['Parking',res.parking_value||v('covered_parking')||'NIL']]);
+             [parkLabel,parkValue]]);
     runLine([['Discount',v('discount')||'NIL']]);
     y-=13;
 
