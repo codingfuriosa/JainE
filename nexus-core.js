@@ -8184,7 +8184,10 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
-      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+      /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
+         printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
+         data. The clock is the only thing that tells two real actions apart here. */
+      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
       const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
       return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
@@ -8267,7 +8270,10 @@ window.usbOpenUserActivity=async function(){
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
-      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+      /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
+         printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
+         data. The clock is the only thing that tells two real actions apart here. */
+      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
       const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
       return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
