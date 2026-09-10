@@ -626,9 +626,22 @@ window.addEventListener('hashchange',renderPage);
 (function(){
   const viewEl=document.getElementById('view');
   if(!viewEl)return;
+  /* Moves the tab row's OWN horizontal scroll and nothing else. This used to be a scrollIntoView
+     with block:'nearest', which is not the vertical no-op it reads as: for an element outside the
+     viewport, "nearest" scrolls every scrollable ancestor - the page included - by the minimum
+     needed to reveal it. So on any view scrolled down away from its tabs (Transcription landing on
+     a deep-linked SL NO row, say), bringing the active tab "into view" meant yanking the whole page
+     back to the top, silently undoing the scroll the view had just done. A MutationObserver
+     callback lands as a microtask immediately after the render that queued it, so it won that race
+     every time, from code the view itself could not see. */
   const scrollActiveTabIntoView=function(){
     const active=viewEl.querySelector('.tabs .tab.active');
-    if(active)active.scrollIntoView({inline:'nearest',block:'nearest'});
+    if(!active)return;
+    const row=active.closest('.tabs');
+    if(!row||row.scrollWidth<=row.clientWidth)return;   // not overflowing: nothing to reveal
+    const r=row.getBoundingClientRect(),a=active.getBoundingClientRect();
+    if(a.left<r.left)        row.scrollLeft-=(r.left-a.left);
+    else if(a.right>r.right) row.scrollLeft+=(a.right-r.right);
   };
   // No setTimeout/rAF wrapper needed - MutationObserver already batches a burst of DOM changes
   // (e.g. rendering a whole page) into one callback call, so calling straight from it still fires
@@ -14016,6 +14029,10 @@ function trQualTag(r){
    same reason, and the three cards never summed to the total. */
 async function trFetch(force){
   if(TR_ROWS&&!force)return TR_ROWS;
+  if(!force){
+    const cached=trCacheRead('tr_fetch_cache','all');
+    if(cached){TR_ROWS=cached;return TR_ROWS;}
+  }
   const PAGE=1000; let out=[], from=0;
   try{
     for(;;){
@@ -14029,6 +14046,7 @@ async function trFetch(force){
       if(from>50000)break;                 // backstop, never a real workload
     }
     TR_ROWS=out;
+    trCacheWrite('tr_fetch_cache','all',out);
   }catch(e){ TR_ROWS=out.length?out:[]; }
   return TR_ROWS;
 }
@@ -15252,6 +15270,34 @@ let TRC_ROWS=null;
 /* Which window TRC_ROWS was actually fetched for ('from|to', '' meaning All time) - so a filter
    change knows whether the cache still answers it or a fresh, still-scoped fetch is needed. */
 let TRC_ROWS_RANGE=null;
+
+/* TRC_ROWS/TR_ROWS only survive as long as this tab's JS does - a reload throws the fetch away and
+   pays the full CRM-join + transcription cost again even one minute later. sessionStorage backs the
+   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 3h of
+   the last real fetch reads from the browser instead of hitting Supabase again. 3h, not "until the
+   tab closes", because the underlying data does keep changing (new calls come in, transcriptions
+   complete) - it just doesn't need re-checking on every reload.
+   sessionStorage (not localStorage): this is a cache of one tab's own last fetch, not something that
+   should leak into a different tab that might be looking at a different filter/date range. */
+const TRC_CACHE_TTL_MS=3*60*60*1000;
+function trCacheRead(key,matchKey){
+  try{
+    const c=JSON.parse(sessionStorage.getItem(key)||'null');
+    if(!c||c.key!==matchKey)return null;
+    if(Date.now()-c.ts>TRC_CACHE_TTL_MS)return null;
+    return c.rows;
+  }catch(e){return null;}
+}
+function trCacheWrite(key,matchKey,rows){
+  /* Quota (or a private-browsing block on storage) is not worth failing the fetch over - the caller
+     still has the rows in memory, it just won't survive a reload this time. */
+  try{sessionStorage.setItem(key,JSON.stringify({key:matchKey,ts:Date.now(),rows:rows}));}catch(e){}
+}
+/* Every place that changes TR_ROWS/TRC_ROWS without going through a real trFetch/trcFetch
+   (delete, restore, a fresh upload, a poll that just finished) has to drop the cached copy too -
+   otherwise a reload in the next 3h would resurrect a deleted call, or hide one just restored or
+   just uploaded, straight out of the stale snapshot. */
+function trCacheClear(key){try{sessionStorage.removeItem(key);}catch(e){}}
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
 /* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
    recently opened from this list, so coming back from its detail page (the in-app Back button, or
@@ -15266,6 +15312,32 @@ let TRC_LAST_FOLLOWUP_ID=null;
    already include - see trcEnsurePinnedLead. */
 let TRC_PIN_ID=null;
 let TRC_PIN_ROWS=null;
+/* What makes #/r79 land on row 79 rather than on the 79th row of whatever happens to be on screen.
+   A SL NO is a position, and a position only means anything against the list it was counted in: the
+   default window is YESTERDAY alone, so the same number over a freshly loaded page names a different
+   lead, or no row at all. So the moment a lead is opened from the list, the number is written down
+   against the thing that does identify the row exactly - the lead's own id, which is also its <tr>
+   id - together with the filters the count was made under, and the way back resolves through that
+   instead of counting rows again.
+   sessionStorage: this is one tab's navigation history and has no business outliving the tab. It is
+   also allowed to simply not be there (a pasted link in a fresh browser), which is what the position
+   fallback in trcView is still for. */
+const TRC_BACK_KEY='trc_back_row';
+function trcRememberRow(sl,leadId,followUpId){
+  if(!sl||leadId==null)return;
+  try{
+    sessionStorage.setItem(TRC_BACK_KEY,JSON.stringify(
+      {sl:Number(sl),leadId:leadId,followUpId:followUpId||null,f:Object.assign({},TRC_F)}));
+  }catch(e){}
+}
+/* Only answers for the SL NO it was written for - a number that doesn't match is a link from some
+   other list state, and guessing a lead for it would be worse than falling back to the position. */
+function trcRecallRow(sl){
+  try{
+    const m=JSON.parse(sessionStorage.getItem(TRC_BACK_KEY)||'null');
+    return (m&&Number(m.sl)===Number(sl)&&m.leadId!=null)?m:null;
+  }catch(e){return null;}
+}
 
 /* Deliberately NOT selecting level_regression_severity/prev_status here, unlike the lead-detail fetch
    below. Both columns come off acc.lead_level_progress_v, a view stacked six windows deep over EVERY
@@ -15323,6 +15395,10 @@ function trcIsRegression(r){
 async function trcFetch(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
+  if(!force){
+    const cached=trCacheRead('trc_fetch_cache',rangeKey);
+    if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;return TRC_ROWS;}
+  }
   /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
      history through a chain of window functions - a cost paid IN FULL on every request to this
      view, no matter how narrow the page's own range() slice is (a WHERE on the outer query cannot
@@ -15348,6 +15424,7 @@ async function trcFetch(force){
       from+=PAGE;if(from>50000)break;
     }
     TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;
+    trCacheWrite('trc_fetch_cache',rangeKey,out);
   }catch(e){
     TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
@@ -15619,19 +15696,14 @@ window.trcCard=function(kind,val){
    instead of all at once, and Previous day - the day whose calls actually finished processing
    overnight - stays the default both here and in TRC_F's own initial state above. */
 function trcDateBar(){
-  const preset=function(label,f,t){
-    const on=TRC_F.from===f&&TRC_F.to===t;
-    return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcSetRange('+(f?'\''+f+'\'':'null')+','+(t?'\''+t+'\'':'null')+')">'+esc(label)+'</button>';
-  };
-  const y=traYesterday();
   /* The From/To boxes no longer fire on their own onchange - picking a From date used to refetch
      immediately with To still at its old value, then picking To refetched AGAIN with the pair that
      was actually wanted. One button, applied once both boxes say what they're meant to, means one
      fetch of the range someone actually asked for, not one accidental fetch per box touched. Enter in
-     either box does the same thing a click on the button would. */
+     either box does the same thing a click on the button would.
+     No preset buttons any more - the boxes already open on Previous day (see TRC_F's own initial
+     state), so a one-click shortcut back to it would only ever restate what's already showing. */
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-    +preset('Previous day',y,y)
-    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
     +'<label style="font-size:12px;color:var(--slate)">To</label>'
@@ -15748,7 +15820,7 @@ function trcLeadRowHtml(g,sl){
      matching call - jumping straight to it instead of the top of the lead's whole history. */
   const jumpTo=TRC_F.personnel!=='all'&&last.follow_up_id?'/'+last.follow_up_id:'';
   const wasOpened=TRC_LAST_LEAD_ID!=null&&String(g.lead_id)===String(TRC_LAST_LEAD_ID);
-  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/lead/'+g.lead_id+jumpTo+'/r'+sl+'\')">'
+  return '<tr id="trcLeadRow'+esc(String(g.lead_id))+'" style="cursor:pointer'+(wasOpened?';background:#f0fdfa;box-shadow:inset 3px 0 0 #0d9488':'')+'" onclick="navTo(\'transcription/r'+sl+'/'+g.lead_id+jumpTo+'\')">'
     +'<td style="font-variant-numeric:tabular-nums;color:var(--slate);text-align:center" title="Row '+sl+' in the current, filtered list">'+sl+'</td>'
     +'<td style="font-variant-numeric:tabular-nums;padding-right:20px">'+esc(String(g.lead_id))+'</td>'
     +'<td style="padding-left:6px"><div style="font-weight:600">'+esc(g.name||('Lead '+g.lead_id))+'</div>'
@@ -15855,11 +15927,29 @@ function trcRender(full){
 }
 
 async function trcView(v,seg){
-  /* The lead id (and, if the click came off the call-level Mismatch table, the follow-up id too) a
-     "Back"/"All leads" link carried in the route itself (transcription/0/<leadId>/<followUpId>) -
-     this is what lets the exact row survive not just an in-app back click but a full page reload or
-     someone pasting the URL, which the in-memory TRC_LAST_LEAD_ID/TRC_LAST_FOLLOWUP_ID alone never could. */
-  if(seg&&seg[1]){TRC_LAST_LEAD_ID=seg[1];TRC_LAST_FOLLOWUP_ID=seg[2]||null;}
+  /* #/r<SL NO> - what backing out of a lead's detail page arrives as, naming the row it was opened
+     from and nothing else. It is a position rather than an identity, so it is only used if nothing
+     better is in memory; what it buys is a landing spot after a full page reload or a pasted URL,
+     which the in-memory TRC_LAST_LEAD_ID/TRC_LAST_FOLLOWUP_ID alone never could.
+     The older #/0/<leadId>/<followUpId> shape names its row by id, which is exact - so it is still
+     honoured, and is the branch a live link from elsewhere in the app takes. */
+  const rowMatch=/^r(\d+)$/i.exec(String((seg&&seg[0])||''));
+  const rowHint=rowMatch?Number(rowMatch[1]):null;
+  if(!rowMatch&&seg&&seg[1]){TRC_LAST_LEAD_ID=seg[1];TRC_LAST_FOLLOWUP_ID=seg[2]||null;}
+  /* An in-app back click still has the lead in memory, which is already exact. A reload, or the URL
+     opened cold in this tab, does not - so recover which row the number named, and the window it was
+     counted in. Restoring the filters is the point, not a side effect: without them the lead may not
+     even be in the fetched range, and the row genuinely is not the 79th of anything on screen.
+     trcFetch keys its cache on the date range, so putting these back before it runs is what makes it
+     go and get the right window; trcEnsurePinnedLead then covers a lead the window still excludes. */
+  if(rowHint&&TRC_LAST_LEAD_ID==null){
+    const memo=trcRecallRow(rowHint);
+    if(memo){
+      Object.assign(TRC_F,memo.f||{});
+      TRC_LAST_LEAD_ID=memo.leadId;
+      TRC_LAST_FOLLOWUP_ID=memo.followUpId||null;
+    }
+  }
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
@@ -15886,9 +15976,12 @@ async function trcView(v,seg){
   trcRender(true);
   /* The Mismatch card switches this same table to one row per call (trcCallRowHtml) instead of one
      row per lead (trcLeadRowHtml) - whichever is actually on screen is the one worth scrolling to. */
-  const row=(TRC_F.match==='MISMATCH'&&TRC_LAST_FOLLOWUP_ID!=null)
+  let row=(TRC_F.match==='MISMATCH'&&TRC_LAST_FOLLOWUP_ID!=null)
     ? $('trcCallRow'+TRC_LAST_FOLLOWUP_ID)
     : (TRC_LAST_LEAD_ID!=null ? $('trcLeadRow'+TRC_LAST_LEAD_ID) : null);
+  /* Nothing in memory to match a lead on - a reload, or someone opening #/r12 cold - so fall back to
+     the position the number names. It is the same lead only if the list rendered the same way. */
+  if(!row&&rowHint){const b=$('trcRows');row=(b&&b.children[rowHint-1])||null;}
   if(row)row.scrollIntoView({block:'center'});
 }
 
@@ -16199,12 +16292,18 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   const id=Number(leadId);
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
-  /* Carried on every "Back"/"All leads" link below, so the list can restore the exact row - the lead
-     row it left from, or, if this page was opened off the call-level Mismatch table, that call row.
-     Restoring is keyed on the lead id, not rowHint (a render-only position that a re-sort or a
-     changed filter can hand to a different lead entirely) - rowHint only ever labels what the row
-     happened to be called at the moment this page was opened. */
-  const backRoute='transcription/0/'+id+(targetFollowUpId?'/'+targetFollowUpId:'');
+  /* Where every "Back"/"Back to all leads" link below goes: the list section this page was opened
+     from and nothing more. The lead's own id is deliberately left off - it belongs to this page, not
+     to the list - so backing out lands on #/r12 rather than a list URL still naming one lead.
+     A row number is a render-only position that a re-sort or a changed filter can hand to a different
+     lead entirely, so the list restores by lead id whenever it still has one in memory and only falls
+     back to the position on a reload (see trcView). A visit that arrived off the call-level Mismatch
+     table carries no row number at all, and goes back to the top of the list. */
+  const backRoute=rowHint?('transcription/r'+rowHint):'transcription/0';
+  /* Written here rather than off the row's click handler because this is the last moment TRC_F is
+     still the list's own filter state - nothing on this page touches it, and the number in backRoute
+     is only meaningful against it. */
+  trcRememberRow(rowHint,id,targetFollowUpId);
   let lead=null,rows=[];
   try{
     const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
@@ -16244,7 +16343,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
       +'<p>Lead '+esc(String(id))+(bu?' · '+esc(bu):'')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s')
         +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
-        +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>'
+        +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
         +'<button class="btn" onclick="trcCopy(\'lead\','+id+')"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
       +'</div></div>';
 
@@ -16353,6 +16452,7 @@ window.trcRetry=async function(followUpId){
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
   const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   TRC_ROWS=null;
+  trCacheClear('trc_fetch_cache');
   if(lead)await trcLeadDetail($('view'),lead);
 };
 
@@ -16369,15 +16469,22 @@ function TRA_TABS_HTML(ti){
 
 VIEWS.transcription=async function(v,seg){
   setCrumb(['Growth & Strategy','Transcription']);
-  /* Detail routes, checked before the tab index because neither 'lead' nor 'auto' is a number.
-     'lead' is the snapshot pipeline, keyed on the CRM's own lead_id. 'auto' still serves rows
-     imported by the previous pipeline into acc.transcriptions, so an old link still resolves. */
+  /* Detail routes, checked before the tab index because none of 'r12', 'lead' or 'auto' is a
+     number. A lead opens at #/r<SL NO>/<leadId>[/<followUpId>] - the row number it was clicked from
+     leads the route, so dropping the tail is the way back to that same section of the list (#/r12).
+     The 'r' is what keeps a row number and a tab apart: a bare number in the first slot is already
+     the tab index (#/1 is Manual Upload), so '3' there could not mean row 3 without also meaning the
+     Deleted tab. The SL NO itself is only a display label, recomputed on every render (see
+     trcLeadRowHtml) and never an identifier - the detail page echoes it back as "Row #N", and the
+     list treats it as a position of last resort (see trcView). */
+  const rowSeg=/^r(\d+)$/i.exec(String(seg[0]||''));
+  if(rowSeg&&seg[1]){return trcLeadDetail(v,seg[1],seg[2]||null,rowSeg[1]);}
+  /* 'lead' is the older shape of that same page, still resolving so an existing link or bookmark
+     does, and still what the call-level Mismatch table links with - it has no SL NO column, so it has
+     no row number to lead with. A real follow-up id (the personnel filter's jump-to-latest-call) can
+     ride in either trailing slot, so both are scanned rather than assumed to be in a fixed order.
+     'auto' serves rows imported by the previous pipeline into acc.transcriptions. */
   if(seg[0]==='lead'&&seg[1]){
-    /* The list's SL NO column shows the row's on-screen position as "#N" - purely a display label,
-       recomputed on every render (see trcLeadRowHtml), never an identifier. The lead click carries it
-       along as a trailing 'rN' segment so the detail page can echo "Row #N" back for reference; a real
-       follow-up id (the personnel filter's jump-to-latest-call) can ride alongside it in either slot,
-       so both trailing segments are scanned rather than assumed to be in a fixed order. */
     let followUpId=null,rowHint=null;
     seg.slice(2).forEach(function(s){const m=/^r(\d+)$/i.exec(s);if(m)rowHint=m[1];else if(!followUpId)followUpId=s;});
     return trcLeadDetail(v,seg[1],followUpId,rowHint);
@@ -16783,7 +16890,7 @@ function trCompDetailHtml(leads,leadId){
   const combined=trCombinedQualify(g.rows);
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> All leads</button>';
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
@@ -16980,7 +17087,12 @@ function trStartPolling(id){
     let out=null;try{out=await trPollOnce(id);}catch(e){}
     if(out&&out.row){const i=(TR_ROWS||[]).findIndex(function(x){return x.id===out.row.id;});if(i>=0)TR_ROWS[i]=out.row;}
     const st=out&&(out.status||(out.row&&out.row.status));
-    if(st==='done'||st==='error'){delete TR_TIMERS[id];if(PAGE==='transcription')renderPage();return;}
+    if(st==='done'||st==='error'){
+      delete TR_TIMERS[id];
+      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 3h cache now
+      if(PAGE==='transcription')renderPage();
+      return;
+    }
     TR_TIMERS[id]=setTimeout(tick,6000);
   };
   TR_TIMERS[id]=setTimeout(tick,3000);
@@ -16999,6 +17111,7 @@ window.trDelete=async function(id){
   TR_ROWS=(TR_ROWS||[]).filter(function(x){return x.id!==id;});
   TR_SELECTED.delete(id);
   if(r){r.deleted_at=now;r.deleted_by=who;TR_DELETED_ROWS=[r].concat(TR_DELETED_ROWS||[]);}
+  trCacheWrite('tr_fetch_cache','all',TR_ROWS);
   trRenderList();trRenderFolderRows();
   try{await sb.schema('acc').from('transcriptions').update({deleted_at:now,deleted_by:who}).eq('id',id);}catch(e){}
   trLogActivity(id,r&&r.file_name,'deleted');
@@ -17024,6 +17137,7 @@ window.trRestore=async function(id){
   const host=$('trDeletedRows');
   if(host)host.innerHTML=trDeletedTableBody();
   TR_ROWS=null; // so All Calls / Folders refetch and pick this call back up next time they're viewed
+  trCacheClear('tr_fetch_cache');
   toast('Restored','ok');
   try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).eq('id',id);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
   trLogActivity(id,r&&r.file_name,'restored');
@@ -17038,6 +17152,7 @@ window.trRestoreAll=async function(){
   const host=$('trDeletedRows');
   if(host)host.innerHTML=trDeletedTableBody();
   TR_ROWS=null;
+  trCacheClear('tr_fetch_cache');
   toast('Restored '+ids.length+' call'+(ids.length===1?'':'s'),'ok');
   try{await sb.schema('acc').from('transcriptions').update({deleted_at:null,deleted_by:null}).in('id',ids);}catch(e){toast('Restored locally, but failed to sync: '+((e&&e.message)||e),'err');}
   rows.forEach(function(r){trLogActivity(r.id,r.file_name,'restored');});
@@ -17162,6 +17277,7 @@ window.trUploadStart=async function(){
         if(!res.ok||!out.row) throw new Error(out.error||'could not start');
         if(!TR_ROWS)TR_ROWS=[];
         TR_ROWS.unshift(out.row);
+        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 3h cache - trStartPolling re-freezes it once it's actually done
         trStartPolling(out.row.id);
         done++;
       }catch(e){ failed++; }
