@@ -764,7 +764,7 @@
   }
   window.accNotifGoto=function(tid){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+tid;renderPage();} else location.href='tasks.html#/task/'+tid; };
   window.accNotifOpen=async function(id){ const n=NOTIFS.find(x=>x.id===id); if(!n)return; if(!n.read){try{await ACC().from('notifications').update({read:true}).eq('id',id);n.read=true;notifPaint();}catch(e){}} if(n.kind==='meeting'||n.kind==='meeting_cancel'||n.kind==='meeting_update'||n.kind==='meeting_reminder'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); navTo('tasks/meetings'); return; } if(n.kind==='campaign_alert'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); location.href='campaigns.html#/campaigns'; return; } if(n.task_id==null){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); return; } accNotifGoto(n.task_id); };
-  window.accNotifReadAll=async function(){ try{await ACC().from('notifications').update({read:true}).eq('recipient',me()).eq('read',false).neq('kind','approval');}catch(e){} await notifLoad(); await computeUrgent(); paintBell(); const dd=$('notifDd'); if(dd&&dd.classList.contains('show'))notifPaint2(); };
+  window.accNotifReadAll=async function(){ const n=(NOTIFS||[]).filter(x=>!x.read&&x.kind!=='approval').length; let ok=false; try{const {error}=await ACC().from('notifications').update({read:true}).eq('recipient',me()).eq('read',false).neq('kind','approval');ok=!error;}catch(e){} if(n&&ok){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:n+' notification'+(n>1?'s':'')}); }catch(_e){} } await notifLoad(); await computeUrgent(); paintBell(); const dd=$('notifDd'); if(dd&&dd.classList.contains('show'))notifPaint2(); };
   function wireBell(){ const b=$('notifBtn'); if(b)b._accW=true; }
 
   window.toggleNotif=function(){ const dd=$('notifDd'); if(!dd)return; if(dd.classList.contains('show')){dd.classList.remove('show');return;} document.querySelectorAll('.dropdown.show').forEach(d=>{if(d!==dd)d.classList.remove('show');}); notifDd(); dd.classList.add('show'); };
@@ -11402,6 +11402,7 @@
         await ACC().from('ptask_activity').insert({task_id:tid,action:'deleted attachment',detail:'Deleted '+(fname||'an attachment')});
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');
+        try{usageQueue('tasks.tasks.delete_attached_file','delete',{title:fname||undefined});}catch(_e){}
         renderPage();
       }catch(e){ toast('Could not delete the attachment: '+((e&&e.message)||e),'err'); }
     });

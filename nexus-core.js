@@ -652,7 +652,7 @@ function renderPage(){
   refreshNotifState();
 }
 function route(){renderPage();}
-window.addEventListener('hashchange',renderPage);
+window.addEventListener('hashchange',function(){renderPage();});
 // Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
 // tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
 // otherwise a page with enough tabs to overflow (e.g. Campaign Analytics' source/period sub-tabs)
@@ -1303,7 +1303,7 @@ async function docRenderTable(host,dept){
     const all=$('dtAll');if(all)all.onchange=e=>{document.querySelectorAll('.dtChk').forEach(c=>{c.checked=e.target.checked;const id=+c.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);});updateBulk();};
     updateBulk();
   };
-  const updateBulk=()=>{const n=DOC.sel.size;const dl=$('dtBulkDl'),del=$('dtBulkDel');if(dl){dl.disabled=!n;dl.innerHTML='<i class="fa-solid fa-download"></i> Download'+(n?' ('+n+')':'');dl.onclick=()=>DOC.sel.forEach(id=>docDownload(id));}if(del){del.disabled=!n;del.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');del.onclick=()=>docBulkDelete();}};
+  const updateBulk=()=>{const n=DOC.sel.size;const dl=$('dtBulkDl'),del=$('dtBulkDel');if(dl){dl.disabled=!n;dl.innerHTML='<i class="fa-solid fa-download"></i> Download'+(n?' ('+n+')':'');dl.onclick=()=>{try{usageQueue('legal.documents.bulk_download_delete','export',{title:'Bulk download ('+DOC.sel.size+' documents)'});}catch(_e){}DOC.sel.forEach(id=>docDownload(id));};}if(del){del.disabled=!n;del.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');del.onclick=()=>docBulkDelete();}};
   window.docPage=(d,tp)=>{DOC.page=Math.max(1,DOC.page+d);if(tp)DOC.page=Math.min(DOC.page,tp);draw();};
   draw();
 }
@@ -6470,6 +6470,7 @@ window.muDeleteSel=async function(){
   const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
   if(error){ toast(error.message,'err'); return; }
   toast(ids.length===1?'Position removed':ids.length+' positions removed','ok');
+  try{usageQueue('hr.monthly_update.delete_rows_or_whole_month','delete',{title:(ids.length===1?((picked[0]&&picked[0].position_title)||'1 position'):ids.length+' positions')+' — '+muMonthLabel(MU_CUR)});}catch(_e){}
   muRefresh();
 };
 
@@ -7208,6 +7209,10 @@ window.inspCancelEdit=function(){ if(INSP_DRILL){INSP_DRILL.edit=false; renderPa
 window.inspBulkE=function(st){ document.querySelectorAll('#eItems .insp-check').forEach(row=>{row.querySelectorAll('.ic-btn').forEach(b=>b.classList.remove('on','ok','no','na')); const b=[...row.querySelectorAll('.ic-btn')].find(x=>x.dataset.s===st); if(b){b.classList.add('on',st==='OK'?'ok':/NOT/.test(st)?'no':'na'); row.dataset.status=st;}}); };
 window.inspUpdateSub=async function(){
   const sec=($('eSec').value||'').trim(), overall=($('eOverall').value||'').trim();
+  // Captured before the save so the two direct logs below can tell an actual edit apart from
+  // "Save changes" clicked with the remark/photo untouched from what was already there.
+  const origSub=(INSP_SUBS||[])[INSP_DRILL&&INSP_DRILL.i]||{};
+  const origSec=(origSub.sec||''), origOverall=(origSub.overall||''), origPhoto=(origSub.photo||'');
   const checks=[...document.querySelectorAll('#eItems .insp-check')];
   const b=$('eSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
   let photo=($('ePhoto').value||'').trim();
@@ -7224,6 +7229,14 @@ window.inspUpdateSub=async function(){
   let err=null;
   for(const c of checks){ const {error}=await sb.schema('acc').from('inspection').update({status:c.dataset.status||'',remarks:sec,defect_photo:photo,overall_remark:overall}).eq('id',c.dataset.id); if(error){err=error.message;break;} }
   if(err){toast(err,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Save changes';} return;}
+  // Logged directly, after the update actually succeeds, rather than through USAGE_MAP's single
+  // fixed key for this button - "update check status" and "add/replace a photo" and "add a
+  // remark" are three distinct catalog features one Save can do at once, and only counting them
+  // when the value actually changed keeps an untouched pre-filled field from over-counting.
+  if(photoFile || (photo && photo!==origPhoto)){ try{ usageQueue('inspection.responses.add_replace_defect_photo','update',
+    {title:(photoFile?photoFile.name:photo)}); }catch(_e){} }
+  if((sec&&sec!==origSec) || (overall&&overall!==origOverall)){ try{ usageQueue('inspection.responses.add_section_overall_remarks','update',
+    {title:(sec||overall).slice(0,80)}); }catch(_e){} }
   INSP_ROWS=null; INSP_DRILL=null; toast('Response updated','ok'); renderPage();
 };
 function inspLogRow(r){ return '<tr><td>'+esc(fmtDate(r.ts))+'</td><td>'+esc(r.inspector)+'</td><td>'+inspLoc(r)+'</td><td>'+esc(r.work_category)+(r.section?'<div style="font-size:11px;color:var(--slate)">'+esc(r.section)+'</div>':'')+'</td><td><b>'+esc(r.item_id)+'</b></td><td style="max-width:260px;color:#475569">'+esc(r.inspection_check)+'</td><td>'+statusBadge(r.status)+'</td><td style="color:var(--slate);max-width:200px">'+esc(r.remarks)+'</td></tr>'; }
@@ -7456,6 +7469,10 @@ window.inspSave=async function(){
   /* After the insert, so a photo that uploaded but whose inspection then failed is not counted. */
   if(photo){ try{ usageQueue('inspection.new_inspection.upload_or_paste_defect_photo','create',
     {title:(photoFile?photoFile.name:photo), source:(photoFile?'upload':'link')}, project||undefined); }catch(_e){} }
+  // Same reasoning: a section/overall remark is optional free text with no button of its own -
+  // only counts as used when the inspector actually typed one, and only once the rows exist.
+  if(sec||overall){ try{ usageQueue('inspection.new_inspection.add_section_overall_remarks','create',
+    {title:(sec||overall).slice(0,80)}, project||undefined); }catch(_e){} }
   INSP_ROWS=null; INSP_FORM_STATE=null; toast(rows.length+' checks submitted','ok'); navTo('inspection');
 };
 /* ---- set/change password so Google users can also use email+password ---- */
@@ -8598,6 +8615,7 @@ window.psaDrop=function(ev){
   const buf=new DataTransfer();
   [...dt.files].forEach(function(f){buf.items.add(f);});
   inp.files=buf.files;
+  window._psaWasDrop=true;
   psaUpPick();
 };
 window.psaUpPick=function(){
@@ -8659,6 +8677,8 @@ window.psaUploadStart=async function(){
   }
   await Promise.all(Array.from({length:Math.min(CONCURRENCY,fs.length)},worker));
   toast(ok+' document'+(ok!==1?'s':'')+' processed'+(fail?(', '+fail+' failed'):''),fail?'warn':'ok');
+  if(ok && window._psaWasDrop){ try{usageQueue('postsales.adhoc.bulk_drag_and_drop_upload','create',{count:ok});}catch(_e){} }
+  window._psaWasDrop=false;
   closeModal();
   psaRender();
 };
@@ -9145,6 +9165,7 @@ window.vtFilterVendors=function(){
   let shown=0;
   rows.forEach(function(tr){ const m=!q||tr.getAttribute('data-vt-s').indexOf(q)!==-1; tr.style.display=m?'':'none'; if(m)shown++; });
   const empty=$('vtSearchEmpty'); if(empty) empty.style.display=shown?'none':'block';
+  usageQueueDebounced('procurement.vendor_trends.search_filter_vendors', q);
 };
 
 window.vtOpenVendor=function(id){
@@ -9756,6 +9777,7 @@ window.rtShareSend=async function(id){
     });
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    try{usageQueue('recruitment.tests.share_test_via_email','update',{title:rec.name,recipients:emails.length});}catch(_e){}
     closeModal();
     const n=Number(out.sent||emails.length);
     const who=(out.via==='gmail')
@@ -10045,8 +10067,10 @@ window.mpEdit=function(id){if(!recGuard())return;
 window.mpUpdate=async function(id){
   const d=mpCollect();delete d.submitted_at;
   const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const prevRec=(MP_RECORDS||[]).find(r=>r.id===id);
   const {data,error}=await sb.schema('hr').from('manpower_requests').update(d).eq('id',id).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
+  if(prevRec&&prevRec.priority!==d.priority){ try{usageQueue('recruitment.manpower_form.mark_requisition_priority','update',{title:d.job_title,priority:d.priority});}catch(_e){} }
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id);
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
   closeModal();toast('Updated');recManpower();
@@ -10869,7 +10893,7 @@ function cmpPeriodBar(){
   }
   return '<div class="seg">'+segBtns+'</div>'+custom+'<div style="height:14px"></div>';
 }
-window.cmpShowProject=function(accId){
+window.cmpShowProject=function(accId,srcTab){
   if(!CMP_LAST)return;
   const acc=CMP_LAST.accounts.find(a=>a.ad_account_id===accId);
   if(!acc)return;
@@ -11463,7 +11487,7 @@ VIEWS.campaigns=async function(v,seg){
       '</tr></thead><tbody>'+
       sorted.map(function(r){
         const used=r.budget?Math.round(r.spend/r.budget*100):null;
-        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
+        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\',\'by_project\')">'+
         '<td style="font-weight:600">'+esc(r.acc.name)+'</td>'+
         '<td style="text-align:right">'+r.campaigns+'</td>'+
         '<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'+
@@ -12090,13 +12114,22 @@ window.compSave=async function(id){
   await compRender();
 };
 window.compToggleActive=async function(id,active){
-  await sb.schema('camp').from('competitor_watchlist').update({active:active}).eq('id',id);
+  // Logged directly, after the update actually succeeds, rather than through USAGE_MAP - a toggle
+  // here can genuinely fail (network error, RLS), and the wrapper fired on the click regardless.
+  const {error}=await sb.schema('camp').from('competitor_watchlist').update({active:active}).eq('id',id);
+  if(error){toast(error.message,'err');try{usageQueue('competitors.overview.toggle_auto_sync_for_a_competitor','error');}catch(_e){}return;}
+  try{usageQueue('competitors.overview.toggle_auto_sync_for_a_competitor','update',{active:active});}catch(_e){}
 };
 window.compRemove=async function(id){
   const ok=await confirmDialog('Remove this competitor? Its stored ads will be deleted too.',{okLabel:'Remove'});
   if(!ok)return;
-  await sb.schema('camp').from('competitor_watchlist').delete().eq('id',id);
+  // Logged directly, after the delete actually succeeds, rather than through USAGE_MAP - the
+  // wrapper fires on the click itself, before the confirm dialog is even answered, so backing out
+  // of the dialog (or a delete that genuinely fails) would still have counted as a removal.
+  const {error}=await sb.schema('camp').from('competitor_watchlist').delete().eq('id',id);
+  if(error){toast(error.message,'err');try{usageQueue('competitors.overview.remove_competitor','error');}catch(_e){}return;}
   toast('Removed','ok');
+  try{usageQueue('competitors.overview.remove_competitor','delete');}catch(_e){}
   await compRender();
 };
 // featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
@@ -12158,6 +12191,10 @@ window.compOpenDetail=function(id){
   window._compDetailIdx=0;
   openModal(compDetailHtml(a),'lg');
   compRenderDetailMedia();
+  // Logged directly, after the ad is actually found and the detail modal opens, rather than
+  // through USAGE_MAP - a stale id (filtered list moved on, page refreshed) hits the "Ad not
+  // found" branch above and would otherwise still have counted as a detail view.
+  try{usageQueue('competitors.overview.view_ad_detail','view',{page:a.page_name});}catch(_e){}
 };
 function compDetailHtml(a){
   const stillRunning=!a.ad_delivery_stop_time;
@@ -16992,6 +17029,10 @@ VIEWS.transcription=async function(v,seg){
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
+    // trCompDetailHtml always renders the combined qualification checklist card - USAGE_VIEWS'
+    // 'transcription/5' key already covers "view a lead's combined call history" for this same
+    // route; this is the second, distinct catalog feature that route also satisfies.
+    if(leadParam){ try{ usageQueue('transcription.compilation.view_combined_qualification_checklist','view'); }catch(_e){} }
     return;
   }
   if(ti===3){
@@ -17796,7 +17837,7 @@ async function trDetail(v,id){
   TR_DETAIL_ROW=r;
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
   if(r.s3_path){
-    try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
+    try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah){ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';const au=ah.querySelector('audio');if(au)au.addEventListener('play',function(){try{usageQueue('transcription.call_detail.play_download_recording','view',{title:name});}catch(_e){}},{once:true});}}}catch(e){}
   }
 }
 // Remarks — open to anyone who can reach this page (same access model as the rest of the
@@ -18014,7 +18055,10 @@ const USAGE_MAP={
   mtgSetGroup:'tasks.meetings.filter_meetings_by_group',
   // Inspection / Campaigns entry points that had no mapping
   inspGo:'inspection.console.start_new_inspection',
-  cmpShowProjectAds:'campaigns.by_project.drill_into_a_project_s_campaigns',
+  // cmpShowProjectAds (the Ads tab's own row-click drill-down into per-ad spend) is NOT mapped here
+  // on purpose - it opens a different table than the By Project tab's campaign rollup, and there is
+  // no catalog feature for an Ads-tab drill-in; mapping it to by_project's key (as it was) miscredited
+  // Ads-tab clicks to a By Project feature that in fact never logged anything.
   /* Accountability — Workflow.
      Almost nothing from this tab is mapped here any more, and the reason is worth stating: a
      generic wrapper fires on the CLICK, before the work happens and before anything is known
@@ -18090,7 +18134,9 @@ const USAGE_MAP={
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
   // candidates - so the old create-month / add-row / edit-cell actions have nothing to log.
   muViewMonth:'hr.monthly_update.open_a_month',
-  muDeleteSel:'hr.monthly_update.remove_position_from_month',
+  // muDeleteSel logs directly (see below) after the delete actually succeeds, using the catalog's
+  // real key 'delete_rows_or_whole_month' - the string that was here, 'remove_position_from_month',
+  // does not exist in erp_feature_catalog and so could never be attributed to anything.
   muApprove:'hr.monthly_update.approve_reject_requisition',
   muSetHiring:'hr.monthly_update.close_reopen_hiring',
   muFilter:'hr.monthly_update.search_filter_positions',
@@ -18106,8 +18152,8 @@ const USAGE_MAP={
   rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
-  rtSave:'recruitment.tests.add_test', rtRename:'recruitment.tests.rename_test',
-  rtDelete:'recruitment.tests.delete_test_s', rtShareSend:'recruitment.tests.share_test_via_email',
+  rtSave:'recruitment.tests.add_test', rtUpdate:'recruitment.tests.rename_test',
+  rtDelete:'recruitment.tests.delete_test_s',
   rtPreview:'recruitment.tests.preview_test_responses_scores',
   recJdSave:'recruitment.descriptions.upload_job_description',
   recJdOpen:'recruitment.descriptions.preview_download_job_description',
@@ -18136,7 +18182,11 @@ const USAGE_MAP={
   cmpSetSource:'campaigns.overview.switch_data_source_meta_google_both',
   cmpSetPeriod:'campaigns.overview.select_or_customize_date_range',
   cmpSetCustom:'campaigns.overview.select_or_customize_date_range',
-  cmpShowProject:'campaigns.overview.drill_into_a_project_s_campaigns',
+  // cmpShowProject opens the same project drill-down modal from two places that are two distinct
+  // catalog features - the Overview tab's chart bars and the By Project tab's table rows. The By
+  // Project row's onclick now passes 'by_project' as a second argument so this resolver can tell
+  // them apart; the Overview chart click passes nothing, which resolves to the Overview key.
+  cmpShowProject:function(accId,srcTab){return srcTab==='by_project'?'campaigns.by_project.drill_into_a_project_s_campaigns':'campaigns.overview.drill_into_a_project_s_campaigns';},
   cmpSetStatus:'campaigns.campaigns.filter_campaigns_by_project_status',
   cmpSetCampProject:'campaigns.campaigns.filter_campaigns_by_project_status',
   cmpSetAdProject:'campaigns.ads.filter_ads_by_project',
@@ -18146,28 +18196,26 @@ const USAGE_MAP={
   // here credited every All-readings filter to Overview.
   // Post Sales
   psaUploadStart:'postsales.adhoc.upload_document_for_adhoc_replacement',
-  psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
+  psaRenameSave:'postsales.adhoc.rename_a_document',
   psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
   psaDownloadOne:'postsales.adhoc.download_a_document',
   psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip',
   // Procurement / Projects / Construction — previously untracked
   procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
   procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
-  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit', vtFilterVendors:'procurement.vendor_trends.search_filter_vendors',
+  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit',
   vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history',
   // Finance / Compliance / Documents / Video — previously untracked
   docPickCat:'documents.department_library.browse_filter_by_category_folder',
   // Competitors / Organic / Scaling / Playbook — previously untracked
-  compToggleActive:'competitors.overview.toggle_auto_sync_for_a_competitor',
-  compRemove:'competitors.overview.remove_competitor',
   compShowOnly:'competitors.overview.drill_into_a_single_competitor',
   compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
   compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
-  compOpenDetail:'competitors.overview.view_ad_detail',
-  // compSave and compRunSync (compSyncFiltered/compRefreshMedia) are NOT mapped here on purpose -
-  // both have real validation/network failure paths and log directly, after success is actually
-  // confirmed, same as misExportCauselist/taskSave above. compSearch is likewise unmapped - see
-  // the oninput/usageQueueDebounced note further up.
+  // compSave, compRunSync (compSyncFiltered/compRefreshMedia), compToggleActive, compRemove and
+  // compOpenDetail are NOT mapped here on purpose - each has a real success/failure (or
+  // found/not-found, or confirmed/cancelled) branch and logs directly, only once that branch is
+  // actually known, same as misExportCauselist/taskSave above. compSearch is likewise unmapped -
+  // see the oninput/usageQueueDebounced note further up.
   orgSetPeriod:'organic.all_content.filter_by_date_range',
   orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
   orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
@@ -18194,7 +18242,14 @@ const USAGE_VIEWS={
   'campaigns/3':         'campaigns.ads.view_ad_level_performance_table',
   'campaigns/4':         'campaigns.trend.view_spend_results_trend_vs_previous_period',
   'campaigns/5':         'campaigns.ad_fatigue.view_fatigue_ranking_by_ad_campaign',
-  'network/0':           'network.overview.view_live_monitoring_status',
+  // Overview is one render that shows five distinct catalog features at once (live status, the
+  // three KPI cards, the chart, and the settings block) - USAGE_VIEWS values can now be an array
+  // so a single navigation logs all of them, instead of only the first one ever tracked here.
+  'network/0':           ['network.overview.view_live_monitoring_status',
+                           'network.overview.view_latest_download_upload_ping_readings',
+                           'network.overview.view_low_reading_count_24h',
+                           'network.overview.view_speed_over_time_chart',
+                           'network.overview.view_monitoring_threshold_settings'],
   'network/1':           'network.all_readings.view_full_readings_table',
   // Console is Inspection's default landing tab, reached with NO segment in the hash at all
   // (inspGo builds a bare '#/inspection' for it) - usageViewTick's own fallback for "no segment"
@@ -18284,11 +18339,14 @@ function usageViewTick(){
     const key=USAGE_VIEWS[PAGE+'/'+tab];
     if(!key) return;
     /* renderPage can fire twice for one navigation - accountability.js re-renders defensively after
-       it loads - and two events for one look would overstate every view feature. */
+       it loads - and two events for one look would overstate every view feature. Dedup on the hash
+       segment itself, not the resolved key(s), so a tab mapped to SEVERAL distinct catalog features
+       (e.g. network/0's Overview widgets) still collapses to one log per look instead of one per key. */
+    const dedupeId=PAGE+'/'+tab;
     const now=Date.now();
-    if(key===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
-    USAGE_LAST_VIEW=key; USAGE_LAST_VIEW_AT=now;
-    usageQueue(key,'view');
+    if(dedupeId===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
+    USAGE_LAST_VIEW=dedupeId; USAGE_LAST_VIEW_AT=now;
+    (Array.isArray(key)?key:[key]).forEach(function(k){ usageQueue(k,'view'); });
   }catch(e){}
 }
 /* The verb, read off the function's own name rather than kept in a second map that could drift out
