@@ -8419,7 +8419,10 @@
       +caseRow
       +'</div>';
   }
-  window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k); gcalRenderOnly(); };
+  window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k);
+    try{ usageQueue('tasks.calendar.filter_by_assigned_to_me_by_me_meetings_legal_dates','search',
+      {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
+    gcalRenderOnly(); };
 
   /* ---- toolbar ---- */
   function gcalToolbarHtml(){
@@ -8460,7 +8463,9 @@
     GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1);
     gcalRenderOnly();
   };
-  window.gcalSearch=function(v){ GCAL_Q=(v||'').trim().toLowerCase(); const body=$('gcalBody'); if(body){body.innerHTML=gcalBodyHtml(); gcalWireDrag(body); gcalWireTimeDrag();} };
+  window.gcalSearch=function(v){ GCAL_Q=(v||'').trim().toLowerCase(); const body=$('gcalBody'); if(body){body.innerHTML=gcalBodyHtml(); gcalWireDrag(body); gcalWireTimeDrag();}
+    // Debounced: this is wired to oninput, so one search would otherwise be logged once per keystroke.
+    try{ usageQueueDebounced('tasks.calendar.search_calendar_items', (v||'').trim()); }catch(_e){} };
 
   /* ---- Month view ---- */
   function gcalMonthHtml(){
@@ -8669,6 +8674,9 @@
   }
   window.gcalOpenDay=function(dateStr){
     GCAL_DATE=dateStr;
+    /* Logged here and not inside gcalRenderDayPanel: that one is re-run by gcalRefresh() after
+       every drag-drop, which would count a panel nobody opened. */
+    try{ usageQueue('tasks.calendar.open_a_day_s_agenda_panel','view',{title:fmtDateY(dateStr)}); }catch(_e){}
     gcalRenderDayPanel(dateStr);
   };
   window.gcalOpenTask=function(tid){
@@ -8813,7 +8821,7 @@
   window.gcalTaskDrop=async function(tid,newDate){
     try{
       if(newDate<todayISO()){ toast('Cannot move a task to a date before today','err'); return; }
-      const {data:old}=await ACC().from('ptasks').select('due_date').eq('id',tid).single();
+      const {data:old}=await ACC().from('ptasks').select('due_date,title').eq('id',tid).single();
       const prevDue=old?old.due_date:null;
       if((prevDue||'')===(newDate||''))return;
       await ACC().from('ptasks').update({due_date:newDate,overdue_emailed:false,due_emailed:false}).eq('id',tid);
@@ -8822,6 +8830,9 @@
       const _d=parseD(newDate), _t=new Date(); _t.setHours(0,0,0,0);
       if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); }catch(_e){} }
       toast('Moved to '+fmtDateY(newDate),'ok');
+      // After the write, and before the reload replaces what is on screen.
+      try{ usageQueue('tasks.calendar.drag_a_task_to_a_new_due_date','update',
+        {title:(old&&old.title)||undefined, due_date:fmtDateY(newDate)}); }catch(_e){}
       await gcalLoadData();
       await gcalRefresh();
     }catch(e){ toast('Could not move the task: '+((e&&e.message)||e),'err'); }
@@ -8840,6 +8851,9 @@
       const {error}=await sb.from('mis_cases').update({[field]:newDate}).eq('id',cid);
       if(error){ toast('Failed to move case: '+error.message,'err'); return; }
       toast((field==='case_next_date'?'Next date':'Action date')+' moved to '+fmtDateY(newDate),'ok');
+      try{ usageQueue('tasks.calendar.drag_a_legal_case_to_a_new_date','update',
+        {title:((GCAL_CASES||[]).find(function(x){return x.id===cid;})||{}).title,
+         date:fmtDateY(newDate), field:(field==='case_next_date'?'Next date':'Action date')}); }catch(_e){}
       await gcalLoadData();
       await gcalRefresh();
     }catch(e){ toast('Could not move the case: '+((e&&e.message)||e),'err'); }
@@ -8903,6 +8917,7 @@
         }catch(_e){}
         toast('All occurrences updated','ok');
       }
+      try{ usageQueue('tasks.meetings.reschedule_one_occurrence_or_a_whole_series','update',{title:m.title}); }catch(_e){}
       await gcalLoadData(); await gcalRefresh();
     }catch(e){ toast('Reschedule failed: '+((e&&e.message)||e),'err'); try{ await gcalRefresh(); }catch(_e){} }
   };
@@ -9246,6 +9261,7 @@
     if((m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
       if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Join it now anyway?')) return;
     }
+    try{ usageQueue('tasks.meetings.join_a_meeting','view',{title:m.title}); }catch(_e){}
     window.open(m.meet_link,'_blank','noopener');
   };
   function mtgCard(m,weekCount){
@@ -9485,6 +9501,7 @@
           const {data:newId,error}=await sb.rpc('reschedule_meeting_occurrence',{p_meeting_id:id,p_occ_date:occ,p_new_date:occ,p_new_start:start,p_new_end:end});
           if(error)throw error;
           if(newId && mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
+          try{ usageQueue('tasks.meetings.reschedule_one_occurrence_or_a_whole_series','update',{title:title}); }catch(_e){}
           toast('This occurrence updated','ok'); closeModal(); await mtgLoadData(); mtgRenderOnly();
         }catch(e){ toast('Could not update this occurrence: '+((e&&e.message)||e),'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Save changes';} }
         return;
@@ -9537,6 +9554,11 @@
         await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:kind,title:titlePrefix+title,body:bodyTxt};}));
       }catch(e){}
     }
+    /* Logged here rather than through USAGE_MAP: that wrapper fired on the Save click, so every
+       edit and every click the validation above turned back counted as a meeting scheduled.
+       editing is the only thing that tells the two apart, and it is only known inside here. */
+    try{ usageQueue(editing?'tasks.meetings.edit_a_meeting':'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
+      editing?'update':'create',{title:title}); }catch(_e){}
     closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
     if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
     await mtgLoadData(); mtgRenderOnly();
@@ -9550,10 +9572,12 @@
     const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
     const attendees=(MTG_ATT&&MTG_ATT[id])||[];
     if(m&&m.mode==='online'&&m.google_event_id){ await mtgSyncGoogle(id,'cancel'); }
-    try{ await ACC().from('meetings').delete().eq('id',id); }catch(e){}
+    let delErr=null;
+    try{ const r=await ACC().from('meetings').delete().eq('id',id); delErr=r&&r.error; }catch(e){ delErr=e; }
     if(m&&attendees.length){
       try{ await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:'meeting_cancel',title:'Meeting cancelled: '+m.title,body:(m.recur_type&&m.recur_type!=='none'?'A recurring':fmtDateY(m.meeting_date))+' meeting was cancelled by the organizer.'};})); }catch(e){}
     }
+    if(!delErr){ try{ usageQueue('tasks.meetings.cancel_a_meeting','delete',{title:m&&m.title}); }catch(_e){} }
     closeModal(); toast('Meeting cancelled','ok');
     await mtgLoadData(); mtgRenderOnly();
   };
@@ -9733,6 +9757,7 @@
   window.mtgSetLang=function(lang){
     MTG_LOG_LANG=lang;
     const l=window._mtgLogRow; if(!l)return;
+    try{ usageQueue('tasks.meetings.set_transcription_language','update',{title:l.title,lang:lang}); }catch(_e){}
     const b=document.getElementById('mtgTrBody'); if(b)b.innerHTML=mtgTrBody(l,lang);
     ['en','bn'].forEach(function(k){ const btn=document.getElementById('mtgLang_'+k); if(btn){ if(k===lang)btn.classList.add('primary'); else btn.classList.remove('primary'); } });
   };
@@ -9893,6 +9918,7 @@
     }
     const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
     if(!resp||!resp.log_id){ toast('Could not save the recording: '+((resp&&resp.error)||'unknown error'),'err'); if(sp){sp.disabled=false;sp.innerHTML='<i class="fa-solid fa-stop"></i> Stop &amp; finish';} return; }
+    try{ usageQueue('tasks.meetings.start_stop_recording','create',{title:R.meeting&&R.meeting.title}); }catch(_e){}
     MTG_REC=null;
     navTo('tasks/meetings/wrap/'+resp.log_id);
   };
@@ -9969,6 +9995,7 @@
     if(!resp||!resp.ok){ toast('Could not save: '+((resp&&resp.error)||'unknown error'),'err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save to Logs';} return; }
     toast('Saved to Logs','ok');
     const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
+    try{ usageQueue('tasks.meetings.save_meeting_wrap_up_summary','update',{title:l&&l.title}); }catch(_e){}
     if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
     else navTo('tasks/meetings/log/'+lid);
   };

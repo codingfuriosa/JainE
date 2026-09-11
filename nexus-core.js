@@ -1292,10 +1292,13 @@ async function docRenderTable(host,dept){
     wire();
   };
   const wire=()=>{
-    const s=$('dtSearch');if(s){s.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();DOC.q=s.value.trim();DOC.page=1;docRenderTable(host,dept);}};}
-    const sb2=$('dtSearchBtn');if(sb2)sb2.onclick=()=>{DOC.q=($('dtSearch')?$('dtSearch').value.trim():'');DOC.page=1;docRenderTable(host,dept);};
-    const so=$('dtSort');if(so){so.value=DOC.sort;so.onchange=e=>{DOC.sort=e.target.value;docRenderTable(host,dept);};}
-    const stt=$('dtStatus');if(stt)stt.onchange=()=>{DOC.page=1;draw();};
+    /* Search only runs on Enter or the button, never per keystroke, so a plain log is right here -
+       no debounce needed. Clearing the box is not a search, so an empty value is not counted. */
+    const usbDoc=(m)=>{ try{ if(m) usageQueue('legal.documents.search_sort_filter_documents','search',m); }catch(_e){} };
+    const s=$('dtSearch');if(s){s.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();DOC.q=s.value.trim();DOC.page=1;usbDoc(DOC.q?{query:DOC.q}:null);docRenderTable(host,dept);}};}
+    const sb2=$('dtSearchBtn');if(sb2)sb2.onclick=()=>{DOC.q=($('dtSearch')?$('dtSearch').value.trim():'');DOC.page=1;usbDoc(DOC.q?{query:DOC.q}:null);docRenderTable(host,dept);};
+    const so=$('dtSort');if(so){so.value=DOC.sort;so.onchange=e=>{DOC.sort=e.target.value;usbDoc({title:'Sorted by '+e.target.value});docRenderTable(host,dept);};}
+    const stt=$('dtStatus');if(stt)stt.onchange=()=>{DOC.page=1;usbDoc({title:'Status: '+(stt.value||'all')});draw();};
     document.querySelectorAll('.dtChk').forEach(c=>c.onchange=e=>{const id=+e.target.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);updateBulk();});
     const all=$('dtAll');if(all)all.onchange=e=>{document.querySelectorAll('.dtChk').forEach(c=>{c.checked=e.target.checked;const id=+c.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);});updateBulk();};
     updateBulk();
@@ -2963,8 +2966,12 @@ window.advFilter=function(){
   const list=(window._advRows||[]).filter(r=>!q||[r.case_type,r.court,r.state_dist,r.advocate_name,r.phone,r.chamber,r.extra_contact]
     .filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1);
   const tb=$('advBody'); if(!tb)return;
-  const tel=p=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
-    .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'">'+esc(x)+'</a>').join('<br>');
+  /* The number carries the advocate's name so the report can say who was called, and stops the
+     click there: the whole row opens the edit form, so tapping a number used to open it too. */
+  const tel=(p,nm)=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
+    .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'" onclick="event.stopPropagation();advCall('
+      +JSON.stringify(esc(nm||'')).replace(/"/g,'&quot;')+','+JSON.stringify(x).replace(/"/g,'&quot;')+')">'+esc(x)+'</a>')
+    .join('<br>');
   // The whole row opens the edit form - no separate Edit button. Only Remove stays, because it
   // must not be reachable by a stray click.
   const cl=(v,w)=>'<td'+(w?(' style="max-width:'+w+'px"'):'')+'><div class="adv-clamp" title="'+esc(v||'')+'">'+esc(v||'—')+'</div></td>';
@@ -2973,7 +2980,7 @@ window.advFilter=function(){
     +cl(r.court,200)
     +cl(r.state_dist,150)
     +'<td><b>'+esc(r.advocate_name||'')+'</b></td>'
-    +'<td class="adv-ph">'+(r.phone?tel(r.phone):'—')+'</td>'
+    +'<td class="adv-ph">'+(r.phone?tel(r.phone,r.advocate_name):'—')+'</td>'
     +cl(r.chamber,240)
     +cl(r.extra_contact,170)
     +'<td onclick="event.stopPropagation()" style="white-space:nowrap">'
@@ -2997,6 +3004,7 @@ window.advModal=function(id){
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
     +'<button class="btn btn-primary" onclick="advSave('+(id||'null')+')"><i class="fa-solid fa-check"></i> '+(id?'Update':'Add')+'</button></div>','md');
 };
+window.advCall=function(nm,num){ try{ usageQueue('legal.advocates.click_to_call_advocate','view',{title:nm||num, phone:num}); }catch(_e){} };
 window.advSave=async function(id){
   const g=k=>{const el=$('advF_'+k);return el?(el.value||'').trim()||null:null;};
   const name=g('advocate_name');
@@ -3006,6 +3014,10 @@ window.advSave=async function(id){
   const {error}=id?await sb.from('legal_advocates').update(row).eq('id',id)
                   :await sb.from('legal_advocates').insert(row);
   if(error){toast(error.message,'err');return;}
+  /* Logged here, not through USAGE_MAP: one Save button both adds and edits, and the fixed key
+     there counted every edit as an advocate added. id is what tells them apart. */
+  try{ usageQueue(id?'legal.advocates.edit_advocate':'legal.advocates.add_advocate', id?'update':'create',
+    {title:name, court:row.court||undefined}); }catch(_e){}
   closeModal();toast(id?'Advocate updated':'Advocate added','ok');
   legalAdvocates();
 };
@@ -3571,6 +3583,10 @@ window.misActionSave=async function(id){
   }
   const {error}=await sb.from('mis_cases').update(upd).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
+  /* Only when something was actually typed. On the case form the remarks box is saved as part of
+     add/edit case and is not a separate act; here it is the reason the modal was opened. */
+  if(newRemark){ try{ usageQueue('legal.mis.add_remarks_to_a_case','update',
+    {title:r.cause_title||r.case_no||('Case #'+id), case_no:r.case_no||undefined}); }catch(_e){} }
 
   // Keep the Actions log in step: close the open one, or record/refresh it.
   try{
@@ -6602,7 +6618,7 @@ async function hrTracker(){
             <td style="font-size:12px;color:var(--slate)">${cel(r.source)}</td>
             <td style="font-size:12px">${cel(r.entity)}</td>
             <td class="tr-nowrap" style="font-family:monospace;font-size:12px">${cel(r.number)}</td>
-            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
+            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${JSON.stringify(r.candidate_name||'')})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
             <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
             <td class="tr-nowrap">${fbTag(r.feedback)}</td>
             <td class="tr-nowrap">${trResumeCell(r)}</td>
@@ -6613,6 +6629,9 @@ async function hrTracker(){
       </div>
     </div>`;
 }
+window.hrTrackerMailed=function(nm){
+  usageQueue('hr.interview_tracker.email_candidate_from_list','view',{title:nm||undefined});
+};
 window.trRowCheck=function(cb){
   const id=Number(cb.dataset.id);
   if(cb.checked)window._trSel.add(id);else window._trSel.delete(id);
@@ -7434,6 +7453,9 @@ window.inspSave=async function(){
   })));
   const {error}=await sb.schema('acc').from('inspection').insert(rows);
   if(error){toast(error.message,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Submit';} return;}
+  /* After the insert, so a photo that uploaded but whose inspection then failed is not counted. */
+  if(photo){ try{ usageQueue('inspection.new_inspection.upload_or_paste_defect_photo','create',
+    {title:(photoFile?photoFile.name:photo), source:(photoFile?'upload':'link')}, project||undefined); }catch(_e){} }
   INSP_ROWS=null; INSP_FORM_STATE=null; toast(rows.length+' checks submitted','ok'); navTo('inspection');
 };
 /* ---- set/change password so Google users can also use email+password ---- */
@@ -9198,7 +9220,19 @@ VIEWS.maintenance=function(v,seg){
    speed-monitor agent. Read-only: RLS lets any signed-in user SELECT these. */
 const NET_RANGES=[['today','Today'],['3d','Last 3 days'],['5d','Last 5 days'],['30d','Last 1 month']];
 let NET_RANGE='today';
-window.netRangeChange=function(v){ NET_RANGE=v; renderPage(); };
+window.netRangeChange=function(v){
+  /* The same picker is rendered on Overview and on All readings. Logged through USAGE_MAP it
+     always reported the Overview key, so the All readings filter read 0 no matter how often it
+     was used. The hash says which tab the person is actually on. */
+  try{
+    const seg=String(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean);
+    const onAll=(seg[seg.length-1]==='1');
+    const label=((typeof NET_RANGES!=='undefined'&&(NET_RANGES.find(function(r){return r[0]===v;})||[]))[1])||v;
+    usageQueue(onAll?'network.all_readings.filter_readings_by_date_range'
+                   :'network.overview.filter_chart_by_date_range','search',{title:label});
+  }catch(_e){}
+  NET_RANGE=v; renderPage();
+};
 
 /* ---- Low-speed snapshot viewer: DISABLED ----------------------------------
    Snapshot images are no longer generated by the agent, so the Snapshot column
@@ -17968,7 +18002,9 @@ const USAGE_MAP={
      which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
      scheduling rather than editing because it saves both and scheduling is the act it usually is;
      "Edit a meeting" is deliberately left unmapped rather than counted wrongly. */
-  mtgFormSave:'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
+  // mtgFormSave logs itself in accountability.js instead - one form saves a NEW meeting and an
+  // EDIT, and a fixed key here counted every edit, and every click validation turned back, as a
+  // meeting scheduled.
   mtgCancelDo:'tasks.meetings.cancel_a_meeting',
   mtgReschedApply:'tasks.meetings.reschedule_one_occurrence_or_a_whole_series',
   mtgTryJoin:'tasks.meetings.join_a_meeting',
@@ -18046,7 +18082,9 @@ const USAGE_MAP={
   // of them is wired to oninput for instant live filtering, and the generic wrapper logging on
   // every keystroke turned one real search into a burst of single/two-character fragments a few
   // milliseconds apart. Each logs directly via usageQueueDebounced, once typing actually settles.
-  advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
+  // advSave logs itself below - the same button adds AND edits, so a fixed key here counted
+  // every edit as an advocate added.
+  advDelete:'legal.advocates.remove_advocate',
   // Human Resources
   // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
@@ -18092,7 +18130,8 @@ const USAGE_MAP={
   inspBulk:'inspection.new_inspection.bulk_mark_all_items_ok',
   inspPick:'inspection.new_inspection.mark_item_ok_not_ok_n_a',
   inspLevelPick:'inspection.new_inspection.select_project_block_floor_flat_work_category',
-  inspOpenPhoto:'inspection.responses.add_replace_defect_photo',
+  // inspOpenPhoto only OPENS a photo for viewing - it was counted as adding one. The real
+  // add happens on the submit, logged at its own source.
   // Campaign Analytics
   cmpSetSource:'campaigns.overview.switch_data_source_meta_google_both',
   cmpSetPeriod:'campaigns.overview.select_or_customize_date_range',
@@ -18103,7 +18142,8 @@ const USAGE_MAP={
   cmpSetAdProject:'campaigns.ads.filter_ads_by_project',
   // Internet Speed
   netRefresh:'network.overview.refresh_speed_test_now',
-  netRangeChange:'network.overview.filter_chart_by_date_range',
+  // netRangeChange logs itself - the same picker serves both Network tabs, and a fixed key
+  // here credited every All-readings filter to Overview.
   // Post Sales
   psaUploadStart:'postsales.adhoc.upload_document_for_adhoc_replacement',
   psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
@@ -18215,6 +18255,9 @@ const USAGE_VIEWS={
   // bodies carry no onclick besides mTabs' own tab-switch navTo), so opening each tab is the
   // only distinguishable action there is. Dashboard has no tabs at all - a bare landing and
   // every navTo('dashboard') both fall through usageViewTick's no-segment default of '0'.
+  'transcription/4':     'transcription.discrepancies.view_calls_flagged_with_a_data_mismatch',
+  'transcription/5':     'transcription.compilation.view_a_lead_s_combined_call_history',
+  'transcription/view':  'transcription.call_detail.view_qualification_checklist_and_entities',
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
