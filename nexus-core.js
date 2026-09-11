@@ -2001,10 +2001,30 @@ function misInRange(r){
   if(!iso) return true;
   return iso>=w.from && iso<=w.to;
 }
-// The causelist is a list of hearings, so it does want a real date on every row.
+/* THE CAUSELIST IS A LIST OF HEARINGS, so the date it lists a matter under is the case's own
+   NEXT DATE - the day it is next before the court - and not the Action Date, which is an
+   internal commitment about when somebody here will do something about it.
+
+   It used the Action Date for both, and the two are not the same day. Money Suit 59/2018 is
+   listed on 11/09/2026 and carries an action date of 03/07/2026: the causelist dated it July
+   and left it off September's altogether. Two matters - WBRERA/COM/000800/2024 and A.P. No.
+   206/2025 - have a hearing date and no action date at all, so they appeared on no causelist
+   ever, which is how this came to light.
+
+   The Action Date remains the right date everywhere else: the Calendar, the Scoreboard and the
+   pinned rows are about what this office has undertaken to do, not about court listings. So
+   this is a separate reading, used by the causelist alone; a case with no hearing date of its
+   own still falls back to the action date rather than vanishing. */
+function misHearingIso(r){
+  if(r.case_next_date_iso) return String(r.case_next_date_iso).slice(0,10);
+  const c=misToIso(r.case_next_date); if(c) return misIsoStr(c);
+  return misRowIso(r);
+}
+// The causelist wants a real date on every row, and it wants the HEARING date.
 function misInRangeDated(r){
-  const iso=misRowIso(r); if(!iso) return false;
-  return misInRange(r);
+  const iso=misHearingIso(r); if(!iso) return false;
+  const w=misRangeDates(); if(!w) return true;
+  return iso>=w.from && iso<=w.to;
 }
 
 const MIS_FIELDS=[
@@ -3124,7 +3144,7 @@ function misBuildCauselist(){
     return null;
   }
   const rows=(window._misRows||[]).filter(misInRangeDated)
-    .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
+    .sort(function(a,b){ return String(misHearingIso(a)||'').localeCompare(String(misHearingIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return null; }
 
   // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
@@ -3137,7 +3157,7 @@ function misBuildCauselist(){
   // On "All dates" the causelist still needs a month to head itself with - take it from the
   // earliest hearing actually listed.
   if(!win){
-    const ds=rows.map(misRowIso).filter(Boolean).sort();
+    const ds=rows.map(misHearingIso).filter(Boolean).sort();
     win={from:ds[0]||todayStr(), to:ds[ds.length-1]||todayStr()};
   }
   const first=new Date(win.from+'T00:00:00');
@@ -3193,7 +3213,7 @@ function misBuildCauselist(){
         +'<td>'+cell(r.case_type)+'</td>'
         +'<td>'+cell(r.cause_title)+'</td>'
         +'<td>'+cell(r.case_no)+'</td>'
-        +'<td class="dt">'+esc(dmy(misRowIso(r)))+'</td>'
+        +'<td class="dt">'+esc(dmy(misHearingIso(r)))+'</td>'
         +'<td>'+cell(r.advocate_incharge)+'</td>'
         +'<td>'+cell(r.court)+'</td>'
         +'<td>'+cell(r.status)+'</td>'
@@ -13466,6 +13486,16 @@ async function custLoadData(customerId,force){
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
+// Farvision's Typology column comes through as e.g. "3.00BHK" (always two decimals, even for a
+// whole number) - a customer doesn't need to see that precision. Left as-is for anything that
+// isn't the plain "<number>BHK" shape (the staff admin screens keep showing/editing the raw value,
+// since that's the actual source-of-truth field).
+function custFormatUnitType(t){
+  if(!t)return t;
+  const m=String(t).trim().match(/^(\d+(?:\.\d+)?)\s*BHK$/i);
+  if(!m)return t;
+  return (parseFloat(m[1]))+' BHK';
+}
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
   return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
@@ -13559,8 +13589,13 @@ async function custTabOverview(data,unit){
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
     '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],
-      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(unit.unit_type||'—'),
-        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',`<span class="tag t-amber">${esc(unit.status||'—')}</span>`,custInr(unit.agreement_value)]])+
+      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
+        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
+        // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
+        // purchase - a status badge that says so on every single statement is just noise. Worth
+        // flagging only once something has actually gone wrong with the booking.
+        unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
+        custInr(unit.agreement_value)]])+
     '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
     (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
       [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
@@ -15020,16 +15055,6 @@ function traRender(full){
   const c=$('traCount');if(c)c.textContent=rows.length+' of '+all.length+' call'+(all.length===1?'':'s');
 }
 
-/* Copy Response - the complete CRM record for this row, exactly as the API sent it. No download
-   button anywhere on this page, by requirement. */
-window.traCopy=async function(id){
-  const r=(TRA_ROWS||[]).find(function(x){return x.id===id;});
-  if(!r)return toast('Call not found','err');
-  const payload=r.original_crm_response||null;
-  if(!payload)return toast('No CRM response stored for this call','warn');
-  await traClip(JSON.stringify(payload,null,2),'CRM response copied');
-};
-
 /* ============ HOW A CALL RECORDING IS OFFERED, everywhere in this module ============
    A real <a href>, not a button. Clicking it downloads the audio, and so do all the things a link
    gets for free and a button never had: middle-click, Save link as, right-click Copy link address,
@@ -15041,18 +15066,30 @@ window.traCopy=async function(id){
    captured from it is dead almost immediately; the Knowlarity one keeps working and is handed a
    fresh signature every time it is followed.
 
-   What decides download-versus-playback is the Content-Disposition the recording host answers with,
-   not this markup: following a Knowlarity link has always produced a file rather than a player,
-   which is what makes a plain link enough here. download= cannot change that - browsers honour the
-   attribute same-origin only - so it is intent for the day these are served from our own origin.
-   target=_blank is the safety net for the other case: a host that ever did answer inline would then
-   render in a new tab instead of replacing the app in this one. */
+   A PLAIN LINK WAS NOT ACTUALLY ENOUGH, WHICH IS WHY THE CLICK IS NOW HANDLED.
+   Left to the browser, following that link fails in two ways that both end with the reader having
+   no file:
+
+     - The chain ends on PLAIN HTTP. sr.knowlarity.com 302s to kservices.knowlarity.com, which 302s
+       to a presigned http://kstoragerecording.s3.amazonaws.com/... URL. Chrome BLOCKS an insecure
+       download started from an https:// page, so on the live domain the click can do nothing at all.
+     - download= is honoured SAME-ORIGIN ONLY, so even when the file does arrive it is named after
+       the host's own uuid - 0a9fbfcb-..._0_r.mp3 - and is untraceable to a lead or a caller.
+
+   So the click goes through trRecClick, which asks the crm-recording edge function for the bytes
+   over https and saves them under the name trRecFile picked. The href stays the Knowlarity URL: it
+   is what makes middle-click, "Save link as" and "Copy link address" keep working, and it is what
+   the handler falls back to opening if the proxy is unreachable. */
 function trRecFile(r){
   /* A name the reader can find again in a downloads folder, rather than the opaque id the host uses.
-     Only honoured same-origin (see above), so this is intent, not a promise. */
+     Now a promise rather than just intent: the proxy sets Content-Disposition from this. */
   const id=(r&&(r.follow_up_id||r.callid||r.id));
   return 'call-recording'+(id?'-'+String(id).replace(/[^A-Za-z0-9_-]/g,''):'')+'.mp3';
 }
+/* A value on its way into a single-quoted JS string inside an onclick attribute - so it needs the
+   attribute escaping esc() does AND the string escaping it does not (esc leaves ' alone). Same
+   idiom as the rest of this file's inline handlers; here so the url is not pasted through it twice. */
+function trRecJs(s){return esc(String(s==null?'':s)).replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 /* opts: label (button text, '' for icon only), icon (defaults to a download arrow), cls (defaults to
    a small button), file (download filename), feat (the USAGE_MAP feature key to log this particular
    link under, when its context is one that was being counted before), missing (what to render when
@@ -15061,11 +15098,12 @@ function trRecLink(url,opts){
   opts=opts||{};
   if(!url)return opts.missing||'';
   const label=(opts.label===undefined?'Download':opts.label);
+  const file=esc(opts.file||'call-recording.mp3');
   return '<a class="'+(opts.cls||'btn btn-sm')+'" href="'+esc(url)+'"'
-    +' download="'+esc(opts.file||'call-recording.mp3')+'"'
+    +' download="'+file+'"'
     +' target="_blank" rel="noopener noreferrer"'
     +' title="'+esc(opts.title||'Download this call recording')+'"'
-    +' onclick="trRecClick(event,\''+esc(opts.feat||'')+'\')">'
+    +' onclick="trRecClick(event,\''+esc(opts.feat||'')+'\',\''+trRecJs(url)+'\',\''+trRecJs(opts.file||'call-recording.mp3')+'\')">'
     +'<i class="fa-solid '+esc(opts.icon||'fa-download')+'"></i>'+(label?' '+esc(label):'')
   +'</a>';
 }
@@ -15073,36 +15111,89 @@ function trRecLink(url,opts){
    label/value row - the address stays readable and copyable, and is now also clickable. */
 function trRecLinkText(url){
   return '<a href="'+esc(url)+'" download="call-recording.mp3" target="_blank" rel="noopener noreferrer"'
-    +' title="Download this call recording" onclick="trRecClick(event,\'\')"'
+    +' title="Download this call recording" onclick="trRecClick(event,\'\',\''+trRecJs(url)+'\',\'\')"'
     +' style="color:#0d9488;text-decoration:underline">'+esc(url)+'</a>';
 }
-/* Everything the anchor cannot do for itself. It does NOT preventDefault - the navigation IS the
-   download - it only stops the click reaching a clickable <tr> underneath, which would otherwise
-   open the lead instead of fetching the audio. It is also where USAGE_MAP now hangs the telemetry
-   that used to sit on the copy button: the feature key travels from the call site rather than being
-   fixed here, because these links appear in several views that count as different features (and in
-   some that were never counted at all, which pass '' and log nothing). */
-window.trRecClick=function(ev,feat){
-  if(ev&&ev.stopPropagation)ev.stopPropagation();
-};
 
-/* One clipboard write, used by the two Copy CRM response buttons (the recording URLs are download
-   links now, see above). navigator.clipboard needs a secure context and a permission that is not
-   always granted, and silently doing nothing is the worst outcome for a button whose entire job is
-   to copy - so there is a fallback that always works. */
-async function traClip(text,okMsg){
-  try{
-    await navigator.clipboard.writeText(text);
-    toast(okMsg,'ok');
-  }catch(e){
-    const ta=document.createElement('textarea');
-    ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
-    document.body.appendChild(ta);ta.select();
-    try{document.execCommand('copy');toast(okMsg,'ok');}
-    catch(e2){toast('Could not copy to clipboard','err');}
-    ta.remove();
+/* THE CLICK. Takes over from the anchor and saves the file itself, for the two reasons in the block
+   comment above (the chain's last hop is plain http, which Chrome refuses to download from an https
+   page; and download= is ignored cross-origin, so the name is lost).
+
+   It still stops the click reaching a clickable <tr> underneath, which would otherwise open the lead
+   instead of fetching the audio. And it is still where USAGE_MAP hangs the telemetry that used to
+   sit on the copy button: the feature key travels from the call site rather than being fixed here,
+   because these links appear in several views that count as different features (and in some that
+   were never counted at all, which pass '' and log nothing) - which is also why `feat` keeps its
+   position as the second argument, where USAGE_MAP's resolver reads it from.
+
+   WHAT IS DELIBERATELY LEFT TO THE BROWSER: a modified click. Ctrl/cmd/shift/alt-click and
+   middle-click mean "open this somewhere else", and answering them with a download in the current
+   tab is not what was asked for - those fall straight through to the href.
+
+   AND IF THE PROXY CANNOT BE REACHED, the old behaviour comes back rather than being simulated.
+   The obvious move - window.open(url) from the catch - does not survive a popup blocker: by then the
+   await has ended the user-gesture context, so the tab is refused and the click still ends in
+   nothing. So a failed link is MARKED instead, and the next click on it is left entirely to the
+   browser: the href is untouched, so that second click does exactly what this link did before any
+   of this existed. The toast is what tells the reader that clicking again is the thing to do. */
+window.trRecClick=async function(ev,feat,url,file){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  /* No url means this is markup from before the handler took arguments - let the anchor do what it
+     always did rather than swallowing the click and doing nothing. */
+  if(!url)return;
+  if(ev&&(ev.ctrlKey||ev.metaKey||ev.shiftKey||ev.altKey||ev.button===1))return;
+  /* Already tried and failed once - this click is the browser's (see the note above). The mark is
+     per element and dies with the next repaint, so it is a fallback for this reader on this link
+     right now, never a permanent downgrade of the feature. */
+  if(ev&&ev.currentTarget&&ev.currentTarget.dataset.recFallback==='1')return;
+  if(ev&&ev.preventDefault)ev.preventDefault();
+
+  /* The clicked element, dimmed while the bytes are on their way. A ~1 MB fetch through the proxy
+     is not instant, and a link that looks untouched for a second reads as a link that did nothing -
+     which is the complaint this whole change is answering. Guarded against a second click landing
+     on the same in-flight link. */
+  const a=(ev&&ev.currentTarget)||null;
+  if(a){
+    if(a.dataset.recBusy==='1')return;
+    a.dataset.recBusy='1';
+    a.style.opacity='0.55';a.style.pointerEvents='none';
   }
-}
+  const done=function(){ if(a){delete a.dataset.recBusy;a.style.opacity='';a.style.pointerEvents='';} };
+
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/crm-recording',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({url:url,filename:file||''})});
+    if(!res.ok){
+      const out=await res.json().catch(function(){return {};});
+      throw new Error(out.error||('HTTP '+res.status));
+    }
+    const blob=await res.blob();
+    /* The proxy's own Content-Disposition wins - it is the one that knows the lead and follow-up ids
+       when the call site had no name to offer (the free-text URL links pass ''). */
+    const cd=res.headers.get('content-disposition')||'';
+    const m=/filename="?([^";]+)"?/i.exec(cd);
+    const name=(m&&m[1])||file||'call-recording.mp3';
+    const objUrl=URL.createObjectURL(blob);
+    const dl=document.createElement('a');
+    dl.href=objUrl;dl.download=name;dl.style.display='none';
+    document.body.appendChild(dl);dl.click();dl.remove();
+    setTimeout(function(){URL.revokeObjectURL(objUrl);},2000);
+    toast('Downloading '+name,'ok');
+  }catch(e){
+    if(a){
+      a.dataset.recFallback='1';
+      toast('Could not download the recording ('+((e&&e.message)||e)+') - click it again to open it directly','warn');
+    }else{
+      /* No element to mark (a programmatic call), so the tab attempt is all there is. */
+      toast('Could not download the recording ('+((e&&e.message)||e)+')','warn');
+      try{window.open(url,'_blank','noopener');}catch(e2){}
+    }
+  }
+  done();
+};
 
 /* Retry - hands the call back to the same pipeline. The backend re-queues it at the BACK of the
    FIFO queue and increments the attempt count; nothing here duplicates a row or clears a result. */
@@ -15289,6 +15380,19 @@ window.traCmDelete=async function(cid,id){
   traDetail($('view'),id);
 };
 
+/* Re-reads this one call and repaints the page. Nothing to invalidate first: unlike the lead page,
+   this view fetches straight from acc.transcriptions on every render and keeps no snapshot. */
+window.traDetailRefresh=async function(id){
+  const b=document.getElementById('traDetailRefreshBtn');
+  if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Refreshing';}
+  try{
+    await traDetail($('view'),id);
+  }catch(e){
+    toast('Could not refresh this call: '+((e&&e.message)||e),'err');
+    if(b&&document.body.contains(b)){b.disabled=false;b.innerHTML='<i class="fa-solid fa-rotate"></i> Refresh';}
+  }
+};
+
 async function traDetail(v,id){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Call']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -15311,7 +15415,13 @@ async function traDetail(v,id){
   const back='<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   const retry=(st==='failed')
     ?'<button class="btn btn-primary" onclick="traRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'';
-  const copy='<button class="btn" onclick="traCopy('+r.id+')"><i class="fa-regular fa-copy"></i> Copy Response</button>';
+  /* Was "Copy Response" - the same JSON-to-clipboard button the lead page carried as "Copy CRM
+     response", and removed for the same reason: the whole CRM record is already laid out in the
+     card below, field by field, and a blob of JSON on the clipboard answered a question nobody on
+     this page was asking. Refresh is what that spot is actually wanted for - this page has no cache
+     to drop, so it simply re-reads the call and repaints. */
+  const refresh='<button class="btn" id="traDetailRefreshBtn" onclick="traDetailRefresh('+r.id+')">'
+    +'<i class="fa-solid fa-rotate"></i> Refresh</button>';
 
   /* The CRM record, whatever keys it carried. Rendered from the stored response rather than from
      the unpacked columns, so a field the API starts sending tomorrow shows up here on its own. */
@@ -15332,7 +15442,7 @@ async function traDetail(v,id){
   v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '
       +esc(r.customer_name||r.title||('Lead '+(r.lead_id||'')))+'</h1>'
       +'<p>Lead '+esc(String(r.lead_id||'—'))+' · '+esc(traRowDate(r)||'—')+'</p></div>'
-      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+back+copy+retry+'</div></div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+back+refresh+retry+'</div></div>'
     +'<div class="card card-pad" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
       +traStatusTag(r)+traMatchTag(r)
       +(r.crm_status?'<span class="tag t-blue">CRM: '+esc(r.crm_status)+'</span>':'')
@@ -15667,6 +15777,38 @@ async function trcFetchAllPages(build){
   return out;
 }
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+
+/* THE PRE-SALES TEAM, from the roster table rather than from whoever happens to be in the fetched
+   rows. The Personnel filter used to be built entirely out of TRC_ROWS, which meant it could only
+   ever offer the callers with a call in the selected date range: a caller who was on leave, or who
+   simply had no lost/follow-up call that day, was missing from the dropdown altogether - and a
+   missing name is indistinguishable from a name with nothing to show. Someone checking "did Rani
+   take any calls yesterday" could not ask the question.
+
+   Nine rows, so it is fetched once per page life and kept - the roster changes when someone joins
+   or leaves the team, not between two clicks of a date preset. null means "not fetched yet", [] is
+   a real answer (and the filter falls back to the rows, exactly as before, so a failed fetch or an
+   older database costs nothing).
+   See acc.crm_presales_personnel - the same list acc.crm_presales_emails() reads to decide which
+   calls are queued for transcription at all, so the dropdown and the pipeline cannot disagree. */
+let TRC_PERSONNEL=null;
+async function trcPersonnelFetch(){
+  if(TRC_PERSONNEL)return TRC_PERSONNEL;
+  try{
+    const {data,error}=await sb.schema('acc').from('crm_presales_personnel')
+      .select('email,full_name,active,sort_order').eq('active',true)
+      .order('sort_order',{ascending:true,nullsFirst:false}).order('full_name');
+    if(error)throw error;
+    TRC_PERSONNEL=(data||[]).map(function(p){
+      return {email:String(p.email||'').toLowerCase(),name:p.full_name||p.email};
+    }).filter(function(p){return p.email;});
+  }catch(e){
+    /* Silent: the filter has a working fallback and a toast here would fire on every visit to a
+       page whose main job has nothing to do with the roster. */
+    TRC_PERSONNEL=[];
+  }
+  return TRC_PERSONNEL;
+}
 /* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
    recently opened from this list, so coming back from its detail page (the in-app Back button, or
    the browser's own back button - both re-run trcView the same way) highlights and scrolls to the
@@ -15776,6 +15918,11 @@ function trcIsRegression(r){
    "All time" (both dates cleared) does the original full fetch - that is a real request for
    everything, not the default. */
 async function trcFetch(force){
+  /* Awaited, and deliberately not fired off in parallel: nine rows once per page life, a no-op on
+     every call after the first, against a view query that costs seconds. Racing it instead would
+     save nothing measurable and would let the roster land AFTER the render that needed it, leaving
+     the dropdown short a caller until something else happened to repaint it. */
+  await trcPersonnelFetch();
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
   if(!force){
@@ -15854,7 +16001,11 @@ function trcApply(rows,skipCards){
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
     if(TRC_F.crm!=='all'&&String(r.crm_status||'')!==TRC_F.crm)return false;
     if(TRC_F.bu!=='all'&&String(r.business_unit_name||'')!==TRC_F.bu)return false;
-    if(TRC_F.personnel!=='all'&&String(r.personnel_email||'')!==TRC_F.personnel)return false;
+    /* Case-insensitively: the option values come from the roster, which stores addresses lowercased
+       (that is what acc.crm_presales_emails() compares against), while personnel_email is whatever
+       casing the CRM happened to send. Matching those exactly is how a selected caller's own calls
+       end up filtered out from under them. */
+    if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
     if(!skipCards){
       if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
@@ -16140,12 +16291,21 @@ function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
     .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
   const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
+  /* The whole team first, in the roster's own order (the manager, then the callers), so every
+     pre-sales caller is selectable whether or not they have a call in this date range. Anyone
+     pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
+     dropped: that combination means the CRM sent a caller the roster has not caught up with, and
+     hiding their calls behind a filter that cannot name them is the worse of the two failures. */
   const seenP={};
-  const personnelValues=(all||[]).reduce(function(out,r){
-    const email=r.personnel_email;
-    if(!email||seenP[email]||String(r.personnel_team||'')!=='Pre-Sales')return out;
-    seenP[email]=1;out.push({email:email,name:r.personnel_name||email});return out;
-  },[]).sort(function(a,b){return a.name.localeCompare(b.name);});
+  const personnelValues=(TRC_PERSONNEL||[]).map(function(p){
+    seenP[p.email]=1;return {email:p.email,name:p.name};
+  });
+  (all||[]).forEach(function(r){
+    const email=String(r.personnel_email||'').toLowerCase();
+    if(!email||seenP[email]||String(r.personnel_team||'')!=='Pre-Sales')return;
+    seenP[email]=1;
+    personnelValues.push({email:email,name:(r.personnel_name||email)+' (not on the roster)'});
+  });
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -16760,9 +16920,39 @@ function trcOvHealthHtml(h){
   +'</div>';
 }
 
+/* What this page was last rendered with, so its Refresh button can render it AGAIN identically -
+   same lead, same ringed call, same row number in the Back link - without the reader having to go
+   back to the list and click in a second time. Kept here rather than read back off the URL because
+   the row number arrives as an argument on some routes and not others (see trcView). */
+let TRC_LEAD_ARGS=null;
+/* Refresh on the lead page means the same thing it means on the list: what is on screen is not
+   trusted. So this lead's cached history goes - it is a 2h snapshot, and rendering it back out is
+   precisely what the reader is asking not to happen - and the page refetches from scratch.
+   Deliberately NOT trcLeadCacheClearAll(): the other leads' snapshots are not what is in doubt, and
+   throwing away the list's whole prefetch would make the next click on every one of them slow. */
+window.trcLeadRefresh=async function(){
+  if(!TRC_LEAD_ARGS)return;
+  const b=document.getElementById('trcLeadRefreshBtn');
+  if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Refreshing';}
+  const a=TRC_LEAD_ARGS;
+  trcLeadCacheDrop(a.leadId);
+  try{
+    await trcLeadDetail($('view'),a.leadId,a.targetFollowUpId,a.rowHint);
+  }catch(e){
+    toast('Could not refresh this lead: '+((e&&e.message)||e),'err');
+    /* Only reached if the re-render itself threw - trcLeadDetail handles a failed fetch by drawing
+       its own error card, and in that case the button it just drew is a fresh one, already enabled.
+       This puts the OLD button back so the page is not left with a dead spinner on it. */
+    if(b&&document.body.contains(b)){b.disabled=false;b.innerHTML='<i class="fa-solid fa-rotate"></i> Refresh';}
+  }
+};
+
 async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
   const id=Number(leadId);
+  /* The NUMERIC id, not the route's string - it is what trcLeadCacheWrite keys the snapshot under,
+     so it has to be what Refresh hands trcLeadCacheDrop. */
+  TRC_LEAD_ARGS={leadId:id,targetFollowUpId:targetFollowUpId||null,rowHint:rowHint||null};
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
   /* Set before anything can fail: backing out of "Lead not found" or a failed fetch still has to put
@@ -16837,7 +17027,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
         +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
-        +'<button class="btn" onclick="trcCopy()"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
+        +'<button class="btn" id="trcLeadRefreshBtn" onclick="trcLeadRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
       +'</div></div>';
 
   /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
@@ -16906,17 +17096,6 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     if(el)el.style.boxShadow='0 0 0 3px #0d9488';
   }
 }
-
-/* Copy, never download - the same rule the rest of this page follows. */
-/* Only the CRM response now. This used to copy a call's recording URL too, which is what every
-   Copy URL button on this page called - those are download links (see trRecLink), so that branch
-   had no caller left. */
-window.trcCopy=async function(){
-  if(!TRC_LEAD)return toast('Nothing loaded to copy','warn');
-  const payload=(TRC_LEAD.lead&&TRC_LEAD.lead.raw)||null;
-  if(!payload)return toast('No CRM response stored for this lead','warn');
-  return traClip(JSON.stringify(payload,null,2),'CRM response copied');
-};
 
 /* Retry sends the follow-up back to the pipeline, which resumes at the PHASE that failed: a QA
    failure never re-transcribes and never re-bills the audio call. */
