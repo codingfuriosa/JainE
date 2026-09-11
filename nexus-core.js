@@ -15476,13 +15476,13 @@ let TRC_ROWS_RANGE=null;
 
 /* TRC_ROWS/TR_ROWS only survive as long as this tab's JS does - a reload throws the fetch away and
    pays the full CRM-join + transcription cost again even one minute later. sessionStorage backs the
-   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 2h of
-   the last real fetch reads from the browser instead of hitting Supabase again. 2h, not "until the
-   tab closes", because the underlying data does keep changing (new calls come in, transcriptions
-   complete) - it just doesn't need re-checking on every reload.
+   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 5h of
+   the last real fetch reads from the browser instead of hitting Supabase again. 5h - a full working
+   session, not "until the tab closes" - because the underlying data does keep changing (new calls
+   come in, transcriptions complete) - it just doesn't need re-checking on every reload.
    sessionStorage (not localStorage): this is a cache of one tab's own last fetch, not something that
    should leak into a different tab that might be looking at a different filter/date range. */
-const TRC_CACHE_TTL_MS=2*60*60*1000;
+const TRC_CACHE_TTL_MS=5*60*60*1000;
 function trCacheRead(key,matchKey){
   try{
     const c=JSON.parse(sessionStorage.getItem(key)||'null');
@@ -15498,11 +15498,11 @@ function trCacheWrite(key,matchKey,rows){
 }
 /* Every place that changes TR_ROWS/TRC_ROWS without going through a real trFetch/trcFetch
    (delete, restore, a fresh upload, a poll that just finished) has to drop the cached copy too -
-   otherwise a reload in the next 2h would resurrect a deleted call, or hide one just restored or
+   otherwise a reload in the next 5h would resurrect a deleted call, or hide one just restored or
    just uploaded, straight out of the stale snapshot. */
 function trCacheClear(key){try{sessionStorage.removeItem(key);}catch(e){}}
 
-/* ---- one lead's WHOLE follow-up history, cached under the same 2h expiry as the list itself.
+/* ---- one lead's WHOLE follow-up history, cached under the same 5h expiry as the list itself.
    The list's own fetch (TRC_LIGHT) deliberately leaves out the transcripts and the five QA blobs,
    so opening a lead has always meant a second, per-lead round trip for select('*') - and clicking
    the same lead twice, or backing out and clicking back in, paid for it again every time. Every
@@ -15556,7 +15556,7 @@ function trcLeadCacheSweep(expiredOnly){
 }
 /* Anything that makes a lead's stored history wrong (an explicit Refresh, a Retry that re-runs the
    pipeline for one call) has to drop it here too - otherwise the detail page would render the
-   pre-change snapshot straight back out of the cache for the next 2h. */
+   pre-change snapshot straight back out of the cache for the next 5h. */
 function trcLeadCacheDrop(id){
   const k=String(id);
   delete TRC_LEAD_MEM[k];
@@ -15596,34 +15596,23 @@ async function trcPrefetchHistories(leadIds){
     if(gen!==TRC_PREFETCH_GEN)return;            // a newer prefetch (or a page change) owns this now
     const ids=todo.slice(i,i+TRC_PREFETCH_CHUNK);
     try{
-      /* The same two queries the detail page runs, just for 25 leads instead of one. crm_leads is a
-         plain indexed lookup and costs next to nothing; the timeline view is the expensive half, and
-         this is the whole point of batching it.
-         Both are PAGED to completion rather than taken as-returned. A single-lead query can safely
-         assume one page; a 25-lead one cannot, and PostgREST answers an over-long result by silently
-         truncating it at its own max-rows - which here would mean caching a lead's history with its
-         oldest calls quietly missing, and the detail page then showing that as the whole story. A
-         short page is the only proof there is nothing more to fetch. */
-      const [leadsAll,rowsAll]=await Promise.all([
-        trcFetchAllPages(function(from,to){
-          return sb.schema('acc').from('crm_leads').select('*').in('lead_id',ids).order('lead_id').range(from,to);
-        }),
-        trcFetchAllPages(function(from,to){
-          return sb.schema('acc').from('followup_timeline_v').select('*').in('lead_id',ids)
-            .order('follow_up_id').range(from,to);
-        })
-      ]);
+      /* ONE request for the whole chunk, where this used to make two - and the per-lead pair the
+         detail page makes on a click is the same one call. See acc.crm_lead_detail: the lead row
+         and its complete follow-up history come back together, keyed by the id that was asked for.
+         It also retires the paging this loop needed. The old shape asked for 25 leads' worth of
+         timeline ROWS, and PostgREST answers an over-long result by silently truncating it at its
+         own max-rows - which would have meant caching a lead's history with its oldest calls
+         quietly missing, and the detail page then showing that as the whole story. Here each
+         lead's history is one jsonb value inside its own row, so 25 leads is 25 rows and there is
+         nothing left to truncate. */
+      const byId=await trcLeadFetchByIds(ids);
       if(gen!==TRC_PREFETCH_GEN)return;
-      const leadById=Object.create(null);
-      leadsAll.forEach(function(l){leadById[String(l.lead_id)]=l;});
-      const rowsById=Object.create(null);
-      rowsAll.forEach(function(r){(rowsById[String(r.lead_id)]||(rowsById[String(r.lead_id)]=[])).push(r);});
       /* Written for every id asked for, not just the ones that came back with rows - a lead with no
          follow-up history at all is a real answer, and caching it is what stops the detail page
          re-asking for that same empty answer on every click. */
       ids.forEach(function(id){
-        const k=String(id);
-        trcLeadCacheWrite(id,leadById[k]||null,(rowsById[k]||[]).slice().sort(trcChrono));
+        const d=byId[String(id)];
+        trcLeadCacheWrite(id,(d&&d.lead)||null,(d&&d.rows)||[]);
       });
     }catch(e){
       /* Silent by design: nothing on screen is waiting for this, and the detail page still fetches
@@ -15632,20 +15621,41 @@ async function trcPrefetchHistories(leadIds){
   }
 }
 
-/* Runs a range()d query to exhaustion. build(from,to) has to apply a stable order() as well as the
-   range - paging an unordered query is how rows get both duplicated and dropped between pages. */
-async function trcFetchAllPages(build){
-  const PAGE=1000;let out=[],from=0;
-  for(;;){
-    const {data,error}=await build(from,from+PAGE-1);
-    if(error)throw error;
-    const batch=data||[];out=out.concat(batch);
-    if(batch.length<PAGE)break;
-    from+=PAGE;
-    if(from>50000)break;                       // backstop, never a real workload for 25 leads
-  }
+/* THE ONE PLACE A LEAD'S HISTORY IS FETCHED, for the click and for the prefetch alike.
+   acc.crm_lead_detail is the find-a-lead-by-id API this module now goes through: it takes the ids
+   as an array, and for each one returns that lead's row and its WHOLE follow-up timeline together,
+   so opening a lead is a single round trip instead of two.
+   WHY IT LIVES IN THE DATABASE rather than as two client queries. acc.followup_timeline_v joins a
+   five-deep chain of window functions over every follow-up there has ever been, and until the
+   matching migration the lead_id filter could not reach inside that chain - so asking for one
+   lead's six calls cost the same ~7-8 SECONDS as asking for all thirteen thousand, which is what
+   every click on this table was paying. Filtering by a single id now pushes all the way down to an
+   index scan (measured 7839ms -> 15ms); filtering by a LIST still cannot, which is exactly why the
+   batch is a loop inside the function rather than one `in('lead_id', ids)` out here. 25 leads:
+   ~4.8s before, ~0.2s now.
+   Returns a map keyed by the STRING id, with an entry for every id asked for - including ids that
+   have nothing behind them, since "this lead has no history" is a real answer worth caching. */
+async function trcLeadFetchByIds(ids){
+  const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:ids});
+  if(error)throw error;
+  const out=Object.create(null);
+  (data||[]).forEach(function(d){
+    out[String(d.lead_id)]={lead:d.lead||null,rows:trcSortHistory(d.followups)};
+  });
+  ids.forEach(function(id){
+    const k=String(id);
+    if(!out[k])out[k]={lead:null,rows:[]};
+  });
   return out;
 }
+/* The function already orders a lead's history by communication_time then follow_up_id. It is
+   sorted again here because trcChrono is what the REST of this module means by chronological (it
+   reads call_start_text first, see the note on trcChrono) - and a history that arrives in one
+   order and is rolled up in another is how a lead's "latest call" quietly becomes the wrong call. */
+function trcSortHistory(rows){
+  return (Array.isArray(rows)?rows:[]).slice().sort(trcChrono);
+}
+
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
 
 /* THE PRE-SALES TEAM, from the roster table rather than from whoever happens to be in the fetched
@@ -16220,7 +16230,7 @@ window.trcClear=async function(){
 };
 /* The one button that means "I don't trust what's on screen" - so it drops BOTH caches, the list's
    and every lead history cached under it, rather than refetching the table and then still handing
-   out 2h-old transcripts on the next click. */
+   out 5h-old transcripts on the next click. */
 window.trcRefresh=async function(){
   trcShowLoading();
   trcLeadCacheClearAll();
@@ -16796,7 +16806,7 @@ function trcOvHealthHtml(h){
    the row number arrives as an argument on some routes and not others (see trcView). */
 let TRC_LEAD_ARGS=null;
 /* Refresh on the lead page means the same thing it means on the list: what is on screen is not
-   trusted. So this lead's cached history goes - it is a 2h snapshot, and rendering it back out is
+   trusted. So this lead's cached history goes - it is a 5h snapshot, and rendering it back out is
    precisely what the reader is asking not to happen - and the page refetches from scratch.
    Deliberately NOT trcLeadCacheClearAll(): the other leads' snapshots are not what is in doubt, and
    throwing away the list's whole prefetch would make the next click on every one of them slow. */
@@ -16848,7 +16858,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
      is only meaningful against it. */
   trcRememberRow(rowHint,id,targetFollowUpId);
   let lead=null,rows=[];
-  /* Already fetched, within the last 2h - by an earlier visit to this same lead, or by the list's
+  /* Already fetched, within the last 5h - by an earlier visit to this same lead, or by the list's
      own background prefetch (see trcPrefetchHistories). Nothing is awaited on this path, so the
      skeleton below is never even reached: the page renders in the same task as the click. */
   const cached=trcLeadCacheRead(id);
@@ -16857,13 +16867,14 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   }else{
     v.innerHTML=trcLeadSkeletonHtml();
     try{
-      const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
-      lead=r1.data||null;
-      /* `*` here, unlike the list: this is the one place the transcripts and the five QA blobs are
-         actually read, and asking for them by name would silently drop whatever the pipeline starts
-         storing tomorrow. */
-      const r2=await sb.schema('acc').from('followup_timeline_v').select('*').eq('lead_id',id);
-      rows=(r2.data||[]).slice().sort(trcChrono);
+      /* One call, not two, and the whole row rather than a column list: this is the one place the
+         transcripts and the five QA blobs are actually read, and naming the columns would silently
+         drop whatever the pipeline starts storing tomorrow. acc.crm_lead_detail returns both halves
+         together - see trcLeadFetchByIds, which is also what the list's prefetch goes through, so a
+         clicked lead and a prefetched one are cached from the identical shape. */
+      const got=(await trcLeadFetchByIds([id]))[String(id)]||{};
+      lead=got.lead||null;
+      rows=got.rows||[];
       trcLeadCacheWrite(id,lead,rows);
     }catch(e){
       v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
@@ -16990,7 +17001,7 @@ window.trcRetry=async function(followUpId){
   TRC_ROWS=null;
   trCacheClear('trc_fetch_cache');
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
-     about to change, so re-rendering the detail page off the 2h snapshot would show the reader the
+     about to change, so re-rendering the detail page off the 5h snapshot would show the reader the
      exact state they just asked to have redone. */
   if(lead)trcLeadCacheDrop(lead);
   if(lead)await trcLeadDetail($('view'),lead);
@@ -17644,7 +17655,7 @@ function trStartPolling(id){
     const st=out&&(out.status||(out.row&&out.row.status));
     if(st==='done'||st==='error'){
       delete TR_TIMERS[id];
-      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 2h cache now
+      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 5h cache now
       if(PAGE==='transcription')renderPage();
       return;
     }
@@ -17832,7 +17843,7 @@ window.trUploadStart=async function(){
         if(!res.ok||!out.row) throw new Error(out.error||'could not start');
         if(!TR_ROWS)TR_ROWS=[];
         TR_ROWS.unshift(out.row);
-        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 2h cache - trStartPolling re-freezes it once it's actually done
+        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 5h cache - trStartPolling re-freezes it once it's actually done
         trStartPolling(out.row.id);
         done++;
       }catch(e){ failed++; }
