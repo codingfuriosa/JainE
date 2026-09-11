@@ -1981,10 +1981,30 @@ function misInRange(r){
   if(!iso) return true;
   return iso>=w.from && iso<=w.to;
 }
-// The causelist is a list of hearings, so it does want a real date on every row.
+/* THE CAUSELIST IS A LIST OF HEARINGS, so the date it lists a matter under is the case's own
+   NEXT DATE - the day it is next before the court - and not the Action Date, which is an
+   internal commitment about when somebody here will do something about it.
+
+   It used the Action Date for both, and the two are not the same day. Money Suit 59/2018 is
+   listed on 11/09/2026 and carries an action date of 03/07/2026: the causelist dated it July
+   and left it off September's altogether. Two matters - WBRERA/COM/000800/2024 and A.P. No.
+   206/2025 - have a hearing date and no action date at all, so they appeared on no causelist
+   ever, which is how this came to light.
+
+   The Action Date remains the right date everywhere else: the Calendar, the Scoreboard and the
+   pinned rows are about what this office has undertaken to do, not about court listings. So
+   this is a separate reading, used by the causelist alone; a case with no hearing date of its
+   own still falls back to the action date rather than vanishing. */
+function misHearingIso(r){
+  if(r.case_next_date_iso) return String(r.case_next_date_iso).slice(0,10);
+  const c=misToIso(r.case_next_date); if(c) return misIsoStr(c);
+  return misRowIso(r);
+}
+// The causelist wants a real date on every row, and it wants the HEARING date.
 function misInRangeDated(r){
-  const iso=misRowIso(r); if(!iso) return false;
-  return misInRange(r);
+  const iso=misHearingIso(r); if(!iso) return false;
+  const w=misRangeDates(); if(!w) return true;
+  return iso>=w.from && iso<=w.to;
 }
 
 const MIS_FIELDS=[
@@ -3095,7 +3115,7 @@ function misBuildCauselist(){
     return null;
   }
   const rows=(window._misRows||[]).filter(misInRangeDated)
-    .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
+    .sort(function(a,b){ return String(misHearingIso(a)||'').localeCompare(String(misHearingIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return null; }
 
   // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
@@ -3108,7 +3128,7 @@ function misBuildCauselist(){
   // On "All dates" the causelist still needs a month to head itself with - take it from the
   // earliest hearing actually listed.
   if(!win){
-    const ds=rows.map(misRowIso).filter(Boolean).sort();
+    const ds=rows.map(misHearingIso).filter(Boolean).sort();
     win={from:ds[0]||todayStr(), to:ds[ds.length-1]||todayStr()};
   }
   const first=new Date(win.from+'T00:00:00');
@@ -3164,7 +3184,7 @@ function misBuildCauselist(){
         +'<td>'+cell(r.case_type)+'</td>'
         +'<td>'+cell(r.cause_title)+'</td>'
         +'<td>'+cell(r.case_no)+'</td>'
-        +'<td class="dt">'+esc(dmy(misRowIso(r)))+'</td>'
+        +'<td class="dt">'+esc(dmy(misHearingIso(r)))+'</td>'
         +'<td>'+cell(r.advocate_incharge)+'</td>'
         +'<td>'+cell(r.court)+'</td>'
         +'<td>'+cell(r.status)+'</td>'
