@@ -13609,14 +13609,10 @@ async function custTabCostSheet(data,unit){
     const schedRows=[];
     invoices.forEach(inv=>{
       const lineItems=inv.invoice_items||[];
+      if(!lineItems.length) return;
       const bySchedule={};
-      lineItems.forEach(li=>{const s=li.schedule||inv.invoice_type||'—';bySchedule[s]=(bySchedule[s]||0)+Number(li.net_amount||0);});
-      const schedules=Object.keys(bySchedule);
-      if(schedules.length){
-        schedules.forEach(s=>{schedRows.push([fmtDate(inv.document_date),esc(s),custInr(bySchedule[s]),fmtDate(inv.due_date),'<span class="tag t-green">Raised</span>']);});
-      }else{
-        schedRows.push([fmtDate(inv.document_date),esc(inv.invoice_type||'—'),'—',fmtDate(inv.due_date),'<span class="tag t-green">Raised</span>']);
-      }
+      lineItems.forEach(li=>{const s=li.schedule||'—';bySchedule[s]=(bySchedule[s]||0)+Number(li.net_amount||0);});
+      Object.keys(bySchedule).forEach(s=>{schedRows.push([fmtDate(inv.document_date),esc(s),custInr(bySchedule[s]),fmtDate(inv.due_date),'<span class="tag t-green">Raised</span>']);});
     });
     out+='<div class="sec-title" style="margin:22px 0 8px">Payment Schedule</div>'+
       mTable(['Invoice date','Milestone','Amount','Due date','Status'],schedRows);
