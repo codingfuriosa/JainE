@@ -13584,34 +13584,47 @@ window.custPrintLedger=function(){
 };
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
-  const {data:costItemRows}=await sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order');
-  const items=costItemRows||[];
-  // Farvision's own Sales Details export carries this per-unit, component by component - so
-  // rather than waiting on staff to scan and upload a cost sheet document for every one of 92+
-  // customers, it's built straight from the same import that already populated the Statement tab.
-  // A staff-uploaded document (customer_documents, doc_type 'cost_sheet') still wins if one exists,
-  // for a unit whose real cost sheet needs a signature or annotation a table can't carry.
-  const {data:uploadedDocs}=await sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false});
-  const uploaded=uploadedDocs||[];
-  if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn’t been shared yet.</div>';
+  const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
+    sb.schema(‘cust’).from(‘cost_sheet_items’).select(‘*’).eq(‘unit_id’,unit.id).eq(‘is_current’,true).order(‘sort_order’),
+    sb.schema(‘cust’).from(‘invoices’).select(‘document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)’).eq(‘unit_id’,unit.id).eq(‘is_current’,true).order(‘document_date’),
+    sb.schema(‘cust’).from(‘customer_documents’).select(‘*’).eq(‘unit_id’,unit.id).eq(‘doc_type’,’cost_sheet’).order(‘created_at’,{ascending:false})
+  ]);
+  const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
+  if(!items.length&&!uploaded.length)return ‘<div class="card card-pad empty">Your cost sheet hasn\’t been shared yet.</div>’;
 
-  let out='';
+  let out=’’;
   if(items.length){
     const rows=items.map(i=>[esc(i.component),custInr(i.amount||0),custInr(i.tax_amount||0),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
       custInr(i.bill_amount||0),custInr(i.received_amount||0),
-      Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
-    const totalRow=['Total',custInr(items.reduce((s,i)=>s+Number(i.amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.tax_amount||0),0)),
+      Number(i.balance_amount||0)>0?’<b style="color:#e08600">’+custInr(i.balance_amount)+’</b>’:custInr(i.balance_amount||0)]);
+    const totalRow=[‘Total’,custInr(items.reduce((s,i)=>s+Number(i.amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.tax_amount||0),0)),
       custInr(items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.bill_amount||0),0)),
       custInr(items.reduce((s,i)=>s+Number(i.received_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.balance_amount||0),0))];
     window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
-    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Cost Sheet</div>'+
-      '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>'+
-      mTable(['Charge','Basic','Tax','Total','Billed','Received','Balance'],rows.concat([totalRow.map(v=>'<b>'+v+'</b>')]));
+    out+=’<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Cost Sheet</div>’+
+      ‘<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>’+
+      mTable([‘Charge’,’Basic’,’Tax’,’Total’,’Billed’,’Received’,’Balance’],rows.concat([totalRow.map(v=>’<b>’+v+’</b>’)]));
+  }
+  if(invoices.length){
+    const schedRows=[];
+    invoices.forEach(inv=>{
+      const lineItems=inv.invoice_items||[];
+      const bySchedule={};
+      lineItems.forEach(li=>{const s=li.schedule||inv.invoice_type||’—‘;bySchedule[s]=(bySchedule[s]||0)+Number(li.net_amount||0);});
+      const schedules=Object.keys(bySchedule);
+      if(schedules.length){
+        schedules.forEach(s=>{schedRows.push([fmtDate(inv.document_date),esc(s),custInr(bySchedule[s]),fmtDate(inv.due_date),’<span class="tag t-green">Raised</span>’]);});
+      }else{
+        schedRows.push([fmtDate(inv.document_date),esc(inv.invoice_type||’—‘),’—‘,fmtDate(inv.due_date),’<span class="tag t-green">Raised</span>’]);
+      }
+    });
+    out+=’<div class="sec-title" style="margin:22px 0 8px">Payment Schedule</div>’+
+      mTable([‘Invoice date’,’Milestone’,’Amount’,’Due date’,’Status’],schedRows);
   }
   if(uploaded.length){
-    const docRows=uploaded.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
-      `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
-    out+='<div class="sec-title" style="margin:22px 0 8px">Signed document'+(uploaded.length>1?'s':'')+'</div>'+cpaTable(['Document','Shared on','Download'],docRows);
+    const docRows=uploaded.map(d=>[fileIcon(d.file_type||’’)+’ ‘+esc(d.title||d.file_name||’Cost Sheet’),fmtDate(d.created_at),
+      `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned(‘${d.storage_path.replace(/’/g,"\\’")}’,’${(d.file_name||’cost-sheet’).replace(/’/g,"\\’")}’)"><i class="fa-solid fa-download"></i> Download</button>`]);
+    out+=’<div class="sec-title" style="margin:22px 0 8px">Signed document’+(uploaded.length>1?’s’:’’)+’</div>’+cpaTable([‘Document’,’Shared on’,’Download’],docRows);
   }
   return out;
 }
