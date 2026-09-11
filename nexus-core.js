@@ -13505,56 +13505,62 @@ window.custPrintStatement=function(){
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
 async function custTabLedger(unit){
-  const [{data:invRows},{data:rcptRows},{data:revRows},{data:osRows}]=await Promise.all([
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,status').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
+  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows}]=await Promise.all([
     sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
-    sb.schema('cust').from('outstanding_items').select('document_no,schedule,bill_amount').eq('unit_id',unit.id).eq('is_current',true)
+    sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('invoices').select('document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).order('document_date')
   ]);
-  const invoices=invRows||[], receipts=rcptRows||[], reversals=revRows||[], osItems=osRows||[];
-  // Build a lookup of total billed per document_no from outstanding_items (fully populated)
-  const osTotals={};const osSchedules={};
-  osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);if(o.schedule){if(!osSchedules[d])osSchedules[d]=new Set();osSchedules[d].add(o.schedule);}});
+  const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
+  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
+  const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
+  const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
+  const netReceived=grossReceipts-grossReversals;
+  const balance=totalBilled-netReceived;
   const entries=[];
   invoices.forEach(inv=>{
-    const total=osTotals[inv.document_no]||0;
-    const schedules=osSchedules[inv.document_no]?[...osSchedules[inv.document_no]]:[];
-    entries.push({date:inv.document_date,type:'Demand',ref:inv.document_no,desc:schedules.join(', ')||inv.invoice_type||'—',debit:total,credit:0});
+    const items=inv.invoice_items||[];
+    const total=items.reduce((s,it)=>s+Number(it.net_amount||0),0);
+    const schedules=[...new Set(items.map(it=>it.schedule).filter(Boolean))];
+    if(total>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,desc:schedules.join(', ')||inv.invoice_type||'—',debit:total,credit:0});
   });
   receipts.forEach(r=>{
-    entries.push({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),debit:0,credit:Number(r.total_amount||0)});
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),debit:0,credit:Number(r.total_amount||0)});
   });
   reversals.forEach(rv=>{
-    entries.push({date:rv.receipt_reversal_date,type:'Reversal',ref:rv.receipt_reversal_no,desc:rv.reason||'Receipt reversal'+(rv.receipt_no?' ('+rv.receipt_no+')':''),debit:Number(rv.reversal_amount||0),credit:0});
+    entries.push({date:rv.receipt_reversal_date,type:'CQRV',ref:rv.receipt_reversal_no,desc:'Cheque return'+(rv.instrument_no?' · '+rv.instrument_no:''),debit:Number(rv.reversal_amount||0),credit:0});
   });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let bal=0;
-  const totalDebit=entries.reduce((s,e)=>s+e.debit,0);
-  const totalCredit=entries.reduce((s,e)=>s+e.credit,0);
-  const rows=entries.map(e=>{bal+=e.debit-e.credit;
-    const tag=e.type==='Demand'?'<span class="tag t-amber">Demand</span>':e.type==='Receipt'?'<span class="tag t-green">Receipt</span>':'<span class="tag t-red">Reversal</span>';
-    return [fmtDate(e.date),tag,esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',custInr(bal)];});
-  if(!rows.length) return '<div class="card card-pad empty">No invoice or receipt records yet for this unit.</div>';
-  window._custLedgerUnit=unit; window._custLedgerEntries=entries;
+  let runBal=0;
+  function balCell(b){return b>0?custInr(b)+' <small style="color:var(--slate)">D</small>':b<0?custInr(Math.abs(b))+' <small style="color:#16855a">Adv</small>':'0';}
+  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
+  const rows=entries.map(e=>{runBal+=e.debit-e.credit;
+    return [fmtDate(e.date),tags[e.type]||esc(e.type),esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
+  if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
+  window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
+  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">Settled</b>';
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px">'+
-    '<span><b>Total demanded:</b> '+custInr(totalDebit)+'</span>'+
-    '<span><b>Total received:</b> '+custInr(totalCredit)+'</span>'+
-    '<span><b>Balance:</b> <b style="color:'+(bal>0?'#e08600':'#16855a')+'">'+custInr(bal)+'</b></span>'+
+    '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
+    '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
+    '<span><b>Balance:</b> '+balLabel+'</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span></div>';
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],rows)+
     '<div style="margin-top:14px"><button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
 }
 window.custPrintLedger=function(){
-  const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
-  if(!unit||!entries||!entries.length){toast('Nothing to print yet','err');return;}
+  const unit=window._custLedgerUnit,entries=window._custLedgerEntries,totalBilled=window._custLedgerTotalBilled||0,netReceived=window._custLedgerNetReceived||0;
+  if(!unit){toast('Nothing to print yet','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to print','err');return;}
-  let bal=0;
-  const totalDebit=entries.reduce((s,e)=>s+e.debit,0);
-  const totalCredit=entries.reduce((s,e)=>s+e.credit,0);
-  const trs=entries.map(e=>{bal+=e.debit-e.credit;
-    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'—')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'—')+'</td><td style="text-align:right">'+custInr(bal)+'</td></tr>';
+  let runBal=0;
+  const balance=totalBilled-netReceived;
+  function balText(b){return b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0';}
+  const totalDebit=(entries||[]).reduce((s,e)=>s+(e.debit||0),0);
+  const totalCredit=(entries||[]).reduce((s,e)=>s+(e.credit||0),0);
+  const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
+    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
   }).join('');
+  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'Settled';
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
@@ -13567,10 +13573,10 @@ window.custPrintLedger=function(){
     '</style></head><body>'+
     '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
-    '<div class="summary"><b>Total demanded:</b> '+custInr(totalDebit)+' &nbsp;|&nbsp; <b>Total received:</b> '+custInr(totalCredit)+' &nbsp;|&nbsp; <b>Balance:</b> '+custInr(bal)+'</div>'+
+    '<div class="summary"><b>Total billed:</b> '+custInr(totalBilled)+' &nbsp;|&nbsp; <b>Net received:</b> '+custInr(netReceived)+' &nbsp;|&nbsp; <b>Balance:</b> '+balLabel+'</div>'+
     '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
     '<tbody>'+trs+'</tbody>'+
-    '<tfoot><tr><td colspan="4">Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+custInr(bal)+'</td></tr></tfoot>'+
+    '<tfoot><tr><td colspan="4">Periodic Ledger Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr></tfoot>'+
     '</table></body></html>';
   try{w.document.open();w.document.write(html);w.document.close();}
   catch(_e){toast('Could not build the printout','err');return;}
