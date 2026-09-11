@@ -17352,7 +17352,7 @@ function trFolderRows(rows,name){return (rows||[]).filter(function(r){return r.f
 // never has to embed the folder name itself as a JS string literal (quote-escaping headaches).
 function trFolderCardHtml(name,list,idx){
   const qual=list.filter(function(r){return r.qualification==='Qualified';}).length;
-  return '<div class="card card-pad" style="position:relative;cursor:pointer" onclick="navTo(\'transcription/1/'+encodeURIComponent(name)+'\')">'
+  return '<div class="card card-pad" style="position:relative;cursor:pointer" onclick="navTo(\'transcription/2/'+encodeURIComponent(name)+'\')">'
     +'<div style="position:absolute;top:8px;right:8px;display:flex;gap:2px" onclick="event.stopPropagation()">'
       +'<button class="btn btn-sm btn-ghost" title="Rename folder" onclick="trFolderRenameModal('+idx+')"><i class="fa-solid fa-pen" style="font-size:11px"></i></button>'
       +'<button class="btn btn-sm btn-ghost" title="Delete folder" onclick="trFolderDeleteConfirm('+idx+')"><i class="fa-solid fa-trash" style="font-size:11px"></i></button>'
@@ -17374,7 +17374,7 @@ function trFolderGridHtml(rows){
 }
 function trFolderCallsHtml(rows,name){
   const list=trFolderRows(rows,name);
-  return '<div class="toolbar" style="margin:16px 0;flex-wrap:wrap;gap:10px"><button class="btn btn-sm" onclick="navTo(\'transcription/1\')"><i class="fa-solid fa-arrow-left"></i> All folders</button>'+trDateRangeHtml()+'<div class="grow"></div>'
+  return '<div class="toolbar" style="margin:16px 0;flex-wrap:wrap;gap:10px"><button class="btn btn-sm" onclick="navTo(\'transcription/2\')"><i class="fa-solid fa-arrow-left"></i> All folders</button>'+trDateRangeHtml()+'<div class="grow"></div>'
     +'<button class="btn btn-sm" onclick="trGoAddCalls()"><i class="fa-solid fa-plus"></i> Add calls</button>'
     +'<button class="btn btn-sm" onclick="trFolderRenameModal()"><i class="fa-solid fa-pen"></i> Rename</button>'
     +'<button class="btn btn-sm" onclick="trFolderDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete folder</button>'
@@ -17448,7 +17448,7 @@ function trCompGridHtml(leads){
     const nm=last.customer_name||('Lead '+g.leadId);
     const latest=trLatestVerdict(g.rows);
     const o=trOutcome(latest.qualification);
-    return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/4/'+encodeURIComponent(g.leadId)+'\')">'
+    return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/5/'+encodeURIComponent(g.leadId)+'\')">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
         +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nm)+'</div>'
         +'<div style="font-size:12px;color:var(--slate);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(last.business_unit_name||'')+'</div></div>'
@@ -17460,12 +17460,12 @@ function trCompGridHtml(leads){
 }
 function trCompDetailHtml(leads,leadId){
   const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
-  if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/4\')">Back</button></div>';
+  if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/5\')">Back</button></div>';
   const last=g.rows[g.rows.length-1];
   const combined=trCombinedQualify(g.rows);
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
@@ -17507,7 +17507,7 @@ window.trGoAddCalls=function(){
 window.trCancelAddTarget=function(){ TR_ADD_TARGET=null; renderPage(); };
 window.trDoneAddTarget=function(){
   const f=TR_ADD_TARGET; TR_ADD_TARGET=null;
-  if(f) navTo('transcription/1/'+encodeURIComponent(f)); else navTo('transcription/1');
+  if(f) navTo('transcription/2/'+encodeURIComponent(f)); else navTo('transcription/2');
 };
 window.trAddSelectedToTarget=async function(){
   if(!TR_ADD_TARGET)return;
@@ -17522,7 +17522,7 @@ window.trAddSelectedToTarget=async function(){
   // from the DB, so jumping there too early could show the list without what was just added.
   try{await sb.schema('acc').from('transcriptions').update({folder:name}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
   TR_ADD_TARGET=null;
-  navTo('transcription/1/'+encodeURIComponent(name));
+  navTo('transcription/2/'+encodeURIComponent(name));
 };
 // Redraws whatever is currently on screen on the Folders tab (grid or a drill-in) from the
 // in-memory TR_ROWS — no refetch, so an in-flight DB write for the same rows can't be raced.
@@ -17572,7 +17572,7 @@ window.trFolderDeleteConfirm=async function(idx){
   const wasViewing=(TR_FOLDER===name);
   toast('Folder deleted','ok');
   if(ids.length)try{await sb.schema('acc').from('transcriptions').update({folder:null}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
-  if(wasViewing){ navTo('transcription/1'); } else { trRenderFolderArea(); }
+  if(wasViewing){ navTo('transcription/2'); } else { trRenderFolderArea(); }
 };
 
 /* ---------- Download ---------- */
