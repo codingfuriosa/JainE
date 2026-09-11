@@ -13532,7 +13532,7 @@ async function custTabLedger(unit){
   });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let runBal=0;
-  function balCell(b){return b>0?custInr(b)+' <small style="color:var(--slate)">D</small>':b<0?custInr(Math.abs(b))+' <small style="color:#16855a">Adv</small>':'0';}
+  function balCell(b){return b>0?'<span>'+custInr(b)+' <small style="color:var(--slate)">D</small></span>':b<0?'<span style="color:#16855a">'+custInr(Math.abs(b))+' Adv</span>':'<span>0</span>';}
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
     return [fmtDate(e.date),tags[e.type]||esc(e.type),esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
