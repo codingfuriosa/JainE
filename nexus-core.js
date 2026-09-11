@@ -13379,45 +13379,41 @@ function custUnitPicker(units,selUnitId){
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:demand},{data:receipts},{data:snapRows},{data:costItemRows}]=await Promise.all([
-    sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
-    sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id),
+  const [{data:invRows},{data:rcptRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
+    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
-    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order')
+    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
+    sb.schema('cust').from('outstanding_items').select('document_no,schedule,bill_amount').eq('unit_id',unit.id).eq('is_current',true)
   ]);
   const snap=snapRows||null;
-  const demandRows=demand||[], receiptRows=receipts||[], costItems=costItemRows||[];
-  const totalDemand=demandRows.reduce((s,d)=>s+Number(d.amount||0),0);
-  const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.amount||0),0);
-  // A pre-possession project (no Invoice/Receipt Register import yet - that report only exists
-  // once a project starts maintenance billing) has no demand/receipt rows at all. The cost sheet
-  // from Sales Details already carries Billed/Received/Balance/Onaccount per charge line, so it
-  // stands in as the statement's numbers until a real demand/receipt import exists.
+  const invoices=invRows||[], receiptRows=rcptRows||[], costItems=costItemRows||[], osItems=osRows||[];
+  const osTotals={};
+  osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);});
+  const totalDemand=invoices.reduce((s,inv)=>s+(osTotals[inv.document_no]||0),0);
+  const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.total_amount||0),0);
   const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-  const useCostSheet=!demandRows.length&&!receiptRows.length&&costItems.length>0;
-  // The snapshot (Farvision's own Outstanding Summary) is authoritative when we have one - it
-  // accounts for On Account and Late Payment Fee, which a plain demand-minus-receipts sum can't.
-  // Falls back to the computed figure for a unit that hasn't had an Outstanding import yet.
+  const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
   const propertyValue=snap?Number(snap.total_consideration||0):Number(unit.agreement_value||0);
   const totalReceivedFinal=useCostSheet?csiReceived:totalReceived;
   const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalDemand-totalReceived));
-  const netOutstanding=snap?Number(snap.net_outstanding||0):billOutstanding;
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
   const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
   const remaining=Math.max(0,propertyValue-totalReceivedFinal);
   const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalDemand?Math.round(totalReceivedFinal/totalDemand*100):0);
 
-  // "Demand due" banner: the most recently raised bill still outstanding, if any.
-  const nextDemand=demandRows.slice().sort((a,b)=>new Date(b.demand_date||0)-new Date(a.demand_date||0))[0];
+  const lastInv=invoices.slice().sort((a,b)=>new Date(b.document_date||0)-new Date(a.document_date||0))[0];
   let dueBanner='';
-  if(nextDemand&&billOutstanding>0){
-    const due=nextDemand.due_date?new Date(nextDemand.due_date):null;
+  if(lastInv&&billOutstanding>0){
+    const due=lastInv.due_date?new Date(lastInv.due_date):null;
     const days=due?Math.round((due-new Date(new Date().toDateString()))/86400000):null;
     const dueText=days==null?'':(days<0?Math.abs(days)+' day'+(Math.abs(days)===1?'':'s')+' overdue':days===0?'due today':'due in '+days+' day'+(days===1?'':'s'));
+    const osScheds=osItems.filter(o=>o.document_no===lastInv.document_no&&o.schedule).map(o=>o.schedule);
+    const schedules=[...new Set(osScheds)];
     dueBanner=`<div class="card card-pad" style="background:${days!=null&&days<0?'#fef2f2':'#eff4ff'};border-color:${days!=null&&days<0?'#fecaca':'#cfe0ef'};margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(nextDemand.milestone||nextDemand.revenue_head||'')}${nextDemand.due_date?' · due '+fmtDate(nextDemand.due_date):''}</span></div>
+      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
       ${dueText?`<span class="tag ${days!=null&&days<0?'t-red':'t-blue'}">${esc(dueText)}</span>`:''}
     </div>`;
   }
@@ -13425,12 +13421,17 @@ async function custTabOverview(data,unit){
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
     ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
-    ['Demand due',custInr(billOutstanding),nextDemand?esc(nextDemand.milestone||nextDemand.revenue_head||''):'—',billOutstanding>0?'#e08600':'#16855a'],
+    ['Demand due',custInr(billOutstanding),lastInv?esc(lastInv.document_no||''):'—',billOutstanding>0?'#e08600':'#16855a'],
     ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'incl. handover')]
   ];
 
-  const entries=[].concat(demandRows.map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone||d.revenue_head,amount:Number(d.amount||0)})))
-    .concat(receiptRows.map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  const entries=[];
+  invoices.forEach(inv=>{
+    const total=osTotals[inv.document_no]||0;
+    const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
+    entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
+  });
+  receiptRows.forEach(r=>{entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-Number(r.total_amount||0)});});
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let bal=0;
   const withBalance=entries.map(e=>{bal+=e.amount;return Object.assign({},e,{balance:bal});});
@@ -13504,29 +13505,134 @@ window.custPrintStatement=function(){
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
 async function custTabLedger(unit){
-  const [{data:demand},{data:receipts}]=await Promise.all([
-    sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
-    sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id)
+  const [{data:invRows},{data:rcptRows},{data:revRows},{data:osRows}]=await Promise.all([
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,status').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
+    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
+    sb.schema('cust').from('outstanding_items').select('document_no,schedule,bill_amount').eq('unit_id',unit.id).eq('is_current',true)
   ]);
-  const entries=[].concat((demand||[]).map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone,amount:Number(d.amount||0)})))
-    .concat((receipts||[]).map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  const invoices=invRows||[], receipts=rcptRows||[], reversals=revRows||[], osItems=osRows||[];
+  // Build a lookup of total billed per document_no from outstanding_items (fully populated)
+  const osTotals={};const osSchedules={};
+  osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);if(o.schedule){if(!osSchedules[d])osSchedules[d]=new Set();osSchedules[d].add(o.schedule);}});
+  const entries=[];
+  invoices.forEach(inv=>{
+    const total=osTotals[inv.document_no]||0;
+    const schedules=osSchedules[inv.document_no]?[...osSchedules[inv.document_no]]:[];
+    entries.push({date:inv.document_date,type:'Demand',ref:inv.document_no,desc:schedules.join(', ')||inv.invoice_type||'—',debit:total,credit:0});
+  });
+  receipts.forEach(r=>{
+    entries.push({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),debit:0,credit:Number(r.total_amount||0)});
+  });
+  reversals.forEach(rv=>{
+    entries.push({date:rv.receipt_reversal_date,type:'Reversal',ref:rv.receipt_reversal_no,desc:rv.reason||'Receipt reversal'+(rv.receipt_no?' ('+rv.receipt_no+')':''),debit:Number(rv.reversal_amount||0),credit:0});
+  });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let bal=0;
-  const rows=entries.map(e=>{bal+=e.amount;
-    return [fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
-      esc(e.ref||'—'),esc(e.desc||'—'),custInr(Math.abs(e.amount)),custInr(bal)];});
-  return rows.length?mTable(['Date','Type','Reference','Details','Amount','Running balance'],rows):
-    '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>';
+  const totalDebit=entries.reduce((s,e)=>s+e.debit,0);
+  const totalCredit=entries.reduce((s,e)=>s+e.credit,0);
+  const rows=entries.map(e=>{bal+=e.debit-e.credit;
+    const tag=e.type==='Demand'?'<span class="tag t-amber">Demand</span>':e.type==='Receipt'?'<span class="tag t-green">Receipt</span>':'<span class="tag t-red">Reversal</span>';
+    return [fmtDate(e.date),tag,esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',custInr(bal)];});
+  if(!rows.length) return '<div class="card card-pad empty">No invoice or receipt records yet for this unit.</div>';
+  window._custLedgerUnit=unit; window._custLedgerEntries=entries;
+  const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px">'+
+    '<span><b>Total demanded:</b> '+custInr(totalDebit)+'</span>'+
+    '<span><b>Total received:</b> '+custInr(totalCredit)+'</span>'+
+    '<span><b>Balance:</b> <b style="color:'+(bal>0?'#e08600':'#16855a')+'">'+custInr(bal)+'</b></span>'+
+    '<span style="color:var(--slate)">'+entries.length+' entries</span></div>';
+  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],rows)+
+    '<div style="margin-top:14px"><button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
 }
-async function custTabCostSheet(unit){
-  // Cost sheets differ enough per unit that they aren't structured/imported data - they're a
-  // document, shown here the same way the Documents tab shows any other per-unit file.
-  const {data}=await sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false});
-  if(!data||!data.length)return '<div class="card card-pad empty">Your cost sheet hasn’t been shared yet.</div>';
-  const rows=data.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
-    `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
-  return cpaTable(['Document','Shared on','Download'],rows);
+window.custPrintLedger=function(){
+  const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
+  if(!unit||!entries||!entries.length){toast('Nothing to print yet','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to print','err');return;}
+  let bal=0;
+  const totalDebit=entries.reduce((s,e)=>s+e.debit,0);
+  const totalCredit=entries.reduce((s,e)=>s+e.credit,0);
+  const trs=entries.map(e=>{bal+=e.debit-e.credit;
+    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'—')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'—')+'</td><td style="text-align:right">'+custInr(bal)+'</td></tr>';
+  }).join('');
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
+    'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
+    'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
+    '.summary{font-size:13px;margin-bottom:14px}'+
+    'table{width:100%;border-collapse:collapse}th,td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:11.5px}'+
+    'th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.03em;background:#f8fafc}'+
+    'td:nth-child(5),td:nth-child(6),td:nth-child(7),th:nth-child(5),th:nth-child(6),th:nth-child(7){text-align:right}'+
+    'tfoot td{font-weight:700;border-top:2px solid #334155}'+
+    '@media print{body{margin:16px}}'+
+    '</style></head><body>'+
+    '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
+    '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
+    '<div class="summary"><b>Total demanded:</b> '+custInr(totalDebit)+' &nbsp;|&nbsp; <b>Total received:</b> '+custInr(totalCredit)+' &nbsp;|&nbsp; <b>Balance:</b> '+custInr(bal)+'</div>'+
+    '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
+    '<tbody>'+trs+'</tbody>'+
+    '<tfoot><tr><td colspan="4">Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+custInr(bal)+'</td></tr></tfoot>'+
+    '</table></body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the printout','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
+};
+async function custTabCostSheet(data,unit){
+  const c=data.contactByUnit[unit.id];
+  const {data:costItemRows}=await sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order');
+  const items=costItemRows||[];
+  // Farvision's own Sales Details export carries this per-unit, component by component - so
+  // rather than waiting on staff to scan and upload a cost sheet document for every one of 92+
+  // customers, it's built straight from the same import that already populated the Statement tab.
+  // A staff-uploaded document (customer_documents, doc_type 'cost_sheet') still wins if one exists,
+  // for a unit whose real cost sheet needs a signature or annotation a table can't carry.
+  const {data:uploadedDocs}=await sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false});
+  const uploaded=uploadedDocs||[];
+  if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn’t been shared yet.</div>';
+
+  let out='';
+  if(items.length){
+    const rows=items.map(i=>[esc(i.component),custInr(i.amount||0),custInr(i.tax_amount||0),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
+      custInr(i.bill_amount||0),custInr(i.received_amount||0),
+      Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
+    const totalRow=['Total',custInr(items.reduce((s,i)=>s+Number(i.amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.tax_amount||0),0)),
+      custInr(items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.bill_amount||0),0)),
+      custInr(items.reduce((s,i)=>s+Number(i.received_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.balance_amount||0),0))];
+    window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
+    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Cost Sheet</div>'+
+      '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>'+
+      mTable(['Charge','Basic','Tax','Total','Billed','Received','Balance'],rows.concat([totalRow.map(v=>'<b>'+v+'</b>')]));
+  }
+  if(uploaded.length){
+    const docRows=uploaded.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
+      `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
+    out+='<div class="sec-title" style="margin:22px 0 8px">Signed document'+(uploaded.length>1?'s':'')+'</div>'+cpaTable(['Document','Shared on','Download'],docRows);
+  }
+  return out;
 }
+window.custPrintCostSheet=function(){
+  const unit=window._custCostSheetUnit,c=window._custCostSheetContact,items=window._custCostSheetItems;
+  if(!unit||!items){toast('Nothing to print yet','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to print','err');return;}
+  const sum=k=>items.reduce((s,i)=>s+Number(i[k]||0),0);
+  const rowsHtml=items.map(i=>'<tr><td>'+esc(i.component)+'</td><td>'+custInr(i.amount||0)+'</td><td>'+custInr(i.tax_amount||0)+'</td><td>'+
+    custInr(Number(i.amount||0)+Number(i.tax_amount||0))+'</td><td>'+custInr(i.bill_amount||0)+'</td><td>'+custInr(i.received_amount||0)+'</td><td>'+custInr(i.balance_amount||0)+'</td></tr>').join('');
+  const totalHtml='<tr style="font-weight:700"><td>Total</td><td>'+custInr(sum('amount'))+'</td><td>'+custInr(sum('tax_amount'))+'</td><td>'+
+    custInr(sum('amount')+sum('tax_amount'))+'</td><td>'+custInr(sum('bill_amount'))+'</td><td>'+custInr(sum('received_amount'))+'</td><td>'+custInr(sum('balance_amount'))+'</td></tr>';
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cost Sheet — '+esc(unit.unit_code)+'</title><style>'+
+    'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
+    'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 20px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:8px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12.5px}'+
+    'th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.03em}'+
+    '</style></head><body>'+
+    '<h1>Cost Sheet — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
+    '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
+    '<table><thead><tr><th>Charge</th><th>Basic</th><th>Tax</th><th>Total</th><th>Billed</th><th>Received</th><th>Balance</th></tr></thead><tbody>'+rowsHtml+totalHtml+'</tbody></table>'+
+    '</body></html>';
+  try{ w.document.open(); w.document.write(html); w.document.close(); }
+  catch(_e){ toast('Could not build the printout','err'); return; }
+  setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
+};
 async function custTabProgress(unit){
   const [{data:pPhotos},{data:uPhotos}]=await Promise.all([
     sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
@@ -13991,7 +14097,7 @@ VIEWS.customer=async function(v,seg){
   let body;
   if(ti===0)body=await custTabOverview(data,unit);
   else if(ti===1)body=await custTabLedger(unit);
-  else if(ti===2)body=await custTabCostSheet(unit);
+  else if(ti===2)body=await custTabCostSheet(data,unit);
   else if(ti===3)body=await custTabProgress(unit);
   else if(ti===4)body=await custTabInspection(unit);
   else if(ti===5)body=await custTabDocuments(unit);
