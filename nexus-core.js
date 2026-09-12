@@ -18423,7 +18423,14 @@ const USAGE_MAP={
    there" when it actually meant "nothing here reports".
    Keyed on page/tab. The numeric ones are the tab index the module already routes on. */
 const USAGE_VIEWS={
-  'tasks/calendar':      'tasks.calendar.view_month_week_day_calendar',
+  /* Two catalog features describe this one screen: the month/week/day calendar itself, and the fact
+     that tasks, meetings and Legal hearing dates all land on it together. The second had no mapping
+     anywhere in the app, so it was the only active feature in the whole catalogue guaranteed to read
+     zero forever - not because nobody opens the calendar, but because nothing reported it. Logged as
+     an array (same shape network/0 already uses) so one look at the screen counts once for each,
+     rather than a second navigation being invented to carry it. */
+  'tasks/calendar':      ['tasks.calendar.view_month_week_day_calendar',
+                           'tasks.calendar.see_tasks_meetings_and_legal_dates_in_one_view'],
   'tasks/archive':       'tasks.archive.view_completed_archived_tasks',
   'tasks/scoreboard':    'tasks.scoreboard.view_task_completion_leaderboard',
   'campaigns/0':         'campaigns.overview.view_spend_leads_cost_charts',
