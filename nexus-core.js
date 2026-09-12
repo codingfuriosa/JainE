@@ -18608,7 +18608,16 @@ function usageViewTick(){
     const now=Date.now();
     if(dedupeId===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
     USAGE_LAST_VIEW=dedupeId; USAGE_LAST_VIEW_AT=now;
-    (Array.isArray(key)?key:[key]).forEach(function(k){ usageQueue(k,'view'); });
+    const drawn=[];
+    (Array.isArray(key)?key:[key]).forEach(function(k){
+      // cleared first, so a key usageQueue refuses (no feature, not signed in) cannot make the
+      // previous event get described a second time
+      USAGE_LAST_QUEUED=null;
+      usageQueue(k,'view');
+      if(USAGE_LAST_QUEUED) drawn.push(USAGE_LAST_QUEUED);
+    });
+    // 700ms is after the render this navigation triggered and long before the batch is sent.
+    if(drawn.length) setTimeout(function(){ usageDescribeScreen(drawn); }, 700);
   }catch(e){}
 }
 /* The verb, read off the function's own name rather than kept in a second map that could drift out
@@ -18632,7 +18641,26 @@ let USAGE_Q=[], USAGE_TIMER=null;
    in the same call stack as the click, and tight enough that an older, unrelated event can never be
    mistaken for this one. Held here rather than on the event itself so nothing extra travels to the
    server in the batch payload. */
-let USAGE_LAST_EV=null, USAGE_LAST_AT=0;
+let USAGE_LAST_EV=null, USAGE_LAST_AT=0, USAGE_LAST_QUEUED=null;
+/* What was actually on the screen, written onto a "view" event after the screen has drawn.
+   Opening a tab is the one kind of action with no object behind it - no task, no document, nobody
+   it went to - so the report's Details column has always been a dash for all 984 of them, and there
+   is nothing in the database that could ever fill it in, because nothing specific happened. What
+   CAN be said is what the person was looking at: "View completed/archived tasks - 128 rows" answers
+   the next question, where a bare dash answers none.
+   It has to run after the render, so the event is queued first and annotated a moment later - the
+   batch does not leave for eight seconds, so there is time. If the screen has no table, or the
+   event has already gone, nothing is written and the dash stays honest. */
+function usageDescribeScreen(evs){
+  try{
+    const v=$('view'); if(!v) return;
+    const n=v.querySelectorAll('table tbody tr').length;
+    if(!n) return;
+    evs.forEach(function(ev){
+      if(USAGE_Q.indexOf(ev)!==-1 && !ev.meta) ev.meta={showing:n+' row'+(n===1?'':'s')};
+    });
+  }catch(e){}
+}
 function usagePendingClick(){
   return (USAGE_LAST_EV && (Date.now()-USAGE_LAST_AT)<1500) ? USAGE_LAST_EV : null;
 }
@@ -18681,6 +18709,7 @@ function usageQueue(featureKey, action, meta, project){
   if(project) ev.project=String(project).trim().slice(0,64) || undefined;
   USAGE_Q.push(ev);
   USAGE_LAST_EV=ev; USAGE_LAST_AT=Date.now();    // so a refused confirm can take it back out again
+  USAGE_LAST_QUEUED=ev;                          // and so a view can be described once it has drawn
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
