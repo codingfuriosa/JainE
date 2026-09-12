@@ -13588,16 +13588,66 @@ window.custPrintLedger=function(){
 };
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
+  const [{data:costItemRows},{data:invRows},{data:uploadedDocs},{data:rcptRows},{data:revRows}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false})
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false}),
+    sb.schema('cust').from('money_receipts').select('total_amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true)
   ]);
   const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
+  const receipts=rcptRows||[], reversals=revRows||[];
   if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
 
   let out='';
   if(items.length){
+    // "Cost Summary" card - mirrors the Basic/Extra/Tax breakup and Due/Received/Balance/
+    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout,
+    // built entirely from our own cost_sheet_items + money_receipts + receipt_reversals (no
+    // guessed basic/tax split on the actuals - only the static per-component agreement figures
+    // carry that split reliably).
+    const unitCostItem=items.find(i=>/unit cost/i.test(i.component||''));
+    const basicCost=Number(unitCostItem?.amount||0);
+    // The standard, recurring per-unit charge types that make up every Dream project's cost
+    // sheet (verified against Farvision's own "Cost breakup" printout). Anything outside this
+    // set - e.g. a one-off "Cheque Dishonoured Charges" penalty - is a later ad-hoc charge, not
+    // part of the original agreement cost, and Farvision itself reports it as a separate figure.
+    const STANDARD_COMPONENTS=/legal documentation|advance maintenance|maintenance deposit|generator charges|flc charges|plc charge|vehicle parking|club membership|infrastructure for club facility|infrastructure for electricity|electricity charges/i;
+    const extraCharges=items.reduce((s,i)=>s+(i===unitCostItem||!STANDARD_COMPONENTS.test(i.component||'')?0:Number(i.amount||0)),0);
+    const adhocCharges=items.reduce((s,i)=>s+(i===unitCostItem||STANDARD_COMPONENTS.test(i.component||'')?0:Number(i.amount||0)),0);
+    const totalTax=items.reduce((s,i)=>s+Number(i.tax_amount||0),0);
+    const totalWithoutTax=basicCost+extraCharges+adhocCharges;
+    const totalWithTax=totalWithoutTax+totalTax;
+    const totalBilled=items.reduce((s,i)=>s+Number(i.bill_amount||0),0);
+    const onAccount=items.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
+    const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
+    const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
+    const netReceived=grossReceipts-grossReversals;
+    const balance=totalBilled-netReceived;
+    const futureDue=Math.max(0,totalWithTax-netReceived);
+    const duePct=totalWithTax?Math.round(totalBilled/totalWithTax*1000)/10:0;
+    const recdPct=totalWithTax?Math.round(netReceived/totalWithTax*1000)/10:0;
+    const balLabel=balance>0?'<span style="color:#e08600">'+custInr(balance)+' due</span>':balance<0?'<span style="color:#16855a">'+custInr(Math.abs(balance))+' advance</span>':'<span style="color:#16855a">Settled</span>';
+    const stat=(label,val,sub,color)=>'<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">'+label+'</div>'+
+      '<div style="font-size:19px;font-weight:700;margin-top:3px'+(color?';color:'+color:'')+'">'+val+'</div>'+
+      (sub?'<div style="font-size:11.5px;color:var(--slate);margin-top:1px">'+sub+'</div>':'')+'</div>';
+    out+='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
+      '<div class="sec-title" style="margin:0 0 14px">Cost Summary</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:16px">'+
+        stat('Due as on '+fmtDate(new Date()),custInr(totalBilled),duePct+'% of agreement value')+
+        stat('Received till '+fmtDate(new Date()),custInr(netReceived),recdPct+'%'+(onAccount?' · '+custInr(onAccount)+' on account':''),'#16855a')+
+        stat('Balance',balLabel,'')+
+        stat('Total due (incl. future bills)',custInr(futureDue),'against full agreement value')+
+      '</div>'+
+      '<div style="border-top:1px solid #e2e8f0;padding-top:12px;font-size:13px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">'+
+        '<span><b>Basic Cost:</b> '+custInr(basicCost)+'</span><span style="color:var(--slate)">+</span>'+
+        '<span><b>Extra Charges:</b> '+custInr(extraCharges)+'</span><span style="color:var(--slate)">+</span>'+
+        (adhocCharges?'<span><b>Other Charges (Adhoc):</b> '+custInr(adhocCharges)+'</span><span style="color:var(--slate)">+</span>':'')+
+        '<span><b>Taxes:</b> '+custInr(totalTax)+'</span><span style="color:var(--slate)">=</span>'+
+        '<span><b>Total (excl. tax):</b> '+custInr(totalWithoutTax)+'</span>'+
+        '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
+      '</div></div>';
+
     const rows=items.map(i=>[esc(i.component),custInr(i.amount||0),custInr(i.tax_amount||0),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
       custInr(i.bill_amount||0),custInr(i.received_amount||0),
       Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
@@ -13605,7 +13655,7 @@ async function custTabCostSheet(data,unit){
       custInr(items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.bill_amount||0),0)),
       custInr(items.reduce((s,i)=>s+Number(i.received_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.balance_amount||0),0))];
     window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
-    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Cost Sheet</div>'+
+    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
       '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>'+
       mTable(['Charge','Basic','Tax','Total','Billed','Received','Balance'],rows.concat([totalRow.map(v=>'<b>'+v+'</b>')]));
   }
