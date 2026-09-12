@@ -17192,7 +17192,7 @@ VIEWS.transcription=async function(v,seg){
        recordings were listed here too, burying the real mismatches under rows needing no judgement.
        A matching follow-up date is the same kind of noise — so a row must carry at least one
        genuinely FAILED check to appear, which is what leaves only the dates that differ. */
-    const rows=(await trFetch(true)).filter(function(r){
+    const rows=(await trFetch()).filter(function(r){
       if(r.source!=='lost_call_sync')return false;
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
@@ -17203,7 +17203,7 @@ VIEWS.transcription=async function(v,seg){
     return;
   }
   if(ti===5){
-    const all=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
+    const all=(await trFetch()).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
     const groups={};
     all.forEach(function(r){ (groups[r.lead_id]=groups[r.lead_id]||[]).push(r); });
     const leads=Object.keys(groups).map(function(id){
@@ -17235,7 +17235,7 @@ VIEWS.transcription=async function(v,seg){
     return;
   }
   if(ti===2){
-    const rows=await trFetch(true);
+    const rows=await trFetch();
     const folder=seg[1]?decodeURIComponent(seg[1]):null;
     TR_FOLDER=folder;
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
@@ -17251,7 +17251,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div id="trSelBar"></div>'
     +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="10"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
-  const rows=await trFetch(true);
+  const rows=await trFetch();
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
 };

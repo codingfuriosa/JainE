@@ -4167,17 +4167,23 @@
     const own=function(k,fb){ const t=String((p&&p[k])||'').trim(); return t||fb||''; };
     const sal=salutation(p&&p.salutation)||'';
     const name=nameCase(own('name',v('customer_name')))||blank(24);
-    const father=own('father_name',v('father_name'));
+    /* THE SECOND PERSON ON THE FORM - the father, husband or guardian named on the line under
+       the applicant - and WHICH of S/O, D/O, W/O, C/O is ticked beside them. Where the tick was
+       read, only that one is printed; where it was not, all four are, for whoever settles the
+       draft to strike out the three that do not apply. */
+    const rel=v('relation_type').toUpperCase().replace(/[^SDWCO/]/g,'');
+    const relTxt=(['S/O','D/O','W/O','C/O'].indexOf(rel)>=0) ? rel : 'S/O, D/O, W/O, C/O';
+    const father=own('father_name',v('relation_name')||v('father_name'));
     const pan=own('pan',v('customer_pan'))||blank(12);
-    /* The Aadhaar is always a rule: the reader compares id numbers and discards them rather than
-       storing them, and an agreement is not a reason to change that. */
-    const aadhaar=blank(16);
+    /* The applicant's own Aadhaar, taken off their scanned card. Only theirs: a relative's or a
+       co-applicant's number is still compared and discarded, never stored and never printed. */
+    const aadhaar=String(res.applicant_aadhaar||'').trim()||blank(16);
     const age=wfAgeFrom(own('dob',v('customer_dob')));
     const occ=own('occupation',v('occupation'));
     const home=((Array.isArray(p&&p.address_lines)&&p.address_lines.length)
       ? p.address_lines : (Array.isArray(LT.address)?LT.address:[]))
       .join(', ').replace(/\s+/g,' ').trim();
-    return (sal?(sal+' '):'')+name+' S/O, D/O, W/O, C/O '+(father?nameCase(father):blank(22))
+    return (sal?(sal+' '):'')+name+' '+relTxt+' '+(father?nameCase(father):blank(22))
       +', PAN No. '+pan+', Aadhaar No. '+aadhaar
       +', by caste \u2013, Occupation - '+(occ?nameCase(occ):blank(12))
       +', aged about '+(age?String(age):blank(4))+' years, residing at '+(home||blank(40));
