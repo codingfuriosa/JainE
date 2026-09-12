@@ -13379,30 +13379,45 @@ function custUnitPicker(units,selUnitId){
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:invRows},{data:rcptRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
+  const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
     sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
     sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('outstanding_items').select('document_no,schedule,bill_amount').eq('unit_id',unit.id).eq('is_current',true)
   ]);
   const snap=snapRows||null;
-  const invoices=invRows||[], receiptRows=rcptRows||[], costItems=costItemRows||[], osItems=osRows||[];
+  const invoices=invRows||[], receiptRows=rcptRows||[], reversalRows=revRows||[], costItems=costItemRows||[], osItems=osRows||[];
+  // Per-invoice amount for the "Recent transactions" list below (still sourced from
+  // outstanding_items, which only carries currently-unpaid documents - a fully-paid invoice
+  // shows as 0 there, which is a display-only limitation for that one list, not the KPIs below).
   const osTotals={};
   osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);});
-  const totalDemand=invoices.reduce((s,inv)=>s+(osTotals[inv.document_no]||0),0);
-  const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.total_amount||0),0);
+  // "Demand due" must compare like with like: total ever billed (cost_sheet_items.bill_amount,
+  // which already accounts for every invoice raised to date) against total ever actually
+  // received (money_receipts minus receipt_reversals). Comparing outstanding_items (which only
+  // lists currently-unpaid documents) against all-time gross receipts - the old formula here -
+  // guarantees a false ~0 for anyone who has ever fully paid off an earlier invoice.
+  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
+  // Total property cost, computed live from the cost sheet (Basic + Extra + Adhoc + Tax) rather
+  // than the units.agreement_value column - keeps every figure on this page traceable to the
+  // same imported Sales Details cost sheet the customer's own charge breakdown comes from.
+  const totalCostWithTax=costItems.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
+  const grossReceipts=receiptRows.reduce((s,r)=>s+Number(r.total_amount||0),0);
+  const grossReversals=reversalRows.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
+  const netReceived=grossReceipts-grossReversals;
   const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
   const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
-  const propertyValue=snap?Number(snap.total_consideration||0):Number(unit.agreement_value||0);
-  const totalReceivedFinal=useCostSheet?csiReceived:totalReceived;
-  const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalDemand-totalReceived));
+  const propertyValue=snap?Number(snap.total_consideration||0):totalCostWithTax;
+  const totalReceivedFinal=useCostSheet?csiReceived:netReceived;
+  const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalBilled-netReceived));
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
   const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
   const remaining=Math.max(0,propertyValue-totalReceivedFinal);
-  const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalDemand?Math.round(totalReceivedFinal/totalDemand*100):0);
+  const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalBilled?Math.round(totalReceivedFinal/totalBilled*100):0);
 
   const lastInv=invoices.slice().sort((a,b)=>new Date(b.document_date||0)-new Date(a.document_date||0))[0];
   let dueBanner='';
@@ -13421,8 +13436,8 @@ async function custTabOverview(data,unit){
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
     ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
-    ['Demand due',custInr(billOutstanding),lastInv?esc(lastInv.document_no||''):'—',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'incl. handover')]
+    ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
+    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
   ];
 
   const entries=[];
@@ -13459,14 +13474,14 @@ async function custTabOverview(data,unit){
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
-    '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],
+    '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Total cost'],
       [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
         unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
         // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
         // purchase - a status badge that says so on every single statement is just noise. Worth
         // flagging only once something has actually gone wrong with the booking.
         unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
-        custInr(unit.agreement_value)]])+
+        custInr(propertyValue)]])+
     '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
     (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
       [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
