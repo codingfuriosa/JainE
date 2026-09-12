@@ -13532,7 +13532,11 @@ async function custTabLedger(unit){
   });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let runBal=0;
-  function balCell(b){return b>0?'<span>'+custInr(b)+' <small style="color:var(--slate)">D</small></span>':b<0?'<span style="color:#16855a">'+custInr(Math.abs(b))+' Adv</span>':'<span>0</span>';}
+  function balCell(b){
+    if(b>0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>';
+    if(b<0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>';
+    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">Settled</span>';
+  }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
     return [fmtDate(e.date),tags[e.type]||esc(e.type),esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
