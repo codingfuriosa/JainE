@@ -1344,8 +1344,14 @@ window.docMenu=function(e,id){
   setTimeout(()=>document.addEventListener('click',function h(){menu.remove();document.removeEventListener('click',h);}),0);
 };
 async function getDoc(id){const {data}=await sb.schema('doc').from('documents').select('*').eq('id',id).single();return data;}
+/* Logged here rather than from USAGE_MAP, and only once the document is actually in hand. A wrapper
+   fires on the click with nothing but the row id, which is why every "Preview / download document"
+   row in the report reads "—": 55 of them, and not one says which document. The name is the only
+   thing that makes the row mean anything. */
 window.docPreview=async function(id){
   const d=await getDoc(id);if(!d)return;
+  try{ usageQueue('legal.documents.preview_download_document','view',
+        {title:d.title||d.file_name||null, category:d.category||d.folder||null}); }catch(_e){}
   if(!d.storage_path){ if(d.link){window.open(d.link,'_blank');return;} toast('No file attached to this record.','');return; }
   if(isS3Path(d.storage_path)){ await s3OpenSigned(d.storage_path); return; }
   const {data,error}=await sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,120);
@@ -1354,6 +1360,8 @@ window.docPreview=async function(id){
 };
 window.docDownload=async function(id){
   const d=await getDoc(id);if(!d)return;
+  try{ usageQueue('legal.documents.preview_download_document','export',
+        {title:d.title||d.file_name||null, category:d.category||d.folder||null}); }catch(_e){}
   if(!d.storage_path){ if(d.link){window.open(d.link,'_blank');return;} toast('No file to download.','');return; }
   if(isS3Path(d.storage_path)){ await s3OpenSigned(d.storage_path,d.file_name||'download'); return; }
   const {data,error}=await sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,120,{download:d.file_name||true});
@@ -18310,8 +18318,13 @@ const USAGE_MAP={
   wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
   // Transcription
   trUploadStart:'transcription.all_calls.upload_call_recording_s',
-  trSetFilter:'transcription.all_calls.filter_calls_by_outcome_or_date',
-  trApplyDateRange:'transcription.all_calls.filter_calls_by_outcome_or_date',
+  /* Which filter, and which dates - a "Filter calls" row with nothing beside it says only that
+     somebody narrowed the list, never to what. Both read what the click itself carries. */
+  trSetFilter:{key:"transcription.all_calls.filter_calls_by_outcome_or_date",
+               meta:function(f){ return f?{filter:String(f)}:null; }},
+  trApplyDateRange:{key:"transcription.all_calls.filter_calls_by_outcome_or_date",
+               meta:function(){ var a=$("trDateFrom"),b=$("trDateTo");
+                 return (a&&a.value)||(b&&b.value) ? {from:(a&&a.value)||"any", to:(b&&b.value)||"any"} : null; }},
   trPinSelected:'transcription.all_calls.pin_unpin_calls',
   trAssignToFolder:'transcription.all_calls.add_calls_to_a_folder',
   trDownloadReport:'transcription.all_calls.download_call_report_or_copy_link',
@@ -18334,7 +18347,8 @@ const USAGE_MAP={
   trDownload:'transcription.call_detail.play_download_recording',
   // Legal — Documents
   docNewFolderSave:'legal.documents.add_folder_sub_category', docUploadSave:'legal.documents.upload_document',
-  docPreview:'legal.documents.preview_download_document', docDownload:'legal.documents.preview_download_document',
+  // docPreview / docDownload are NOT mapped here: the document is fetched inside the function, so
+  // only the function itself can say WHICH document was opened. They log directly at their source.
   docRenameSave:'legal.documents.rename_document',
   docMoveSave:'legal.documents.move_document_to_another_category',
   docMoveSaveLegal:'legal.documents.move_document_to_another_category',
@@ -18343,8 +18357,10 @@ const USAGE_MAP={
   docBulkDeleteConfirm:'legal.documents.bulk_download_delete',
   // Legal — MIS / Actions / Advocates
   misSave:'legal.mis.add_case', misUpdate:'legal.mis.edit_case', misDeleteSel:'legal.mis.delete_case_s',
-  misSetRange:'legal.mis.filter_cases_by_hearing_date_range',
-  misRangePick:'legal.mis.filter_cases_by_hearing_date_range',
+  misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
+               meta:function(v){ return v?{range:String(v)}:null; }},
+  misRangePick:{key:"legal.mis.filter_cases_by_hearing_date_range",
+               meta:function(v){ return v?{range:String(v)}:null; }},
   misActionExecute:'legal.mis.record_execute_a_case_action',
   misActionSave:'legal.mis.record_execute_a_case_action',
   misSwipeToggle:'legal.mis.mark_case_complete_reopen',
@@ -18364,7 +18380,9 @@ const USAGE_MAP={
   // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
   // candidates - so the old create-month / add-row / edit-cell actions have nothing to log.
-  muViewMonth:'hr.monthly_update.open_a_month',
+  // Which month was opened - the whole point of the action, and it is right there in the argument.
+  muViewMonth:{key:"hr.monthly_update.open_a_month",
+               meta:function(iso){ var l=muMonthLabel(iso); return l?{month:l}:null; }},
   // muDeleteSel logs directly (see below) after the delete actually succeeds, using the catalog's
   // real key 'delete_rows_or_whole_month' - the string that was here, 'remove_position_from_month',
   // does not exist in erp_feature_catalog and so could never be attributed to anything.
@@ -18385,10 +18403,16 @@ const USAGE_MAP={
   // Recruitment (ATS)
   rtSave:'recruitment.tests.add_test', rtUpdate:'recruitment.tests.rename_test',
   rtDelete:'recruitment.tests.delete_test_s',
-  rtPreview:'recruitment.tests.preview_test_responses_scores',
+  rtPreview:{key:"recruitment.tests.preview_test_responses_scores",
+               meta:function(id){ var r=(RT_RECORDS||[]).find(function(x){return x.id===id;});
+                 return r&&r.name?{title:r.name}:null; }},
   recJdSave:'recruitment.descriptions.upload_job_description',
-  recJdOpen:'recruitment.descriptions.preview_download_job_description',
-  recJdDownload:'recruitment.descriptions.preview_download_job_description',
+  recJdOpen:{key:"recruitment.descriptions.preview_download_job_description",
+               meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
+                 return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
+  recJdDownload:{key:"recruitment.descriptions.preview_download_job_description",
+               meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
+                 return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
   recDeleteSel:'recruitment.descriptions.delete_job_description_s',
   mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:'recruitment.manpower_form.edit_requisition',
   mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
