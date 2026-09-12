@@ -61,11 +61,26 @@ function closeModal(){$('overlay').classList.remove('show');$('modalHost').inner
    "This page says…" dialog (whose styling/wording is desktop-Chrome-specific and inconsistent
    or absent on mobile browsers). Usage: if(!await confirmDialog('Delete this task?'))return; */
 let __confirmResolve=null;
+/* Saying no here takes back the usage event the click already queued.
+   The generic USAGE_MAP wrapper fires on the CLICK, and for a button that asks "are you sure?"
+   that is a full second before anybody has agreed to anything - so a delete somebody thought
+   better of counted exactly the same as one they went through with. Twenty-six buttons across the
+   portal are built this way (deletes, rejections, closing hiring, restoring calls, the AI rewrite),
+   and the Usability report has been counting every abandoned one of them.
+   Retracting at the point of refusal fixes all twenty-six at once, and any confirm-gated button
+   added later, without moving the logging inside each function by hand - and without the opposite
+   mistake of unmapping them, which would have left those features recording nothing at all. It is
+   safe because the event is still sitting in the client-side queue unsent: only the event queued in
+   the same breath as this dialog opening qualifies (the modal blocks the UI, so no unrelated click
+   can land in between), and only while it is genuinely still unsent - a batch already on its way to
+   the server is left alone rather than chased. A feature that wants to record the specific thing it
+   deleted still logs directly at its own source, exactly as before. */
 function confirmDialog(message,opts){
   opts=opts||{};
   const danger=opts.danger!==false;
+  const pending=usagePendingClick();
   return new Promise(resolve=>{
-    __confirmResolve=resolve;
+    __confirmResolve=function(val){ if(val===false) usageRetract(pending); resolve(val); };
     openModal(`<div class="modal-head"><h3><i class="fa-solid ${opts.icon||(danger?'fa-triangle-exclamation':'fa-circle-question')}" style="color:${danger?'var(--err)':'var(--brand)'}"></i> ${esc(opts.title||'Please confirm')}</h3></div>
       <div class="modal-body">${esc(message)}</div>
       <div class="modal-foot"><button class="btn" onclick="__confirmAnswer(false)">Cancel</button><button class="btn ${danger?'btn-danger':'btn-primary'}" onclick="__confirmAnswer(true)">${esc(opts.okLabel||'Delete')}</button></div>`);
@@ -18561,6 +18576,24 @@ function usageAction(fn){
   return 'view';
 }
 let USAGE_Q=[], USAGE_TIMER=null;
+/* The event the most recent click queued, and when. Only ever read by the confirm-dialog retraction
+   above: an "are you sure?" that opens within a moment of a click is that click's dialog, and a
+   "no" means the thing the event claims happened never did. 1.5s is generous for a modal that opens
+   in the same call stack as the click, and tight enough that an older, unrelated event can never be
+   mistaken for this one. Held here rather than on the event itself so nothing extra travels to the
+   server in the batch payload. */
+let USAGE_LAST_EV=null, USAGE_LAST_AT=0;
+function usagePendingClick(){
+  return (USAGE_LAST_EV && (Date.now()-USAGE_LAST_AT)<1500) ? USAGE_LAST_EV : null;
+}
+function usageRetract(ev){
+  if(!ev) return false;
+  const i=USAGE_Q.indexOf(ev);
+  if(i===-1) return false;                       // already flushed - too late to take it back
+  USAGE_Q.splice(i,1);
+  if(USAGE_LAST_EV===ev){ USAGE_LAST_EV=null; USAGE_LAST_AT=0; }
+  return true;
+}
 // During an extended outage the queue would otherwise grow without bound; past this it's the
 // freshest activity that's kept, not the oldest, since an approximate recent picture beats an
 // exact but ancient one for a report read in terms of "the last 30 days".
@@ -18574,13 +18607,30 @@ const USAGE_MAX_Q=600;
 // rows logged so far, because nothing ever passed one. It is the project a task/record belongs to,
 // which the Usability report shows in its own column; a call site that doesn't know one passes
 // nothing, exactly as before. Trimmed to 64 chars because that is what erp_log_usage stores.
+/* A once-only id for each event, so a batch that arrives at the server twice is only stored once.
+   This is not hypothetical: 28 events are sitting in the table as exact duplicates - same person,
+   same feature, same microsecond - and the retry path is how they got there. usageFlush puts a
+   failed batch back on the queue and sends it again, but "failed" from the client's side includes
+   the case where the server committed the rows and the response was lost on the way back (a tab
+   going hidden mid-request does exactly this, which is why forwarding and receiving workflow steps
+   - clicked and immediately navigated away from - are the worst affected). The client cannot tell
+   that apart from a real failure, and it should not have to: the id makes re-sending harmless, so
+   the retry stays as safe as it is useful. randomUUID needs a secure context; the fallback is only
+   ever reached on http or a very old browser, and being unique per event is all that is asked of
+   it. */
+function usageEventId(){
+  try{ if(window.crypto&&crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+  return 'x'+Date.now().toString(16)+'-'+Math.random().toString(16).slice(2,10)
+        +'-'+Math.random().toString(16).slice(2,10);
+}
 function usageQueue(featureKey, action, meta, project){
   if(!featureKey || !(state&&state.email)) return;
   const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
-                action:action||'view', occurred_at:new Date().toISOString()};
+                action:action||'view', occurred_at:new Date().toISOString(), eid:usageEventId()};
   if(meta && typeof meta==='object') ev.meta=meta;
   if(project) ev.project=String(project).trim().slice(0,64) || undefined;
   USAGE_Q.push(ev);
+  USAGE_LAST_EV=ev; USAGE_LAST_AT=Date.now();    // so a refused confirm can take it back out again
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
