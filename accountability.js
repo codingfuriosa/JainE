@@ -3184,10 +3184,15 @@
     // Uma Chatterjee is supposed to be able to. Instance-creation now only bypasses trigger_owner
     // for the true superadmin account, matching the server-side fix below exactly.
     const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || eq(mySelf,'ayushruia1@gmail.com');
-    // Editing/deleting the workflow itself is just these two named accounts now — mirrors
+    // Deleting the workflow itself is still these two named accounts — mirrors
     // acc.wf_is_admin_dept() server-side exactly (which also keeps a real superadmin override,
     // a separate pre-existing concept unrelated to this pair).
     const canManage = eq(mySelf,'ayushruia1@gmail.com') || eq(mySelf,'businessanalyst@thejaingroup.com');
+    // Editing the workflow's own definition (its fields and steps) is narrower than deleting it -
+    // the Administrator alone, not the wider management pair. UI-only for now: the button is
+    // hidden from businessanalyst@, but acc.wf_is_admin_dept() still allows both accounts, so this
+    // is not yet real enforcement against a direct call.
+    const canManageEdit = eq(mySelf,'ayushruia1@gmail.com');
     window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
     /* Whether "New <noun>" opens the file chooser instead of a form - see wfNewInstance. Decided
        here, where the workflow has already been fetched, because the button's press has to act on
@@ -3272,9 +3277,29 @@
        allowed rather than being the thing that decides it.
        Reimbursement only: once an instance has moved past its first step, NEITHER right applies
        to anyone — not even the owner or the Administrator. A returned-for-correction instance is
-       exempt (current_step is reset back to the first step for exactly that reason). */
+       exempt (current_step is reset back to the first step for exactly that reason).
+       Booking Form only: Edit stops working from the same moment Delete already does everywhere -
+       its first step being received - rather than waiting for that step to be fully done. Delete
+       itself needs no change here: the generic "already started" block below (data-first-received)
+       already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
-    const canEditCase=function(c){ return !wfPastStep1Locked(c) && eq(c&&c.created_by, mySelf); };
+    const wfBookingStarted=function(c){
+      if(id!==41 || !c) return false;
+      const firstSeqHere = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
+      if(firstSeqHere==null) return false;
+      const fst=fcs.find(function(x){ return x.case_id===c.id && x.seq===firstSeqHere; });
+      return !!(fst&&(fst.received_at||fst.status==='received'||fst.status==='done'||fst.forwarded_at));
+    };
+    /* Booking Form: THE ADMINISTRATOR AND POST SALES, AND NOBODY ELSE - not even whoever raised it.
+       Every other workflow stays creator-only, which is the opposite rule, and deliberately so: a
+       booking carries the customer's KYC, their Aadhaar and the price they were quoted, and the
+       people who answer for those are the ones who may change them. Raising a booking does not
+       make it yours to edit afterwards. */
+    const canEditCase=function(c){
+      if(wfPastStep1Locked(c) || wfBookingStarted(c)) return false;
+      if(id===41) return eq(mySelf,'ayushruia1@gmail.com') || wfInDept('Post Sales');
+      return eq(c&&c.created_by, mySelf);
+    };
     const canDeleteCase=function(c){ return !wfPastStep1Locked(c) && (eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com')); };
     const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     /* PRINTING is not editing. Bulk print is for the people who have to file these - the claimant
@@ -3348,7 +3373,9 @@
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
-          +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
+          // Booking Form only: no Print here — printing a case with customer KYC/Aadhaar on it is
+          // Post Sales/Administrator's business from the instance itself, not a bulk action.
+          +(id!==41?'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>':'')
           // Reimbursement only: sits right beside the disabled "print selected" icon it is an
           // alternative to - one prints whatever you've ticked, this one prints the whole running
           // new-and-unprinted pile without having to select anything. Hidden while selCaseId is set
@@ -3385,8 +3412,8 @@
         +'<span class="wf-wr-seg wf-wr-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting <b>'+myWait+'</b></span>'
         +'<span class="wf-wr-seg wf-wr-recv"><i class="fa-solid fa-inbox"></i> Received <b>'+myRecv+'</b></span>'
       +'</span>'):'')
-      +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
-                  +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
+      +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
+      +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
       +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
@@ -3712,13 +3739,32 @@
     // Reimbursement only: past its first step, nobody edits it — see wfPastStep1Locked in
     // wfDetailPage / acc.wf_update_instance for the same rule. A returned instance is exempt.
     const pastStep1Locked=c.flow_id===39 && c.current_step>1 && !c.returned_at;
-    const canEditThis=!pastStep1Locked&&(c.status!=='Done'&&c.status!=='Cancelled')
-      &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
+    /* Booking Form only: Edit stops working the moment its first step is received - the same
+       "started" instant Delete already goes by elsewhere in this workflow - not only once the
+       whole thing is done. fcs is already fetched above, ordered by seq, so its first entry IS
+       the first step's own row. */
+    const fst0=fcs.length?fcs[0]:null;
+    const bookingStarted=c.flow_id===41 && !!(fst0&&(fst0.received_at||fst0.status==='received'||fst0.status==='done'||fst0.forwarded_at));
+    /* Booking Form: the Administrator and Post Sales only - see canEditCase for why. The creator
+       clause that every other workflow relies on is deliberately NOT applied here, so raising a
+       booking does not carry the right to edit it afterwards.
+       One consequence worth knowing: an instance RETURNED for correction can only be corrected by
+       those two as well. On this workflow that is who raises them anyway. */
+    const wfBookingCanAct=eq(me(),'ayushruia1@gmail.com')||wfInDept('Post Sales');
+    const canEditThis=!pastStep1Locked&&!bookingStarted&&(c.status!=='Done'&&c.status!=='Cancelled')
+      &&(c.flow_id===41
+         ? wfBookingCanAct
+         : (eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());})));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
-    const printBtn='<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
+    // Booking Form only: no Print button on the instance itself either - see the matching removal
+    // in wfDetailPage's bulk toolbar.
+    const printBtn=(c.flow_id===41)?'':'<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
     /* Booking Form only: the checklist being filled is specific to it. Reading the attachments
-       takes a minute or two, so it is a button somebody presses - not something that runs on open. */
-    const auditBtn=(c.flow_id===41)
+       takes a minute or two, so it is a button somebody presses - not something that runs on open.
+       These carry customer KYC and Aadhaar, so - unlike every other download in this file - only
+       the Administrator or Post Sales dept get to see the buttons at all, regardless of who
+       created the instance. */
+    const auditBtn=(c.flow_id===41&&wfBookingCanAct)
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
@@ -3935,6 +3981,36 @@
     return row.result;
   }
 
+  /* A DOWNLOAD SHOULD LET YOU LOOK FIRST. These four Booking Form documents used to save straight
+     to disk the moment the button was pressed. Fine for something already trusted; wrong for a
+     PDF carrying a customer's Aadhaar and KYC that somebody is about to hand over or file. Every
+     one of them now opens a preview of the finished PDF first - the file only reaches disk once a
+     person has looked at it and presses Download themselves. */
+  function wfPreviewPdf(bytes,filename,toastMsg){
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    let cleaned=false;
+    const cleanup=function(){ if(cleaned)return; cleaned=true; try{ URL.revokeObjectURL(url); }catch(_e){} };
+    openModal('<div class="modal-head"><h3>'+esc2(filename)+'</h3><span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="padding:0">'
+        +'<iframe src="'+esc2(url)+'" style="width:100%;height:70vh;border:0;display:block;background:#525659"></iframe>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" id="wfPvClose">Close Preview</button>'
+        +'<button class="ac-btn primary" id="wfPvGo"><i class="fa-solid fa-download"></i> Download</button></div>','lg');
+    setTimeout(function(){
+      const go=$('wfPvGo');
+      if(go) go.onclick=function(){
+        const a=document.createElement('a');
+        a.href=url; a.download=filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        if(toastMsg) toast(toastMsg,'ok');
+      };
+      const close=$('wfPvClose');
+      if(close) close.onclick=function(){ closeModal(); cleanup(); };
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); cleanup(); }; });
+    },30);
+  }
+
   window.wfWelcomeLetter=async function(caseId){
     let res=null;
     try{ res=await wfBookingReading(caseId); }
@@ -4047,13 +4123,7 @@
 
     const bytes=await doc.save();
     const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='Welcome Letter - '+name+'.pdf';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
-    toast('Welcome letter downloaded','ok');
+    wfPreviewPdf(bytes,'Welcome Letter - '+name+'.pdf','Welcome letter downloaded');
   }
 
   /* ── allotment letter ─────────────────────────────────────────────────────────────────────────
@@ -4509,19 +4579,14 @@
     foot();
 
     const bytes=await doc.save();
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
     const who=allotteeNames(res)[0]||'agreement';
-    const a=document.createElement('a');
-    a.href=url; a.download='Agreement for Sale - '+who.replace(/[^A-Za-z0-9 ]/g,'')+'.pdf';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
     /* Said at the moment of download rather than printed on the deed: a line on the face of an
        agreement saying which template it came from would travel with it to the customer. */
     const onGurukul=(tmpl.project===project);
-    toast('Agreement downloaded — the blanks on it are for the values the documents do not state'
+    wfPreviewPdf(bytes,'Agreement for Sale - '+who.replace(/[^A-Za-z0-9 ]/g,'')+'.pdf',
+      'Agreement downloaded — the blanks on it are for the values the documents do not state'
       +(onGurukul?'' : ('. It is set on the '+tmpl.project+' template, not '
-        +(project||'this booking’s project')+' — check the recitals before it goes out')),'ok');
+        +(project||'this booking’s project')+' — check the recitals before it goes out')));
   }
 
   /* THE APARTMENT, ITS PARKING, AND THE TWO TOGETHER - read off the cost sheet as stored.
@@ -4754,13 +4819,7 @@
 
     const bytes=await doc.save();
     const nm=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='Allotment Letter - '+nm+'.pdf';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
-    toast('Allotment letter downloaded','ok');
+    wfPreviewPdf(bytes,'Allotment Letter - '+nm+'.pdf','Allotment letter downloaded');
   }
   window.wfChecklistDownload=async function(caseId){
     let res=null;
@@ -4887,10 +4946,78 @@
        filled form looks like. Every value starts in the same column, so they read straight down
        instead of being hunted for. */
     const LBL=152, VX=M+LBL+18;
+
+    /* WHY IT FAILED, IN A FEW WORDS, ON THE SAME LINE.
+       A column of NOT OKs tells whoever picks the file up that something is wrong but not what,
+       and they then have to open the reading to find out. So each failed row carries its own
+       reason in brackets beside it.
+       These are WRITTEN SHORT rather than trimmed from the long reason the reader gives: a
+       sentence cut off mid-word reads worse than no sentence at all. Each is built from what was
+       actually decided, so it can never disagree with the verdict beside it. The full wording is
+       still in the reading for anyone who wants it. */
+    const clWhy=function(key){
+      if(key==='Cost Sheet'){
+        const parts=((res.cost_sheet_verdict||{}).parts)||[];
+        const bad=parts.filter(function(p){ return !p.ok; })
+                       .map(function(p){ return String(p.what||'').replace(/^the /,''); });
+        return bad.join(', ');
+      }
+      if(key==='KYC of Customer'){
+        // a card that is plainly the applicant's, spelt differently - the commonest failure
+        const nf=res.name_faults||[];
+        if(nf.length){
+          const m=String(nf[0]).match(/^The ([A-Z]+) card/);
+          const kind=m?(m[1].charAt(0)+m[1].slice(1).toLowerCase()):'ID';
+          return kind+' name differs';
+        }
+        const app=(((res.kyc||{}).people)||[]).filter(function(p){ return p.is_applicant; })[0];
+        if(app&&!app.aadhaar&&!app.pan) return 'no ID card for the applicant';
+        if(app&&app.dob_matches===false) return 'date of birth differs';
+        return 'ID does not agree';
+      }
+      if(key==='Mobile Number'){
+        const mb=(res.validation||{}).mobile||{};
+        return (mb.numbers&&mb.numbers.length)?'not a valid number':'none in the file';
+      }
+      if(key==='Email ID'){
+        const em=(res.validation||{}).email||{};
+        return (em.addresses&&em.addresses.length)?'not a usable address':'none in the file';
+      }
+      if(key==='Pan Card No.'){
+        const pn=(res.validation||{}).pan||{};
+        if(!pn.form_pan) return 'not stated on the form';
+        return pn.cards?'does not match the card':'not a valid PAN';
+      }
+      if(key==='Signatures'){
+        const sg=(res.signatures||{}).summary||{};
+        const n=((sg.unsigned)||[]).length;
+        if(n) return n+' page'+(n===1?'':'s')+' unsigned';
+        if(sg.cost_sheet_signed===false) return 'cost sheet unsigned';
+        return 'a signature is missing';
+      }
+      return '';
+    };
+
     const row=function(label,value,dim,edge){
       page.drawText(label,{x:M,y:y,size:10.5,font:reg,color:ink});
       page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
       page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
+      /* IT MUST NOT WRAP. The row is one line and a second one would push the whole sheet out of
+         shape, so the reason is measured against the space actually left on this line and left
+         off altogether if it will not fit. A missing note costs nothing; a broken sheet costs a
+         reprint. */
+      if(String(value)==='NOT OK'){
+        const why=clWhy(label);
+        if(why){
+          const vw=bold.widthOfTextAtSize(String(value),10.5);
+          const sx=VX+vw+7, room=(edge||R)-6-sx;
+          let t='('+why+')';
+          while(t.length>6 && reg.widthOfTextAtSize(t,8.5)>room)
+            t='('+t.slice(1,-2).replace(/[ ,;]+$/,'')+')';
+          if(reg.widthOfTextAtSize(t,8.5)<=room)
+            page.drawText(t,{x:sx,y:y,size:8.5,font:reg,color:soft});
+        }
+      }
       page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
     };
     // Nothing prints as UNKNOWN: a check that could not be settled reads NOT OK. See the reader.
@@ -4948,13 +5075,7 @@
     const bytes=await doc.save();
     const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
       .replace(/[^\w \-]/g,'').trim()||'booking';
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='Booking Form Check List - '+nm+'.pdf';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },4000);
-    toast('Check list downloaded','ok');
+    wfPreviewPdf(bytes,'Booking Form Check List - '+nm+'.pdf','Check list downloaded');
   }
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
@@ -7311,7 +7432,7 @@
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
-      +(caseRow?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
+      +(caseRow&&!(flow&&flow.id===41)?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
       +A+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTaskFields?wfInst:(wfInst+' - '+wfStepName))+'</b>'+(wfDayTable?wfDayTable:(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':''))+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
