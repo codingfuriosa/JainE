@@ -5,6 +5,16 @@ const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
 const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+/* For a value being dropped INSIDE a single-quoted JS string in an onclick attribute, which esc()
+   alone cannot make safe: it escapes & < > " and deliberately leaves the apostrophe alone, because
+   an apostrophe is harmless in HTML text. Inside onclick="f('...')" it is not harmless - it closes
+   the string early and the whole handler becomes a syntax error, so the click silently does
+   nothing. Real feature names hit this: "Open a day's agenda panel", "View a department's library",
+   "View a lead's combined call history".
+   Order matters. The backslash goes in FIRST, for the JS parser, and only then esc() for the HTML
+   parser - the other way round would HTML-encode the apostrophe to &#39;, which the browser decodes
+   back to a bare ' before the JS is ever parsed, leaving the bug exactly where it was. */
+const escJs=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 const state={user:null,email:null,profile:null,roles:null,super:false};
 // The access token, kept current from boot() and every onAuthStateChange firing. Usage telemetry's
 // unload-time flush needs it synchronously (a pagehide handler can't safely await getSession()) —
@@ -7838,10 +7848,21 @@ function usbBandStyle(b){ const f=USB_BANDS.find(function(x){return x[0]===b;})|
 // Opens on the past 30 days — one of the four fixed presets, no custom entry to fall back to.
 const USB={preset:'30d',from:null,to:null,email:'',dept:'',rows:null,people:null};
 /* The presets the user asked for, resolved against IST because a "month" is a month where the
-   people using this actually are. Kept as pure date maths so the same range is produced whatever
-   the browser's own timezone happens to be set to. */
+   people using this actually are.
+   The comment above this used to claim the same range came out "whatever the browser's own
+   timezone happens to be set to", and the code underneath it simply read new Date() - which is
+   local time, so the claim was only true on an Indian machine. Everywhere else the window slid by
+   a day against the server, which counts strictly in IST: someone opening "This Month" on the 1st
+   from a machine set behind IST asked for a range that began before the month did. Now the clock
+   is actually moved to Kolkata first, and the rest of the maths is unchanged. */
+function usbIstNow(){
+  // en-US gives "M/D/YYYY, h:mm:ss AM" for this locale, which Date can parse back; the point is
+  // only to land on the right calendar day in Kolkata, not to preserve the instant.
+  try{ return new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'})); }
+  catch(e){ return new Date(); }
+}
 function usbRange(preset){
-  const now=new Date(), y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
+  const now=usbIstNow(), y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
   const iso=function(dt){ return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); };
   if(preset==='week'){ const dow=(now.getDay()+6)%7; return {from:iso(new Date(y,m,d-dow)), to:iso(now)}; }   // Monday-start
   if(preset==='month'){ return {from:iso(new Date(y,m,1)), to:iso(now)}; }
@@ -8210,7 +8231,7 @@ function usbModuleDetailHtml(moduleId){
           const open=USB_FEAT_OPEN.has(r.feature_key);
           const clickable=Number(r.uses||0)>0;   // nobody used it — nothing to expand into
           const chev=clickable?'<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>':'<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
-          const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'+(clickable?' onclick="usbToggleFeature(\''+esc(r.feature_key)+'\')"':'')+'>'
+          const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'+(clickable?' onclick="usbToggleFeature(\''+escJs(r.feature_key)+'\')"':'')+'>'
             +'<td>'+chev+esc(r.feature)+'</td>'
             +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
             +'<td>'+Number(r.users||0)+'</td>'
@@ -8235,7 +8256,7 @@ function usbFeatureUsersRowHtml(r){
   }else{
     inner='<div class="usb-users-wrap">'
       +cached.map(function(u){
-        return '<div class="usb-user-line usb-user-clickable" onclick="usbOpenUserEvents(\''+esc(r.feature_key)+'\',\''+esc(u.email)+'\',\''+esc(r.feature)+'\')" title="See every individual use">'
+        return '<div class="usb-user-line usb-user-clickable" onclick="usbOpenUserEvents(\''+escJs(r.feature_key)+'\',\''+escJs(u.email)+'\',\''+escJs(r.feature)+'\')" title="See every individual use">'
           +'<span class="usb-user-name">'+esc(nameOf(u.email))+'</span>'
           +'<span class="usb-user-meta">'+u.uses+' use'+(u.uses===1?'':'s')+' · last '+esc(fmtDate(u.last_used))+' <i class="fa-solid fa-chevron-right" style="font-size:9px;color:var(--slate-2);margin-left:6px"></i></span></div>';
       }).join('')
@@ -8268,7 +8289,12 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(myToken!==USB_EV_TOKEN) return;   // superseded by a newer drill-down while this was in flight
   const wrap=$('usbEvWrap'); if(!wrap)return;   // closed before the round trip finished
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
-  const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
+  /* The server hands back at most 500 of these. Printing rows.length as "uses" without saying so
+     meant a heavy user's row reading 1,200 opened onto a panel headed "500 uses" - two numbers for
+     one thing, with nothing to say which was right. The activity log next door already owns up to
+     its own 1,000 cap; this one now does the same. */
+  const capNote=(rows.length>=500)?' (showing the most recent 500)':'';
+  const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
   // The 4th column was Project, and it was blank on nearly every row - only 13 of 896 tasks have a
   // project (tag) set at all, so on the Tasks features it never said anything. What a reader of
