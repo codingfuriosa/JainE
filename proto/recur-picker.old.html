@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Repeat picker</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/* JainE's own tokens, from nexus.css — the reference picker was a hotel's green; this is ours. */
+:root{
+  --ink:#0b1220; --slate:#64748b; --slate-2:#94a3b8;
+  --line:#e6eaf1; --line-2:#eef1f6; --bg:#f5f7fb; --card:#fff;
+  --brand:#1d4ed8; --brand-700:#1e40af; --brand-50:#eff4ff; --brand-a10:#eef2ff;
+  --err:#dc2626; --radius:11px;
+  --shadow-lg:0 10px 30px rgba(16,24,40,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;
+  -webkit-font-smoothing:antialiased;padding:34px 26px 120px}
+.demo-h{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px}
+.demo-s{color:var(--slate);font-size:13px;margin-bottom:22px}
+.demo-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;max-width:620px;
+  box-shadow:0 1px 2px rgba(16,24,40,.05)}
+.demo-lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);
+  display:block;margin-bottom:6px}
+.demo-out{margin-top:18px;font-size:12.5px;color:var(--slate);line-height:1.7}
+.demo-out code{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 6px;
+  font-size:12px;color:var(--ink)}
+
+/* ── the field that opens it ─────────────────────────────────────────────────────────────── */
+.rp-field{display:flex;align-items:center;gap:10px;width:100%;height:44px;padding:0 13px;
+  border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer;font:inherit;
+  color:var(--ink);text-align:left}
+.rp-field:hover{border-color:#cbd5e1}
+.rp-field.open{border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.10)}
+.rp-field i.lead{color:var(--slate);font-size:14px}
+.rp-field .val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.rp-field .val.none{color:var(--slate-2);font-weight:400}
+.rp-field i.caret{color:var(--slate-2);font-size:11px}
+
+/* ── the popover ─────────────────────────────────────────────────────────────────────────── */
+.rp-pop{position:absolute;z-index:70;background:#fff;border:1px solid var(--line);border-radius:12px;
+  box-shadow:var(--shadow-lg);overflow:hidden;display:none}
+.rp-pop.show{display:block}
+.rp-body{display:flex;align-items:stretch}
+
+/* left: the presets */
+.rp-side{width:194px;flex:none;border-right:1px solid var(--line);background:#fcfdff;padding:8px}
+.rp-opt{display:flex;align-items:center;gap:9px;width:100%;padding:9px 11px;border:0;border-radius:8px;
+  background:transparent;font:inherit;font-size:13.5px;color:var(--ink);cursor:pointer;text-align:left}
+.rp-opt:hover{background:var(--brand-a10)}
+.rp-opt.on{background:var(--brand);color:#fff;font-weight:600}
+.rp-opt i{width:15px;text-align:center;font-size:12px;color:var(--slate)}
+.rp-opt.on i{color:#fff}
+.rp-side-sep{height:1px;background:var(--line);margin:7px 9px}
+
+/* right: whatever that preset needs */
+.rp-main{padding:16px 18px;min-width:410px}
+.rp-main-h{font-size:13px;font-weight:700;margin-bottom:3px}
+.rp-main-s{font-size:12.5px;color:var(--slate);margin-bottom:14px;line-height:1.55}
+
+.rp-days{display:flex;gap:6px;flex-wrap:wrap}
+.rp-day{width:46px;height:40px;border:1px solid var(--line);border-radius:9px;background:#fff;
+  font:inherit;font-size:12.5px;font-weight:600;color:var(--slate);cursor:pointer}
+.rp-day:hover{border-color:var(--brand);color:var(--brand)}
+.rp-day.on{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* the 1–31 grid, for "on which date" */
+.rp-dates{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;max-width:340px}
+.rp-date{height:36px;border:1px solid transparent;border-radius:8px;background:var(--bg);
+  font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer}
+.rp-date:hover{border-color:var(--brand);color:var(--brand)}
+.rp-date.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.rp-last{margin-top:9px}
+.rp-chk{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);cursor:pointer}
+.rp-chk input{width:15px;height:15px;accent-color:var(--brand);cursor:pointer}
+
+.rp-months{display:flex;gap:6px;flex-wrap:wrap;max-width:340px}
+.rp-month{width:52px;height:34px;border:1px solid var(--line);border-radius:8px;background:#fff;
+  font:inherit;font-size:12px;font-weight:600;color:var(--slate);cursor:pointer}
+.rp-month:hover{border-color:var(--brand);color:var(--brand)}
+.rp-month.on{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* the two-month calendar — the shape of the picker in the reference */
+.rp-cal{display:flex;gap:26px;position:relative}
+.rp-cal-nav{position:absolute;top:-3px;width:28px;height:28px;border:1px solid var(--line);
+  border-radius:50%;background:#fff;color:var(--slate);cursor:pointer;font-size:11px}
+.rp-cal-nav:hover{border-color:var(--brand);color:var(--brand)}
+.rp-cal-nav.prev{left:0}
+.rp-cal-nav.next{right:0}
+.rp-cal-m{flex:1}
+.rp-cal-t{text-align:center;font-size:13.5px;font-weight:700;margin-bottom:10px}
+.rp-cal-g{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.rp-cal-g .dow{font-size:10.5px;font-weight:700;color:var(--slate-2);text-align:center;padding:4px 0 6px;
+  letter-spacing:.04em}
+.rp-cal-d{height:32px;border:0;border-radius:50%;background:transparent;font:inherit;font-size:12.5px;
+  color:var(--ink);cursor:pointer}
+.rp-cal-d:hover:not(:disabled){background:var(--brand-a10);color:var(--brand)}
+.rp-cal-d.on{background:var(--brand);color:#fff;font-weight:700}
+.rp-cal-d.today:not(.on){box-shadow:inset 0 0 0 1px var(--brand);font-weight:700}
+.rp-cal-d:disabled{color:#cbd5e1;cursor:default}
+.rp-cal-d.blank{visibility:hidden}
+
+/* ends-on */
+.rp-ends{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)}
+.rp-ends-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rp-pill{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border:1px solid var(--line);
+  border-radius:20px;background:#fff;font:inherit;font-size:12.5px;font-weight:600;color:var(--slate);cursor:pointer}
+.rp-pill:hover{border-color:var(--brand);color:var(--brand)}
+.rp-pill.on{background:var(--brand-a10);border-color:#bfd3fb;color:var(--brand)}
+.rp-num{width:64px;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 9px;font:inherit;
+  font-size:12.5px;text-align:center}
+
+/* footer — summary left, Reset and Done right, as in the reference */
+.rp-foot{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);
+  background:#fcfdff}
+.rp-sum{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--ink)}
+.rp-sum .sub{display:block;font-size:11.5px;font-weight:400;color:var(--slate);margin-top:2px}
+.rp-reset{background:none;border:0;font:inherit;font-size:13px;color:var(--slate);text-decoration:underline;
+  cursor:pointer;padding:6px 4px}
+.rp-reset:hover{color:var(--err)}
+.rp-done{height:38px;padding:0 22px;border:0;border-radius:9px;background:var(--brand);color:#fff;
+  font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+.rp-done:hover{background:var(--brand-700)}
+
+@media(max-width:760px){
+  .rp-body{flex-direction:column}
+  .rp-side{width:100%;border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;
+    overflow-x:auto;padding:8px}
+  .rp-opt{width:auto;white-space:nowrap}
+  .rp-side-sep{display:none}
+  .rp-main{min-width:0;padding:14px}
+  .rp-cal{flex-direction:column;gap:18px}
+  .rp-pop{left:10px!important;right:10px;width:auto}
+}
+</style>
+</head>
+<body>
+
+<div class="demo-h">Repeat picker</div>
+<div class="demo-s">Presets on the left, whatever that preset needs on the right &mdash; the shape of the
+  date picker you sent, in JAIN-E's own colours.</div>
+
+<div class="demo-card">
+  <label class="demo-lbl" for="rpField">Repeats</label>
+  <button type="button" class="rp-field" id="rpField" aria-haspopup="dialog" aria-expanded="false">
+    <i class="fa-solid fa-rotate lead"></i>
+    <span class="val none" id="rpVal">Does not repeat</span>
+    <i class="fa-solid fa-chevron-down caret"></i>
+  </button>
+  <div class="demo-out" id="rpOut"></div>
+</div>
+
+<div class="rp-pop" id="rpPop" role="dialog" aria-label="Repeat"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   The repeat picker.
+   Built as one self-contained object so it can be lifted into accountability.js and opened from
+   the task form without carrying anything else along. It only ever produces a plain rule object -
+   nothing here knows about tasks, series or the calendar.
+
+   Deliberately mirrors the vocabulary Meetings already uses in this module (Daily / Weekly on a
+   day / Monthly on a date), and adds the longer cycles asked for. Anything more exotic than these
+   lives behind "Custom dates", which is an explicit list rather than another rule to learn.
+   ══════════════════════════════════════════════════════════════════════════════════════════════ */
+(function () {
+  var DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var DOW_S = ['SU','MO','TU','WE','TH','FR','SA'];
+  var MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var MON_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  var PRESETS = [
+    { key:'none',      label:'Does not repeat', icon:'fa-ban' },
+    { key:'daily',     label:'Daily',           icon:'fa-sun' },
+    { key:'weekly',    label:'Weekly',          icon:'fa-calendar-week' },
+    { key:'monthly',   label:'Monthly',         icon:'fa-calendar-days' },
+    { key:'quarterly', label:'Quarterly',       icon:'fa-calendar' },
+    { key:'halfyear',  label:'Half-yearly',     icon:'fa-calendar' },
+    { key:'yearly',    label:'Yearly',          icon:'fa-cake-candles' },
+    { key:'custom',    label:'Custom dates',    icon:'fa-hand-pointer' }
+  ];
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function iso(y,m,d){ return y+'-'+pad(m+1)+'-'+pad(d); }
+  function todayISO(){ var t=new Date(); return iso(t.getFullYear(), t.getMonth(), t.getDate()); }
+  // "Tue 8 Sep 2026" - the shape the reference picker uses in its own footer
+  function fmtLong(s){
+    if(!s) return '';
+    var d=new Date(s+'T00:00:00');
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+fmtISO(s);
+  }
+  function fmtISO(s){
+    if(!s) return '';
+    var p=String(s).split('-');
+    return Number(p[2])+' '+MON_S[Number(p[1])-1]+' '+p[0];
+  }
+  function ord(n){
+    n=Number(n);
+    if(n===0) return 'last day';
+    var s=['th','st','nd','rd'], v=n%100;
+    return n+(s[(v-20)%10]||s[v]||s[0]);
+  }
+  function daysIn(y,m){ return new Date(y,m+1,0).getDate(); }
+
+  // The rule. Everything the picker knows, and all it hands back.
+  var R = null;
+  function blank(){
+    var t=new Date();
+    return {
+      freq:'none',
+      dueDate: iso(t.getFullYear(), t.getMonth(), t.getDate()),   // the one date, when not repeating
+      weekdays:[t.getDay()],          // weekly
+      onDate:t.getDate(),             // monthly / quarterly / half-yearly / yearly (0 = last day)
+      months:[t.getMonth()],          // quarterly / half-yearly / yearly
+      dates:[],                       // custom
+      skipWeekends:false,             // daily
+      ends:'never',                   // 'never' | 'on' | 'after'
+      until:'',
+      count:12
+    };
+  }
+
+  var field=document.getElementById('rpField');
+  var valEl=document.getElementById('rpVal');
+  var pop=document.getElementById('rpPop');
+  var outEl=document.getElementById('rpOut');
+  var draft=null;                     // edited copy; only committed on Done
+  var calMonth=null;                  // left-hand month of the two-month calendar
+
+  // ── plain English, which is the only description anybody should have to read ────────────────
+  function describe(r){
+    if(!r) return 'No date set';
+    if(r.freq==='none') return r.dueDate ? ('Due '+fmtLong(r.dueDate)) : 'No date set';
+    var s='';
+    if(r.freq==='daily') s = r.skipWeekends ? 'Every weekday' : 'Every day';
+    else if(r.freq==='weekly'){
+      var d=(r.weekdays||[]).slice().sort();
+      if(!d.length) s='Weekly';
+      else if(d.length===7) s='Every day';
+      else s='Every week on '+d.map(function(x){return DOW[x];}).join(', ');
+    }
+    else if(r.freq==='monthly')   s='Every month on the '+ord(r.onDate);
+    else if(r.freq==='quarterly') s='Every 3 months on the '+ord(r.onDate);
+    else if(r.freq==='halfyear')  s='Every 6 months on the '+ord(r.onDate);
+    else if(r.freq==='yearly'){
+      var m=(r.months||[]).slice().sort(function(a,b){return a-b;});
+      s='Every year on the '+ord(r.onDate)+' of '+(m.length?m.map(function(x){return MON[x];}).join(', '):MON[0]);
+    }
+    else if(r.freq==='custom'){
+      var n=(r.dates||[]).length;
+      s = n ? ('On '+n+' chosen date'+(n===1?'':'s')) : 'Custom dates — none chosen yet';
+    }
+    if(r.ends==='on' && r.until) s+=', until '+fmtISO(r.until);
+    if(r.ends==='after') s+=', '+r.count+' time'+(Number(r.count)===1?'':'s');
+    return s;
+  }
+
+  // ── the right-hand pane, per preset ────────────────────────────────────────────────────────
+  function paneDaily(){
+    return head('Every day','It will appear once a day. Weekends can be skipped for something that only makes sense on a working day.')
+      + '<label class="rp-chk"><input type="checkbox" data-a="weekends"'+(draft.skipWeekends?' checked':'')+'> '
+      + 'Skip Saturdays and Sundays</label>';
+  }
+  function paneWeekly(){
+    var h=head('Every week','Pick the day, or several — something due twice a week is two days, not two rules.');
+    h+='<div class="rp-days">';
+    for(var i=0;i<7;i++){
+      h+='<button type="button" class="rp-day'+((draft.weekdays||[]).indexOf(i)>-1?' on':'')+'" data-a="dow" data-i="'+i+'">'+DOW_S[i]+'</button>';
+    }
+    return h+'</div>';
+  }
+  function paneOnDate(title,sub){
+    var h=head(title,sub);
+    h+='<div class="rp-dates">';
+    for(var d=1;d<=31;d++){
+      h+='<button type="button" class="rp-date'+(Number(draft.onDate)===d?' on':'')+'" data-a="date" data-i="'+d+'">'+d+'</button>';
+    }
+    h+='</div><div class="rp-last"><label class="rp-chk"><input type="checkbox" data-a="lastday"'
+      +(Number(draft.onDate)===0?' checked':'')+'> Last day of the month instead</label></div>';
+    /* 29, 30 and 31 do not exist in every month, and silently sliding to the 1st of the next month
+       is the kind of thing nobody notices until a deadline is wrong. Said out loud instead. */
+    if(Number(draft.onDate)>28){
+      h+='<div class="rp-main-s" style="margin:10px 0 0;color:var(--brand)">'
+        +'<i class="fa-solid fa-circle-info"></i> In a month with no '+ord(draft.onDate)
+        +', it will fall on that month’s last day.</div>';
+    }
+    return h;
+  }
+  function paneYearly(){
+    var h=paneOnDate('Every year','Pick the date, then the month or months it falls in.');
+    h+='<div class="rp-main-h" style="margin-top:16px">Month</div><div class="rp-months">';
+    for(var m=0;m<12;m++){
+      h+='<button type="button" class="rp-month'+((draft.months||[]).indexOf(m)>-1?' on':'')+'" data-a="mon" data-i="'+m+'">'+MON_S[m]+'</button>';
+    }
+    return h+'</div>';
+  }
+  function paneCustom(){
+    return head('Custom dates','Click the days it should appear on. Nothing is worked out — it happens exactly on the dates you pick.')
+      + calendarHtml(draft.dates||[], 'cdate');
+  }
+  function head(t,s){ return '<div class="rp-main-h">'+t+'</div><div class="rp-main-s">'+s+'</div>'; }
+
+  /* "Does not repeat" IS the ordinary date picker. One field does both jobs - pick a day here, or
+     pick a repeat on the left - so there is no separate due-date box to keep in step with it. */
+  function paneOnce(){
+    return head('Due date','Pick the day it is due. Choose a repeat on the left if it should come back.')
+      + calendarHtml(draft.dueDate?[draft.dueDate]:[], 'due');
+  }
+
+  /* Two months side by side with arrows between them - the shape of the reference picker. Also
+     reused, on its own, for "until" under Ends. */
+  function calendarHtml(selected, action){
+    var base = calMonth || (function(){ var t=new Date(); return {y:t.getFullYear(), m:t.getMonth()}; })();
+    var today = todayISO();
+    var h='<div class="rp-cal">'
+      + '<button type="button" class="rp-cal-nav prev" data-a="cal" data-i="-1" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button>'
+      + '<button type="button" class="rp-cal-nav next" data-a="cal" data-i="1" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button>';
+    for(var k=0;k<2;k++){
+      var m=base.m+k, y=base.y+Math.floor(m/12); m=((m%12)+12)%12;
+      h+='<div class="rp-cal-m"><div class="rp-cal-t">'+MON[m]+' '+y+'</div><div class="rp-cal-g">';
+      for(var i=0;i<7;i++) h+='<div class="dow">'+DOW_S[i]+'</div>';
+      var first=new Date(y,m,1).getDay();
+      for(var b=0;b<first;b++) h+='<button type="button" class="rp-cal-d blank" disabled></button>';
+      for(var d=1;d<=daysIn(y,m);d++){
+        var s=iso(y,m,d), cls='rp-cal-d';
+        if(selected.indexOf(s)>-1) cls+=' on';
+        if(s===today) cls+=' today';
+        // A repeat that starts in the past would fire nothing, so past days are not selectable.
+        var dis = s<today ? ' disabled' : '';
+        h+='<button type="button" class="'+cls+'" data-a="'+action+'" data-d="'+s+'"'+dis+'>'+d+'</button>';
+      }
+      h+='</div></div>';
+    }
+    return h+'</div>';
+  }
+
+  function endsHtml(){
+    if(draft.freq==='none' || draft.freq==='custom') return '';   // custom already IS a finite list
+    var h='<div class="rp-ends"><div class="rp-main-h" style="margin-bottom:9px">Ends</div><div class="rp-ends-row">'
+      + pill('never','Never','fa-infinity')
+      + pill('on','On a date','fa-calendar-day')
+      + pill('after','After','fa-list-ol');
+    if(draft.ends==='after'){
+      h+='<input class="rp-num" type="number" min="1" max="365" value="'+Number(draft.count||12)+'" data-a="count"> times';
+    }
+    h+='</div>';
+    if(draft.ends==='on'){
+      h+='<div style="margin-top:14px">'+calendarHtml(draft.until?[draft.until]:[], 'until')+'</div>';
+    }
+    return h+'</div>';
+  }
+  function pill(v,label,icon){
+    return '<button type="button" class="rp-pill'+(draft.ends===v?' on':'')+'" data-a="ends" data-v="'+v+'">'
+      +'<i class="fa-solid '+icon+'"></i>'+label+'</button>';
+  }
+
+  function render(){
+    var side='<div class="rp-side">';
+    PRESETS.forEach(function(p,i){
+      if(p.key==='custom') side+='<div class="rp-side-sep"></div>';
+      side+='<button type="button" class="rp-opt'+(draft.freq===p.key?' on':'')+'" data-a="freq" data-v="'+p.key+'">'
+        +'<i class="fa-solid '+p.icon+'"></i>'+p.label+'</button>';
+    });
+    side+='</div>';
+
+    var main='';
+    if(draft.freq==='none')           main=paneOnce();
+    else if(draft.freq==='daily')     main=paneDaily();
+    else if(draft.freq==='weekly')    main=paneWeekly();
+    else if(draft.freq==='monthly')   main=paneOnDate('Every month','Pick the date of the month it falls on.');
+    else if(draft.freq==='quarterly') main=paneOnDate('Every 3 months','Pick the date. It repeats every third month from the first one.');
+    else if(draft.freq==='halfyear')  main=paneOnDate('Every 6 months','Pick the date. It repeats every sixth month from the first one.');
+    else if(draft.freq==='yearly')    main=paneYearly();
+    else                              main=paneCustom();
+
+    pop.innerHTML='<div class="rp-body">'+side+'<div class="rp-main">'+main+endsHtml()+'</div></div>'
+      +'<div class="rp-foot">'
+        +'<div class="rp-sum">'+describe(draft)+'<span class="sub">'+nextUp(draft)+'</span></div>'
+        +'<button type="button" class="rp-reset" data-a="reset">Reset</button>'
+        +'<button type="button" class="rp-done" data-a="done">Done</button>'
+      +'</div>';
+  }
+
+  /* The next few dates it would actually land on. Worth showing: "every month on the 31st" reads
+     fine and behaves surprisingly, and this is where somebody notices before saving. */
+  function nextUp(r){
+    var d=occurrences(r,3);
+    if(r.freq==='none') return r.dueDate ? 'One task, once' : 'Pick a day on the right';
+    if(!d.length) return 'Nothing scheduled yet';
+    return 'Next: '+d.map(fmtISO).join(' · ');
+  }
+  function occurrences(r,n){
+    if(!r || r.freq==='none') return [];
+    if(r.freq==='custom') return (r.dates||[]).slice().sort().slice(0,n);
+    var out=[], t=new Date(), cur=new Date(t.getFullYear(),t.getMonth(),t.getDate()), guard=0;
+    var until = (r.ends==='on' && r.until) ? r.until : null;
+    var cap = (r.ends==='after') ? Number(r.count||0) : Infinity;
+    while(out.length<n && guard++<800){
+      var s=iso(cur.getFullYear(),cur.getMonth(),cur.getDate());
+      if(until && s>until) break;
+      if(out.length>=cap) break;
+      if(hits(r,cur)) out.push(s);
+      cur.setDate(cur.getDate()+1);
+    }
+    return out;
+  }
+  function hits(r,d){
+    var dom=d.getDate(), mo=d.getMonth(), last=daysIn(d.getFullYear(),mo);
+    var want = Number(r.onDate)===0 ? last : Math.min(Number(r.onDate), last);  // 31st in a 30-day month
+    if(r.freq==='daily') return r.skipWeekends ? (d.getDay()!==0 && d.getDay()!==6) : true;
+    if(r.freq==='weekly') return (r.weekdays||[]).indexOf(d.getDay())>-1;
+    if(r.freq==='monthly') return dom===want;
+    if(r.freq==='quarterly') return dom===want && (mo%3)===(new Date().getMonth()%3);
+    if(r.freq==='halfyear') return dom===want && (mo%6)===(new Date().getMonth()%6);
+    if(r.freq==='yearly') return dom===want && (r.months||[]).indexOf(mo)>-1;
+    return false;
+  }
+
+  // ── open / close ───────────────────────────────────────────────────────────────────────────
+  function open(){
+    draft=JSON.parse(JSON.stringify(R||blank()));
+    calMonth=null;
+    render();
+    pop.classList.add('show');
+    field.classList.add('open');
+    field.setAttribute('aria-expanded','true');
+    place();
+  }
+  function close(){
+    pop.classList.remove('show');
+    field.classList.remove('open');
+    field.setAttribute('aria-expanded','false');
+  }
+  function place(){
+    var r=field.getBoundingClientRect();
+    pop.style.left=(r.left+window.scrollX)+'px';
+    pop.style.top=(r.bottom+window.scrollY+8)+'px';
+    // if it would run off the bottom, sit it above the field instead
+    var h=pop.offsetHeight;
+    if(r.bottom+8+h > window.innerHeight && r.top-8-h > 0){
+      pop.style.top=(r.top+window.scrollY-8-h)+'px';
+    }
+    var w=pop.offsetWidth;
+    if(r.left+w > window.innerWidth-12) pop.style.left=Math.max(12,window.innerWidth-w-12+window.scrollX)+'px';
+  }
+
+  function commit(){
+    R = JSON.parse(JSON.stringify(draft));
+    paintField();
+    close();
+  }
+  /* Split out from commit() deliberately. The closed state has to be painted once on load, and at
+     that point there is no draft to read - calling commit() for it threw on draft.freq, which
+     killed the script before a single handler was attached, so the field did nothing at all. */
+  function paintField(){
+    var repeats = !!(R && R.freq && R.freq !== 'none');
+    valEl.textContent = describe(R);
+    valEl.className = 'val' + ((repeats || (R && R.dueDate)) ? '' : ' none');
+    var lead = field.querySelector('i.lead');
+    if(lead) lead.className = repeats ? 'fa-solid fa-rotate lead' : 'fa-solid fa-calendar-day lead';
+    if(!outEl) return;
+    outEl.innerHTML = repeats
+      ? 'Rule handed back to the form:<br><code>'+JSON.stringify(R)+'</code>'
+        + '<br>Next ten: '+occurrences(R,10).map(fmtISO).join(' &middot; ')
+      : 'A single dated task, exactly as tasks work today:<br><code>'
+        + JSON.stringify({freq:'none', dueDate:(R&&R.dueDate)||null})+'</code>';
+  }
+
+  field.addEventListener('click', function(){ pop.classList.contains('show') ? close() : open(); });
+  document.addEventListener('click', function(e){
+    if(pop.classList.contains('show') && !pop.contains(e.target) && e.target!==field && !field.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  window.addEventListener('resize', function(){ if(pop.classList.contains('show')) place(); });
+
+  pop.addEventListener('click', function(e){
+    var el=e.target.closest('[data-a]'); if(!el) return;
+    /* Stop it here. render() below replaces the panel's contents, so by the time this click
+       reached the document the clicked element was detached - and the outside-click check reads a
+       detached target as "not inside the panel" and closed it. Every click in the panel shut it. */
+    e.stopPropagation();
+    var a=el.getAttribute('data-a');
+    if(a==='freq'){
+      draft.freq=el.getAttribute('data-v');
+      if(draft.freq==='custom') draft.ends='never';
+      // a fresh weekly with nothing ticked would never fire - start it on today
+      if(draft.freq==='weekly' && !(draft.weekdays||[]).length) draft.weekdays=[new Date().getDay()];
+      if(draft.freq==='yearly' && !(draft.months||[]).length) draft.months=[new Date().getMonth()];
+    }
+    else if(a==='dow'){
+      var i=Number(el.getAttribute('data-i')), k=draft.weekdays.indexOf(i);
+      if(k>-1){ if(draft.weekdays.length>1) draft.weekdays.splice(k,1); }   // never leave it empty
+      else draft.weekdays.push(i);
+    }
+    else if(a==='date')    draft.onDate=Number(el.getAttribute('data-i'));
+    else if(a==='lastday') draft.onDate = el.checked ? 0 : new Date().getDate();
+    else if(a==='mon'){
+      var m=Number(el.getAttribute('data-i')), j=draft.months.indexOf(m);
+      if(j>-1){ if(draft.months.length>1) draft.months.splice(j,1); } else draft.months.push(m);
+    }
+    else if(a==='weekends') draft.skipWeekends=el.checked;
+    else if(a==='cdate'){
+      var s=el.getAttribute('data-d'), p=draft.dates.indexOf(s);
+      if(p>-1) draft.dates.splice(p,1); else draft.dates.push(s);
+    }
+    else if(a==='due')    draft.dueDate=el.getAttribute('data-d');
+    else if(a==='until')  draft.until=el.getAttribute('data-d');
+    else if(a==='ends')   draft.ends=el.getAttribute('data-v');
+    else if(a==='cal'){
+      var base=calMonth||(function(){var t=new Date();return {y:t.getFullYear(),m:t.getMonth()};})();
+      var mm=base.m+Number(el.getAttribute('data-i'));
+      calMonth={ y: base.y+Math.floor(mm/12), m: ((mm%12)+12)%12 };
+    }
+    else if(a==='reset'){ draft=blank(); calMonth=null; }
+    else if(a==='done'){ commit(); return; }
+    render(); place();
+  });
+  // checkboxes and the number box report through change/input, not click
+  pop.addEventListener('change', function(e){
+    var el=e.target.closest('[data-a]'); if(!el) return;
+    e.stopPropagation();   // same reason as the click handler above
+    var a=el.getAttribute('data-a');
+    if(a==='weekends'){ draft.skipWeekends=el.checked; render(); place(); }
+    if(a==='lastday'){ draft.onDate = el.checked ? 0 : new Date().getDate(); render(); place(); }
+    if(a==='count'){ draft.count=Math.max(1,Math.min(365,Number(el.value)||1)); render(); place(); }
+  });
+
+  R = blank();          // a task starts with today's date and no repeat
+  paintField();
+})();
+</script>
+</body>
+</html>

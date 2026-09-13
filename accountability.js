@@ -513,6 +513,134 @@
     .nt-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line-2);cursor:pointer}.nt-item:hover{background:#f8fafc}.nt-item.unread{background:var(--brand-a10,#f5f7ff)}
     .nt-item.urg{background:#fef2f2}
     #notifDd{width:340px;max-width:92vw}
+
+    /* ── due date + repeat picker ──────────────────────────────────────────────────────────
+       How often on the left; on the right, only what that choice needs. One fixed height, so
+       the panel does not grow or shrink as options are clicked. */
+    /* Capped to the window, and its own body scrolls. The panel is position:fixed, so anything
+       hanging below the fold cannot be scrolled into view - which is what made Done unreachable
+       and read as "the page will not scroll". The summary line and the footer stay put; only the
+       rail and the calendar scroll. */
+    .dp-pop{width:432px;max-width:min(94vw,432px);background:#fff;border:1px solid var(--line);
+      border-radius:12px;box-shadow:0 10px 30px rgba(16,24,40,.16);overflow:hidden;
+      display:flex;flex-direction:column;max-height:calc(100vh - 20px)}
+    .dp-body{display:flex;align-items:stretch;overflow-y:auto;min-height:0}
+    .dp-says,.dp-foot{flex:none}
+    .dp-rail{width:142px;flex:none;border-right:1px solid var(--line);background:#fbfcfe;
+      padding:8px 7px;display:flex;flex-direction:column;gap:1px}
+    .dp-opt{width:100%;height:31px;padding:0 10px;border:0;border-radius:7px;background:transparent;
+      font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+    .dp-opt:hover{background:var(--brand-a10,#eef2ff)}
+    .dp-opt.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:600}
+    .dp-main{flex:1;min-width:0;padding:10px 12px 12px;min-height:314px;display:flex;flex-direction:column}
+    .dp-ask{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:8px}
+    .dp-ask .req{color:var(--brand,#1d4ed8);letter-spacing:0;text-transform:none;font-weight:600}
+    .dp-note{font-size:11.5px;color:var(--slate);line-height:1.55}
+    .dp-head{display:flex;align-items:center;gap:2px;margin-bottom:4px}
+    .dp-title{flex:1;text-align:center;font-size:12.5px;font-weight:700}
+    .dp-nav{width:25px;height:25px;flex:none;display:flex;align-items:center;justify-content:center;
+      border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:11px}
+    .dp-nav:hover{background:var(--brand-a10,#eef2ff);color:var(--brand,#1d4ed8)}
+    .dp-dow{display:grid;grid-template-columns:repeat(7,1fr)}
+    .dp-dow span{text-align:center;font-size:10px;font-weight:700;color:var(--slate-2,#94a3b8);
+      padding-bottom:2px}
+    .dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+    .dp-day{height:30px;border:0;border-radius:7px;background:transparent;font:inherit;
+      font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;
+      position:relative;padding:0}
+    .dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10,#eef2ff)}
+    .dp-day.pad{color:var(--slate-2,#94a3b8);opacity:.4}
+    .dp-day[disabled]{color:var(--slate-2,#94a3b8);opacity:.3;cursor:default}
+    .dp-day.on{background:var(--brand,#1d4ed8);color:#fff;font-weight:700}
+    .dp-day.today:not(.on)::after{content:'';position:absolute;left:50%;bottom:4px;width:3px;
+      height:3px;margin-left:-1.5px;border-radius:50%;background:var(--brand,#1d4ed8)}
+    /* the multi-select grids: weekdays, dates of the month, months of the year */
+    .dp-chips{display:grid;gap:4px}
+    .dp-chips.dow{grid-template-columns:repeat(7,1fr)}
+    .dp-chips.dom{grid-template-columns:repeat(7,1fr)}
+    /* six across, two rows: twelve months in half the height, which is what leaves room for the
+       chosen month's dates underneath without the panel growing */
+    .dp-chips.mon{grid-template-columns:repeat(6,1fr)}
+    .dp-chips.mon .dp-chip{font-size:11px;height:28px;flex-direction:column;gap:0;line-height:1}
+    .dp-chip{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;font:inherit;
+      font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);cursor:pointer;padding:0;
+      display:flex;align-items:center;justify-content:center}
+    .dp-chip:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-chip.on{background:var(--brand,#1d4ed8);border-color:var(--brand,#1d4ed8);color:#fff;
+      font-weight:700}
+    .dp-chip.wide{grid-column:span 3}
+    /* a dot, not a number: at 44px wide a count would crowd the month name */
+    .dp-chip .pip{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.75;
+      margin-top:2px}
+    /* which month the date grid belongs to */
+    .dp-chip.active{box-shadow:0 0 0 2px var(--brand-a10,#eef2ff),0 0 0 3px var(--brand,#1d4ed8)}
+    .dp-sub{display:flex;align-items:baseline;gap:8px;margin:11px 0 7px;padding-top:10px;
+      border-top:1px solid var(--line)}
+    .dp-sub .lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate)}
+    .dp-sub .rm{margin-left:auto;border:0;background:transparent;padding:0;font:inherit;font-size:11px;
+      color:var(--slate-2,#94a3b8);cursor:pointer;text-decoration:underline}
+    .dp-sub .rm:hover{color:#dc2626}
+    .dp-empty{margin-top:11px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;
+      color:var(--slate);line-height:1.55}
+    .dp-quick{display:flex;gap:4px;margin-top:7px}
+    .dp-quick button{flex:1;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;
+      font:inherit;font-size:11.5px;font-weight:500;color:var(--slate);cursor:pointer;
+      white-space:nowrap;padding:0}
+    .dp-quick button:hover{border-color:var(--brand,#1d4ed8);color:var(--brand,#1d4ed8);
+      background:var(--brand-50,#eff4ff)}
+    .dp-mode{display:flex;align-items:center;gap:7px;margin-bottom:6px;padding:6px 9px;
+      border-radius:7px;background:var(--brand-50,#eff4ff);color:var(--brand-700,#1e40af);
+      font-size:11.5px;font-weight:600}
+    .dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:11.5px;
+      font-weight:600;color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline;padding:0}
+    /* min-height so the footer does not shuffle as the sentence wraps */
+    .dp-says{border-top:1px solid var(--line);background:#f8fafc;padding:9px 12px;font-size:11.5px;
+      color:var(--slate);line-height:1.55;min-height:56px}
+    .dp-says b{color:var(--ink);font-weight:600}
+    .dp-says .warn{color:var(--brand,#1d4ed8);margin-top:2px}
+    .dp-says .miss{color:#dc2626;font-weight:600}
+    .dp-says .ends{margin-top:4px}
+    .dp-says .ends button{border:0;background:transparent;padding:0;font:inherit;font-size:11.5px;
+      color:var(--brand,#1d4ed8);cursor:pointer;text-decoration:underline}
+    .dp-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}
+    .dp-foot .dp-clear{border:0;background:transparent;padding:0;font:inherit;font-size:12px;
+      color:var(--slate);cursor:pointer}
+    .dp-foot .dp-clear:hover{color:#dc2626}
+    .dp-foot .dp-done{margin-left:auto;height:31px;padding:0 17px;border:0;border-radius:8px;
+      background:var(--brand,#1d4ed8);color:#fff;font:inherit;font-size:12px;font-weight:600;
+      cursor:pointer}
+    .dp-foot .dp-done[disabled]{opacity:.45;cursor:not-allowed}
+    .dp-inline{box-shadow:none;width:100%;max-width:100%}
+    /* the repeat, said on the task itself so a saved rule is visible without reopening the picker */
+    .dp-chip-rep{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+      padding:2px 9px;border-radius:20px;white-space:nowrap;background:var(--brand-50,#eff4ff);
+      color:var(--brand-700,#1e40af);border:1px solid var(--brand-a10,#eef2ff)}
+    .dp-chip-rep i{font-size:9.5px}
+
+    /* an instance's attachments, printed as pages rather than filenames */
+    .wf-print-att{margin-top:16px;page-break-inside:avoid}
+    .wf-print-att-h{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--slate);margin-bottom:6px}
+    .wf-print-att-img{display:block;width:100%;max-width:100%;height:auto;border:1px solid var(--line);
+      border-radius:4px;margin-bottom:10px;page-break-inside:avoid;page-break-after:auto}
+    .wf-print-att-miss{font-size:12px;color:#b91c1c}
+
+      color:#991b1b;font-size:13px}
+      margin-bottom:12px;font-size:12.5px;color:#92400e}
+      margin-bottom:6px}
+      color:var(--slate)}
+      font-size:12px;color:var(--slate);line-height:1.6}
+      border-top:1px solid var(--line)}
+    @media (max-width:520px){
+      .dp-body{flex-direction:column}
+      .dp-rail{width:100%;border-right:0;border-bottom:1px solid var(--line);
+        flex-direction:row;flex-wrap:wrap;gap:4px}
+      .dp-opt{width:auto;flex:1 1 30%;text-align:center}
+      .dp-main{min-height:0}
+    }
     `;
     document.head.appendChild(s);
   }
@@ -636,7 +764,7 @@
   }
   window.accNotifGoto=function(tid){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+tid;renderPage();} else location.href='tasks.html#/task/'+tid; };
   window.accNotifOpen=async function(id){ const n=NOTIFS.find(x=>x.id===id); if(!n)return; if(!n.read){try{await ACC().from('notifications').update({read:true}).eq('id',id);n.read=true;notifPaint();}catch(e){}} if(n.kind==='meeting'||n.kind==='meeting_cancel'||n.kind==='meeting_update'||n.kind==='meeting_reminder'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); navTo('tasks/meetings'); return; } if(n.kind==='campaign_alert'){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); location.href='campaigns.html#/campaigns'; return; } if(n.task_id==null){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); return; } accNotifGoto(n.task_id); };
-  window.accNotifReadAll=async function(){ try{await ACC().from('notifications').update({read:true}).eq('recipient',me()).eq('read',false).neq('kind','approval');}catch(e){} await notifLoad(); await computeUrgent(); paintBell(); const dd=$('notifDd'); if(dd&&dd.classList.contains('show'))notifPaint2(); };
+  window.accNotifReadAll=async function(){ const n=(NOTIFS||[]).filter(x=>!x.read&&x.kind!=='approval').length; let ok=false; try{const {error}=await ACC().from('notifications').update({read:true}).eq('recipient',me()).eq('read',false).neq('kind','approval');ok=!error;}catch(e){} if(n&&ok){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:n+' notification'+(n>1?'s':'')}); }catch(_e){} } await notifLoad(); await computeUrgent(); paintBell(); const dd=$('notifDd'); if(dd&&dd.classList.contains('show'))notifPaint2(); };
   function wireBell(){ const b=$('notifBtn'); if(b)b._accW=true; }
 
   window.toggleNotif=function(){ const dd=$('notifDd'); if(!dd)return; if(dd.classList.contains('show')){dd.classList.remove('show');return;} document.querySelectorAll('.dropdown.show').forEach(d=>{if(d!==dd)d.classList.remove('show');}); notifDd(); dd.classList.add('show'); };
@@ -865,6 +993,17 @@
       const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
       g.style.display=hasVisible?'':'none';
     });
+    // Logged directly, debounced to the settled query, rather than through USAGE_MAP - this fires
+    // on every keystroke for instant filtering, and logging every keystroke turned one real search
+    // into a burst of single/two-character fragments milliseconds apart (typing "182" logged "1",
+    // "18" and "182" as three separate searches), flooding the Usability report's per-person
+    // Details view with noise instead of one clean "searched for 182" entry.
+    clearTimeout(window._accSearchLogT);
+    if(val){
+      window._accSearchLogT=setTimeout(function(){
+        try{ usageQueue('tasks.tasks.search_tasks','search',{query:String(val)}); }catch(_e){}
+      },800);
+    }
   };
 
   /* ---------- WORKFLOW ----------
@@ -1148,6 +1287,12 @@
     // creator/step-owners, the same class of bug already fixed in canEvent.
     const trigList=(f.trigger_owner||'').split(',').map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
     const trigOk = f.trigger_owner==='__ALL__' || trigList.indexOf(String(me()||'').toLowerCase())!==-1;
+    /* The Administrator sees every workflow. The database already agreed - acc.wf_can_see_flow
+       starts at app.can_read('acc'), which a superadmin passes - but this client-side filter did
+       not, so a flow whose created_by was not the Administrator was served and then hidden. That
+       happens to any flow inserted by a migration rather than through the builder, which has no
+       logged-in user to record. Checked here so it cannot depend on who happened to create it. */
+    if(eq(me(),'ayushruia1@gmail.com') || wfInDept('Systems')) return true;
     return eq(f.created_by||'',me()) || trigOk || o.some(function(e){return eq(e,me());})
       // A flow can be opened up to whole departments (e.g. Invoice Processing -> Systems +
       // Administration) instead of just its creator/trigger-owner/step-owners — mirrors the
@@ -1217,6 +1362,13 @@
      given to is one where the handling roster is sensitive. Every other workflow has no such list and
      is left exactly as it was, so this cannot quietly narrow Reimbursement or anything else. */
   function wfRosterAccess(f, steps, fcs){
+    // Invoice Processing: the Tracker (and People row) was hidden from anyone who wasn't a raiser,
+    // a fixed step owner, or already a step-person on some existing case - which in practice meant
+    // most people who could open this workflow at all still couldn't see it. Reaching this function
+    // already means the page itself let them in, so anyone who has access to the workflow gets the
+    // Tracker too, same as any flow that never restricted trigger_step_assignable_to in the first
+    // place (the branch right below this one).
+    if(f && f.id===26) return {show:true,scope:'all'};
     const assign=String((f&&f.trigger_step_assignable_to)||'')
       .split(',').map(function(x){return x.trim();}).filter(Boolean);
     if(!assign.length) return {show:true,scope:'all'};    // flow doesn't restrict handover — unchanged
@@ -1295,6 +1447,20 @@
   // Returns {short, full} — short is what's shown (clipped with an ellipsis), full is the complete
   // text for a hover title, so a long concatenated value (several "Day" sets) isn't just cut off
   // with no way to read the rest.
+  /* What a Booking Form instance is, in four words, out of the check list that was filled for it.
+     `pending` is not the same as blank: one means nobody has read the file yet, the other means the
+     file did not say. */
+  function wfBkFields(row){
+    const st=String((row&&row.status)||'');
+    const f=(row&&row.result&&row.result.fields)||null;
+    if(st!=='done'||!f) return {status:st||'pending'};
+    const g=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    return {status:'done', name:g('customer_name'), project:g('project_name'),
+            block:g('block'), flat:g('flat')};
+  }
+  function wfBk(caseId){ return (window._wfBk||{})[caseId]||null; }
+
   function wfTrigShort(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const byLabel={}; det.forEach(function(d){ if(d&&d.label) byLabel[d.label]=d.value; });
@@ -1306,6 +1472,18 @@
     const cardFields=Array.isArray(flow&&flow.card_fields)&&flow.card_fields.length?flow.card_fields:null;
     const sumField=(flow&&flow.tracker_sum_field||'').trim();
     let full;
+    /* Booking Form: nothing is typed but the attachment, so the row is named by whoever the
+       documents say bought which flat. Until the reading finishes it says so rather than sitting
+       blank, which would read as an empty booking. */
+    if(flow&&flow.id===41){
+      const b=wfBk(c.id);
+      full=(b&&b.status==='done')
+        ? [b.name, b.project, [b.block&&('Block '+b.block), b.flat&&('Flat '+b.flat)]
+            .filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+        : (b&&b.status==='failed' ? 'Could not be read' : 'Being read…');
+      const sh=full.length>30?full.slice(0,29)+'…':full;
+      return {short:sh, full:full};
+    }
     if(listFields){
       full=listFields.map(function(l){ return wfDetailDisp(byLabel[l]||''); }).filter(Boolean).join(', ');
     } else {
@@ -2123,8 +2301,11 @@
       // placeholder, or multiline (an exceptional case, set directly rather than via a checkbox).
       if(orig.placeholder) f.placeholder=orig.placeholder;
       if(type==='text' && orig.multiline) f.multiline=true;
-      // an attachment is never compulsory, whatever the box says
-      if(opt||type==='attachment') f.optional=true;
+      /* The Optional box governs attachments as well now. It used to be forced on whatever the
+         box said, so a workflow that genuinely needs a document - a Booking Form IS the document -
+         had no way to insist on one. Written explicitly either way, so the runtime can tell
+         "deliberately required" from "never said". */
+      f.optional=opt;
       if(type==='select'){
         // Options are stored as {label} objects — matches how the runtime (wfEvtRowHtml) reads
         // them, and how pre-existing select fields (e.g. Reimbursement's Conveyance/Food) are shaped.
@@ -2217,6 +2398,13 @@
       // list would wipe a template that is already in use.
       const tmpl=wfTmplCollect();
       if(tmpl.length){ try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:tmpl}); }catch(_e){} }
+      /* "Create a new workflow" and "Edit workflow steps/owners" used to be counted on wfNew and
+         wfEdit - the two functions that merely OPEN the builder. Opening a form and abandoning it
+         counted as having created a workflow, and one person poking at the builder three times read
+         as three new workflows. Counted here instead, where the save has actually gone through, and
+         which of the two features it was is decided by the same editId the save itself used. */
+      try{ usageQueue(editId?'tasks.workflow.edit_workflow_steps_owners':'tasks.workflow.create_a_new_workflow',
+                      editId?'update':'create', {workflow:name}); }catch(_e){}
       toast('Workflow saved','ok');
       // Redirect to the new workflow immediately. The noun lookup ("Invoice", "Leave Request", …)
       // used to be awaited here, which held the form open while it ran; now it happens in the
@@ -2337,9 +2525,18 @@
       if(info) return wfForwardLabel(info);
       const {data:cur}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       if(!cur) return 'Forwarded to the next person';
-      const {data:steps}=await ACC().from('flow_case_steps').select('seq,person,candidates,title,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').eq('case_id',cur.case_id).order('seq',{ascending:true});
+      const {data:kase}=await ACC().from('flow_cases').select('flow_id').eq('id',cur.case_id).maybeSingle();
+      const {data:steps}=await ACC().from('flow_case_steps').select('seq,person,candidates,title').eq('case_id',cur.case_id).order('seq',{ascending:true});
       const nxt=(steps||[]).find(function(s){return s.seq>cur.seq;});
-      return nxt?wfForwardLabel({nextWho:wfWhoOfStep(nxt)}):'Forwarded to the next person';
+      if(!nxt) return 'Forwarded to the next person';
+      // owner_from_trigger/owner_emails/etc. are on the step DEFINITION (flow_steps), never on
+      // flow_case_steps - merged in by flow+seq, same as the Tasks-list version of this lookup.
+      let def=null;
+      if(kase&&kase.flow_id!=null){
+        const {data:d}=await ACC().from('flow_steps').select('seq,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').eq('flow_id',kase.flow_id).eq('seq',nxt.seq).maybeSingle();
+        def=d;
+      }
+      return wfForwardLabel({nextWho:wfWhoOfStep(Object.assign({},def,nxt))});
     }catch(_e){ return 'Forwarded to the next person'; }
   }
   /* Who holds a LIVE step. wfStepWhoText was written for the flow definition and reads
@@ -2558,7 +2755,13 @@
     const sumField=(flow.tracker_sum_field||'').trim();
     // Owner shows on every workflow's tracker, not just ones with a sum field — whoever triggered
     // an instance should always be visible, alongside whatever detail columns that flow already shows.
-    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}].concat(sumField?[{k:'Total Amount'}]:tmpl.map(function(f){ return {k:f.label}; }));
+    /* Booking Form: its form has one field on it, an attachment, and the tracker drops attachments
+       — so this flow would otherwise have no columns of its own at all. Its four come from the
+       check list instead, filled once the documents have been read. */
+    const bkCols=(flow.id===41)?['Name','Project','Block','Flat']:null;
+    const fixed=[{k:wfIdLabel(flow)},{k:'Timestamp'},{k:'Owner'}]
+      .concat(sumField?[{k:'Total Amount'}]
+        :(bkCols?bkCols.map(function(k){ return {k:k}; }):tmpl.map(function(f){ return {k:f.label}; })));
     const F=fixed.length;
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
@@ -2623,6 +2826,17 @@
       const ownerTd='<td>'+esc2(wfNm(c.created_by)||'')+'</td>';
       const extraTds=ownerTd+(sumField
         ? '<td><b>'+esc2(wfMoney(wfSumField(by[sumField])))+'</b></td>'
+        : bkCols
+        ? (function(){
+            const b=wfBk(c.id);
+            if(!b||b.status!=='done'){
+              const say=(b&&b.status==='failed')?'could not be read':'being read';
+              return '<td colspan="'+bkCols.length+'" style="color:var(--slate)">'+esc2(say)+'</td>';
+            }
+            return [b.name,b.project,b.block,b.flat].map(function(v){
+              return '<td title="'+esc2(v||'')+'">'
+                +(v?cellText(v):'<span style="color:var(--slate)">—</span>')+'</td>'; }).join('');
+          })()
         : tmpl.map(function(f){ return '<td title="'+esc2(wfDetailDisp(by[f.label]||''))+'">'+cellText(by[f.label])+'</td>'; }).join(''));
       const left='<td><b>'+wfCaseNoText(c)+'</b></td><td>'+esc2(wfTrackDT(c.created_at))+'</td>'+extraTds;
       const cells=steps.map(function(s){
@@ -2703,6 +2917,8 @@
      bill fields it happens to carry. */
   window.wfTrackerFilter=function(){
     const q=((($('wfTkSearch')||{}).value)||'').trim().toLowerCase();
+    // Wired to oninput, so it logs the settled query once rather than a fragment per keystroke.
+    try{ usageQueueDebounced('tasks.workflow.search_filter_the_tracker', q); }catch(_e){}
     const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
     let shown=0;
     rows.forEach(function(r){
@@ -2935,6 +3151,18 @@
     if(cases.length){ try{ const wfCaseIds=cases.map(function(c){return c.id;});
       fcs=await wfFetchPaged(function(){ return ACC().from('flow_case_steps').select('*')
         .in('case_id',wfCaseIds).order('id',{ascending:true}); }); }catch(e){} }
+    /* Booking Form only. Its form asks for nothing but the attachments — the customer, the project
+       and the unit are what the documents themselves say, so they are read out of the stored
+       check list rather than typed by whoever uploaded the file. Both the Instances column and the
+       Tracker's own columns come from here; a booking still being read simply has no row yet. */
+    window._wfBk={};
+    if(id===41 && cases.length){
+      try{
+        const {data}=await ACC().from('booking_audits').select('case_id,status,result')
+          .in('case_id',cases.map(function(c){ return c.id; }));
+        (data||[]).forEach(function(r){ window._wfBk[r.case_id]=wfBkFields(r); });
+      }catch(_e){}
+    }
     let forms=[];
     try{ const {data}=await ACC().from('flow_forms').select('*').eq('flow_id',id).order('sl',{ascending:true}); forms=data||[]; }catch(e){}
     window._wfForms=forms; window._wfSteps=steps;
@@ -2956,11 +3184,20 @@
     // Uma Chatterjee is supposed to be able to. Instance-creation now only bypasses trigger_owner
     // for the true superadmin account, matching the server-side fix below exactly.
     const canEvent = isCreator || (flow.trigger_owner ? trigOk : isStepOwner) || eq(mySelf,'ayushruia1@gmail.com');
-    // Editing/deleting the workflow itself is just these two named accounts now — mirrors
+    // Deleting the workflow itself is still these two named accounts — mirrors
     // acc.wf_is_admin_dept() server-side exactly (which also keeps a real superadmin override,
     // a separate pre-existing concept unrelated to this pair).
     const canManage = eq(mySelf,'ayushruia1@gmail.com') || eq(mySelf,'businessanalyst@thejaingroup.com');
+    // Editing the workflow's own definition (its fields and steps) is narrower than deleting it -
+    // the Administrator alone, not the wider management pair. UI-only for now: the button is
+    // hidden from businessanalyst@, but acc.wf_is_admin_dept() still allows both accounts, so this
+    // is not yet real enforcement against a direct call.
+    const canManageEdit = eq(mySelf,'ayushruia1@gmail.com');
     window._wfFlowId=id; window._wfDelId = canManage ? id : null; window._wfCanEvent = canEvent; wfWireDeleteKey();
+    /* Whether "New <noun>" opens the file chooser instead of a form - see wfNewInstance. Decided
+       here, where the workflow has already been fetched, because the button's press has to act on
+       it in the same tick or the browser refuses to open a chooser at all. */
+    window._wfAttachOnly = wfAttachOnly(flow);
     // the word this workflow deals in — "Invoice", "Leave Request", ... used all over this page
     const N=wfNounOf(flow); window._wfNoun=N;
     // older workflows saved before this feature have no word yet — learn it once, quietly
@@ -3040,9 +3277,29 @@
        allowed rather than being the thing that decides it.
        Reimbursement only: once an instance has moved past its first step, NEITHER right applies
        to anyone — not even the owner or the Administrator. A returned-for-correction instance is
-       exempt (current_step is reset back to the first step for exactly that reason). */
+       exempt (current_step is reset back to the first step for exactly that reason).
+       Booking Form only: Edit stops working from the same moment Delete already does everywhere -
+       its first step being received - rather than waiting for that step to be fully done. Delete
+       itself needs no change here: the generic "already started" block below (data-first-received)
+       already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
-    const canEditCase=function(c){ return !wfPastStep1Locked(c) && eq(c&&c.created_by, mySelf); };
+    const wfBookingStarted=function(c){
+      if(id!==41 || !c) return false;
+      const firstSeqHere = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
+      if(firstSeqHere==null) return false;
+      const fst=fcs.find(function(x){ return x.case_id===c.id && x.seq===firstSeqHere; });
+      return !!(fst&&(fst.received_at||fst.status==='received'||fst.status==='done'||fst.forwarded_at));
+    };
+    /* Booking Form: THE ADMINISTRATOR AND POST SALES, AND NOBODY ELSE - not even whoever raised it.
+       Every other workflow stays creator-only, which is the opposite rule, and deliberately so: a
+       booking carries the customer's KYC, their Aadhaar and the price they were quoted, and the
+       people who answer for those are the ones who may change them. Raising a booking does not
+       make it yours to edit afterwards. */
+    const canEditCase=function(c){
+      if(wfPastStep1Locked(c) || wfBookingStarted(c)) return false;
+      if(id===41) return eq(mySelf,'ayushruia1@gmail.com') || wfInDept('Post Sales');
+      return eq(c&&c.created_by, mySelf);
+    };
     const canDeleteCase=function(c){ return !wfPastStep1Locked(c) && (eq(c&&c.created_by, mySelf) || eq(mySelf,'ayushruia1@gmail.com')); };
     const anyActionable=cases.some(function(c){ return canEditCase(c)||canDeleteCase(c); });
     /* PRINTING is not editing. Bulk print is for the people who have to file these - the claimant
@@ -3051,6 +3308,9 @@
        exactly the people who need them. Nothing is disclosed by it either: it can only print rows
        already visible on this page, which visibility has already decided. */
     const canPrintBulk=isStepHolder || eq(mySelf,'ayushruia1@gmail.com')
+      // businessanalyst@ isn't a step owner here (deliberately, see the removal further up in this
+      // file's history) but still needs to run "Print New Reimbursements", same as cfo@ already can.
+      || (id===39 && eq(mySelf,'businessanalyst@thejaingroup.com'))
       || cases.some(function(c){ return eq(c&&c.created_by, mySelf); });
     const showChk=anyActionable||canPrintBulk;
     /* FINISHED WORK MOVES OUT OF THE WAY.
@@ -3113,7 +3373,9 @@
       tableHtml='<div class="wf-card"><div class="wf-card-hd"><i class="fa-solid fa-table-list"></i> <span id="wfInstTitle">'+esc2(N.many)+'</span> <span class="cnt" id="wfInstCount">'+(archiveOn?activeCount:cases.length)+'</span>'
         +tip('One row per '+N.lc+'. Can’t be deleted once its first step is received, or edited once it’s completed.')
         +(showChk?('<span class="wf-inst-tools">'
-          +'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>'
+          // Booking Form only: no Print here — printing a case with customer KYC/Aadhaar on it is
+          // Post Sales/Administrator's business from the instance itself, not a bulk action.
+          +(id!==41?'<button class="ac-btn ic" id="wfInstPrint" title="Print selected" disabled onclick="wfInstPrintSel()"><i class="fa-solid fa-print"></i></button>':'')
           // Reimbursement only: sits right beside the disabled "print selected" icon it is an
           // alternative to - one prints whatever you've ticked, this one prints the whole running
           // new-and-unprinted pile without having to select anything. Hidden while selCaseId is set
@@ -3150,9 +3412,9 @@
         +'<span class="wf-wr-seg wf-wr-wait"><i class="fa-solid fa-hourglass-half"></i> Waiting <b>'+myWait+'</b></span>'
         +'<span class="wf-wr-seg wf-wr-recv"><i class="fa-solid fa-inbox"></i> Received <b>'+myRecv+'</b></span>'
       +'</span>'):'')
-      +(canManage?('<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>'
-                  +'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>'):'')
-      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfEventOpen('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
+      +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
+      +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
+      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -3431,7 +3693,14 @@
     const word=(ids.length===1?N.lc:N.lcMany);
     wfConfirm({ title:'Delete '+ids.length+' '+word+'?', body:'This permanently removes the selected '+word+' and any tasks they created.', okLabel:'Delete', okClass:'danger', onOk:async function(){
       const doomed=await wfCaseFilePaths(ids);
+      // Same as above: read what is about to go while it is still readable. One event per instance
+      // deleted, each naming the instance — deleting four in one go is four things gone, and a
+      // single event saying "delete" would under-report it and name none of them.
+      let um=[];
+      try{ um=await Promise.all(ids.map(function(cid){ return wfCaseUsageMeta(cid); })); }catch(_e){ um=[]; }
       try{ const {error}=await ACC().rpc('wf_delete_cases',{p_ids:ids}); if(error)throw error; }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+      try{ (um.length?um:ids.map(function(){return null;})).forEach(function(m){
+        usageQueue('tasks.workflow.delete_an_instance','delete',m); }); }catch(_e){}
       await wfPurgeCaseFiles(doomed);
       toast('Deleted','ok'); renderPage();
     }});
@@ -3439,7 +3708,7 @@
 
   async function wfCaseRoute(v, caseId){
     let c=null; try{ const {data}=await ACC().from('flow_cases').select('flow_id').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
-    if(!c){ toast('Not found','err'); return navTo('tasks/workflow'); }
+    if(!c){ toast('That instance no longer exists — it may have been deleted','err'); return navTo('tasks/workflow'); }
     return wfDetailPage(v, c.flow_id, caseId);
   }
 
@@ -3461,7 +3730,7 @@
     if(!box)return;
     if(!c){ box.innerHTML='<div class="ac-empty" style="cursor:default">Not found</div>'; return; }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     const pinned=wfOriginalAttachmentHtml(c,flow)+wfQrCodeAttachmentHtml(c,flow);
     /* The owner, or whoever it has been sent back to — not the workflow-management admins, and
        only while it is still moving; once it is Done or Cancelled it is final. Mirrors
@@ -3470,12 +3739,39 @@
     // Reimbursement only: past its first step, nobody edits it — see wfPastStep1Locked in
     // wfDetailPage / acc.wf_update_instance for the same rule. A returned instance is exempt.
     const pastStep1Locked=c.flow_id===39 && c.current_step>1 && !c.returned_at;
-    const canEditThis=!pastStep1Locked&&(c.status!=='Done'&&c.status!=='Cancelled')
-      &&(eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());}));
+    /* Booking Form only: Edit stops working the moment its first step is received - the same
+       "started" instant Delete already goes by elsewhere in this workflow - not only once the
+       whole thing is done. fcs is already fetched above, ordered by seq, so its first entry IS
+       the first step's own row. */
+    const fst0=fcs.length?fcs[0]:null;
+    const bookingStarted=c.flow_id===41 && !!(fst0&&(fst0.received_at||fst0.status==='received'||fst0.status==='done'||fst0.forwarded_at));
+    /* Booking Form: the Administrator and Post Sales only - see canEditCase for why. The creator
+       clause that every other workflow relies on is deliberately NOT applied here, so raising a
+       booking does not carry the right to edit it afterwards.
+       One consequence worth knowing: an instance RETURNED for correction can only be corrected by
+       those two as well. On this workflow that is who raises them anyway. */
+    const wfBookingCanAct=eq(me(),'ayushruia1@gmail.com')||wfInDept('Post Sales');
+    const canEditThis=!pastStep1Locked&&!bookingStarted&&(c.status!=='Done'&&c.status!=='Cancelled')
+      &&(c.flow_id===41
+         ? wfBookingCanAct
+         : (eq(c.created_by||'',me())||backTo.some(function(e){return eq(e,me());})));
     const editBtn=canEditThis?('<button class="wf-tlhead-x" onclick="wfEventOpen('+c.flow_id+','+c.id+')" title="Edit this '+esc2(wfN().lc)+'"><i class="fa-solid fa-pen"></i></button>'):'';
-    const printBtn='<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
+    // Booking Form only: no Print button on the instance itself either - see the matching removal
+    // in wfDetailPage's bulk toolbar.
+    const printBtn=(c.flow_id===41)?'':'<button class="wf-tlhead-x" onclick="wfPrintCase('+c.id+')" title="Print this '+esc2(wfN().lc)+'"><i class="fa-solid fa-print"></i></button>';
+    /* Booking Form only: the checklist being filled is specific to it. Reading the attachments
+       takes a minute or two, so it is a button somebody presses - not something that runs on open.
+       These carry customer KYC and Aadhaar, so - unlike every other download in this file - only
+       the Administrator or Post Sales dept get to see the buttons at all, regardless of who
+       created the instance. */
+    const auditBtn=(c.flow_id===41&&wfBookingCanAct)
+      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
+        +'<button class="wf-tlhead-x" onclick="wfAgreement('+c.id+')" title="Download the Agreement for Sale — a draft to be checked and completed, not a final deed"><i class="fa-solid fa-file-contract"></i></button>'
+      : '';
     box.innerHTML='<div class="wf-tlhead"><div class="wf-tlhead-t"><i class="fa-solid fa-diagram-project"></i> '+esc2(wfN().one)+' '+wfCaseNoText(c)+' '+(c.status==='Done'?'<span class="ac-chip ac-c-Completed">Done</span>':(c.status==='Cancelled'?'<span class="ac-chip" style="background:#fee2e2;color:#b91c1c">Cancelled</span>':'<span class="ac-chip ac-c-Pending">In progress</span>'))+'</div>'
-      +'<div class="wf-tlhead-acts">'+editBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
+      +'<div class="wf-tlhead-acts">'+editBtn+auditBtn+printBtn+'<button class="wf-tlhead-x" onclick="wfShowDef()" title="Show workflow steps"><i class="fa-solid fa-xmark"></i></button></div></div>'
       +'<div class="wf-trig-box"><i class="fa-solid fa-user"></i> <b>'+esc2(wfN().one)+' by:</b> '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
       /* A returned instance is stopped and waiting on its owner, which is not something the timeline
          shows - every step reads "waiting" exactly as it would on a new one. Said plainly instead. */
@@ -3530,6 +3826,1257 @@
     },40);
   };
 
+  /* ── booking check list ────────────────────────────────────────────────────────────────────
+     The icon downloads the filled check list. No popup: the reading already happened in the
+     background when the booking was raised (acc.booking_audits + a trigger + a cron worker), so
+     there is nothing to wait for and nothing to confirm. */
+  /* ── welcome letter ───────────────────────────────────────────────────────────────────────
+     The letter Post Sales sends a customer once their booking is in. Same source as the check
+     list - the stored reading of their own documents - so the two can never disagree about who
+     bought what, and the same on-demand loading, so it builds from the local copy too. */
+  /* Two marks, and they are not interchangeable. The customer letters carry the CURRENT logo
+     ("Caring For Your Dreams"); the check list carries the CLASSIC one that is printed on the form
+     itself ("Your Dream. Our Commitment."), lifted out of the blank so the sheet looks like the
+     sheet it replaces. Both are loaded on demand and only when a document is actually built. */
+  const JG_LOGOS={
+    current: {src:'assets/brand/jaingroup-logo.js',         key:'JG_LOGO_B64'},
+    classic: {src:'assets/brand/jaingroup-logo-classic.js', key:'JG_LOGO_CLASSIC_B64'}
+  };
+  async function jgLogo(which){
+    const L=JG_LOGOS[which||'current'];
+    if(!window[L.key]){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=L.src; sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the letterhead logo could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const b=window[L.key];
+    if(!b) throw new Error('the letterhead logo loaded but was empty');
+    const bin=atob(b), out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    return out;
+  }
+
+  /* Indian numbering, in words: lakh and crore, not million. Written out here rather than asked of
+     a model because it has exactly one right answer, and because a letter that tells a customer the
+     wrong amount in words is a serious thing to get wrong. */
+  const RUP_ONES=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven',
+    'Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const RUP_TENS=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  function under100(n){
+    if(n<20) return RUP_ONES[n];
+    return RUP_TENS[Math.floor(n/10)]+(n%10?' '+RUP_ONES[n%10]:'');
+  }
+  function under1000(n){
+    if(n<100) return under100(n);
+    return RUP_ONES[Math.floor(n/100)]+' Hundred'+(n%100?' '+under100(n%100):'');
+  }
+  function rupeesInWords(amount){
+    let n=Math.floor(Math.abs(Number(amount)||0));
+    const paise=Math.round((Math.abs(Number(amount)||0)-n)*100);
+    if(!n && !paise) return 'Zero';
+    const parts=[];
+    const crore=Math.floor(n/10000000); n-=crore*10000000;
+    const lakh=Math.floor(n/100000);    n-=lakh*100000;
+    const thou=Math.floor(n/1000);      n-=thou*1000;
+    if(crore) parts.push(under1000(crore)+' Crore');
+    if(lakh)  parts.push(under1000(lakh)+' Lakh');
+    if(thou)  parts.push(under1000(thou)+' Thousand');
+    if(n)     parts.push(under1000(n));
+    let out=parts.join(' ');
+    if(paise) out+=(out?' and ':'')+under100(paise)+' Paise';
+    return out;
+  }
+  /* A booking form prints "Mr./Ms./Mast./M/s." as a row of options for the applicant to ring, and
+     the reader hands that whole string back when none of them is clearly ringed. Printing it would
+     address a customer as "Mr./Ms./Mast./M/s. Saptarshi Pasari". A title with a slash in it, or one
+     too long to be a title, is treated as no title at all - a name on its own is correct, an
+     invented Mr. or Mrs. is not. */
+  function salutation(raw){
+    const t=String(raw==null?'':raw).trim();
+    if(!t || t.indexOf('/')!==-1 || t.length>6) return '';
+    return t;
+  }
+  /* Everyone the flat is allotted to, addressed the way a letter addresses them. */
+  function allotteeNames(res){
+    const LT=(res&&res.letter)||{}, f=res&&res.fields||{};
+    const out=[];
+    (Array.isArray(LT.allottees)?LT.allottees:[]).forEach(function(p){
+      const nm=nameCase(p&&p.name);
+      if(!nm) return;
+      if(out.some(function(x){ return x.toUpperCase().indexOf(nm.toUpperCase())!==-1; })) return;
+      out.push([salutation(p&&p.salutation),nm].filter(Boolean).join(' '));
+    });
+    if(!out.length){
+      const one=f.customer_name&&String(f.customer_name.value||'').trim();
+      if(one && one!=='NIL') out.push(nameCase(one));
+    }
+    return out;
+  }
+
+  /* A booking form prints names in capitals; a letter to a customer does not shout at them. */
+  function nameCase(s){
+    return String(s==null?'':s).trim().toLowerCase()
+      .replace(/(^|[\s.'\-])([a-z])/g,function(_m,a,b){ return a+b.toUpperCase(); });
+  }
+  // 7 -> 7th. The letter reads "7th floor", not "floor 7".
+  function ordinal(n){
+    const v=Math.floor(Math.abs(Number(n)));
+    if(!isFinite(v)||!v) return null;
+    const t=v%100;
+    if(t>=11&&t<=13) return v+'th';
+    return v+({1:'st',2:'nd',3:'rd'}[v%10]||'th');
+  }
+
+  /* WHAT A DOCUMENT BUTTON SAYS WHILE THE READING IS STILL RUNNING.
+
+     Reading a booking takes about two and a half minutes - a shade under two for Gemini to read the
+     scans, a few seconds for ChatGPT to check them, the rest fetching the files. Submitting a
+     booking pokes the worker straight away (acc.booking_audit_kick), so that is normally the whole
+     wait; the five-minute cron behind it is only the safety net.
+
+     So the message says how long it has actually been and roughly how much is left. The old wording
+     - "try again in a minute or two" - read the same whether the reading had started five seconds
+     ago or had been stuck for an hour. One place decides it and all three buttons ask, so a new
+     document only has to ask for the reading. */
+  const WF_READ_SECONDS=150;
+  function wfAgo(ts){
+    const s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000));
+    if(s<60) return s+' second'+(s===1?'':'s');
+    const m=Math.round(s/60);
+    return m+' minute'+(m===1?'':'s');
+  }
+  /* Returns the stored reading, or throws with a sentence worth showing the person. */
+  async function wfBookingReading(caseId){
+    let row=null;
+    try{
+      const {data}=await ACC().from('booking_audits')
+        .select('status,result,error,queued_at,started_at,attempts')
+        .eq('case_id',caseId).maybeSingle();
+      row=data;
+    }catch(_e){
+      throw new Error('The reading could not be looked up just now \u2014 try again in a moment.');
+    }
+    if(!row) throw new Error('This booking has not been queued for reading yet.');
+
+    if(row.status==='pending'||row.status==='running'){
+      const running=(row.status==='running');
+      const from=(running&&row.started_at)||row.queued_at;
+      const left=WF_READ_SECONDS-Math.round((Date.now()-new Date(from).getTime())/1000);
+      const mins=Math.max(1,Math.round(left/60));
+      /* Past the usual time is not the same as broken - a bigger file simply takes longer - so it
+         says so plainly rather than either promising a minute or crying failure. */
+      const eta=(left<=0) ? 'this one is taking longer than usual'
+              : (left<30) ? 'nearly done'
+              : ('about '+mins+' more minute'+(mins===1?'':'s'));
+      throw new Error((running?'Reading the attachments \u2014 started ':'Queued for reading ')
+        +wfAgo(from)+' ago, '+eta+'.');
+    }
+    if(row.status!=='done'||!row.result){
+      throw new Error('The attachments could not be read: '+(row.error||'unknown reason')
+        +((row.attempts>1)?(' (tried '+row.attempts+' times)'):''));
+    }
+    return row.result;
+  }
+
+  /* A DOWNLOAD SHOULD LET YOU LOOK FIRST. These four Booking Form documents used to save straight
+     to disk the moment the button was pressed. Fine for something already trusted; wrong for a
+     PDF carrying a customer's Aadhaar and KYC that somebody is about to hand over or file. Every
+     one of them now opens a preview of the finished PDF first - the file only reaches disk once a
+     person has looked at it and presses Download themselves. */
+  function wfPreviewPdf(bytes,filename,toastMsg){
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    let cleaned=false;
+    const cleanup=function(){ if(cleaned)return; cleaned=true; try{ URL.revokeObjectURL(url); }catch(_e){} };
+    openModal('<div class="modal-head"><h3>'+esc2(filename)+'</h3><span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="padding:0">'
+        +'<iframe src="'+esc2(url)+'" style="width:100%;height:70vh;border:0;display:block;background:#525659"></iframe>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="ac-btn" id="wfPvClose">Close Preview</button>'
+        +'<button class="ac-btn primary" id="wfPvGo"><i class="fa-solid fa-download"></i> Download</button></div>','lg');
+    setTimeout(function(){
+      const go=$('wfPvGo');
+      if(go) go.onclick=function(){
+        const a=document.createElement('a');
+        a.href=url; a.download=filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        if(toastMsg) toast(toastMsg,'ok');
+      };
+      const close=$('wfPvClose');
+      if(close) close.onclick=function(){ closeModal(); cleanup(); };
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); cleanup(); }; });
+    },30);
+  }
+
+  window.wfWelcomeLetter=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfWelcomePdf(res); }
+    catch(e){ toast('Could not build the letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* A4, letterhead, one page. Every value is taken from the stored reading; nothing here is written
+     by a model. Anything the documents did not state is left as a blank to be filled by hand rather
+     than guessed, because this letter goes to the customer. */
+  async function wfWelcomePdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+    const logoBytes=await jgLogo();
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);          // A4
+    const W=595.28, M=64;                              // margins
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const ink=L.rgb(0.12,0.12,0.13), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.80,0.13,0.16);
+
+    const logo=await doc.embedPng(logoBytes);
+    const lw=176, lh=lw*logo.height/logo.width;
+    page.drawImage(logo,{x:M,y:841.89-56-lh,width:lw,height:lh});
+
+    let y=841.89-56-lh-26;
+    page.drawLine({start:{x:M,y:y},end:{x:W-M,y:y},thickness:1.6,color:rule});
+    y-=30;
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+
+    // The date the letter is written, in the form a letter uses.
+    const d=new Date();
+    const MON=['January','February','March','April','May','June','July','August','September',
+               'October','November','December'];
+    page.drawText(d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear(),
+      {x:W-M-reg.widthOfTextAtSize(d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear(),10.5),
+       y:y,size:10.5,font:reg,color:soft});
+    y-=34;
+
+    /* Everyone the flat is being allotted to, with the titles the booking form used. When the form
+       gave no title, the name goes on its own rather than inventing Mr. or Mrs. for a customer. */
+    const who=allotteeNames(res);
+    const project=val('project_name')||'________________';
+    const locality=String(LT.locality||'').trim();
+    const flat=val('flat')||'____', block=val('block')||'____';
+    /* A booking form writes the floor as "5", as "3rd" or as "3rd FLOOR". The letter says "3rd
+       floor" in every case - taking the number out and rebuilding it avoids "3rd FLOOR floor". */
+    const fRaw=val('floor');
+    const fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum ? (ordinal(fNum)+' floor')
+                        : (fRaw ? (nameCase(fRaw)+' floor') : '____ floor');
+    const tokenNum=(LT.token&&typeof LT.token.value==='number'&&isFinite(LT.token.value))
+      ? LT.token.value : null;
+    const tokenFig=tokenNum!==null
+      ? tokenNum.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})
+      : '________';
+    /* The words the form itself printed are preferred - that is what the customer signed against -
+       and only worked out from the figure when the form printed none. */
+    const tokenWords=String((LT.token&&LT.token.in_words)||'').trim()
+      || (tokenNum!==null ? rupeesInWords(tokenNum) : '________________');
+
+    page.drawText('Dear '+(who.join(' & ')||'Sir / Madam')+',',{x:M,y:y,size:11.5,font:bold,color:ink});
+    y-=30;
+
+    // Wraps to the page width; returns the new baseline.
+    const para=function(text,size,font,gap){
+      font=font||reg;
+      const max=W-2*M;
+      const words=String(text).split(/\s+/);
+      let line='';
+      words.forEach(function(w){
+        const t=line?line+' '+w:w;
+        if(font.widthOfTextAtSize(t,size)>max){
+          page.drawText(line,{x:M,y:y,size:size,font:font,color:ink});
+          y-=size*1.55; line=w;
+        } else line=t;
+      });
+      if(line) { page.drawText(line,{x:M,y:y,size:size,font:font,color:ink}); y-=size*1.55; }
+      y-=(gap===undefined?11:gap);
+    };
+
+    para('Greetings from The Jain Group!',11);
+    para('Whilst expressing our deep appreciation towards your investment in \u2018'+project
+      +'\u2019, we further feel privileged for having placed your trust on us in selecting your '
+      +'Dream Home.',11,reg);
+    para('By way of this letter, please be informed that we have received the application for '
+      +'Flat No. '+flat+', '+floorTxt+', Block-'+block+' of '+project
+      +(locality?(' '+locality):'')+'.',11,reg);
+    para('We have received a token amount of '+tokenFig+' ('+tokenWords
+      +' only) against the above mentioned booking.',11,reg);
+    para('Please feel free to get in touch with the undersigned with any queries / feedback or for '
+      +'assistance. It is always our pleasure to be of service to you today and in the future.',11,reg);
+    para('Once again we warmly welcome you to the growing Jain Group family.',11,reg,26);
+
+    para('Thanking you,',11,reg,34);
+    page.drawText('Pallabita Ghosh',{x:M,y:y,size:11.5,font:bold,color:ink}); y-=15;
+    page.drawText('Manager \u2013 Post Sales',{x:M,y:y,size:10.5,font:reg,color:soft}); y-=14;
+    page.drawText('Reach me @ 8420541541',{x:M,y:y,size:10.5,font:reg,color:soft});
+
+    // Footer rule, so the page reads as a letterhead rather than as a page of text.
+    page.drawLine({start:{x:M,y:64},end:{x:W-M,y:64},thickness:0.7,color:L.rgb(.85,.86,.88)});
+    const foot='THE JAIN GROUP  \u00b7  CARING FOR YOUR DREAMS';
+    page.drawText(foot,{x:(W-reg.widthOfTextAtSize(foot,8))/2,y:50,size:8,font:reg,
+      color:L.rgb(.55,.57,.60)});
+
+    const bytes=await doc.save();
+    const name=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    wfPreviewPdf(bytes,'Welcome Letter - '+name+'.pdf','Welcome letter downloaded');
+  }
+
+  /* ── allotment letter ─────────────────────────────────────────────────────────────────────────
+     The formal allotment, sent once the booking is in. Deliberately not shaped like the welcome
+     letter: that one is a note of thanks and reads as prose, this one is a notice of what has been
+     allotted at what price, so it is centred under a rule, states the property in labelled fields,
+     and sets the money in a ruled table. Same stored reading behind both.
+
+     THE MONEY. Three lines, and they must add up on the page:
+       Cost of apartment   the FLAT section's own net subtotal, plus the car parking if one was
+                           bought. NOT the cost sheet's grand total - that carries the deposits, the
+                           club and the electricity, which are not the price of the apartment.
+       Extra charge        the GST on those same two figures, taken as gross minus net rather than
+                           by applying a rate, so a change of rate cannot make this wrong.
+       Total               the gross of the same two. Equals the two lines above it, by construction.
+     Every one of them comes from the cost sheet as read; none is a rate applied by JAIN-E. */
+  /* ── AGREEMENT FOR SALE ───────────────────────────────────────────────────────────────────
+     The agreement is the only one of these documents that is a CONTRACT, so it is built
+     differently from the check list and the two letters.
+
+     Its words are not written here. assets/forms/agreement-gurukul.js carries the executed Dream
+     Gurukul agreement verbatim - thirty pages of it - with a {{token}} at each of the nineteen
+     places a customer's own particulars belong. This file only typesets that and fills the
+     tokens. Nothing about the obligations can be changed by anything in here, which is the point:
+     a generator that could rephrase a clause would be a liability.
+
+     One project, one template. The recitals differ project by project - the land, the development
+     agreement, the sanction, the RERA number - so Ananta and the rest each need their own file
+     rather than a switch inside this one. Asked for a project with no template, it says so
+     instead of quietly serving Gurukul's terms for a flat in Joka.
+
+     WHAT IS LEFT BLANK, AND WHY. A blank on a draft contract is a line for someone to complete;
+     a wrong value is a term of sale nobody agreed. So anything the documents do not state prints
+     as a rule to be filled in by hand, and the covering note names them. */
+  /* EVERY BOOKING USES THE DREAM GURUKUL TEMPLATE FOR NOW, whichever project it is for. That is
+     deliberate and temporary: it is the only agreement supplied so far, and a draft on the wrong
+     recitals is more use to the person checking it than no draft at all. The recitals really do
+     differ project by project - the land, the development agreement, the sanction, the RERA
+     number - so a draft for another project has to be read against that project's own terms
+     before it goes anywhere near a customer. The download says which template was used when it
+     is not the booking's own project, so nobody has to remember.
+
+     TEMPLATES is keyed by project so adding the next one is a line here and a file beside it;
+     FALLBACK is what makes today's behaviour temporary rather than baked in. */
+  const AG_TEMPLATES={'Dream Gurukul':{src:'assets/forms/agreement-gurukul.js', key:'AGREEMENT_GURUKUL'}};
+  const AG_FALLBACK='Dream Gurukul';
+  async function wfAgTemplate(project){
+    const T=AG_TEMPLATES[project]||AG_TEMPLATES[AG_FALLBACK];
+    if(!T) throw new Error('no agreement template is available');
+    if(!window[T.key]){
+      await new Promise(function(res,rej){
+        const sc=document.createElement('script');
+        sc.src=T.src; sc.onload=res;
+        sc.onerror=function(){ rej(new Error('the agreement template could not be loaded')); };
+        document.head.appendChild(sc);
+      });
+    }
+    const t=window[T.key];
+    if(!t||!Array.isArray(t.blocks)) throw new Error('the agreement template loaded but was empty');
+    return t;
+  }
+
+  /* An age in completed years on today's date, from a date of birth written dd/mm/yyyy. The
+     agreement says "aged about N years" and N has to be the age now, not at booking. */
+  function wfAgeFrom(dob){
+    const m=String(dob==null?'':dob).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if(!m) return null;
+    const b=new Date(+m[3], +m[2]-1, +m[1]);
+    if(isNaN(b)) return null;
+    const now=new Date();
+    let a=now.getFullYear()-b.getFullYear();
+    const before=(now.getMonth()<b.getMonth())
+      || (now.getMonth()===b.getMonth() && now.getDate()<b.getDate());
+    if(before) a--;
+    return (a>0 && a<120) ? a : null;
+  }
+  const WF_SMALL=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'];
+  const wfCountWord=function(n){ return WF_SMALL[n]||String(n); };
+
+  /* Where the areas come from, in one place, because two documents ask for them. */
+  function wfUnitAreas(res){
+    const cs=((res.unit||{}).cost_sheet)||{}, ua=res.unit_areas||{};
+    const pick=function(k){ return (ua[k]===null||ua[k]===undefined||ua[k]==='') ? cs[k] : ua[k]; };
+    return {carpet_sqft:pick('carpet_sqft'), builtup_sqft:pick('builtup_sqft'),
+            balcony_sqft:pick('balcony_sqft'), cupboard_sqft:pick('cupboard_sqft'),
+            sba_sqft:pick('sba_sqft')};
+  }
+
+  /* THE ALLOTTEE'S OWN PARAGRAPH - the one place the agreement's wording depends on the data.
+
+     THE FIRST APPLICANT AND NOBODY ELSE. It used to run every allottee, joined by AND, the way
+     the executed specimen does for a joint booking. That is wrong here: a second applicant's
+     particulars are not on the booking form to be had, so the paragraph filled up with rules for
+     a person who may not even be party to the deed. One applicant; a joint booking is added by
+     hand by whoever settles the draft.
+
+     S/O, D/O, W/O, C/O ALL APPEAR, because the form does not say which applies and a deed has to
+     be right about a person's relation to the name beside it. Whoever completes the draft strikes
+     out the three that do not. */
+  function wfAgAllottee(res){
+    const f=res.fields||{}, LT=res.letter||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const detail=Array.isArray(res.allottees_detail)?res.allottees_detail:[];
+    const p=detail[0] || (Array.isArray(LT.allottees)&&LT.allottees[0])
+      || {salutation:null, name:v('customer_name')};
+    /* A BLANK HAS TO BE VISIBLE. Spaces would leave the sentence looking complete and quietly
+       wrong - "S/O , PAN No. ," reads as a mistake, not as something waiting to be written. An
+       underscored rule reads as what it is: a line to fill in by hand. */
+    const blank=function(n){ return new Array((n||18)+1).join('_'); };
+    const own=function(k,fb){ const t=String((p&&p[k])||'').trim(); return t||fb||''; };
+    const sal=salutation(p&&p.salutation)||'';
+    const name=nameCase(own('name',v('customer_name')))||blank(24);
+    /* THE SECOND PERSON ON THE FORM - the father, husband or guardian named on the line under
+       the applicant - and WHICH of S/O, D/O, W/O, C/O is ticked beside them. Where the tick was
+       read, only that one is printed; where it was not, all four are, for whoever settles the
+       draft to strike out the three that do not apply. */
+    const rel=v('relation_type').toUpperCase().replace(/[^SDWCO/]/g,'');
+    const relTxt=(['S/O','D/O','W/O','C/O'].indexOf(rel)>=0) ? rel : 'S/O, D/O, W/O, C/O';
+    const father=own('father_name',v('relation_name')||v('father_name'));
+    const pan=own('pan',v('customer_pan'))||blank(12);
+    /* The applicant's own Aadhaar, taken off their scanned card. Only theirs: a relative's or a
+       co-applicant's number is still compared and discarded, never stored and never printed. */
+    const aadhaar=String(res.applicant_aadhaar||'').trim()||blank(16);
+    const age=wfAgeFrom(own('dob',v('customer_dob')));
+    const occ=own('occupation',v('occupation'));
+    const home=((Array.isArray(p&&p.address_lines)&&p.address_lines.length)
+      ? p.address_lines : (Array.isArray(LT.address)?LT.address:[]))
+      .join(', ').replace(/\s+/g,' ').trim();
+    return (sal?(sal+' '):'')+name+' '+relTxt+' '+(father?nameCase(father):blank(22))
+      +', PAN No. '+pan+', Aadhaar No. '+aadhaar
+      +', by caste \u2013, Occupation - '+(occ?nameCase(occ):blank(12))
+      +', aged about '+(age?String(age):blank(4))+' years, residing at '+(home||blank(40));
+  }
+
+  /* Every token the template can carry, worked out once. A token with nothing behind it becomes a
+     rule of the right length rather than an empty gap or, worse, a plausible guess. */
+  function wfAgValues(res){
+    const f=res.fields||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const rule=function(n){ return new Array((n||14)+1).join('_'); };
+    const park=res.parking||{};
+    const kind=String((park.marked&&park.marked.value)||'').toUpperCase();
+    const rows=Array.isArray(park.rows)?park.rows:[];
+    /* HOW MANY CAR PARKS, counted from the LABELS AND NOT BY ADDING THE ROWS UP.
+
+       The reader reports a parking row per cost sheet, and a booking has two sheets - the net
+       column and the gross column - so the same single car park appears twice. Added up, one
+       covered park became "2 (Two) Covered parking", which the agreement then states twice.
+
+       The count is in the label the sheet prints: "1-Covered Car Parking". So each row is read
+       for its own number and the LARGEST is taken, which is the same figure whether the file
+       carries one sheet or four. A row with no number in its label counts as one park. */
+    let count=0;
+    rows.forEach(function(r){
+      const m=String((r&&r.label)||'').match(/(\d+)\s*[-\s]?\s*(?:nos?\.?\s*)?(?:covered|open|car)/i);
+      count=Math.max(count, m?Number(m[1]):1);
+    });
+    if(!count && kind) count=1;
+    /* The areas, from wherever the reading put them. unit_areas is where the reader files them
+       now; unit.cost_sheet is where the built-up has always been, as the string the sheet prints
+       ("709.0") - which the reader's own number check rejected for not being a number, so
+       unit_areas came back empty. Taken field by field rather than by merging the two objects:
+       a null in the newer one would otherwise wipe out a good value in the older. */
+    const areas=wfUnitAreas(res);
+    const num=function(x){ const n=Number(String(x==null?'':x).replace(/[^0-9.]/g,''));
+      return isFinite(n)&&n>0?String(n):''; };
+    const floorNo=(String(v('floor')).match(/\d+/)||[''])[0];
+    const tok=((res.letter||{}).token||{}).value;
+    const today=new Date();
+    return {
+      exec_day:rule(6), exec_month:rule(14), exec_year:String(today.getFullYear()),
+      exec_place:rule(16),
+      ALLOTTEES:wfAgAllottee(res),
+      flat:v('flat')||rule(8), block:v('block')||rule(6),
+      floor_ord:floorNo?ordinal(floorNo):rule(6),
+      park_count:count?String(count):rule(3),
+      park_words:count?wfCountWord(count):rule(6),
+      park_s:(count===1?'':'s'),
+      park_kind:kind?(kind.charAt(0)+kind.slice(1).toLowerCase()):rule(8),
+      park_kind_word:kind?(kind.charAt(0)+kind.slice(1).toLowerCase()):rule(8),
+      carpet:num(areas.carpet_sqft)||rule(9),
+      balcony:num(areas.balcony_sqft)||rule(9),
+      cupboard:num(areas.cupboard_sqft)||rule(9),
+      builtup:num(areas.builtup_sqft)||rule(9),
+      sba:num(v('area_sqft'))||num(areas.sba_sqft)||rule(9),
+      application_no:v('application_no')||rule(22),
+      /* The booking amount as the agreement states it: figures and words. The words are written
+         out here rather than copied from the form, which prints them only sometimes - and an
+         agreement that says one sum in words and another in figures is a dispute waiting. */
+      token_figures:(typeof tok==='number')?wfRs2(tok):rule(12),
+      token_words:(typeof tok==='number')?('Rupees '+rupeesInWords(tok)+' only'):rule(30)
+    };
+  }
+
+  /* The three tables whose figures come from the cost sheet. Everything in them is a figure the
+     sheet prints; nothing is a rate applied here, so a change of GST cannot make the agreement
+     disagree with what the customer signed. */
+  /* Money on a contract is written to the paisa, the way the cost sheet writes it. n2 inside the
+     allotment letter does the same job, but it is a local of that function; this is the module's
+     own so the agreement does not depend on another document's internals. */
+  const wfRs2=function(v){ return (typeof v==='number'&&isFinite(v))
+    ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
+  function wfAgTables(res){
+    const SM=wfSheetMoney(res);
+    const f=res.fields||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const sheets=Array.isArray(res.cost_sheets)?res.cost_sheets:[];
+    const basis=function(b){ for(let i=0;i<sheets.length;i++)
+      if(String((sheets[i]&&sheets[i].basis)||'').toUpperCase()===b) return sheets[i]; return null; };
+    const money=function(n){ return (typeof n==='number')?(wfRs2(n)):'—'; };
+    const bhk=v('bhk')?(v('bhk').replace(/\s*BHK\s*/i,'')+' BHK'):'';
+    /* The areas, from wherever the reading put them. unit_areas is where the reader files them
+       now; unit.cost_sheet is where the built-up has always been, as the string the sheet prints
+       ("709.0") - which the reader's own number check rejected for not being a number, so
+       unit_areas came back empty. Taken field by field rather than by merging the two objects:
+       a null in the newer one would otherwise wipe out a good value in the older. */
+    const areas=wfUnitAreas(res);
+    const carpet=Number(String(areas.carpet_sqft==null?'':areas.carpet_sqft).replace(/[^0-9.]/g,''));
+
+    /* PART I - the unit's own price. Net, the GST on it, and the two together: the same three
+       lines the executed copy prints, and the same three the allotment letter quotes. */
+    const net=SM.net, gross=SM.gross;
+    const uNet=(net.total!==null)?net.total:((net.flat||0)+(net.parking||0));
+    const uGr =(gross.total!==null)?gross.total:((gross.flat||0)+(gross.parking||0));
+    const price=[
+      ['1.', 'Price of the Said '+(bhk||'—')+' Unit/Residential Unit'
+             +(isFinite(carpet)&&carpet>0?(' calculated on the carpet area admeasuring '+carpet+' sqft'):''),
+             money(uNet)],
+      ['2.', 'GST', (typeof uNet==='number'&&typeof uGr==='number')?wfRs2(uGr-uNet):'—'],
+      ['3.', 'Total', money(uGr)],
+    ];
+
+    /* THE EDC TABLE is whatever the cost sheet's own other-charges section lists, row for row.
+       Not a fixed list: a sheet may carry seven of them, or none, and the agreement should show
+       what this customer is actually being charged rather than a menu. */
+    const edcSheet=basis('NET')||sheets[0]||null;
+    const edcRows=[];
+    ((edcSheet&&edcSheet.line_items)||[]).forEach(function(it){
+      if(String((it&&it.kind)||'CHARGE').toUpperCase()!=='CHARGE') return;
+      if(String((it&&it.section)||'').toUpperCase()!=='OTHER') return;
+      if(typeof it.amount!=='number') return;
+      edcRows.push([String(it.label||'').trim(), wfRs2(it.amount)]);
+    });
+
+    /* THE PAYMENT PLAN comes from the cost sheet's own schedule. Each row states what the
+       instalment is FOR and what percentage it is, and the amount is the gross - which is what
+       the customer actually pays on that date. */
+    const plan=[];
+    (Array.isArray(res.payment_schedule)?res.payment_schedule:[]).forEach(function(r,i){
+      if(!r) return;
+      const pct=(r.percent===null||r.percent===undefined||r.percent==='')
+        ? (i===0?'Booking Amount':'')
+        : (String(r.percent).replace(/%$/,'')+'%');
+      const note=[pct, (r.plus_gst===false?'':'Plus GST'), (r.less_booking?'(Less Booking Amount)':'')]
+        .filter(Boolean).join(' ');
+      plan.push([String.fromCharCode(65+i), String(r.milestone||'').trim(), note,
+                 (typeof r.amount==='number')?wfRs2(r.amount):'—']);
+    });
+    if(plan.length){
+      const tot=(Array.isArray(res.payment_schedule)?res.payment_schedule:[])
+        .reduce(function(a,r){ return a+((r&&typeof r.amount==='number')?r.amount:0); },0);
+      const pctTot=(Array.isArray(res.payment_schedule)?res.payment_schedule:[])
+        .reduce(function(a,r){ const p=Number(String((r&&r.percent)||'').replace(/[^0-9.]/g,''));
+          return a+(isFinite(p)?p:0); },0);
+      plan.push(['', 'Total Price', (pctTot?(Math.round(pctTot)+'%'):''), wfRs2(tot)]);
+    }
+    return {price:price, edc:edcRows, plan:plan};
+  }
+
+  window.wfAgreement=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAgreementPdf(res); }
+    catch(e){ toast('Could not build the agreement: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* A4, thirty-odd pages, numbered. Serif, because it is a deed and every executed copy of one
+     is set in serif; justified, for the same reason. */
+  async function wfAgreementPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+    const f=res.fields||{};
+    const project=String(((f.project_name||{}).value)||'').trim();
+    const tmpl=await wfAgTemplate(project);
+    const vals=wfAgValues(res), tables=wfAgTables(res);
+
+    const doc=await L.PDFDocument.create();
+    const reg =await doc.embedFont(L.StandardFonts.TimesRoman);
+    const bold=await doc.embedFont(L.StandardFonts.TimesRomanBold);
+    const W=595.28, H=841.89, M=64, RIGHT=W-M, CW=W-2*M;
+    const ink=L.rgb(0.06,0.07,0.10), soft=L.rgb(0.35,0.38,0.44), line=L.rgb(0.72,0.75,0.80);
+    const SZ=10, LEAD=14.2;
+
+    let page=null, y=0, pageNo=0;
+    const newPage=function(){
+      if(page) foot();
+      page=doc.addPage([W,H]); pageNo++; y=H-M;
+    };
+    const foot=function(){
+      const t=String(pageNo);
+      page.drawText(t,{x:(W-reg.widthOfTextAtSize(t,9))/2,y:34,size:9,font:reg,color:soft});
+    };
+    const room=function(n){ if(y-(n||LEAD)<M+26) newPage(); };
+
+    /* Words into lines of a given width, then the line painted word by word so the spaces carry
+       the slack - which is what justified means. The last line of a paragraph is left alone. */
+    const wrap=function(text,font,size,width){
+      const out=[];
+      String(text==null?'':text).split('\n').forEach(function(para){
+        const words=para.split(/\s+/).filter(function(w){ return w!==''; });
+        if(!words.length){ out.push({words:[],last:true}); return; }
+        let cur=[];
+        words.forEach(function(w){
+          const trial=cur.concat([w]).join(' ');
+          if(cur.length && font.widthOfTextAtSize(trial,size)>width){
+            out.push({words:cur,last:false}); cur=[w];
+          } else cur.push(w);
+        });
+        out.push({words:cur,last:true});
+      });
+      return out;
+    };
+    /* A LINE IS DRAWN AS ONE STRING, never word by word.
+
+       It was justified first, placing each word at a measured offset so the line came out flush
+       on both margins. On one line of the recitals PRIVATE and LIMITED came out touching, and I
+       could not account for the two points that went missing - the width function and the drawn
+       glyphs agreed when measured directly. On a contract an unexplained gap between two words
+       of a company's legal name is not a cosmetic matter, so the mechanism that can produce one
+       is gone rather than patched. Set ragged right, the words are whatever the font says they
+       are and cannot touch. */
+    const drawLine=function(ln,x,size,font,colour){
+      if(!ln.words.length) return;
+      page.drawText(ln.words.join(' '),{x:x,y:y,size:size,font:font,color:colour});
+    };
+    const para=function(text,opt){
+      const o=opt||{};
+      const font=o.bold?bold:reg, size=o.size||SZ, lead=o.lead||LEAD;
+      const x=M+(o.indent||0), width=CW-(o.indent||0);
+      wrap(text,font,size,width).forEach(function(ln){
+        room(lead);
+        drawLine(ln,x,size,font,o.colour||ink);
+        y-=lead;
+      });
+      y-=(o.gap===undefined?6:o.gap);
+    };
+    const heading=function(text){
+      room(LEAD*2);
+      y-=6;
+      const t=String(text||'').trim();
+      const w=bold.widthOfTextAtSize(t,10.5);
+      page.drawText(t,{x:M+(CW-w)/2,y:y,size:10.5,font:bold,color:ink});
+      y-=LEAD+4;
+    };
+
+    /* A table draws its own rows, and a row that will not fit starts a fresh page WITH the
+       header repeated - a price table whose heading is on the page before is unreadable. */
+    const table=function(head,rows,widths){
+      if(!rows||!rows.length) return;
+      const cols=widths.slice();
+      const fixed=cols.reduce(function(a,b){ return a+b; },0);
+      const flexAt=cols.indexOf(0);
+      if(flexAt>=0) cols[flexAt]=CW-fixed;
+      const cellLines=function(r,font,size){
+        return r.map(function(c,i){ return wrap(c,font,size,cols[i]-10); });
+      };
+      const rowH=function(lines){ return Math.max.apply(null,
+        lines.map(function(ls){ return ls.length; }))*12.6+8; };
+      const drawRow=function(r,font,size,fill){
+        const lines=cellLines(r,font,size), h=rowH(lines);
+        if(y-h<M+26){ newPage(); drawRow(head,bold,9.5,true); }
+        if(fill) page.drawRectangle({x:M,y:y-h,width:CW,height:h,color:L.rgb(0.96,0.96,0.97)});
+        page.drawRectangle({x:M,y:y-h,width:CW,height:h,borderColor:line,borderWidth:0.7,opacity:0});
+        let cx=M;
+        lines.forEach(function(ls,i){
+          let cy=y-14;
+          ls.forEach(function(ln){
+            if(!ln.words.length) return;
+            const t=ln.words.join(' ');
+            /* the money column is the last one and reads right-aligned, as money does */
+            const rightAligned=(i===r.length-1 && /^[\d,.—%]+$/.test(t));
+            const tx=rightAligned?(cx+cols[i]-5-font.widthOfTextAtSize(t,size)):(cx+5);
+            page.drawText(t,{x:tx,y:cy,size:size,font:font,color:ink});
+            cy-=12.6;
+          });
+          cx+=cols[i];
+        });
+        // the column rules
+        let rx=M;
+        for(let i=0;i<cols.length-1;i++){
+          rx+=cols[i];
+          page.drawLine({start:{x:rx,y:y},end:{x:rx,y:y-h},thickness:0.7,color:line});
+        }
+        y-=h;
+      };
+      room(60);
+      drawRow(head,bold,9.5,true);
+      rows.forEach(function(r,i){
+        const lastRow=(i===rows.length-1);
+        drawRow(r, (lastRow && /total/i.test(String(r[1]||r[0]||'')))?bold:reg, 9.5, false);
+      });
+      y-=10;
+    };
+
+    const fill=function(text){
+      return String(text==null?'':text).replace(/\{\{(\w+)\}\}/g, function(_m,k){
+        return (vals[k]===undefined||vals[k]===null)?('{{'+k+'}}'):String(vals[k]);
+      });
+    };
+
+    newPage();
+    tmpl.blocks.forEach(function(b){
+      if(!b) return;
+      if(b.t==='h'){ heading(fill(b.x)); return; }
+      if(b.t==='table'){
+        if(b.id==='specs') table(b.head,b.rows,b.w);
+        else if(b.id==='price') table(b.head,tables.price,b.w);
+        else if(b.id==='edc')   table(b.head,tables.edc,b.w);
+        else if(b.id==='plan')  table(b.head,tables.plan,b.w);
+        return;
+      }
+      const t=fill(b.x);
+      /* The allottees' block is set as its own paragraph per person, and the ANDs between them
+         are centred the way the executed copy sets them. */
+      if(b.x==='{{ALLOTTEES}}'){
+        t.split('\n').forEach(function(chunk){
+          const c=chunk.trim();
+          if(c==='AND'){ heading('AND'); return; }
+          para(c,{gap:8});
+        });
+        return;
+      }
+      para(t);
+    });
+
+    /* The execution block. Three signatures, each with room to actually sign. */
+    room(200);
+    y-=10;
+    [['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED OWNERS','IN THE PRESENCE OF:'],
+     ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED PROMOTER','IN THE PRESENCE OF:'],
+     ['SIGNED SEALED AND DELIVERED','BY THE WITHIN NAMED ALLOTTEE','IN THE PRESENCE OF:']]
+      .forEach(function(blk){
+        room(96);
+        blk.forEach(function(l){ page.drawText(l,{x:M,y:y,size:9.5,font:bold,color:ink}); y-=12.6; });
+        y-=44;
+        page.drawLine({start:{x:M,y:y},end:{x:M+210,y:y},thickness:0.8,color:line});
+        y-=26;
+      });
+    foot();
+
+    const bytes=await doc.save();
+    const who=allotteeNames(res)[0]||'agreement';
+    /* Said at the moment of download rather than printed on the deed: a line on the face of an
+       agreement saying which template it came from would travel with it to the customer. */
+    const onGurukul=(tmpl.project===project);
+    wfPreviewPdf(bytes,'Agreement for Sale - '+who.replace(/[^A-Za-z0-9 ]/g,'')+'.pdf',
+      'Agreement downloaded — the blanks on it are for the values the documents do not state'
+      +(onGurukul?'' : ('. It is set on the '+tmpl.project+' template, not '
+        +(project||'this booking’s project')+' — check the recitals before it goes out')));
+  }
+
+  /* THE APARTMENT, ITS PARKING, AND THE TWO TOGETHER - read off the cost sheet as stored.
+
+     A cost sheet is laid out as "Unit Charges Details", then "Parking Details" with its own TOTAL,
+     then "TOTAL FLAT VALUE" covering both. The reading already carries every row; what went wrong
+     on Arup Bhawal's letter was choosing among them. It took the first subtotal in the flat
+     section - which on that layout is the PARKING group's total - as the price of the apartment,
+     so the letter quoted the flat at 5,00,000 (the price of his car park) and then added the car
+     park to it a second time.
+
+     So the apartment is ADDED UP from the charge rows with the parking rows left out, and the two
+     can no longer be confused however the sheet is laid out. Where the sheet prints its own total
+     of the pair, that is kept and preferred: it is the figure the customer signed against, and it
+     beats anything totted up here.
+
+     Computed from res.cost_sheets rather than the reading's stored letter.price, so every booking
+     already read is right the moment this ships - nothing has to be read again. */
+  function wfSheetMoney(res){
+    const sheets=Array.isArray(res&&res.cost_sheets)?res.cost_sheets:[];
+    const norm=function(l){ return String(l==null?'':l).toUpperCase().replace(/[^A-Z0-9]/g,''); };
+    const byBasis=function(want){
+      for(let i=0;i<sheets.length;i++)
+        if(String((sheets[i]&&sheets[i].basis)||'').toUpperCase()===want) return sheets[i];
+      return null;
+    };
+    const one=function(sheet){
+      const items=Array.isArray(sheet&&sheet.line_items)?sheet.line_items:[];
+      const isPark=function(it){ return /PARKING|GARAGE/.test(norm(it&&it.label)); };
+      let parking=null,total=null,sum=0,any=false,sub=null;
+      items.forEach(function(it){
+        const amt=(typeof (it&&it.amount)==='number')?it.amount:null;
+        if(amt===null) return;
+        const kind=String((it&&it.kind)||'CHARGE').toUpperCase();
+        const sec=String((it&&it.section)||'').toUpperCase();
+        if(kind==='CHARGE'&&isPark(it)){ parking=(parking||0)+amt; return; }
+        if(kind==='CHARGE'&&sec==='FLAT'){ sum+=amt; any=true; return; }
+        if(kind!=='CHARGE'&&/FLATVALUE|TOTALFLAT/.test(norm(it&&it.label))&&total===null) total=amt;
+        else if(kind==='SUBTOTAL'&&sec==='FLAT'&&sub===null&&!isPark(it)) sub=amt;
+      });
+      // A sheet that itemises nothing but its parking: take the parking back out of the lump.
+      const flat=any?sum:((sub!==null)?(sub-(parking||0)):null);
+      return {flat:flat, parking:parking, total:total};
+    };
+    return {net:one(byBasis('NET')||sheets[0]||null), gross:one(byBasis('GROSS'))};
+  }
+  window.wfAllotmentLetter=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfAllotmentPdf(res); }
+    catch(e){ toast('Could not build the allotment letter: '+((e&&e.message)||e),'err'); }
+  };
+
+  async function wfAllotmentPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);
+    const W=595.28, H=841.89, M=58;
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const ink=L.rgb(0.10,0.10,0.11), soft=L.rgb(0.40,0.42,0.45),
+          line=L.rgb(0.72,0.74,0.77), band=L.rgb(0.94,0.95,0.96);
+
+    const f=res.fields||{}, LT=res.letter||{};
+    const val=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const n2=function(v){ return (typeof v==='number'&&isFinite(v))
+      ? v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : null; };
+
+    /* NO LETTERHEAD OF OUR OWN. This goes out on the company's printed paper, so the top of the
+       page is left clear for it - no logo drawn, and no rules under one. Raise CLEAR_TOP if the
+       printed letterhead runs deeper than this. */
+    const CLEAR_TOP=118;
+    let y=H-CLEAR_TOP;
+
+    // The date this letter is written, in the form the example uses.
+    const d=new Date(), p2=function(n){ return String(n).padStart(2,'0'); };
+    const today=p2(d.getDate())+'.'+p2(d.getMonth()+1)+'.'+d.getFullYear();
+    page.drawText(today,{x:W-M-reg.widthOfTextAtSize(today,10.5),y:y,size:10.5,font:reg,color:ink});
+    y-=26;
+
+    const who=allotteeNames(res);
+
+    page.drawText('To,',{x:M,y:y,size:10.5,font:reg,color:ink}); y-=15;
+    page.drawText(who.join(' & ')||'The Applicant',{x:M,y:y,size:11,font:bold,color:ink}); y-=15;
+    /* The customer's own address, as the booking form prints it. When the form gave none the lines
+       are simply absent - a letter with an invented address is worse than one with none. */
+    const addr=(Array.isArray(LT.address)?LT.address:[]).slice(0,4);
+    addr.forEach(function(l){ page.drawText(l,{x:M,y:y,size:10.5,font:reg,color:ink}); y-=14; });
+    if(LT.pin){ page.drawText('PIN '+String(LT.pin).replace(/^PIN\s*/i,''),
+      {x:M,y:y,size:10.5,font:reg,color:ink}); y-=14; }
+    y-=16;
+
+    const title='ALLOTMENT LETTER';
+    const tw=bold.widthOfTextAtSize(title,13);
+    page.drawText(title,{x:(W-tw)/2,y:y,size:13,font:bold,color:ink});
+    page.drawLine({start:{x:(W-tw)/2-2,y:y-4},end:{x:(W+tw)/2+2,y:y-4},thickness:0.8,color:ink});
+    y-=32;
+
+    page.drawText('Dear Sir / Madam,',{x:M,y:y,size:10.5,font:reg,color:ink});
+    y-=24;
+
+    const project=val('project_name')||'________';
+    const place=String(LT.locality||'').trim();
+    const placed=project.toUpperCase()+(place?('\u201d, '+place):'\u201d');
+    /* The letter writes dates with dots - its own date at the top does, so the application date
+       should too rather than sitting beside it in slashes. */
+    const bookingDate=(res.checklist&&res.checklist['Booking Date']
+      && res.checklist['Booking Date']!=='--')
+      ? String(res.checklist['Booking Date']).replace(/[\/\-]/g,'.') : '________';
+    const flat=val('flat')||'____', block=val('block')||'____';
+    const fRaw=val('floor'), fNum=(fRaw.match(/\d+/)||[])[0];
+    const floorTxt=fNum?ordinal(fNum):(fRaw||'____');
+    // Type is the floor and the flat together, the way the example writes it: 6N.
+    const flatOnly=flat.replace(/^\s*\d+\s*/,'');
+    const typeTxt=(fNum && flat && !/^\d/.test(flat)) ? (fNum+flatOnly) : (flat||'____');
+    const company=String(LT.addressed_to||'').trim()||'Dream Gateway Hotels Ltd';
+
+    const para=function(text,gap){
+      const max=W-2*M, size=10.5;
+      const words=String(text).split(/\s+/);
+      let ln='';
+      words.forEach(function(w){
+        const t=ln?ln+' '+w:w;
+        if(reg.widthOfTextAtSize(t,size)>max){
+          page.drawText(ln,{x:M,y:y,size:size,font:reg,color:ink}); y-=size*1.6; ln=w;
+        } else ln=t;
+      });
+      if(ln){ page.drawText(ln,{x:M,y:y,size:size,font:reg,color:ink}); y-=size*1.6; }
+      y-=(gap===undefined?10:gap);
+    };
+
+    para('This has reference to your Application dated '+bookingDate
+      +' for booking of an Apartment in \u201c'+placed+'.');
+    para('We are pleased to allot you Flat No. '+flat+' on the '+floorTxt+' Floor in Block '+block
+      +', at '+project+(place?(', '+place):'')
+      +'. We take this opportunity to congratulate you for being a part of \u201c'
+      +project.toUpperCase()+'\u201d.');
+    para('Please find enclosed the \u201cSchedule of Payments\u201d for the captioned property. You '
+      +'are requested to kindly remit the payments as per the schedule. Also note that the payment '
+      +'has to be remitted in favour of \u201c'+company+'\u201d.',16);
+
+    page.drawText('Property Details',{x:M,y:y,size:11,font:bold,color:ink}); y-=17;
+    /* Labelled fields rather than a sentence: someone checking an allotment reads down the labels.
+       The block is what the tower is called, so it is given as the tower name and not repeated. */
+    const facts=[['Project',project+(place?(', '+place):'')],
+                 ['Super Built up area',(val('area_sqft')?(val('area_sqft')+' sq.ft.'):'________')],
+                 ['Tower Name',block],
+                 ['Type',typeTxt]];
+    facts.forEach(function(kv){
+      page.drawText(kv[0],{x:M,y:y,size:10,font:reg,color:soft});
+      page.drawText(String(kv[1]),{x:M+130,y:y,size:10.5,font:bold,color:ink});
+      y-=15;
+    });
+    y-=14;
+
+    /* The price table. Rows are drawn to a measured height so the total row can be banded and the
+       whole block ruled - a price a customer is asked to pay should look like a statement, not a
+       sentence. */
+    /* Every figure here comes from the cost sheet's own rows. The reading also carries a
+       precomputed letter.price, but that is what got Arup Bhawal's letter wrong and it is
+       deliberately not consulted, even as a fallback: a sheet nobody could read leaves these
+       null and the table prints a dash, which is the truth. A wrong price on a letter to a
+       customer is worse than a blank one. */
+    const SM=wfSheetMoney(res);
+    const flatNet=SM.net.flat,      flatGr=SM.gross.flat;
+    const parkNet=SM.net.parking,   parkGr=SM.gross.parking;
+    const hasPark=parkNet!==null||parkGr!==null;
+    const kind=String((res.parking&&res.parking.marked&&res.parking.marked.value)||'').toUpperCase();
+    const kindWord=(kind==='COVERED'||kind==='OPEN')?(kind.charAt(0)+kind.slice(1).toLowerCase()):'';
+    /* The sheet's own "TOTAL FLAT VALUE" is the apartment and its parking together, and it wins:
+       it is the figure the customer signed against, so it beats one added up here. Only a sheet
+       that prints no such row falls back to adding the two. */
+    const totNet=SM.net.total, totGr=SM.gross.total;
+    const costNet=(totNet!==null)?totNet
+                 :((flatNet===null&&parkNet===null)?null:((flatNet||0)+(parkNet||0)));
+    const costGr =(totGr!==null)?totGr
+                 :((flatGr===null&&parkGr===null)?null:((flatGr||0)+(parkGr||0)));
+    const extra=(costNet!==null&&costGr!==null)?(costGr-costNet):null;
+
+    const costLabel=hasPark
+      ? ('Cost of apartment including 1 '+(kindWord||'Car')+' Parking')
+      : 'Cost of apartment';
+    const rows=[[costLabel,n2(costNet)],
+                ['Extra charge (GST)',n2(extra)],
+                ['Total Purchase Price (inclusive of all)',n2(costGr)]];
+
+    const tX=M, tW=W-2*M, rowH=24, amtR=W-M-10;
+    const tTop=y;
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH*3,
+      borderColor:line,borderWidth:0.8,color:L.rgb(1,1,1)});
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH,color:band});
+    page.drawRectangle({x:tX,y:tTop-rowH*3,width:tW,height:rowH*3,
+      borderColor:line,borderWidth:0.8,opacity:0});
+    rows.forEach(function(r,i){
+      const ry=tTop-rowH*(i+1);
+      if(i) page.drawLine({start:{x:tX,y:ry+rowH},end:{x:tX+tW,y:ry+rowH},
+        thickness:0.6,color:line});
+      const last=(i===2), fnt=last?bold:reg;
+      page.drawText(r[0],{x:tX+10,y:ry+8.5,size:10,font:fnt,color:ink});
+      const amt=r[1]?('Rs. '+r[1]):'\u2014';
+      page.drawText(amt,{x:amtR-fnt.widthOfTextAtSize(amt,10.5),y:ry+8.5,size:10.5,font:fnt,color:ink});
+    });
+    y=tTop-rowH*3-16;
+
+    // The total in words, under the table, the way the example gives it.
+    if(costGr!==null){
+      const wordsTxt='('+rupeesInWords(costGr)+' only)';
+      page.drawText(wordsTxt,{x:amtR-reg.widthOfTextAtSize(wordsTxt,9.5),y:y,size:9.5,
+        font:reg,color:soft});
+      y-=22;
+    }
+
+    para('Thanking you and assuring you the best of our services at all times.',30);
+
+    page.drawText('For '+company,{x:M,y:y,size:10.5,font:bold,color:ink}); y-=46;
+    page.drawText('Authorized Signatory',{x:M,y:y,size:10.5,font:reg,color:ink});
+    y-=10;
+
+    /* The closing rule normally sits at the foot of the page, but on a letter with a long address
+       or a parking row it would otherwise creep up against "Authorized Signatory". */
+    const footY=Math.min(58, y-34);
+    page.drawLine({start:{x:M,y:footY},end:{x:W-M,y:footY},thickness:0.6,color:line});
+    const foot='THE JAIN GROUP  \u00b7  CARING FOR YOUR DREAMS';
+    page.drawText(foot,{x:(W-reg.widthOfTextAtSize(foot,7.5))/2,y:footY-13,size:7.5,font:reg,
+      color:L.rgb(.55,.57,.60)});
+
+    const bytes=await doc.save();
+    const nm=(who[0]||val('customer_name')||'customer').replace(/[^\w \-]/g,'').trim()||'customer';
+    wfPreviewPdf(bytes,'Allotment Letter - '+nm+'.pdf','Allotment letter downloaded');
+  }
+  window.wfChecklistDownload=async function(caseId){
+    let res=null;
+    try{ res=await wfBookingReading(caseId); }
+    catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
+    try{ await wfChecklistPdf(res); }
+    catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
+  };
+
+  /* Typeset at A4 and downloaded. Every value comes from the stored reading; nothing on the sheet
+     is written by a model.
+
+     WHY THIS IS SET RATHER THAN OVERLAID. It used to be drawn by writing values onto a scan of the
+     printed blank. On a scan the gaps are fixed at whatever width they were printed, so a value sat
+     hard against the underscores with no space before it, two ran into each other when both blanks
+     were too narrow - PLC and FLC came out as "100 100" - and a long one was cut mid-word, "3rd
+     FLOOR" printing as "3rd FL". Setting the page gives each label its room, puts every value in
+     one column, and lets a line grow when its value is long.
+
+     The wording, the items and their order are the form's own and are not to be improved on;
+     assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
+  async function wfChecklistPdf(res){
+    const L=await loadPdfLib();
+    if(!L) throw new Error('the PDF library could not be loaded');
+
+    const doc=await L.PDFDocument.create();
+    const page=doc.addPage([595.28,841.89]);
+    const W=595.28, H=841.89, M=58, R=W-M;
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    /* One ink, as on any form - a check list is not a dashboard, and it gets photocopied. Grey is
+       for a value nobody has filled in yet, never for a warning. */
+    const ink=L.rgb(0.07,0.07,0.08), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.55,0.57,0.60);
+
+    const f=res.fields||{}, cl=res.checklist||{};
+    const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
+      return (!t||t==='NIL')?'':t; };
+    const dots=function(t){ return String(t==null?'':t).trim().replace(/[\/\-]/g,'.'); };
+    const grp=function(t){
+      const str=String(t==null?'':t).trim();
+      if(!str) return '';
+      const n=Number(str.replace(/,/g,''));
+      return isFinite(n)?n.toLocaleString('en-IN'):str;
+    };
+    const said=function(t){ const x=String(t==null?'':t).trim();
+      return (x && x!=='NIL' && !/^--.*--$/.test(x)) ? x : ''; };
+
+    /* The mark the form itself carries, top left, at the size and place the printed blank put it:
+       109.5 x 131.25 points against the left margin. This one is an internal sheet, so it prints
+       its own letterhead rather than assuming company paper the way the letters do. */
+    const logo=await doc.embedJpg(await jgLogo('classic'));
+    const lw=109.5, lh=131.25, logoTop=H-52;
+    page.drawImage(logo,{x:M,y:logoTop-lh,width:lw,height:lh});
+    let y=logoTop-lh-26;
+
+    (function(){
+      const lab='Date  :  ', val=dots((res.header&&res.header.date)||'')||'\u2014';
+      const lw=reg.widthOfTextAtSize(lab,10.5), w=lw+bold.widthOfTextAtSize(val,10.5);
+      page.drawText(lab,{x:R-w,y:y,size:10.5,font:reg,color:ink});
+      page.drawText(val,{x:R-w+lw,y:y,size:10.5,font:bold,color:ink});
+    })();
+    y-=30;
+
+    page.drawText('Booking form check list :-',{x:M,y:y,size:11.5,font:bold,color:ink});
+    y-=26;
+
+    // The two header lines, colons in one column so each pair reads as a pair.
+    const mLab=['Name of Post sales in-charge Responsible','Name of the customer'];
+    const mVal=[(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH',
+                allotteeNames(res).join('  &  ')||'\u2014'];
+    const colonX=M+Math.max.apply(null,mLab.map(function(t){
+      return reg.widthOfTextAtSize(t,10.5); }))+12;
+    mLab.forEach(function(lab,i){
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(':',{x:colonX,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(mVal[i]),{x:colonX+12,y:y,size:10.5,font:bold,color:ink});
+      y-=17;
+    });
+    y-=11;
+
+    /* Label : Value, comma separated, with real space around the colon. Drawn as a run of chunks
+       so the labels can stay light and the values bold on the one line. */
+    const runLine=function(pairs){
+      let x=M;
+      pairs.forEach(function(p,i){
+        /* An explicit NIL is an answer and prints as one - the form's own way of saying there is
+           no discount, no parking. Only a genuinely empty value becomes a dash. */
+        const lab=p[0]+' : ';
+        const val=(p[1]==null||String(p[1]).trim()==='') ? '\u2014' : String(p[1]).trim();
+        page.drawText(lab,{x:x,y:y,size:10.5,font:reg,color:soft});
+        x+=reg.widthOfTextAtSize(lab,10.5);
+        page.drawText(val,{x:x,y:y,size:10.5,font:bold,color:ink});
+        x+=bold.widthOfTextAtSize(val,10.5);
+        if(i<pairs.length-1){
+          page.drawText(',    ',{x:x,y:y,size:10.5,font:reg,color:ink});
+          x+=reg.widthOfTextAtSize(',    ',10.5);
+        }
+      });
+      y-=17;
+    };
+    // The floor is the number the booking form gives - not "3rd FLOOR" clipped to "3rd FL".
+    const floorNo=(String(v('floor')).match(/\d+/)||[v('floor')])[0]||'';
+    runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
+             ['Floor',floorNo],
+             ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
+    /* WHICH parking belongs in the label, not the value. The reading gives "COVERED 5,00,000",
+       which printed as "Parking : COVERED 5,00,000" - reading as though COVERED were part of the
+       amount. What was ticked is the name of the thing being charged for, so it goes with the
+       word: "COVERED Parking : 5,00,000". Nothing ticked stays plain "Parking". */
+    const pv=String(res.parking_value||v('covered_parking')||'').trim();
+    const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
+    const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
+    const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
+    runLine([['Base Rate',v('base_rate')?(grp(v('base_rate'))+'/-'):''],
+             ['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+             [parkLabel,parkValue]]);
+    runLine([['Discount',v('discount')||'NIL']]);
+    y-=13;
+
+    page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
+    y-=23;
+
+    /* A dash between the label and the rule, and the value written ON the rule - which is what a
+       filled form looks like. Every value starts in the same column, so they read straight down
+       instead of being hunted for. */
+    const LBL=152, VX=M+LBL+18;
+
+    /* WHY IT FAILED, IN A FEW WORDS, ON THE SAME LINE.
+       A column of NOT OKs tells whoever picks the file up that something is wrong but not what,
+       and they then have to open the reading to find out. So each failed row carries its own
+       reason in brackets beside it.
+       These are WRITTEN SHORT rather than trimmed from the long reason the reader gives: a
+       sentence cut off mid-word reads worse than no sentence at all. Each is built from what was
+       actually decided, so it can never disagree with the verdict beside it. The full wording is
+       still in the reading for anyone who wants it. */
+    const clWhy=function(key){
+      if(key==='Cost Sheet'){
+        const parts=((res.cost_sheet_verdict||{}).parts)||[];
+        const bad=parts.filter(function(p){ return !p.ok; })
+                       .map(function(p){ return String(p.what||'').replace(/^the /,''); });
+        return bad.join(', ');
+      }
+      if(key==='KYC of Customer'){
+        // a card that is plainly the applicant's, spelt differently - the commonest failure
+        const nf=res.name_faults||[];
+        if(nf.length){
+          const m=String(nf[0]).match(/^The ([A-Z]+) card/);
+          const kind=m?(m[1].charAt(0)+m[1].slice(1).toLowerCase()):'ID';
+          return kind+' name differs';
+        }
+        const app=(((res.kyc||{}).people)||[]).filter(function(p){ return p.is_applicant; })[0];
+        if(app&&!app.aadhaar&&!app.pan) return 'no ID card for the applicant';
+        if(app&&app.dob_matches===false) return 'date of birth differs';
+        return 'ID does not agree';
+      }
+      if(key==='Mobile Number'){
+        const mb=(res.validation||{}).mobile||{};
+        return (mb.numbers&&mb.numbers.length)?'not a valid number':'none in the file';
+      }
+      if(key==='Email ID'){
+        const em=(res.validation||{}).email||{};
+        return (em.addresses&&em.addresses.length)?'not a usable address':'none in the file';
+      }
+      if(key==='Pan Card No.'){
+        const pn=(res.validation||{}).pan||{};
+        if(!pn.form_pan) return 'not stated on the form';
+        return pn.cards?'does not match the card':'not a valid PAN';
+      }
+      if(key==='Signatures'){
+        const sg=(res.signatures||{}).summary||{};
+        const n=((sg.unsigned)||[]).length;
+        if(n) return n+' page'+(n===1?'':'s')+' unsigned';
+        if(sg.cost_sheet_signed===false) return 'cost sheet unsigned';
+        return 'a signature is missing';
+      }
+      return '';
+    };
+
+    const row=function(label,value,dim,edge){
+      page.drawText(label,{x:M,y:y,size:10.5,font:reg,color:ink});
+      page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
+      /* IT MUST NOT WRAP. The row is one line and a second one would push the whole sheet out of
+         shape, so the reason is measured against the space actually left on this line and left
+         off altogether if it will not fit. A missing note costs nothing; a broken sheet costs a
+         reprint. */
+      if(String(value)==='NOT OK'){
+        const why=clWhy(label);
+        if(why){
+          const vw=bold.widthOfTextAtSize(String(value),10.5);
+          const sx=VX+vw+7, room=(edge||R)-6-sx;
+          let t='('+why+')';
+          while(t.length>6 && reg.widthOfTextAtSize(t,8.5)>room)
+            t='('+t.slice(1,-2).replace(/[ ,;]+$/,'')+')';
+          if(reg.widthOfTextAtSize(t,8.5)<=room)
+            page.drawText(t,{x:sx,y:y,size:8.5,font:reg,color:soft});
+        }
+      }
+      page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
+    };
+    // Nothing prints as UNKNOWN: a check that could not be settled reads NOT OK. See the reader.
+    const verdict=function(key){
+      const t=String(cl[key]==null?'':cl[key]).trim();
+      if(t==='Ok')     return ['OK',false];
+      if(t==='Not Ok') return ['NOT OK',false];
+      if(!t||/^--.*--$/.test(t)) return ['\u2014',true];
+      return [t,false];
+    };
+    ['Cost Sheet','Market valuation Sheet','KYC of Customer','Mobile Number','Email ID',
+     'Pan Card No.'].forEach(function(k){
+      const d=verdict(k); row(k,d[0],d[1]); y-=22;
+    });
+    (function(){ const src=said(cl['Source']); row('Source',src||'\u2014',!src); y-=22; })();
+
+    // The one row the form itself puts two pairs on.
+    (function(){
+      const lead=said(cl['Booked in CRM - Lead ID']), mid=VX+112;
+      row('Booked in CRM \u2013 Lead ID', lead||'awaiting the CRM', !lead, mid);
+      const bx=mid+26, blab='Booking Date';
+      page.drawText(blab,{x:bx,y:y,size:10.5,font:reg,color:ink});
+      const bvx=bx+reg.widthOfTextAtSize(blab,10.5)+12;
+      page.drawText('\u2013',{x:bvx,y:y,size:10.5,font:reg,color:soft});
+      const bd=said(cl['Booking Date']) ? dots(cl['Booking Date']) : '';
+      page.drawText(bd||'\u2014',{x:bvx+14,y:y,size:10.5,font:bd?bold:reg,color:bd?ink:soft});
+      page.drawLine({start:{x:bvx+14,y:y-4},end:{x:R,y:y-4},thickness:0.6,color:rule});
+      y-=22;
+    })();
+    (function(){ const d=verdict('Signatures'); row('Signatures',d[0],d[1]); y-=32; })();
+
+    (function(){
+      /* The form prints a small arrow here that the standard PDF fonts cannot encode; a colon
+         says the same thing and matches every other label on the sheet. */
+      const lab='Payment Plan   :   ';
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
+      page.drawText(String(cl['Payment Plan']||'AS PER COST SHEET /'),
+        {x:M+reg.widthOfTextAtSize(lab,10.5),y:y,size:10.5,font:bold,color:ink});
+      y-=42;
+    })();
+
+    /* Discount Approved is a line for VC / HD to sign, not a value to fill - so it stays a line,
+       with whoever the documents named written on it when they named anybody. */
+    (function(){
+      const lab='Discount Approved', vchd='(VC / HD)';
+      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:ink});
+      const x1=M+reg.widthOfTextAtSize(lab,10.5)+18;
+      const x2=R-reg.widthOfTextAtSize(vchd,10.5)-16;
+      const who=said(cl['Discount Approved']);
+      if(who) page.drawText(who,{x:x1+8,y:y,size:10.5,font:bold,color:ink});
+      page.drawLine({start:{x:x1,y:y-4},end:{x:x2,y:y-4},thickness:0.6,color:rule});
+      page.drawText(vchd,{x:x2+16,y:y,size:10.5,font:reg,color:soft});
+    })();
+
+    const bytes=await doc.save();
+    const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
+      .replace(/[^\w \-]/g,'').trim()||'booking';
+    wfPreviewPdf(bytes,'Booking Form Check List - '+nm+'.pdf','Check list downloaded');
+  }
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
      flow like Reimbursement, or the detail-card grid for anything else) plus the whole injected
@@ -3540,31 +5087,169 @@
      someone printing this needs to be able to scan or check by eye. Opened in a new tab rather
      than done via @media print CSS on the live page, so it doesn't have to fight the app's own
      nav/sidebar/panel chrome to hide everything else. */
+  /* Attachments printed as pages rather than filenames. An image goes straight in; a PDF is
+     rendered page by page with pdf.js (loadPdfJs() already exists in nexus-core for the Post-Sales
+     tooling) and each page embedded as an image, because a PDF cannot otherwise be folded into the
+     app's own print job - the browser will not include a cross-origin PDF in window.print().
+
+     Rendering FETCHES the file from S3, so it needs the site it is viewed from to be on the
+     bucket's allowed-origins list. Where the fetch fails the file is named instead, so the print
+     says what is missing rather than coming out silently blank. */
+  const WF_PRINT_MAX_PAGES=12;
+  /* Pages embedded across ONE print job, however many instances it covers. Printing a single
+     booking form never comes near it; Accounts printing a month of invoices would, and without a
+     ceiling that job means dozens of fetches and megabytes of embedded images. Reset per job in
+     wfPrintCases. */
+  const WF_PRINT_PAGE_BUDGET=45;
+  let WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;
+  function wfAttFileName(p){
+    return String(p||'').split('/').pop().replace(/^\d+_[a-z0-9]+_/i,'');
+  }
+  /* Reads one stored file's BYTES through the s3-fetch edge function rather than letting the
+     browser fetch it from S3 directly.
+
+     pdf.js has to fetch a PDF to render it, and a direct fetch is cross-origin - so it only worked
+     from the one site the bucket's CORS rules name, and printing anywhere else failed with
+     "Could not be rendered here". Reading it server-side takes CORS out of the decision entirely.
+     Images are left on their signed URL: a plain <img src> is not a CORS request, and nothing here
+     reads its pixels. */
+  async function wfFetchAttachmentBytes(path){
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    if(!token) throw new Error('not signed in');
+    const res=await fetch(SUPABASE_URL+'/functions/v1/s3-fetch',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'apikey':SUPABASE_KEY},
+      body:JSON.stringify({key:String(path||'').replace(/^s3:/,'')})
+    });
+    if(!res.ok){
+      let msg='';
+      try{ msg=((await res.json())||{}).error||''; }catch(_e){}
+      throw new Error(msg||('could not be read (HTTP '+res.status+')'));
+    }
+    return await res.arrayBuffer();
+  }
+  /* Attachments printed as pages rather than filenames - the Booking Form IS the attachment, so a
+     print listing "rajib_upadhay.pdf" and nothing else was not a printed booking form. Images go
+     straight in; a PDF is rendered page by page with pdf.js (loadPdfJs() already exists in
+     nexus-core for the Post-Sales tooling), because a browser will not include a cross-origin PDF
+     in its own print job.
+
+     Whatever field is flagged upiScannerMemory is skipped: Reimbursement's QR Code already prints
+     as its own image block above, and printing it here as well put the same code on the sheet
+     twice. */
+  async function wfPrintAttachmentsHtml(det,flow){
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    const qrLabel=(qrField&&qrField.label)||'';
+    let paths=[];
+    (det||[]).forEach(function(d){
+      if(!d) return;
+      if(qrLabel && eq(d.label||'', qrLabel)) return;
+      paths=paths.concat(wfValuePaths(d.value));
+    });
+    if(!paths.length) return '';
+
+    const blocks=[];
+    for(const p of paths){
+      const name=wfAttFileName(p);
+      const head='<div class="wf-print-att-h">'+esc2(name)+'</div>';
+
+      if(/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)){
+        const url=await wfSignedUrl(p);
+        blocks.push('<div class="wf-print-att">'+head
+          +(url?('<img src="'+esc2(url)+'" class="wf-print-att-img">')
+               :'<div class="wf-print-att-miss">This file could not be opened.</div>')
+          +'</div>');
+        continue;
+      }
+
+      if(/\.pdf$/i.test(name)){
+        if(WF_PRINT_PAGES_LEFT<=0){
+          blocks.push('<div class="wf-print-att">'+head
+            +'<div class="wf-print-att-miss">Not printed \u2014 this job already covers '
+            +WF_PRINT_PAGE_BUDGET+' pages. Print this one on its own to include it.</div></div>');
+          continue;
+        }
+        let imgs=[], why='';
+        try{
+          const lib=await loadPdfJs();
+          if(!lib) throw new Error('the PDF renderer did not load');
+          const buf=await wfFetchAttachmentBytes(p);
+          const pdf=await lib.getDocument({data:new Uint8Array(buf)}).promise;
+          const n=Math.min(pdf.numPages, WF_PRINT_MAX_PAGES, WF_PRINT_PAGES_LEFT);
+          for(let i=1;i<=n;i++){
+            const page=await pdf.getPage(i);
+            // 1.6 keeps a scan readable in print without a page of 10MB data URLs.
+            const vp=page.getViewport({scale:1.6});
+            const cv=document.createElement('canvas');
+            cv.width=vp.width; cv.height=vp.height;
+            await page.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+            imgs.push('<img src="'+cv.toDataURL('image/jpeg',0.82)+'" class="wf-print-att-img">');
+          }
+          WF_PRINT_PAGES_LEFT-=imgs.length;
+          if(pdf.numPages>n) imgs.push('<div class="wf-print-att-miss">Only the first '+n
+            +' of '+pdf.numPages+' pages are printed.</div>');
+        }catch(e){ imgs=[]; why=(e&&e.message)?String(e.message):'it could not be read'; }
+        blocks.push('<div class="wf-print-att">'+head
+          +(imgs.length
+            ? imgs.join('')
+            // Say WHY. "Could not be rendered here" sent us looking in the wrong place once already.
+            : '<div class="wf-print-att-miss">Not printed \u2014 '+esc2(why)+'.</div>')
+          +'</div>');
+        continue;
+      }
+
+      blocks.push('<div class="wf-print-att">'+head
+        +'<div class="wf-print-att-miss">Not a printable file type \u2014 open it to view.</div></div>');
+    }
+    return blocks.join('');
+  }
   async function wfCasePrintSection(caseId){
     let c=null, flow=null;
     try{ const {data}=await ACC().from('flow_cases').select('*').eq('id',caseId).maybeSingle(); c=data; }catch(e){}
     if(!c) return null;
     if(c.flow_id){ try{ const {data}=await ACC().from('flows').select('*').eq('id',c.flow_id).maybeSingle(); flow=data; }catch(e){} }
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
-    const detHtml=wfCaseSummaryHtml(c,flow) || (det.length?('<ul class="wf-detlist">'+det.map(function(d){return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+esc2(d.value||'')+'</li>';}).join('')+'</ul>'):'');
+    const detHtml=wfCaseSummaryHtml(c,flow) || wfDetListHtml(det,flow);
     let qrHtml='';
     const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
     const qrField=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    // The whole point of this section is the QR code Accounts hands over - if it can't be shown,
+    // that must say so on the printout, not leave a silent gap that looks like it just never
+    // existed. Signing can fail outright (missing/renamed object); the image can also sign fine
+    // and still fail to load at print time (S3 answers AccessDenied rather than Not Found, so
+    // that only ever shows up as a broken <img> at render) - onerror catches that second case.
     if(qrField){
       const raw=det.find(function(d){ return d&&eq(d.label,qrField.label); });
       const paths=wfSplitSets((raw&&raw.value)||'').filter(function(p){ return String(p).trim().indexOf('s3:')===0; });
+      // Built via DOM API (not an HTML string) so the message text never has to be embedded inside
+      // the onerror attribute itself - that would mean nesting one quoting scheme inside another.
+      const missingOnerror="var d=document.createElement('div');d.className='wf-print-qr-missing';"
+        +"d.textContent='QR code image not available — ask them to re-upload it';this.replaceWith(d);";
+      const missingHtml='<div class="wf-print-qr-missing">QR code image not available — ask them to re-upload it</div>';
+      let body=missingHtml;
       if(paths.length){
         const urls=(await Promise.all(paths.map(function(p){ return wfSignedUrl(p); }))).filter(Boolean);
-        if(urls.length) qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'
-          +urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img">'; }).join('')+'</div>';
+        if(urls.length) body=urls.map(function(u){ return '<img src="'+esc2(u)+'" class="wf-print-qr-img" onerror="'+missingOnerror+'">'; }).join('');
       }
+      qrHtml='<div class="wf-print-qr"><div class="wf-print-qr-h">'+esc2(qrField.label)+'</div>'+body+'</div>';
+    }
+    /* Never let attachments take the printout down with them: a signing failure or an
+       unreadable PDF must still leave the instance's own details printable.
+       Reimbursement (flow 39) prints the QR code only - every other attachment (bill photos,
+       receipts) is deliberately left off the bulk printout; only the code the QR field itself
+       carries is meant to go on the sheet Accounts hands over. */
+    let attHtml='';
+    if(!(flow&&flow.id===39)){
+      try{ attHtml=await wfPrintAttachmentsHtml(det,flow); }catch(_e){ attHtml=''; }
     }
     const title=wfN().one+' '+wfCaseNoText(c);
     return { title:title,
       html:'<section class="wf-print-case">'
         +'<h2 style="margin:0 0 4px">'+esc2(title)+'</h2>'
         +'<div style="color:#64748b;margin-bottom:14px">'+esc2(wfN().one)+' by: '+esc2(wfNm(c.created_by)||c.created_by||'—')+'</div>'
-        +detHtml+qrHtml
+        +detHtml+qrHtml+attHtml
       +'</section>' };
   }
 
@@ -3581,6 +5266,11 @@
     if(!w){ toast('Please allow popups to print','err'); return false; }
     try{ w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preparing…</title></head>'
       +'<body style="font-family:system-ui,sans-serif;margin:28px;color:#64748b">Preparing '+ids.length+' '+(ids.length===1?'page':'pages')+'…</body></html>'); }catch(_e){}
+    WF_PRINT_PAGES_LEFT=WF_PRINT_PAGE_BUDGET;   // a fresh allowance for each print job
+    // Deliberately sequential, NOT Promise.all - wfCasePrintSection's attachment rendering reads
+    // and decrements the shared WF_PRINT_PAGES_LEFT budget as it goes, so which case sees how much
+    // budget is left (and which one gets the "not printed, budget exceeded" message) depends on
+    // processing them in order. Running them in parallel would race that shared counter.
     const parts=[];
     for(const id of ids){ const sec=await wfCasePrintSection(id); if(sec) parts.push(sec); }
     if(!parts.length){ try{ w.close(); }catch(_e){} toast('Nothing to print','err'); return false; }
@@ -3590,6 +5280,7 @@
       +'body{margin:24px;font-family:Inter,system-ui,sans-serif;color:#0f172a;background:#fff}'
       +'.wf-print-qr{margin-top:18px}.wf-print-qr-h{font-weight:700;margin-bottom:8px}'
       +'.wf-print-qr-img{max-width:260px;display:block;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px}'
+      +'.wf-print-qr-missing{max-width:260px;padding:14px;border:1px dashed #cbd5e1;border-radius:8px;color:#b91c1c;font-size:13px;margin-bottom:10px}'
       // Each claim starts its own sheet, so one can be handed to one person - except the last,
       // which would otherwise throw a blank page at the end of every print job.
       +'.wf-print-case{break-after:page;page-break-after:always}'
@@ -3611,7 +5302,10 @@
        already done. decode() resolves only once the image can actually be painted; falls back to
        load/error for the rare browser without it. Either way 'error' resolves too, so one broken
        image can never hang the rest of the printout. */
-    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img'));
+    /* Attachment pages are waited on as well. This looked only for QR images, so a Booking Form
+       - which has none - made Promise.all([]) resolve immediately and print fired before a single
+       attachment page had been decoded, giving a blank printout. */
+    const imgs=Array.prototype.slice.call(w.document.querySelectorAll('.wf-print-qr-img,.wf-print-att-img'));
     const imgReady=function(img){ return new Promise(function(res){
       if(typeof img.decode==='function'){ img.decode().then(res,res); return; }
       if(img.complete) return res();
@@ -3620,36 +5314,74 @@
     }); };
     Promise.race([
       Promise.all(imgs.map(imgReady)),
-      new Promise(function(res){ setTimeout(res, 1500+Math.min(parts.length,30)*250); })
+      // A rendered PDF page is a far bigger image than a QR code, so the backstop allows for
+      // the images actually present rather than the number of instances alone.
+      new Promise(function(res){ setTimeout(res, 2000+Math.min(parts.length,30)*250+Math.min(imgs.length,40)*150); })
     ]).then(doPrint);
     return true;
   };
-  window.wfPrintCase=function(caseId){ return window.wfPrintCases([caseId]); };
+  window.wfPrintCase=function(caseId){
+    // Which instance was printed, rather than only that something was.
+    wfCaseUsageMeta(caseId).then(function(um){
+      try{ usageQueue('tasks.workflow.print_an_instance','export',um); }catch(_e){}
+    });
+    return window.wfPrintCases([caseId]);
+  };
+  /* The last batch this button actually handed over - same "one UPDATE, one now()" timestamp
+     for every case in that job, so grouping on bulk_printed_at recovers exactly that set even
+     though there's no dedicated batch-id column. Used only to offer a reprint; never touched
+     when there's genuinely new stuff to print. */
+  async function wfLastPrintedBatch(){
+    let last=null;
+    try{
+      const {data}=await ACC().from('flow_cases').select('id,bulk_printed_at').eq('flow_id',39)
+        .not('bulk_printed_at','is',null).order('bulk_printed_at',{ascending:false}).limit(1).maybeSingle();
+      last=data;
+    }catch(e){}
+    if(!last) return [];
+    let rows=[];
+    try{
+      const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).eq('bulk_printed_at',last.bulk_printed_at);
+      rows=data||[];
+    }catch(e){}
+    return rows.map(function(r){ return r.id; });
+  }
   /* Reimbursement's "Print New Reimbursements": everything Accounts (step 2) currently has as received,
      minus whatever this button has already sent to print before - so running it again next week
      only ever hands over what is genuinely new, instead of Accounts re-sorting the whole pile by
      eye to find what changed. Marking done happens AFTER the print job is actually handed to the
      browser, not before - a popup blocked or a build failure must leave every claim eligible for
-     the next attempt, not silently drop it from every future run. */
+     the next attempt, not silently drop it from every future run. When there's nothing new, offer
+     to reprint the last batch instead of a dead-end toast - reprinting doesn't re-stamp
+     bulk_printed_at, so it can't be mistaken for a second "new" batch next time this runs. */
   window.wfBulkPrintNewReceipts=async function(){
     let cases=[];
     try{
       const {data}=await ACC().from('flow_cases').select('id').eq('flow_id',39).is('bulk_printed_at',null);
       cases=data||[];
     }catch(e){ toast('Could not load claims','err'); return; }
-    if(!cases.length){ toast('Nothing new to print','warn'); return; }
-    const ids=cases.map(function(c){ return c.id; });
-    let steps=[];
-    try{
-      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
-      steps=data||[];
-    }catch(e){ toast('Could not check receipt status','err'); return; }
-    const eligible=steps.map(function(s){ return s.case_id; });
-    if(!eligible.length){ toast('Nothing new to print','warn'); return; }
-    const ok=await window.wfPrintCases(eligible);
-    if(!ok) return;
-    try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
-    catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+    let eligible=[];
+    if(cases.length){
+      const ids=cases.map(function(c){ return c.id; });
+      let steps=[];
+      try{
+        const {data}=await ACC().from('flow_case_steps').select('case_id').eq('seq',2).eq('status','received').in('case_id',ids);
+        steps=data||[];
+      }catch(e){ toast('Could not check receipt status','err'); return; }
+      eligible=steps.map(function(s){ return s.case_id; });
+    }
+    if(eligible.length){
+      const ok=await window.wfPrintCases(eligible);
+      if(!ok) return;
+      try{ await ACC().rpc('wf_mark_bulk_printed',{p_ids:eligible}); }
+      catch(e){ toast('Printed, but could not mark them as printed — they may reappear next time','warn'); }
+      return;
+    }
+    const lastIds=await wfLastPrintedBatch();
+    if(!lastIds.length){ toast('Nothing new to print','warn'); return; }
+    wfConfirm({ title:'Nothing new to print', okLabel:'Print last batch', okClass:'primary',
+      body:'Every received claim has already been printed. Print the last batch ('+lastIds.length+' claim'+(lastIds.length===1?'':'s')+') again?',
+      onOk:function(){ window.wfPrintCases(lastIds); } });
   };
 
   function wfWireDeleteKey(){ if(window._wfKeyWired)return; window._wfKeyWired=true; document.addEventListener('keydown',function(e){
@@ -3658,13 +5390,20 @@
     if(e.key==='Delete'){ if(!window._wfDelId)return; window.wfDelete(window._wfDelId); }
     // N = start a new instance of the workflow currently open, same as clicking "New <Noun>" —
     // only when this account is actually allowed to (mirrors the button's own canEvent gate).
-    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfEventOpen(window._wfFlowId); }
+    else if((e.key==='n'||e.key==='N')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){ if(!window._wfFlowId||!window._wfCanEvent)return; e.preventDefault(); window.wfNewInstance(window._wfFlowId); }
   }); }
 
   window.wfDelete=function(id){
     wfConfirm({ title:'Delete this workflow?', body:'This permanently removes the workflow and all its '+wfN().lcMany+' and their tasks. This cannot be undone.', okLabel:'Delete', okClass:'danger', onOk:async function(){
+      // Read the name while the workflow still exists — after the delete there is nothing left to
+      // name it by, and "Delete a workflow" with a blank Details is the report saying nothing.
+      let nm=null;
+      try{ const {data}=await ACC().from('flows').select('name').eq('id',id).maybeSingle(); nm=(data&&data.name)||null; }catch(_e){}
       try{ const {error}=await ACC().rpc('wf_delete_flow',{p_id:id}); if(error)throw error; }
       catch(e){ toast('Could not delete workflow: '+((e&&e.message)||e),'err'); return; }
+      // Counted here rather than on the click: this button opens a confirmation, and a delete that
+      // was thought better of is not a delete.
+      try{ usageQueue('tasks.workflow.delete_a_workflow','delete',nm?{workflow:nm}:null); }catch(_e){}
       window._wfDelId=null; toast('Workflow deleted','ok'); navTo('tasks/workflow');
     }});
   };
@@ -4616,6 +6355,186 @@
       } else if(gs.length<2 && x){ x.remove(); }
     });
   }
+  /* ── STARTING ONE WHEN THE FORM ASKS FOR NOTHING BUT FILES ────────────────────────────────
+     A Booking Form is a scan and nothing else: everything a person could have typed - the name,
+     the project, the flat - is read off the document afterwards, and typing it again would only
+     create a second version to disagree with. So for a workflow whose whole form is attachments,
+     pressing "New Booking Form" opens the file chooser itself. Pick the scans, and the booking is
+     created and the reading starts; no dialog is drawn at any point.
+
+     WHY THE CHOOSER OPENS FROM HERE AND NOT FROM THE FORM. A browser only opens a file chooser
+     while a click is still fresh - within the same tick as the press. The earlier attempt clicked
+     the form's own box once the dialog had been drawn, which is several database reads later, by
+     which time the click is spent and nothing happens. Everything up to .click() below is
+     therefore synchronous; the uploading and the creating happen after, when the wait no longer
+     costs anything.
+
+     Every other workflow has questions to answer and still opens its form. */
+  function wfAttachOnly(flow){
+    const t=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    return t.length>0 && t.every(function(f){ return f && f.type==='attachment'; });
+  }
+  window.wfNewInstance=function(flowId){
+    if(window._wfAttachOnly && Number(flowId)===Number(window._wfFlowId)) return wfQuickAttach(flowId);
+    return wfEventOpen(flowId);
+  };
+  window.wfQuickAttach=function(flowId){
+    const inp=document.createElement('input');
+    inp.type='file'; inp.multiple=true;
+    inp.style.cssText='position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(inp);
+    let picked=false;
+    inp.addEventListener('change',function(){
+      picked=true;
+      const files=[].slice.call(inp.files||[]);
+      try{ inp.remove(); }catch(_e){}
+      if(files.length) wfQuickAttachSubmit(flowId, files);
+    });
+    /* Cancelling a file chooser fires no event at all, so the input would otherwise sit in the
+       page for the rest of the session. Coming back to the window is the only signal there is. */
+    window.addEventListener('focus',function tidy(){
+      window.removeEventListener('focus',tidy);
+      setTimeout(function(){ if(!picked) try{ inp.remove(); }catch(_e){} },500);
+    });
+    inp.click();
+  };
+  /* THE CARD THAT SAYS WHAT IS HAPPENING TO THE FILES.
+
+     Without a dialog there is nothing on screen to show that anything is going on, and a toast is
+     gone in a few seconds. A booking form is a scan of several megabytes, so there can be a long
+     quiet minute between choosing the file and the instance appearing - during which the only
+     reasonable thing a person can conclude is that it did not work, and reload the page. Reloading
+     abandons the upload, which is exactly how a booking ends up neither created nor reported.
+
+     So the card stays until the work is finished: one line per file with its own percentage, then
+     the creating step. A failure keeps the card on screen with the reason spelled out, rather than
+     a message that has already faded by the time anybody looks. */
+  function wfWorkCard(title){
+    let el=document.getElementById('wfWorkCard');
+    if(el) el.remove();
+    el=document.createElement('div');
+    el.id='wfWorkCard';
+    /* It LIVES IN THE TOAST STACK rather than floating over it. Both sit bottom-right, so a card
+       of its own covered every toast that appeared while it was up - including the ones saying
+       what had gone wrong. In #toasts it is one more item in the same column and they push each
+       other along; a page without that stack still gets a card, fixed in the corner. */
+    const stack=document.getElementById('toasts');
+    el.style.cssText=(stack?'':'position:fixed;right:18px;bottom:18px;z-index:99999;')
+      +'min-width:280px;max-width:360px;background:var(--card,#fff);color:var(--ink,#111);'
+      +'border:1px solid var(--line,#e3e3e3);border-radius:12px;padding:12px 14px;'
+      +'box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13px;line-height:1.5';
+    el.innerHTML='<div style="font-weight:600;margin-bottom:6px" class="wfwc-t"></div>'
+      +'<div class="wfwc-b"></div>';
+    el.querySelector('.wfwc-t').textContent=title;
+    (stack||document.body).appendChild(el);
+    return {
+      say:function(html){ const b=el.querySelector('.wfwc-b'); if(b) b.innerHTML=html; },
+      title:function(t){ const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t; },
+      close:function(){ try{ el.remove(); }catch(_e){} },
+      /* A failure is not swept away on a timer - it waits to be read and dismissed. What is
+         already on the card STAYS: the per-file reasons are the useful part, and replacing them
+         with a summary that points at them would leave nothing to point at. */
+      stop:function(t,html){
+        const h=el.querySelector('.wfwc-t'); if(h) h.textContent=t;
+        const b=el.querySelector('.wfwc-b');
+        if(b) b.innerHTML=b.innerHTML+'<div style="margin-top:8px">'+html+'</div>'
+          +'<div style="margin-top:10px"><button class="ac-btn" '
+          +'onclick="(function(e){var c=document.getElementById(\'wfWorkCard\'); if(c)c.remove();})()">'
+          +'Close</button></div>';
+      }
+    };
+  }
+  async function wfQuickAttachSubmit(flowId, files){
+    const N=window._wfNoun||{one:'instance',lc:'instance'};
+    const many=(files.length>1);
+    const card=wfWorkCard('Filing this '+N.lc);
+    const state=files.map(function(f){ return {name:f.name, pct:0, done:false, failed:''}; });
+    const draw=function(extra){
+      card.say(state.map(function(s){
+        const right = s.failed ? ('<span style="color:#c0392b">'+esc2(s.failed)+'</span>')
+                    : s.done   ? '<span style="color:#1e8e3e">done</span>'
+                               : (s.pct+'%');
+        return '<div style="display:flex;gap:10px;justify-content:space-between">'
+          +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px">'
+          +esc2(s.name)+'</span>'+right+'</div>';
+      }).join('')+(extra?('<div style="margin-top:8px">'+extra+'</div>'):''));
+    };
+    draw('Uploading — please keep this page open.');
+    /* A reload part-way through loses the upload silently. The browser will not let a page say
+       why, but it does ask, and being asked at all is the warning. */
+    const guard=function(e){ e.preventDefault(); e.returnValue=''; return ''; };
+    window.addEventListener('beforeunload',guard);
+    /* Stored under the label the workflow's own field carries, so the instance reads back exactly
+       as one filed through the form would. */
+    let label='Attachment';
+    try{
+      const {data}=await ACC().from('flows').select('trigger_template').eq('id',flowId).maybeSingle();
+      const f=(Array.isArray(data&&data.trigger_template)?data.trigger_template:[])
+        .filter(function(x){ return x && x.type==='attachment'; })[0];
+      if(f&&f.label) label=f.label;
+    }catch(_e){}
+    /* One failure is reported and the rest still go: losing three good pages because the fourth
+       timed out would be worse than a booking that is short one scan and can be edited. */
+    const paths=[];
+    for(let i=0;i<files.length;i++){
+      const file=files[i];
+      try{
+        const key=s3KeyForFlowEvent(String(flowId), file.name);
+        const {data,error}=await uploadFileToS3(key,file,function(pct){
+          state[i].pct=pct; draw('Uploading — please keep this page open.');
+        });
+        if(error) throw error;
+        state[i].done=true; draw('Uploading — please keep this page open.');
+        paths.push(data.path);
+      }catch(e){
+        state[i].failed=((e&&e.message)||String(e)); draw('Uploading — please keep this page open.');
+      }
+    }
+    if(!paths.length){
+      window.removeEventListener('beforeunload',guard);
+      draw('');   // the "keep this page open" line has had its day
+      card.stop('No '+N.lc+' was created',
+        'None of the files reached storage, so nothing was filed — the reason is beside each one '
+        +'above. Nothing was lost; choose them again once it is sorted out.');
+      return;
+    }
+    draw('Creating the '+esc2(N.lc)+'…');
+    try{
+      const {data:newCaseId,error}=await ACC().rpc('wf_create_instance',
+        {p_flow_id:flowId, p_details:[{label:label, value:paths.join(WF_ATT_SEP)}], p_step_members:null});
+      if(error) throw error;
+      window.removeEventListener('beforeunload',guard);
+      // Same as the form's own save: say WHICH id it got, read back from the created row rather
+      // than guessed, because numbers are handed out at the moment of saving.
+      let newIdText='';
+      try{
+        if(newCaseId!=null){
+          const {data:mk}=await ACC().from('flow_cases').select('jaine_id,case_no')
+            .eq('id',newCaseId).maybeSingle();
+          const v=mk&&(mk.jaine_id!=null?mk.jaine_id:mk.case_no);
+          if(v!=null&&String(v).trim()!=='') newIdText=String(v);
+        }
+      }catch(_e){}
+      try{ usageQueue('tasks.workflow.start_a_new_instance','create', await wfCaseUsageMeta(newCaseId)); }catch(_e){}
+      /* Inserting the case queues the reading and pokes the reader straight away (the triggers on
+         flow_cases and booking_audits), so there is nothing to start from here - only to say so,
+         since the person is about to press Check List and would otherwise wonder. */
+      card.title(newIdText?('New '+N.one+' — Id '+newIdText):(N.one+' created'));
+      card.say('Reading the '+(many?'attachments':'attachment')+' now — about two and a half '
+        +'minutes. You can carry on; the check list will be ready when you come back.');
+      setTimeout(function(){ card.close(); },12000);
+      if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
+    }catch(e){
+      window.removeEventListener('beforeunload',guard);
+      draw('');
+      /* The files ARE in storage - only the instance failed - so the message says so rather than
+         leaving someone to wonder whether the scans need finding again. */
+      card.stop('The '+N.lc+' could not be created',
+        esc2((e&&e.message)||String(e))
+        +'<br><br>The files did upload, so nothing is lost; try once more.');
+    }
+  }
+
   window.wfEventOpen=async function(flowId, caseId, draftId){
     wfInjectCss();
     /* Anything left over from a previous session that was closed without Cancel - the overlay,
@@ -4643,6 +6562,15 @@
     window._wfEvtMinTotal=Number(flow.min_total||0)||0;
     if(!caseId && !steps.length){ toast('Add steps to this workflow before starting a '+N.lc,'warn'); return; }
     const editing=!!caseId;
+    /* `editing` means "this is an existing instance" and governs the title, the Save-draft button,
+       who-does-which-step, and the AI field suggestion - a resumed draft is still a CREATION, so it
+       must stay false for all of those.
+
+       But it was ALSO gating whether saved values get loaded, and a draft has no case id - so
+       reopening a draft drew an empty form and the draft's data appeared to vanish. What is needed
+       there is a different question: are there saved values to draw? A case has them; so does a
+       draft. Hence two flags. */
+    const hasSaved=!!caseId||!!draftRow;
     // Ensure this workflow has 3 detail fields relevant to its triggering event (analyzed by Claude).
     // Fetched once and cached into trigger_template so every instance uses the same fields.
     let tmpl=Array.isArray(flow.trigger_template)?flow.trigger_template:[];
@@ -4670,8 +6598,13 @@
       template=template.concat([{label:'Attachment',type:'attachment',optional:true}]);
       try{ await ACC().rpc('wf_set_template',{p_flow_id:flowId, p_fields:template}); }catch(_e){}
     }
-    // An attachment is never compulsory - a form should not be blocked for want of a file.
-    template=template.map(function(t){ return (t&&(t.type==='attachment'))?Object.assign({},t,{optional:true}):t; });
+    /* An attachment DEFAULTS to optional - no form should be blocked for want of a file - but a
+       workflow may insist on one by saving the field with optional:false. Only an unspecified
+       value gets defaulted; an explicit false is now respected. */
+    template=template.map(function(t){
+      if(!t || t.type!=='attachment') return t;
+      return (t.optional===false) ? t : Object.assign({},t,{optional:true});
+    });
     // "Multiple" lets the whole set of fields repeat — one group per entry (Entry 1, Entry 2…).
     // Grouping saved values by `d.group` (missing group = 0) also reads legacy single-group data
     // exactly as before, so this is one code path for both.
@@ -4685,7 +6618,7 @@
        properly, and the editing branch now feeds it. */
     let src=[];
     let groupsSrc;
-    if(editing){
+    if(hasSaved){
       const savedDetails=Array.isArray(draftRow&&draftRow.details)?draftRow.details:(Array.isArray(caseRow&&caseRow.trigger_details)?caseRow.trigger_details:[]);
       if(locked){
         const byGroup={};
@@ -4709,13 +6642,19 @@
        has saved, from savedDetails above. upi_scanner_get falls back to the person's own most
        recent past submission of THIS flow when nothing has been explicitly remembered yet, so the
        pre-fill still works even if a save never actually reached upi_scanner_remember. */
-    if(!editing){
+    /* !caseId, so this still covers a resumed draft - but it now only fills the field when the
+       draft did not already carry one. Overwriting a QR the person deliberately attached to their
+       draft with whatever was last remembered would be the same class of bug as the one above. */
+    if(!caseId){
       const scannerField=template.find(function(t){ return t&&t.upiScannerMemory; });
       if(scannerField){
-        try{
-          const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
-          if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
-        }catch(_e){}
+        const already=((src.find(function(t){ return t&&t.label===scannerField.label; })||{}).value||'').trim();
+        if(!already){
+          try{
+            const {data:remembered}=await ACC().rpc('upi_scanner_get',{p_flow_id:flowId});
+            if(remembered) src=src.map(function(t){ return (t&&t.label===scannerField.label)?Object.assign({},t,{value:remembered}):t; });
+          }catch(_e){}
+        }
       }
     }
     // A text field can opt into a growing autocomplete list (flow.autocomplete_fields, e.g.
@@ -4753,7 +6692,7 @@
     if(commonFields.length) src=src.filter(function(t){ return !(t&&t.common); });
     rowsHtml=(src.length?src.map(function(t){return wfEvtRowHtml(t, (t&&t.value)||'', locked);}):[wfEvtRowHtml('','',false)]).join('');
     let editGroupsHtml='';
-    if(allowMulti && editing && src.length){
+    if(allowMulti && hasSaved && src.length){
       const setsFor={}; let nSets=1;
       src.forEach(function(t){
         const parts=wfSplitSets((t&&t.value)||'');
@@ -4792,7 +6731,7 @@
     let dateGroupsHtml='';
     if(dateMode){
       const byDate={}, dateOrder=[];
-      if(editing){
+      if(hasSaved){
         const cols={}; let nEnt=1;
         src.forEach(function(t){ const parts=wfSplitSets((t&&t.value)||''); cols[t.label]=parts; if(parts.length>nEnt) nEnt=parts.length; });
         for(let i=0;i<nEnt;i++){
@@ -4849,16 +6788,21 @@
        Asking the same question once per step made the form long and invited answering it
        differently for steps that are meant to be handled by the same person. */
     /* The restriction is for the people who RAISE these day to day - a bill may only be handed to
-       the two named people, so the picker offers only those two and the question cannot be answered
+       the named people, so the picker offers only those and the question cannot be answered
        wrongly. Systems is exempt: they are the ones who have to put things right when a bill has
        gone to the wrong person, and a picker that cannot name anyone else leaves them unable to.
        Uma Chatterjee is exempt too: she is a trigger owner on Invoice Processing but not one of the
        day-to-day store raisers the restriction targets, so her picker offers everyone — matches
        acc.wf_create_instance's own exemption exactly, or the server would reject what this form let
-       her pick. An empty list means the workflow never restricted the picker, and nothing changes. */
+       her pick. An empty list means the workflow never restricted the picker, and nothing changes.
+       trigger_step_assignable_overrides adds names for ONE specific raiser without touching the
+       shared list anyone else sees - keyed by that raiser's own email, lowercased, same lookup the
+       server does in acc.wf_create_instance. */
     const stepAssignRestrict=(wfInDept('Systems')||eq(me(),'ayushruia1@gmail.com')||eq(me(),'frontoffice@thejaingroup.com'))
       ? []
-      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+      : (flow.trigger_step_assignable_to||'').split(',').map(function(x){return x.trim();}).filter(Boolean)
+          .concat(Array.isArray(flow.trigger_step_assignable_overrides&&flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()])
+            ? flow.trigger_step_assignable_overrides[(me()||'').toLowerCase()] : []);
     const membersHtml=openSteps.length
       ? '<label class="wf-lbl">Who does '+(openSteps.length===1?'this step':'these steps')+'? '
           +tip('These steps have no fixed owner — whoever you name here does '+(openSteps.length===1?'it':'all of them')+'. Name more than one and they all receive it, with the first to accept it keeping it.')+'</label>'
@@ -5037,8 +6981,7 @@
       if(minT>0 && !caseId && !DRAFT){
         const tt=wfEvtTotalCalc();
         if(tt && tt.total<minT){
-          toast('A '+N.lc+' must come to at least '+wfMoney(minT)
-            +' \u2014 this one totals '+wfMoney(tt.total),'warn');
+          toast('Your total should be at least '+wfMoney(minT),'warn');
           return;
         }
       }
@@ -5175,6 +7118,10 @@
         // a file uploaded during this edit and then taken off again before saving
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
+        // Editing an existing instance is its own catalog feature. It used to be counted as
+        // "Start a new instance", because USAGE_MAP could only see that wfEventSave ran and not
+        // which of its two jobs it had just done.
+        try{ usageQueue('tasks.workflow.edit_an_instance','update', await wfCaseUsageMeta(caseId)); }catch(_e){}
         toast(N.one+' updated','ok');
         if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/workflow/'+flowId); }
       } else {
@@ -5216,6 +7163,9 @@
             if(v!=null&&String(v).trim()!=='') newIdText=String(v);
           }
         }catch(_e){}    // the bill exists either way; a missing id is no reason to look like a failure
+        // Logged here rather than through USAGE_MAP: only this branch knows the instance was
+        // created rather than edited, and the id it was given.
+        try{ usageQueue('tasks.workflow.start_a_new_instance','create', await wfCaseUsageMeta(newCaseId)); }catch(_e){}
         toast(newIdText
           ? ('New '+N.one+' created — Id: '+newIdText)
           : (N.one+' created — first step assigned'),'ok');
@@ -5272,6 +7222,37 @@
     }
     return '<span class="wf-att-file" onclick="event.stopPropagation();wfAttOpen(\''+esc2(a.storage_path)+'\',\''+esc2(name)+'\')"><i class="fa-solid fa-file-arrow-down"></i> '+esc2(name)+'</span>';
   }
+  /* Is this field already shown above the thread as a real, openable chip? The trigger-event
+     Attachment is, and so is whichever field is flagged upiScannerMemory. Listing them again in
+     the detail list gave the same file twice - once as a chip, once as raw "s3:portal/..." text. */
+  function wfDetIsPinned(label,flow){
+    if(eq(label||'','Attachment')) return true;
+    const tmpl=Array.isArray(flow&&flow.trigger_template)?flow.trigger_template:[];
+    const qr=tmpl.find(function(t){ return t&&t.upiScannerMemory; });
+    return !!(qr&&eq(label||'',qr.label||''));
+  }
+  /* Every separator a stored value can carry: '|' between entries, ',' between entries when there
+     is no pipe, and ' ; ' between several files on ONE entry. Splitting on the comma alone read
+     "s3:a ; s3:b" as a single path and rendered one chip pointing at both filenames at once. */
+  function wfValuePaths(v){
+    return String(v==null?'':v).split(/[|,;]/)
+      .map(function(x){ return x.trim(); })
+      .filter(function(x){ return x.indexOf('s3:')===0; });
+  }
+  /* The generic detail list, shared by the instance view and the printed page so the two cannot
+     drift. Any value that is really a stored file becomes openable chips rather than its path. */
+  function wfDetListHtml(det,flow){
+    const rows=(det||[]).filter(function(d){
+      return d && !(d.label && wfDetIsPinned(d.label,flow));
+    }).map(function(d){
+      const paths=wfValuePaths(d.value);
+      const val=paths.length
+        ? wfAttachmentsRowHtml(paths.map(function(p){ return {storage_path:p}; }))
+        : esc2(d.value||'');
+      return '<li>'+(d.label?('<span class="wf-detk">'+esc2(d.label)+'</span> '):'')+val+'</li>';
+    });
+    return rows.length?('<ul class="wf-detlist">'+rows.join('')+'</ul>'):'';
+  }
   function wfAttachmentsRowHtml(atts){
     if(!atts||!atts.length) return '';
     return '<div class="wf-att-row">'+atts.map(wfAttachmentHtml).join('')+'</div>';
@@ -5285,9 +7266,10 @@
     // An entry-wise instance holds one attachment PER ENTRY in this field, and the table already
     // gives each row its own. Pinning the joined value here would render one broken chip.
     if(wfIsDaywise(flow,det) || wfSplitSets(f.value).length>1) return '';
-    // A multi-entry (repeated-set) workflow can have one attachment per set, comma-joined like any
-    // other multi-entry field — split back out into one chip per file.
-    const paths=String(f.value).split(',').map(function(s){return s.trim();}).filter(function(s){return s.indexOf('s3:')===0;});
+    /* One chip per file. A `multi` field joins its files with ' ; ' and a multi-entry workflow
+       joins entries with ',' or '|' - splitting on the comma alone turned two uploaded files into
+       one chip whose path was both filenames joined, which opened nothing. */
+    const paths=wfValuePaths(f.value);
     if(!paths.length) return '';
     return '<div class="wf-upd-pinned"><div class="wf-upd-pinned-lbl"><i class="fa-solid fa-thumbtack"></i> Original attachment'+(paths.length>1?'s':'')+'</div>'+wfAttachmentsRowHtml(paths.map(function(p){return {storage_path:p};}))+'</div>';
   }
@@ -5450,7 +7432,7 @@
       +'<div class="tp-sub">Step '+(idx+1)+' of '+allSteps.length+' · '+esc2(wfTitleCase(fcs.title||''))+'</div></div>'
       +'<div class="tp-acts"><button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/work\')"><i class="fa-solid fa-arrow-left"></i></button>'
       +(caseRow?'<button class="ac-btn" title="View '+esc2(wfNounOf(flow).lc)+' timeline" onclick="navTo(\'tasks/workflow/case/'+caseRow.id+'\')"><i class="fa-solid fa-bars-progress"></i><span class="wf-btxt"> Timeline</span></button>':'')
-      +(caseRow?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
+      +(caseRow&&!(flow&&flow.id===41)?'<button class="ac-btn" title="Print this '+esc2(wfNounOf(flow).lc)+' — same as printing from the '+esc2(wfNounOf(flow).lc)+' itself" onclick="wfPrintCase('+caseRow.id+')"><i class="fa-solid fa-print"></i><span class="wf-btxt"> Print</span></button>':'')
       +A+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description</h3><div class="tp-desc"><b>'+esc2(wfTaskFields?wfInst:(wfInst+' - '+wfStepName))+'</b>'+(wfDayTable?wfDayTable:(wfDescFmt?'<div style="margin-top:8px;line-height:1.7">'+wfDescFmt+'</div>':''))+(fcs.description?'<div style="margin-top:6px;color:var(--slate)">'+esc2(wfTitleCase(fcs.description))+'</div>':'')+'</div></div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details'+tip('Allotted is the time this step is meant to take. Time taken starts counting the moment the step reaches you and stops when you forward it.')+'</h3><div class="tp-grid">'
@@ -5495,30 +7477,156 @@
     wfConfirm({ title:'Forward this step?', body:'This completes your step and passes the workflow to the next person.', okLabel:'Forward', okClass:'primary',
       onOk:async function(){
         const label=await wfComputeForwardLabel(fcsId);
+        const um=await wfStepUsageMeta(fcsId);
+        const cid=await wfCaseIdOfStep(fcsId);
         try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); if(cb){cb.disabled=false;cb.checked=false;} return; }
+        await wfLogForward(fcsId, um, cid);
         toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); renderPage();
       },
       onCancel:function(){ if(cb){cb.disabled=false;cb.checked=false;} }
     });
   };
 
+  /* Receiving and forwarding a step were the two busiest tracked actions in the whole ERP - 317
+     and 288 events - and both recorded nothing but the fact that a button was pressed, which
+     tells a reader nothing at all. What makes them readable is WHICH step of WHICH instance of
+     WHICH workflow: "Accounts Review & Payment · Reimburse required · Reimbursement".
+     These were written as ONE embedded select each - flow_case_steps -> flow_cases -> flows -
+     and in production that embed came back empty every single time, so every workflow event
+     logged since it went in carries meta:null and reads as a dash in the report. Three plain
+     selects along the same foreign keys cost two extra round trips on a button press and depend
+     on nothing but the tables themselves. A failed read still just means no detail, never a
+     broken action. */
+  async function wfFlowNameFor(caseRow){
+    if(!caseRow || caseRow.flow_id==null) return null;
+    try{
+      const {data}=await ACC().from('flows').select('name').eq('id',caseRow.flow_id).maybeSingle();
+      return (data&&data.name)||null;
+    }catch(_e){ return null; }
+  }
+  function wfCaseMetaFrom(c, flowName){
+    const m={};
+    if(c&&c.title) m.instance=c.title;
+    const idv=(c&&c.jaine_id!=null)?c.jaine_id:(c?c.case_no:null);
+    if(idv!=null&&String(idv).trim()!=='') m.ref_no=String(idv);
+    if(flowName) m.workflow=flowName;
+    return m;
+  }
+  async function wfStepUsageMeta(fcsId){
+    try{
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('title,case_id').eq('id',fcsId).maybeSingle();
+      if(!s) return null;
+      let c=null;
+      if(s.case_id!=null){
+        const {data}=await ACC().from('flow_cases')
+          .select('title,case_no,jaine_id,flow_id').eq('id',s.case_id).maybeSingle();
+        c=data||null;
+      }
+      const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
+      if(s.title) m.step=s.title;
+      return Object.keys(m).length?m:null;
+    }catch(_e){ return null; }
+  }
+  async function wfCaseUsageMeta(caseId){
+    try{
+      const {data:c}=await ACC().from('flow_cases')
+        .select('title,case_no,jaine_id,flow_id').eq('id',caseId).maybeSingle();
+      if(!c) return null;
+      const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
+      return Object.keys(m).length?m:null;
+    }catch(_e){ return null; }
+  }
+  /* Who a step went to. The report's fourth column asks "who is this now with", and for a forward
+     that is the step the instance moved ON to - read AFTER the forward RPC, because that is the
+     moment the next step becomes the current one. Names come from the same people list the rest of
+     this page uses, so it reads "Rabindra Nath Dey", not "accounts2".
+     A step can be owned by one person, by several (person is a comma-joined list), or by nobody yet
+     with a set of candidates to claim it - all three are worth saying, so all three are read. */
+  async function wfStepOwnerNames(fcsId){
+    if(fcsId==null) return undefined;
+    try{
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('person,candidates,claimed_by').eq('id',fcsId).maybeSingle();
+      if(!s) return undefined;
+      let emails=[];
+      if(s.claimed_by) emails=[s.claimed_by];
+      else if(s.person) emails=String(s.person).split(',');
+      else if(Array.isArray(s.candidates)) emails=s.candidates.slice();
+      emails=emails.map(function(e){ return String(e||'').trim(); }).filter(Boolean);
+      if(!emails.length) return undefined;
+      return await usageNames(emails);
+    }catch(_e){ return undefined; }
+  }
+  // The step the instance is sitting on right now, by its case. Used straight after a forward,
+  // a reject or a revert, when the interesting person is whoever it just landed with.
+  async function wfCurrentStepOwnerNames(caseId){
+    if(caseId==null) return undefined;
+    try{
+      const {data:c}=await ACC().from('flow_cases').select('current_step').eq('id',caseId).maybeSingle();
+      if(!c || c.current_step==null) return undefined;
+      const {data:s}=await ACC().from('flow_case_steps')
+        .select('id').eq('case_id',caseId).eq('seq',c.current_step).maybeSingle();
+      if(!s) return undefined;
+      return await wfStepOwnerNames(s.id);
+    }catch(_e){ return undefined; }
+  }
+  // A step's own case id, needed after the action when only the step id was passed in.
+  async function wfCaseIdOfStep(fcsId){
+    if(fcsId==null) return null;
+    try{
+      const {data}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
+      return (data&&data.case_id!=null)?data.case_id:null;
+    }catch(_e){ return null; }
+  }
+  /* One place that builds the whole event for a forward, whichever button did the forwarding.
+     There are four of them - the row checkbox, the send button, and the two route choices on
+     Invoice Processing - and until now only two logged anything at all, so a bill forwarded down
+     the Payment or Cheque route simply never appeared in the report. */
+  // A reject sends the step BACK, so the person worth naming is whoever it landed on - the same
+  // "who has it now" question a forward asks, answered the same way.
+  async function wfLogReject(um, caseId){
+    try{
+      const m=Object.assign({}, um||{});
+      const who=await wfCurrentStepOwnerNames(caseId);
+      if(who) m.assignee=who;
+      usageQueue('tasks.workflow.reject_send_a_step_back','update',Object.keys(m).length?m:null);
+    }catch(_e){}
+  }
+  async function wfLogForward(fcsId, um, caseId){
+    try{
+      const m=Object.assign({}, um||{});
+      const who=await wfCurrentStepOwnerNames(caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
+      if(who) m.assignee=who;
+      usageQueue('tasks.workflow.forward_a_step','update',Object.keys(m).length?m:null);
+    }catch(_e){}
+  }
+
   window.wfReceive=async function(fcsId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_receive',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not receive: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.receive_a_step','update',um); }catch(_e){}
     toast('Received — timer started','ok'); renderPage();
   };
 
   window.wfForward=async function(fcsId){
     const label=await wfComputeForwardLabel(fcsId);
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, um, cid);
     toast(label.replace(/^Forward to/,'Forwarded to'),'ok'); navTo('tasks/work');
   };
 
   window.wfForwardChequeChoice=async function(fcsId,cheque){
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_rtp_cheque_choice',{p_fcs_id:fcsId,p_cheque:cheque}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, Object.assign({route:cheque?'Cheque':'GST Approval only'}, um||{}), cid);
     toast(cheque?'Forwarded — cheque steps continue as normal':'Forwarded — GST Approval only, cheque steps skipped','ok');
     navTo('tasks/work');
   };
@@ -5527,9 +7635,12 @@
      the bill's whole route, so it is worth being an explicit act rather than a variant of a
      forward that happens to take an argument. */
   window.wfForwardPaymentChoice=async function(fcsId,payment){
+    const um=await wfStepUsageMeta(fcsId);
+    const cid=await wfCaseIdOfStep(fcsId);
     try{ const {error}=await ACC().rpc('wf_forward_bill_booking_choice',
       {p_fcs_id:fcsId,p_payment:!!payment}); if(error)throw error; }
     catch(e){ toast('Could not forward: '+((e&&e.message)||e),'err'); return; }
+    await wfLogForward(fcsId, Object.assign({route:payment?'Payment':'Direct'}, um||{}), cid);
     toast(payment
       ? 'Forwarded on the Payment route — RTP next, then the cheque, then checking'
       : 'Forwarded','ok');
@@ -5537,8 +7648,10 @@
   };
 
   window.wfDone=async function(fcsId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not complete: '+((e&&e.message)||e),'err'); return; }
+    try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
     toast('Workflow completed','ok'); navTo('tasks/work');
   };
 
@@ -5555,8 +7668,12 @@
       body:'This closes the reimbursement for good. Only do this once the money is actually in your account.',
       okLabel:'Yes, I received it', okClass:'ok',
       onOk:async function(){
+        const um=await wfStepUsageMeta(fcsId);
         try{ const {error}=await ACC().rpc('wf_done',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not close it: '+((e&&e.message)||e),'err'); return; }
+        // Reimbursement's "I received the payment" closes the claim for good and logged nothing at
+        // all, so the confirmation step of the busiest workflow was invisible in the report.
+        try{ usageQueue('tasks.workflow.mark_final_step_done','update',um); }catch(_e){}
         toast('Confirmed — this reimbursement is complete','ok'); navTo('tasks/work');
       }});
   };
@@ -5565,8 +7682,10 @@
       body:'This goes straight back to Accounts so they can look into it. You will get it again once they have sorted it out.',
       okLabel:'Send back to Accounts', okClass:'danger',
       onOk:async function(){
+        const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
         try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
         catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
+        await wfLogReject(um, cid);
         toast('Sent back to Accounts','ok'); navTo('tasks/work');
       }});
   };
@@ -5627,12 +7746,14 @@
       return;
     }
     const go=$('wfRejGo'); if(go){ go.disabled=true; go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
     // nothing is deleted any more, so there are no files to collect first
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
       if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Send back for correction'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
+    await wfLogReject(um, cid);
     closeModal();
     toast('Sent back for correction — an email has gone out','ok');
     navTo('tasks/work');
@@ -5641,16 +7762,25 @@
   // From a task-list row: same confirmation popup, no navigation needed.
   window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
+    const um=await wfStepUsageMeta(fcsId);
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
     catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
     toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
   window.wfRevert=function(fcsId){
     wfConfirm({ title:'Revert this step?', body:'The task will be pulled back to you from whoever currently has it, and any steps after yours will be cleared.', okLabel:'Revert', okClass:'danger', onOk:async function(){
+      const um=await wfStepUsageMeta(fcsId), cid=await wfCaseIdOfStep(fcsId);
       try{ const {error}=await ACC().rpc('wf_revert',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not revert: '+((e&&e.message)||e),'err'); return; }
+      try{
+        const m=Object.assign({}, um||{});
+        const who=await wfCurrentStepOwnerNames(cid);
+        if(who) m.assignee=who;
+        usageQueue('tasks.workflow.revert_a_forwarded_step','update',Object.keys(m).length?m:null);
+      }catch(_e){}
       toast('Reverted — the task is back with you','ok');
       if(ROUTE&&ROUTE.tab==='workflow'){ renderPage(); } else { navTo('tasks/work'); }
     }});
@@ -5659,8 +7789,10 @@
   // Reopen: bring the completed final step back (instance Done -> In progress)
   window.wfReopen=function(fcsId){
     wfConfirm({ title:'Reopen this workflow?', body:'The final step comes back to you and this '+wfN().lc+' moves from Done back to In progress.', okLabel:'Reopen', okClass:'primary', onOk:async function(){
+      const um=await wfStepUsageMeta(fcsId);
       try{ const {error}=await ACC().rpc('wf_reopen',{p_fcs_id:fcsId}); if(error)throw error; }
       catch(e){ toast('Could not reopen: '+((e&&e.message)||e),'err'); return; }
+      try{ usageQueue('tasks.workflow.reopen_a_completed_instance','update',um); }catch(_e){}
       toast('Reopened','ok'); navTo('tasks/work');
     }});
   };
@@ -5686,6 +7818,15 @@
         if(insErr) throw insErr;
       }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
     }
+    // What the update was about, not just that one was posted - the instance it is on, plus a
+    // short excerpt of the text and how many files came with it.
+    try{
+      const um=(await wfCaseUsageMeta(caseId))||{};
+      if(body) um.update=body.replace(/\s+/g,' ').trim().slice(0,140);
+      if(files.length) um.attachments=String(files.length);
+      usageQueue('tasks.workflow.post_an_update_comment_on_an_instance','create',
+                 Object.keys(um).length?um:null);
+    }catch(_e){}
     if(inp)inp.value=''; if(fileInput)fileInput.value='';
     // Posted from the Tracker's case panel (not a step task page) — refresh just that panel in
     // place so the selected row and its position in the table survive, instead of a full
@@ -5915,14 +8056,23 @@
     .wf-members-row{display:flex;align-items:center;gap:10px;margin:12px 0 0}
     .wf-mini-lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate)}
     /* timeline panel */
-    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px}
+    .wf-tlhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+    /* min-width:0 lets the title actually shrink. Without it a long instance number holds the row
+       open at its full width and pushes the buttons off the side of a phone. */
+    .wf-tlhead-t{font-size:13px;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
     .wf-tlhead-t i{color:var(--slate)}
     /* Edit + close sit together as one action group on the right, not spread apart by the
        header's own space-between (which only expects two children: the title, and this group). */
-    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:none}
-    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px}
+    .wf-tlhead-acts{display:flex;align-items:center;gap:8px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}
+    .wf-tlhead-x{border:1px solid var(--line);background:var(--bg-card);color:var(--slate);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:12px;flex:none}
     .wf-tlhead-x:hover{border-color:var(--brand);color:var(--brand)}
+    /* On a phone this row carries six buttons - edit, check list, welcome letter, allotment
+       letter, print, close - which will not fit beside the title. They take a row of their own,
+       left-aligned like everything else, and grow to a size a thumb can actually hit. */
+    @media (max-width:560px){
+      .wf-tlhead-acts{width:100%;justify-content:flex-start}
+      .wf-tlhead-x{width:36px;height:36px;font-size:14px}
+    }
     .wf-timeline{display:flex;flex-direction:column}
     /* Slim timeline row: one line on a normal screen, wrapping to two on a phone. */
     .wf-tl-item{display:flex;gap:12px;padding-bottom:10px;position:relative}
@@ -6416,7 +8566,10 @@
       +caseRow
       +'</div>';
   }
-  window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k); gcalRenderOnly(); };
+  window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k);
+    try{ usageQueue('tasks.calendar.filter_by_assigned_to_me_by_me_meetings_legal_dates','search',
+      {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
+    gcalRenderOnly(); };
 
   /* ---- toolbar ---- */
   function gcalToolbarHtml(){
@@ -6457,7 +8610,9 @@
     GCAL_MINI_MONTH=new Date(d.getFullYear(),d.getMonth(),1);
     gcalRenderOnly();
   };
-  window.gcalSearch=function(v){ GCAL_Q=(v||'').trim().toLowerCase(); const body=$('gcalBody'); if(body){body.innerHTML=gcalBodyHtml(); gcalWireDrag(body); gcalWireTimeDrag();} };
+  window.gcalSearch=function(v){ GCAL_Q=(v||'').trim().toLowerCase(); const body=$('gcalBody'); if(body){body.innerHTML=gcalBodyHtml(); gcalWireDrag(body); gcalWireTimeDrag();}
+    // Debounced: this is wired to oninput, so one search would otherwise be logged once per keystroke.
+    try{ usageQueueDebounced('tasks.calendar.search_calendar_items', (v||'').trim()); }catch(_e){} };
 
   /* ---- Month view ---- */
   function gcalMonthHtml(){
@@ -6666,6 +8821,9 @@
   }
   window.gcalOpenDay=function(dateStr){
     GCAL_DATE=dateStr;
+    /* Logged here and not inside gcalRenderDayPanel: that one is re-run by gcalRefresh() after
+       every drag-drop, which would count a panel nobody opened. */
+    try{ usageQueue('tasks.calendar.open_a_day_s_agenda_panel','view',{title:fmtDateY(dateStr)}); }catch(_e){}
     gcalRenderDayPanel(dateStr);
   };
   window.gcalOpenTask=function(tid){
@@ -6810,7 +8968,7 @@
   window.gcalTaskDrop=async function(tid,newDate){
     try{
       if(newDate<todayISO()){ toast('Cannot move a task to a date before today','err'); return; }
-      const {data:old}=await ACC().from('ptasks').select('due_date').eq('id',tid).single();
+      const {data:old}=await ACC().from('ptasks').select('due_date,title').eq('id',tid).single();
       const prevDue=old?old.due_date:null;
       if((prevDue||'')===(newDate||''))return;
       await ACC().from('ptasks').update({due_date:newDate,overdue_emailed:false,due_emailed:false}).eq('id',tid);
@@ -6819,9 +8977,12 @@
       const _d=parseD(newDate), _t=new Date(); _t.setHours(0,0,0,0);
       if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); }catch(_e){} }
       toast('Moved to '+fmtDateY(newDate),'ok');
+      // After the write, and before the reload replaces what is on screen.
+      try{ usageQueue('tasks.calendar.drag_a_task_to_a_new_due_date','update',
+        {title:(old&&old.title)||undefined, due_date:fmtDateY(newDate)}); }catch(_e){}
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move task','err'); }
+    }catch(e){ toast('Could not move the task: '+((e&&e.message)||e),'err'); }
   };
   // Dragging a Legal case to a new day writes straight into mis_cases (public schema, not acc —
   // see gcalCasesLoadData), into whichever of its two date columns the dragged chip came from:
@@ -6837,9 +8998,12 @@
       const {error}=await sb.from('mis_cases').update({[field]:newDate}).eq('id',cid);
       if(error){ toast('Failed to move case: '+error.message,'err'); return; }
       toast((field==='case_next_date'?'Next date':'Action date')+' moved to '+fmtDateY(newDate),'ok');
+      try{ usageQueue('tasks.calendar.drag_a_legal_case_to_a_new_date','update',
+        {title:((GCAL_CASES||[]).find(function(x){return x.id===cid;})||{}).title,
+         date:fmtDateY(newDate), field:(field==='case_next_date'?'Next date':'Action date')}); }catch(_e){}
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move case','err'); }
+    }catch(e){ toast('Could not move the case: '+((e&&e.message)||e),'err'); }
   };
   // Dragging a one-time meeting onto another day's section changes its meeting_date. This resyncs
   // meeting_attendees (delete+reinsert, same as a normal edit) so the existing meeting-mailer trigger
@@ -6900,6 +9064,7 @@
         }catch(_e){}
         toast('All occurrences updated','ok');
       }
+      try{ usageQueue('tasks.meetings.reschedule_one_occurrence_or_a_whole_series','update',{title:m.title}); }catch(_e){}
       await gcalLoadData(); await gcalRefresh();
     }catch(e){ toast('Reschedule failed: '+((e&&e.message)||e),'err'); try{ await gcalRefresh(); }catch(_e){} }
   };
@@ -6924,7 +9089,7 @@
       if(m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to move meeting','err'); }
+    }catch(e){ toast('Could not move the meeting: '+((e&&e.message)||e),'err'); }
   };
   /* ---- Day view: dragging a meeting block vertically changes its time ----
      Vertical-only (only one day is visible in Day view, so there's nothing to drop onto to change the
@@ -6988,7 +9153,7 @@
       if(m&&m.mode==='online'){ await mtgSyncGoogle(mid,'sync'); }
       await gcalLoadData();
       await gcalRefresh();
-    }catch(e){ toast('Failed to update meeting time','err'); }
+    }catch(e){ toast('Could not update the meeting time: '+((e&&e.message)||e),'err'); }
   };
 
   /* ---- shell / entry point ---- */
@@ -7243,6 +9408,7 @@
     if((m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
       if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Join it now anyway?')) return;
     }
+    try{ usageQueue('tasks.meetings.join_a_meeting','view',{title:m.title}); }catch(_e){}
     window.open(m.meet_link,'_blank','noopener');
   };
   function mtgCard(m,weekCount){
@@ -7482,6 +9648,7 @@
           const {data:newId,error}=await sb.rpc('reschedule_meeting_occurrence',{p_meeting_id:id,p_occ_date:occ,p_new_date:occ,p_new_start:start,p_new_end:end});
           if(error)throw error;
           if(newId && mode==='online'){ try{ await mtgSyncGoogle(newId,'sync'); }catch(_e){} }
+          try{ usageQueue('tasks.meetings.reschedule_one_occurrence_or_a_whole_series','update',{title:title}); }catch(_e){}
           toast('This occurrence updated','ok'); closeModal(); await mtgLoadData(); mtgRenderOnly();
         }catch(e){ toast('Could not update this occurrence: '+((e&&e.message)||e),'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Save changes';} }
         return;
@@ -7534,6 +9701,11 @@
         await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:kind,title:titlePrefix+title,body:bodyTxt};}));
       }catch(e){}
     }
+    /* Logged here rather than through USAGE_MAP: that wrapper fired on the Save click, so every
+       edit and every click the validation above turned back counted as a meeting scheduled.
+       editing is the only thing that tells the two apart, and it is only known inside here. */
+    try{ usageQueue(editing?'tasks.meetings.edit_a_meeting':'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
+      editing?'update':'create',{title:title}); }catch(_e){}
     closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
     if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
     await mtgLoadData(); mtgRenderOnly();
@@ -7547,10 +9719,12 @@
     const m=(MTG_LIST||[]).find(function(x){return x.id===id;});
     const attendees=(MTG_ATT&&MTG_ATT[id])||[];
     if(m&&m.mode==='online'&&m.google_event_id){ await mtgSyncGoogle(id,'cancel'); }
-    try{ await ACC().from('meetings').delete().eq('id',id); }catch(e){}
+    let delErr=null;
+    try{ const r=await ACC().from('meetings').delete().eq('id',id); delErr=r&&r.error; }catch(e){ delErr=e; }
     if(m&&attendees.length){
       try{ await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:'meeting_cancel',title:'Meeting cancelled: '+m.title,body:(m.recur_type&&m.recur_type!=='none'?'A recurring':fmtDateY(m.meeting_date))+' meeting was cancelled by the organizer.'};})); }catch(e){}
     }
+    if(!delErr){ try{ usageQueue('tasks.meetings.cancel_a_meeting','delete',{title:m&&m.title}); }catch(_e){} }
     closeModal(); toast('Meeting cancelled','ok');
     await mtgLoadData(); mtgRenderOnly();
   };
@@ -7730,6 +9904,7 @@
   window.mtgSetLang=function(lang){
     MTG_LOG_LANG=lang;
     const l=window._mtgLogRow; if(!l)return;
+    try{ usageQueue('tasks.meetings.set_transcription_language','update',{title:l.title,lang:lang}); }catch(_e){}
     const b=document.getElementById('mtgTrBody'); if(b)b.innerHTML=mtgTrBody(l,lang);
     ['en','bn'].forEach(function(k){ const btn=document.getElementById('mtgLang_'+k); if(btn){ if(k===lang)btn.classList.add('primary'); else btn.classList.remove('primary'); } });
   };
@@ -7890,6 +10065,7 @@
     }
     const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
     if(!resp||!resp.log_id){ toast('Could not save the recording: '+((resp&&resp.error)||'unknown error'),'err'); if(sp){sp.disabled=false;sp.innerHTML='<i class="fa-solid fa-stop"></i> Stop &amp; finish';} return; }
+    try{ usageQueue('tasks.meetings.start_stop_recording','create',{title:R.meeting&&R.meeting.title}); }catch(_e){}
     MTG_REC=null;
     navTo('tasks/meetings/wrap/'+resp.log_id);
   };
@@ -7966,6 +10142,7 @@
     if(!resp||!resp.ok){ toast('Could not save: '+((resp&&resp.error)||'unknown error'),'err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-floppy-disk"></i> Save to Logs';} return; }
     toast('Saved to Logs','ok');
     const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
+    try{ usageQueue('tasks.meetings.save_meeting_wrap_up_summary','update',{title:l&&l.title}); }catch(_e){}
     if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
     else navTo('tasks/meetings/log/'+lid);
   };
@@ -8112,10 +10289,12 @@
       if(wfIds.length){
         const {data:steps}=await ACC().from('flow_case_steps').select('id,case_id,seq,received_at,forwarded_at,title').in('id',wfIds);
         const caseIds=Array.from(new Set((steps||[]).map(function(s){return s.case_id;})));
-        // person/candidates/owner_from_trigger come along so the Forward button can name who the
-        // step is about to go to, rather than saying "the next person".
+        // person/candidates come along so the Forward button can name who the step is about to
+        // go to, rather than saying "the next person" - owner_from_trigger and the rest of the
+        // step DEFINITION aren't columns on this table at all (flow_steps only), so they're
+        // looked up from stepDefByFlowSeq below instead of selected here.
         let allc=[]; if(caseIds.length){ allc=await wfFetchPaged(function(){ return ACC().from('flow_case_steps')
-          .select('case_id,seq,received_at,forwarded_at,person,candidates,owner_from_trigger,title')
+          .select('case_id,seq,received_at,forwarded_at,person,candidates,title')
           .in('case_id',caseIds).order('id',{ascending:true}); }); }
         /* created_by is what the task name leads with on a claim-named workflow (Reimbursement).
            It was missing from this select, so the owner silently vanished from the name shown in the
@@ -8131,8 +10310,8 @@
            not see simply was not there, so a middle step looked like the end of the line and got
            the Done flag while its own page correctly offered Forward. The definition is readable
            to anyone who can see the workflow, so it settles the question either way. */
-        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={};
-        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only').in('flow_id',flowIds);
+        const maxSeqByFlow={}, minSeqByFlow={}, confirmOnly={}, stepDefByFlowSeq={};
+        if(flowIds.length){ try{ const r=await ACC().from('flow_steps').select('flow_id,seq,confirm_only,owner_from_trigger,owner_emails,owner_email,owner_resolve_map,owner_resolve_field,owner_role').in('flow_id',flowIds);
           (((r&&r.data)||[])).forEach(function(s){
             if(!(s.flow_id in maxSeqByFlow)||s.seq>maxSeqByFlow[s.flow_id]) maxSeqByFlow[s.flow_id]=s.seq;
             if(!(s.flow_id in minSeqByFlow)||s.seq<minSeqByFlow[s.flow_id]) minSeqByFlow[s.flow_id]=s.seq;
@@ -8140,6 +10319,10 @@
             // DEFINITION for the same reason the bounds are: an instance's own rows may not be
             // readable, and guessing wrong here would offer the wrong buttons entirely.
             if(s.confirm_only) confirmOnly[s.flow_id+':'+s.seq]=true;
+            // owner_from_trigger/owner_emails/etc. live only on the DEFINITION, never on the
+            // instance's own flow_case_steps row - kept here, keyed by flow+seq, so nextWho below
+            // can be worked out without selecting those columns off a table that doesn't have them.
+            stepDefByFlowSeq[s.flow_id+':'+s.seq]=s;
           }); }catch(_e){} }
         const bounds={}, byCase={};
         allc.forEach(function(s){ const bb=bounds[s.case_id]||(bounds[s.case_id]={min:s.seq,max:s.seq}); if(s.seq<bb.min)bb.min=s.seq; if(s.seq>bb.max)bb.max=s.seq; (byCase[s.case_id]=byCase[s.case_id]||[]).push(s); });
@@ -8186,7 +10369,10 @@
              looked like the first one, so Reject vanished from the outside list. */
           const defMin=(c.flow_id!=null)?minSeqByFlow[c.flow_id]:undefined;
           const firstSeq=(defMin!=null)?Math.min(defMin,bb.min):bb.min;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(nextStep):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
+          // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
+          const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -8406,7 +10592,7 @@
     });
     updateInsDateBtn(); updateInsMemberBtn(); updateInsProjBtn(); updateSelfInsDateBtn(); updateSelfInsProjBtn();
   }
-  let INS_STAGE={due:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
+  let INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}, SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}, INS_BUSY=false, SELF_INS_BUSY=false;
   function insInput(){
     return `<div class="ac-addrow-ghost" id="insGhost" onclick="accInsExpand()"><i class="fa-solid fa-plus"></i> Add task</div>
     <div class="ac-addrow" id="insRow" style="display:none">
@@ -8482,19 +10668,437 @@
     setTimeout(function(){ document.addEventListener('mousedown',popoverOutside,true); },0);
     return el;
   }
-  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title='Due '+fmtDate(INS_STAGE.due); } else { b.classList.remove('primary'); b.title='Set due date'; } }
+  function updateInsDateBtn(){ const b=$('insDateBtn'); if(!b)return; if(INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(INS_STAGE.recur||{freq:'none',date:INS_STAGE.due}); dpMarkBtn(b,INS_STAGE.recur); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,null); } }
   function updateInsMemberBtn(){ const b=$('insMemberBtn'); if(!b)return; const n=(INS_STAGE.members||[]).length; if(n){ b.classList.add('primary'); b.title=n+' member'+(n>1?'s':'')+' selected'; } else { b.classList.remove('primary'); b.title='Pick members'; } }
   function updateInsProjBtn(){ const b=$('insProjBtn'); if(!b)return; if(INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
-  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title='Due '+fmtDate(SELF_INS_STAGE.due); } else { b.classList.remove('primary'); b.title='Set due date'; } }
+  function updateSelfInsDateBtn(){ const b=$('selfInsDateBtn'); if(!b)return; if(SELF_INS_STAGE.due){ b.classList.add('primary'); b.title=dpDescribe(SELF_INS_STAGE.recur||{freq:'none',date:SELF_INS_STAGE.due}); dpMarkBtn(b,SELF_INS_STAGE.recur); } else { b.classList.remove('primary'); b.title='Set due date'; dpMarkBtn(b,null); } }
   function updateSelfInsProjBtn(){ const b=$('selfInsProjBtn'); if(!b)return; if(SELF_INS_STAGE.project){ b.classList.add('primary'); b.title='Tag: '+(SELF_INS_STAGE.projectLabel||''); } else { b.classList.remove('primary'); b.title='Set tag'; } }
+  /* ── due date + repeat picker ───────────────────────────────────────────────────────────────
+     Replaces the browser's native date box on Tasks. How often on the left; on the right, only
+     what that choice actually needs:
+
+       Does not repeat  a date, required
+       Every day        nothing
+       Every week       which weekdays
+       Every month      which dates of the month (several allowed, plus "last day")
+       Every 3 months   the same, every third month counted from the first one
+       Every year       which months, and for each of them its own dates
+
+     What gets saved is a due_date (the next real occurrence) plus a rule stored as jsonb in
+     acc.ptasks.recur. dpMatches() below is a deliberate mirror of acc.recur_matches() in the
+     database - both walk a day at a time and test the same predicate, so the dates shown here are
+     the dates the server will actually create. Change one and you must change the other.
+     proto/due-date-picker.html is the standalone version. */
+  const DP_FREQS=[
+    {k:'none',      label:'Does not repeat', asks:'date'},
+    {k:'daily',     label:'Every day',       asks:'nothing'},
+    {k:'weekly',    label:'Every week',      asks:'weekdays'},
+    {k:'monthly',   label:'Every month',     asks:'monthdays'},
+    {k:'quarterly', label:'Every 3 months',  asks:'monthdays'},
+    {k:'yearly',    label:'Every year',      asks:'monthdates'}
+  ];
+  const DP_DOW=['S','M','T','W','T','F','S'];
+  const DP_DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const DP_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DP_MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function dpAsks(f){ for(var i=0;i<DP_FREQS.length;i++) if(DP_FREQS[i].k===f) return DP_FREQS[i].asks; return 'date'; }
+  const dpPad=n=>String(n).padStart(2,'0');
+  const dpIso=(y,m,d)=>y+'-'+dpPad(m+1)+'-'+dpPad(d);
+  const dpParse=s=>{const p=String(s).split('-');return {y:+p[0],m:+p[1]-1,d:+p[2]};};
+  const dpDaysIn=(y,m)=>new Date(y,m+1,0).getDate();
+  const dpAdd=(s,n)=>{const p=dpParse(s),d=new Date(p.y,p.m,p.d+n);return dpIso(d.getFullYear(),d.getMonth(),d.getDate());};
+  const dpShort=s=>{if(!s)return '';const p=dpParse(s);return p.d+' '+DP_MONS[p.m]+' '+p.y;};
+  const dpLong=s=>{if(!s)return '';const p=dpParse(s);return DP_DOWL[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+DP_MONS[p.m]+' '+p.y;};
+  /* istTodayISO(), not todayISO(): the floor has to be the same "today" the backend works in, or a
+     device with a skewed clock offers a day the server already treats as past. */
+  function dpFloor(){ return istTodayISO(); }
+  function dpOrd(n){
+    if(n==='last') return 'last day';
+    n=+n;
+    if(n%100>=11&&n%100<=13) return n+'th';
+    return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');
+  }
+  function dpList(a){
+    if(!a.length) return '';
+    if(a.length===1) return a[0];
+    return a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+  }
+  function dpSortDays(a){
+    return (a||[]).slice().sort(function(x,y){
+      if(x==='last') return 1;
+      if(y==='last') return -1;
+      return x-y;
+    });
+  }
+  // A day number placed inside a real month: 'last', or clamped so the 31st survives February.
+  function dpDayIn(y,m,day){ return day==='last' ? dpDaysIn(y,m) : Math.min(+day, dpDaysIn(y,m)); }
+  function dpDaysForMonth(rule,y,m){
+    var src = rule.freq==='yearly' ? ((rule.monthdates||{})[m]||[]) : (rule.monthdays||[]);
+    var out=[];
+    dpSortDays(src).forEach(function(d){
+      var n=dpDayIn(y,m,d);
+      if(out.indexOf(n)<0) out.push(n);
+    });
+    return out;
+  }
+
+  /* Mirror of acc.recur_matches(). */
+  function dpMatches(rule,isoDate,anchor){
+    if(!rule||!rule.freq) return false;
+    var p=dpParse(isoDate);
+    if(rule.freq==='daily') return true;
+    if(rule.freq==='weekly') return (rule.weekdays||[]).indexOf(new Date(p.y,p.m,p.d).getDay())>-1;
+    if(rule.freq==='monthly'||rule.freq==='quarterly'){
+      if(rule.freq==='quarterly'){
+        var a=dpParse(anchor||isoDate);
+        var months=(p.y*12+p.m)-(a.y*12+a.m);
+        if(((months%3)+3)%3!==0) return false;
+      }
+      return dpDaysForMonth(rule,p.y,p.m).indexOf(p.d)>-1;
+    }
+    if(rule.freq==='yearly') return dpDaysForMonth(rule,p.y,p.m).indexOf(p.d)>-1;
+    return false;
+  }
+  /* The next n dates on or after `from`. Same day-walk as the database, so the two agree. */
+  function dpOccurrences(rule,n,from,anchor){
+    if(!rule) return [];
+    if(rule.freq==='none'||!rule.freq) return rule.date?[rule.date]:[];
+    var out=[], cur=from||dpFloor(), guard=0;
+    while(out.length<n && guard++<800){
+      if(rule.until && cur>rule.until) break;
+      if(dpMatches(rule,cur,anchor||from)) out.push(cur);
+      cur=dpAdd(cur,1);
+    }
+    return out;
+  }
+  function dpFirst(rule){
+    var o=dpOccurrences(rule,1,dpFloor(),null);
+    return o.length?o[0]:null;
+  }
+
+  function dpDescribe(r){
+    if(!r) return 'Set due date';
+    if(!r.freq||r.freq==='none') return r.date?dpLong(r.date):'Set due date';
+    var s='';
+    if(r.freq==='daily') s='Every day';
+    else if(r.freq==='weekly')
+      s='Every '+dpList((r.weekdays||[]).slice().sort(function(a,b){return a-b;}).map(function(d){return DP_DOWL[d];}));
+    else if(r.freq==='monthly'||r.freq==='quarterly'){
+      var ds=dpList(dpSortDays(r.monthdays).map(dpOrd));
+      s=(r.freq==='quarterly')?('The '+ds+', every 3 months'):('The '+ds+' of every month');
+    }
+    else if(r.freq==='yearly'){
+      var ms=Object.keys(r.monthdates||{}).map(Number).sort(function(a,b){return a-b;});
+      s=dpList(ms.map(function(m){
+        var ds2=dpSortDays((r.monthdates||{})[m]||[]);
+        var nums=ds2.filter(function(d){return d!=='last';});
+        var parts=[];
+        if(nums.length) parts.push(dpList(nums.map(String))+' '+DP_MONS[m]);
+        if(ds2.indexOf('last')>-1) parts.push('the last day of '+DP_MONS[m]);
+        return dpList(parts);
+      }))+' each year';
+      s=s.charAt(0).toUpperCase()+s.slice(1);
+    }
+    if(r.until) s+=', until '+dpShort(r.until);
+    return s;
+  }
+  function dpMarkBtn(b,rule){
+    if(!b) return;
+    var i=b.querySelector('i'); if(!i) return;
+    var rep=!!(rule&&rule.freq&&rule.freq!=='none');
+    i.className=rep?'fa-solid fa-rotate':'fa-regular fa-calendar';
+  }
+
+  var DP_ST=null, DP_VIEW=null, DP_MODE='date', DP_AM=null, DP_HOST=null, DP_OPTS=null;
+
+  function dpBlank(){ return {freq:'none',date:dpFloor(),weekdays:[],monthdays:[],monthdates:{},until:null}; }
+
+  function dpMissing(r){
+    var a=dpAsks(r.freq);
+    if(a==='date')      return r.date?null:'Pick the date it is due.';
+    if(a==='nothing')   return null;
+    if(a==='weekdays')  return r.weekdays.length?null:'Pick at least one day of the week.';
+    if(a==='monthdays') return r.monthdays.length?null:'Pick at least one date of the month.';
+    if(a==='monthdates'){
+      var ms=Object.keys(r.monthdates);
+      if(!ms.length) return 'Pick at least one month.';
+      for(var i=0;i<ms.length;i++){
+        if(!(r.monthdates[ms[i]]||[]).length) return 'Pick the dates in '+DP_MONL[+ms[i]]+'.';
+      }
+      return null;
+    }
+    return null;
+  }
+
+  function dpFirstChosenMonth(){
+    var k=Object.keys(DP_ST.monthdates).map(Number).sort(function(a,b){return a-b;});
+    return k.length?k[0]:null;
+  }
+
+  function dpAskLbl(t,req){
+    return '<div class="dp-ask">'+t+(req?' <span class="req">required</span>':'')+'</div>';
+  }
+
+  function dpCalendar(){
+    var sel   = DP_MODE==='until' ? DP_ST.until : DP_ST.date;
+    var floor = DP_MODE==='until' ? (dpFirst(dpRuleOf(DP_ST))||dpFloor()) : dpFloor();
+    var y=DP_VIEW.y, m=DP_VIEW.m;
+    var first=new Date(y,m,1).getDay(), n=dpDaysIn(y,m);
+    var prevN=dpDaysIn(y,m===0?11:m-1), today=dpFloor(), i, d;
+    var h='<div class="dp-head">'
+      +'<button type="button" class="dp-nav" data-dp="mv" data-v="-1" title="Previous month"><i class="fa-solid fa-chevron-left"></i></button>'
+      +'<div class="dp-title">'+DP_MONL[m]+' '+y+'</div>'
+      +'<button type="button" class="dp-nav" data-dp="mv" data-v="1" title="Next month"><i class="fa-solid fa-chevron-right"></i></button>'
+      +'</div><div class="dp-dow">'+DP_DOW.map(function(x){return '<span>'+x+'</span>';}).join('')+'</div><div class="dp-grid">';
+    for(i=0;i<first;i++) h+='<button type="button" class="dp-day pad" disabled>'+(prevN-first+i+1)+'</button>';
+    for(d=1;d<=n;d++){
+      var iso=dpIso(y,m,d);
+      h+='<button type="button" class="dp-day'+(iso===sel?' on':'')+(iso===today?' today':'')+'"'
+        +' data-dp="pick" data-v="'+iso+'"'+(iso<floor?' disabled':'')+'>'+d+'</button>';
+    }
+    var tail=(first+n)%7;
+    if(tail) for(i=1;i<=7-tail;i++) h+='<button type="button" class="dp-day pad" disabled>'+i+'</button>';
+    return h+'</div>';
+  }
+
+  function dpPane(){
+    var a=dpAsks(DP_ST.freq), h='<div class="dp-main">', i;
+
+    if(DP_MODE==='until'){
+      return h+'<div class="dp-mode"><i class="fa-solid fa-flag-checkered"></i>Choosing the last date'
+        +'<button type="button" data-dp="backtodate">Back</button></div>'+dpCalendar()+'</div>';
+    }
+
+    if(a==='date'){
+      h+=dpAskLbl('Due date',true)+dpCalendar()
+        +'<div class="dp-quick">'
+        +'<button type="button" data-dp="pick" data-v="'+dpFloor()+'">Today</button>'
+        +'<button type="button" data-dp="pick" data-v="'+dpAdd(dpFloor(),1)+'">Tomorrow</button>'
+        +'<button type="button" data-dp="pick" data-v="'+dpAdd(dpFloor(),7)+'">Next week</button>'
+        +'</div>';
+    }
+    else if(a==='nothing'){
+      h+=dpAskLbl('Every day')
+        +'<div class="dp-note">Nothing to choose &mdash; it comes back every day.<br><br>The first one is due today.</div>';
+    }
+    else if(a==='weekdays'){
+      h+=dpAskLbl('Which days',true)+'<div class="dp-chips dow">';
+      for(i=0;i<7;i++)
+        h+='<button type="button" class="dp-chip'+(DP_ST.weekdays.indexOf(i)>-1?' on':'')+'"'
+          +' data-dp="dow" data-v="'+i+'" title="'+DP_DOWL[i]+'">'+DP_DOW[i]+'</button>';
+      h+='</div><div class="dp-note" style="margin-top:9px">Twice a week is two days, not two tasks.</div>';
+    }
+    else if(a==='monthdays'){
+      h+=dpAskLbl('Which dates',true)+'<div class="dp-chips dom">';
+      for(i=1;i<=31;i++)
+        h+='<button type="button" class="dp-chip'+(DP_ST.monthdays.indexOf(i)>-1?' on':'')+'"'
+          +' data-dp="dom" data-v="'+i+'">'+i+'</button>';
+      h+='<button type="button" class="dp-chip wide'+(DP_ST.monthdays.indexOf('last')>-1?' on':'')+'"'
+        +' data-dp="dom" data-v="last">Last day</button></div>';
+    }
+    else if(a==='monthdates'){
+      h+=dpAskLbl('Which months',true)+'<div class="dp-chips mon">';
+      for(i=0;i<12;i++){
+        var picked=DP_ST.monthdates[i]!==undefined;
+        var hasDates=picked&&(DP_ST.monthdates[i]||[]).length>0;
+        h+='<button type="button" class="dp-chip'+(picked?' on':'')+(DP_AM===i?' active':'')+'"'
+          +' data-dp="mon" data-v="'+i+'" title="'+DP_MONL[i]+'">'+DP_MONS[i]
+          +(hasDates?'<span class="pip"></span>':'')+'</button>';
+      }
+      h+='</div>';
+      /* One 1-to-31 grid for whichever month is highlighted - the same grid "Every month" uses, so
+         choosing ten months does not make the panel ten rows taller. */
+      if(DP_AM!==null && DP_ST.monthdates[DP_AM]!==undefined){
+        var sel=DP_ST.monthdates[DP_AM]||[];
+        h+='<div class="dp-sub"><span class="lbl">Dates in '+DP_MONL[DP_AM]+'</span>'
+          +'<button type="button" class="rm" data-dp="unmon" data-v="'+DP_AM+'">Remove month</button></div>'
+          +'<div class="dp-chips dom">';
+        for(i=1;i<=31;i++)
+          h+='<button type="button" class="dp-chip'+(sel.indexOf(i)>-1?' on':'')+'"'
+            +' data-dp="ymd" data-v="'+i+'">'+i+'</button>';
+        h+='<button type="button" class="dp-chip wide'+(sel.indexOf('last')>-1?' on':'')+'"'
+          +' data-dp="ymd" data-v="last">Last day</button></div>';
+      } else {
+        h+='<div class="dp-empty">Pick a month above, then choose its dates here.<br>'
+          +'Each month keeps its own &mdash; 15 and 30 June, just the 1st in December.</div>';
+      }
+    }
+    return h+'</div>';
+  }
+
+  function dpSays(){
+    var miss=dpMissing(DP_ST);
+    if(miss) return '<div class="dp-says"><span class="miss">'+miss+'</span></div>';
+    var rule=dpRuleOf(DP_ST);
+    var h='<b>'+dpDescribe(DP_ST)+'</b>';
+    var nx=(DP_ST.freq==='none')?[DP_ST.date]:dpOccurrences(rule,3,dpFloor(),null);
+    if(nx.length&&nx[0]) h+='<br>Next: '+nx.map(dpShort).join(' &middot; ');
+    if(dpUsesShortMonth()) h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +(dpAsks(DP_ST.freq)==='monthdates'
+         ? 'In February it falls on the 28th, or the 29th in a leap year.'
+         : 'A 29th, 30th or 31st falls on the last day of a shorter month.')+'</div>';
+    if(DP_ST.freq==='quarterly') h+='<div class="warn"><i class="fa-solid fa-circle-info"></i> '
+      +'Every 3 months, counting from the first one.</div>';
+    if(DP_ST.freq!=='none'){
+      h+='<div class="ends">'+(DP_ST.until
+        ? 'Ends '+dpShort(DP_ST.until)+' &middot; <button type="button" data-dp="noend">remove</button>'
+        : '<button type="button" data-dp="setend">Set an end date</button>')+'</div>';
+    }
+    return '<div class="dp-says">'+h+'</div>';
+  }
+  function dpUsesShortMonth(){
+    var a=dpAsks(DP_ST.freq), i, m, ds;
+    if(a==='monthdays') for(i=0;i<DP_ST.monthdays.length;i++){ if(+DP_ST.monthdays[i]>28) return true; }
+    if(a==='monthdates'){
+      // Only February can be short of a 29th/30th/31st; January the 31st is the 31st every year.
+      ds=DP_ST.monthdates[1]||[];
+      for(i=0;i<ds.length;i++){ if(+ds[i]>28) return true; }
+    }
+    return false;
+  }
+
+  // The rule as it will be stored: only the fields its own option uses, so nothing stale rides along.
+  function dpRuleOf(st){
+    var a=dpAsks(st.freq);
+    if(a==='date') return null;                    // no repeat; the due date carries it
+    var r={freq:st.freq};
+    if(a==='weekdays')        r.weekdays=st.weekdays.slice().sort(function(x,y){return x-y;});
+    else if(a==='monthdays')  r.monthdays=dpSortDays(st.monthdays);
+    else if(a==='monthdates') r.monthdates=JSON.parse(JSON.stringify(st.monthdates));
+    if(st.until) r.until=st.until;
+    return r;
+  }
+  // What a caller gets back: the due date to store, and the rule (or null).
+  function dpResult(){
+    if(dpMissing(DP_ST)) return null;
+    var rule=dpRuleOf(DP_ST);
+    return rule ? {due:dpFirst(rule), recur:rule} : {due:DP_ST.date, recur:null};
+  }
+
+  function dpPaint(){
+    if(!DP_HOST) return;
+    var railH='<div class="dp-rail">'+DP_FREQS.map(function(f){
+      return '<button type="button" class="dp-opt'+(DP_ST.freq===f.k?' on':'')+'" data-dp="freq" data-v="'+f.k+'">'+f.label+'</button>';
+    }).join('')+'</div>';
+    var h='<div class="dp-body">'+railH+dpPane()+'</div>'+dpSays();
+    if(DP_OPTS.footer)
+      h+='<div class="dp-foot"><button type="button" class="dp-clear" data-dp="clear">Clear</button>'
+        +'<button type="button" class="dp-done" data-dp="done"'+(dpMissing(DP_ST)?' disabled':'')+'>Done</button></div>';
+    DP_HOST.innerHTML=h;
+    if(DP_OPTS.onChange) DP_OPTS.onChange(dpResult());
+  }
+
+  function dpToggle(arr,v){ var i=arr.indexOf(v); if(i>-1) arr.splice(i,1); else arr.push(v); }
+
+  function dpClick(e){
+    var el=e.target.closest('[data-dp]'); if(!el) return;
+    e.preventDefault(); e.stopPropagation();
+    var a=el.getAttribute('data-dp'), v=el.getAttribute('data-v'), m;
+
+    if(a==='freq'){
+      DP_ST.freq=v; DP_MODE='date';
+      if(dpAsks(v)==='date') DP_ST.until=null;          // a one-off has nothing to end
+      if(dpAsks(v)==='monthdates') DP_AM=dpFirstChosenMonth();
+    }
+    else if(a==='mv'){ m=DP_VIEW.m+Number(v); DP_VIEW={y:DP_VIEW.y+Math.floor(m/12),m:((m%12)+12)%12}; }
+    else if(a==='pick'){
+      if(DP_MODE==='until'){
+        DP_ST.until=v; DP_MODE='date';
+      } else {
+        DP_ST.date=v;
+        if(DP_ST.until&&DP_ST.until<v) DP_ST.until=null;
+        var q=dpParse(v); DP_VIEW={y:q.y,m:q.m};
+      }
+    }
+    else if(a==='dow') dpToggle(DP_ST.weekdays,Number(v));
+    else if(a==='dom') dpToggle(DP_ST.monthdays, v==='last'?'last':Number(v));
+    else if(a==='mon'){
+      /* Clicking a month always selects it and points the grid at it; removing is the explicit
+         "Remove month", so one click cannot quietly discard dates already set for a month you
+         only meant to look at. */
+      m=Number(v);
+      if(DP_ST.monthdates[m]===undefined) DP_ST.monthdates[m]=[];
+      DP_AM=m;
+    }
+    else if(a==='ymd'){
+      if(DP_AM===null) return;
+      if(!DP_ST.monthdates[DP_AM]) DP_ST.monthdates[DP_AM]=[];
+      dpToggle(DP_ST.monthdates[DP_AM], v==='last'?'last':Number(v));
+    }
+    else if(a==='unmon'){
+      delete DP_ST.monthdates[v];
+      if(DP_AM===Number(v)) DP_AM=dpFirstChosenMonth();
+    }
+    else if(a==='setend'){
+      DP_MODE='until';
+      var f=dpParse(DP_ST.until||dpFirst(dpRuleOf(DP_ST))||dpFloor()); DP_VIEW={y:f.y,m:f.m};
+    }
+    else if(a==='backtodate'){ DP_MODE='date'; }
+    else if(a==='noend'){ DP_ST.until=null; }
+    else if(a==='clear'){ if(DP_OPTS.onDone) DP_OPTS.onDone(null); return; }
+    else if(a==='done'){ if(dpMissing(DP_ST)) return; if(DP_OPTS.onDone) DP_OPTS.onDone(dpResult()); return; }
+    dpPaint();
+  }
+
+  /* rule = {due, recur} as stored on the task, or null. */
+  function accDpMount(host,cur,opts){
+    DP_HOST=host; DP_OPTS=opts||{};
+    DP_ST=dpBlank();
+    var recur=cur&&cur.recur;
+    if(recur&&recur.freq){
+      DP_ST.freq=recur.freq;
+      DP_ST.weekdays=(recur.weekdays||[]).slice();
+      DP_ST.monthdays=(recur.monthdays||[]).slice();
+      DP_ST.monthdates={};
+      if(recur.monthdates) for(var k in recur.monthdates){
+        var vv=recur.monthdates[k];
+        DP_ST.monthdates[k]=Array.isArray(vv)?vv.slice():(vv==null?[]:[vv]);
+      }
+      DP_ST.until=recur.until||null;
+    } else {
+      DP_ST.freq='none';
+      DP_ST.date=(cur&&cur.due)||dpFloor();
+    }
+    // Never open on a month already behind today, or every day in view is greyed out.
+    var start=(DP_ST.date&&DP_ST.date>=dpFloor())?DP_ST.date:dpFloor();
+    var p=dpParse(start);
+    DP_VIEW={y:p.y,m:p.m}; DP_MODE='date'; DP_AM=dpFirstChosenMonth();
+    host.classList.add('dp-pop');
+    host.addEventListener('click',dpClick);
+    dpPaint();
+    return host;
+  }
+  /* openPopover positions the panel while it is still an empty div, so it measures 0 wide and
+     0 tall; a 432px panel opened near an edge has to be placed again once it has a size.
+
+     Below the button by default, above it when it would run off the bottom, and pinned to the top
+     when it fits neither. Being position:fixed, anything left off-screen can never be scrolled to
+     - .dp-pop caps its height and scrolls its own body for the same reason. */
+  function dpFitPopover(el,anchor){
+    if(!el||!anchor) return;
+    var m=8, vw=window.innerWidth, vh=window.innerHeight;
+    var r=anchor.getBoundingClientRect(), w=el.offsetWidth, h=el.offsetHeight;
+    var top=r.bottom+4;
+    if(top+h > vh-m) top=r.top-h-4;
+    if(top < m) top=m;
+    el.style.top=top+'px';
+    el.style.left=Math.max(m,Math.min(r.left,vw-w-m))+'px';
+  }
+
   window.accInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
-    const cur=INS_STAGE.due||'';
-    openPopover(btn,`<input type="date" id="acPopDate" min="${todayISO()}" value="${cur}" onchange="accInsDateSet(this.value)" style="opacity:0;width:36px;height:36px;border:0;padding:0;outline:none;background:transparent">`);
-    const inp=document.getElementById('acPopDate'); if(inp){ inp.focus(); try{ inp.showPicker && inp.showPicker(); }catch(_e){} }
+    const el=openPopover(btn,'<div id="acDpBox"></div>');
+    accDpMount(document.getElementById('acDpBox'),
+      {due:INS_STAGE.due,recur:INS_STAGE.recur},
+      {footer:true,onDone:function(r){ accInsDateSet(r); }});
+    dpFitPopover(el,btn);
   };
-  window.accInsDateSet=function(v){ INS_STAGE.due=v||null; updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus(); };
+  window.accInsDateSet=function(r){
+    INS_STAGE.due=r?r.due:null; INS_STAGE.recur=r?r.recur:null;
+    updateInsDateBtn(); accInsToggleX(); closePopover(); const t=$('insInput'); if(t)t.focus();
+  };
   window.accInsPickMembers=async function(ev){
     ev.stopPropagation();
     const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
@@ -8512,18 +11116,23 @@
     if(pv==='__new'){
       const nm=($('etNewProj').value||'').trim(); if(!nm){toast('Enter a tag name','err');return;}
       const depts=myDepts();
-      try{ const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; INS_STAGE.project=pj.id; INS_STAGE.projectLabel=nm; }catch(e){ toast('Failed to create tag','err'); return; }
+      try{ const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; INS_STAGE.project=pj.id; INS_STAGE.projectLabel=nm; }catch(e){ toast('Could not create the tag: '+((e&&e.message)||e),'err'); return; }
     } else { INS_STAGE.project=pv?Number(pv):null; INS_STAGE.projectLabel=pv?(window._etProjLabel||''):''; }
     updateInsProjBtn(); accInsToggleX(); closeModal(); const t=$('insInput'); if(t)t.focus();
   };
   window.accSelfInsPickDate=function(ev){
     ev.stopPropagation(); const btn=ev.currentTarget;
     if(POPOVER_ANCHOR===btn){ closePopover(); return; }
-    const cur=SELF_INS_STAGE.due||'';
-    openPopover(btn,`<input type="date" id="acPopSelfDate" min="${todayISO()}" value="${cur}" onchange="accSelfInsDateSet(this.value)" style="opacity:0;width:36px;height:36px;border:0;padding:0;outline:none;background:transparent">`);
-    const inp=document.getElementById('acPopSelfDate'); if(inp){ inp.focus(); try{ inp.showPicker && inp.showPicker(); }catch(_e){} }
+    const el=openPopover(btn,'<div id="acDpBox"></div>');
+    accDpMount(document.getElementById('acDpBox'),
+      {due:SELF_INS_STAGE.due,recur:SELF_INS_STAGE.recur},
+      {footer:true,onDone:function(r){ accSelfInsDateSet(r); }});
+    dpFitPopover(el,btn);
   };
-  window.accSelfInsDateSet=function(v){ SELF_INS_STAGE.due=v||null; updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus(); };
+  window.accSelfInsDateSet=function(r){
+    SELF_INS_STAGE.due=r?r.due:null; SELF_INS_STAGE.recur=r?r.recur:null;
+    updateSelfInsDateBtn(); accSelfInsToggleX(); closePopover(); const t=$('selfInsInput'); if(t)t.focus();
+  };
   window.accSelfInsPickProject=async function(ev){
     ev.stopPropagation();
     const {data:projectsRaw}=await ACC().from('projects').select('id,name,department,created_by,owner').order('name');
@@ -8534,15 +11143,28 @@
     const pv=$('etProj').value;
     if(pv==='__new'){
       const nm=($('etNewProj').value||'').trim(); if(!nm){toast('Enter a tag name','err');return;}
-      try{ const depts=myDepts(); const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; SELF_INS_STAGE.project=pj.id; SELF_INS_STAGE.projectLabel=nm; }catch(e){ toast('Failed to create tag','err'); return; }
+      try{ const depts=myDepts(); const {data:pj,error}=await ACC().from('projects').insert({name:nm,created_by:me(),owner:me(),department:depts.length?depts:null}).select().single(); if(error)throw error; SELF_INS_STAGE.project=pj.id; SELF_INS_STAGE.projectLabel=nm; }catch(e){ toast('Could not create the tag: '+((e&&e.message)||e),'err'); return; }
     } else { SELF_INS_STAGE.project=pv?Number(pv):null; SELF_INS_STAGE.projectLabel=pv?(window._etProjLabel||''):''; }
     updateSelfInsProjBtn(); accSelfInsToggleX(); closeModal(); const t=$('selfInsInput'); if(t)t.focus();
   };
   window.accP3=function(k){P3=k;tasksScreen();};
   window.accInsToggleX=function(){};
   window.accSelfInsToggleX=function(){};
-  window.accInsCancel=function(){ INS_STAGE={due:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
-  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accInsCancel=function(){ INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='byMe')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  window.accSelfInsCancel=function(){ SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; if(GAP_ACTIVE.kind==='self')GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; tasksScreen(); };
+  // Full names, not email fragments, in the Usability report's "Assigned to" column.
+  // This deliberately uses THIS file's people() + nameOf rather than nexus-core's global nameOf:
+  // that one reads the PEOPLE global, which is filled by getPeople() and nothing on the
+  // Accountability page ever calls it - so PEOPLE stays null and its fallback returned the local
+  // part of the address, which is how "Prerna Gupta" came out as "businessanalyst". people() is
+  // cached with a TTL and is already loaded on these screens, so this costs no extra round trip;
+  // an email with no matching account falls back to the address itself, which at least identifies
+  // the person.
+  async function usageNames(emails){
+    let list=[]; try{ list=await people(); }catch(_x){ list=[]; }
+    const out=(emails||[]).filter(Boolean).map(function(e){ return nameOf(list,e); });
+    return out.length?out.join(', '):undefined;
+  }
   window.accInsCreate=async function(){
     if(INS_BUSY)return;
     const inp=$('insInput'); const title=(inp&&inp.value||'').trim(); if(!title){toast('Type a title','err');return;}
@@ -8551,14 +11173,34 @@
     const projectId=INS_STAGE.project||null;
     INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur:INS_STAGE.recur||null}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert(sel.map(e=>({task_id:t.id,email:e})));
       let r;
       if(GAP_ACTIVE.kind==='byMe' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._byMeOrderIds||[]).length){ r=await rankBetweenIds(window._byMeOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      INS_STAGE={due:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
+      // Logged here, after the row and its assignees actually exist, so a failed save is never
+      // counted as a task that was created. Two things and no more: the task's name, which is what
+      // Details is read for, and who it went to, which the report shows in its own column. Both
+      // only exist as staged values inside this function - a USAGE_MAP wrapper could never see
+      // them, which is why this logs directly.
+      try{ usageQueue('tasks.tasks.create_task','create',{
+        title:title,
+        assignee:await usageNames(sel)
+      }); }catch(_e){}
+      // "Insert a task at a specific position" - the "+ Add task here" strip that appears between
+      // two rows. r is non-null only when rankBetweenIds actually placed this task between real
+      // neighbours, so an ordinary add at the end of the list is not counted as one. Logged here
+      // rather than on the strip's own click (accGapOpen): opening the composer and then typing
+      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to
+      // taskReorderDrop, a handler that still exists in nexus-core.js but that nothing calls any
+      // more, which is why this feature read 0 uses while people were using it daily.
+      if(r!=null){ try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','create',{
+        title:title,
+        assignee:await usageNames(sel)
+      }); }catch(_e){} }
+      INS_STAGE={due:null,recur:null,members:[],project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task created','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ INS_BUSY=false; }
   };
@@ -8569,14 +11211,31 @@
     const projectId=SELF_INS_STAGE.project||null;
     SELF_INS_BUSY=true;
     try{
-      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0}).select().single();
+      const {data:t,error}=await ACC().from('ptasks').insert({title,delegator:me(),due_date:due,project_id:projectId,order_index:0,recur:SELF_INS_STAGE.recur||null}).select().single();
       if(error)throw error;
       await ACC().from('ptask_assignees').insert({task_id:t.id,email:me()});
       let r;
       if(GAP_ACTIVE.kind==='self' && (GAP_ACTIVE.beforeId!=null||GAP_ACTIVE.afterId!=null) && (window._selfOrderIds||[]).length){ r=await rankBetweenIds(window._selfOrderIds,GAP_ACTIVE.beforeId,GAP_ACTIVE.afterId); }
       else { r=null; await appendRankForMe(t.id); }
       if(r!=null) await setMyRank(t.id,r);
-      SELF_INS_STAGE={due:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
+      // Same as accInsCreate, for a task somebody adds for themselves - the assignee is always
+      // the person doing it, so it is recorded rather than left blank.
+      try{ usageQueue('tasks.tasks.create_task','create',{
+        title:title,
+        assignee:await usageNames([me()])
+      }); }catch(_e){}
+      // "Insert a task at a specific position" - the "+ Add task here" strip that appears between
+      // two rows. r is non-null only when rankBetweenIds actually placed this task between real
+      // neighbours, so an ordinary add at the end of the list is not counted as one. Logged here
+      // rather than on the strip's own click (accGapOpen): opening the composer and then typing
+      // nothing, or cancelling, is not use of the feature. The catalog entry had been wired to
+      // taskReorderDrop, a handler that still exists in nexus-core.js but that nothing calls any
+      // more, which is why this feature read 0 uses while people were using it daily.
+      if(r!=null){ try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','create',{
+        title:title,
+        assignee:await usageNames([me()])
+      }); }catch(_e){} }
+      SELF_INS_STAGE={due:null,recur:null,project:null,projectLabel:''}; GAP_ACTIVE={kind:null,beforeId:null,afterId:null}; toast('Task added','ok'); tasksScreen();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
     finally{ SELF_INS_BUSY=false; }
   };
@@ -8665,12 +11324,6 @@
      matching its current order, then the drag swap is applied on top. ---- */
   async function crystallizeAndSwap(draggedId,targetId,orderIds){
     if(!targetId||draggedId===targetId) return;
-    // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
-    // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can never
-    // see it - the "Insert a task at a specific position" feature was mapped to a different,
-    // long-dead global (taskReorderDrop) instead, which is why real drag-reorder usage never showed.
-    // usageQueue is nexus-core.js's own global helper, reachable here like any other global.
-    try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
     try{
       const my=me();
       const {data:existing}=await ACC().from('task_rank').select('task_id').eq('viewer_email',my).in('task_id',orderIds);
@@ -8688,7 +11341,18 @@
         ACC().from('task_rank').upsert({task_id:draggedId,viewer_email:my,rank:bi},{onConflict:'task_id,viewer_email'}),
         ACC().from('task_rank').upsert({task_id:targetId,viewer_email:my,rank:ai},{onConflict:'task_id,viewer_email'})
       ]);
-    }catch(e){ toast('Failed to reorder','err'); }
+      // Logged directly, not through nexus-core.js's USAGE_MAP: this function lives inside this
+      // file's own IIFE and is never assigned to window, so the window[fn]-wrapping tracker can
+      // never see it - the "Insert a task at a specific position" feature was mapped instead to
+      // taskReorderDrop, a handler nothing calls any more, which is why real drag-reorder usage
+      // never showed. usageQueue is nexus-core.js's own global helper, reachable here like
+      // any other global. Logged at this point and not on entry, so a drag that failed partway is
+      // not counted as a position somebody set; the task's own name is what Details is read for.
+      try{
+        const {data:dt}=await ACC().from('ptasks').select('title').eq('id',draggedId).single();
+        usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update',(dt&&dt.title)?{title:dt.title}:null);
+      }catch(_e){}
+    }catch(e){ toast('Could not reorder: '+((e&&e.message)||e),'err'); }
     tasksScreen();
   }
   function wireSwapDrag(col,fullOrderIds){
@@ -8813,7 +11477,7 @@
         ${canEdit?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
         ${canEdit?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`:''}</span></h3>
       <div class="tp-grid">
-        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
+        <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${t.recur?` <span class="dp-chip-rep"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe(t.recur))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Created</div><div class="v">${t.created_at?wfDTFull(t.created_at):'—'}</div></div>
         <div class="tp-f"><div class="k">Owner</div><div class="v">${esc2(nameOf(list,t.delegator))}</div></div>
@@ -8885,8 +11549,9 @@
         await ACC().from('ptask_activity').insert({task_id:tid,action:'deleted attachment',detail:'Deleted '+(fname||'an attachment')});
         await sysMsg(tid,'deleted the attachment "'+(fname||'file')+'"');
         toast('Attachment "'+(fname||'')+'" deleted','ok');
+        try{usageQueue('tasks.tasks.delete_attached_file','delete',{title:fname||undefined});}catch(_e){}
         renderPage();
-      }catch(e){ toast('Failed','err'); }
+      }catch(e){ toast('Could not delete the attachment: '+((e&&e.message)||e),'err'); }
     });
   };
   function subRow(s){ return `<div class="tp-sub-item" data-id="${s.id}"><i class="fa-solid fa-grip-vertical grip"></i><input type="checkbox" ${s.done?'checked':''} onchange="accSubToggle(${s.id},this.checked)" style="width:17px;height:17px"><div style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--slate)':''}">${esc2(s.title)}</div><button class="ac-btn ic danger" style="height:28px;width:28px" onclick="accSubDel(${s.id})"><i class="fa-solid fa-trash"></i></button></div>`; }
@@ -8896,7 +11561,7 @@
   window.accSubtasksToggle=function(){ const c=$('subCard'); if(!c)return; const show=c.style.display==='none'; c.style.display=show?'block':'none'; if(show){const i=$('stTitle'); if(i)i.focus();} };
   window.accSubCancel=function(){ const i=$('stTitle'); if(i)i.value=''; };
   window.accSubAdd=async function(tid){ const i=$('stTitle'); const title=(i&&i.value||'').trim(); if(!title){toast('Type a sub-task title','err');return;} try{const {data:mx}=await ACC().from('ptask_subtasks').select('order_index').eq('task_id',tid).order('order_index',{ascending:false}).limit(1);const nx=(mx&&mx[0]?mx[0].order_index+1:0);const firstSub=!(mx&&mx.length);await ACC().from('ptask_subtasks').insert({task_id:tid,title,order_index:nx});if(firstSub)await sysMsg(tid,'added the first sub-task');await recalc(tid);renderPage();}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} };
-  window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Failed','err');} };
+  window.accSubToggle=async function(sid,done){ try{await ACC().from('ptask_subtasks').update({done,done_at:done?nowISO():null}).eq('id',sid);const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){toast('Could not update the sub-task: '+((e&&e.message)||e),'err');} };
   window.accSubDel=function(sid){ accConfirm('Delete this sub-task?', async function(){ try{const s=await ACC().from('ptask_subtasks').select('task_id').eq('id',sid).single();await ACC().from('ptask_subtasks').delete().eq('id',sid);if(s.data)await recalc(s.data.task_id);renderPage();}catch(e){} }); };
   async function recalc(tid){
     const {data:subs}=await ACC().from('ptask_subtasks').select('done').eq('task_id',tid);
@@ -8937,7 +11602,7 @@
     if(val==='__new'){ if(n){n.style.display='block';n.focus();} }
     else { if(n){n.style.display='none';n.value='';} window._etProjLabel=val?(el.querySelector('.ms-nm').textContent.trim()):''; }
   };
-  window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Failed','err');} }); };
+  window.accReopen=function(tid){ if(!(window._tp&&window._tp.amOwner)){toast('Only the person who assigned this task can reopen it','err');return;} accConfirm('Reopen this completed task? It will move back to active tasks.', async function(){ try{ await ACC().from('ptasks').update({approval_state:'open',status:'Pending'}).eq('id',tid); await ACC().from('ptask_activity').insert({task_id:tid,action:'reopened',detail:'Task reopened'}); await sysMsg(tid,'reopened the task'); toast('Reopened','ok'); renderPage(); }catch(e){toast('Could not reopen the task: '+((e&&e.message)||e),'err');} }); };
   window.accRevert=function(tid){
     if(!(window._tp&&window._tp.amMember)){toast('Only someone assigned to this task can revert it','err');return;}
     accConfirm('Revert this task back to Pending? It leaves Awaiting Approval and returns to your active tasks — and the task owner\'s "Assigned by Me" list.', async function(){
@@ -8989,42 +11654,64 @@
       await ACC().from('ptask_comments').insert({task_id:tid,body:body||null,attach_path:attachPath,attach_name:attachName});
       if(i)i.value=''; accChatClearFile();
       renderPage();
-    }catch(e){toast('Failed','err');}
+    }catch(e){toast('Could not post your update: '+((e&&e.message)||e),'err');}
   };
   window.accDueHistory=function(tid){ const h=(window._tp&&window._tp.dueHist)||[]; openModal(`<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> Due date history</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,560px)">${h.length?h.map(a=>`<div style="padding:8px 0;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--body)">${esc2(a.detail||'')}<span style="float:right;color:var(--slate)">${fmtDateY(a.created_at)}</span></div>`).join(''):'<div class="ac-empty" style="cursor:default;border:0">No due-date changes</div>'}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Close</button></div>`,'md'); };
   window.accEditDesc=async function(tid){ const {data:t}=await ACC().from('ptasks').select('description').eq('id',tid).single(); openModal(`<div class="modal-head"><h3><i class="fa-solid fa-align-left"></i> Description</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(80vw,680px)"><textarea class="ac-in" id="edDesc" style="min-height:300px" placeholder="Describe the task…">${esc2((t&&t.description)||'')}</textarea></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDescSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'lg'); };
-  window.accEditDescSave=async function(tid){ try{await ACC().from('ptasks').update({description:$('edDesc').value||null}).eq('id',tid);await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'Description updated'});await sysMsg(tid,'updated the description');closeModal();renderPage();}catch(e){toast('Failed','err');} };
+  // Logged directly, after the update actually succeeds, rather than through USAGE_MAP - captures
+  // a plain-text excerpt of the new description, not just that a Save button was clicked.
+  window.accEditDescSave=async function(tid){ try{const val=$('edDesc').value||null;await ACC().from('ptasks').update({description:val}).eq('id',tid);await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'Description updated'});await sysMsg(tid,'updated the description');
+    try{ const excerpt=val?String(val).replace(/\s+/g,' ').trim():''; usageQueue('tasks.tasks.edit_task_description','update',excerpt?{description:(excerpt.length>140?excerpt.slice(0,140)+'…':excerpt)}:null); }catch(_e){}
+    closeModal();toast('Description saved','ok');renderPage();}catch(e){toast('Could not save the description: '+((e&&e.message)||e),'err');} };
   window.accEditTitle=async function(tid){
     const {data:t}=await ACC().from('ptasks').select('title').eq('id',tid).single();
     openModal(`<div class="modal-head"><h3>Rename task</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)"><input class="ac-in" id="rnTitle" value="${esc2((t&&t.title)||'')}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditTitleSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
   };
+  // Logged directly, after the update succeeds and only when the title actually changed (same
+  // gate the activity log/sysMsg already use) - captures the new title itself, not just a click.
   window.accEditTitleSave=async function(tid){
     const v=($('rnTitle').value||'').trim(); if(!v){toast('Title required','err');return;}
     try{
       const {data:old}=await ACC().from('ptasks').select('title').eq('id',tid).single();
       await ACC().from('ptasks').update({title:v}).eq('id',tid);
-      if(old&&old.title!==v){ await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'renamed to "'+v+'"'}); await sysMsg(tid,'renamed to "'+v+'"'); }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      if(old&&old.title!==v){
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:'renamed to "'+v+'"'}); await sysMsg(tid,'renamed to "'+v+'"');
+        try{ usageQueue('tasks.tasks.edit_task_title','update',{title:v}); }catch(_e){}
+      }
+      closeModal(); toast('Task renamed','ok'); renderPage();
+    }catch(e){toast('Could not rename the task: '+((e&&e.message)||e),'err');}
   };
+  let DP_EDIT=null;   // the rule the modal is holding, read back by accEditDueSave
   window.accEditDue=async function(tid){
-    const {data:t}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
-    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(90vw,360px)"><input class="ac-in" type="date" id="edDueF" min="${todayISO()}" value="${(t&&t.due_date)||''}"></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    const {data:t}=await ACC().from('ptasks').select('due_date,created_at,recur,recur_anchor').eq('id',tid).single();
+    openModal(`<div class="modal-head"><h3>Due date</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="min-width:min(94vw,432px);padding:0"><div id="acDpBox" class="dp-inline"></div></div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditDueSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md');
+    DP_EDIT=t?{due:t.due_date,recur:t.recur}:null;
+    accDpMount(document.getElementById('acDpBox'),DP_EDIT,
+      {footer:false,onChange:function(r){ DP_EDIT=r; }});
   };
   window.accEditDueSave=async function(tid){
-    const due=$('edDueF').value||null;
+    const res=DP_EDIT;
+    const due=(res&&res.due)||null;
     try{
-      const {data:old}=await ACC().from('ptasks').select('due_date,created_at').eq('id',tid).single();
-      if(due&&due<todayISO()){toast('Due date cannot be earlier than today','err');return;}
+      const {data:old}=await ACC().from('ptasks').select('due_date,created_at,recur').eq('id',tid).single();
+      if(due&&due<istTodayISO()){toast('Due date cannot be earlier than today','err');return;}
       const prevDue=old?old.due_date:null;
-      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false}).eq('id',tid);
+      const prevRecur=(old&&old.recur)||null, newRecur=(res&&res.recur)||null;
+      /* recur_anchor is left alone on purpose: the trigger sets it on the first save and it must
+         not move afterwards, or a quarterly rule would re-phase and a clamped monthly 31st would
+         re-anchor to whatever short month it last landed on. */
+      await ACC().from('ptasks').update({due_date:due,overdue_emailed:false,due_emailed:false,recur:newRecur}).eq('id',tid);
+      if(JSON.stringify(prevRecur)!==JSON.stringify(newRecur)){
+        await ACC().from('ptask_activity').insert({task_id:tid,action:'repeat changed',detail:'Repeat '+(prevRecur?dpDescribe(prevRecur):'none')+' \u2192 '+(newRecur?dpDescribe(newRecur):'none')});
+      }
       if((prevDue||'')!==(due||'')){
         await ACC().from('ptask_activity').insert({task_id:tid,action:'due date changed',detail:'Due date '+(prevDue?fmtDateY(prevDue):'none')+' → '+(due?fmtDateY(due):'none')});
         await sysMsg(tid, prevDue?('changed the due date from '+fmtDateY(prevDue)+' to '+(due?fmtDateY(due):'none')):('set the due date to '+(due?fmtDateY(due):'none')));
+        try{ usageQueue('tasks.tasks.edit_task_due_date','update',{due_date:due||'cleared'}); }catch(_e){}
         if(due){ const _d=parseD(due), _t=new Date(); _t.setHours(0,0,0,0); if(_d&&_d<=_t){ try{ fetch('https://rkxsgtauigjrpcjkmccu.supabase.co/functions/v1/overdue-mailer',{method:'POST',headers:{apikey:'sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n'}}); toast('Task is due \u2014 members notified by email','ok'); }catch(_e){} } }
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Due date saved','ok'); renderPage();
+    }catch(e){toast('Could not update the due date: '+((e&&e.message)||e),'err');}
   };
   window.accEditProject=async function(tid){
     const [tR,pR]=await Promise.all([ACC().from('ptasks').select('project_id').eq('id',tid).single(),ACC().from('projects').select('id,name,department,created_by,owner').order('name')]);
@@ -9050,13 +11737,18 @@
         const detail=pid?('moved it to project '+(newProjName||'—')):'removed the project';
         await ACC().from('ptask_activity').insert({task_id:tid,action:'edited',detail:detail});
         await sysMsg(tid,detail);
+        // The project also goes in the event's own project column, not only in Details, so the
+        // report can group and filter by it.
+        try{ usageQueue('tasks.tasks.edit_task_project','update',{project:newProjName||'(removed)'}, newProjName||undefined); }catch(_e){}
       }
-      closeModal(); toast('Saved','ok'); renderPage();
-    }catch(e){toast('Failed','err');}
+      closeModal(); toast('Tag saved','ok'); renderPage();
+    }catch(e){toast('Could not update the tag: '+((e&&e.message)||e),'err');}
   };
   window.accEditMembers=async function(tid){ const [list,aR]=await Promise.all([people(),ACC().from('ptask_assignees').select('email').eq('task_id',tid)]); const {data:t}=await ACC().from('ptasks').select('delegator').eq('id',tid).single(); const others=list.filter(p=>!eq(p.email,(t&&t.delegator)||me())); const cur=(aR.data||[]).map(r=>r.email);
     openModal(`<div class="modal-head"><h3>Members <span style="font-size:12px;color:#94a3b8;font-weight:400">(owner cannot be a member)</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden">${msWidget('emMembers',others,cur)}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditMembersSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md'); };
-  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length)await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Failed','err');} };
+  // usageQueue logged only when parts is non-empty (a real add/remove happened), after the actual
+  // change, rather than through USAGE_MAP - captures who was added/removed, not just a click.
+  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
   window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
@@ -9074,6 +11766,12 @@
       if(parentFiles&&parentFiles.length){ await ACC().from('ptask_files').insert(parentFiles.map(f=>({task_id:t.id,file_name:f.file_name,storage_path:f.storage_path,file_size:f.file_size,uploaded_by:f.uploaded_by}))); }
       await appendRankForMe(t.id);
       await ACC().from('ptask_activity').insert({task_id:pid,action:'delegated',detail:'Delegated to '+sel.length+' person(s)'});
+      // Was mapped through USAGE_MAP, which could only record that the button was pressed. Logged
+      // here instead so the event says which task was delegated and to whom.
+      try{ usageQueue('tasks.tasks.delegate_task_to_someone','create',{
+        title:(parent&&parent.title)||undefined,
+        assignee:await usageNames(sel)
+      }); }catch(_e){}
       closeModal(); toast('Delegated','ok'); renderPage();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };

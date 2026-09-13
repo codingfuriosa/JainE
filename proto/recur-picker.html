@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Due date picker</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+/* JainE's own tokens, from nexus.css. */
+:root{
+  --ink:#0b1220; --slate:#64748b; --slate-2:#94a3b8;
+  --line:#e6eaf1; --bg:#f5f7fb;
+  --brand:#1d4ed8; --brand-700:#1e40af; --brand-50:#eff4ff; --brand-a10:#eef2ff;
+  --err:#dc2626;
+  --shadow-lg:0 10px 30px rgba(16,24,40,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;
+  -webkit-font-smoothing:antialiased;padding:34px 26px 120px}
+.demo-h{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-bottom:4px}
+.demo-s{color:var(--slate);font-size:13px;margin-bottom:22px;max-width:560px;line-height:1.6}
+.demo-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;max-width:420px;
+  box-shadow:0 1px 2px rgba(16,24,40,.05)}
+.demo-lbl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);
+  display:block;margin-bottom:6px}
+.demo-out{margin-top:18px;font-size:12.5px;color:var(--slate);line-height:1.7}
+.demo-out code{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 6px;
+  font-size:12px;color:var(--ink)}
+
+/* the field that opens it */
+.dp-field{display:flex;align-items:center;gap:10px;width:100%;height:44px;padding:0 13px;
+  border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer;font:inherit;
+  color:var(--ink);text-align:left}
+.dp-field:hover{border-color:#cbd5e1}
+.dp-field.open{border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.10)}
+.dp-field i.lead{color:var(--slate);font-size:14px}
+.dp-field .val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.dp-field .val.none{color:var(--slate-2);font-weight:400}
+.dp-field i.caret{color:var(--slate-2);font-size:11px}
+
+/* the popover: ONE column, 288px wide. No side rail, no second calendar. */
+.dp-pop{position:absolute;z-index:70;width:288px;background:#fff;border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow-lg);display:none}
+.dp-pop.show{display:block}
+
+/* month strip */
+.dp-head{display:flex;align-items:center;gap:4px;padding:12px 12px 6px}
+.dp-title{flex:1;text-align:center;font-size:13.5px;font-weight:700;letter-spacing:-.1px}
+.dp-nav{width:28px;height:28px;flex:none;display:flex;align-items:center;justify-content:center;
+  border:0;border-radius:7px;background:transparent;color:var(--slate);cursor:pointer;font-size:12px}
+.dp-nav:hover{background:var(--brand-a10);color:var(--brand)}
+
+/* the grid */
+.dp-cal{padding:0 12px 10px}
+.dp-dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:2px}
+.dp-dow span{text-align:center;font-size:10.5px;font-weight:700;letter-spacing:.03em;color:var(--slate-2)}
+.dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+.dp-day{height:34px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;
+  color:var(--ink);cursor:pointer;position:relative}
+.dp-day:hover:not([disabled]):not(.on){background:var(--brand-a10)}
+.dp-day.mute{color:var(--slate-2);opacity:.55}
+.dp-day[disabled]{color:var(--slate-2);opacity:.32;cursor:default}
+.dp-day.on{background:var(--brand);color:#fff;font-weight:700}
+/* a dot under today, so "today" reads without a second colour fighting the selection */
+.dp-day.today:not(.on)::after{content:"";position:absolute;left:50%;bottom:5px;width:3px;height:3px;
+  margin-left:-1.5px;border-radius:50%;background:var(--brand)}
+
+/* the three answers people actually give */
+.dp-quick{display:flex;gap:5px;padding:0 12px 11px}
+.dp-quick button{flex:1;height:28px;border:1px solid var(--line);border-radius:7px;background:#fff;
+  font:inherit;font-size:12px;color:var(--slate);cursor:pointer;font-weight:500}
+.dp-quick button:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-50)}
+
+/* repeat - one line, visibly secondary to the calendar */
+.dp-sec{border-top:1px solid var(--line);padding:10px 12px}
+.dp-rep-row{display:flex;align-items:center;gap:8px}
+.dp-rep-row .lbl{font-size:12.5px;color:var(--slate);flex:none}
+.dp-sel{flex:1;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;
+  font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;font-weight:500}
+.dp-sel:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(29,78,216,.10)}
+
+/* the one plain-English line that says what will happen */
+.dp-says{padding:0 12px 10px;font-size:12px;color:var(--slate);line-height:1.5}
+.dp-says b{color:var(--ink);font-weight:600}
+.dp-says .warn{color:var(--brand)}
+.dp-ends{margin-top:5px}
+.dp-ends button{border:0;background:transparent;padding:0;font:inherit;font-size:12px;color:var(--brand);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+
+/* when the calendar is picking an END date instead, say so and offer the way back */
+.dp-mode{display:flex;align-items:center;gap:7px;margin:0 12px 8px;padding:7px 9px;border-radius:8px;
+  background:var(--brand-50);color:var(--brand-700);font-size:12px;font-weight:600}
+.dp-mode i{font-size:11px}
+.dp-mode button{margin-left:auto;border:0;background:transparent;font:inherit;font-size:12px;
+  color:var(--brand);cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-weight:600}
+
+.dp-foot{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding:9px 12px}
+.dp-clear{border:0;background:transparent;padding:0;font:inherit;font-size:12.5px;color:var(--slate);
+  cursor:pointer}
+.dp-clear:hover{color:var(--err)}
+.dp-done{margin-left:auto;height:32px;padding:0 16px;border:0;border-radius:8px;background:var(--brand);
+  color:#fff;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.dp-done:hover{background:var(--brand-700)}
+</style>
+</head>
+<body>
+
+<div class="demo-h">Due date</div>
+<div class="demo-s">One column, one calendar. The repeat is worked out from the day you click &mdash;
+  pick the 15th and "Every month" already means the 15th of every month, so there is nothing else to
+  fill in.</div>
+
+<div class="demo-card">
+  <label class="demo-lbl">When is it due?</label>
+  <button type="button" class="dp-field" id="field">
+    <i class="fa-solid fa-calendar-day lead"></i>
+    <span class="val none">Pick a date</span>
+    <i class="fa-solid fa-chevron-down caret"></i>
+  </button>
+  <div class="demo-out" id="out"></div>
+</div>
+
+<div class="dp-pop" id="pop"></div>
+
+<script>
+(function(){
+  var DOW_S = ['S','M','T','W','T','F','S'];
+  var DOW_L = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var MON   = ['January','February','March','April','May','June','July','August','September',
+               'October','November','December'];
+  var MON_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  /* Six answers in a plain dropdown. A dropdown rather than a rail of buttons because it stays one
+     line high whatever the options are, it is the control everybody already knows, and it keeps the
+     repeat visibly secondary to the calendar - which is what it is, for almost every task. */
+  var FREQS = [
+    ['none',      'Does not repeat'],
+    ['daily',     'Every day'],
+    ['weekly',    'Every week'],
+    ['monthly',   'Every month'],
+    ['quarterly', 'Every 3 months'],
+    ['yearly',    'Every year']
+  ];
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function iso(y,m,d){ return y+'-'+pad(m+1)+'-'+pad(d); }
+  function parse(s){ var p=String(s).split('-'); return {y:+p[0], m:+p[1]-1, d:+p[2]}; }
+  function todayISO(){ var t=new Date(); return iso(t.getFullYear(), t.getMonth(), t.getDate()); }
+  function shortDate(s){ if(!s) return ''; var p=parse(s); return p.d+' '+MON_S[p.m]+' '+p.y; }
+  function longDate(s){
+    if(!s) return '';
+    var p=parse(s);
+    return DOW_L[new Date(p.y,p.m,p.d).getDay()].slice(0,3)+' '+p.d+' '+MON_S[p.m]+' '+p.y;
+  }
+  function ord(n){
+    n=+n;
+    if(n%100>=11 && n%100<=13) return n+'th';
+    return n+({1:'st',2:'nd',3:'rd'}[n%10]||'th');
+  }
+  function addDays(s,n){
+    var p=parse(s), d=new Date(p.y,p.m,p.d+n);
+    return iso(d.getFullYear(),d.getMonth(),d.getDate());
+  }
+  function daysIn(y,m){ return new Date(y,m+1,0).getDate(); }
+
+  var R     = null;      // what the form gets back
+  var draft = null;      // what is being edited
+  var view  = null;      // {y,m} month on screen
+  var mode  = 'date';    // 'date' | 'until' - the SAME calendar does both jobs
+
+  var field = document.getElementById('field');
+  var valEl = field.querySelector('.val');
+  var pop   = document.getElementById('pop');
+  var outEl = document.getElementById('out');
+
+  function blank(){ return { date: todayISO(), freq:'none', until:null }; }
+
+  function describe(r){
+    if(!r || !r.date) return 'Pick a date';
+    if(r.freq==='none') return longDate(r.date);
+    var p = parse(r.date), dow = DOW_L[new Date(p.y,p.m,p.d).getDay()], s = '';
+    if(r.freq==='daily')     s = 'Every day';
+    if(r.freq==='weekly')    s = 'Every '+dow;
+    if(r.freq==='monthly')   s = 'Every month on the '+ord(p.d);
+    if(r.freq==='quarterly') s = 'Every 3 months on the '+ord(p.d);
+    if(r.freq==='yearly')    s = 'Every '+p.d+' '+MON_S[p.m];
+    if(r.until) s += ', until '+shortDate(r.until);
+    return s;
+  }
+
+  /* The next few dates, so the rule is never a guess. Nothing is stored from this - it only ever
+     describes the rule already in the draft. */
+  function occurrences(r,n){
+    if(!r || !r.date) return [];
+    if(r.freq==='none') return [r.date];
+    var out=[], p=parse(r.date), i=0, guard=0;
+    while(out.length<n && guard++<600){
+      var s;
+      if(r.freq==='daily')       s = addDays(r.date, i);
+      else if(r.freq==='weekly') s = addDays(r.date, i*7);
+      else {
+        var step = r.freq==='monthly' ? 1 : r.freq==='quarterly' ? 3 : 12;
+        var m = p.m + step*i, y = p.y + Math.floor(m/12);
+        m = ((m%12)+12)%12;
+        // A 31st in a 30-day month lands on that month's last day, not the 1st of the next.
+        s = iso(y, m, Math.min(p.d, daysIn(y,m)));
+      }
+      i++;
+      if(r.until && s > r.until) break;
+      out.push(s);
+    }
+    return out;
+  }
+
+  function calHtml(){
+    var sel   = mode==='until' ? draft.until : draft.date;
+    var floor = mode==='until' ? draft.date  : todayISO();   // an end cannot precede the start
+    var y=view.y, m=view.m;
+    var first=new Date(y,m,1).getDay(), n=daysIn(y,m);
+    var prevN=daysIn(y, m===0?11:m-1), today=todayISO(), i, d, t;
+
+    var h = '<div class="dp-head">'
+      + '<button type="button" class="dp-nav" data-a="mv" data-i="-1" aria-label="Previous month">'
+      +   '<i class="fa-solid fa-chevron-left"></i></button>'
+      + '<div class="dp-title">'+MON[m]+' '+y+'</div>'
+      + '<button type="button" class="dp-nav" data-a="mv" data-i="1" aria-label="Next month">'
+      +   '<i class="fa-solid fa-chevron-right"></i></button>'
+      + '</div>';
+
+    if(mode==='until'){
+      h += '<div class="dp-mode"><i class="fa-solid fa-flag-checkered"></i>Choosing the last date'
+        +  '<button type="button" data-a="backtodate">Back</button></div>';
+    }
+
+    h += '<div class="dp-cal"><div class="dp-dow">'
+      + DOW_S.map(function(x){ return '<span>'+x+'</span>'; }).join('')
+      + '</div><div class="dp-grid">';
+
+    for(i=0;i<first;i++){
+      h += '<button type="button" class="dp-day mute" disabled>'+(prevN-first+i+1)+'</button>';
+    }
+    for(d=1;d<=n;d++){
+      var s   = iso(y,m,d);
+      var cls = 'dp-day' + (s===sel?' on':'') + (s===today?' today':'');
+      h += '<button type="button" class="'+cls+'" data-a="pick" data-d="'+s+'"'
+        + (s<floor?' disabled':'') + '>'+d+'</button>';
+    }
+    var tail = (first+n) % 7;
+    if(tail){
+      for(t=1;t<=7-tail;t++) h += '<button type="button" class="dp-day mute" disabled>'+t+'</button>';
+    }
+    return h + '</div></div>';
+  }
+
+  function saysHtml(){
+    if(draft.freq==='none'){
+      return draft.date ? 'Due <b>'+longDate(draft.date)+'</b>' : 'No date chosen yet.';
+    }
+    var nx = occurrences(draft, 3);
+    var h  = '<b>'+describe(draft)+'</b>';
+    if(nx.length) h += '<br>Next: '+nx.map(shortDate).join(' &middot; ');
+    // Say the clamp out loud rather than let a deadline be quietly wrong.
+    if((draft.freq==='monthly' || draft.freq==='quarterly') && parse(draft.date).d > 28){
+      h += '<br><span class="warn"><i class="fa-solid fa-circle-info"></i> '
+        + 'In a shorter month it falls on that month&rsquo;s last day.</span>';
+    }
+    h += '<div class="dp-ends">' + (draft.until
+        ? 'Ends '+shortDate(draft.until)+' &middot; <button type="button" data-a="noend">remove</button>'
+        : '<button type="button" data-a="setend">Set an end date</button>')
+      + '</div>';
+    return h;
+  }
+
+  function render(){
+    var h = calHtml();
+
+    // Today / Tomorrow / Next week - only while picking the due date.
+    if(mode==='date'){
+      h += '<div class="dp-quick">'
+        + '<button type="button" data-a="jump" data-d="'+todayISO()+'">Today</button>'
+        + '<button type="button" data-a="jump" data-d="'+addDays(todayISO(),1)+'">Tomorrow</button>'
+        + '<button type="button" data-a="jump" data-d="'+addDays(todayISO(),7)+'">Next week</button>'
+        + '</div>';
+    }
+
+    h += '<div class="dp-sec"><div class="dp-rep-row"><span class="lbl">Repeat</span>'
+      + '<select class="dp-sel" data-a="freq">'
+      + FREQS.map(function(f){
+          return '<option value="'+f[0]+'"'+(draft.freq===f[0]?' selected':'')+'>'+f[1]+'</option>';
+        }).join('')
+      + '</select></div></div>';
+
+    h += '<div class="dp-says">'+saysHtml()+'</div>'
+      +  '<div class="dp-foot">'
+      +    '<button type="button" class="dp-clear" data-a="clear">Clear</button>'
+      +    '<button type="button" class="dp-done" data-a="done">Done</button>'
+      +  '</div>';
+
+    pop.innerHTML = h;
+  }
+
+  function paintField(){
+    var repeats = !!(R && R.freq && R.freq!=='none');
+    valEl.textContent = describe(R);
+    valEl.className   = 'val' + ((R && R.date) ? '' : ' none');
+    var lead = field.querySelector('i.lead');
+    if(lead) lead.className = repeats ? 'fa-solid fa-rotate lead' : 'fa-solid fa-calendar-day lead';
+    if(!outEl) return;
+    outEl.innerHTML = 'Saved on the task:<br><code>'+JSON.stringify(R)+'</code>'
+      + (repeats ? '<br>Next ten: '+occurrences(R,10).map(shortDate).join(' &middot; ') : '');
+  }
+
+  function open(){
+    draft = R ? JSON.parse(JSON.stringify(R)) : blank();
+    var p = parse(draft.date || todayISO());
+    view  = {y:p.y, m:p.m};
+    mode  = 'date';
+    render();
+    pop.classList.add('show');
+    field.classList.add('open');
+    var r = field.getBoundingClientRect();
+    pop.style.top  = (window.scrollY + r.bottom + 6)+'px';
+    pop.style.left = (window.scrollX + r.left)+'px';
+  }
+  function close(){ pop.classList.remove('show'); field.classList.remove('open'); }
+
+  field.addEventListener('click', function(e){
+    e.stopPropagation();
+    if(pop.classList.contains('show')) close(); else open();
+  });
+
+  pop.addEventListener('click', function(e){
+    var el = e.target.closest('[data-a]');
+    if(!el) return;
+    /* render() replaces the popover's contents, which detaches e.target - the document handler
+       below would then measure a node with no parent and read it as a click OUTSIDE, closing the
+       popover on every single click. Stopping it here is what keeps it open. */
+    e.stopPropagation();
+    var a = el.getAttribute('data-a'), m, q, u, d;
+
+    if(a==='mv'){
+      m = view.m + (+el.getAttribute('data-i'));
+      view = {y: view.y + Math.floor(m/12), m: ((m%12)+12)%12};
+    }
+    else if(a==='pick'){
+      d = el.getAttribute('data-d');
+      if(mode==='until'){ draft.until = d; mode = 'date'; }
+      else {
+        draft.date = d;
+        // A stale end date before the start would silently kill the whole series.
+        if(draft.until && draft.until < d) draft.until = null;
+      }
+    }
+    else if(a==='jump'){
+      draft.date = el.getAttribute('data-d');
+      q = parse(draft.date); view = {y:q.y, m:q.m};
+      if(draft.until && draft.until < draft.date) draft.until = null;
+    }
+    else if(a==='setend'){
+      mode = 'until';
+      u = parse(draft.until || draft.date); view = {y:u.y, m:u.m};
+    }
+    else if(a==='backtodate'){ mode = 'date'; }
+    else if(a==='noend'){ draft.until = null; }
+    else if(a==='clear'){ R = null; paintField(); close(); return; }
+    else if(a==='done'){  R = JSON.parse(JSON.stringify(draft)); paintField(); close(); return; }
+    render();
+  });
+
+  // A <select> fires change, not click - handled apart so the dropdown behaves natively.
+  pop.addEventListener('change', function(e){
+    var el = e.target.closest('[data-a="freq"]');
+    if(!el) return;
+    draft.freq = el.value;
+    if(draft.freq==='none') draft.until = null;
+    render();
+  });
+
+  document.addEventListener('mousedown', function(e){
+    if(!pop.classList.contains('show')) return;
+    if(pop.contains(e.target) || field.contains(e.target)) return;
+    close();
+  });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+
+  R = blank();
+  paintField();
+})();
+</script>
+</body>
+</html>

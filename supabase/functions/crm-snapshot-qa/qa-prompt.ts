@@ -365,6 +365,11 @@ perfectly (every fact_check a Match) to a customer who wants something this proj
 
 A SITE VISIT IS NOT THE QUALIFICATION TEST. Agreeing to a site visit, asking to book, or asking to
 proceed all qualify a lead on their own - they are the customer settling the question themselves.
+INTEREST IN A SITE VISIT QUALIFIES A LEAD ON ITS OWN TOO, even short of a firm agreement or a fixed
+date. "Yes, I would like to see the site", "sounds good, arrange a visit", "I am interested, tell me
+when I can come" - none of these commit to a day, but all of them are the customer choosing to move
+forward, which is what the four gates exist to detect in the first place. Do not withhold Qualified
+waiting for a booked date; interest expressed is enough.
 But a customer who passes the four gates and still will not come to the site - busy, out of town,
 travelling, wants to send a family member, asks to be called after the puja - IS STILL QUALIFIED.
 They want to buy a flat; only the visit is unsettled. Reading that as a downgrade is the single most
@@ -392,8 +397,8 @@ So: "In Follow Up" is the WRONG answer for a qualified lead who moved their visi
 Use these definitions:
 - Lost         - the customer has closed the door: no requirement, already bought elsewhere, a wrong
                  or prank enquiry, a broker, or a clear refusal to proceed.
-- Qualified    - the four gates are met, or the customer agreed to a site visit, asked to proceed or
-                 asked to book - and they have not closed the door.
+- Qualified    - the four gates are met, or the customer agreed to (or showed interest in) a site
+                 visit, asked to proceed or asked to book - and they have not closed the door.
 - In Follow Up - the gates are not settled and the lead is still open: genuinely undecided, or
                  unavailable, asked to be called back, wants to discuss with family, is busy, wants
                  time to think. This is for a lead that has NEVER cleared the bar. A lead that has
