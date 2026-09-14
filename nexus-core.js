@@ -12908,12 +12908,19 @@ async function cpaMediaThumb(p){
     :`<div ${onclickAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8;cursor:pointer"><i class="fa-solid fa-image"></i></div>`;
 }
 async function cpaMediaRow(p){return [await cpaMediaThumb(p),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
+// Caps each "Existing uploads" panel at roughly 5 rows tall (thumbnail rows run ~64px incl.
+// padding) and scrolls internally past that, so uploading a dozen photos to one scope doesn't
+// push the Upload button and every panel after it down the page - only this list scrolls.
+function cpaMediaListWrap(label,tableHtml){
+  return '<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">'+label+'</div>'+
+    '<div style="max-height:320px;overflow-y:auto">'+tableHtml+'</div>';
+}
 async function cpaRenderProjectPhotoList(){
   const host=$('cpaPhList');if(!host)return;
   const projectId=Number($('cpaPhProject').value);
   const {data}=await sb.schema('cust').from('project_photos').select('*').eq('project_id',projectId).is('deleted_at',null).order('taken_on',{ascending:false});
   const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('project_photos',${p.id},'cpaRenderProjectPhotoList')">Delete</button>`]));
-  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+  host.innerHTML=cpaMediaListWrap('Existing uploads',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
 }
 async function cpaRenderTowerPhotoList(){
   const host=$('cpaTwList');if(!host)return;
@@ -12921,7 +12928,7 @@ async function cpaRenderTowerPhotoList(){
   if(!tower){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no towers on record.</div>';return;}
   const {data}=await sb.schema('cust').from('tower_photos').select('*').eq('project_id',projectId).eq('tower',tower).is('deleted_at',null).order('taken_on',{ascending:false});
   const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('tower_photos',${p.id},'cpaRenderTowerPhotoList')">Delete</button>`]));
-  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads for '+esc(tower)+'</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+  host.innerHTML=cpaMediaListWrap('Existing uploads for '+esc(tower),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
 }
 async function cpaRenderFloorPhotoList(){
   const host=$('cpaFlList');if(!host)return;
@@ -12929,14 +12936,14 @@ async function cpaRenderFloorPhotoList(){
   if(!floorNo){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no units to derive floors from.</div>';return;}
   const {data}=await sb.schema('cust').from('floor_photos').select('*').eq('project_id',projectId).eq('floor_no',floorNo).is('deleted_at',null).order('taken_on',{ascending:false});
   const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('floor_photos',${p.id},'cpaRenderFloorPhotoList')">Delete</button>`]));
-  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads for Floor '+esc(floorNo)+'</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+  host.innerHTML=cpaMediaListWrap('Existing uploads for Floor '+esc(floorNo),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
 }
 async function cpaRenderUnitPhotoList(){
   const host=$('cpaUhList');if(!host)return;
   const unitId=Number($('cpaUhUnit').value);
   const {data}=await sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unitId).is('deleted_at',null).order('taken_on',{ascending:false});
   const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('unit_photos',${p.id},'cpaRenderUnitPhotoList')">Delete</button>`]));
-  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads for this flat</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+  host.innerHTML=cpaMediaListWrap('Existing uploads for this flat',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
 }
 window.cpaDeletePhoto=async function(table,id,refreshFn){
   if(!await confirmDialog('Remove this photo/video from the customer portal?',{okLabel:'Delete'}))return;
