@@ -12896,13 +12896,16 @@ window.cpaOnFlProjectChange=async function(){
 // right photo actually made it in, right after uploading - videos get a play-icon tile since
 // signing a video URL just to build a thumbnail isn't worth the round trip, only opened on click.
 async function cpaMediaThumb(p){
+  // Every branch below needs exactly one style="" attribute - a second style attribute on the
+  // same tag is silently dropped by the browser (first one wins), which is why the sizing here
+  // used to be ignored entirely and thumbnails rendered at their native full size.
   const isVideo=(p.file_type||'').indexOf('video')===0;
-  const openAttr=`onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')" style="cursor:pointer"`;
-  if(isVideo)return `<div ${openAttr} title="Open video" style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b"><i class="fa-solid fa-circle-play"></i></div>`;
+  const onclickAttr=`onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"`;
+  if(isVideo)return `<div ${onclickAttr} title="Open video" style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b;cursor:pointer"><i class="fa-solid fa-circle-play"></i></div>`;
   const url=await s3SignedUrl(p.storage_path);
   return url
-    ?`<img src="${url}" alt="" ${openAttr} title="Open full size" style="width:52px;height:52px;object-fit:cover;border-radius:6px;display:block">`
-    :`<div ${openAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid fa-image"></i></div>`;
+    ?`<img src="${url}" alt="" ${onclickAttr} title="Open full size" style="width:52px;height:52px;object-fit:cover;border-radius:6px;display:block;cursor:pointer">`
+    :`<div ${onclickAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8;cursor:pointer"><i class="fa-solid fa-image"></i></div>`;
 }
 async function cpaMediaRow(p){return [await cpaMediaThumb(p),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
 async function cpaRenderProjectPhotoList(){
