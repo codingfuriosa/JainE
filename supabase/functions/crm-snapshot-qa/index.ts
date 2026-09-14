@@ -924,6 +924,19 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
     return failQueue("the QA reply was missing one of the five required assessments");
   }
 
+  /* status_assessment.ai_assessed_status MUST be one of these four words - nothing else is a status.
+     gpt-4.1 has been observed writing a mismatch_type value here instead ("qualified_should_not_have_
+     been_qualified") on calls where the CRM says Qualified and its own verdict disagrees - the two
+     fields sit right next to each other in the prompt and share vocabulary, and the model occasionally
+     answers one with the other's word. Caught here, before it can reach deriveStatusMatch or the
+     dashboard: a wrong ENUM VALUE corrupts every Qualified/Lost/In-Follow-Up count downstream, which
+     is a worse failure than the retry this triggers. */
+  const AI_STATUS_VALUES = new Set(["Lost", "Qualified", "In Follow Up", "Unclear"]);
+  const rawAiStatus = String(sa.ai_assessed_status ?? "").trim();
+  if (!AI_STATUS_VALUES.has(rawAiStatus)) {
+    return failQueue(`the QA reply's ai_assessed_status was not one of the four allowed values (got ${JSON.stringify(sa.ai_assessed_status ?? null)})`);
+  }
+
   const derived = deriveStatusMatch(ctx.crm_status, String(sa.ai_assessed_status || ""), priorQual);
   /* A pitch that never happened has no score. Storing 0 would drag the day's average down as though
      the agent had pitched badly. */
