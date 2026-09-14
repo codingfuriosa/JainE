@@ -8436,6 +8436,11 @@ const USB_COL4={
   'hr':                   {header:'Position',     keys:['position','month']},
   'recruitment':          {header:'Position',     keys:['position','department']},
   'procurement':          {header:'Vendor',       keys:['vendor']},
+  'procurement.quote_comp':{header:'Category',    keys:['category','replacements']},
+  'postsales':            {header:'Status',       keys:['status','replacements']},
+  'competitors':          {header:'Competitor · Range', keys:['competitor','range','media']},
+  'organic':              {header:'Period · Network',   keys:['period','network','kind']},
+  'helpdesk':             {header:'Topic',        keys:['category','subject']},
   /* Screens you only look at. There is no record and nobody it went to, so the honest last column
      is how much was in front of the person - which is recorded once the screen has drawn. Three
      Accountability tabs are listed individually for the same reason: the Scoreboard, the Archive
@@ -18479,6 +18484,48 @@ function usbNetMeta(){
     return {range:(l&&l[1])||String(r)};
   }catch(e){ return null; }
 }
+/* Post Sales · ADHOC — how the replacement job is doing. The document's own name goes in Details;
+   what the column adds is the thing you would ask next, which is whether it worked and how many
+   replacements it covers. Both are on the row already. */
+function usbPsaMeta(id){
+  try{
+    const r=(typeof PSA!=='undefined'&&PSA&&PSA.queue)?PSA.queue.find(function(x){return x.id===id;}):null;
+    if(!r) return null;
+    return {title:r.name||undefined, status:r.status||undefined,
+            replacements:(r.count!=null?r.count+' replacement'+(r.count===1?'':'s'):undefined)};
+  }catch(e){ return null; }
+}
+// Competitor Ads — whose ads, and over what window. Read from the filter bar, which is what every
+// action on that screen is relative to.
+function usbCompMeta(){
+  try{
+    const f=(typeof COMP_F!=='undefined')?COMP_F:null; if(!f) return null;
+    const out={};
+    if(f.wl && f.wl!=='all') out.competitor=String(f.wl);
+    if(f.range==='custom' && (f.from||f.to)) out.range=(f.from||'any')+' → '+(f.to||'today');
+    else if(f.range) out.range=String(f.range).replace(/_/g,' ');
+    if(f.media && f.media!=='all') out.media=String(f.media);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+// Posts & Reels — which window, and which network's content is being looked at.
+function usbOrgMeta(){
+  try{
+    const p=(typeof ORG_PERIOD!=='undefined')?ORG_PERIOD:null;
+    const out={};
+    if(p==='custom' && typeof ORG_SINCE!=='undefined' && ORG_SINCE)
+      out.period=ORG_SINCE+' → '+((typeof ORG_UNTIL!=='undefined'&&ORG_UNTIL)||'today');
+    else if(p) out.period=String(p).replace(/_/g,' ');
+    if(typeof ORG_NET!=='undefined' && ORG_NET && ORG_NET!=='all') out.network=String(ORG_NET);
+    if(typeof ORG_KIND!=='undefined' && ORG_KIND && ORG_KIND!=='all') out.kind=String(ORG_KIND);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+// Procurement · Quote Comp — which category of document. It arrives as the click's own argument on
+// every one of these, which is why they are wired to read it rather than to a lookup.
+function usbProcCat(cat){
+  try{ return cat?{category:String(cat)}:null; }catch(e){ return null; }
+}
 // Procurement · Vendor Trends — which vendor
 function usbVendorMeta(id){
   try{
@@ -18733,33 +18780,33 @@ const USAGE_MAP={
   // netRangeChange logs itself - the same picker serves both Network tabs, and a fixed key
   // here credited every All-readings filter to Overview.
   // Post Sales
-  psaUploadStart:'postsales.adhoc.upload_document_for_adhoc_replacement',
-  psaRenameSave:'postsales.adhoc.rename_a_document',
-  psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
-  psaDownloadOne:'postsales.adhoc.download_a_document',
-  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip',
+  psaUploadStart:{key:'postsales.adhoc.upload_document_for_adhoc_replacement', meta:function(){ try{ var el=document.getElementById('psaFile'); var f=el&&el.files; return (f&&f.length)?{title:f[0].name, replacements:(f.length===1?'1 file':f.length+' files')}:null; }catch(e){ return null; } }},
+  psaRenameSave:{key:'postsales.adhoc.rename_a_document', meta:usbPsaMeta},
+  psaRemove:{key:'postsales.adhoc.remove_a_document', meta:usbPsaMeta}, psaPreview:{key:'postsales.adhoc.preview_a_document', meta:usbPsaMeta},
+  psaDownloadOne:{key:'postsales.adhoc.download_a_document', meta:usbPsaMeta},
+  psaDownloadAllZip:{key:'postsales.adhoc.download_all_documents_as_zip', meta:function(){ try{ var q=(typeof PSA!=='undefined'&&PSA&&PSA.queue)?PSA.queue.length:0; return q?{replacements:q+' document'+(q===1?'':'s')}:null; }catch(e){ return null; } }},
   // Procurement / Projects / Construction — previously untracked
-  procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
-  procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
+  procUploadSave:{key:'procurement.quote_comp.upload_document', meta:usbProcCat}, procEditSave:{key:'procurement.quote_comp.rename_replace_document', meta:function(id,cat){ return usbProcCat(cat); }},
+  procDeleteSel:{key:'procurement.quote_comp.delete_document_s', meta:usbProcCat}, procDownloadSel:{key:'procurement.quote_comp.download_document_s', meta:function(){ try{ var k=(typeof PROC!=='undefined'&&PROC)?PROC.sel.size:0; return {category:(typeof PROC!=='undefined'&&PROC&&PROC.tab)||undefined, replacements:k?k+' file'+(k===1?'':'s'):undefined}; }catch(e){ return null; } }},
   vtBuToggle:'procurement.vendor_trends.filter_by_business_unit',
   vtOpenVendor:{key:'procurement.vendor_trends.view_vendor_detail_spend_history', meta:usbVendorMeta},
   // Finance / Compliance / Documents / Video — previously untracked
   docPickCat:{key:'documents.department_library.browse_filter_by_category_folder', meta:usbDocScope},
   // Competitors / Organic / Scaling / Playbook — previously untracked
-  compShowOnly:'competitors.overview.drill_into_a_single_competitor',
-  compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
-  compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
+  compShowOnly:{key:'competitors.overview.drill_into_a_single_competitor', meta:usbCompMeta},
+  compSetFilter:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
+  compSetDate:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
   // compSave, compRunSync (compSyncFiltered/compRefreshMedia), compToggleActive, compRemove and
   // compOpenDetail are NOT mapped here on purpose - each has a real success/failure (or
   // found/not-found, or confirmed/cancelled) branch and logs directly, only once that branch is
   // actually known, same as misExportCauselist/taskSave above. compSearch is likewise unmapped -
   // see the oninput/usageQueueDebounced note further up.
-  orgSetPeriod:'organic.all_content.filter_by_date_range',
-  orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
-  orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
-  orgSetPageId:'organic.all_content.filter_by_network_content_type_or_page',
-  orgSetSort:'organic.all_content.sort_content_by_metric',
-  orgOpen:'organic.all_content.view_post_detail'
+  orgSetPeriod:{key:'organic.all_content.filter_by_date_range', meta:usbOrgMeta},
+  orgSetNet:{key:'organic.all_content.filter_by_network_content_type_or_page', meta:usbOrgMeta},
+  orgSetKind:{key:'organic.all_content.filter_by_network_content_type_or_page', meta:usbOrgMeta},
+  orgSetPageId:{key:'organic.all_content.filter_by_network_content_type_or_page', meta:usbOrgMeta},
+  orgSetSort:{key:'organic.all_content.sort_content_by_metric', meta:usbOrgMeta},
+  orgOpen:{key:'organic.all_content.view_post_detail', meta:usbOrgMeta}
   // orgApplyCustom is NOT mapped here on purpose - it has real validation (missing dates, From
   // after To) and logs directly, same reason as compSave above. orgSearch is likewise unmapped -
   // see the oninput/usageQueueDebounced note further up. Scaling Up and Playbook are both
