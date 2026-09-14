@@ -8422,8 +8422,40 @@ const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
    mistake this is meant to end. Accountability keeps 'Assigned to'; the rest follow as their
    capture lands. */
 const USB_COL4={
-  'tasks':      {header:'Assigned to', keys:['assignee']},
-  'inspection': {header:'Unit',        keys:['unit','category']}
+  'tasks':                {header:'Assigned to', keys:['assignee']},
+  'inspection':           {header:'Unit',        keys:['unit','category']},
+  // Legal is three different subjects under one roof, so it is keyed per tab rather than per module
+  'legal.mis':            {header:'Case · Court', keys:['case_no','court']},
+  'legal.actions':        {header:'Case · Court', keys:['case_no','court']},
+  'legal.advocates':      {header:'Court',        keys:['court','case_type']},
+  'legal.documents':      {header:'Folder',       keys:['folder','category','department']},
+  'documents':            {header:'Department',   keys:['department','folder']},
+  'transcription':        {header:'Lead · Project', keys:['lead','project','language']},
+  'network':              {header:'Range',        keys:['range']},
+  'campaigns':            {header:'Period · Source', keys:['period','source']},
+  'hr':                   {header:'Position',     keys:['position','month']},
+  'recruitment':          {header:'Position',     keys:['position','department']},
+  'procurement':          {header:'Vendor',       keys:['vendor']},
+  /* Screens you only look at. There is no record and nobody it went to, so the honest last column
+     is how much was in front of the person - which is recorded once the screen has drawn. Three
+     Accountability tabs are listed individually for the same reason: the Scoreboard, the Archive
+     and the Calendar are things you read, not things you hand to anybody, and "Assigned to" was
+     never going to say anything on them. The Tasks, Meetings and Workflow tabs keep it. */
+  'tasks.scoreboard':     {header:'On screen',    keys:['showing']},
+  'tasks.archive':        {header:'On screen',    keys:['showing']},
+  'tasks.calendar':       {header:'On screen',    keys:['showing']},
+  'dashboard':            {header:'On screen',    keys:['showing']},
+  'projects':             {header:'On screen',    keys:['showing']},
+  'video':                {header:'On screen',    keys:['showing']},
+  'crm':                  {header:'On screen',    keys:['showing']},
+  'scaling':              {header:'On screen',    keys:['showing']},
+  'gtd':                  {header:'On screen',    keys:['showing']},
+  'organic':              {header:'On screen',    keys:['showing']},
+  'compliance':           {header:'On screen',    keys:['showing']},
+  'maintenance':          {header:'On screen',    keys:['showing']},
+  'inventory':            {header:'On screen',    keys:['showing']},
+  'playbook':             {header:'On screen',    keys:['showing']},
+  'finance':              {header:'On screen',    keys:['showing']}
 };
 const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
 function usbCol4(featureKey){
@@ -18329,6 +18361,122 @@ window.trDownload=async function(id){
    The wrapper must be incapable of breaking the app it measures: the logging is inside its own
    try/catch, and the original function is called through unconditionally whatever happens. Events
    are queued and sent in batches, never one request per click. */
+/* ============ WHAT EACH MODULE'S ACTIONS ARE ABOUT ==========================================
+   The drill-down's last column used to be "Assigned to" everywhere, which only means something in
+   Accountability - a task is handed to somebody; a document is not. Everywhere else it was a column
+   of dashes taking the width that the one useful fact should have had, and which fact that is
+   depends on what the module does: an inspection happens to a flat, a document lives in a folder,
+   a call belongs to a lead, a requisition is for a position.
+
+   These helpers answer that question per module. Every one of them is defensive on purpose: they
+   read whatever list the screen already has in memory, and if the row is not there (a stale id, a
+   list not loaded yet, a global that does not exist on this page) they return null and the column
+   shows a dash rather than a wrong answer. Telemetry must never be the thing that breaks a click.
+
+   Note on the wrapper: it logs BEFORE the function it wraps runs, so anything read here must be the
+   state as it is at the moment of the click. That is why these take the id from the click's own
+   arguments rather than reading "what is currently open" - the latter would describe the record the
+   person just left. */
+function usbFrom(list, id, build){
+  try{
+    if(id==null) return null;
+    const r=(list||[]).find(function(x){ return String(x.id)===String(id); });
+    return r?build(r):null;
+  }catch(e){ return null; }
+}
+// Legal · MIS — which case, and where it is being heard
+function usbMisMeta(id){
+  return usbFrom(window._misRows, id, function(r){
+    return {title:r.cause_title||r.case_no||undefined, case_no:r.case_no||undefined, court:r.court||undefined};
+  });
+}
+// Legal · Advocates — which court they appear in
+function usbAdvMeta(id){
+  return usbFrom(window._advRows, id, function(r){
+    return {title:r.advocate_name||undefined, court:r.court||undefined, case_type:r.case_type||undefined};
+  });
+}
+/* Legal · Documents and Document Library — where the document sits. There is no in-memory list of
+   documents (they are fetched one at a time), so this reports the folder the screen is currently
+   showing, which is the folder the document being acted on is in. */
+function usbDocScope(){
+  try{
+    const d=(typeof DOC!=='undefined')?DOC:null; if(!d) return null;
+    const out={};
+    if(d.dept) out.department=String(d.dept);
+    if(d.cat)  out.folder=String(d.cat);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+// Transcription — the lead the call belongs to. Checks the deleted list and the open call too, so
+// restoring a call or acting from the detail screen still names it.
+function usbCallMeta(id){
+  const pick=function(r){
+    return {title:r.title||r.file_name||undefined, lead:r.customer_name||undefined, project:r.project||undefined};
+  };
+  try{
+    return usbFrom(TR_ROWS, id, pick) || usbFrom(TR_DELETED_ROWS, id, pick)
+        || (TR_DETAIL_ROW?pick(TR_DETAIL_ROW):null);
+  }catch(e){ return null; }
+}
+// Recruitment — the position or the thing being acted on
+function usbTestMeta(id){ return usbFrom((typeof RT_RECORDS!=='undefined')?RT_RECORDS:null, id,
+  function(r){ return {title:r.name||undefined}; }); }
+function usbJdMeta(id){ return usbFrom(window._recAllJDs, id,
+  function(r){ return {title:r.name||r.file_name||undefined}; }); }
+function usbMpMeta(id){ return usbFrom((typeof MP_RECORDS!=='undefined')?MP_RECORDS:null, id,
+  function(r){ return {title:r.job_title||undefined, position:r.job_title||undefined, department:r.department||undefined}; }); }
+function usbRefMeta(id){ return usbFrom((typeof REF_RECORDS!=='undefined')?REF_RECORDS:null, id,
+  function(r){ return {title:r.referred_name||undefined, position:r.position||undefined}; }); }
+// HR — the candidate, and the position they are for
+function usbTrkMeta(id){ return usbFrom(window._trRows, id,
+  function(r){ return {title:r.candidate_name||undefined, position:r.position||undefined}; }); }
+function usbResumeMeta(id){ return usbFrom((typeof RS_ROWS!=='undefined')?RS_ROWS:null, id,
+  function(r){ return {title:r.file_name||undefined, position:r.position||undefined}; }); }
+// HR · Monthly Update is keyed by the requisition behind the row, not by an id of its own.
+function usbMuMeta(manpowerId){
+  try{
+    const r=((typeof MU_ROWS!=='undefined'&&MU_ROWS)||[]).find(function(x){ return x.manpower_id===manpowerId; });
+    if(!r) return null;
+    return {title:r.position_title||undefined, position:r.position_title||undefined,
+            month:(typeof MU_CUR!=='undefined'&&MU_CUR)?muMonthLabel(MU_CUR):undefined};
+  }catch(e){ return null; }
+}
+/* Campaign Analytics — every number on this screen is "for this period, from this source", so that
+   pair is the context every action here needs. Read from the state rather than the click, because
+   most of these buttons change one half of it and the other half still matters. */
+function usbCmpMeta(){
+  try{
+    const per=(typeof CMP_PERIOD!=='undefined')?CMP_PERIOD:null;
+    const label=(per==='custom' && typeof CMP_SINCE!=='undefined' && CMP_SINCE)
+      ? (CMP_SINCE+' → '+((typeof CMP_UNTIL!=='undefined'&&CMP_UNTIL)||'today'))
+      : (per?String(per).replace(/_/g,' '):null);
+    const out={};
+    if(label) out.period=label;
+    if(typeof CMP_SOURCE!=='undefined'&&CMP_SOURCE) out.source=String(CMP_SOURCE);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+/* Internet Speed — the window being looked at. The speed reading itself was the first idea, but it
+   is not in hand at the moment of the click (the refresh that produces it has not run yet, and the
+   chart's numbers live inside the render), so reporting it here would mean reporting the PREVIOUS
+   reading against this action - worse than useless. The range is what every feature on this screen
+   genuinely has, and it is what tells two otherwise identical rows apart. */
+function usbNetMeta(){
+  try{
+    const r=(typeof NET_RANGE!=='undefined')?NET_RANGE:null;
+    if(!r) return null;
+    const l=((typeof NET_RANGES!=='undefined'&&NET_RANGES)||[]).find(function(x){ return x[0]===r; });
+    return {range:(l&&l[1])||String(r)};
+  }catch(e){ return null; }
+}
+// Procurement · Vendor Trends — which vendor
+function usbVendorMeta(id){
+  try{
+    const v=(typeof VT_CACHE!=='undefined'&&VT_CACHE&&VT_CACHE.vendors)?VT_CACHE.vendors[id]:null;
+    return v?{title:v.name||undefined, vendor:v.name||undefined}:null;
+  }catch(e){ return null; }
+}
 const USAGE_MAP={
   // Accountability — Tasks
   // taskSave itself is NOT mapped here (see the direct usageQueue call inside it) - the title it
@@ -18427,46 +18575,51 @@ const USAGE_MAP={
   trApplyDateRange:{key:"transcription.all_calls.filter_calls_by_outcome_or_date",
                meta:function(){ var a=$("trDateFrom"),b=$("trDateTo");
                  return (a&&a.value)||(b&&b.value) ? {from:(a&&a.value)||"any", to:(b&&b.value)||"any"} : null; }},
-  trPinSelected:'transcription.all_calls.pin_unpin_calls',
-  trAssignToFolder:'transcription.all_calls.add_calls_to_a_folder',
-  trDownloadReport:'transcription.all_calls.download_call_report_or_copy_link',
+  trPinSelected:{key:'transcription.all_calls.pin_unpin_calls', meta:usbCallMeta},
+  trAssignToFolder:{key:'transcription.all_calls.add_calls_to_a_folder', meta:usbCallMeta},
+  trDownloadReport:{key:'transcription.all_calls.download_call_report_or_copy_link', meta:usbCallMeta},
   /* Every recording download link routes its click through trRecClick (see trRecLink). One handler
      serves several views that are different features, so the key travels in the call site's own
      `feat` and this resolver just passes it through - a link from a view that was never counted
      passes '' and, since the wrapper skips a falsy key, logs nothing. */
   trRecClick:function(ev,feat){return feat||'';},
-  trRetry:'transcription.all_calls.retry_failed_transcription', trDelete:'transcription.all_calls.delete_a_call',
+  trRetry:{key:'transcription.all_calls.retry_failed_transcription', meta:usbCallMeta}, trDelete:{key:'transcription.all_calls.delete_a_call', meta:usbCallMeta},
   trFolderRenameSave:'transcription.folders.rename_delete_a_folder',
   trFolderDeleteConfirm:'transcription.folders.rename_delete_a_folder',
   trRemoveFromFolder:'transcription.folders.add_or_remove_calls_from_a_folder',
   trAddSelectedToTarget:'transcription.folders.add_or_remove_calls_from_a_folder',
   trDownloadFolder:'transcription.folders.download_all_calls_in_a_folder',
-  trRestore:'transcription.deleted.restore_a_deleted_call_single_or_all',
+  trRestore:{key:'transcription.deleted.restore_a_deleted_call_single_or_all', meta:usbCallMeta},
   trRestoreAll:'transcription.deleted.restore_a_deleted_call_single_or_all',
   trShowHistory:'transcription.deleted.view_delete_restore_activity_history',
-  trSetLang:'transcription.call_detail.switch_transcript_language',
-  trCmAdd:'transcription.call_detail.add_delete_a_remark', trCmDelete:'transcription.call_detail.add_delete_a_remark',
-  trDownload:'transcription.call_detail.play_download_recording',
+  // Which language, on which call - the language is the whole point of the click, and the call is
+  // what makes the row identifiable among everybody else's language switches.
+  trSetLang:{key:'transcription.call_detail.switch_transcript_language',
+             meta:function(lang){ const m=usbCallMeta()||{};
+               if(lang) m.language=String(lang);
+               return Object.keys(m).length?m:null; }},
+  trCmAdd:{key:'transcription.call_detail.add_delete_a_remark', meta:usbCallMeta}, trCmDelete:{key:'transcription.call_detail.add_delete_a_remark', meta:usbCallMeta},
+  trDownload:{key:'transcription.call_detail.play_download_recording', meta:usbCallMeta},
   // Legal — Documents
-  docNewFolderSave:'legal.documents.add_folder_sub_category', docUploadSave:'legal.documents.upload_document',
+  docNewFolderSave:{key:'legal.documents.add_folder_sub_category', meta:usbDocScope}, docUploadSave:{key:'legal.documents.upload_document', meta:usbDocScope},
   // docPreview / docDownload are NOT mapped here: the document is fetched inside the function, so
   // only the function itself can say WHICH document was opened. They log directly at their source.
-  docRenameSave:'legal.documents.rename_document',
-  docMoveSave:'legal.documents.move_document_to_another_category',
-  docMoveSaveLegal:'legal.documents.move_document_to_another_category',
-  docReplaceSave:'legal.documents.replace_document_version', docPin:'legal.documents.pin_unpin_document',
-  docDeleteConfirm:'legal.documents.delete_document_s',
-  docBulkDeleteConfirm:'legal.documents.bulk_download_delete',
+  docRenameSave:{key:'legal.documents.rename_document', meta:usbDocScope},
+  docMoveSave:{key:'legal.documents.move_document_to_another_category', meta:usbDocScope},
+  docMoveSaveLegal:{key:'legal.documents.move_document_to_another_category', meta:usbDocScope},
+  docReplaceSave:{key:'legal.documents.replace_document_version', meta:usbDocScope}, docPin:{key:'legal.documents.pin_unpin_document', meta:usbDocScope},
+  docDeleteConfirm:{key:'legal.documents.delete_document_s', meta:usbDocScope},
+  docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', meta:usbDocScope},
   // Legal — MIS / Actions / Advocates
-  misSave:'legal.mis.add_case', misUpdate:'legal.mis.edit_case', misDeleteSel:'legal.mis.delete_case_s',
+  misSave:'legal.mis.add_case', misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
   misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
                meta:function(v){ return v?{range:String(v)}:null; }},
   misRangePick:{key:"legal.mis.filter_cases_by_hearing_date_range",
                meta:function(v){ return v?{range:String(v)}:null; }},
-  misActionExecute:'legal.mis.record_execute_a_case_action',
-  misActionSave:'legal.mis.record_execute_a_case_action',
-  misSwipeToggle:'legal.mis.mark_case_complete_reopen',
-  misDocsPick:'legal.mis.upload_documents_for_a_case',
+  misActionExecute:{key:'legal.mis.record_execute_a_case_action', meta:usbMisMeta},
+  misActionSave:{key:'legal.mis.record_execute_a_case_action', meta:usbMisMeta},
+  misSwipeToggle:{key:'legal.mis.mark_case_complete_reopen', meta:usbMisMeta},
+  misDocsPick:{key:'legal.mis.upload_documents_for_a_case', meta:usbMisMeta},
   // misExportCauselist / misViewCauselist are NOT mapped here on purpose - they log directly,
   // after misBuildCauselist actually produces a sheet, so a click warned off for no date
   // range or no matching hearings doesn't count as a use the way the generic wrapper would.
@@ -18477,7 +18630,7 @@ const USAGE_MAP={
   // milliseconds apart. Each logs directly via usageQueueDebounced, once typing actually settles.
   // advSave logs itself below - the same button adds AND edits, so a fixed key here counted
   // every edit as an advocate added.
-  advDelete:'legal.advocates.remove_advocate',
+  advDelete:{key:'legal.advocates.remove_advocate', meta:usbAdvMeta},
   // Human Resources
   // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
@@ -18488,22 +18641,22 @@ const USAGE_MAP={
   // muDeleteSel logs directly (see below) after the delete actually succeeds, using the catalog's
   // real key 'delete_rows_or_whole_month' - the string that was here, 'remove_position_from_month',
   // does not exist in erp_feature_catalog and so could never be attributed to anything.
-  muApprove:'hr.monthly_update.approve_reject_requisition',
-  muSetHiring:'hr.monthly_update.close_reopen_hiring',
+  muApprove:{key:'hr.monthly_update.approve_reject_requisition', meta:usbMuMeta},
+  muSetHiring:{key:'hr.monthly_update.close_reopen_hiring', meta:usbMuMeta},
   muFilter:'hr.monthly_update.search_filter_positions',
-  trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
-  trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
+  trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:{key:'hr.interview_tracker.edit_interview_entry', meta:usbTrkMeta},
+  trackerDelete:{key:'hr.interview_tracker.delete_interview_entry_ies', meta:usbTrkMeta},
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
   // trackerFilter is NOT mapped here - it logs directly via usageQueueDebounced.
-  trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
-  rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
-  rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
+  trResumeOpen:{key:'hr.interview_tracker.preview_download_candidate_cv', meta:usbTrkMeta},
+  rsUploadSave:'hr.resumes.upload_resume', rsPreview:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta},
+  rsDownload:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta}, rsDelete:{key:'hr.resumes.delete_resume_s', meta:usbResumeMeta},
   rsBulkDelete:'hr.resumes.delete_resume_s',
   // the AI resume search is gone - a plain name/file filter replaced it
   rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
-  rtSave:'recruitment.tests.add_test', rtUpdate:'recruitment.tests.rename_test',
+  rtSave:'recruitment.tests.add_test', rtUpdate:{key:'recruitment.tests.rename_test', meta:usbTestMeta},
   rtDelete:'recruitment.tests.delete_test_s',
   rtPreview:{key:"recruitment.tests.preview_test_responses_scores",
                meta:function(id){ var r=(RT_RECORDS||[]).find(function(x){return x.id===id;});
@@ -18516,13 +18669,13 @@ const USAGE_MAP={
                meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
                  return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
   recDeleteSel:'recruitment.descriptions.delete_job_description_s',
-  mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:'recruitment.manpower_form.edit_requisition',
+  mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:{key:'recruitment.manpower_form.edit_requisition', meta:usbMpMeta},
   mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
-  mpDeleteOne:'recruitment.manpower_form.delete_requisition_s',
-  mpAiGenerate:'recruitment.manpower_form.generate_jd_post_text_creative',
+  mpDeleteOne:{key:'recruitment.manpower_form.delete_requisition_s', meta:usbMpMeta},
+  mpAiGenerate:{key:'recruitment.manpower_form.generate_jd_post_text_creative', meta:usbMpMeta},
   mpAiCopyPost:'recruitment.manpower_form.copy_platform_post_text',
-  refSave:'recruitment.referrals.refer_someone', refDecide:'recruitment.referrals.approve_reject_referral',
-  refDelete:'recruitment.referrals.delete_referral',
+  refSave:'recruitment.referrals.refer_someone', refDecide:{key:'recruitment.referrals.approve_reject_referral', meta:usbRefMeta},
+  refDelete:{key:'recruitment.referrals.delete_referral', meta:usbRefMeta},
   /* Inspection. Every one of these carries the unit it happened to - the flat, floor, tower or
      project - because that is the fact an inspection row is useless without. New Inspection reads
      the form as it stands, Form Responses reads the submission that is open, and the Console
@@ -18544,19 +18697,19 @@ const USAGE_MAP={
   // inspOpenPhoto only OPENS a photo for viewing - it was counted as adding one. The real
   // add happens on the submit, logged at its own source.
   // Campaign Analytics
-  cmpSetSource:'campaigns.overview.switch_data_source_meta_google_both',
-  cmpSetPeriod:'campaigns.overview.select_or_customize_date_range',
-  cmpSetCustom:'campaigns.overview.select_or_customize_date_range',
+  cmpSetSource:{key:'campaigns.overview.switch_data_source_meta_google_both', meta:usbCmpMeta},
+  cmpSetPeriod:{key:'campaigns.overview.select_or_customize_date_range', meta:usbCmpMeta},
+  cmpSetCustom:{key:'campaigns.overview.select_or_customize_date_range', meta:usbCmpMeta},
   // cmpShowProject opens the same project drill-down modal from two places that are two distinct
   // catalog features - the Overview tab's chart bars and the By Project tab's table rows. The By
   // Project row's onclick now passes 'by_project' as a second argument so this resolver can tell
   // them apart; the Overview chart click passes nothing, which resolves to the Overview key.
   cmpShowProject:function(accId,srcTab){return srcTab==='by_project'?'campaigns.by_project.drill_into_a_project_s_campaigns':'campaigns.overview.drill_into_a_project_s_campaigns';},
-  cmpSetStatus:'campaigns.campaigns.filter_campaigns_by_project_status',
-  cmpSetCampProject:'campaigns.campaigns.filter_campaigns_by_project_status',
-  cmpSetAdProject:'campaigns.ads.filter_ads_by_project',
+  cmpSetStatus:{key:'campaigns.campaigns.filter_campaigns_by_project_status', meta:usbCmpMeta},
+  cmpSetCampProject:{key:'campaigns.campaigns.filter_campaigns_by_project_status', meta:usbCmpMeta},
+  cmpSetAdProject:{key:'campaigns.ads.filter_ads_by_project', meta:usbCmpMeta},
   // Internet Speed
-  netRefresh:'network.overview.refresh_speed_test_now',
+  netRefresh:{key:'network.overview.refresh_speed_test_now', meta:usbNetMeta},
   // netRangeChange logs itself - the same picker serves both Network tabs, and a fixed key
   // here credited every All-readings filter to Overview.
   // Post Sales
@@ -18569,9 +18722,9 @@ const USAGE_MAP={
   procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
   procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
   vtBuToggle:'procurement.vendor_trends.filter_by_business_unit',
-  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history',
+  vtOpenVendor:{key:'procurement.vendor_trends.view_vendor_detail_spend_history', meta:usbVendorMeta},
   // Finance / Compliance / Documents / Video — previously untracked
-  docPickCat:'documents.department_library.browse_filter_by_category_folder',
+  docPickCat:{key:'documents.department_library.browse_filter_by_category_folder', meta:usbDocScope},
   // Competitors / Organic / Scaling / Playbook — previously untracked
   compShowOnly:'competitors.overview.drill_into_a_single_competitor',
   compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
@@ -18718,12 +18871,17 @@ function usageViewTick(){
     const now=Date.now();
     if(dedupeId===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
     USAGE_LAST_VIEW=dedupeId; USAGE_LAST_VIEW_AT=now;
+    /* Opening a screen has no object behind it, but on some modules it does have a CONTEXT worth
+       recording - which date range the Internet Speed chart is on, which period and source the
+       campaign numbers are for, which department's library is open. Without it every view of those
+       screens reads identically, and the last column has nothing to show. */
+    const vm=(USAGE_VIEW_META[PAGE]&&USAGE_VIEW_META[PAGE]())||null;
     const drawn=[];
     (Array.isArray(key)?key:[key]).forEach(function(k){
       // cleared first, so a key usageQueue refuses (no feature, not signed in) cannot make the
       // previous event get described a second time
       USAGE_LAST_QUEUED=null;
-      usageQueue(k,'view');
+      usageQueue(k,'view',vm?Object.assign({},vm):null);
       if(USAGE_LAST_QUEUED) drawn.push(USAGE_LAST_QUEUED);
     });
     // 700ms is after the render this navigation triggered and long before the batch is sent.
@@ -18767,10 +18925,23 @@ function usageDescribeScreen(evs){
     const n=v.querySelectorAll('table tbody tr').length;
     if(!n) return;
     evs.forEach(function(ev){
-      if(USAGE_Q.indexOf(ev)!==-1 && !ev.meta) ev.meta={showing:n+' row'+(n===1?'':'s')};
+      // merged into whatever context the navigation already recorded, rather than replacing it:
+      // "Last 3 days" and "50 rows" are both worth having, and neither is the other.
+      if(USAGE_Q.indexOf(ev)!==-1){
+        ev.meta=Object.assign({}, ev.meta||{}, {showing:n+' row'+(n===1?'':'s')});
+      }
     });
   }catch(e){}
 }
+/* Screen-level context per module, for "opened a screen" events only. Deliberately short: a module
+   belongs here when the screen genuinely has a state worth recording, not just to fill the column.
+   Transcription is absent on purpose - viewing the call list is not about any one call, and
+   attaching the last-opened one would be a wrong answer dressed as a right one. */
+const USAGE_VIEW_META={
+  network:    function(){ return usbNetMeta(); },
+  campaigns:  function(){ return usbCmpMeta(); },
+  documents:  function(){ return usbDocScope(); }
+};
 function usagePendingClick(){
   return (USAGE_LAST_EV && (Date.now()-USAGE_LAST_AT)<1500) ? USAGE_LAST_EV : null;
 }
