@@ -7111,6 +7111,65 @@ let INSP_RESP_FILTER={q:'',work:'All'};
 let INSP_LOG_FILTER={q:'',block:'All',cat:'All',status:'All',section:'All'};
 async function inspFetch(){ const {data,error}=await sb.schema('acc').from('inspection').select('*').order('ts',{ascending:false}).limit(20000); if(error)throw error; return data||[]; }
 function inspLoc(r){ return (r.project?esc(r.project)+' · ':'')+'B'+esc(r.block||'?')+(r.floor?' · '+esc(r.floor):'')+' · '+esc(r.flat||'?'); }
+/* ---- What an inspection action was ABOUT, for the Usability report ---------------------------
+   Every action on this screen happens to one specific place - a flat, a floor, a tower, a project -
+   and the report had no way of saying which: 137 inspection events, all of them reading "—". The
+   unit is the one fact that makes an inspection row mean anything ("marked 12 items on 703" rather
+   than "marked 12 items"), and it is sitting right there in the form the whole time.
+   Plain text, not the escaped HTML inspLoc builds, because this goes into a JSON field and is
+   escaped again when the report draws it. Empty parts are dropped rather than printed as "B?" -
+   a Project-level inspection genuinely has no block or flat, and inventing a "?" for it reads as
+   missing data rather than as "this level does not have one". */
+function inspUnit(o){
+  if(!o) return null;
+  const parts=[];
+  if(o.project) parts.push(String(o.project).trim());
+  if(o.block)   parts.push('Block '+String(o.block).trim());
+  if(o.floor)   parts.push(String(o.floor).trim());
+  if(o.flat)    parts.push(String(o.flat).trim());
+  if(o.area_detail) parts.push(String(o.area_detail).trim());
+  return parts.length?parts.join(' · '):null;
+}
+// The New Inspection form as it stands right now. Read straight off the fields, so it is correct
+// at the moment of the click rather than whatever was saved last.
+function inspFormUnit(){
+  try{
+    const raw=($('inLevel')&&$('inLevel').value)||'';
+    const u=inspUnit({project:$('inProject')&&$('inProject').value,
+                      block:$('inBlock')&&$('inBlock').value,
+                      floor:$('inFloor')&&$('inFloor').value,
+                      flat:$('inFlat')&&$('inFlat').value,
+                      area_detail:raw.split('::')[1]||''});
+    const cat=($('inCat')&&$('inCat').value)||'';
+    if(!u && !cat) return null;
+    return {unit:u||undefined, category:cat||undefined};
+  }catch(e){ return null; }
+}
+/* The submission on the Form Responses tab. An index can be passed in because the wrapper logs
+   BEFORE the function it wraps runs - inspOpenSub(i) is the one that SETS INSP_DRILL, so reading
+   the global there would describe the submission the person just left, not the one they opened.
+   Everything else acts on whatever is already open, and passes nothing. */
+function inspSubUnit(i){
+  try{
+    const idx=(typeof i==='number')?i:(INSP_DRILL&&INSP_DRILL.i);
+    const r=(INSP_SUBS||[])[idx];
+    if(!r) return null;
+    const u=inspUnit(r);
+    if(!u && !r.work_category) return null;
+    return {unit:u||undefined, category:r.work_category||undefined};
+  }catch(e){ return null; }
+}
+// What the Console is narrowed to. 'All' is the absence of a filter, so it is left out rather than
+// printed - "Block All" says nothing.
+function inspScopeMeta(){
+  try{
+    const s=INSP_SCOPE||{}, keep=function(v){ return v && v!=='All' ? String(v) : null; };
+    const u=inspUnit({project:keep(s.project), block:keep(s.block), floor:keep(s.floor), flat:keep(s.flat)});
+    const w=keep(s.work);
+    if(!u && !w) return {unit:'All projects'};
+    return {unit:u||'All projects', category:w||undefined};
+  }catch(e){ return null; }
+}
 function qcStat(rows){ let ok=0,no=0,na=0; rows.forEach(r=>{const u=(r.status||'').trim().toUpperCase(); if(u==='OK')ok++; else if(/NOT\s*OK/.test(u)){no++;} else if(u==='NA'||u==='N/A')na++;}); const rated=ok+no; const checks=ok+no+na; return {checks,ok,no,na,open:no,rated,pass:rated?Math.round(ok/rated*100):0}; }
 function statusBadge(s){const u=(s||'').toUpperCase(); if(u==='OK')return '<span class="tag t-green">OK</span>'; if(/NOT\s*OK/.test(u))return '<span class="tag t-red">NOT OK</span>'; if(u==='NA'||u==='N/A')return '<span class="tag t-gray">NA</span>'; return esc(s);}
 function passbar(p){const col=p>=80?'#16855a':p>=50?'#d98a00':'#c83232';return '<div style="display:flex;align-items:center;gap:7px"><div class="progress" style="max-width:84px;flex:1"><span style="width:'+p+'%;background:'+col+'"></span></div><span style="font-size:11.5px;color:var(--slate)">'+p+'%</span></div>';}
@@ -7287,9 +7346,9 @@ window.inspUpdateSub=async function(){
   // remark" are three distinct catalog features one Save can do at once, and only counting them
   // when the value actually changed keeps an untouched pre-filled field from over-counting.
   if(photoFile || (photo && photo!==origPhoto)){ try{ usageQueue('inspection.responses.add_replace_defect_photo','update',
-    {title:(photoFile?photoFile.name:photo)}); }catch(_e){} }
+    Object.assign({title:(photoFile?photoFile.name:photo)}, inspSubUnit()||{})); }catch(_e){} }
   if((sec&&sec!==origSec) || (overall&&overall!==origOverall)){ try{ usageQueue('inspection.responses.add_section_overall_remarks','update',
-    {title:(sec||overall).slice(0,80)}); }catch(_e){} }
+    Object.assign({title:(sec||overall).slice(0,80)}, inspSubUnit()||{})); }catch(_e){} }
   INSP_ROWS=null; INSP_DRILL=null; toast('Response updated','ok'); renderPage();
 };
 function inspLogRow(r){ return '<tr><td>'+esc(fmtDate(r.ts))+'</td><td>'+esc(r.inspector)+'</td><td>'+inspLoc(r)+'</td><td>'+esc(r.work_category)+(r.section?'<div style="font-size:11px;color:var(--slate)">'+esc(r.section)+'</div>':'')+'</td><td><b>'+esc(r.item_id)+'</b></td><td style="max-width:260px;color:#475569">'+esc(r.inspection_check)+'</td><td>'+statusBadge(r.status)+'</td><td style="color:var(--slate);max-width:200px">'+esc(r.remarks)+'</td></tr>'; }
@@ -7520,12 +7579,18 @@ window.inspSave=async function(){
   const {error}=await sb.schema('acc').from('inspection').insert(rows);
   if(error){toast(error.message,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Submit';} return;}
   /* After the insert, so a photo that uploaded but whose inspection then failed is not counted. */
+  /* The unit is built from the values this submit actually used rather than re-read from the form,
+     because navTo below clears the screen - by the time a form-reading helper ran, the fields it
+     wanted would already be gone. */
+  const submittedUnit=inspUnit({project,block,floor,flat,area_detail:areaDetail});
   if(photo){ try{ usageQueue('inspection.new_inspection.upload_or_paste_defect_photo','create',
-    {title:(photoFile?photoFile.name:photo), source:(photoFile?'upload':'link')}, project||undefined); }catch(_e){} }
+    {title:(photoFile?photoFile.name:photo), source:(photoFile?'upload':'link'),
+     unit:submittedUnit||undefined, category:cat||undefined}, project||undefined); }catch(_e){} }
   // Same reasoning: a section/overall remark is optional free text with no button of its own -
   // only counts as used when the inspector actually typed one, and only once the rows exist.
   if(sec||overall){ try{ usageQueue('inspection.new_inspection.add_section_overall_remarks','create',
-    {title:(sec||overall).slice(0,80)}, project||undefined); }catch(_e){} }
+    {title:(sec||overall).slice(0,80),
+     unit:submittedUnit||undefined, category:cat||undefined}, project||undefined); }catch(_e){} }
   INSP_ROWS=null; INSP_FORM_STATE=null; toast(rows.length+' checks submitted','ok'); navTo('inspection');
 };
 /* ---- set/change password so Google users can also use email+password ---- */
@@ -8309,15 +8374,18 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   // "Create task" actually wants next to the task's name is WHO it went to, which the event now
   // captures as meta.assignee. Read from meta rather than the project column, and left out of
   // Details so it appears once, in its own column.
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
+  /* Every row here is the same feature, so the last column can be named for exactly what that
+     feature's work is about - "Unit" on an inspection, "Assigned to" on a task. */
+  const col4=usbCol4(featureKey);
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>'+esc(col4.header)+'</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
          printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
          data. The clock is the only thing that tells two real actions apart here. */
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      const who=usbCol4Value(e.meta, col4.keys)||'—';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col4.keys)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8340,6 +8408,37 @@ function usbMetaLabel(k){
 // 'assignee' is not internal - it is shown, but in its own "Assigned to" column beside Details
 // rather than repeated inside it.
 const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
+/* ---- The drill-down's last column ------------------------------------------------------------
+   "Assigned to" only means anything where something is handed to somebody, which is Accountability
+   and nowhere else. Everywhere else it was a column of dashes taking up the width that the one
+   fact worth knowing should have had - and which fact that is depends entirely on what the module
+   does. An inspection happens to a flat; a document lives in a folder; a call belongs to a lead.
+   So the column is chosen per module and tab, and named for what it holds.
+   Keyed by module first, and by 'module.tab' where one module covers genuinely different things
+   (Legal's Documents, MIS and Advocates are three different subjects under one roof). The most
+   specific match wins.
+   A module is only listed here once its features actually capture the field - adding the column
+   before the capture would just move the blank from one column to another, which is the whole
+   mistake this is meant to end. Accountability keeps 'Assigned to'; the rest follow as their
+   capture lands. */
+const USB_COL4={
+  'tasks':      {header:'Assigned to', keys:['assignee']},
+  'inspection': {header:'Unit',        keys:['unit','category']}
+};
+const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
+function usbCol4(featureKey){
+  const p=String(featureKey||'').split('.');
+  return USB_COL4[p[0]+'.'+p[1]] || USB_COL4[p[0]] || USB_COL4_DEFAULT;
+}
+// Whatever of the chosen keys this particular event actually carries, in the order listed.
+function usbCol4Value(meta, keys){
+  if(!meta || typeof meta!=='object') return '';
+  const out=[];
+  keys.forEach(function(k){
+    if(meta[k]!=null && String(meta[k]).trim()!=='') out.push(String(meta[k]).trim());
+  });
+  return out.join(' · ');
+}
 /* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
    and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
    a dump of fields rather than as the thing that happened. These keys are the names, so they are
@@ -8347,7 +8446,9 @@ const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
    (#93 New Bill Recording), then which step. Everything a feature captured beyond the name - a
    due date, a search query, a route - still carries its label, because those DO need saying. */
 const USB_META_NAME_ORDER=['workflow','instance','step','title','query'];
-function usbMetaHtml(meta){
+// extraSkip is whatever the last column is already showing for this row - printed once, in its own
+// column, rather than twice on the same line.
+function usbMetaHtml(meta, extraSkip){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
   const has=function(k){ return meta[k]!=null && String(meta[k]).trim()!==''; };
   const named=[];
@@ -8360,7 +8461,7 @@ function usbMetaHtml(meta){
   });
   // An instance with a number but no title still deserves its number shown.
   if(!has('instance') && has('ref_no')) named.push('#'+esc(String(meta.ref_no)));
-  const skip=USB_META_INTERNAL_KEYS.concat(USB_META_NAME_ORDER, ['ref_no']);
+  const skip=USB_META_INTERNAL_KEYS.concat(USB_META_NAME_ORDER, ['ref_no'], extraSkip||[]);
   const rest=Object.keys(meta).filter(function(k){ return skip.indexOf(k)===-1 && has(k); })
     .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
   const parts=named.concat(rest);
@@ -8392,18 +8493,19 @@ window.usbOpenUserActivity=async function(){
   const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
-  // Assigned to is a column here too, for the same reason as on the per-feature drill-down: the
-  // person an action went to is left out of Details deliberately, so without a column of its own
-  // it would simply not appear anywhere in this list.
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
+  /* Every row here is a DIFFERENT feature, so unlike the per-feature drill-down this column cannot
+     be named for one subject. It shows whichever of those subjects the row happens to carry - the
+     person a task went to, the flat an inspection was on - under one heading that covers both. */
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th><th>On / to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
          printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
          data. The clock is the only thing that tells two real actions apart here. */
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      const col4=usbCol4(e.feature_key);
+      const who=usbCol4Value(e.meta, col4.keys)||'—';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col4.keys)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -18421,16 +18523,24 @@ const USAGE_MAP={
   mpAiCopyPost:'recruitment.manpower_form.copy_platform_post_text',
   refSave:'recruitment.referrals.refer_someone', refDecide:'recruitment.referrals.approve_reject_referral',
   refDelete:'recruitment.referrals.delete_referral',
-  // Inspection
-  inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
-  inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',
-  inspOpenSub:'inspection.responses.open_and_edit_a_submission',
-  inspEditSub:'inspection.responses.open_and_edit_a_submission',
-  inspUpdateSub:'inspection.responses.update_check_status_per_item',
-  inspBulkE:'inspection.responses.bulk_mark_all_checks_ok',
-  inspBulk:'inspection.new_inspection.bulk_mark_all_items_ok',
-  inspPick:'inspection.new_inspection.mark_item_ok_not_ok_n_a',
-  inspLevelPick:'inspection.new_inspection.select_project_block_floor_flat_work_category',
+  /* Inspection. Every one of these carries the unit it happened to - the flat, floor, tower or
+     project - because that is the fact an inspection row is useless without. New Inspection reads
+     the form as it stands, Form Responses reads the submission that is open, and the Console
+     reports whatever it is currently narrowed to. */
+  inspSave:{key:'inspection.new_inspection.submit_inspection', meta:inspFormUnit},
+  inspBulk:{key:'inspection.new_inspection.bulk_mark_all_items_ok', meta:inspFormUnit},
+  inspPick:{key:'inspection.new_inspection.mark_item_ok_not_ok_n_a', meta:inspFormUnit},
+  inspLevelPick:{key:'inspection.new_inspection.select_project_block_floor_flat_work_category', meta:inspFormUnit},
+  inspDrill:{key:'inspection.console.drill_into_a_status_count', meta:inspScopeMeta},
+  inspScope:{key:'inspection.console.filter_by_project_block_floor_flat_work_type',
+             // called as inspScope(dim, val) - read the choice being made, not the state before it
+             meta:function(dim,val){ const m=inspScopeMeta()||{};
+               if(dim && val && val!=='All') m[String(dim)]=String(val);
+               return m; }},
+  inspOpenSub:{key:'inspection.responses.open_and_edit_a_submission', meta:inspSubUnit},
+  inspEditSub:{key:'inspection.responses.open_and_edit_a_submission', meta:inspSubUnit},
+  inspUpdateSub:{key:'inspection.responses.update_check_status_per_item', meta:inspSubUnit},
+  inspBulkE:{key:'inspection.responses.bulk_mark_all_checks_ok', meta:inspSubUnit},
   // inspOpenPhoto only OPENS a photo for viewing - it was counted as adding one. The real
   // add happens on the submit, logged at its own source.
   // Campaign Analytics
