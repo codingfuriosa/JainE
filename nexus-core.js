@@ -13734,7 +13734,7 @@ async function custTabLedger(unit){
     });
   });
   receipts.forEach(r=>{
-    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
   });
   reversals.forEach(rv=>{
     entries.push({date:rv.receipt_reversal_date,type:'CQRV',ref:rv.receipt_reversal_no,desc:'Cheque return'+(rv.instrument_no?' · '+rv.instrument_no:''),debit:Number(rv.reversal_amount||0),credit:0});
@@ -13747,8 +13747,13 @@ async function custTabLedger(unit){
     return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
   }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
+  // A money receipt row carries its own "view / download" control, so a customer who wants proof
+  // of a payment gets it from the ledger line itself rather than hunting for it elsewhere.
+  const refCell=e=>e.rid
+    ? '<span class="rcpt-ref">'+esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this receipt" onclick="custViewReceipt('+e.rid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>'
+    : esc(e.ref||'—');
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
-    return [fmtDate(e.date),tags[e.type]||esc(e.type),esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
+    return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
@@ -13795,6 +13800,154 @@ window.custPrintLedger=function(){
     '</table></body></html>';
   try{w.document.open();w.document.write(html);w.document.close();}
   catch(_e){toast('Could not build the printout','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
+};
+
+/* ---------- Money receipt (viewed / downloaded from a ledger receipt row) ----------
+   Every figure below comes from the Farvision Receipt Register import - money_receipts for the
+   header, receipt_items for the allocation lines - so the portal never invents a receipt number,
+   date, amount or adjustment. The issuer block is the only static part: it is the company
+   letterhead, identical on every Farvision receipt, not per-customer data. */
+const CUST_RECEIPT_ISSUER={
+  name:'DREAM GATEWAY HOTELS LIMITED',
+  address:'JAIN GROUP, 44/2A, HAZRA ROAD, KOLKATA-19, KOLKATA, WEST BENGAL, INDIA, PIN:700019',
+  gstin:'19AADCD0692H1ZL',
+  pan:'AADCD0692H'
+};
+// Indian-system amount in words ("Rupees One Lac Eighty Four Thousand Six Hundred Eighty Four Only"),
+// matching how Farvision spells the total on its own receipt.
+function custAmountInWords(n){
+  n=Math.floor(Math.abs(Number(n)||0));
+  if(!n) return 'Rupees Zero Only';
+  const ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve',
+    'Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two=v=>v<20?ones[v]:(tens[Math.floor(v/10)]+(v%10?' '+ones[v%10]:''));
+  const three=v=>(v>=100?ones[Math.floor(v/100)]+' Hundred'+(v%100?' ':''):'')+(v%100?two(v%100):'');
+  const parts=[];
+  const crore=Math.floor(n/10000000); n%=10000000;
+  const lac=Math.floor(n/100000);     n%=100000;
+  const thou=Math.floor(n/1000);      n%=1000;
+  if(crore) parts.push(three(crore)+' Crore');
+  if(lac)   parts.push(three(lac)+' Lac');
+  if(thou)  parts.push(three(thou)+' Thousand');
+  if(n)     parts.push(three(n));
+  return 'Rupees '+parts.join(' ')+' Only';
+}
+// Builds the receipt document once; the modal preview and the printable page share it so what a
+// customer sees on screen is exactly what downloads.
+function custReceiptDocHtml(r,items,unit,contact,forPrint){
+  const c=contact||{}, p=(unit&&unit.projects&&unit.projects.name)||'';
+  const field=(l,v)=>'<div class="rcpt-f"><span>'+esc(l)+'</span><b>'+(v?esc(v):'—')+'</b></div>';
+  const left=[
+    field('Email',c.contact_email),
+    field('Contact No',c.contact_phone),
+    field('Booking No',unit&&unit.booking_no),
+    field('Customer No',unit&&unit.application_no)
+  ].join('');
+  const right=[
+    field('Receipt No',r.receipt_no),
+    field('Receipt Date',r.receipt_date?fmtDate(r.receipt_date):''),
+    field('Project',p),
+    field('Unit No',unit&&unit.unit_code),
+    field('Payment Mode',r.payment_mode),
+    field('Drawn On',r.drawn_on),
+    field('Instn. No.',r.instrument_no),
+    field('Instn. Date',r.instrument_date?fmtDate(r.instrument_date):'')
+  ].join('');
+  const rowsHtml=(items||[]).map((it,i)=>'<tr>'+
+    '<td>'+(i+1)+'</td>'+
+    '<td>'+(it.line_type==='on_account'?'On Account':'Bill')+'</td>'+
+    '<td>'+esc(it.schedule||'—')+'</td>'+
+    '<td>'+esc(it.revenue_head||'—')+'</td>'+
+    '<td>'+esc(it.against_demand_no||'—')+'</td>'+
+    '<td>'+(it.invoice_date?fmtDate(it.invoice_date):'—')+'</td>'+
+    '<td>'+esc(it.particulars||'—')+'</td>'+
+    '<td class="amt">'+custInr(it.amount||0)+'</td></tr>').join('');
+  const total=Number(r.total_amount||0);
+  const badge=r.is_reversed?'<span class="tag t-red">Reversed</span>':'';
+  return ''+
+    '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
+      '<div class="rcpt-issuer"><h2>'+esc(CUST_RECEIPT_ISSUER.name)+'</h2>'+
+        '<div class="rcpt-addr">'+esc(CUST_RECEIPT_ISSUER.address)+'</div>'+
+        '<div class="rcpt-addr">GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+' &nbsp;·&nbsp; PAN : '+esc(CUST_RECEIPT_ISSUER.pan)+'</div>'+
+      '</div>'+
+      '<div class="rcpt-title">Receipt '+badge+'</div>'+
+      '<div class="rcpt-grid">'+
+        '<div><div class="rcpt-name">'+esc((c.contact_name)||(unit&&unit.customer_name)||'')+'</div>'+
+          (c.contact_address?'<div class="rcpt-addr">'+esc(c.contact_address)+'</div>':'')+left+'</div>'+
+        '<div>'+right+'</div>'+
+      '</div>'+
+      (r.narration?'<div class="rcpt-remarks"><span>Remarks :</span> <b>'+esc(r.narration)+'</b></div>':'')+
+      '<div class="rcpt-tblwrap"><table class="rcpt-tbl"><thead><tr>'+
+        '<th>Sl. #</th><th>Type</th><th>Schedule Name</th><th>Revenue Name</th>'+
+        '<th>Invoice No</th><th>Invoice Dt</th><th>Particulars</th><th class="amt">Total Amt</th>'+
+      '</tr></thead><tbody>'+(rowsHtml||'<tr><td colspan="8" style="text-align:center;color:#64748b">No allocation lines recorded for this receipt.</td></tr>')+'</tbody>'+
+      '<tfoot><tr><td colspan="7">Total Receipt Amount</td><td class="amt">'+custInr(total)+'</td></tr>'+
+      '<tr><td colspan="8" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(total))+'</td></tr></tfoot>'+
+      '</table></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+    '</div>';
+}
+// Styles are shared by the on-screen modal and the printable window.
+const CUST_RECEIPT_CSS=
+  '.rcpt-doc{color:#0f172a;font-size:12.5px}'+
+  '.rcpt-issuer{border-bottom:1px solid #e2e8f0;padding-bottom:10px;margin-bottom:12px}'+
+  '.rcpt-issuer h2{margin:0 0 3px;font-size:16px;letter-spacing:.01em}'+
+  '.rcpt-addr{color:#64748b;font-size:11.5px;line-height:1.5}'+
+  '.rcpt-title{text-align:center;font-size:14px;font-weight:700;letter-spacing:.06em;margin:0 0 14px;display:flex;align-items:center;justify-content:center;gap:10px}'+
+  '.rcpt-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:12px}'+
+  '.rcpt-name{font-weight:700;margin-bottom:3px}'+
+  '.rcpt-f{display:flex;gap:8px;padding:1.5px 0;font-size:12px}'+
+  '.rcpt-f span{color:#64748b;min-width:96px;flex:0 0 96px}'+
+  '.rcpt-f b{font-weight:600;word-break:break-word}'+
+  '.rcpt-remarks{margin:0 0 10px;font-size:12px}.rcpt-remarks span{color:#64748b}'+
+  '.rcpt-tblwrap{overflow-x:auto}'+
+  '.rcpt-tbl{width:100%;border-collapse:collapse;font-size:11.5px;min-width:660px}'+
+  '.rcpt-tbl th,.rcpt-tbl td{border:1px solid #e2e8f0;padding:5px 7px;text-align:left;vertical-align:top}'+
+  '.rcpt-tbl thead th{background:#f8fafc;color:#475569;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}'+
+  '.rcpt-tbl .amt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}'+
+  '.rcpt-tbl tfoot td{font-weight:700;background:#f8fafc}'+
+  '.rcpt-tbl tfoot .rcpt-words{font-weight:600;text-align:left;background:#fff}'+
+  '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
+  '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
+  // On a phone the two header columns cannot sit side by side without clipping the right one.
+  '@media(max-width:640px){.rcpt-grid{grid-template-columns:1fr;gap:12px}'+
+  '.rcpt-f span{min-width:82px;flex:0 0 82px}.rcpt-title{font-size:13px}}';
+
+window.custViewReceipt=async function(id){
+  const unit=window._custLedgerUnit;
+  if(!unit){toast('Open the ledger first','err');return;}
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>','lg');
+  const [{data:rcpt,error:re},{data:its},{data:cts}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('*').eq('id',id).maybeSingle(),
+    sb.schema('cust').from('receipt_items').select('*').eq('receipt_id',id).order('sort_order'),
+    sb.schema('cust').from('farvision_contacts').select('*').eq('unit_id',unit.id).eq('is_current',true).limit(1)
+  ]);
+  if(re||!rcpt){openModal('<div class="modal-head"><h3>Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="card card-pad empty">This receipt could not be loaded.</div></div>','lg');return;}
+  window._custReceiptCache={r:rcpt,items:its||[],unit:unit,contact:(cts&&cts[0])||null};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
+      custReceiptDocHtml(rcpt,its||[],unit,(cts&&cts[0])||null,false)+'</div>'+
+    '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
+    '<button class="btn btn-primary" onclick="custPrintReceipt()"><i class="fa-solid fa-download"></i> Download PDF</button></div>','lg');
+};
+
+window.custPrintReceipt=function(){
+  const s=window._custReceiptCache;
+  if(!s){toast('Open a receipt first','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to download','err');return;}
+  const fileName='Money-Receipt-'+String(s.r.receipt_no||'').replace(/[^A-Za-z0-9]+/g,'-');
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(fileName)+'</title><style>'+
+    'body{margin:26px;font-family:Inter,system-ui,sans-serif}'+CUST_RECEIPT_CSS+
+    '.rcpt-tbl{min-width:0}.rcpt-tblwrap{overflow:visible}'+
+    '@media print{body{margin:12px}}'+
+    '</style></head><body>'+custReceiptDocHtml(s.r,s.items,s.unit,s.contact,true)+'</body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the receipt','err');return;}
   setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
 };
 async function custTabCostSheet(data,unit){

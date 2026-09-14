@@ -937,3 +937,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 @media(max-width:560px){
   .net-chart-wrap{height:190px}
 }
+
+/* Money-receipt control on an Applicant Ledger receipt row. The button is always rendered (so it
+   is reachable on touch, where there is no hover) but sits back until the row is hovered. */
+.rcpt-ref{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.rcpt-ref .rcpt-view{padding:2px 8px;font-size:11px;line-height:1.6;opacity:.4;transition:opacity .12s ease}
+tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
+@media(hover:none){.rcpt-ref .rcpt-view{opacity:1}}
