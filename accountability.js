@@ -4933,10 +4933,24 @@
     const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
     const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
     const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
-    runLine([['Base Rate',v('base_rate')?(grp(v('base_rate'))+'/-'):''],
-             ['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+    // When the base rate came in under the approved one, the Base Rate line shows the sum
+    // ("5,399 - 5,349 = 50/-") rather than the bare figure - that comparison IS the point of the
+    // line. Detected by the "=" the baserate check's own detail only carries in that branch. Equal
+    // to the approved rate, or no approved rate on file, falls back to the plain document value -
+    // there is nothing to compare, so nothing but the figure is shown.
+    const baseRateArith=(res.arithmetic||[]).filter(function(c){ return c.kind==='baserate'; })[0];
+    const baseRateVal=(baseRateArith&&baseRateArith.detail&&baseRateArith.detail.indexOf('=')!==-1)
+      ? baseRateArith.detail : (v('base_rate')?(grp(v('base_rate'))+'/-'):'');
+    // Base Rate gets its own line - the "X - Y = Z/-" form runs long, and on the same line as
+    // PLC/FLC/Parking (itself now sometimes "OPEN Parking : 4,00,000" rather than a bare figure)
+    // the combined text can run past the printable width. Each field is still measured and placed
+    // by its own actual width (see runLine), so nothing overlaps - this is purely about not running
+    // off the right margin.
+    runLine([['Base Rate',baseRateVal]]);
+    runLine([['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
              [parkLabel,parkValue]]);
-    runLine([['Discount',v('discount')||'NIL']]);
+    // Left blank for now, per request.
+    runLine([['Discount','']]);
     y-=13;
 
     page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
