@@ -13823,7 +13823,7 @@ async function custTabCostSheet(data,unit){
     // sheet (verified against Farvision's own "Cost breakup" printout). Anything outside this
     // set - e.g. a one-off "Cheque Dishonoured Charges" penalty - is a later ad-hoc charge, not
     // part of the original agreement cost, and Farvision itself reports it as a separate figure.
-    const STANDARD_COMPONENTS=/legal documentation|advance maintenance|maintenance deposit|generator charges|flc charges|plc charge|vehicle parking|club membership|infrastructure for club facility|infrastructure for electricity|electricity charges/i;
+    const STANDARD_COMPONENTS=/legal documentation|advance maintenance|maintenance deposit|generator charges|flc charges|plc charge|vehicle parking|club membership|infrastructure for club facility|infrastructure for electricity|electricity charges|association formation charges/i;
     const extraCharges=items.reduce((s,i)=>s+(i===unitCostItem||!STANDARD_COMPONENTS.test(i.component||'')?0:Number(i.amount||0)),0);
     const adhocCharges=items.reduce((s,i)=>s+(i===unitCostItem||STANDARD_COMPONENTS.test(i.component||'')?0:Number(i.amount||0)),0);
     const totalTax=items.reduce((s,i)=>s+Number(i.tax_amount||0),0);
@@ -13859,16 +13859,29 @@ async function custTabCostSheet(data,unit){
         '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
       '</div></div>';
 
-    const rows=items.map(i=>[esc(i.component),custInr(i.amount||0),custInr(i.tax_amount||0),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
-      custInr(i.bill_amount||0),custInr(i.received_amount||0),
-      Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
-    const totalRow=['Total',custInr(items.reduce((s,i)=>s+Number(i.amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.tax_amount||0),0)),
-      custInr(items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.bill_amount||0),0)),
-      custInr(items.reduce((s,i)=>s+Number(i.received_amount||0),0)),custInr(items.reduce((s,i)=>s+Number(i.balance_amount||0),0))];
+    // Cost Breakup below shows the agreement's cost estimate itself (Amount/GST/Gross per
+    // charge, grouped like Farvision's own "Estimated Offer Price" sheet into Unit Charges vs
+    // Extra Development Charges) - not payment status, which already lives in the Cost Summary
+    // card above (Billed/Received/Balance).
+    const UNIT_GROUP=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+    const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
+    const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
+    const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
+    const breakupRow=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
+      return [esc(i.component),custInr(amt),gstPct+'%',custInr(tax),custInr(amt+tax)];};
+    const breakupTotal=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
+      return ['<b>'+label+'</b>','<b>'+custInr(amt)+'</b>','','<b>'+custInr(tax)+'</b>','<b>'+custInr(amt+tax)+'</b>'];};
+    const groupTitle=t=>'<div style="font-size:12px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;margin:16px 0 6px">'+t+'</div>';
     window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
-    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
-      '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>'+
-      mTable(['Charge','Basic','Tax','Total','Billed','Received','Balance'],rows.concat([totalRow.map(v=>'<b>'+v+'</b>')]));
+    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
+      '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
+    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+
+      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],unitGroupItems.map(breakupRow).concat([breakupTotal(unitGroupItems,'Total Flat Value')]));
+    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+
+      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],edcGroupItems.map(breakupRow).concat([breakupTotal(edcGroupItems,'Total EDC')]));
+    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+
+      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],adhocGroupItems.map(breakupRow).concat([breakupTotal(adhocGroupItems,'Total Adhoc')]));
+    out+='<div style="margin-top:8px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14.5px"><b>Grand Total: '+custInr(totalWithTax)+'</b></div>';
   }
   if(invoices.length){
     const schedRows=[];
@@ -13894,20 +13907,32 @@ window.custPrintCostSheet=function(){
   if(!unit||!items){toast('Nothing to print yet','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to print','err');return;}
-  const sum=k=>items.reduce((s,i)=>s+Number(i[k]||0),0);
-  const rowsHtml=items.map(i=>'<tr><td>'+esc(i.component)+'</td><td>'+custInr(i.amount||0)+'</td><td>'+custInr(i.tax_amount||0)+'</td><td>'+
-    custInr(Number(i.amount||0)+Number(i.tax_amount||0))+'</td><td>'+custInr(i.bill_amount||0)+'</td><td>'+custInr(i.received_amount||0)+'</td><td>'+custInr(i.balance_amount||0)+'</td></tr>').join('');
-  const totalHtml='<tr style="font-weight:700"><td>Total</td><td>'+custInr(sum('amount'))+'</td><td>'+custInr(sum('tax_amount'))+'</td><td>'+
-    custInr(sum('amount')+sum('tax_amount'))+'</td><td>'+custInr(sum('bill_amount'))+'</td><td>'+custInr(sum('received_amount'))+'</td><td>'+custInr(sum('balance_amount'))+'</td></tr>';
+  const STANDARD_COMPONENTS=/legal documentation|advance maintenance|maintenance deposit|generator charges|flc charges|plc charge|vehicle parking|club membership|infrastructure for club facility|infrastructure for electricity|electricity charges|association formation charges/i;
+  const UNIT_GROUP=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+  const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
+  const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
+  const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
+  const rowHtml=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
+    return '<tr><td>'+esc(i.component)+'</td><td>'+custInr(amt)+'</td><td>'+gstPct+'%</td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
+  const totalHtml=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
+    return '<tr style="font-weight:700"><td>'+label+'</td><td>'+custInr(amt)+'</td><td></td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
+  const groupTable=(label,list,totalLabel)=>list.length?'<h3>'+label+'</h3><table><thead><tr><th>Particulars</th><th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
+    list.map(rowHtml).join('')+totalHtml(list,totalLabel)+'</tbody></table>':'';
+  const grandTotal=items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cost Sheet — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 20px}'+
-    'table{width:100%;border-collapse:collapse;margin-top:8px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12.5px}'+
+    'h3{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;margin:20px 0 4px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:4px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12.5px}'+
     'th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.03em}'+
+    '.grand{margin-top:14px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14px;font-weight:700}'+
     '</style></head><body>'+
     '<h1>Cost Sheet — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
-    '<table><thead><tr><th>Charge</th><th>Basic</th><th>Tax</th><th>Total</th><th>Billed</th><th>Received</th><th>Balance</th></tr></thead><tbody>'+rowsHtml+totalHtml+'</tbody></table>'+
+    groupTable('Unit Charges',unitGroupItems,'Total Flat Value')+
+    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC')+
+    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc')+
+    '<div class="grand">Grand Total: '+custInr(grandTotal)+'</div>'+
     '</body></html>';
   try{ w.document.open(); w.document.write(html); w.document.close(); }
   catch(_e){ toast('Could not build the printout','err'); return; }
