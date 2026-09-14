@@ -13845,10 +13845,15 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
     field('Booking No',unit&&unit.booking_no),
     field('Customer No',unit&&unit.application_no)
   ].join('');
+  // Farvision prints the unit's category letter (its Level4 in the ERP hierarchy). That letter is
+  // the tail of the unit code - checked against all 145 rows of the Sales Details export, where
+  // Level4 equalled the unit-code tail every time - so it needs no separate column.
+  const category=String((unit&&unit.unit_code)||'').replace(/^\d+/,'').trim().toUpperCase();
   const right=[
     field('Receipt No',r.receipt_no),
     field('Receipt Date',r.receipt_date?fmtDate(r.receipt_date):''),
     field('Project',p),
+    field('Category',category),
     field('Unit No',unit&&unit.unit_code),
     field('Payment Mode',r.payment_mode),
     field('Drawn On',r.drawn_on),
