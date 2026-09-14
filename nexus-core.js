@@ -13716,13 +13716,25 @@ async function custTabLedger(unit){
   const balance=totalBilled-netReceived;
   const entries=[];
   invoices.forEach(inv=>{
+    // Farvision's real Applicant Ledger shows one row per (Document No x Schedule) -
+    // never merged/summed across schedules even when they share a document number
+    // (confirmed against two real Farvision PDF exports).
     const items=inv.invoice_items||[];
-    const total=items.reduce((s,it)=>s+Number(it.net_amount||0),0);
-    const schedules=[...new Set(items.map(it=>it.schedule).filter(Boolean))];
-    if(total>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,desc:schedules.join(', ')||inv.invoice_type||'—',debit:total,credit:0});
+    if(!items.length) return;
+    const bySchedule={};
+    const order=[];
+    items.forEach(it=>{
+      const s=it.schedule||inv.invoice_type||'—';
+      if(!(s in bySchedule)){bySchedule[s]=0;order.push(s);}
+      bySchedule[s]+=Number(it.net_amount||0);
+    });
+    order.forEach(s=>{
+      const amt=bySchedule[s];
+      if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,desc:s,debit:amt,credit:0});
+    });
   });
   receipts.forEach(r=>{
-    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),debit:0,credit:Number(r.total_amount||0)});
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
   });
   reversals.forEach(rv=>{
     entries.push({date:rv.receipt_reversal_date,type:'CQRV',ref:rv.receipt_reversal_no,desc:'Cheque return'+(rv.instrument_no?' · '+rv.instrument_no:''),debit:Number(rv.reversal_amount||0),credit:0});
@@ -13738,6 +13750,8 @@ async function custTabLedger(unit){
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
     return [fmtDate(e.date),tags[e.type]||esc(e.type),esc(e.ref||'—'),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
+  const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
+  const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
   window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
   const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">Settled</b>';
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px">'+
@@ -13745,7 +13759,7 @@ async function custTabLedger(unit){
     '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
     '<span><b>Balance:</b> '+balLabel+'</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span></div>';
-  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],rows)+
+  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows)+
     '<div style="margin-top:14px"><button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
 }
 window.custPrintLedger=function(){
