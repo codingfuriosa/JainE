@@ -982,6 +982,8 @@ function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/$
 function s3KeyForProjectPhoto(projectId,filename){return `customer-portal/projects/${projectId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProjectDoc(projectId,docType,filename){return `customer-portal/projects/${projectId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForUnitPhoto(unitId,filename){return `customer-portal/units/${unitId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForFloorPhoto(projectId,floorNo,filename){return `customer-portal/projects/${projectId}/floors/${s3SafeSeg(floorNo)}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForTowerPhoto(projectId,tower,filename){return `customer-portal/projects/${projectId}/towers/${s3SafeSeg(tower)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/units/${unitId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForInspectionChecklist(unitId,filename){return `customer-portal/units/${unitId}/inspection-checklist/${s3Stamp()}_${s3SafeName(filename)}`;}
@@ -12255,7 +12257,7 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -12806,31 +12808,109 @@ window.cpaUndoImport=async function(id){
   toast('Import undone','ok');route();
 };
 
-/* ---------- Tab 4: Photos ---------- */
+/* ---------- Tab 4: Photos (project-wide, tower-wide, floor-wide, per-flat - each accepts
+   images and videos together, multiple files at once, and lists what's already there with a
+   Delete button so staff can remove anything wrongly uploaded) ---------- */
+function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)&&u.tower).map(u=>u.tower))].sort();}
+function cpaFloorsForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)).map(u=>custDeriveFloor(u.unit_code)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));}
+function cpaMediaIcon(fileType){return (fileType||'').indexOf('video')===0?'<i class="fa-solid fa-circle-play"></i>':fileIcon(fileType);}
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}${u.floor_casting_completed_at?'':' (casting pending)'}</option>`).join('');
   const today=new Date().toISOString().slice(0,10);
+  const firstProjectId=projects[0]?projects[0].id:null;
+  const towerOpts=firstProjectId?cpaTowersForProject(units,firstProjectId).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(''):'';
+  const floorOpts=firstProjectId?cpaFloorsForProject(units,firstProjectId).map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join(''):'';
   host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos</div>
-    <label>Project</label><select id="cpaPhProject">${projOpts}</select>
+    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos/videos</div>
+    <label>Project</label><select id="cpaPhProject" onchange="cpaRenderProjectPhotoList()">${projOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaPhCaption">
-    <label>Photos</label><input type="file" id="cpaPhFiles" accept="image/*" multiple>
+    <label>Photos / videos</label><input type="file" id="cpaPhFiles" accept="image/*,video/*" multiple>
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaPhList" style="margin-top:14px"></div>
     </div>
-    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos</div>
-    <label>Unit</label><select id="cpaUhUnit">${unitOpts}</select>
+    <div class="card card-pad frm"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
+    <label>Project</label><select id="cpaTwProject" onchange="cpaOnTwProjectChange()">${projOpts}</select>
+    <label>Tower / Block</label><select id="cpaTwTower" onchange="cpaRenderTowerPhotoList()">${towerOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaTwDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaTwCaption">
+    <label>Photos / videos</label><input type="file" id="cpaTwFiles" accept="image/*,video/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaTwList" style="margin-top:14px"></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Floor-wise construction photos/videos</div>
+    <label>Project</label><select id="cpaFlProject" onchange="cpaOnFlProjectChange()">${projOpts}</select>
+    <label>Floor</label><select id="cpaFlFloor" onchange="cpaRenderFloorPhotoList()">${floorOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaFlDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaFlCaption">
+    <label>Photos / videos</label><input type="file" id="cpaFlFiles" accept="image/*,video/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaFlList" style="margin-top:14px"></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos/videos</div>
+    <label>Unit</label><select id="cpaUhUnit" onchange="cpaRenderUnitPhotoList()">${unitOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaUhCaption">
-    <label>Photos</label><input type="file" id="cpaUhFiles" accept="image/*" multiple>
+    <label>Photos / videos</label><input type="file" id="cpaUhFiles" accept="image/*,video/*" multiple>
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaUhList" style="margin-top:14px"></div>
     </div></div>`;
+  cpaRenderProjectPhotoList();cpaRenderTowerPhotoList();cpaRenderFloorPhotoList();cpaRenderUnitPhotoList();
 }
+window.cpaOnTwProjectChange=async function(){
+  const units=await cpaUnits();
+  const towers=cpaTowersForProject(units,$('cpaTwProject').value);
+  $('cpaTwTower').innerHTML=towers.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  cpaRenderTowerPhotoList();
+};
+window.cpaOnFlProjectChange=async function(){
+  const units=await cpaUnits();
+  const floors=cpaFloorsForProject(units,$('cpaFlProject').value);
+  $('cpaFlFloor').innerHTML=floors.map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join('');
+  cpaRenderFloorPhotoList();
+};
+function cpaMediaRow(p){return [cpaMediaIcon(p.file_type),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
+async function cpaRenderProjectPhotoList(){
+  const host=$('cpaPhList');if(!host)return;
+  const projectId=Number($('cpaPhProject').value);
+  const {data}=await sb.schema('cust').from('project_photos').select('*').eq('project_id',projectId).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=(data||[]).map(p=>[...cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('project_photos',${p.id},'cpaRenderProjectPhotoList')">Delete</button>`]);
+  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+}
+async function cpaRenderTowerPhotoList(){
+  const host=$('cpaTwList');if(!host)return;
+  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value;
+  if(!tower){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no towers on record.</div>';return;}
+  const {data}=await sb.schema('cust').from('tower_photos').select('*').eq('project_id',projectId).eq('tower',tower).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=(data||[]).map(p=>[...cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('tower_photos',${p.id},'cpaRenderTowerPhotoList')">Delete</button>`]);
+  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads for '+esc(tower)+'</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+}
+async function cpaRenderFloorPhotoList(){
+  const host=$('cpaFlList');if(!host)return;
+  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value;
+  if(!floorNo){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no units to derive floors from.</div>';return;}
+  const {data}=await sb.schema('cust').from('floor_photos').select('*').eq('project_id',projectId).eq('floor_no',floorNo).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=(data||[]).map(p=>[...cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('floor_photos',${p.id},'cpaRenderFloorPhotoList')">Delete</button>`]);
+  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads for Floor '+esc(floorNo)+'</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+}
+async function cpaRenderUnitPhotoList(){
+  const host=$('cpaUhList');if(!host)return;
+  const unitId=Number($('cpaUhUnit').value);
+  const {data}=await sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unitId).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=(data||[]).map(p=>[...cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('unit_photos',${p.id},'cpaRenderUnitPhotoList')">Delete</button>`]);
+  host.innerHTML='<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">Existing uploads for this flat</div>'+cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]);
+}
+window.cpaDeletePhoto=async function(table,id,refreshFn){
+  if(!await confirmDialog('Remove this photo/video from the customer portal?',{okLabel:'Delete'}))return;
+  const {error}=await sb.schema('cust').from(table).update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Delete failed: '+error.message,'err');return;}
+  toast('Removed','ok');window[refreshFn]();
+};
 window.cpaUploadProjectPhotos=async function(){
   const projectId=Number($('cpaPhProject').value),takenOn=$('cpaPhDate').value,caption=$('cpaPhCaption').value.trim()||null;
-  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo','err');return;}
+  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
   const btn=$('cpaPhBtn');btn.disabled=true;let ok=0;
   for(const f of files){
     btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
@@ -12840,12 +12920,47 @@ window.cpaUploadProjectPhotos=async function(){
     if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' photo(s) uploaded','ok');
+  if(ok)toast(ok+' file(s) uploaded','ok');
   $('cpaPhFiles').value='';
+  cpaRenderProjectPhotoList();
+};
+window.cpaUploadTowerPhotos=async function(){
+  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value,takenOn=$('cpaTwDate').value,caption=$('cpaTwCaption').value.trim()||null;
+  if(!tower){toast('This project has no towers on record','err');return;}
+  const files=[...$('cpaTwFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
+  const btn=$('cpaTwBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForTowerPhoto(projectId,tower,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('tower_photos').insert({project_id:projectId,tower,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' file(s) uploaded','ok');
+  $('cpaTwFiles').value='';
+  cpaRenderTowerPhotoList();
+};
+window.cpaUploadFloorPhotos=async function(){
+  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value,takenOn=$('cpaFlDate').value,caption=$('cpaFlCaption').value.trim()||null;
+  if(!floorNo){toast('This project has no units to derive floors from','err');return;}
+  const files=[...$('cpaFlFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
+  const btn=$('cpaFlBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForFloorPhoto(projectId,floorNo,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('floor_photos').insert({project_id:projectId,floor_no:floorNo,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' file(s) uploaded','ok');
+  $('cpaFlFiles').value='';
+  cpaRenderFloorPhotoList();
 };
 window.cpaUploadUnitPhotos=async function(){
   const unitId=Number($('cpaUhUnit').value),takenOn=$('cpaUhDate').value,caption=$('cpaUhCaption').value.trim()||null;
-  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo','err');return;}
+  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
   const btn=$('cpaUhBtn');btn.disabled=true;let ok=0;
   for(const f of files){
     btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
@@ -12855,8 +12970,9 @@ window.cpaUploadUnitPhotos=async function(){
     if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' photo(s) uploaded','ok');
+  if(ok)toast(ok+' file(s) uploaded','ok');
   $('cpaUhFiles').value='';
+  cpaRenderUnitPhotoList();
 };
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
@@ -13366,6 +13482,14 @@ function custFormatUnitType(t){
   if(!m)return t;
   return (parseFloat(m[1]))+' BHK';
 }
+// Floor number derived from the leading digits of unit_code (e.g. "5" from "5A", "12" from
+// "12C") - the same Farvision <floor><unit-letter> convention the RLS policy on
+// cust.floor_photos matches against (substring(unit_code from '^[0-9]+')), so a customer's own
+// derived floor always lines up with what the admin picks when uploading floor-wise media.
+function custDeriveFloor(unitCode){
+  const m=String(unitCode||'').match(/^\d+/);
+  return m?m[0]:null;
+}
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
   return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
@@ -13474,14 +13598,29 @@ async function custTabOverview(data,unit){
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
-    '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Total cost'],
-      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
-        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
-        // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
-        // purchase - a status badge that says so on every single statement is just noise. Worth
-        // flagging only once something has actually gone wrong with the booking.
-        unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
-        custInr(propertyValue)]])+
+    (function(){
+      // Rate = the Unit Cost line's basic amount divided by Super Built-Up area, matching
+      // Farvision's own Property Details table (Rate x Super Built-Up = Unit Cost amount).
+      // Computed live from cost_sheet_items rather than stored anywhere, since we don't keep a
+      // separate rate column.
+      const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
+      const basicAmt=Number(unitCostItem?.amount||0);
+      const sba=Number(unit.super_built_up_area_sqft||0);
+      const rate=sba?Math.round(basicAmt/sba):null;
+      return '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(
+        ['Unit','Project','Type','Block/Tower','Super Built-Up','Built-Up','Carpet','Rate','Status','Total cost'],
+        [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
+          esc(unit.tower||'—'),
+          unit.super_built_up_area_sqft?unit.super_built_up_area_sqft+' sqft':'—',
+          unit.built_up_area_sqft?unit.built_up_area_sqft+' sqft':'—',
+          unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
+          rate?custInr(rate)+'/sqft':'—',
+          // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
+          // purchase - a status badge that says so on every single statement is just noise. Worth
+          // flagging only once something has actually gone wrong with the booking.
+          unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
+          custInr(propertyValue)]]);
+    })()+
     '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
     (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
       [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
@@ -13717,28 +13856,39 @@ window.custPrintCostSheet=function(){
   catch(_e){ toast('Could not build the printout','err'); return; }
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
+// Shared photo/video grid used by every construction-media level (project, tower, floor, unit)
+// and by the inspection-update trail - a card per file, showing a real thumbnail for images and
+// a play-icon placeholder for video (signing a video's URL up front isn't needed for the
+// thumbnail, only when the customer actually opens it via s3OpenSigned).
+async function custMediaGrid(list){
+  const urls=await Promise.all(list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;return isVideo?Promise.resolve(null):s3SignedUrl(p.storage_path);}));
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
+    list.map((p,i)=>{const isVideo=(p.file_type||'').indexOf('video')===0;const url=urls[i];
+      const thumb=url
+        ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
+        :`<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div>`;
+      return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
+    <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
+}
 async function custTabProgress(unit){
-  const [{data:pPhotos},{data:uPhotos}]=await Promise.all([
+  const floorNo=custDeriveFloor(unit.unit_code);
+  const [{data:pPhotos},{data:tPhotos},{data:fPhotos},{data:uPhotos}]=await Promise.all([
     sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
+    floorNo?sb.schema('cust').from('floor_photos').select('*').eq('project_id',unit.project_id).eq('floor_no',floorNo).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
     unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
   ]);
-  const photoGrid=async list=>{
-    const urls=await Promise.all(list.map(p=>s3SignedUrl(p.storage_path)));
-    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
-      list.map((p,i)=>{const url=urls[i];
-        const thumb=url
-          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
-          :'<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid fa-image fa-lg"></i></div>';
-        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
-      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
-  };
   let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
-    ((pPhotos&&pPhotos.length)?await photoGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
+    ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
+  out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your floor'+(floorNo?' — Floor '+esc(floorNo):'')+'</div>';
+  out+=(fPhotos&&fPhotos.length)?await custMediaGrid(fPhotos):'<div class="card card-pad empty">No floor-wide updates yet — check back soon.</div>';
   out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
   if(!unit.floor_casting_completed_at){
     out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
   }else{
-    out+=(uPhotos&&uPhotos.length)?await photoGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+    out+=(uPhotos&&uPhotos.length)?await custMediaGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
   }
   return out;
 }
@@ -13764,18 +13914,8 @@ async function custTabInspection(unit){
     (checklist?
       `<div class="card card-pad" style="display:flex;justify-content:space-between;align-items:center">${fileIcon(checklist.file_type||'')} ${esc(checklist.file_name||'Inspection checklist')}<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${checklist.storage_path.replace(/'/g,"\\'")}','${(checklist.file_name||'checklist').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button></div>`:
       '<div class="card card-pad empty">Your inspection checklist hasn\u2019t been uploaded yet.</div>');
-  const mediaGrid=async list=>{
-    const urls=await Promise.all(list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;return isVideo?Promise.resolve(null):s3SignedUrl(p.storage_path);}));
-    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
-      list.map((p,i)=>{const isVideo=(p.file_type||'').indexOf('video')===0;const url=urls[i];
-        const thumb=url
-          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
-          :`<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div>`;
-        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
-      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
-  };
   const updatesSection='<div class="sec-title" style="margin:20px 0 10px">Updates against the checklist</div>'+
-    ((updates&&updates.length)?await mediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
+    ((updates&&updates.length)?await custMediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
   return checklistSection+updatesSection;
 }
 async function custTabVideos(){
