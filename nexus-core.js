@@ -8462,14 +8462,23 @@ function usbCol4(featureKey){
   const p=String(featureKey||'').split('.');
   return USB_COL4[p[0]+'.'+p[1]] || USB_COL4[p[0]] || USB_COL4_DEFAULT;
 }
-// Whatever of the chosen keys this particular event actually carries, in the order listed.
+/* Whatever of the chosen keys this particular event actually carries, in the order listed.
+   Falls back to what was on the screen when none of them apply. That fallback matters more than it
+   looks: a tab holds both kinds of feature at once - Tasks has "Delegate a task", which really does
+   go to somebody, sitting beside "View tasks grouped by person", which goes to nobody at all. One
+   header has to serve both, so the row that has no subject shows what the person was looking at
+   instead of a dash. Only used when the primary keys give nothing, so it never dilutes a real
+   answer. */
 function usbCol4Value(meta, keys){
   if(!meta || typeof meta!=='object') return '';
   const out=[];
   keys.forEach(function(k){
     if(meta[k]!=null && String(meta[k]).trim()!=='') out.push(String(meta[k]).trim());
   });
-  return out.join(' · ');
+  if(out.length) return out.join(' · ');
+  if(keys.indexOf('showing')===-1 && meta.showing!=null && String(meta.showing).trim()!=='')
+    return String(meta.showing).trim();
+  return '';
 }
 /* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
    and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
@@ -18567,7 +18576,18 @@ const USAGE_MAP={
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
   wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
   // Transcription
-  trUploadStart:'transcription.all_calls.upload_call_recording_s',
+  /* An upload is the one action on this screen with no lead behind it yet - the call does not
+     exist until it has been uploaded, so there is nothing to look up. 517 uses, and the column
+     would have been a dash on every one of them. What it genuinely has is the files themselves:
+     how many, and the first one's name. */
+  trUploadStart:{key:'transcription.all_calls.upload_call_recording_s',
+    meta:function(){
+      try{
+        const f=Array.prototype.slice.call(($('trFile')&&$('trFile').files)||[]);
+        if(!f.length) return null;
+        return {title:f[0].name, lead:f.length===1?'1 recording':f.length+' recordings'};
+      }catch(e){ return null; }
+    }},
   /* Which filter, and which dates - a "Filter calls" row with nothing beside it says only that
      somebody narrowed the list, never to what. Both read what the click itself carries. */
   trSetFilter:{key:"transcription.all_calls.filter_calls_by_outcome_or_date",
@@ -18611,7 +18631,7 @@ const USAGE_MAP={
   docDeleteConfirm:{key:'legal.documents.delete_document_s', meta:usbDocScope},
   docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', meta:usbDocScope},
   // Legal — MIS / Actions / Advocates
-  misSave:'legal.mis.add_case', misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
+  misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
   misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
                meta:function(v){ return v?{range:String(v)}:null; }},
   misRangePick:{key:"legal.mis.filter_cases_by_hearing_date_range",
@@ -18644,24 +18664,24 @@ const USAGE_MAP={
   muApprove:{key:'hr.monthly_update.approve_reject_requisition', meta:usbMuMeta},
   muSetHiring:{key:'hr.monthly_update.close_reopen_hiring', meta:usbMuMeta},
   muFilter:'hr.monthly_update.search_filter_positions',
-  trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:{key:'hr.interview_tracker.edit_interview_entry', meta:usbTrkMeta},
+  trackerSave:{key:'hr.interview_tracker.add_interview', meta:function(){ try{ var a=$('trFName'),b=$('trFPos'); var nm=a&&a.value.trim(), p=b&&b.value.trim(); return (nm||p)?{title:nm||undefined, position:p||undefined}:null; }catch(e){ return null; } }}, trackerUpdate:{key:'hr.interview_tracker.edit_interview_entry', meta:usbTrkMeta},
   trackerDelete:{key:'hr.interview_tracker.delete_interview_entry_ies', meta:usbTrkMeta},
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
   // trackerFilter is NOT mapped here - it logs directly via usageQueueDebounced.
   trResumeOpen:{key:'hr.interview_tracker.preview_download_candidate_cv', meta:usbTrkMeta},
-  rsUploadSave:'hr.resumes.upload_resume', rsPreview:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta},
+  rsUploadSave:{key:'hr.resumes.upload_resume', meta:function(){ try{ var el=$('rsFile'); var f=el&&el.files&&el.files[0]; return f?{title:f.name}:null; }catch(e){ return null; } }}, rsPreview:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta},
   rsDownload:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta}, rsDelete:{key:'hr.resumes.delete_resume_s', meta:usbResumeMeta},
   rsBulkDelete:'hr.resumes.delete_resume_s',
   // the AI resume search is gone - a plain name/file filter replaced it
   rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
-  rtSave:'recruitment.tests.add_test', rtUpdate:{key:'recruitment.tests.rename_test', meta:usbTestMeta},
+  rtSave:{key:'recruitment.tests.add_test', meta:function(){ try{ var a=$('rtFName'); var nm=a&&a.value&&a.value.trim(); return nm?{title:nm}:null; }catch(e){ return null; } }}, rtUpdate:{key:'recruitment.tests.rename_test', meta:usbTestMeta},
   rtDelete:'recruitment.tests.delete_test_s',
   rtPreview:{key:"recruitment.tests.preview_test_responses_scores",
                meta:function(id){ var r=(RT_RECORDS||[]).find(function(x){return x.id===id;});
                  return r&&r.name?{title:r.name}:null; }},
-  recJdSave:'recruitment.descriptions.upload_job_description',
+  recJdSave:{key:'recruitment.descriptions.upload_job_description', meta:function(){ try{ var a=$('recJdName'); var nm=a&&a.value.trim(); return nm?{title:nm, position:nm}:null; }catch(e){ return null; } }},
   recJdOpen:{key:"recruitment.descriptions.preview_download_job_description",
                meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
                  return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
@@ -18669,12 +18689,12 @@ const USAGE_MAP={
                meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
                  return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
   recDeleteSel:'recruitment.descriptions.delete_job_description_s',
-  mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:{key:'recruitment.manpower_form.edit_requisition', meta:usbMpMeta},
+  mpSave:{key:'recruitment.manpower_form.submit_requisition', meta:function(){ try{ var d=mpCollect()||{}; return d.job_title?{title:d.job_title, position:d.job_title, department:d.department||undefined}:null; }catch(e){ return null; } }}, mpUpdate:{key:'recruitment.manpower_form.edit_requisition', meta:usbMpMeta},
   mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
   mpDeleteOne:{key:'recruitment.manpower_form.delete_requisition_s', meta:usbMpMeta},
   mpAiGenerate:{key:'recruitment.manpower_form.generate_jd_post_text_creative', meta:usbMpMeta},
   mpAiCopyPost:'recruitment.manpower_form.copy_platform_post_text',
-  refSave:'recruitment.referrals.refer_someone', refDecide:{key:'recruitment.referrals.approve_reject_referral', meta:usbRefMeta},
+  refSave:{key:'recruitment.referrals.refer_someone', meta:function(){ try{ var a=$('refFName'); var nm=a&&a.value&&a.value.trim(); return nm?{title:nm}:null; }catch(e){ return null; } }}, refDecide:{key:'recruitment.referrals.approve_reject_referral', meta:usbRefMeta},
   refDelete:{key:'recruitment.referrals.delete_referral', meta:usbRefMeta},
   /* Inspection. Every one of these carries the unit it happened to - the flat, floor, tower or
      project - because that is the fact an inspection row is useless without. New Inspection reads
