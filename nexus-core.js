@@ -13744,7 +13744,7 @@ async function custTabLedger(unit){
   function balCell(b){
     if(b>0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>';
     if(b<0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>';
-    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">Settled</span>';
+    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
   }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
@@ -13753,7 +13753,7 @@ async function custTabLedger(unit){
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
   window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
-  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">Settled</b>';
+  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px">'+
     '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
     '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
@@ -13775,7 +13775,7 @@ window.custPrintLedger=function(){
   const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
     return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
   }).join('');
-  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'Settled';
+  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'0.00';
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
@@ -13838,7 +13838,7 @@ async function custTabCostSheet(data,unit){
     const futureDue=Math.max(0,totalWithTax-netReceived);
     const duePct=totalWithTax?Math.round(totalBilled/totalWithTax*1000)/10:0;
     const recdPct=totalWithTax?Math.round(netReceived/totalWithTax*1000)/10:0;
-    const balLabel=balance>0?'<span style="color:#e08600">'+custInr(balance)+' due</span>':balance<0?'<span style="color:#16855a">'+custInr(Math.abs(balance))+' advance</span>':'<span style="color:#16855a">Settled</span>';
+    const balLabel=balance>0?'<span style="color:#e08600">'+custInr(balance)+' due</span>':balance<0?'<span style="color:#16855a">'+custInr(Math.abs(balance))+' advance</span>':'<span style="color:#16855a">0.00</span>';
     const stat=(label,val,sub,color)=>'<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">'+label+'</div>'+
       '<div style="font-size:19px;font-weight:700;margin-top:3px'+(color?';color:'+color:'')+'">'+val+'</div>'+
       (sub?'<div style="font-size:11.5px;color:var(--slate);margin-top:1px">'+sub+'</div>':'')+'</div>';
