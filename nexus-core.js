@@ -8434,6 +8434,9 @@ const USB_COL4={
   'network':              {header:'Range',        keys:['range']},
   'campaigns':            {header:'Period · Source', keys:['period','source']},
   'hr':                   {header:'Position',     keys:['position','month']},
+  // Monthly Update's two buttons each go two ways, so its column carries the decision rather than
+  // the position - the position is already the Details on those rows.
+  'hr.monthly_update':    {header:'Decision',     keys:['decision','month']},
   'recruitment':          {header:'Position',     keys:['position','department']},
   'procurement':          {header:'Vendor',       keys:['vendor']},
   'procurement.quote_comp':{header:'Category',    keys:['category','replacements']},
@@ -18447,14 +18450,33 @@ function usbTrkMeta(id){ return usbFrom(window._trRows, id,
   function(r){ return {title:r.candidate_name||undefined, position:r.position||undefined}; }); }
 function usbResumeMeta(id){ return usbFrom((typeof RS_ROWS!=='undefined')?RS_ROWS:null, id,
   function(r){ return {title:r.file_name||undefined, position:r.position||undefined}; }); }
-// HR · Monthly Update is keyed by the requisition behind the row, not by an id of its own.
-function usbMuMeta(manpowerId){
+/* HR · Monthly Update is keyed by the requisition behind the row, not by an id of its own.
+   The position's name is the thing the row is ABOUT, so it goes in Details as a bare name. What
+   the click decided - approved or rejected, hiring closed or reopened - is a different fact and
+   gets its own column: one button that can go two ways is unreadable if both ways look identical
+   in the report. Only 'title' is returned, never 'position' as well, or Details would print the
+   same name twice. */
+function usbMuRow(manpowerId){
   try{
     const r=((typeof MU_ROWS!=='undefined'&&MU_ROWS)||[]).find(function(x){ return x.manpower_id===manpowerId; });
-    if(!r) return null;
-    return {title:r.position_title||undefined, position:r.position_title||undefined,
-            month:(typeof MU_CUR!=='undefined'&&MU_CUR)?muMonthLabel(MU_CUR):undefined};
+    return r||null;
   }catch(e){ return null; }
+}
+function usbMuBase(manpowerId){
+  const r=usbMuRow(manpowerId);
+  const out={};
+  if(r&&r.position_title) out.title=String(r.position_title);
+  try{ if(typeof MU_CUR!=='undefined'&&MU_CUR) out.month=muMonthLabel(MU_CUR); }catch(e){}
+  return out;
+}
+function usbMuMeta(manpowerId){
+  const o=usbMuBase(manpowerId);
+  return Object.keys(o).length?o:null;
+}
+function usbMuDecision(manpowerId, decision){
+  const o=usbMuBase(manpowerId);
+  if(decision) o.decision=decision;
+  return Object.keys(o).length?o:null;
 }
 /* Campaign Analytics — every number on this screen is "for this period, from this source", so that
    pair is the context every action here needs. Read from the state rather than the click, because
@@ -18708,8 +18730,14 @@ const USAGE_MAP={
   // muDeleteSel logs directly (see below) after the delete actually succeeds, using the catalog's
   // real key 'delete_rows_or_whole_month' - the string that was here, 'remove_position_from_month',
   // does not exist in erp_feature_catalog and so could never be attributed to anything.
-  muApprove:{key:'hr.monthly_update.approve_reject_requisition', meta:usbMuMeta},
-  muSetHiring:{key:'hr.monthly_update.close_reopen_hiring', meta:usbMuMeta},
+  /* Both of these are one button that goes two ways, and the way it went is the whole point. The
+     position's name lands in Details; the decision gets its own column, so an approval and a
+     rejection of the same requisition can be told apart at a glance instead of reading as the
+     same row twice. */
+  muApprove:{key:'hr.monthly_update.approve_reject_requisition',
+             meta:function(manpowerId, ok){ return usbMuDecision(manpowerId, ok?'Approved':'Rejected'); }},
+  muSetHiring:{key:'hr.monthly_update.close_reopen_hiring',
+             meta:function(manpowerId, open){ return usbMuDecision(manpowerId, open?'Hiring reopened':'Hiring closed'); }},
   muFilter:'hr.monthly_update.search_filter_positions',
   trackerSave:{key:'hr.interview_tracker.add_interview', meta:function(){ try{ var a=$('trFName'),b=$('trFPos'); var nm=a&&a.value.trim(), p=b&&b.value.trim(); return (nm||p)?{title:nm||undefined, position:p||undefined}:null; }catch(e){ return null; } }}, trackerUpdate:{key:'hr.interview_tracker.edit_interview_entry', meta:usbTrkMeta},
   trackerDelete:{key:'hr.interview_tracker.delete_interview_entry_ies', meta:usbTrkMeta},
