@@ -8602,6 +8602,37 @@
       {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
     gcalRenderOnly(); };
 
+  /* Which way the calendar is being read, for the Usability report.
+     Opening the calendar was one of the few actions with nothing at all beside it - the report
+     could say somebody looked at it, never how. That matters here more than most screens, because
+     the four views answer different needs: a team living in Day view wants the agenda panel to be
+     good, a team that only ever opens Month wants the month grid to be. Both look identical in the
+     report today.
+     Read live off the toolbar's own state, and worded the way the toolbar words it, so the report
+     and the screen never disagree. Called from nexus-core through window because this file keeps
+     its state in a closure. */
+  window.gcalUsageMeta=function(){
+    try{
+      // GCAL_DATE survives leaving the Calendar, so without this the Scoreboard and Archive would
+      // each be labelled with whichever month was last open - a wrong answer, not a missing one.
+      if(!/^#\/?tasks\/calendar(\/|$)/.test(location.hash||'')) return null;
+      if(!GCAL_DATE) return null;
+      const d=new Date(GCAL_DATE+'T00:00:00');
+      if(isNaN(d.getTime())) return null;
+      const label={day:'Day', week:'Week', month:'Month', year:'Year'}[GCAL_VIEW]||GCAL_VIEW;
+      let period;
+      if(GCAL_VIEW==='month')      period=d.toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+      else if(GCAL_VIEW==='year')  period=String(d.getFullYear());
+      else if(GCAL_VIEW==='week'){
+        const days=gcalListRange(GCAL_DATE);
+        const sd=new Date(days[0]+'T00:00:00'), ed=new Date(days[days.length-1]+'T00:00:00');
+        period=sd.toLocaleDateString('en-IN',{day:'numeric',month:'short'})+'–'
+              +ed.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+      }
+      else period=d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+      return {view:label+' · '+period};
+    }catch(_e){ return null; }
+  };
   /* ---- toolbar ---- */
   function gcalToolbarHtml(){
     let title='';
@@ -9210,6 +9241,18 @@
 
   /* ---------- MEETINGS ---------- */
   let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
+  /* How many people a meeting action actually serves, for the Usability report.
+     "Scheduled a meeting" is the same row whether two people spoke for ten minutes or fifteen sat
+     through a review, and those are not the same fact about the feature. The attendee list is
+     already loaded on this screen, so the count costs nothing to record.
+     A meeting with nobody invited yet returns null rather than "0 people" - the organiser is
+     mid-way through setting it up, and a zero there reads as a finding when it is just a draft. */
+  function mtgUsageAttendees(id){
+    try{
+      const n=((MTG_ATT&&MTG_ATT[id])||[]).length;
+      return n?{attendees:n+(n===1?' person':' people')}:null;
+    }catch(_e){ return null; }
+  }
   let GOOGLE_CONNECTED=null;
   let MTG_GROUP='all';
   function mtgDurationMinutes(start,end){
@@ -9439,7 +9482,7 @@
     if((m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
       if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Join it now anyway?')) return;
     }
-    try{ usageQueue('tasks.meetings.join_a_meeting','view',{title:m.title}); }catch(_e){}
+    try{ usageQueue('tasks.meetings.join_a_meeting','view',Object.assign({title:m.title}, mtgUsageAttendees(id)||{})); }catch(_e){}
     window.open(m.meet_link,'_blank','noopener');
   };
   function mtgCard(m,weekCount){
@@ -9736,7 +9779,8 @@
        edit and every click the validation above turned back counted as a meeting scheduled.
        editing is the only thing that tells the two apart, and it is only known inside here. */
     try{ usageQueue(editing?'tasks.meetings.edit_a_meeting':'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
-      editing?'update':'create',{title:title}); }catch(_e){}
+      editing?'update':'create',
+      {title:title, attendees:(attendees.length?attendees.length+(attendees.length===1?' person':' people'):undefined)}); }catch(_e){}
     closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
     if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
     await mtgLoadData(); mtgRenderOnly();
@@ -9755,7 +9799,7 @@
     if(m&&attendees.length){
       try{ await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:'meeting_cancel',title:'Meeting cancelled: '+m.title,body:(m.recur_type&&m.recur_type!=='none'?'A recurring':fmtDateY(m.meeting_date))+' meeting was cancelled by the organizer.'};})); }catch(e){}
     }
-    if(!delErr){ try{ usageQueue('tasks.meetings.cancel_a_meeting','delete',{title:m&&m.title}); }catch(_e){} }
+    if(!delErr){ try{ usageQueue('tasks.meetings.cancel_a_meeting','delete',Object.assign({title:m&&m.title}, mtgUsageAttendees(id)||{})); }catch(_e){} }
     closeModal(); toast('Meeting cancelled','ok');
     await mtgLoadData(); mtgRenderOnly();
   };

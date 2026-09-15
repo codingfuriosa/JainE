@@ -8491,7 +8491,11 @@ const USB_COL4={
      keep "Assigned to". */
   'tasks.scoreboard':     {header:'Time spent', keys:['time_spent']},
   'tasks.archive':        {header:'Time spent', keys:['time_spent']},
-  'tasks.calendar':       {header:'Time spent', keys:['time_spent']},
+  // The Calendar is read four different ways and they are not interchangeable - a team living in
+  // Day view needs a good agenda panel, one that only opens Month needs a good month grid, and the
+  // report could not tell them apart. How long they stayed still shows in Details.
+  'tasks.calendar':       {header:'View',       keys:['view']},
+  'tasks.meetings':       {header:'Attendees',  keys:['attendees']},
   'dashboard':            {header:'Time spent', keys:['time_spent']},
   'projects':             {header:'Time spent', keys:['time_spent']},
   'video':                {header:'Time spent', keys:['time_spent']},
@@ -19139,7 +19143,12 @@ function usageDescribeScreen(evs){
 const USAGE_VIEW_META={
   network:    function(){ return usbNetMeta(); },
   campaigns:  function(){ return usbCmpMeta(); },
-  documents:  function(){ return usbDocScope(); }
+  documents:  function(){ return usbDocScope(); },
+  /* Accountability's only screen with a screen-level state worth recording is the Calendar, and it
+     keeps that state in accountability.js's own closure - hence the window hop. It returns null off
+     the Calendar tab, so the Tasks, Workflow, Archive and Scoreboard views are unaffected. */
+  tasks:      function(){ try{ return (window.gcalUsageMeta && window.gcalUsageMeta()) || null; }
+                          catch(e){ return null; } }
 };
 function usagePendingClick(){
   return (USAGE_LAST_EV && (Date.now()-USAGE_LAST_AT)<1500) ? USAGE_LAST_EV : null;
