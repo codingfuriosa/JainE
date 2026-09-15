@@ -13753,12 +13753,13 @@ async function custTabLedger(unit){
   }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
   const seenInvoice={};
+  const pick=(kind,id)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'" onchange="custDocPickChanged()">';
   const refCell=e=>{
-    if(e.rid) return '<span class="rcpt-ref">'+
+    if(e.rid) return '<span class="rcpt-ref">'+pick('receipt',e.rid)+
       esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this receipt" onclick="custViewReceipt('+e.rid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>';
     if(e.iid){
       const first=!seenInvoice[e.iid]; seenInvoice[e.iid]=1;
-      return '<span class="rcpt-ref">'+
+      return '<span class="rcpt-ref">'+(first?pick('invoice',e.iid):'')+
         esc(e.ref||'—')+(first?'<button class="btn btn-sm rcpt-view" title="View / download this invoice" onclick="custViewInvoice('+e.iid+')"><i class="fa-solid fa-file-arrow-down"></i></button>':'')+'</span>';
     }
     return esc(e.ref||'—');
@@ -13775,7 +13776,9 @@ async function custTabLedger(unit){
     '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
     '<span><b>Balance:</b> '+balLabel+'</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
-    '<span style="margin-left:auto"><button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+    '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+    '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
+    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
@@ -13976,28 +13979,31 @@ window.custPrintReceipt=function(){
 
 window.custDocPickChanged=function(){
   const picks=Array.from(document.querySelectorAll('.rcpt-pick'));
-  const n=picks.filter(p=>p.checked).length;
-  const btn=document.getElementById('custRcptBulkBtn');
+  const checked=picks.filter(p=>p.checked);
+  const n=checked.length;
+  // Determine which kind is being selected — lock out the other kind
+  const activeKind=checked.length?checked[0].dataset.kind:null;
+  picks.forEach(p=>{
+    if(activeKind&&p.dataset.kind!==activeKind){p.disabled=true;p.checked=false;}
+    else p.disabled=false;
+  });
+  const btn=document.getElementById('custBulkDlBtn');
+  const lbl=document.getElementById('custBulkDlLabel');
   if(btn){
-    btn.disabled=!n;
-    btn.innerHTML='<i class="fa-solid fa-file-arrow-down"></i> Download selected'+(n?' ('+n+')':'');
+    btn.style.display=n?'':'none';
+    if(lbl) lbl.textContent='Download '+(activeKind==='invoice'?'invoices':'receipts')+' ('+n+')';
   }
-  const all=document.getElementById('custRcptPickAll');
-  if(all){all.checked=n>0&&n===picks.length;all.indeterminate=n>0&&n<picks.length;}
-};
-window.custDocPickAll=function(on){
-  document.querySelectorAll('.rcpt-pick').forEach(p=>{p.checked=!!on;});
-  custDocPickChanged();
 };
 
-// Bulk download: receipts and invoices printed as one document, page-broken so each prints on
-// its own sheet. Customers routinely need a whole year of receipts for a loan file or tax proof.
+// Bulk download: multiple receipts OR multiple invoices as one multi-page PDF.
+// Receipts and invoices are never mixed — the checkbox handler enforces same-type selection.
 window.custDownloadSelectedDocs=async function(){
   const unit=window._custLedgerUnit;
   if(!unit){toast('Open the ledger first','err');return;}
   const checked=Array.from(document.querySelectorAll('.rcpt-pick:checked'));
-  const rcptIds=checked.filter(p=>p.dataset.kind==='receipt').map(p=>Number(p.value)).filter(Boolean);
-  const invIds=checked.filter(p=>p.dataset.kind==='invoice').map(p=>Number(p.value)).filter(Boolean);
+  const kind=checked.length?checked[0].dataset.kind:null;
+  const rcptIds=kind==='receipt'?checked.map(p=>Number(p.value)).filter(Boolean):[];
+  const invIds=kind==='invoice'?checked.map(p=>Number(p.value)).filter(Boolean):[];
   if(!rcptIds.length&&!invIds.length){toast('Tick the documents you want to download','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to download','err');return;}
