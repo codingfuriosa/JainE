@@ -14943,7 +14943,10 @@ window.custModReqDecide=async function(id,decision){
   closeModal();toast(decision==='accepted'?'Accepted':'Rejected','ok');route();
 };
 VIEWS.customer=async function(v,seg){
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  v.innerHTML='<div class="cust-building-loader"><div class="cbl-site">'+
+    '<div class="cbl-crane"><div class="cbl-crane-arm"></div><div class="cbl-crane-hook"></div></div>'+
+    '<div class="cbl-building"><div class="cbl-floor cbl-f1"></div><div class="cbl-floor cbl-f2"></div><div class="cbl-floor cbl-f3"></div><div class="cbl-floor cbl-f4"></div><div class="cbl-floor cbl-f5"></div></div>'+
+    '<div class="cbl-ground"></div></div><div class="cbl-text">Building your experience...</div></div>';
   const tabs=CUST_TABS;
   const ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
