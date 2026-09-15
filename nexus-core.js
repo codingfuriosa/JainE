@@ -8384,7 +8384,7 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   const col4=usbCol4(featureKey);
   const showCol4=!!col4.header, showDetails=!col4.hideDetails;
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
-    +(showDetails?'<th>Details</th>':'')
+    +(showDetails?('<th>'+esc(col4.detailsHeader||'Details')+'</th>'):'')
     +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
     +'</tr></thead><tbody>'
     +rows.map(function(e){
@@ -8452,7 +8452,12 @@ const USB_COL4={
   'documents':            {header:null, keys:[], hideDetails:true},
   'documents.department_library.browse_filter_by_category_folder':
                           {header:'Department · Folder', keys:['department','folder'], hideDetails:true},
-  'transcription':        {header:'Lead · Project',    keys:['lead','project','language']},
+  /* Every call-level feature runs through usbCallMeta, and what it puts in Details is the name on
+     the call record - the customer who was on the phone, not a member of staff. "Details" gave no
+     hint of that; the header now says whose name it is. The lead is dropped from the fourth column
+     because it IS that same name - printing it twice on one row says nothing the first mention
+     didn't already say. */
+  'transcription':        {header:'Project', keys:['project','language'], detailsHeader:'Customer name'},
   'network':              {header:'Range',             keys:['range']},
   /* Every number on these screens is "for this period, from this source", so that pair is the one
      fact each action here needs - and it is the whole fact, which leaves Details with nothing to
@@ -8514,7 +8519,18 @@ const USB_COL4={
   'hr.monthly_update.search_filter_positions':    {header:'Time spent', keys:['time_spent']},
   'hr.monthly_update.delete_rows_or_whole_month': {header:'Time spent', keys:['time_spent']},
   // An upload has no lead yet - the call does not exist until it has run - so it reports the files.
-  'transcription.all_calls.upload_call_recording_s': {header:'Files', keys:['files']},
+  /* The upload row is the one call-level feature whose Details is NOT just a name: it carries the
+     recording, the outcome and the project together, and the recording is as often a file name as
+     a person. So it keeps the plain "Details" header. The column carries the project, which every
+     one of the 517 reconstructed uploads has, plus the file count a live upload adds - naming it
+     "Files" alone had emptied all 517 of them, since a rebuilt row has no file count to give. */
+  'transcription.all_calls.upload_call_recording_s':
+                          {header:'Project · Files', keys:['project','files'], detailsHeader:'Details'},
+  /* Filtering a list is not about one call, so there is no lead and no project to name - that
+     column can never fill here. Details can and now does: since 12 Sep the click records which
+     filter, or which dates. The 13 older rows predate that and are permanently blank; a filter
+     leaves no trace anywhere else, so there is nothing to recover them from. */
+  'transcription.all_calls.filter_calls_by_outcome_or_date': {header:null, keys:[]},
 
   /* --- screens you only look at -------------------------------------------------------------- */
   /* No record and nobody it went to, so the honest column is how much was in front of the person.
