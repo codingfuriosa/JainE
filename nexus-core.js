@@ -8444,7 +8444,14 @@ const USB_COL4={
   /* --- whole modules ------------------------------------------------------------------------ */
   'tasks':                {header:'Assigned to',       keys:['assignee']},
   'inspection':           {header:'Unit',              keys:['unit','category']},
-  'documents':            {header:'Department',        keys:['department','folder']},
+  /* Four of the five Document Library features are named "View ..." and are exactly that - a tab
+     that opens a list of documents. The Department column was never once filled on any of them:
+     the department and folder only exist while somebody is INSIDE a department library picking a
+     folder, which is the fifth feature, not these four. So the module drops both columns, and the
+     one feature where a choice is actually made keeps its own, below. */
+  'documents':            {header:null, keys:[], hideDetails:true},
+  'documents.department_library.browse_filter_by_category_folder':
+                          {header:'Department · Folder', keys:['department','folder'], hideDetails:true},
   'transcription':        {header:'Lead · Project',    keys:['lead','project','language']},
   'network':              {header:'Range',             keys:['range']},
   /* Every number on these screens is "for this period, from this source", so that pair is the one
@@ -18925,7 +18932,15 @@ const USAGE_MAP={
   vtBuToggle:'procurement.vendor_trends.filter_by_business_unit',
   vtOpenVendor:{key:'procurement.vendor_trends.view_vendor_detail_spend_history', meta:usbVendorMeta},
   // Finance / Compliance / Documents / Video — previously untracked
-  docPickCat:{key:'documents.department_library.browse_filter_by_category_folder', meta:usbDocScope},
+  // Same trap as cmpSetSource: docPickCat(c) is what SETS DOC.cat, and the wrapper logs before it
+  // runs - so usbDocScope() would read the folder being left, not the one being opened, and picking
+  // "All" would record whatever folder happened to be open before it. The picked value is the
+  // argument, so take it from there. Nothing wrong is stored yet: this feature has 0 uses so far.
+  docPickCat:{key:'documents.department_library.browse_filter_by_category_folder',
+    meta:function(c){ try{ var d=(typeof DOC!=='undefined')?DOC:null; var out={};
+      if(d&&d.dept) out.department=String(d.dept);
+      out.folder=c?String(c):'All';
+      return out; }catch(e){ return null; } }},
   // Competitors / Organic / Scaling / Playbook — previously untracked
   compShowOnly:{key:'competitors.overview.drill_into_a_single_competitor', meta:usbCompMeta},
   compSetFilter:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
