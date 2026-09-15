@@ -18778,7 +18778,7 @@ const USAGE_MAP={
                if(lang) m.language=String(lang);
                return Object.keys(m).length?m:null; }},
   trCmAdd:{key:'transcription.call_detail.add_delete_a_remark', meta:usbCallMeta}, trCmDelete:{key:'transcription.call_detail.add_delete_a_remark', meta:usbCallMeta},
-  trDownload:{key:'transcription.call_detail.play_download_recording', meta:usbCallMeta},
+  trDownload:{key:'transcription.call_detail.play_download_recording', act:'export', meta:usbCallMeta},
   // Legal — Documents
   docNewFolderSave:{key:'legal.documents.add_folder_sub_category', meta:usbDocScope}, docUploadSave:{key:'legal.documents.upload_document', meta:usbDocScope},
   // docPreview / docDownload are NOT mapped here: the document is fetched inside the function, so
@@ -18788,7 +18788,7 @@ const USAGE_MAP={
   docMoveSaveLegal:{key:'legal.documents.move_document_to_another_category', meta:usbDocScope},
   docReplaceSave:{key:'legal.documents.replace_document_version', meta:usbDocScope}, docPin:{key:'legal.documents.pin_unpin_document', meta:usbDocScope},
   docDeleteConfirm:{key:'legal.documents.delete_document_s', meta:usbDocScope},
-  docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', meta:usbDocScope},
+  docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', act:'delete', meta:usbDocScope},
   // Legal — MIS / Actions / Advocates
   misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
   misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
@@ -18835,10 +18835,12 @@ const USAGE_MAP={
   // trackerFilter is NOT mapped here - it logs directly via usageQueueDebounced.
   trResumeOpen:{key:'hr.interview_tracker.preview_download_candidate_cv', meta:usbTrkMeta},
   rsUploadSave:{key:'hr.resumes.upload_resume', meta:function(){ try{ var el=$('rsFile'); var f=el&&el.files&&el.files[0]; return f?{title:f.name}:null; }catch(e){ return null; } }}, rsPreview:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta},
-  rsDownload:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta}, rsDelete:{key:'hr.resumes.delete_resume_s', meta:usbResumeMeta},
+  rsDownload:{key:'hr.resumes.preview_download_resume', act:'export', meta:usbResumeMeta}, rsDelete:{key:'hr.resumes.delete_resume_s', meta:usbResumeMeta},
   rsBulkDelete:'hr.resumes.delete_resume_s',
-  // the AI resume search is gone - a plain name/file filter replaced it
-  rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
+  // the AI resume search is gone - a plain name/file filter replaced it. rsDownload used to be
+  // listed a second time on the next line, and the later, meta-less copy silently won - downloads
+  // lost their Details for as long as both existed.
+  rsFilter:'hr.resumes.search_resumes',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
   rtSave:{key:'recruitment.tests.add_test', meta:function(){ try{ var a=$('rtFName'); var nm=a&&a.value&&a.value.trim(); return nm?{title:nm}:null; }catch(e){ return null; } }}, rtUpdate:{key:'recruitment.tests.rename_test', meta:usbTestMeta},
@@ -18850,7 +18852,7 @@ const USAGE_MAP={
   recJdOpen:{key:"recruitment.descriptions.preview_download_job_description",
                meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
                  return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
-  recJdDownload:{key:"recruitment.descriptions.preview_download_job_description",
+  recJdDownload:{key:"recruitment.descriptions.preview_download_job_description", act:'export',
                meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
                  return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
   recDeleteSel:'recruitment.descriptions.delete_job_description_s',
@@ -19087,9 +19089,40 @@ function usageViewTick(){
     USAGE_OPEN_VIEW={evs:drawn, at:Date.now()};
   }catch(e){}
 }
-/* The verb, read off the function's own name rather than kept in a second map that could drift out
-   of step with the first. Only ever used to label the event; the feature is what is counted. */
-function usageAction(fn){
+/* The verb the report prints in its Action column. It used to be guessed from the JavaScript
+   FUNCTION'S name, which records how the code happens to be written rather than what the person
+   did - and the two drift apart badly. cmpSetPeriod contains "set", so changing the date filter on
+   a read-only spend chart was filed as "update": somebody who did nothing but look at last month's
+   numbers appeared in the report to have edited something. accSubDel contains no word the list
+   recognised, so deleting a sub-task fell through to "view" - the same mistake pointing the other
+   way, and the more dangerous one, because the report then says nobody deleted anything.
+   "Delete an instance" ended up split 17 "delete" / 7 "view" purely on which code path logged it.
+   The feature key already states the act, in words written for a human to read -
+   "filter_cases_by_hearing_date_range", "delete_an_instance", "switch_data_source". Reading the verb
+   from there is not a guess, and it stays right for features nobody has written yet: a new key
+   named after what it does is labelled correctly the first time it is ever clicked.
+   The old name-based guess survives only as a fallback for the few callers that log a bare module
+   key with no feature part on it. */
+function usageActionFromKey(key){
+  const parts=String(key||'').split('.');
+  if(parts.length<3) return null;
+  // "bulk_" only says how many; the verb is whatever follows it (bulk_mark_all_ok is still a mark).
+  const leaf=parts.slice(2).join('.').toLowerCase().replace(/^bulk_/,'');
+  if(!leaf) return null;
+  if(/^(delete|remove|cancel)_/.test(leaf))                            return 'delete';
+  if(/^(download|export|print|copy)_/.test(leaf))                      return 'export';
+  if(/^(filter|search|sort|ask)_/.test(leaf) || /_search(_|$)/.test(leaf)) return 'search';
+  // only a leading or trailing "upload" is a file going up - "download_upload_ping_readings" is a
+  // network measurement, and matching the word anywhere would have filed reading it as a create.
+  if(/^upload_/.test(leaf) || /_upload$/.test(leaf))                   return 'create';
+  if(/^(view|open|browse|select|switch|drill|preview|see|play|read|expand|show|join|click|refresh|disabled)_/.test(leaf)) return 'view';
+  if(/^(add|create|new|submit|save|raise|start|log|record|attach|post|insert|comment|schedule|refer|generate|email|share|fetch)_/.test(leaf)) return 'create';
+  if(/^(update|edit|rename|move|mark|approve|decline|reject|forward|revert|reopen|toggle|set|assign|delegate|change|complete|replace|pin|restore|retry|receive|reschedule|drag|close|rebuild|ai)_/.test(leaf)) return 'update';
+  return 'view';
+}
+function usageAction(fn, key){
+  const fromKey=usageActionFromKey(key);
+  if(fromKey) return fromKey;
   if(/delete|remove|dismiss/i.test(fn))            return 'delete';
   if(/download|export|print/i.test(fn))            return 'export';
   if(/filter|search/i.test(fn))                    return 'search';
@@ -19330,7 +19363,8 @@ function usageInstall(){
   Object.keys(USAGE_MAP).forEach(function(fn){
     const orig=window[fn];
     if(typeof orig!=='function' || orig.__usageWrapped) return;
-    const mapped=USAGE_MAP[fn], act=usageAction(fn);
+    const mapped=USAGE_MAP[fn];
+
     // Most entries are one function, one feature - a plain string. A few functions do two different
     // things depending on an argument (taskSave(kind) creates a task OR delegates one from the same
     // modal and Save button), and a fixed string would count every delegation as "create task" while
@@ -19342,6 +19376,11 @@ function usageInstall(){
     // what a wrapper can see, and is logged directly at the source instead (see crystallizeAndSwap).
     const isDescriptor=mapped&&typeof mapped==='object'&&('key' in mapped);
     const keySrc=isDescriptor?mapped.key:mapped;
+    // act: is the escape hatch for the few rows where one catalogue entry covers two different
+    // buttons - "Preview / Download document" is one feature but a preview is not an export, and
+    // only the function that was actually called knows which of the two happened.
+    const actOverride=(isDescriptor && mapped.act) ? mapped.act : null;
+
     const metaFn=isDescriptor?mapped.meta:null;
     const wrapped=function(){
       try{
@@ -19349,7 +19388,8 @@ function usageInstall(){
         if(key){
           let meta=null;
           if(metaFn){ try{ meta=metaFn.apply(this, arguments); }catch(_e){} }
-          usageQueue(key, act, meta);
+          usageQueue(key, actOverride || usageAction(fn, key), meta);
+
         }
       }catch(e){}
       return orig.apply(this, arguments);      // called through no matter what happened above
