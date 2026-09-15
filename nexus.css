@@ -981,3 +981,112 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 .rcpt-ref .rcpt-pick{width:14px;height:14px;margin:0;cursor:pointer;accent-color:var(--brand);flex:none}
 .rcpt-pick-all{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);cursor:pointer;user-select:none}
 .rcpt-pick-all input{width:14px;height:14px;margin:0;cursor:pointer;accent-color:var(--brand)}
+
+/* ===== Customer Portal — Premium Statement UI =====
+   All rules scoped under .cust-view-fade so they only affect the customer portal,
+   never the staff-side pages that share mKpis()/mTable(). */
+
+@keyframes custCardRise{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+@keyframes custCountUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes custShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* --- KPI cards: glassmorphism + gradient --- */
+.cust-view-fade .kpis{gap:16px}
+.cust-view-fade .kpi{
+  background:linear-gradient(135deg,rgba(255,255,255,.85) 0%,rgba(239,244,255,.7) 100%);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border:1px solid rgba(29,78,216,.1);
+  border-radius:14px;
+  padding:22px 20px;
+  box-shadow:0 2px 8px rgba(29,78,216,.06),0 1px 3px rgba(0,0,0,.04);
+  position:relative;overflow:hidden;
+  transition:transform .22s cubic-bezier(.25,.46,.45,.94),box-shadow .22s ease;
+  animation:custCardRise .45s cubic-bezier(.22,1,.36,1) both
+}
+.cust-view-fade .kpi:nth-child(1){animation-delay:.05s}
+.cust-view-fade .kpi:nth-child(2){animation-delay:.12s}
+.cust-view-fade .kpi:nth-child(3){animation-delay:.19s}
+.cust-view-fade .kpi:nth-child(4){animation-delay:.26s}
+.cust-view-fade .kpi::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,transparent,rgba(29,78,216,.3),rgba(59,130,246,.5),rgba(29,78,216,.3),transparent);
+  background-size:200% 100%;animation:custShimmer 3s ease-in-out infinite
+}
+.cust-view-fade .kpi::after{
+  content:'';position:absolute;top:-20px;right:-20px;width:80px;height:80px;
+  background:radial-gradient(circle,rgba(29,78,216,.06) 0%,transparent 70%);
+  border-radius:50%;pointer-events:none
+}
+.cust-view-fade .kpi:hover{
+  transform:translateY(-3px);
+  box-shadow:0 8px 24px rgba(29,78,216,.1),0 2px 6px rgba(0,0,0,.05)
+}
+.cust-view-fade .kpi .val{
+  font-size:26px;font-weight:800;letter-spacing:-.6px;
+  background:linear-gradient(135deg,#0f172a 0%,#1e40af 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  animation:custCountUp .5s cubic-bezier(.22,1,.36,1) both
+}
+.cust-view-fade .kpi:nth-child(1) .val{animation-delay:.2s}
+.cust-view-fade .kpi:nth-child(2) .val{animation-delay:.3s}
+.cust-view-fade .kpi:nth-child(3) .val{animation-delay:.4s}
+.cust-view-fade .kpi:nth-child(4) .val{animation-delay:.5s}
+.cust-view-fade .kpi .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--slate)}
+
+/* --- Section titles: gradient accent bar --- */
+.cust-view-fade .sec-title{
+  font-size:15px;font-weight:800;letter-spacing:-.2px;color:#0f172a;
+  display:flex;align-items:center;gap:10px;
+  position:relative;padding-left:14px
+}
+.cust-view-fade .sec-title::before{
+  content:'';position:absolute;left:0;top:2px;bottom:2px;width:3.5px;
+  background:linear-gradient(180deg,#1d4ed8,#3b82f6);border-radius:2px
+}
+
+/* --- Tables: premium treatment --- */
+.cust-view-fade .qc-table-card{
+  border:1px solid rgba(29,78,216,.08);
+  border-radius:14px;
+  box-shadow:0 2px 8px rgba(29,78,216,.04),0 1px 2px rgba(0,0,0,.03);
+  overflow:hidden;
+  animation:custCardRise .5s cubic-bezier(.22,1,.36,1) both;
+  animation-delay:.15s
+}
+.cust-view-fade .tbl th{
+  background:linear-gradient(135deg,#f8fafc 0%,#eff4ff 100%);
+  font-size:10.5px;font-weight:700;letter-spacing:.05em;color:var(--slate);
+  padding:12px 14px;border-bottom:2px solid rgba(29,78,216,.1)
+}
+.cust-view-fade .tbl td{padding:12px 14px;border-bottom:1px solid rgba(226,232,240,.5);transition:background .12s ease}
+.cust-view-fade .tbl tbody tr:nth-child(even) td{background:rgba(248,250,252,.6)}
+.cust-view-fade .tbl tbody tr:hover td{background:rgba(239,244,255,.5)}
+.cust-view-fade .tbl tbody tr:last-child td{border-bottom:0}
+
+/* --- Buttons: premium styling --- */
+.cust-view-fade .btn{
+  border-radius:10px;border:1px solid rgba(29,78,216,.15);
+  background:linear-gradient(135deg,#fff 0%,#f8fafc 100%);
+  box-shadow:0 1px 3px rgba(29,78,216,.06);
+  transition:transform .15s ease,box-shadow .15s ease,background .15s ease
+}
+.cust-view-fade .btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(29,78,216,.1);
+  background:linear-gradient(135deg,#eff4ff 0%,#dbeafe 100%)
+}
+
+/* --- Mobile responsive --- */
+@media(max-width:640px){
+  .cust-view-fade .kpi{padding:16px 14px;border-radius:12px}
+  .cust-view-fade .kpi .val{font-size:22px}
+  .cust-view-fade .kpi::after{width:50px;height:50px;top:-10px;right:-10px}
+  .cust-view-fade .qc-table-card{border-radius:12px}
+  .cust-view-fade .tbl th,.cust-view-fade .tbl td{padding:10px 11px}
+  .cust-view-fade .sec-title{padding-left:12px}
+}
+@media(max-width:480px){
+  .cust-view-fade .kpis{grid-template-columns:1fr !important;gap:12px}
+  .cust-view-fade .kpi{padding:18px 16px}
+}

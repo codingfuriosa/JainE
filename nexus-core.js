@@ -14983,6 +14983,27 @@ VIEWS.customer=async function(v,seg){
     banner+
     custUnitPicker(data.units,unit.id)+
     '<div style="margin-top:14px">'+body+'</div></div>';
+  // Animated count-up on KPI values (Statement tab only)
+  if(ti===0){requestAnimationFrame(function(){
+    v.querySelectorAll('.cust-view-fade .kpi .val').forEach(function(el){
+      var raw=el.textContent.trim();
+      var m=raw.match(/[\d,.]+/);
+      if(!m)return;
+      var target=parseFloat(m[0].replace(/,/g,''));
+      if(isNaN(target)||target===0)return;
+      var prefix=raw.slice(0,raw.indexOf(m[0]));
+      var suffix=raw.slice(raw.indexOf(m[0])+m[0].length);
+      var duration=700,start=performance.now();
+      el.textContent=prefix+'0'+suffix;
+      function tick(now){
+        var t=Math.min((now-start)/duration,1);
+        var ease=1-Math.pow(1-t,3);
+        el.textContent=prefix+Math.round(target*ease).toLocaleString('en-IN')+suffix;
+        if(t<1)requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+  });}
 };
 VIEWS.supplier=function(v,seg){
   setCrumb(['Stakeholder Portals','Supplier Portal']);
