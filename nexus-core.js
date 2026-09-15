@@ -8517,7 +8517,12 @@ const USB_COL4={
   'scaling':              {header:'Time spent', keys:['time_spent']},
   'gtd':                  {header:'Time spent', keys:['time_spent']},
   'compliance':           {header:'Time spent', keys:['time_spent']},
-  'maintenance':          {header:'Time spent', keys:['time_spent']},
+  /* All four Assets & Maintenance tabs open a LIST - there is no feature that opens one asset or
+     one ticket, and the screen has no clickable row at all, so there is no name to record. Nor is
+     the screen reading the asset tables yet: it renders hardcoded rows, which is why it claims 311
+     assets while ast_assets holds 40. Until a row can be opened, "viewed the register" is the whole
+     truth and When and Action carry it. */
+  'maintenance':          {header:null, keys:[], hideDetails:true},
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
   'finance':              {header:'Time spent', keys:['time_spent']}
