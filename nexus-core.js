@@ -8447,7 +8447,10 @@ const USB_COL4={
   'documents':            {header:'Department',        keys:['department','folder']},
   'transcription':        {header:'Lead · Project',    keys:['lead','project','language']},
   'network':              {header:'Range',             keys:['range']},
-  'campaigns':            {header:'Period · Source',   keys:['period','source']},
+  /* Every number on these screens is "for this period, from this source", so that pair is the one
+     fact each action here needs - and it is the whole fact, which leaves Details with nothing to
+     add. Three columns, none of them padding. */
+  'campaigns':            {header:'Period · Source',   keys:['period','source'], hideDetails:true},
   'recruitment':          {header:'Position',          keys:['position','department']},
   'procurement':          {header:'Vendor',            keys:['vendor']},
   'postsales':            {header:'Status',            keys:['status','replacements']},
@@ -18879,9 +18882,19 @@ const USAGE_MAP={
   // inspOpenPhoto only OPENS a photo for viewing - it was counted as adding one. The real
   // add happens on the submit, logged at its own source.
   // Campaign Analytics
-  cmpSetSource:{key:'campaigns.overview.switch_data_source_meta_google_both', meta:usbCmpMeta},
-  cmpSetPeriod:{key:'campaigns.overview.select_or_customize_date_range', meta:usbCmpMeta},
-  cmpSetCustom:{key:'campaigns.overview.select_or_customize_date_range', meta:usbCmpMeta},
+  /* These three read the choice from the CLICK, not from the state. The wrapper logs before the
+     wrapped function runs, so usbCmpMeta - which reads CMP_SOURCE and CMP_PERIOD - was reporting
+     what the person switched AWAY from, not what they switched to. "Switched to Meta" recorded as
+     Google is a wrong answer, and a quiet one. */
+  cmpSetSource:{key:'campaigns.overview.switch_data_source_meta_google_both',
+    meta:function(s){ const m=usbCmpMeta()||{}; if(s) m.source=String(s); return Object.keys(m).length?m:null; }},
+  cmpSetPeriod:{key:'campaigns.overview.select_or_customize_date_range',
+    meta:function(p){ const m=usbCmpMeta()||{}; if(p) m.period=String(p).replace(/_/g,' '); return Object.keys(m).length?m:null; }},
+  cmpSetCustom:{key:'campaigns.overview.select_or_customize_date_range',
+    meta:function(){ const m=usbCmpMeta()||{};
+      const a=$('cmpSince'), b=$('cmpUntil');
+      if(a&&a.value&&b&&b.value) m.period=a.value+' → '+b.value;
+      return Object.keys(m).length?m:null; }},
   // cmpShowProject opens the same project drill-down modal from two places that are two distinct
   // catalog features - the Overview tab's chart bars and the By Project tab's table rows. The By
   // Project row's onclick now passes 'by_project' as a second argument so this resolver can tell
