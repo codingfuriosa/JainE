@@ -13637,7 +13637,32 @@ async function custTabOverview(data,unit){
     mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
 
   window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
+  const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
+  const basicAmt=Number(unitCostItem?.amount||0);
+  const sba=Number(unit.super_built_up_area_sqft||0);
+  const rate=sba?Math.round(basicAmt/sba):null;
+  const myUnitSection='<div class="sec-title" style="margin:18px 0 8px">My unit</div>'+mTable(
+    ['Unit','Project','Type','Block/Tower','Super Built-Up','Built-Up','Carpet','Rate','Booking date','Status','Total cost'],
+    [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
+      esc(unit.tower||'—'),
+      unit.super_built_up_area_sqft?unit.super_built_up_area_sqft+' sqft':'—',
+      unit.built_up_area_sqft?unit.built_up_area_sqft+' sqft':'—',
+      unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
+      rate?custInr(rate)+'/sqft':'—',
+      c?fmtDate(c.booking_date):'—',
+      unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
+      custInr(propertyValue)]]);
+  const profileSection='<div class="sec-title" style="margin:18px 0 8px">Profile</div>'+
+    (c?'<div class="card card-pad" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 24px;font-size:13.5px">'+
+      '<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Name</div><b>'+esc(c.contact_name||'—')+'</b></div>'+
+      (c.co_applicant_name?'<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Co-Applicant</div><b>'+esc(c.co_applicant_name)+'</b></div>':'')+
+      '<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Phone</div>'+esc(c.contact_phone||'—')+'</div>'+
+      '<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Email</div>'+esc(c.contact_email||'—')+'</div>'+
+      '<div style="grid-column:1/-1"><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Correspondence address</div>'+esc(c.contact_address||'—')+'</div>'+
+      '</div>'
+      :'<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
   return dueBanner+mKpis(kpis)+
+    myUnitSection+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
@@ -13646,33 +13671,7 @@ async function custTabOverview(data,unit){
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
-    (function(){
-      // Rate = the Unit Cost line's basic amount divided by Super Built-Up area, matching
-      // Farvision's own Property Details table (Rate x Super Built-Up = Unit Cost amount).
-      // Computed live from cost_sheet_items rather than stored anywhere, since we don't keep a
-      // separate rate column.
-      const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
-      const basicAmt=Number(unitCostItem?.amount||0);
-      const sba=Number(unit.super_built_up_area_sqft||0);
-      const rate=sba?Math.round(basicAmt/sba):null;
-      return '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(
-        ['Unit','Project','Type','Block/Tower','Super Built-Up','Built-Up','Carpet','Rate','Status','Total cost'],
-        [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
-          esc(unit.tower||'—'),
-          unit.super_built_up_area_sqft?unit.super_built_up_area_sqft+' sqft':'—',
-          unit.built_up_area_sqft?unit.built_up_area_sqft+' sqft':'—',
-          unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
-          rate?custInr(rate)+'/sqft':'—',
-          // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
-          // purchase - a status badge that says so on every single statement is just noise. Worth
-          // flagging only once something has actually gone wrong with the booking.
-          unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
-          custInr(propertyValue)]]);
-    })()+
-    '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
-    (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
-      [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
-      '<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
+    profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
 // synchronously, before anything is awaited, or the popup blocker eats it) - the browser's own
