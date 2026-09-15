@@ -13538,6 +13538,11 @@ function custUnitPicker(units,selUnitId){
   return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
     units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
 }
+// Farvision keeps cancelled demands in the Invoice Register with Status=Cancel (a quarter of the
+// rows), and the cost sheet carries an offsetting negative against them. Showing them to a
+// customer would restate demands that were withdrawn, so every customer-facing read excludes
+// them - and a cancelled invoice must never be downloadable as a tax document.
+const CUST_INVOICE_CANCELLED='Cancel';
 // Statement of Account - modelled on Farvision's own customer portal (a Farvision export a
 // customer sent us as a reference), which frames the landing tab as a bank-statement-style
 // summary rather than a raw ledger: property value / paid-to-date / demand due / remaining, a
@@ -13547,7 +13552,7 @@ function custUnitPicker(units,selUnitId){
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
     sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
@@ -13706,7 +13711,7 @@ async function custTabLedger(unit){
     sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
     sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('invoices').select('document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).order('document_date')
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
   ]);
   const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
   const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
@@ -13730,7 +13735,7 @@ async function custTabLedger(unit){
     });
     order.forEach(s=>{
       const amt=bySchedule[s];
-      if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,desc:s,debit:amt,credit:0});
+      if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,iid:inv.id,desc:s,debit:amt,credit:0});
     });
   });
   receipts.forEach(r=>{
@@ -13748,10 +13753,31 @@ async function custTabLedger(unit){
   }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
   // A money receipt row carries its own "view / download" control, so a customer who wants proof
-  // of a payment gets it from the ledger line itself rather than hunting for it elsewhere.
-  const refCell=e=>e.rid
-    ? '<span class="rcpt-ref">'+esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this receipt" onclick="custViewReceipt('+e.rid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>'
-    : esc(e.ref||'—');
+  // of a payment gets it from the ledger line itself rather than hunting for it elsewhere. The
+  // tickbox alongside it feeds the toolbar's bulk download, for the common case of needing a
+  // year's receipts together (loan file, tax proof) rather than one at a time.
+  // One invoice occupies several ledger rows (one per schedule), so its tickbox belongs on the
+  // first of them only - otherwise the same document offers itself for selection repeatedly.
+  const invoiceCount=new Set(entries.filter(e=>e.iid).map(e=>e.iid)).size;
+  const allowBulk=(receipts.length+invoiceCount)>1;
+  const seenInvoice={};
+  const pick=(kind,id,label)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'"'+
+    ' onchange="custDocPickChanged()" aria-label="Select '+esc(label)+' for download">';
+  const refCell=e=>{
+    if(e.rid) return '<span class="rcpt-ref">'+
+      (allowBulk?pick('receipt',e.rid,'receipt '+(e.ref||'')):'')+
+      esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this receipt" onclick="custViewReceipt('+e.rid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>';
+    // An invoice row offers the same control, but opens a document that can be printed either as
+    // the tax invoice or as a demand letter - the two formats Farvision's own Document Print
+    // dialog offers for a selected invoice.
+    if(e.iid){
+      const first=!seenInvoice[e.iid]; seenInvoice[e.iid]=1;
+      return '<span class="rcpt-ref">'+
+        (allowBulk?(first?pick('invoice',e.iid,'invoice '+(e.ref||'')):'<span class="rcpt-pick-gap"></span>'):'')+
+        esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this invoice or demand" onclick="custViewInvoice('+e.iid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>';
+    }
+    return esc(e.ref||'—');
+  };
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
     return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
@@ -13759,13 +13785,17 @@ async function custTabLedger(unit){
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
   window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
   const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
-  const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:13.5px">'+
+  const bulkTools=allowBulk?
+    '<label class="rcpt-pick-all"><input type="checkbox" id="custRcptPickAll" onchange="custDocPickAll(this.checked)">Select all</label>'+
+    '<button class="btn" id="custRcptBulkBtn" disabled onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> Download selected</button>':'';
+  const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
     '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
     '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
     '<span><b>Balance:</b> '+balLabel+'</span>'+
-    '<span style="color:var(--slate)">'+entries.length+' entries</span></div>';
-  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows)+
-    '<div style="margin-top:14px"><button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
+    '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
+    '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+bulkTools+
+    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
   const unit=window._custLedgerUnit,entries=window._custLedgerEntries,totalBilled=window._custLedgerTotalBilled||0,netReceived=window._custLedgerNetReceived||0;
@@ -13913,7 +13943,14 @@ const CUST_RECEIPT_CSS=
   '.rcpt-tbl thead th{background:#f8fafc;color:#475569;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}'+
   '.rcpt-tbl .amt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}'+
   '.rcpt-tbl tfoot td{font-weight:700;background:#f8fafc}'+
+  '.rcpt-tbl tfoot td:first-child{text-align:right}'+
+  '.rcpt-tbl tfoot tr.rcpt-strong td{background:#f1f5f9}'+
   '.rcpt-tbl tfoot .rcpt-words{font-weight:600;text-align:left;background:#fff}'+
+  // Demand-letter terms: small print, and it must not be split mid-clause across printed pages.
+  '.rcpt-terms{margin-top:18px;font-size:11px;line-height:1.55;color:#334155;break-inside:avoid}'+
+  '.rcpt-terms h4{margin:12px 0 4px;font-size:11.5px;font-weight:700;color:#0f172a}'+
+  '.rcpt-terms p{margin:0 0 6px;text-align:justify}'+
+  '.rcpt-terms ul{margin:0 0 6px;padding-left:16px}.rcpt-terms li{margin-bottom:3px}'+
   '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
   '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
   // On a phone the two header columns cannot sit side by side without clipping the right one.
@@ -13955,11 +13992,385 @@ window.custPrintReceipt=function(){
   catch(_e){toast('Could not build the receipt','err');return;}
   setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
 };
+
+window.custDocPickChanged=function(){
+  const picks=Array.from(document.querySelectorAll('.rcpt-pick'));
+  const n=picks.filter(p=>p.checked).length;
+  const btn=document.getElementById('custRcptBulkBtn');
+  if(btn){
+    btn.disabled=!n;
+    btn.innerHTML='<i class="fa-solid fa-file-arrow-down"></i> Download selected'+(n?' ('+n+')':'');
+  }
+  const all=document.getElementById('custRcptPickAll');
+  if(all){all.checked=n>0&&n===picks.length;all.indeterminate=n>0&&n<picks.length;}
+};
+window.custDocPickAll=function(on){
+  document.querySelectorAll('.rcpt-pick').forEach(p=>{p.checked=!!on;});
+  custDocPickChanged();
+};
+
+// Bulk download: receipts and invoices printed as one document, page-broken so each prints on
+// its own sheet. Customers routinely need a whole year of receipts for a loan file or tax proof.
+window.custDownloadSelectedDocs=async function(){
+  const unit=window._custLedgerUnit;
+  if(!unit){toast('Open the ledger first','err');return;}
+  const checked=Array.from(document.querySelectorAll('.rcpt-pick:checked'));
+  const rcptIds=checked.filter(p=>p.dataset.kind==='receipt').map(p=>Number(p.value)).filter(Boolean);
+  const invIds=checked.filter(p=>p.dataset.kind==='invoice').map(p=>Number(p.value)).filter(Boolean);
+  if(!rcptIds.length&&!invIds.length){toast('Tick the documents you want to download','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to download','err');return;}
+  const total=rcptIds.length+invIds.length;
+  try{w.document.write('<!DOCTYPE html><title>Documents</title><body style="font:14px Inter,system-ui,sans-serif;margin:26px;color:#475569">Preparing '+total+' document'+(total===1?'':'s')+'…');}catch(_e){}
+  const [{data:cts},{data:csi},{data:snap}]=await Promise.all([
+    sb.schema('cust').from('farvision_contacts').select('*').eq('unit_id',unit.id).eq('is_current',true).limit(1),
+    sb.schema('cust').from('cost_sheet_items').select('component,amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('outstanding_snapshot').select('late_fee_accrued').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
+  ]);
+  const contact=(cts&&cts[0])||null;
+  const pages=[];
+  // Receipts
+  if(rcptIds.length){
+    const [{data:rcpts},{data:rItems}]=await Promise.all([
+      sb.schema('cust').from('money_receipts').select('*').in('id',rcptIds).eq('unit_id',unit.id).eq('is_current',true),
+      sb.schema('cust').from('receipt_items').select('*').in('receipt_id',rcptIds).order('sort_order')
+    ]);
+    const byReceipt={};
+    (rItems||[]).forEach(it=>{(byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(it);});
+    const rank={}; rcptIds.forEach((id,i)=>{rank[id]=i;});
+    (rcpts||[]).slice().sort((a,b)=>rank[a.id]-rank[b.id]).forEach(r=>{
+      pages.push(custReceiptDocHtml(r,byReceipt[r.id]||[],unit,contact,true));
+    });
+  }
+  // Invoices (as Tax Invoice format)
+  if(invIds.length){
+    const [{data:invs},{data:allInv},{data:rcpts2}]=await Promise.all([
+      sb.schema('cust').from('invoices').select('*').in('id',invIds).eq('unit_id',unit.id).eq('is_current',true),
+      sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_items(schedule,revenue_head,amount,tax,net_amount,sort_order)')
+        .eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('due_date'),
+      sb.schema('cust').from('money_receipts').select('id,receipt_date').eq('unit_id',unit.id).eq('is_current',true)
+    ]);
+    const rids2=(rcpts2||[]).map(r=>r.id).filter(Boolean);
+    const {data:alloc2}=rids2.length
+      ? await sb.schema('cust').from('receipt_items').select('against_demand_no,schedule,revenue_head,amount,line_type,particulars,receipt_id').in('receipt_id',rids2)
+      : {data:[]};
+    const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
+    const sba=Number(unit.super_built_up_area_sqft||0);
+    const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
+    const rate=sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null;
+    const lateFee=Number((snap&&snap.late_fee_accrued)||0);
+    (invs||[]).forEach(inv=>{
+      const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
+      const items=its&&its.invoice_items?its.invoice_items:[];
+      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates);
+      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
+    });
+  }
+  if(!pages.length){try{w.close();}catch(_e){} toast('No documents could be loaded','err');return;}
+  const fileName='Documents-'+String(unit.unit_code||'').replace(/[^A-Za-z0-9]+/g,'-')+'-'+pages.length;
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(fileName)+'</title><style>'+
+    'body{margin:26px;font-family:Inter,system-ui,sans-serif}'+CUST_RECEIPT_CSS+
+    '.rcpt-tbl{min-width:0}.rcpt-tblwrap{overflow:visible}'+
+    '.rcpt-page+.rcpt-page{margin-top:34px;border-top:1px dashed #cbd5e1;padding-top:34px}'+
+    '@media print{body{margin:12px}'+
+    '.rcpt-page{page-break-after:always;break-after:page}'+
+    '.rcpt-page:last-child{page-break-after:auto;break-after:auto}'+
+    '.rcpt-page+.rcpt-page{margin-top:0;border-top:0;padding-top:0}}'+
+    '</style></head><body>'+
+    pages.map(p=>'<div class="rcpt-page">'+p+'</div>').join('')+
+    '</body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the documents','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},450);
+};
+
+/* --------------------------- Tax Invoice / Demand Letter ---------------------------
+   One invoice, two printable formats - the same choice Farvision's Document Print dialog
+   offers. Both are built from cust.invoices + invoice_items, verified line for line against
+   Farvision's own PDF exports for OHINV/0008725-26.
+
+   The GST column is deliberately Amount / GST / Total rather than Farvision's HSN +
+   CGST/SGST + taxable-value breakup: we hold a single tax figure per line, and the taxable
+   value cannot be derived from it reliably - Unit Cost is taxed at 7.5% on two-thirds of
+   value (land abatement) while Legal Documentation is 18% on the full value. Reconstructing
+   the split lands ~0.07% off the filed GSTR1 figure, which is not good enough for a tax
+   document, so it is omitted rather than guessed. */
+const CUST_INVOICE_FORMATS={invoice:'Tax Invoice',demand:'Demand Letter'};
+
+// Reproduced from Farvision's own demand letter template, which is the wording the company
+// already sends - not drafted here. The bank-details block that follows it on the Farvision
+// printout is blank at source, so it is omitted rather than printed as empty labels.
+const CUST_DEMAND_TERMS=[
+  'The above mentioned total due amount is excluding interest for late payment. You are therefore requested to remit/pay the above mentioned amount immediately to avoid further interest accrual @ 18 % p.a. However, interest on previous outstanding shall be payable till the date of payment. Please ignore this demand letter, if already paid. Demand letter does not mean revocation of termination. If you have been issued termination letter, kindly contact us immediately at 033-40319999'
+];
+const CUST_DEMAND_NOTES=[
+  'Jain Group is committed towards transparency, customer satisfaction and highest ethics. Please mail assistant.md@thejaingroup.com or call 9330026077, if any Jain Group employee requests cash, gifts or any benefits whatsover.',
+  'Bank charges (if any) will also be payable plus GST.',
+  'Interest @ 18% p.a. will be charged as applicable.',
+  'If your accounts do not tally with our records, please contact us immediately.',
+  'Please mention Customer Name, Customer Code, Project Name & Payment details behind your cheque / DD.',
+  'Status of Project Completion ( As per Demand).'
+];
+
+// ctx: {inv, items, prevDues, plan, lateFee, unit, contact, rate}
+//   inv/items - the selected invoice, for the Tax Invoice format
+//   plan      - every non-cancelled billed line for the unit with what has been paid against it,
+//               for the Demand format, which Farvision issues over the whole payment plan rather
+//               than a single invoice
+function custInvoiceDocHtml(ctx,fmt,forPrint){
+  const inv=ctx.inv||{}, unit=ctx.unit||{}, c=ctx.contact||{};
+  const p=(unit.projects&&unit.projects.name)||'';
+  const demand=fmt==='demand';
+  const field=(l,v)=>'<div class="rcpt-f"><span>'+esc(l)+'</span><b>'+(v?esc(v):'—')+'</b></div>';
+  // Same derivation the money receipt uses: the category letter is the tail of the unit code.
+  const category=String(unit.unit_code||'').replace(/^\d+/,'').trim().toUpperCase();
+  const sba=Number(unit.super_built_up_area_sqft||0);
+  // Farvision labels the co-applicant differently on the two documents, and prints the line only
+  // when there is one - 95 of our 145 bookings have one, so an always-present empty row would be
+  // wrong on a third of them.
+  const left=[
+    c.co_applicant_name?field(demand?'Co Applicant(S)':'Co Applicant Name',c.co_applicant_name):'',
+    field('Email',c.contact_email),
+    field('Contact No',c.contact_phone),
+    field('GSTIN',inv.gstin),
+    field(demand?'Application Code No.':'Booking No',unit.booking_no),
+    field('Customer No',unit.application_no)
+  ].join('');
+  // Farvision dates a demand letter to the invoice it was raised against while reporting paid
+  // amounts as they stand now - confirmed against its own export for OHINV/0008725-26, dated
+  // 05/05/2025 yet carrying today's payment position. Mirrored here rather than "corrected".
+  const right=(demand?[
+    field('Dated',inv.document_date?fmtDate(inv.document_date):fmtDate(new Date())),
+    field('Demand Against',inv.document_no),
+    field('Project',p),
+    field('Category',category),
+    field('Unit No',unit.unit_code),
+    sba?field('Total Sale Area',sba+' SQ. FT.'):'',
+    ctx.rate?field('Rate',ctx.rate+' per SQ.FT.'):''
+  ]:[
+    field('Invoice No',inv.document_no),
+    field('Invoice Date',inv.document_date?fmtDate(inv.document_date):''),
+    field('Due Date',inv.due_date?fmtDate(inv.due_date):''),
+    field('Project',p),
+    field('Category',category),
+    field('Unit No',unit.unit_code),
+    field('Invoice Type',inv.invoice_type)
+  ]).join('');
+
+  let head,rowsHtml,foot,tail='';
+  if(demand){
+    head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
+      '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
+    let due=0,paid=0;
+    rowsHtml=(ctx.plan||[]).map(r=>{
+      due+=r.due; paid+=r.paid;
+      return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
+        '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
+        '<td class="amt">'+custInr(r.due)+'</td><td class="amt">'+custInr(r.paid)+'</td>'+
+        '<td class="amt">'+custInr(r.due-r.paid)+'</td></tr>';
+    }).join('');
+    // On-account receipts are rows in the table above, so the totals already account for them.
+    const payable=due-paid;
+    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+custInr(due)+'</td>'+
+      '<td class="amt">'+custInr(paid)+'</td><td class="amt">'+custInr(payable)+'</td></tr>'+
+      '<tr><td colspan="6" class="rcpt-words">Amount payable in words : '+esc(custAmountInWords(Math.max(0,payable)))+'</td></tr>';
+    tail='<div class="rcpt-terms">'+
+      '<h4>Terms &amp; Condition:</h4>'+
+      CUST_DEMAND_TERMS.map(t=>'<p>'+esc(t)+'</p>').join('')+
+      '<h4>Note :</h4><ul>'+CUST_DEMAND_NOTES.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul>'+
+      '<p>Expecting your prompt action in this regard, and assuring you of our best services always, we remain.</p>'+
+      '<p>Yours faithfully,</p></div>';
+  }else{
+    head='<th>Sl. #</th><th>Schedule Name</th><th>Revenue Name</th>'+
+      '<th class="amt">Amount</th><th class="amt">GST</th><th class="amt">Total Amt</th>';
+    let amt=0,tax=0,net=0;
+    rowsHtml=(ctx.items||[]).map((it,i)=>{
+      amt+=Number(it.amount||0); tax+=Number(it.tax||0); net+=Number(it.net_amount||0);
+      return '<tr><td>'+(i+1)+'</td><td>'+esc(it.schedule||'—')+'</td><td>'+esc(it.revenue_head||'—')+'</td>'+
+        '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
+        '<td class="amt">'+custInr(it.net_amount||0)+'</td></tr>';
+    }).join('');
+    // Previous dues is what is still unpaid on invoices raised before this one. It can only be
+    // stated as a single figure: receipts allocate against the net of a line, never split across
+    // its basic and tax, so an amount/GST breakup of a part-paid line would be invented.
+    const prev=Number(ctx.prevDues||0);
+    const lateFee=Number(ctx.lateFee||0);
+    const sumRow=(label,a,t,n,strong)=>'<tr'+(strong?' class="rcpt-strong"':'')+'><td colspan="3">'+esc(label)+'</td>'+
+      '<td class="amt">'+a+'</td><td class="amt">'+t+'</td><td class="amt">'+n+'</td></tr>';
+    // Previous dues and late fees carry no basic/GST split of their own, so a running total can
+    // only show those two columns while both are nil - which is the normal case, and then the
+    // running totals simply repeat the invoice's own figures, exactly as Farvision prints them.
+    // Once either is non-nil the split is genuinely unknown and the column shows a dash rather
+    // than a made-up number.
+    const carry=(v,blocked)=>blocked?'—':custInr(v);
+    foot=
+      sumRow('Total Invoice Amount :',custInr(amt),custInr(tax),custInr(net))+
+      sumRow('Previous dues :',carry(0,prev),carry(0,prev),custInr(prev))+
+      sumRow('Total Payable :',carry(amt,prev),carry(tax,prev),custInr(net+prev),true)+
+      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),custInr(lateFee))+
+      sumRow('Total payable with interest :',carry(amt,prev||lateFee),carry(tax,prev||lateFee),custInr(net+prev+lateFee),true)+
+      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(net+prev+lateFee))+'</td></tr>';
+  }
+  return ''+
+    '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
+      '<div class="rcpt-issuer"><h2>'+esc(CUST_RECEIPT_ISSUER.name)+'</h2>'+
+        '<div class="rcpt-addr">'+esc(CUST_RECEIPT_ISSUER.address)+'</div>'+
+        '<div class="rcpt-addr">GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+' &nbsp;·&nbsp; PAN : '+esc(CUST_RECEIPT_ISSUER.pan)+'</div>'+
+      '</div>'+
+      '<div class="rcpt-title">'+(demand?'DEMAND LETTER':'TAX INVOICE')+'</div>'+
+      '<div class="rcpt-grid">'+
+        '<div><div class="rcpt-name">'+esc(c.contact_name||'')+'</div>'+
+          (c.contact_address?'<div class="rcpt-addr">'+esc(c.contact_address)+'</div>':'')+left+'</div>'+
+        '<div>'+right+'</div>'+
+      '</div>'+
+      (demand?'<div class="rcpt-remarks">Dear Sir / Madam,<br>We wish to inform you that your following installments are falling due on the dates indicated against them.</div>':'')+
+      '<div class="rcpt-tblwrap"><table class="rcpt-tbl"><thead><tr>'+head+'</tr></thead>'+
+      '<tbody>'+(rowsHtml||'<tr><td colspan="6" style="text-align:center;color:#64748b">No charge lines recorded.</td></tr>')+'</tbody>'+
+      '<tfoot>'+foot+'</tfoot></table></div>'+
+      tail+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
+      '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
+    '</div>';
+}
+
+// Every billed line for the unit with what has been paid against it, plus what was still unpaid
+// on invoices raised before `beforeDate`. Receipts are matched the way Farvision allocates them:
+// against the invoice number, then the schedule and revenue head within it. Kept pure so it can
+// be checked against the ledger and against Farvision's own demand letter without a round trip.
+function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
+  const SEP=String.fromCharCode(31);
+  const key=(doc,sch,head)=>[String(doc||''),String(sch||''),String(head||'')].join(SEP);
+  // An "On Account" receipt line is money received against the unit but not applied to any
+  // particular demand, so it has no invoice number to match on. It still belongs in the table as
+  // a payment in its own right - dated by the receipt it came in on, which is what our data
+  // records - rather than being spread across plan lines by guesswork or bolted on as a footer
+  // adjustment. Nothing owes against it, so it carries no Amount Due.
+  const paidByKey={}; let onAccount=0; const onAccountRows=[];
+  (alloc||[]).forEach(a=>{
+    const amt=Number(a.amount||0);
+    if(a.line_type==='on_account'||!a.against_demand_no){
+      onAccount+=amt;
+      onAccountRows.push({dueDate:(receiptDates&&receiptDates[a.receipt_id])||null,
+        schedule:a.particulars||'On Account',head:'',due:0,paid:amt});
+      return;
+    }
+    const k=key(a.against_demand_no,a.schedule,a.revenue_head);
+    paidByKey[k]=(paidByKey[k]||0)+amt;
+  });
+  const plan=[]; let prevDues=0;
+  (allInv||[]).forEach(iv=>{
+    (iv.invoice_items||[]).slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(it=>{
+      const due=Number(it.net_amount||0);
+      const paid=Math.min(due,Number(paidByKey[key(iv.document_no,it.schedule,it.revenue_head)]||0));
+      plan.push({dueDate:iv.due_date||iv.document_date,schedule:it.schedule,head:it.revenue_head,due:due,paid:paid});
+      if(beforeDate&&iv.document_date&&iv.document_date<beforeDate) prevDues+=Math.max(0,due-paid);
+    });
+  });
+  onAccountRows.forEach(r=>plan.push(r));
+  plan.sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||''))||
+    String(a.schedule||'').localeCompare(String(b.schedule||''))||
+    String(a.head||'').localeCompare(String(b.head||'')));
+  // Money on account is available to settle what is outstanding, so it reduces previous dues
+  // before any of it is left over.
+  return {plan:plan,prevDues:Math.max(0,prevDues-onAccount),onAccount:onAccount};
+}
+
+window.custViewInvoice=async function(id){
+  const unit=window._custLedgerUnit;
+  if(!unit){toast('Open the ledger first','err');return;}
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-invoice"></i> Invoice</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>','lg');
+  const [{data:inv,error:ie},{data:its},{data:cts},{data:allInv},{data:rcpts},{data:csi},{data:snap}]=await Promise.all([
+    sb.schema('cust').from('invoices').select('*').eq('id',id).eq('unit_id',unit.id).neq('status',CUST_INVOICE_CANCELLED).maybeSingle(),
+    sb.schema('cust').from('invoice_items').select('*').eq('invoice_id',id).order('sort_order'),
+    sb.schema('cust').from('farvision_contacts').select('*').eq('unit_id',unit.id).eq('is_current',true).limit(1),
+    sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_items(schedule,revenue_head,amount,tax,net_amount,sort_order)')
+      .eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('due_date'),
+    sb.schema('cust').from('money_receipts').select('id,receipt_date').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('cost_sheet_items').select('component,amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('outstanding_snapshot').select('late_fee_accrued').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
+  ]);
+  if(ie||!inv){openModal('<div class="modal-head"><h3>Invoice</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="card card-pad empty">This invoice could not be loaded.</div></div>','lg');return;}
+
+  // Fetched by receipt id rather than by filtering an embedded money_receipts join: the embed
+  // form returned nothing here, which silently made every earlier invoice look unpaid and put a
+  // phantom "Previous dues" on the printed invoice.
+  const rids=(rcpts||[]).map(r=>r.id).filter(Boolean);
+  const {data:alloc}=rids.length
+    ? await sb.schema('cust').from('receipt_items').select('against_demand_no,schedule,revenue_head,amount,line_type,particulars,receipt_id').in('receipt_id',rids)
+    : {data:[]};
+  const receiptDates={};
+  (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
+  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
+
+  const sba=Number(unit.super_built_up_area_sqft||0);
+  const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
+  window._custInvoiceCache={
+    inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
+    lateFee:Number((snap&&snap.late_fee_accrued)||0),
+    rate:sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null,
+    unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
+  };
+  custRenderInvoiceModal();
+};
+function custRenderInvoiceModal(){
+  const s=window._custInvoiceCache;
+  if(!s) return;
+  // A segmented control rather than a dropdown: there are exactly two formats, and which one is
+  // about to be downloaded should be readable at a glance instead of hidden behind a closed
+  // select. Uses the portal's own .seg component so it matches every other switcher.
+  const icons={invoice:'fa-file-invoice',demand:'fa-file-lines'};
+  const seg=Object.keys(CUST_INVOICE_FORMATS).map(k=>
+    '<button type="button" class="seg-btn'+(k===s.fmt?' on':'')+'" aria-pressed="'+(k===s.fmt)+'"'+
+    ' onclick="custSetInvoiceFormat(\''+k+'\')"><i class="fa-solid '+icons[k]+'"></i> '+
+    esc(CUST_INVOICE_FORMATS[k])+'</button>').join('');
+  openModal('<div class="modal-head"><h3><i class="fa-solid '+icons[s.fmt]+'"></i> '+esc(CUST_INVOICE_FORMATS[s.fmt])+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
+      '<div class="rcpt-fmt">'+
+        '<span class="rcpt-fmt-lbl">Format</span>'+
+        '<div class="seg" role="group" aria-label="Document format">'+seg+'</div>'+
+        '<span class="rcpt-fmt-hint">'+(s.fmt==='demand'
+          ? 'Whole payment plan for this unit, with what has been paid against each instalment'
+          : 'This invoice only — '+esc(s.inv.document_no||''))+'</span>'+
+      '</div>'+
+      custInvoiceDocHtml(s,s.fmt,false)+'</div>'+
+    '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
+    '<button class="btn btn-primary" onclick="custPrintInvoice()"><i class="fa-solid fa-download"></i> Download '+esc(CUST_INVOICE_FORMATS[s.fmt])+'</button></div>','lg');
+}
+
+window.custSetInvoiceFormat=function(fmt){
+  const s=window._custInvoiceCache;
+  if(!s||!CUST_INVOICE_FORMATS[fmt]) return;
+  s.fmt=fmt;
+  custRenderInvoiceModal();
+};
+
+// Prints whatever format is currently selected - the preview and the download are always the
+// same document, so choosing "Tax Invoice" can never hand the customer a demand letter.
+window.custPrintInvoice=function(){
+  const s=window._custInvoiceCache;
+  if(!s){toast('Open an invoice first','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to download','err');return;}
+  const label=s.fmt==='demand'?'Demand-Letter':'Tax-Invoice';
+  const fileName=label+'-'+String(s.inv.document_no||'').replace(/[^A-Za-z0-9]+/g,'-');
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(fileName)+'</title><style>'+
+    'body{margin:26px;font-family:Inter,system-ui,sans-serif}'+CUST_RECEIPT_CSS+
+    '.rcpt-tbl{min-width:0}.rcpt-tblwrap{overflow:visible}'+
+    '@media print{body{margin:12px}}'+
+    '</style></head><body>'+custInvoiceDocHtml(s,s.fmt,true)+'</body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the document','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
+};
+
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:costItemRows},{data:invRows},{data:uploadedDocs},{data:rcptRows},{data:revRows}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
-    sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).order('document_date'),
+    sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
     sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false}),
     sb.schema('cust').from('money_receipts').select('total_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true)
