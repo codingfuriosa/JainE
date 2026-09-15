@@ -8531,7 +8531,10 @@ const USB_COL4={
   // report could not tell them apart. How long they stayed still shows in Details.
   'tasks.calendar':       {header:'View',       keys:['view']},
   'tasks.meetings':       {header:'Attendees',  keys:['attendees']},
-  'dashboard':            {header:'Time spent', keys:['time_spent']},
+  /* The one Home feature carries exactly one thing - how long the screen stayed open - and that is
+     already the fourth column. time_spent is an internal key, so Details was printing a dash under
+     a header on all 584 rows: a column whose entire content is the absence of content. */
+  'dashboard':            {header:'Time spent', keys:['time_spent'], hideDetails:true},
   'projects':             {header:'Time spent', keys:['time_spent']},
   'video':                {header:'Time spent', keys:['time_spent']},
   /* All 8 CRM & Sales features are named "View ..." and every one of them is exactly that - a tab
