@@ -160,6 +160,24 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
    plays automatically, same reasoning as sbItemActivate above. */
 @keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .cust-view-fade{animation:custViewFade .28s ease}
+/* Premium profile card */
+@keyframes custProfileSlideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes custProfileItemIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
+@keyframes custAvatarPop{0%{transform:scale(0) rotate(-20deg);opacity:0}60%{transform:scale(1.08) rotate(2deg)}100%{transform:scale(1) rotate(0);opacity:1}}
+@keyframes custAvatarGlow{0%,100%{box-shadow:0 0 0 0 rgba(29,78,216,.15)}50%{box-shadow:0 0 0 10px rgba(29,78,216,0)}}
+.cust-profile{background:linear-gradient(135deg,#f8fafc 0%,#eff6ff 50%,#f0f9ff 100%);border:1px solid #dbeafe;border-radius:14px;padding:24px;position:relative;overflow:hidden}
+.cust-profile::before{content:'';position:absolute;top:-40px;right:-40px;width:140px;height:140px;background:radial-gradient(circle,rgba(29,78,216,.06) 0%,transparent 70%);border-radius:50%;pointer-events:none}
+.cust-profile::after{content:'';position:absolute;bottom:-30px;left:-30px;width:100px;height:100px;background:radial-gradient(circle,rgba(16,185,129,.05) 0%,transparent 70%);border-radius:50%;pointer-events:none}
+.cust-profile-header{display:flex;align-items:center;gap:16px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid rgba(29,78,216,.1)}
+.cust-profile-avatar{width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:#fff;font-size:19px;font-weight:700;display:flex;align-items:center;justify-content:center;letter-spacing:.5px;flex-shrink:0;animation:custAvatarPop .45s cubic-bezier(.34,1.56,.64,1) both,custAvatarGlow 2.5s ease-in-out 1s infinite}
+.cust-profile-details{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.cust-profile-item{display:flex;align-items:flex-start;gap:10px;animation:custProfileItemIn .35s ease both;background:rgba(255,255,255,.7);border-radius:10px;padding:12px 14px;border:1px solid rgba(226,232,240,.6);transition:transform .15s ease,box-shadow .15s ease}
+.cust-profile-item:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.06)}
+.cust-profile-addr{grid-column:1/-1}
+.cust-profile-icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.cust-profile-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);margin-bottom:2px;font-weight:600}
+.cust-profile-value{font-size:13.5px;color:#0f172a;font-weight:500;line-height:1.4;word-break:break-word}
+@media(max-width:640px){.cust-profile{padding:16px}.cust-profile-avatar{width:46px;height:46px;font-size:16px}.cust-profile-details{grid-template-columns:1fr}.cust-profile-addr{grid-column:auto}}
 .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
 .page-head h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
 .page-head p{color:var(--slate);font-size:13.5px;margin-top:4px}

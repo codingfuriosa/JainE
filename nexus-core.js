@@ -13652,15 +13652,25 @@ async function custTabOverview(data,unit){
       c?fmtDate(c.booking_date):'—',
       unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
       custInr(propertyValue)]]);
-  const profileSection='<div class="sec-title" style="margin:18px 0 8px">Profile</div>'+
-    (c?'<div class="card card-pad" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 24px;font-size:13.5px">'+
-      '<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Name</div><b>'+esc(c.contact_name||'—')+'</b></div>'+
-      (c.co_applicant_name?'<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Co-Applicant</div><b>'+esc(c.co_applicant_name)+'</b></div>':'')+
-      '<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Phone</div>'+esc(c.contact_phone||'—')+'</div>'+
-      '<div><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Email</div>'+esc(c.contact_email||'—')+'</div>'+
-      '<div style="grid-column:1/-1"><div style="color:var(--slate);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">Correspondence address</div>'+esc(c.contact_address||'—')+'</div>'+
-      '</div>'
-      :'<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
+  const custName=c?c.contact_name||'':'';
+  const initials=custName.replace(/^(Mr\.|Ms\.|Mrs\.|Md\.|Dr\.)\s*/i,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const profileSection=c?
+    '<div class="cust-profile" style="margin:22px 0 8px;animation:custProfileSlideIn .5s ease both">'+
+      '<div class="cust-profile-header">'+
+        '<div class="cust-profile-avatar">'+esc(initials)+'</div>'+
+        '<div class="cust-profile-name">'+
+          '<h3 style="margin:0;font-size:18px;font-weight:700;color:#0f172a">'+esc(custName)+'</h3>'+
+          (c.co_applicant_name?'<div style="font-size:13px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-user-group" style="margin-right:4px;font-size:11px"></i>Co-Applicant: '+esc(c.co_applicant_name)+'</div>':'')+
+          '<div style="font-size:12px;color:var(--slate);margin-top:4px">'+esc(unit.booking_no||'')+' · '+esc((unit.projects&&unit.projects.name)||'')+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="cust-profile-details">'+
+        '<div class="cust-profile-item" style="animation-delay:.1s"><div class="cust-profile-icon"><i class="fa-solid fa-phone"></i></div><div><div class="cust-profile-label">Phone</div><div class="cust-profile-value">'+esc(c.contact_phone||'—')+'</div></div></div>'+
+        '<div class="cust-profile-item" style="animation-delay:.15s"><div class="cust-profile-icon"><i class="fa-solid fa-envelope"></i></div><div><div class="cust-profile-label">Email</div><div class="cust-profile-value">'+esc(c.contact_email||'—')+'</div></div></div>'+
+        '<div class="cust-profile-item cust-profile-addr" style="animation-delay:.2s"><div class="cust-profile-icon"><i class="fa-solid fa-location-dot"></i></div><div><div class="cust-profile-label">Correspondence address</div><div class="cust-profile-value">'+esc(c.contact_address||'—')+'</div></div></div>'+
+      '</div>'+
+    '</div>'
+    :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
   return dueBanner+mKpis(kpis)+
     myUnitSection+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
