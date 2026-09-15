@@ -8449,9 +8449,9 @@ const USB_COL4={
   // a month's requisitions. 'position' fitted only the first of them.
   'hr':                   {header:'Position',          keys:['position']},
   'hr.resumes':           {header:'Role',              keys:['role','position']},
-  'hr.interview_qs':      {header:'On screen',         keys:['showing']},
+  'hr.interview_qs':      {header:'Time spent', keys:['time_spent']},
   // A test has a name and nothing else; the name is already the Details.
-  'recruitment.tests':    {header:'On screen',         keys:['showing']},
+  'recruitment.tests':    {header:'Time spent', keys:['time_spent']},
   'procurement.quote_comp':{header:'Category',         keys:['category','replacements']},
   // Asking the assistant carries the question; raising a ticket carries its category.
   'helpdesk.assistant':   {header:'Question',          keys:['query']},
@@ -8465,11 +8465,22 @@ const USB_COL4={
      "Open a month" keeps the month in Details rather than in the column: the When column already
      says the date, so the month only earns its place when it is NOT the current one - somebody
      opening June's record in September - and Details is where that belongs. */
+  /* Workflow splits by what the click actually did. Four of its features hand the step to somebody,
+     and for those the person is the point. The rest - receiving, printing, marking done, posting an
+     update, editing or deleting an instance - go to nobody, which is why "Assigned to" was blank on
+     almost all of them. What they DO have is how long the work had been waiting, and on this portal
+     that is the number worth reading: 410 measurable steps, 45.9 hours average, 204 of them over a
+     day. A "Step" column was the other candidate and is wrong - Details already prints the step. */
+  'tasks.workflow':                               {header:'Waited',  keys:['waited']},
+  'tasks.workflow.forward_a_step':                {header:'Sent to', keys:['assignee']},
+  'tasks.workflow.reject_send_a_step_back':       {header:'Sent to', keys:['assignee']},
+  'tasks.workflow.revert_a_forwarded_step':       {header:'Sent to', keys:['assignee']},
+  'tasks.workflow.start_a_new_instance':          {header:'Sent to', keys:['assignee']},
   'hr.monthly_update.approve_reject_requisition': {header:'Decision', keys:['decision']},
   'hr.monthly_update.close_reopen_hiring':        {header:'Decision', keys:['decision']},
-  'hr.monthly_update.open_a_month':               {header:'On screen',keys:['showing']},
-  'hr.monthly_update.search_filter_positions':    {header:'On screen',keys:['showing']},
-  'hr.monthly_update.delete_rows_or_whole_month': {header:'On screen',keys:['showing']},
+  'hr.monthly_update.open_a_month':               {header:'Time spent', keys:['time_spent']},
+  'hr.monthly_update.search_filter_positions':    {header:'Time spent', keys:['time_spent']},
+  'hr.monthly_update.delete_rows_or_whole_month': {header:'Time spent', keys:['time_spent']},
   // An upload has no lead yet - the call does not exist until it has run - so it reports the files.
   'transcription.all_calls.upload_call_recording_s': {header:'Files', keys:['files']},
 
@@ -8478,20 +8489,20 @@ const USB_COL4={
      Three Accountability tabs are here for the same reason: the Scoreboard, the Archive and the
      Calendar are things you read, not things you hand to anybody. Tasks, Meetings and Workflow
      keep "Assigned to". */
-  'tasks.scoreboard':     {header:'On screen',    keys:['showing']},
-  'tasks.archive':        {header:'On screen',    keys:['showing']},
-  'tasks.calendar':       {header:'On screen',    keys:['showing']},
-  'dashboard':            {header:'On screen',    keys:['showing']},
-  'projects':             {header:'On screen',    keys:['showing']},
-  'video':                {header:'On screen',    keys:['showing']},
-  'crm':                  {header:'On screen',    keys:['showing']},
-  'scaling':              {header:'On screen',    keys:['showing']},
-  'gtd':                  {header:'On screen',    keys:['showing']},
-  'compliance':           {header:'On screen',    keys:['showing']},
-  'maintenance':          {header:'On screen',    keys:['showing']},
-  'inventory':            {header:'On screen',    keys:['showing']},
-  'playbook':             {header:'On screen',    keys:['showing']},
-  'finance':              {header:'On screen',    keys:['showing']}
+  'tasks.scoreboard':     {header:'Time spent', keys:['time_spent']},
+  'tasks.archive':        {header:'Time spent', keys:['time_spent']},
+  'tasks.calendar':       {header:'Time spent', keys:['time_spent']},
+  'dashboard':            {header:'Time spent', keys:['time_spent']},
+  'projects':             {header:'Time spent', keys:['time_spent']},
+  'video':                {header:'Time spent', keys:['time_spent']},
+  'crm':                  {header:'Time spent', keys:['time_spent']},
+  'scaling':              {header:'Time spent', keys:['time_spent']},
+  'gtd':                  {header:'Time spent', keys:['time_spent']},
+  'compliance':           {header:'Time spent', keys:['time_spent']},
+  'maintenance':          {header:'Time spent', keys:['time_spent']},
+  'inventory':            {header:'Time spent', keys:['time_spent']},
+  'playbook':             {header:'Time spent', keys:['time_spent']},
+  'finance':              {header:'Time spent', keys:['time_spent']}
 };
 const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
 /* Most specific wins: the feature itself, then its tab, then its module.
@@ -19010,6 +19021,8 @@ function usageViewTick(){
        campaign numbers are for, which department's library is open. Without it every view of those
        screens reads identically, and the last column has nothing to show. */
     const vm=(USAGE_VIEW_META[PAGE]&&USAGE_VIEW_META[PAGE]())||null;
+    // whatever screen they were on is now finished - close it before opening the next
+    usageCloseView();
     const drawn=[];
     (Array.isArray(key)?key:[key]).forEach(function(k){
       // cleared first, so a key usageQueue refuses (no feature, not signed in) cannot make the
@@ -19020,6 +19033,8 @@ function usageViewTick(){
     });
     // 700ms is after the render this navigation triggered and long before the batch is sent.
     if(drawn.length) setTimeout(function(){ usageDescribeScreen(drawn); }, 700);
+    // held from here until they leave, so the event can carry how long they stayed
+    USAGE_OPEN_VIEW={evs:drawn, at:Date.now()};
   }catch(e){}
 }
 /* The verb, read off the function's own name rather than kept in a second map that could drift out
@@ -19044,6 +19059,56 @@ let USAGE_Q=[], USAGE_TIMER=null;
    mistaken for this one. Held here rather than on the event itself so nothing extra travels to the
    server in the batch payload. */
 let USAGE_LAST_EV=null, USAGE_LAST_AT=0, USAGE_LAST_QUEUED=null;
+/* ---- How long somebody actually stayed on a screen -------------------------------------------
+   A read-only screen has one honest usability question: was it read, or bounced off? Opening the
+   Scoreboard for six seconds and sitting with it for six minutes are different facts, and the
+   report could tell them apart for none of its 1,000-odd view events.
+   duration_ms has been on the events table from the start, erp_log_usage already reads it out of
+   the payload, and in 9,258 events not one has ever carried a value - the browser simply never
+   sent one. This fills it in.
+   The catch is timing: the event is queued the moment the screen opens, and the batch leaves eight
+   seconds later, long before anybody has finished reading. So the view event is HELD back - kept in
+   the queue, skipped by the flush - until the person navigates away, hides the tab or closes it.
+   Then its duration is stamped on and it goes with the next batch.
+   Holding it is safe because every exit path closes it: the next navigation, visibilitychange, and
+   the unload flush. The count itself is never at risk - the event exists in the queue from the
+   first moment, so the worst case is a use recorded without a duration, never a lost use. */
+let USAGE_OPEN_VIEW={evs:[], at:0};
+const USAGE_MAX_VIEW_MS=4*60*60*1000;   // a tab left open overnight is not four hours of reading
+function usageSpan(ms){
+  const s=Math.round(ms/1000);
+  if(s<60) return s+'s';
+  const m=Math.floor(s/60); if(m<60) return m+'m'+(s%60?' '+(s%60)+'s':'');
+  const h=Math.floor(m/60); return h+'h'+(m%60?' '+(m%60)+'m':'');
+}
+function usageCloseView(){
+  try{
+    const open=USAGE_OPEN_VIEW;
+    USAGE_OPEN_VIEW={evs:[], at:0};
+    if(!open.evs.length || !open.at) return;
+    const ms=Date.now()-open.at;
+    if(ms>0 && ms<USAGE_MAX_VIEW_MS){
+      const span=usageSpan(ms);
+      open.evs.forEach(function(ev){
+        ev.duration_ms=ms;                                   // the column that has always been there
+        ev.meta=Object.assign({}, ev.meta||{}, {time_spent:span});  // and a readable copy for the report
+      });
+    }
+    // the flush timer may have given up while the only thing queued was being held
+    if(USAGE_Q.length && !USAGE_TIMER) USAGE_TIMER=setTimeout(usageFlush, 8000);
+  }catch(e){ USAGE_OPEN_VIEW={evs:[], at:0}; }
+}
+// Everything queued EXCEPT a view still being timed. Used instead of splicing from the front, so
+// one held event cannot block the batch behind it.
+function usageTakeBatch(n){
+  const out=[];
+  for(let i=0;i<USAGE_Q.length && out.length<n;i++){
+    if(USAGE_OPEN_VIEW.evs.indexOf(USAGE_Q[i])!==-1) continue;
+    out.push(USAGE_Q[i]);
+  }
+  out.forEach(function(ev){ const i=USAGE_Q.indexOf(ev); if(i!==-1) USAGE_Q.splice(i,1); });
+  return out;
+}
 /* What was actually on the screen, written onto a "view" event after the screen has drawn.
    Opening a tab is the one kind of action with no object behind it - no task, no document, nobody
    it went to - so the report's Details column has always been a dash for all 984 of them, and there
@@ -19154,7 +19219,8 @@ function usageQueueDebounced(featureKey, val, action, delay){
 async function usageFlush(){
   if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
   if(!USAGE_Q.length) return;
-  const batch=USAGE_Q.splice(0, 60);
+  const batch=usageTakeBatch(60);
+  if(!batch.length) return;                // only a view still being timed - nothing to send yet
   try{
     const {error}=await sb.rpc('erp_log_usage',{p_events:batch});
     if(error) throw error;
@@ -19173,6 +19239,8 @@ async function usageFlush(){
    hood, the same problem all over again — so it's built here from the token boot() already keeps
    cached for exactly this: a fetch fired from an unload handler can't safely await getSession(). */
 function usageFlushOnUnload(){
+  // the screen is going away, so whatever was being timed is finished - stamp it and send it too
+  usageCloseView();
   if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
   if(!USAGE_Q.length || !USAGE_TOKEN) return;
   const batch=USAGE_Q.splice(0, 60);
