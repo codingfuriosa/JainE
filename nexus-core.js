@@ -8547,6 +8547,20 @@ const USB_COL4={
   // rather than filled with something that only looks like an answer.
   'tasks.scoreboard':     {header:null, keys:[], hideDetails:true},
   'tasks.archive':        {header:null, keys:[], hideDetails:true},
+  /* Six more of the same kind, found by reading their rows rather than their config: 214 uses
+     between them and not one has ever put anything in either column.
+     The three Tasks ones inherit "Assigned to" from the module, but regrouping a list assigns
+     nothing to anybody - there is no person in the act at all, so it could never have filled.
+     The three Calendar ones should have carried which view was open, and the helper for it has
+     been live since 1684217 - yet "view" has never once been recorded on any of them. That is a
+     real fault and worth chasing on its own; until it is chased, a header promising something the
+     rows have never held is the thing to remove. */
+  'tasks.tasks.view_tasks_grouped_by_workflow':                {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.view_tasks_grouped_by_person':                  {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.view_tasks_grouped_by_tag':                     {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.view_month_week_day_calendar':               {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.see_tasks_meetings_and_legal_dates_in_one_view': {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.open_a_day_s_agenda_panel':                  {header:null, keys:[], hideDetails:true},
   // The Calendar is read four different ways and they are not interchangeable - a team living in
   // Day view needs a good agenda panel, one that only opens Month needs a good month grid, and the
   // report could not tell them apart. How long they stayed still shows in Details.
