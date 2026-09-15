@@ -13752,29 +13752,14 @@ async function custTabLedger(unit){
     return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
   }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
-  // A money receipt row carries its own "view / download" control, so a customer who wants proof
-  // of a payment gets it from the ledger line itself rather than hunting for it elsewhere. The
-  // tickbox alongside it feeds the toolbar's bulk download, for the common case of needing a
-  // year's receipts together (loan file, tax proof) rather than one at a time.
-  // One invoice occupies several ledger rows (one per schedule), so its tickbox belongs on the
-  // first of them only - otherwise the same document offers itself for selection repeatedly.
-  const invoiceCount=new Set(entries.filter(e=>e.iid).map(e=>e.iid)).size;
-  const allowBulk=(receipts.length+invoiceCount)>1;
   const seenInvoice={};
-  const pick=(kind,id,label)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'"'+
-    ' onchange="custDocPickChanged()" aria-label="Select '+esc(label)+' for download">';
   const refCell=e=>{
     if(e.rid) return '<span class="rcpt-ref">'+
-      (allowBulk?pick('receipt',e.rid,'receipt '+(e.ref||'')):'')+
       esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this receipt" onclick="custViewReceipt('+e.rid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>';
-    // An invoice row offers the same control, but opens a document that can be printed either as
-    // the tax invoice or as a demand letter - the two formats Farvision's own Document Print
-    // dialog offers for a selected invoice.
     if(e.iid){
       const first=!seenInvoice[e.iid]; seenInvoice[e.iid]=1;
       return '<span class="rcpt-ref">'+
-        (allowBulk?(first?pick('invoice',e.iid,'invoice '+(e.ref||'')):'<span class="rcpt-pick-gap"></span>'):'')+
-        esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this invoice or demand" onclick="custViewInvoice('+e.iid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>';
+        esc(e.ref||'—')+(first?'<button class="btn btn-sm rcpt-view" title="View / download this invoice" onclick="custViewInvoice('+e.iid+')"><i class="fa-solid fa-file-arrow-down"></i></button>':'')+'</span>';
     }
     return esc(e.ref||'—');
   };
@@ -13785,16 +13770,12 @@ async function custTabLedger(unit){
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
   window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
   const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
-  const bulkTools=allowBulk?
-    '<label class="rcpt-pick-all"><input type="checkbox" id="custRcptPickAll" onchange="custDocPickAll(this.checked)">Select all</label>'+
-    '<button class="btn" id="custRcptBulkBtn" disabled onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> Download selected</button>':'';
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
     '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
     '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
     '<span><b>Balance:</b> '+balLabel+'</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
-    '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+bulkTools+
-    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+    '<span style="margin-left:auto"><button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
