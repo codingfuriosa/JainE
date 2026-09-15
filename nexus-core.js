@@ -21,14 +21,74 @@ const state={user:null,email:null,profile:null,roles:null,super:false};
 // declared up here, by state, rather than down by the telemetry code that's its only reader, so
 // boot() setting it doesn't read as a forward reference to something declared hundreds of lines later.
 let USAGE_TOKEN=null;
-const PAGE=window.PAGE||'dashboard';
+// Mutable (not const): the App Shell reassigns this on an in-place cross-module navigation instead
+// of loading a different .html document — see navTo()/activateModule() below. A direct load or
+// refresh still sets it once from window.PAGE exactly as before; nothing about that path changes.
+let PAGE=window.PAGE||'dashboard';
 // A customer session never signs in through login.html and must never be sent back to it — see
-// the customer-detection block in boot() below and the isolation-retrofit migration.
+// the customer-detection block in boot() below and the isolation-retrofit migration. Computed once
+// here rather than read live off PAGE: a real customer session's own nav (renderCustomerShell(),
+// navTo('customer/'+i)) never leaves PAGE==='customer' via activateModule(), so this can't go stale.
 const LOGIN_PAGE=(PAGE==='customer')?'customer-login.html':'login.html';
 function fileFor(id){if(id==='dashboard')return 'index.html';if(id==='tasks')return 'accountability.html';if(id==='custportal_admin')return 'custportal-admin.html';return id+'.html';}
-function navTo(path){const seg=String(path).split('/');const first=seg[0];if(first===PAGE){location.hash=seg.length>1?('#/'+seg.slice(1).join('/')):'#/';renderPage();}else{const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';location.href=fileFor(first)+hash;}}
+// Reverse of fileFor(): which module id does a given pathname's filename belong to. Used by
+// popstate (browser Back/Forward across modules) to recover PAGE from the URL alone.
+function pageIdFromPath(pathname){
+  const file=(pathname.split('/').pop()||'index.html');
+  if(file==='index.html'||file==='')return 'dashboard';
+  if(file==='accountability.html')return 'tasks';
+  if(file==='custportal-admin.html')return 'custportal_admin';
+  return file.replace(/\.html$/,'');
+}
+// Page-specific scripts that used to be a second <script> tag on that one .html file, loaded in
+// parallel with nexus-core.js (see accountability.js's own "loads after nexus-core.js" comment, and
+// the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
+// these needs the same script loaded on demand, once, before rendering — never re-fetched on a
+// second visit in the same tab.
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js'};
+const _loadedPageScripts=new Set();
+function ensurePageScript(id){
+  const src=PAGE_EXTRA_SCRIPT[id];
+  if(!src||_loadedPageScripts.has(src))return Promise.resolve();
+  return new Promise((resolve)=>{
+    const s=document.createElement('script');
+    s.src=src+'?v=20260913c';
+    s.onload=()=>{_loadedPageScripts.add(src);resolve();};
+    // A failed load shouldn't hang navigation forever — render with whatever's already there
+    // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message
+    // for exactly this case) rather than block the rest of the app on one missing file.
+    s.onerror=()=>resolve();
+    document.body.appendChild(s);
+  });
+}
+// The in-place cross-module transition: swap PAGE, load that module's extra script if it has one,
+// update the tab title (no new document is loaded, so nothing else will), then render. Called from
+// navTo() for a sidebar click and from popstate for Back/Forward across modules.
+async function activateModule(id){
+  PAGE=id; window.PAGE=id;
+  await ensurePageScript(id);
+  document.title=(LABELS[id]||id)+' · Nexus-RE · Jain Group';
+  renderPage();
+}
+window.addEventListener('popstate',function(){
+  const id=pageIdFromPath(location.pathname);
+  if(id!==PAGE){ activateModule(id); }else{ renderPage(); }
+});
+function navTo(path){
+  const seg=String(path).split('/');
+  const first=seg[0];
+  const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';
+  if(first===PAGE){ location.hash=hash||'#/'; renderPage(); return; }
+  // Customer sessions (and an admin previewing one) never have a sidebar item for another module
+  // to begin with, but navTo() is also called from things like breadcrumbs — staying on the current
+  // real document for a customer session is the one case still worth a true navigation rather than
+  // an in-place swap, since renderCustomerShell() is a different shell entirely from renderShell().
+  if(state.isCustomer||state.impersonating){ location.href=fileFor(first)+hash; return; }
+  try{ history.pushState({spaPageId:first},'',fileFor(first)+hash); }catch(e){ location.href=fileFor(first)+hash; return; }
+  activateModule(first);
+}
 window.navTo=navTo;
-function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+id;renderPage();} else location.href='tasks.html#/task/'+id; }
+function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+id;renderPage();} else navTo('tasks/task/'+id); }
 
 /* ============================ HELPERS ============================ */
 function toast(msg,type){if(type==='err')console.error('[toast]',msg);const t=el('div','toast '+(type||''),'<i class="fa-solid fa-'+(type==='err'?'circle-exclamation':type==='ok'?'circle-check':type==='warn'?'triangle-exclamation':'circle-info')+'"></i>'+esc(msg));$('toasts').appendChild(t);setTimeout(()=>t.remove(),(type==='err'||type==='warn')?9000:3400);}
@@ -108,6 +168,30 @@ function fatal(msg){
   if(a){a.style.display='flex';a.innerHTML='<div style="text-align:center;max-width:420px;padding:30px;font-family:Inter,system-ui,sans-serif"><div style="font-size:34px">⚠️</div><div style="margin-top:12px;font-weight:700;font-size:17px">Couldn’t load the workspace</div><div style="color:#64748b;font-size:13.5px;margin-top:8px;line-height:1.5">'+msg+'</div><a href="'+LOGIN_PAGE+'" style="display:inline-block;margin-top:16px;background:#1d4ed8;color:#fff;padding:10px 18px;border-radius:9px;text-decoration:none;font-weight:600;font-size:14px">Go to Sign In</a></div>';}
 }
 window.addEventListener('error',function(e){ if(!state.user){ fatal((e.message||'A script error occurred')+'.'); } });
+
+// Every navigation between modules is a full page load of a different .html file (each pulling in
+// this same multi-megabyte script fresh), so boot()'s who-is-this + profile/roles/permissions
+// fetches used to re-run in full on every single click between tabs — the visible "Loading your
+// workspace" pause. This sessionStorage cache skips that on every navigation after the first one in
+// a tab; refreshBootCache() is called anywhere state.profile/roles/super changes mid-session (a
+// Settings save, password-set, onboarding) so a cache hit within BOOT_CACHE_TTL_MS never serves data
+// staler than the user's own last edit. An admin changing someone ELSE's access still takes up to
+// BOOT_CACHE_TTL_MS to show up for that person — an acceptable trade for data that changes by
+// administrative action, not by the second.
+const BOOT_CACHE_KEY='nexusBootCacheV1';
+const BOOT_CACHE_TTL_MS=3*60*1000;
+function refreshBootCache(){
+  try{ sessionStorage.setItem(BOOT_CACHE_KEY,JSON.stringify({email:state.email,at:Date.now(),profile:state.profile,roles:state.roles,super:state.super})); }catch(e){}
+}
+function readBootCache(){
+  try{
+    const raw=sessionStorage.getItem(BOOT_CACHE_KEY);
+    if(!raw)return null;
+    const parsed=JSON.parse(raw);
+    if(parsed&&parsed.email===state.email&&(Date.now()-parsed.at)<BOOT_CACHE_TTL_MS)return parsed;
+  }catch(e){}
+  return null;
+}
 async function autoProvisionGoogleProfile(){
   try{
     const meta=(state.user&&state.user.user_metadata)||{};
@@ -138,11 +222,21 @@ async function boot(){
   // Every existing staff table's RLS was `using(true)` until a real customer login existed
   // (see 20260828090100_customer_portal_isolation_retrofit.sql), so the ONLY safe place to keep a
   // customer session away from the staff shell is here, before anything staff-only is fetched.
+  // RLS is the real boundary now (prof_read is `not app.is_customer()`, adm.* keys off the caller's
+  // own email/super_admin), so this ordering is a courtesy fast-path today, not the security check
+  // it originally had to be — which is what makes it safe to cache (see refreshBootCache() above).
+  const cachedBoot=readBootCache();
   let custRow=null;
-  try{
-    const {data}=await sb.schema('cust').from('customers').select('id,full_name').eq('auth_user_id',state.user.id).eq('status','active').is('deleted_at',null).maybeSingle();
-    custRow=data||null;
-  }catch(e){}
+  if(cachedBoot){
+    state.profile=cachedBoot.profile;
+    state.roles=cachedBoot.roles;
+    state.super=cachedBoot.super;
+  }else{
+    try{
+      const {data}=await sb.schema('cust').from('customers').select('id,full_name').eq('auth_user_id',state.user.id).eq('status','active').is('deleted_at',null).maybeSingle();
+      custRow=data||null;
+    }catch(e){}
+  }
   if(custRow){
     if(PAGE!=='customer'){
       // A customer JWT trying to load a staff page. Sign out rather than silently redirect — an
@@ -161,12 +255,12 @@ async function boot(){
     const asId=Number(new URLSearchParams(location.search).get('as'));
     if(asId){
       try{
-        const {data:me}=await sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle();
-        state.roles=me;
-      }catch(e){}
-      try{
-        const {data:p}=await sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle();
-        state.super=!!(p&&p.super_admin);
+        const [rolesRes,permRes]=await Promise.all([
+          sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+          sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+        ]);
+        state.roles=rolesRes.data||null;
+        state.super=!!(permRes.data&&permRes.data.super_admin);
       }catch(e){}
       // Client-side check decides only whether we ATTEMPT the preview — same as every other
       // module-visibility check in this app (see hasUsability() above). The real boundary is RLS:
@@ -182,18 +276,22 @@ async function boot(){
   }
 
   // ensure profile + permission rows exist (idempotent self-provision)
-  try{
-    const {data:prof}=await sb.schema('acc').from('user_profile').select('*').eq('email',state.email).maybeSingle();
-    state.profile=prof;
-  }catch(e){}
-  try{
-    const {data:me}=await sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle();
-    state.roles=me;
-  }catch(e){}
-  try{
-    const {data:p}=await sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle();
-    state.super=!!(p&&p.super_admin);
-  }catch(e){}
+  // These three are independent of each other (different tables, no data dependency), so a fresh
+  // fetch runs them together instead of one-after-another — and a cache hit above skips this
+  // whole block, since state.profile/roles/super are already populated from it.
+  if(!cachedBoot){
+    try{
+      const [profRes,rolesRes,permRes]=await Promise.all([
+        sb.schema('acc').from('user_profile').select('*').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+        sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+        sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+      ]);
+      state.profile=profRes.data||null;
+      state.roles=rolesRes.data||null;
+      state.super=!!(permRes.data&&permRes.data.super_admin);
+      refreshBootCache();
+    }catch(e){}
+  }
 
   // Landed here right after a Google OAuth redirect (oauth-verify.html forwards
   // straight to index.html?intent=login|signup with no visible page of its own).
@@ -215,14 +313,20 @@ async function boot(){
       location.replace('login.html?alreadyhave=1');
       return;
     }
-    if(_viaGoogle && !_completed){ await autoProvisionGoogleProfile(); }
+    if(_viaGoogle && !_completed){
+      await autoProvisionGoogleProfile();
+      refreshBootCache();
+    }
   }
 
   renderShell();
   $('authLoad').style.display='none';
   if(!state.super && !(state.profile&&state.profile.onboarded)){
     const viaGoogle=!!(state.user&&state.user.app_metadata&&state.user.app_metadata.provider==='google');
-    if(viaGoogle) await autoProvisionGoogleProfile();
+    if(viaGoogle){
+      await autoProvisionGoogleProfile();
+      refreshBootCache();
+    }
   }
   // A brand-new signup who hasn't finished onboarding yet still gets straight into the same
   // baseline modules an onboarded-but-unassigned user already has (DEFAULT_MODULES) — dashboard,
@@ -437,10 +541,29 @@ function renderShell(){
     nav.appendChild(el('div','sb-group',g.group));
     g.items.forEach(it=>{
       const a=el('a','sb-item','<i class="fa-solid '+it.icon+'"></i> '+it.label);
+      // href stays a real URL — Ctrl/Cmd/middle-click still opens a genuine new tab, which should
+      // do its own real boot() rather than inherit this tab's SPA state. A plain left-click is
+      // intercepted below to swap in place instead, which is what actually removes the reload.
       a.href=fileFor(it.id);a.dataset.id=it.id;
+      a.onclick=function(e){
+        if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+        e.preventDefault();
+        navTo(it.id);
+      };
       nav.appendChild(a);
     });
   });
+  // The logo/"back to home" link is static markup in each .html shell (not built by effectiveNav()
+  // above), but it's the exact same kind of cross-module link, so it gets the exact same treatment.
+  const brand=document.querySelector('.sb-brand');
+  if(brand&&!brand.dataset.spaBound){
+    brand.dataset.spaBound='1';
+    brand.addEventListener('click',function(e){
+      if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+      e.preventDefault();
+      navTo('dashboard');
+    });
+  }
   if(state.super)secPendingBadge();
   // profile avatar + dropdown
   const nm=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||state.email.split('@')[0];
@@ -476,7 +599,7 @@ function renderShell(){
   var bd=$('sbBackdrop'); if(bd) bd.onclick=function(){ document.body.classList.remove('nav-open'); };
   document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
 }
-async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} location.replace(LOGIN_PAGE); }
+async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} try{ sessionStorage.removeItem(BOOT_CACHE_KEY); }catch(e){} location.replace(LOGIN_PAGE); }
 window.doSignOut=doSignOut;
 
 // Universal live document search (top nav)
@@ -3883,7 +4006,7 @@ window.taskOnboardSave=async function(){
   const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
   const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
   if(error){toast(error.message,'err');return;}
-  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;toast('Profile saved','ok');location.hash='#/tasks';route();
+  state.profile=Object.assign(state.profile||{},row);refreshBootCache();PEOPLE=null;toast('Profile saved','ok');location.hash='#/tasks';route();
 };
 async function taskProfile(v){
   await taskOnboard(v);
@@ -5805,7 +5928,7 @@ window.setProfileSave=async function(){
   const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
   const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
   if(error){toast(error.message,'err');return;}
-  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;toast('Profile saved','ok');
+  state.profile=Object.assign(state.profile||{},row);refreshBootCache();PEOPLE=null;toast('Profile saved','ok');
   VIEWS.settings($('view'));
 };
 
@@ -7615,7 +7738,7 @@ window.setPasswordSave=async function(){
   const b=$('spwBtn');if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.auth.updateUser({password:p});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='Save password';}return;}
-  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); }catch(e){}
+  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); refreshBootCache(); }catch(e){}
   closeModal();toast('Password set — you can now sign in with email + password too','ok');
 };
 /* ---- complete a "Forgot password" reset (lands here via PASSWORD_RECOVERY after the emailed link) ---- */
@@ -7635,7 +7758,7 @@ window.resetPasswordSave=async function(){
   const b=$('rpwBtn');if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.auth.updateUser({password:p});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='Save new password';}return;}
-  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); }catch(e){}
+  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); refreshBootCache(); }catch(e){}
   closeModal();toast('Password updated — you can sign in with it from now on','ok');
 };
 function promptSetPassword(){
@@ -7797,7 +7920,7 @@ window.onboardSave=async function(){
   const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
   const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Complete setup';}return;}
-  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;
+  state.profile=Object.assign(state.profile||{},row);refreshBootCache();PEOPLE=null;
   const host=document.getElementById('onboardHost');if(host)host.remove();
   $('shell').style.display='block';location.hash='';renderShell();renderPage();startSessionGuard();
 };
@@ -8646,7 +8769,9 @@ VIEWS.crm=function(v,seg){
   else if(ti===5){ body=mTable(['Customer','Demand','Due','Amount','Status'],[['Rahul Mehta','On RCC F10','30 Jun','₹4.2L','Pending']]); }
   else if(ti===6){ body=mTable(['Broker','Deals','Commission','Status'],[['Skyline Realty','12','₹6.2L','Active']]); }
   else { body=mSoon(tabs[ti]); }
-  v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')+mTabs('crm',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+  v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
+    +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
+    +mTabs('crm',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
 };
 
 /* ============================ POST SALES — ADHOC bulk replace ============================
