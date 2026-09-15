@@ -8422,7 +8422,11 @@ function usbMetaLabel(k){
 // data rather than the honest "nothing was captured for this one" that an old event actually is.
 // 'assignee' is not internal - it is shown, but in its own "Assigned to" column beside Details
 // rather than repeated inside it.
-const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
+/* time_spent and showing belong to a column, never to Details. Left out of this list they leaked
+   into every view row as "Time Spent: 13s · Showing: 44 rows" - clutter beside the thing the row is
+   actually about, and on screens whose column is something else entirely it was the only thing in
+   Details at all. A column that wants either of them asks for it by name; nothing else prints it. */
+const USB_META_INTERNAL_KEYS=['ref','backfill','assignee','time_spent','showing'];
 /* ---- The drill-down's last column ------------------------------------------------------------
    "Assigned to" only means anything where something is handed to somebody, which is Accountability
    and nowhere else. Everywhere else it was a column of dashes taking up the width that the one
@@ -8465,8 +8469,15 @@ const USB_COL4={
   'recruitment.tests':    {header:'Time spent', keys:['time_spent']},
   'procurement.quote_comp':{header:'Category',         keys:['category','replacements']},
   // Asking the assistant carries the question; raising a ticket carries its category.
-  'helpdesk.assistant':   {header:'Question',          keys:['query']},
-  'helpdesk.tickets':     {header:'Topic',             keys:['category']},
+  /* Help Desk, feature by feature. Asking the assistant carries the question - but the question is
+     already the Details, printed bare as the thing the row is about, so a Question column beside it
+     said the same words twice. Opening the chat and opening My Tickets are screen-opens with no
+     question and no ticket behind them. Raising a ticket is the one action here with two facts to
+     its name: the subject in Details, the department it went to in the column. */
+  'helpdesk.tickets':                       {header:'Topic', keys:['category']},
+  'helpdesk.assistant.ask_a_question':      {header:null, keys:[]},
+  'helpdesk.assistant.view_ai_assistant_chat':{header:null, keys:[], hideDetails:true},
+  'helpdesk.tickets.view_my_tickets':       {header:null, keys:[], hideDetails:true},
 
   /* --- single features whose subject is unlike anything else in their tab -------------------- */
   /* Monthly Update is the case that proved per-tab was not enough. Approve/reject and close/reopen
