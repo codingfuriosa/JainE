@@ -8457,7 +8457,12 @@ const USB_COL4={
      hint of that; the header now says whose name it is. The lead is dropped from the fourth column
      because it IS that same name - printing it twice on one row says nothing the first mention
      didn't already say. */
-  'transcription':        {header:'Project', keys:['project','language'], detailsHeader:'Customer name'},
+  'transcription':        {header:'Project', keys:['project'], detailsHeader:'Customer name'},
+  /* The language IS the click here, so it gets the column and the header that names it. Left in the
+     module's key list it would have printed under a header reading "Project", which is the same
+     mismatch as a month sitting under "Decision". The call itself is still named, in Details. */
+  'transcription.call_detail.switch_transcript_language':
+                          {header:'Language', keys:['language'], detailsHeader:'Customer name'},
   'network':              {header:'Range',             keys:['range']},
   /* Every number on these screens is "for this period, from this source", so that pair is the one
      fact each action here needs - and it is the whole fact, which leaves Details with nothing to
