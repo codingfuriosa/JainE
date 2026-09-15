@@ -139,12 +139,19 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "reason": "why this verdict",
     "fact_checks": [
       { "fact": "Project" | "Configuration" | "Budget" | "Area (sqft)" | "Location" | "Possession",
+        "project": null,
         "status": "Match" | "Mismatch" | "Not Discussed",
         "what_was_said": "what the call actually said about this fact, or null if Not Discussed",
         "what_is_correct": "the approved value from the catalogue, or null if Not Discussed or the
                              catalogue does not cover it",
         "note": "one short line on why - required for Match and Mismatch, null for Not Discussed" }
-      ... all six facts, always in this order, always all six present
+      ... all six facts for the lead's OWN project, always in this order, always all six present,
+      "project" always null on these six
+      ... THEN one more entry for every price, location, area (sqft) or possession claim made about
+      any OTHER named project during the call - see OTHER PROJECTS MENTIONED below. "project" on
+      these is the other project's name (never null), "fact" is whichever of Budget | Area (sqft) |
+      Location | Possession was actually claimed, and none of these extra entries use "Configuration"
+      or "Project" as their "fact". Omit this tail entirely when no other project's figures came up.
     ]
   },
   "followup_date_accuracy": {
@@ -228,10 +235,13 @@ thing, and do not build a verdict on a single word that may have been misheard.
 
 ### 1. PITCH ACCURACY
 Was what the salesperson said about the project true and complete?
-Judge against the approved project information supplied below, for the project this lead belongs to.
+Judge against the approved project information supplied below - for the project this lead belongs to,
+AND for any other project the agent brought figures for (see OTHER PROJECTS MENTIONED below; a wrong
+price, location, sqft or ready-to-move/under-construction claim counts here regardless of which
+project it was about).
 Consider: was the correct project discussed; was the information given correct; were there incorrect
-claims; did the pitch follow the company funnel; were required points missed; was any wrong
-product information given.
+claims about the lead's own project OR about any other project named on the call; did the pitch follow
+the company funnel; were required points missed; was any wrong product information given.
 - "score" is 0-100 for the accuracy of what was said, not for how good the agent was.
 - "status": Accurate (nothing incorrect, nothing important missing) · Partially Accurate (correct but
   incomplete, or one minor error) · Inaccurate (a materially wrong claim about the project) ·
@@ -264,6 +274,25 @@ actual quote or its substance in "what_was_said" and the catalogue's value in "w
 both null together only for Not Discussed. Where the catalogue itself does not cover this project or
 this fact (Dream Residency Manor, Ecocity Bungalows, Durbaar Banquets pricing), that is also
 Not Discussed - unverifiable is not a mismatch.
+
+OTHER PROJECTS MENTIONED. Agents often bring up a project other than the lead's own - redirecting a
+customer, answering "do you have anything in X area", comparing options. Whenever the agent states a
+PRICE, LOCATION, AREA (sqft), or POSSESSION STATUS (ready-to-move vs under construction) for a project
+OTHER than the one this lead belongs to, that claim is CHECKED AGAINST CATALOGUE JUST AS RIGOROUSLY AS
+a claim about the lead's own project - being a side remark does not make it exempt, and a customer can
+act on a wrong number regardless of which project it was attached to.
+- Check each such claim (there may be several, about one project or several) against CATALOGUE.
+- A wrong price, wrong location, wrong sqft, or wrong ready-to-move/under-construction claim about
+  ANY project is a MATERIAL ERROR - quote it in "issues" exactly as you would for the lead's own
+  project, factor it into "reason", and let it pull down the overall pitch "score" and "status" the
+  same way. Do not let a mistake escape simply because it was about a different project's figures.
+- Record each one as its own entry appended to "fact_checks" after the six required entries, with
+  "project" set to that other project's name (see CATALOGUE for the approved name) and "fact" set to
+  whichever of Budget, Area (sqft), Location or Possession was actually claimed - one entry per claim.
+  Use the same Match / Mismatch / Not Discussed logic, and the same catalogue-does-not-cover-it
+  exception (Dream Residency Manor, Ecocity Bungalows, Durbaar Banquets pricing stay unverifiable).
+- If no other project's price, location, sqft or possession status was mentioned at all, add nothing -
+  do not manufacture an entry for a project that never came up.
 
 ### 2. FOLLOW-UP DATE ACCURACY
 Is the CRM's next_follow_up_date supported by the conversation?
@@ -365,6 +394,11 @@ perfectly (every fact_check a Match) to a customer who wants something this proj
 
 A SITE VISIT IS NOT THE QUALIFICATION TEST. Agreeing to a site visit, asking to book, or asking to
 proceed all qualify a lead on their own - they are the customer settling the question themselves.
+INTEREST IN A SITE VISIT QUALIFIES A LEAD ON ITS OWN TOO, even short of a firm agreement or a fixed
+date. "Yes, I would like to see the site", "sounds good, arrange a visit", "I am interested, tell me
+when I can come" - none of these commit to a day, but all of them are the customer choosing to move
+forward, which is what the four gates exist to detect in the first place. Do not withhold Qualified
+waiting for a booked date; interest expressed is enough.
 But a customer who passes the four gates and still will not come to the site - busy, out of town,
 travelling, wants to send a family member, asks to be called after the puja - IS STILL QUALIFIED.
 They want to buy a flat; only the visit is unsettled. Reading that as a downgrade is the single most
@@ -392,8 +426,8 @@ So: "In Follow Up" is the WRONG answer for a qualified lead who moved their visi
 Use these definitions:
 - Lost         - the customer has closed the door: no requirement, already bought elsewhere, a wrong
                  or prank enquiry, a broker, or a clear refusal to proceed.
-- Qualified    - the four gates are met, or the customer agreed to a site visit, asked to proceed or
-                 asked to book - and they have not closed the door.
+- Qualified    - the four gates are met, or the customer agreed to (or showed interest in) a site
+                 visit, asked to proceed or asked to book - and they have not closed the door.
 - In Follow Up - the gates are not settled and the lead is still open: genuinely undecided, or
                  unavailable, asked to be called back, wants to discuss with family, is busy, wants
                  time to think. This is for a lead that has NEVER cleared the bar. A lead that has

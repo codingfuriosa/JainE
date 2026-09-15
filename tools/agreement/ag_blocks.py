@@ -12,6 +12,12 @@ SP = ("C:/Users/Gigabyte/AppData/Local/Temp/claude/C--DreamOne/"
 pages = json.load(io.open(SP + "ag_raw.json", encoding="utf-8"))
 
 # A line that begins one of these starts a new block rather than continuing the last.
+#
+# "Part ..." is deliberately NOT here, though several headings begin with it. "as prescribed in
+# the Payment Plan mentioned in / Part II of Schedule-C as may be demanded by the Promoter" is
+# one sentence broken across a printed line, and treating the second half as a new block cut
+# clause 1.12 off mid-sentence. Standalone headings are caught by HEADING below, which requires
+# the line to be nothing but the heading.
 STARTS = re.compile(r"""^(
     \d+\.\d+(\.\d+)*\s          |   # 11.5.1, 7.3
     \d+\.\s*[A-Z]               |   # 16. COMPLIANCE
@@ -21,8 +27,6 @@ STARTS = re.compile(r"""^(
     \(\d+\)\s                   |
     [a-z]\.\s                   |   # g. Goods and Service Tax
     SCHEDULE                    |
-    Part\s*[-\u2013]?\s*[IVX]+  |
-    PART-\s?[IVX]+              |
     WHEREAS                     |
     DEFINITIONS                 |
     IN\ WITNESS\ WHEREOF        |
@@ -31,7 +35,10 @@ STARTS = re.compile(r"""^(
 
 # Lines that are headings in their own right.
 HEADING = re.compile(r"^\s*(AGREEMENT FOR SALE|BY AND BETWEEN|AND|SCHEDULE\s*[-\u2013]\s*\"?[A-D]\"?"
-                     r"|SCHEDULE-D|Part\s*[-\u2013]?\s*[IVX]+.*|PART-[IVX]+|\([A-Z][A-Z \u2013-]+\))\s*$")
+                     r"|SCHEDULE-D|Part\s*[-–]?\s*[IVX]+(\s*(PLAN|\([A-Z][A-Za-z ]+\)))?|PART-[IVX]+|\([A-Z][A-Z –-]+\))\s*$")
+# The trailing .* that used to end the Part rule made "Part II of Schedule-C as may be
+# demanded by the Promoter..." a HEADING, and clause 1.12 was cut off mid-sentence.
+# A heading is the whole line and nothing more.
 
 def tidy(s):
     s = s.replace("\ufffd", '"')

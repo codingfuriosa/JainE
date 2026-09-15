@@ -5,6 +5,16 @@ const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
 const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+/* For a value being dropped INSIDE a single-quoted JS string in an onclick attribute, which esc()
+   alone cannot make safe: it escapes & < > " and deliberately leaves the apostrophe alone, because
+   an apostrophe is harmless in HTML text. Inside onclick="f('...')" it is not harmless - it closes
+   the string early and the whole handler becomes a syntax error, so the click silently does
+   nothing. Real feature names hit this: "Open a day's agenda panel", "View a department's library",
+   "View a lead's combined call history".
+   Order matters. The backslash goes in FIRST, for the JS parser, and only then esc() for the HTML
+   parser - the other way round would HTML-encode the apostrophe to &#39;, which the browser decodes
+   back to a bare ' before the JS is ever parsed, leaving the bug exactly where it was. */
+const escJs=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 const state={user:null,email:null,profile:null,roles:null,super:false};
 // The access token, kept current from boot() and every onAuthStateChange firing. Usage telemetry's
 // unload-time flush needs it synchronously (a pagehide handler can't safely await getSession()) —
@@ -61,11 +71,26 @@ function closeModal(){$('overlay').classList.remove('show');$('modalHost').inner
    "This page says…" dialog (whose styling/wording is desktop-Chrome-specific and inconsistent
    or absent on mobile browsers). Usage: if(!await confirmDialog('Delete this task?'))return; */
 let __confirmResolve=null;
+/* Saying no here takes back the usage event the click already queued.
+   The generic USAGE_MAP wrapper fires on the CLICK, and for a button that asks "are you sure?"
+   that is a full second before anybody has agreed to anything - so a delete somebody thought
+   better of counted exactly the same as one they went through with. Twenty-six buttons across the
+   portal are built this way (deletes, rejections, closing hiring, restoring calls, the AI rewrite),
+   and the Usability report has been counting every abandoned one of them.
+   Retracting at the point of refusal fixes all twenty-six at once, and any confirm-gated button
+   added later, without moving the logging inside each function by hand - and without the opposite
+   mistake of unmapping them, which would have left those features recording nothing at all. It is
+   safe because the event is still sitting in the client-side queue unsent: only the event queued in
+   the same breath as this dialog opening qualifies (the modal blocks the UI, so no unrelated click
+   can land in between), and only while it is genuinely still unsent - a batch already on its way to
+   the server is left alone rather than chased. A feature that wants to record the specific thing it
+   deleted still logs directly at its own source, exactly as before. */
 function confirmDialog(message,opts){
   opts=opts||{};
   const danger=opts.danger!==false;
+  const pending=usagePendingClick();
   return new Promise(resolve=>{
-    __confirmResolve=resolve;
+    __confirmResolve=function(val){ if(val===false) usageRetract(pending); resolve(val); };
     openModal(`<div class="modal-head"><h3><i class="fa-solid ${opts.icon||(danger?'fa-triangle-exclamation':'fa-circle-question')}" style="color:${danger?'var(--err)':'var(--brand)'}"></i> ${esc(opts.title||'Please confirm')}</h3></div>
       <div class="modal-body">${esc(message)}</div>
       <div class="modal-foot"><button class="btn" onclick="__confirmAnswer(false)">Cancel</button><button class="btn ${danger?'btn-danger':'btn-primary'}" onclick="__confirmAnswer(true)">${esc(opts.okLabel||'Delete')}</button></div>`);
@@ -505,13 +530,30 @@ async function fetchNotifTasks(){
 window.notifDismissAllDue=async function(){
   const items=await fetchNotifTasks();
   if(!items.length)return;
-  try{await sb.schema('acc').from('notif_dismissed_tasks').upsert(items.map(t=>({email:state.email,task_id:t.id})));}catch(e){}
+  let ok=false;
+  try{const {error}=await sb.schema('acc').from('notif_dismissed_tasks').upsert(items.map(t=>({email:state.email,task_id:t.id})));ok=!error;}catch(e){}
+  // Logged here rather than through USAGE_MAP so both "Mark all read" links - this one and the
+  // Updates one below - record the same feature with the same verb, and so a click that saved
+  // nothing is not counted. How many were cleared is the only detail worth keeping.
+  if(ok){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:items.length+' due reminder'+(items.length>1?'s':'')}); }catch(_e){} }
   await renderNotifDropdown();refreshNotifState();
 };
 // "Mark all read" for the Updates bucket (project-added / task-delegated) — Approvals are deliberately
 // excluded, since those need an actual Approve/Decline action, not just dismissal.
 window.notifMarkAllGeneralRead=async function(){
-  try{await sb.schema('acc').from('notifications').update({read:true}).eq('recipient',state.email).eq('read',false);}catch(e){}
+  // This is the "Mark all read" people actually press - the Updates bucket - and it was the one
+  // the usage catalog never watched: only notifDismissAllDue (the Due bucket) was mapped, and
+  // acc.notif_dismissed_tasks shows that link has never been clicked once, so the feature read 0
+  // uses while thousands of notifications were being cleared here. .select() is what makes the
+  // count knowable; with nothing unread the click is a no-op and is not counted.
+  // Counted BEFORE the update, with a plain select, rather than from what the update returns:
+  // an update's returning rows depend on the row-level policy still matching the row after the
+  // change, and read:true is exactly what changed. A count taken first cannot be caught by that.
+  let n=0;
+  try{const {data:un}=await sb.schema('acc').from('notifications').select('id').eq('recipient',state.email).eq('read',false);n=(un||[]).length;}catch(e){}
+  let ok=false;
+  try{const {error}=await sb.schema('acc').from('notifications').update({read:true}).eq('recipient',state.email).eq('read',false);ok=!error;}catch(e){}
+  if(n&&ok){ try{ usageQueue('tasks.tasks.mark_all_notifications_as_read','update',{title:n+' notification'+(n>1?'s':'')}); }catch(_e){} }
   await renderNotifDropdown();refreshNotifState();
 };
 function notifIsHighlight(t){
@@ -635,7 +677,7 @@ function renderPage(){
   refreshNotifState();
 }
 function route(){renderPage();}
-window.addEventListener('hashchange',renderPage);
+window.addEventListener('hashchange',function(){renderPage();});
 // Whenever a tab bar's active tab changes (a fresh page render, or a view re-rendering just its own
 // tabs after an async fetch), scroll that tab into view within its own horizontally-scrolling row -
 // otherwise a page with enough tabs to overflow (e.g. Campaign Analytics' source/period sub-tabs)
@@ -1277,15 +1319,18 @@ async function docRenderTable(host,dept){
     wire();
   };
   const wire=()=>{
-    const s=$('dtSearch');if(s){s.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();DOC.q=s.value.trim();DOC.page=1;docRenderTable(host,dept);}};}
-    const sb2=$('dtSearchBtn');if(sb2)sb2.onclick=()=>{DOC.q=($('dtSearch')?$('dtSearch').value.trim():'');DOC.page=1;docRenderTable(host,dept);};
-    const so=$('dtSort');if(so){so.value=DOC.sort;so.onchange=e=>{DOC.sort=e.target.value;docRenderTable(host,dept);};}
-    const stt=$('dtStatus');if(stt)stt.onchange=()=>{DOC.page=1;draw();};
+    /* Search only runs on Enter or the button, never per keystroke, so a plain log is right here -
+       no debounce needed. Clearing the box is not a search, so an empty value is not counted. */
+    const usbDoc=(m)=>{ try{ if(m) usageQueue('legal.documents.search_sort_filter_documents','search',m); }catch(_e){} };
+    const s=$('dtSearch');if(s){s.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();DOC.q=s.value.trim();DOC.page=1;usbDoc(DOC.q?{query:DOC.q}:null);docRenderTable(host,dept);}};}
+    const sb2=$('dtSearchBtn');if(sb2)sb2.onclick=()=>{DOC.q=($('dtSearch')?$('dtSearch').value.trim():'');DOC.page=1;usbDoc(DOC.q?{query:DOC.q}:null);docRenderTable(host,dept);};
+    const so=$('dtSort');if(so){so.value=DOC.sort;so.onchange=e=>{DOC.sort=e.target.value;usbDoc({title:'Sorted by '+e.target.value});docRenderTable(host,dept);};}
+    const stt=$('dtStatus');if(stt)stt.onchange=()=>{DOC.page=1;usbDoc({title:'Status: '+(stt.value||'all')});draw();};
     document.querySelectorAll('.dtChk').forEach(c=>c.onchange=e=>{const id=+e.target.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);updateBulk();});
     const all=$('dtAll');if(all)all.onchange=e=>{document.querySelectorAll('.dtChk').forEach(c=>{c.checked=e.target.checked;const id=+c.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);});updateBulk();};
     updateBulk();
   };
-  const updateBulk=()=>{const n=DOC.sel.size;const dl=$('dtBulkDl'),del=$('dtBulkDel');if(dl){dl.disabled=!n;dl.innerHTML='<i class="fa-solid fa-download"></i> Download'+(n?' ('+n+')':'');dl.onclick=()=>DOC.sel.forEach(id=>docDownload(id));}if(del){del.disabled=!n;del.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');del.onclick=()=>docBulkDelete();}};
+  const updateBulk=()=>{const n=DOC.sel.size;const dl=$('dtBulkDl'),del=$('dtBulkDel');if(dl){dl.disabled=!n;dl.innerHTML='<i class="fa-solid fa-download"></i> Download'+(n?' ('+n+')':'');dl.onclick=()=>{try{usageQueue('legal.documents.bulk_download_delete','export',{title:'Bulk download ('+DOC.sel.size+' documents)'});}catch(_e){}DOC.sel.forEach(id=>docDownload(id));};}if(del){del.disabled=!n;del.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');del.onclick=()=>docBulkDelete();}};
   window.docPage=(d,tp)=>{DOC.page=Math.max(1,DOC.page+d);if(tp)DOC.page=Math.min(DOC.page,tp);draw();};
   draw();
 }
@@ -1301,8 +1346,14 @@ window.docMenu=function(e,id){
   setTimeout(()=>document.addEventListener('click',function h(){menu.remove();document.removeEventListener('click',h);}),0);
 };
 async function getDoc(id){const {data}=await sb.schema('doc').from('documents').select('*').eq('id',id).single();return data;}
+/* Logged here rather than from USAGE_MAP, and only once the document is actually in hand. A wrapper
+   fires on the click with nothing but the row id, which is why every "Preview / download document"
+   row in the report reads "—": 55 of them, and not one says which document. The name is the only
+   thing that makes the row mean anything. */
 window.docPreview=async function(id){
   const d=await getDoc(id);if(!d)return;
+  try{ usageQueue('legal.documents.preview_download_document','view',
+        {title:d.title||d.file_name||null, category:d.category||d.folder||null}); }catch(_e){}
   if(!d.storage_path){ if(d.link){window.open(d.link,'_blank');return;} toast('No file attached to this record.','');return; }
   if(isS3Path(d.storage_path)){ await s3OpenSigned(d.storage_path); return; }
   const {data,error}=await sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,120);
@@ -1311,6 +1362,8 @@ window.docPreview=async function(id){
 };
 window.docDownload=async function(id){
   const d=await getDoc(id);if(!d)return;
+  try{ usageQueue('legal.documents.preview_download_document','export',
+        {title:d.title||d.file_name||null, category:d.category||d.folder||null}); }catch(_e){}
   if(!d.storage_path){ if(d.link){window.open(d.link,'_blank');return;} toast('No file to download.','');return; }
   if(isS3Path(d.storage_path)){ await s3OpenSigned(d.storage_path,d.file_name||'download'); return; }
   const {data,error}=await sb.storage.from(bucketFor(d.department)).createSignedUrl(d.storage_path,120,{download:d.file_name||true});
@@ -1983,10 +2036,30 @@ function misInRange(r){
   if(!iso) return true;
   return iso>=w.from && iso<=w.to;
 }
-// The causelist is a list of hearings, so it does want a real date on every row.
+/* THE CAUSELIST IS A LIST OF HEARINGS, so the date it lists a matter under is the case's own
+   NEXT DATE - the day it is next before the court - and not the Action Date, which is an
+   internal commitment about when somebody here will do something about it.
+
+   It used the Action Date for both, and the two are not the same day. Money Suit 59/2018 is
+   listed on 11/09/2026 and carries an action date of 03/07/2026: the causelist dated it July
+   and left it off September's altogether. Two matters - WBRERA/COM/000800/2024 and A.P. No.
+   206/2025 - have a hearing date and no action date at all, so they appeared on no causelist
+   ever, which is how this came to light.
+
+   The Action Date remains the right date everywhere else: the Calendar, the Scoreboard and the
+   pinned rows are about what this office has undertaken to do, not about court listings. So
+   this is a separate reading, used by the causelist alone; a case with no hearing date of its
+   own still falls back to the action date rather than vanishing. */
+function misHearingIso(r){
+  if(r.case_next_date_iso) return String(r.case_next_date_iso).slice(0,10);
+  const c=misToIso(r.case_next_date); if(c) return misIsoStr(c);
+  return misRowIso(r);
+}
+// The causelist wants a real date on every row, and it wants the HEARING date.
 function misInRangeDated(r){
-  const iso=misRowIso(r); if(!iso) return false;
-  return misInRange(r);
+  const iso=misHearingIso(r); if(!iso) return false;
+  const w=misRangeDates(); if(!w) return true;
+  return iso>=w.from && iso<=w.to;
 }
 
 const MIS_FIELDS=[
@@ -2948,8 +3021,12 @@ window.advFilter=function(){
   const list=(window._advRows||[]).filter(r=>!q||[r.case_type,r.court,r.state_dist,r.advocate_name,r.phone,r.chamber,r.extra_contact]
     .filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1);
   const tb=$('advBody'); if(!tb)return;
-  const tel=p=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
-    .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'">'+esc(x)+'</a>').join('<br>');
+  /* The number carries the advocate's name so the report can say who was called, and stops the
+     click there: the whole row opens the edit form, so tapping a number used to open it too. */
+  const tel=(p,nm)=>String(p||'').split('/').map(x=>x.trim()).filter(Boolean)
+    .map(x=>'<a href="tel:'+esc(x.replace(/\s+/g,''))+'" onclick="event.stopPropagation();advCall('
+      +JSON.stringify(esc(nm||'')).replace(/"/g,'&quot;')+','+JSON.stringify(x).replace(/"/g,'&quot;')+')">'+esc(x)+'</a>')
+    .join('<br>');
   // The whole row opens the edit form - no separate Edit button. Only Remove stays, because it
   // must not be reachable by a stray click.
   const cl=(v,w)=>'<td'+(w?(' style="max-width:'+w+'px"'):'')+'><div class="adv-clamp" title="'+esc(v||'')+'">'+esc(v||'—')+'</div></td>';
@@ -2958,7 +3035,7 @@ window.advFilter=function(){
     +cl(r.court,200)
     +cl(r.state_dist,150)
     +'<td><b>'+esc(r.advocate_name||'')+'</b></td>'
-    +'<td class="adv-ph">'+(r.phone?tel(r.phone):'—')+'</td>'
+    +'<td class="adv-ph">'+(r.phone?tel(r.phone,r.advocate_name):'—')+'</td>'
     +cl(r.chamber,240)
     +cl(r.extra_contact,170)
     +'<td onclick="event.stopPropagation()" style="white-space:nowrap">'
@@ -2982,6 +3059,7 @@ window.advModal=function(id){
     +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
     +'<button class="btn btn-primary" onclick="advSave('+(id||'null')+')"><i class="fa-solid fa-check"></i> '+(id?'Update':'Add')+'</button></div>','md');
 };
+window.advCall=function(nm,num){ try{ usageQueue('legal.advocates.click_to_call_advocate','view',{title:nm||num, phone:num}); }catch(_e){} };
 window.advSave=async function(id){
   const g=k=>{const el=$('advF_'+k);return el?(el.value||'').trim()||null:null;};
   const name=g('advocate_name');
@@ -2991,6 +3069,10 @@ window.advSave=async function(id){
   const {error}=id?await sb.from('legal_advocates').update(row).eq('id',id)
                   :await sb.from('legal_advocates').insert(row);
   if(error){toast(error.message,'err');return;}
+  /* Logged here, not through USAGE_MAP: one Save button both adds and edits, and the fixed key
+     there counted every edit as an advocate added. id is what tells them apart. */
+  try{ usageQueue(id?'legal.advocates.edit_advocate':'legal.advocates.add_advocate', id?'update':'create',
+    {title:name, court:row.court||undefined}); }catch(_e){}
   closeModal();toast(id?'Advocate updated':'Advocate added','ok');
   legalAdvocates();
 };
@@ -3097,7 +3179,7 @@ function misBuildCauselist(){
     return null;
   }
   const rows=(window._misRows||[]).filter(misInRangeDated)
-    .sort(function(a,b){ return String(misRowIso(a)||'').localeCompare(String(misRowIso(b)||'')); });
+    .sort(function(a,b){ return String(misHearingIso(a)||'').localeCompare(String(misHearingIso(b)||'')); });
   if(!rows.length){ toast('No hearings fall in '+misRangeLabel(),'warn'); return null; }
 
   // Reproduces CAUSTLIST - AUGUST26.pdf exactly, down to the spelling and casing that came
@@ -3110,7 +3192,7 @@ function misBuildCauselist(){
   // On "All dates" the causelist still needs a month to head itself with - take it from the
   // earliest hearing actually listed.
   if(!win){
-    const ds=rows.map(misRowIso).filter(Boolean).sort();
+    const ds=rows.map(misHearingIso).filter(Boolean).sort();
     win={from:ds[0]||todayStr(), to:ds[ds.length-1]||todayStr()};
   }
   const first=new Date(win.from+'T00:00:00');
@@ -3166,7 +3248,7 @@ function misBuildCauselist(){
         +'<td>'+cell(r.case_type)+'</td>'
         +'<td>'+cell(r.cause_title)+'</td>'
         +'<td>'+cell(r.case_no)+'</td>'
-        +'<td class="dt">'+esc(dmy(misRowIso(r)))+'</td>'
+        +'<td class="dt">'+esc(dmy(misHearingIso(r)))+'</td>'
         +'<td>'+cell(r.advocate_incharge)+'</td>'
         +'<td>'+cell(r.court)+'</td>'
         +'<td>'+cell(r.status)+'</td>'
@@ -3556,6 +3638,10 @@ window.misActionSave=async function(id){
   }
   const {error}=await sb.from('mis_cases').update(upd).eq('id',id);
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Save';}return;}
+  /* Only when something was actually typed. On the case form the remarks box is saved as part of
+     add/edit case and is not a separate act; here it is the reason the modal was opened. */
+  if(newRemark){ try{ usageQueue('legal.mis.add_remarks_to_a_case','update',
+    {title:r.cause_title||r.case_no||('Case #'+id), case_no:r.case_no||undefined}); }catch(_e){} }
 
   // Keep the Actions log in step: close the open one, or record/refresh it.
   try{
@@ -5155,7 +5241,7 @@ function wireProjTaskDrag(parentType,parentId){
           window._dragging=false; row.classList.remove('dragging');
           document.removeEventListener('pointermove',move);
           document.removeEventListener('pointerup',up);
-          persistProjTaskOrder(list,parentType,parentId);
+          persistProjTaskOrder(list,parentType,parentId,Number(row.dataset.id));
         }
         document.addEventListener('pointermove',move);
         document.addEventListener('pointerup',up);
@@ -5163,14 +5249,30 @@ function wireProjTaskDrag(parentType,parentId){
     });
   });
 }
-async function persistProjTaskOrder(list,parentType,parentId){
+async function persistProjTaskOrder(list,parentType,parentId,movedId){
+  const ids=[...list.querySelectorAll('.drag-row')].map(r=>Number(r.dataset.id));
+  /* The order the list was rendered in, which renderTaskDragList keeps. This runs on every
+     pointerup on a grip - including a plain click, and a drag that was put back where it started -
+     and both leave the order untouched. Without this comparison every one of those would have been
+     counted as a reorder. */
+  const was=(parentType==='project'?window.__PJT_ORDER:window.__GL_ORDER)||[];
+  const moved=(was.length!==ids.length)||ids.some(function(id,i){return id!==was[i];});
+  await Promise.all(ids.map((tid,i)=>sb.schema('acc').from('tasks').update({sort_order:i}).eq('id',tid)));
   // Logged directly rather than through USAGE_MAP's window[fn] wrapping: the drag reorder this
   // serves fires a pointerdown handler bound to this exact function reference at render time, and
   // usageAction() would misclassify it as 'view' anyway (nothing in "persistProjTaskOrder" matches
-  // its verb regexes). See the same note on crystallizeAndSwap in accountability.js.
-  try{ usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update'); }catch(e){}
-  const ids=[...list.querySelectorAll('.drag-row')].map(r=>Number(r.dataset.id));
-  await Promise.all(ids.map((tid,i)=>sb.schema('acc').from('tasks').update({sort_order:i}).eq('id',tid)));
+  // its verb regexes). See the same note on crystallizeAndSwap in accountability.js. The moved
+  // task's own name is recorded, so the report's Details column has something to show.
+  if(moved){
+    try{
+      let title=null;
+      if(movedId!=null&&!isNaN(movedId)){
+        const {data:mt}=await sb.schema('acc').from('tasks').select('title').eq('id',movedId).single();
+        title=(mt&&mt.title)||null;
+      }
+      usageQueue('tasks.tasks.insert_a_task_at_a_specific_position','update',title?{title:title}:null);
+    }catch(e){}
+  }
   if(parentType==='project')projectDetail($('view'),parentId); else goalDetail($('view'),parentId);
 }
 window.taskDragOver=function(e,row){
@@ -6423,6 +6525,7 @@ window.muDeleteSel=async function(){
   const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
   if(error){ toast(error.message,'err'); return; }
   toast(ids.length===1?'Position removed':ids.length+' positions removed','ok');
+  try{usageQueue('hr.monthly_update.delete_rows_or_whole_month','delete',{title:(ids.length===1?((picked[0]&&picked[0].position_title)||'1 position'):ids.length+' positions')+' — '+muMonthLabel(MU_CUR)});}catch(_e){}
   muRefresh();
 };
 
@@ -6571,7 +6674,7 @@ async function hrTracker(){
             <td style="font-size:12px;color:var(--slate)">${cel(r.source)}</td>
             <td style="font-size:12px">${cel(r.entity)}</td>
             <td class="tr-nowrap" style="font-family:monospace;font-size:12px">${cel(r.number)}</td>
-            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
+            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${JSON.stringify(r.candidate_name||'')})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
             <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
             <td class="tr-nowrap">${fbTag(r.feedback)}</td>
             <td class="tr-nowrap">${trResumeCell(r)}</td>
@@ -6582,6 +6685,9 @@ async function hrTracker(){
       </div>
     </div>`;
 }
+window.hrTrackerMailed=function(nm){
+  usageQueue('hr.interview_tracker.email_candidate_from_list','view',{title:nm||undefined});
+};
 window.trRowCheck=function(cb){
   const id=Number(cb.dataset.id);
   if(cb.checked)window._trSel.add(id);else window._trSel.delete(id);
@@ -7007,6 +7113,65 @@ let INSP_RESP_FILTER={q:'',work:'All'};
 let INSP_LOG_FILTER={q:'',block:'All',cat:'All',status:'All',section:'All'};
 async function inspFetch(){ const {data,error}=await sb.schema('acc').from('inspection').select('*').order('ts',{ascending:false}).limit(20000); if(error)throw error; return data||[]; }
 function inspLoc(r){ return (r.project?esc(r.project)+' · ':'')+'B'+esc(r.block||'?')+(r.floor?' · '+esc(r.floor):'')+' · '+esc(r.flat||'?'); }
+/* ---- What an inspection action was ABOUT, for the Usability report ---------------------------
+   Every action on this screen happens to one specific place - a flat, a floor, a tower, a project -
+   and the report had no way of saying which: 137 inspection events, all of them reading "—". The
+   unit is the one fact that makes an inspection row mean anything ("marked 12 items on 703" rather
+   than "marked 12 items"), and it is sitting right there in the form the whole time.
+   Plain text, not the escaped HTML inspLoc builds, because this goes into a JSON field and is
+   escaped again when the report draws it. Empty parts are dropped rather than printed as "B?" -
+   a Project-level inspection genuinely has no block or flat, and inventing a "?" for it reads as
+   missing data rather than as "this level does not have one". */
+function inspUnit(o){
+  if(!o) return null;
+  const parts=[];
+  if(o.project) parts.push(String(o.project).trim());
+  if(o.block)   parts.push('Block '+String(o.block).trim());
+  if(o.floor)   parts.push(String(o.floor).trim());
+  if(o.flat)    parts.push(String(o.flat).trim());
+  if(o.area_detail) parts.push(String(o.area_detail).trim());
+  return parts.length?parts.join(' · '):null;
+}
+// The New Inspection form as it stands right now. Read straight off the fields, so it is correct
+// at the moment of the click rather than whatever was saved last.
+function inspFormUnit(){
+  try{
+    const raw=($('inLevel')&&$('inLevel').value)||'';
+    const u=inspUnit({project:$('inProject')&&$('inProject').value,
+                      block:$('inBlock')&&$('inBlock').value,
+                      floor:$('inFloor')&&$('inFloor').value,
+                      flat:$('inFlat')&&$('inFlat').value,
+                      area_detail:raw.split('::')[1]||''});
+    const cat=($('inCat')&&$('inCat').value)||'';
+    if(!u && !cat) return null;
+    return {unit:u||undefined, category:cat||undefined};
+  }catch(e){ return null; }
+}
+/* The submission on the Form Responses tab. An index can be passed in because the wrapper logs
+   BEFORE the function it wraps runs - inspOpenSub(i) is the one that SETS INSP_DRILL, so reading
+   the global there would describe the submission the person just left, not the one they opened.
+   Everything else acts on whatever is already open, and passes nothing. */
+function inspSubUnit(i){
+  try{
+    const idx=(typeof i==='number')?i:(INSP_DRILL&&INSP_DRILL.i);
+    const r=(INSP_SUBS||[])[idx];
+    if(!r) return null;
+    const u=inspUnit(r);
+    if(!u && !r.work_category) return null;
+    return {unit:u||undefined, category:r.work_category||undefined};
+  }catch(e){ return null; }
+}
+// What the Console is narrowed to. 'All' is the absence of a filter, so it is left out rather than
+// printed - "Block All" says nothing.
+function inspScopeMeta(){
+  try{
+    const s=INSP_SCOPE||{}, keep=function(v){ return v && v!=='All' ? String(v) : null; };
+    const u=inspUnit({project:keep(s.project), block:keep(s.block), floor:keep(s.floor), flat:keep(s.flat)});
+    const w=keep(s.work);
+    if(!u && !w) return {unit:'All projects'};
+    return {unit:u||'All projects', category:w||undefined};
+  }catch(e){ return null; }
+}
 function qcStat(rows){ let ok=0,no=0,na=0; rows.forEach(r=>{const u=(r.status||'').trim().toUpperCase(); if(u==='OK')ok++; else if(/NOT\s*OK/.test(u)){no++;} else if(u==='NA'||u==='N/A')na++;}); const rated=ok+no; const checks=ok+no+na; return {checks,ok,no,na,open:no,rated,pass:rated?Math.round(ok/rated*100):0}; }
 function statusBadge(s){const u=(s||'').toUpperCase(); if(u==='OK')return '<span class="tag t-green">OK</span>'; if(/NOT\s*OK/.test(u))return '<span class="tag t-red">NOT OK</span>'; if(u==='NA'||u==='N/A')return '<span class="tag t-gray">NA</span>'; return esc(s);}
 function passbar(p){const col=p>=80?'#16855a':p>=50?'#d98a00':'#c83232';return '<div style="display:flex;align-items:center;gap:7px"><div class="progress" style="max-width:84px;flex:1"><span style="width:'+p+'%;background:'+col+'"></span></div><span style="font-size:11.5px;color:var(--slate)">'+p+'%</span></div>';}
@@ -7158,6 +7323,10 @@ window.inspCancelEdit=function(){ if(INSP_DRILL){INSP_DRILL.edit=false; renderPa
 window.inspBulkE=function(st){ document.querySelectorAll('#eItems .insp-check').forEach(row=>{row.querySelectorAll('.ic-btn').forEach(b=>b.classList.remove('on','ok','no','na')); const b=[...row.querySelectorAll('.ic-btn')].find(x=>x.dataset.s===st); if(b){b.classList.add('on',st==='OK'?'ok':/NOT/.test(st)?'no':'na'); row.dataset.status=st;}}); };
 window.inspUpdateSub=async function(){
   const sec=($('eSec').value||'').trim(), overall=($('eOverall').value||'').trim();
+  // Captured before the save so the two direct logs below can tell an actual edit apart from
+  // "Save changes" clicked with the remark/photo untouched from what was already there.
+  const origSub=(INSP_SUBS||[])[INSP_DRILL&&INSP_DRILL.i]||{};
+  const origSec=(origSub.sec||''), origOverall=(origSub.overall||''), origPhoto=(origSub.photo||'');
   const checks=[...document.querySelectorAll('#eItems .insp-check')];
   const b=$('eSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
   let photo=($('ePhoto').value||'').trim();
@@ -7174,6 +7343,14 @@ window.inspUpdateSub=async function(){
   let err=null;
   for(const c of checks){ const {error}=await sb.schema('acc').from('inspection').update({status:c.dataset.status||'',remarks:sec,defect_photo:photo,overall_remark:overall}).eq('id',c.dataset.id); if(error){err=error.message;break;} }
   if(err){toast(err,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Save changes';} return;}
+  // Logged directly, after the update actually succeeds, rather than through USAGE_MAP's single
+  // fixed key for this button - "update check status" and "add/replace a photo" and "add a
+  // remark" are three distinct catalog features one Save can do at once, and only counting them
+  // when the value actually changed keeps an untouched pre-filled field from over-counting.
+  if(photoFile || (photo && photo!==origPhoto)){ try{ usageQueue('inspection.responses.add_replace_defect_photo','update',
+    Object.assign({title:(photoFile?photoFile.name:photo)}, inspSubUnit()||{})); }catch(_e){} }
+  if((sec&&sec!==origSec) || (overall&&overall!==origOverall)){ try{ usageQueue('inspection.responses.add_section_overall_remarks','update',
+    Object.assign({title:(sec||overall).slice(0,80)}, inspSubUnit()||{})); }catch(_e){} }
   INSP_ROWS=null; INSP_DRILL=null; toast('Response updated','ok'); renderPage();
 };
 function inspLogRow(r){ return '<tr><td>'+esc(fmtDate(r.ts))+'</td><td>'+esc(r.inspector)+'</td><td>'+inspLoc(r)+'</td><td>'+esc(r.work_category)+(r.section?'<div style="font-size:11px;color:var(--slate)">'+esc(r.section)+'</div>':'')+'</td><td><b>'+esc(r.item_id)+'</b></td><td style="max-width:260px;color:#475569">'+esc(r.inspection_check)+'</td><td>'+statusBadge(r.status)+'</td><td style="color:var(--slate);max-width:200px">'+esc(r.remarks)+'</td></tr>'; }
@@ -7403,6 +7580,19 @@ window.inspSave=async function(){
   })));
   const {error}=await sb.schema('acc').from('inspection').insert(rows);
   if(error){toast(error.message,'err'); if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Submit';} return;}
+  /* After the insert, so a photo that uploaded but whose inspection then failed is not counted. */
+  /* The unit is built from the values this submit actually used rather than re-read from the form,
+     because navTo below clears the screen - by the time a form-reading helper ran, the fields it
+     wanted would already be gone. */
+  const submittedUnit=inspUnit({project,block,floor,flat,area_detail:areaDetail});
+  if(photo){ try{ usageQueue('inspection.new_inspection.upload_or_paste_defect_photo','create',
+    {title:(photoFile?photoFile.name:photo), source:(photoFile?'upload':'link'),
+     unit:submittedUnit||undefined, category:cat||undefined}, project||undefined); }catch(_e){} }
+  // Same reasoning: a section/overall remark is optional free text with no button of its own -
+  // only counts as used when the inspector actually typed one, and only once the rows exist.
+  if(sec||overall){ try{ usageQueue('inspection.new_inspection.add_section_overall_remarks','create',
+    {title:(sec||overall).slice(0,80),
+     unit:submittedUnit||undefined, category:cat||undefined}, project||undefined); }catch(_e){} }
   INSP_ROWS=null; INSP_FORM_STATE=null; toast(rows.length+' checks submitted','ok'); navTo('inspection');
 };
 /* ---- set/change password so Google users can also use email+password ---- */
@@ -7733,10 +7923,21 @@ function usbBandStyle(b){ const f=USB_BANDS.find(function(x){return x[0]===b;})|
 // Opens on the past 30 days — one of the four fixed presets, no custom entry to fall back to.
 const USB={preset:'30d',from:null,to:null,email:'',dept:'',rows:null,people:null};
 /* The presets the user asked for, resolved against IST because a "month" is a month where the
-   people using this actually are. Kept as pure date maths so the same range is produced whatever
-   the browser's own timezone happens to be set to. */
+   people using this actually are.
+   The comment above this used to claim the same range came out "whatever the browser's own
+   timezone happens to be set to", and the code underneath it simply read new Date() - which is
+   local time, so the claim was only true on an Indian machine. Everywhere else the window slid by
+   a day against the server, which counts strictly in IST: someone opening "This Month" on the 1st
+   from a machine set behind IST asked for a range that began before the month did. Now the clock
+   is actually moved to Kolkata first, and the rest of the maths is unchanged. */
+function usbIstNow(){
+  // en-US gives "M/D/YYYY, h:mm:ss AM" for this locale, which Date can parse back; the point is
+  // only to land on the right calendar day in Kolkata, not to preserve the instant.
+  try{ return new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'})); }
+  catch(e){ return new Date(); }
+}
 function usbRange(preset){
-  const now=new Date(), y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
+  const now=usbIstNow(), y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
   const iso=function(dt){ return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); };
   if(preset==='week'){ const dow=(now.getDay()+6)%7; return {from:iso(new Date(y,m,d-dow)), to:iso(now)}; }   // Monday-start
   if(preset==='month'){ return {from:iso(new Date(y,m,1)), to:iso(now)}; }
@@ -8105,7 +8306,7 @@ function usbModuleDetailHtml(moduleId){
           const open=USB_FEAT_OPEN.has(r.feature_key);
           const clickable=Number(r.uses||0)>0;   // nobody used it — nothing to expand into
           const chev=clickable?'<span class="usb-feat-chev'+(open?' open':'')+'"><i class="fa-solid fa-chevron-right"></i></span>':'<span class="usb-feat-chev" style="visibility:hidden"><i class="fa-solid fa-chevron-right"></i></span>';
-          const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'+(clickable?' onclick="usbToggleFeature(\''+esc(r.feature_key)+'\')"':'')+'>'
+          const row='<tr class="'+(clickable?'usb-feat-row':'')+'"'+(clickable?' onclick="usbToggleFeature(\''+escJs(r.feature_key)+'\')"':'')+'>'
             +'<td>'+chev+esc(r.feature)+'</td>'
             +'<td><b>'+Number(r.uses||0).toLocaleString('en-IN')+'</b></td>'
             +'<td>'+Number(r.users||0)+'</td>'
@@ -8130,7 +8331,7 @@ function usbFeatureUsersRowHtml(r){
   }else{
     inner='<div class="usb-users-wrap">'
       +cached.map(function(u){
-        return '<div class="usb-user-line usb-user-clickable" onclick="usbOpenUserEvents(\''+esc(r.feature_key)+'\',\''+esc(u.email)+'\',\''+esc(r.feature)+'\')" title="See every individual use">'
+        return '<div class="usb-user-line usb-user-clickable" onclick="usbOpenUserEvents(\''+escJs(r.feature_key)+'\',\''+escJs(u.email)+'\',\''+escJs(r.feature)+'\')" title="See every individual use">'
           +'<span class="usb-user-name">'+esc(nameOf(u.email))+'</span>'
           +'<span class="usb-user-meta">'+u.uses+' use'+(u.uses===1?'':'s')+' · last '+esc(fmtDate(u.last_used))+' <i class="fa-solid fa-chevron-right" style="font-size:9px;color:var(--slate-2);margin-left:6px"></i></span></div>';
       }).join('')
@@ -8163,19 +8364,45 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   if(myToken!==USB_EV_TOKEN) return;   // superseded by a newer drill-down while this was in flight
   const wrap=$('usbEvWrap'); if(!wrap)return;   // closed before the round trip finished
   if(err){ wrap.innerHTML='<div class="card card-pad empty"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load events</div><p>'+esc(err)+'</p></div>'; return; }
-  const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
+  /* The server hands back at most 500 of these. Printing rows.length as "uses" without saying so
+     meant a heavy user's row reading 1,200 opened onto a panel headed "500 uses" - two numbers for
+     one thing, with nothing to say which was right. The activity log next door already owns up to
+     its own 1,000 cap; this one now does the same. */
+  const capNote=(rows.length>=500)?' (showing the most recent 500)':'';
+  const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px"><b>'+esc(featureLabel||'')+'</b> · '+rows.length+' use'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No individual events found in this range.</div>'; return; }
   // The 4th column was Project, and it was blank on nearly every row - only 13 of 896 tasks have a
   // project (tag) set at all, so on the Tasks features it never said anything. What a reader of
   // "Create task" actually wants next to the task's name is WHO it went to, which the event now
   // captures as meta.assignee. Read from meta rather than the project column, and left out of
   // Details so it appears once, in its own column.
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
+  /* Every row here is the same feature, so the last column can be named for exactly what that
+     feature's work is about - "Unit" on an inspection, "Assigned to" on a task. */
+  /* A feature that has nothing to put in a column does not get the column. Some screens are only
+     looked at - the Scoreboard and the Archive have no record behind them, nobody they went to and
+     nothing they are about - so a Details and a last column would be two permanently empty cells
+     taking width from the two that do say something. Better a narrow honest table than a wide one
+     padded with dashes. */
+  const col4=usbCol4(featureKey);
+  const showCol4=!!col4.header, showDetails=!col4.hideDetails;
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
+    +(showDetails?('<th>'+esc(col4.detailsHeader||'Details')+'</th>'):'')
+    +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
+    +'</tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
-      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
+         printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
+         data. The clock is the only thing that tells two real actions apart here. */
+      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      // Only what the column ACTUALLY printed is held back from Details. Passing the whole key list
+      // hid fields the column then had no room for - "Open a month" lost its month from Details to a
+      // column that never showed it, which is how a working row ended up blank at both ends.
+      const col=usbCol4Value(e.meta, col4.keys);
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td>'
+        +(showDetails?('<td>'+usbMetaHtml(e.meta,col.used)+'</td>'):'')
+        +(showCol4?('<td style="color:var(--slate)">'+esc(col.text||'—')+'</td>'):'')
+      +'</tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8197,7 +8424,192 @@ function usbMetaLabel(k){
 // data rather than the honest "nothing was captured for this one" that an old event actually is.
 // 'assignee' is not internal - it is shown, but in its own "Assigned to" column beside Details
 // rather than repeated inside it.
-const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
+/* time_spent and showing belong to a column, never to Details. Left out of this list they leaked
+   into every view row as "Time Spent: 13s · Showing: 44 rows" - clutter beside the thing the row is
+   actually about, and on screens whose column is something else entirely it was the only thing in
+   Details at all. A column that wants either of them asks for it by name; nothing else prints it. */
+const USB_META_INTERNAL_KEYS=['ref','backfill','assignee','time_spent','showing'];
+/* ---- The drill-down's last column ------------------------------------------------------------
+   "Assigned to" only means anything where something is handed to somebody, which is Accountability
+   and nowhere else. Everywhere else it was a column of dashes taking up the width that the one
+   fact worth knowing should have had - and which fact that is depends entirely on what the module
+   does. An inspection happens to a flat; a document lives in a folder; a call belongs to a lead.
+   So the column is chosen per module and tab, and named for what it holds.
+   Keyed by module first, and by 'module.tab' where one module covers genuinely different things
+   (Legal's Documents, MIS and Advocates are three different subjects under one roof). The most
+   specific match wins.
+   A module is only listed here once its features actually capture the field - adding the column
+   before the capture would just move the blank from one column to another, which is the whole
+   mistake this is meant to end. Accountability keeps 'Assigned to'; the rest follow as their
+   capture lands. */
+const USB_COL4={
+  /* --- whole modules ------------------------------------------------------------------------ */
+  'tasks':                {header:'Assigned to',       keys:['assignee']},
+  'inspection':           {header:'Unit',              keys:['unit','category']},
+  /* Four of the five Document Library features are named "View ..." and are exactly that - a tab
+     that opens a list of documents. The Department column was never once filled on any of them:
+     the department and folder only exist while somebody is INSIDE a department library picking a
+     folder, which is the fifth feature, not these four. So the module drops both columns, and the
+     one feature where a choice is actually made keeps its own, below. */
+  'documents':            {header:null, keys:[], hideDetails:true},
+  'documents.department_library.browse_filter_by_category_folder':
+                          {header:'Department · Folder', keys:['department','folder'], hideDetails:true},
+  /* Every call-level feature runs through usbCallMeta, and what it puts in Details is the name on
+     the call record - the customer who was on the phone, not a member of staff. "Details" gave no
+     hint of that; the header now says whose name it is. The lead is dropped from the fourth column
+     because it IS that same name - printing it twice on one row says nothing the first mention
+     didn't already say. */
+  'transcription':        {header:'Project', keys:['project'], detailsHeader:'Customer name'},
+  /* The language IS the click here, so it gets the column and the header that names it. Left in the
+     module's key list it would have printed under a header reading "Project", which is the same
+     mismatch as a month sitting under "Decision". The call itself is still named, in Details. */
+  'transcription.call_detail.switch_transcript_language':
+                          {header:'Language', keys:['language'], detailsHeader:'Customer name'},
+  'network':              {header:'Range',             keys:['range']},
+  /* Every number on these screens is "for this period, from this source", so that pair is the one
+     fact each action here needs - and it is the whole fact, which leaves Details with nothing to
+     add. Three columns, none of them padding. */
+  'campaigns':            {header:'Period · Source',   keys:['period','source'], hideDetails:true},
+  'recruitment':          {header:'Position',          keys:['position','department']},
+  'procurement':          {header:'Vendor',            keys:['vendor']},
+  'postsales':            {header:'Status',            keys:['status','replacements']},
+  'competitors':          {header:'Competitor · Range',keys:['competitor','range','media']},
+  'organic':              {header:'Period · Network',  keys:['period','network','kind']},
+
+  /* --- tabs that are about something different from the rest of their module ----------------- */
+  // Legal is three different subjects under one roof
+  'legal.mis':            {header:'Case · Court',      keys:['case_no','court']},
+  'legal.actions':        {header:'Case · Court',      keys:['case_no','court']},
+  'legal.advocates':      {header:'Court',             keys:['court','case_type']},
+  'legal.documents':      {header:'Folder',            keys:['folder','category','department']},
+  // HR's three tabs hold three different things: a candidate's interview, a resume for a role, and
+  // a month's requisitions. 'position' fitted only the first of them.
+  'hr':                   {header:'Position',          keys:['position']},
+  'hr.resumes':           {header:'Role',              keys:['role','position']},
+  'hr.interview_qs':      {header:'Time spent', keys:['time_spent']},
+  // A test has a name and nothing else; the name is already the Details.
+  'recruitment.tests':    {header:'Time spent', keys:['time_spent']},
+  'procurement.quote_comp':{header:'Category',         keys:['category','replacements']},
+  // Asking the assistant carries the question; raising a ticket carries its category.
+  /* Help Desk, feature by feature. Asking the assistant carries the question - but the question is
+     already the Details, printed bare as the thing the row is about, so a Question column beside it
+     said the same words twice. Opening the chat and opening My Tickets are screen-opens with no
+     question and no ticket behind them. Raising a ticket is the one action here with two facts to
+     its name: the subject in Details, the department it went to in the column. */
+  'helpdesk.tickets':                       {header:'Topic', keys:['category']},
+  'helpdesk.assistant.ask_a_question':      {header:null, keys:[]},
+  'helpdesk.assistant.view_ai_assistant_chat':{header:null, keys:[], hideDetails:true},
+  'helpdesk.tickets.view_my_tickets':       {header:null, keys:[], hideDetails:true},
+
+  /* --- single features whose subject is unlike anything else in their tab -------------------- */
+  /* Monthly Update is the case that proved per-tab was not enough. Approve/reject and close/reopen
+     are decisions; opening a month is a month; searching is a typed query. One header across all
+     three put the month under "Decision" AND took it out of Details, leaving a row that had been
+     working blank at both ends. Each is named for its own subject now.
+     "Open a month" keeps the month in Details rather than in the column: the When column already
+     says the date, so the month only earns its place when it is NOT the current one - somebody
+     opening June's record in September - and Details is where that belongs. */
+  /* Workflow splits by what the click actually did. Four of its features hand the step to somebody,
+     and for those the person is the point. The rest - receiving, printing, marking done, posting an
+     update, editing or deleting an instance - go to nobody, which is why "Assigned to" was blank on
+     almost all of them. What they DO have is how long the work had been waiting, and on this portal
+     that is the number worth reading: 410 measurable steps, 45.9 hours average, 204 of them over a
+     day. A "Step" column was the other candidate and is wrong - Details already prints the step. */
+  'tasks.workflow':                               {header:'Waited',  keys:['waited']},
+  'tasks.workflow.forward_a_step':                {header:'Sent to', keys:['assignee']},
+  'tasks.workflow.reject_send_a_step_back':       {header:'Sent to', keys:['assignee']},
+  'tasks.workflow.revert_a_forwarded_step':       {header:'Sent to', keys:['assignee']},
+  'tasks.workflow.start_a_new_instance':          {header:'Sent to', keys:['assignee']},
+  'hr.monthly_update.approve_reject_requisition': {header:'Decision', keys:['decision']},
+  'hr.monthly_update.close_reopen_hiring':        {header:'Decision', keys:['decision']},
+  'hr.monthly_update.open_a_month':               {header:'Time spent', keys:['time_spent']},
+  'hr.monthly_update.search_filter_positions':    {header:'Time spent', keys:['time_spent']},
+  'hr.monthly_update.delete_rows_or_whole_month': {header:'Time spent', keys:['time_spent']},
+  // An upload has no lead yet - the call does not exist until it has run - so it reports the files.
+  /* The upload row is the one call-level feature whose Details is NOT just a name: it carries the
+     recording, the outcome and the project together, and the recording is as often a file name as
+     a person. So it keeps the plain "Details" header. The column carries the project, which every
+     one of the 517 reconstructed uploads has, plus the file count a live upload adds - naming it
+     "Files" alone had emptied all 517 of them, since a rebuilt row has no file count to give. */
+  'transcription.all_calls.upload_call_recording_s':
+                          {header:'Project · Files', keys:['project','files'], detailsHeader:'Details'},
+  /* Filtering a list is not about one call, so there is no lead and no project to name - that
+     column can never fill here. Details can and now does: since 12 Sep the click records which
+     filter, or which dates. The 13 older rows predate that and are permanently blank; a filter
+     leaves no trace anywhere else, so there is nothing to recover them from. */
+  'transcription.all_calls.filter_calls_by_outcome_or_date': {header:null, keys:[]},
+
+  /* --- screens you only look at -------------------------------------------------------------- */
+  /* No record and nobody it went to, so the honest column is how much was in front of the person.
+     Three Accountability tabs are here for the same reason: the Scoreboard, the Archive and the
+     Calendar are things you read, not things you hand to anybody. Tasks, Meetings and Workflow
+     keep "Assigned to". */
+  // Two screens you only read. There is no record behind them, nobody they went to, and nothing
+  // they are about - so both the Details and the last column would be permanently empty. Removed
+  // rather than filled with something that only looks like an answer.
+  'tasks.scoreboard':     {header:null, keys:[], hideDetails:true},
+  'tasks.archive':        {header:null, keys:[], hideDetails:true},
+  // The Calendar is read four different ways and they are not interchangeable - a team living in
+  // Day view needs a good agenda panel, one that only opens Month needs a good month grid, and the
+  // report could not tell them apart. How long they stayed still shows in Details.
+  'tasks.calendar':       {header:'View',       keys:['view']},
+  'tasks.meetings':       {header:'Attendees',  keys:['attendees']},
+  /* The one Home feature carries exactly one thing - how long the screen stayed open - and that is
+     already the fourth column. time_spent is an internal key, so Details was printing a dash under
+     a header on all 584 rows: a column whose entire content is the absence of content. */
+  'dashboard':            {header:'Time spent', keys:['time_spent'], hideDetails:true},
+  'projects':             {header:'Time spent', keys:['time_spent']},
+  'video':                {header:'Time spent', keys:['time_spent']},
+  /* All 8 CRM & Sales features are named "View ..." and every one of them is exactly that - a tab
+     that opens a list. Nothing is ever chosen, filtered or changed, so the only things the events
+     ever carried were the row count and how long the tab stayed open, neither of which answers a
+     question anybody asks. When and Action say the whole truth here. */
+  'crm':                  {header:null, keys:[], hideDetails:true},
+  'scaling':              {header:'Time spent', keys:['time_spent']},
+  'gtd':                  {header:'Time spent', keys:['time_spent']},
+  'compliance':           {header:'Time spent', keys:['time_spent']},
+  /* All four Assets & Maintenance tabs open a LIST - there is no feature that opens one asset or
+     one ticket, and the screen has no clickable row at all, so there is no name to record. Nor is
+     the screen reading the asset tables yet: it renders hardcoded rows, which is why it claims 311
+     assets while ast_assets holds 40. Until a row can be opened, "viewed the register" is the whole
+     truth and When and Action carry it. */
+  'maintenance':          {header:null, keys:[], hideDetails:true},
+  'inventory':            {header:'Time spent', keys:['time_spent']},
+  'playbook':             {header:'Time spent', keys:['time_spent']},
+  'finance':              {header:'Time spent', keys:['time_spent']}
+};
+const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
+/* Most specific wins: the feature itself, then its tab, then its module.
+   The per-feature level is not a refinement, it is the level this needed from the start. A tab
+   holds features that are about completely different things - Monthly Update has "Approve / reject
+   a requisition" (a decision), "Open a month" (a month) and "Search positions" (a typed query)
+   sitting together - and one header across all three put the month under a column headed
+   "Decision", which is worse than the dash it replaced. */
+function usbCol4(featureKey){
+  const k=String(featureKey||''), p=k.split('.');
+  return USB_COL4[k] || USB_COL4[p[0]+'.'+p[1]] || USB_COL4[p[0]] || USB_COL4_DEFAULT;
+}
+/* Whatever of the chosen keys this particular event actually carries, in the order listed.
+   Falls back to what was on the screen when none of them apply. That fallback matters more than it
+   looks: a tab holds both kinds of feature at once - Tasks has "Delegate a task", which really does
+   go to somebody, sitting beside "View tasks grouped by person", which goes to nobody at all. One
+   header has to serve both, so the row that has no subject shows what the person was looking at
+   instead of a dash. Only used when the primary keys give nothing, so it never dilutes a real
+   answer. */
+/* Whatever of the chosen keys this event actually carries, in the order listed - and nothing else.
+   There used to be a fallback here: when none of the chosen keys applied it showed what was on the
+   screen instead. That was a mistake, and a visible one - the Scoreboard printed "85 rows" under a
+   column headed "Time spent", and the grouped-by views would have printed it under "Assigned to".
+   A wrong label on real data is worse than an empty cell; the empty cell is at least honest about
+   not knowing. A column now shows its own fact or shows nothing. */
+function usbCol4Value(meta, keys){
+  if(!meta || typeof meta!=='object' || !keys || !keys.length) return {text:'', used:[]};
+  const out=[], used=[];
+  keys.forEach(function(k){
+    if(meta[k]!=null && String(meta[k]).trim()!==''){ out.push(String(meta[k]).trim()); used.push(k); }
+  });
+  return out.length ? {text:out.join(' · '), used:used} : {text:'', used:[]};
+}
 /* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
    and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
    a dump of fields rather than as the thing that happened. These keys are the names, so they are
@@ -8205,7 +8617,9 @@ const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
    (#93 New Bill Recording), then which step. Everything a feature captured beyond the name - a
    due date, a search query, a route - still carries its label, because those DO need saying. */
 const USB_META_NAME_ORDER=['workflow','instance','step','title','query'];
-function usbMetaHtml(meta){
+// extraSkip is whatever the last column is already showing for this row - printed once, in its own
+// column, rather than twice on the same line.
+function usbMetaHtml(meta, extraSkip){
   if(!meta || typeof meta!=='object') return '<span style="color:var(--slate-2)">—</span>';
   const has=function(k){ return meta[k]!=null && String(meta[k]).trim()!==''; };
   const named=[];
@@ -8218,7 +8632,7 @@ function usbMetaHtml(meta){
   });
   // An instance with a number but no title still deserves its number shown.
   if(!has('instance') && has('ref_no')) named.push('#'+esc(String(meta.ref_no)));
-  const skip=USB_META_INTERNAL_KEYS.concat(USB_META_NAME_ORDER, ['ref_no']);
+  const skip=USB_META_INTERNAL_KEYS.concat(USB_META_NAME_ORDER, ['ref_no'], extraSkip||[]);
   const rest=Object.keys(meta).filter(function(k){ return skip.indexOf(k)===-1 && has(k); })
     .map(function(k){ return '<b style="font-weight:600">'+esc(usbMetaLabel(k))+':</b> '+esc(String(meta[k])); });
   const parts=named.concat(rest);
@@ -8250,15 +8664,20 @@ window.usbOpenUserActivity=async function(){
   const capNote=(rows.length>=1000)?' (showing the most recent 1,000)':'';
   const head='<p style="color:var(--slate);font-size:13px;margin:0 0 14px">'+rows.length+' event'+(rows.length===1?'':'s')+capNote+' · '+esc(fmtDate(r.from))+' – '+esc(fmtDate(r.to))+'</p>';
   if(!rows.length){ wrap.innerHTML=head+'<div class="card card-pad empty" style="padding:24px;text-align:center;color:var(--slate)">No activity found in this range.</div>'; return; }
-  // Assigned to is a column here too, for the same reason as on the per-feature drill-down: the
-  // person an action went to is left out of Details deliberately, so without a column of its own
-  // it would simply not appear anywhere in this list.
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th><th>Assigned to</th></tr></thead><tbody>'
+  /* Every row here is a DIFFERENT feature, so unlike the per-feature drill-down this column cannot
+     be named for one subject. It shows whichever of those subjects the row happens to carry - the
+     person a task went to, the flat an inspection was on - under one heading that covers both. */
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:560px"><table class="tbl"><thead><tr><th>When</th><th>Module</th><th>Tab</th><th>Feature</th><th>Action</th><th>Details</th><th>On / to</th></tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
-      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      const who=(e.meta&&typeof e.meta==='object'&&e.meta.assignee!=null&&String(e.meta.assignee).trim())?String(e.meta.assignee):'—';
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
+         printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
+         data. The clock is the only thing that tells two real actions apart here. */
+      const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      const col4=usbCol4(e.feature_key);
+      const col=usbCol4Value(e.meta, col4.keys);
+      const who=col.text||'—';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col.used)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8539,6 +8958,7 @@ window.psaDrop=function(ev){
   const buf=new DataTransfer();
   [...dt.files].forEach(function(f){buf.items.add(f);});
   inp.files=buf.files;
+  window._psaWasDrop=true;
   psaUpPick();
 };
 window.psaUpPick=function(){
@@ -8600,6 +9020,8 @@ window.psaUploadStart=async function(){
   }
   await Promise.all(Array.from({length:Math.min(CONCURRENCY,fs.length)},worker));
   toast(ok+' document'+(ok!==1?'s':'')+' processed'+(fail?(', '+fail+' failed'):''),fail?'warn':'ok');
+  if(ok && window._psaWasDrop){ try{usageQueue('postsales.adhoc.bulk_drag_and_drop_upload','create',{count:ok});}catch(_e){} }
+  window._psaWasDrop=false;
   closeModal();
   psaRender();
 };
@@ -9086,6 +9508,7 @@ window.vtFilterVendors=function(){
   let shown=0;
   rows.forEach(function(tr){ const m=!q||tr.getAttribute('data-vt-s').indexOf(q)!==-1; tr.style.display=m?'':'none'; if(m)shown++; });
   const empty=$('vtSearchEmpty'); if(empty) empty.style.display=shown?'none':'block';
+  usageQueueDebounced('procurement.vendor_trends.search_filter_vendors', q);
 };
 
 window.vtOpenVendor=function(id){
@@ -9161,7 +9584,19 @@ VIEWS.maintenance=function(v,seg){
    speed-monitor agent. Read-only: RLS lets any signed-in user SELECT these. */
 const NET_RANGES=[['today','Today'],['3d','Last 3 days'],['5d','Last 5 days'],['30d','Last 1 month']];
 let NET_RANGE='today';
-window.netRangeChange=function(v){ NET_RANGE=v; renderPage(); };
+window.netRangeChange=function(v){
+  /* The same picker is rendered on Overview and on All readings. Logged through USAGE_MAP it
+     always reported the Overview key, so the All readings filter read 0 no matter how often it
+     was used. The hash says which tab the person is actually on. */
+  try{
+    const seg=String(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean);
+    const onAll=(seg[seg.length-1]==='1');
+    const label=((typeof NET_RANGES!=='undefined'&&(NET_RANGES.find(function(r){return r[0]===v;})||[]))[1])||v;
+    usageQueue(onAll?'network.all_readings.filter_readings_by_date_range'
+                   :'network.overview.filter_chart_by_date_range','search',{title:label});
+  }catch(_e){}
+  NET_RANGE=v; renderPage();
+};
 
 /* ---- Low-speed snapshot viewer: DISABLED ----------------------------------
    Snapshot images are no longer generated by the agent, so the Snapshot column
@@ -9685,6 +10120,7 @@ window.rtShareSend=async function(id){
     });
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    try{usageQueue('recruitment.tests.share_test_via_email','update',{title:rec.name,recipients:emails.length});}catch(_e){}
     closeModal();
     const n=Number(out.sent||emails.length);
     const who=(out.via==='gmail')
@@ -9974,8 +10410,10 @@ window.mpEdit=function(id){if(!recGuard())return;
 window.mpUpdate=async function(id){
   const d=mpCollect();delete d.submitted_at;
   const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const prevRec=(MP_RECORDS||[]).find(r=>r.id===id);
   const {data,error}=await sb.schema('hr').from('manpower_requests').update(d).eq('id',id).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Update';}return;}
+  if(prevRec&&prevRec.priority!==d.priority){ try{usageQueue('recruitment.manpower_form.mark_requisition_priority','update',{title:d.job_title,priority:d.priority});}catch(_e){} }
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id);
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
   closeModal();toast('Updated');recManpower();
@@ -10798,7 +11236,7 @@ function cmpPeriodBar(){
   }
   return '<div class="seg">'+segBtns+'</div>'+custom+'<div style="height:14px"></div>';
 }
-window.cmpShowProject=function(accId){
+window.cmpShowProject=function(accId,srcTab){
   if(!CMP_LAST)return;
   const acc=CMP_LAST.accounts.find(a=>a.ad_account_id===accId);
   if(!acc)return;
@@ -11392,7 +11830,7 @@ VIEWS.campaigns=async function(v,seg){
       '</tr></thead><tbody>'+
       sorted.map(function(r){
         const used=r.budget?Math.round(r.spend/r.budget*100):null;
-        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\')">'+
+        return '<tr class="clk" onclick="cmpShowProject(\''+r.acc.ad_account_id+'\',\'by_project\')">'+
         '<td style="font-weight:600">'+esc(r.acc.name)+'</td>'+
         '<td style="text-align:right">'+r.campaigns+'</td>'+
         '<td style="text-align:right">'+(r.budget?(inr(r.budget)+'<span style="color:var(--slate);font-size:11px">/day</span>'+(used!=null?'<div style="font-size:10.5px;color:'+(used>100?'#b91c1c':'var(--slate)')+'">'+used+'% used</div>':'')):'—')+'</td>'+
@@ -12019,13 +12457,22 @@ window.compSave=async function(id){
   await compRender();
 };
 window.compToggleActive=async function(id,active){
-  await sb.schema('camp').from('competitor_watchlist').update({active:active}).eq('id',id);
+  // Logged directly, after the update actually succeeds, rather than through USAGE_MAP - a toggle
+  // here can genuinely fail (network error, RLS), and the wrapper fired on the click regardless.
+  const {error}=await sb.schema('camp').from('competitor_watchlist').update({active:active}).eq('id',id);
+  if(error){toast(error.message,'err');try{usageQueue('competitors.overview.toggle_auto_sync_for_a_competitor','error');}catch(_e){}return;}
+  try{usageQueue('competitors.overview.toggle_auto_sync_for_a_competitor','update',{active:active});}catch(_e){}
 };
 window.compRemove=async function(id){
   const ok=await confirmDialog('Remove this competitor? Its stored ads will be deleted too.',{okLabel:'Remove'});
   if(!ok)return;
-  await sb.schema('camp').from('competitor_watchlist').delete().eq('id',id);
+  // Logged directly, after the delete actually succeeds, rather than through USAGE_MAP - the
+  // wrapper fires on the click itself, before the confirm dialog is even answered, so backing out
+  // of the dialog (or a delete that genuinely fails) would still have counted as a removal.
+  const {error}=await sb.schema('camp').from('competitor_watchlist').delete().eq('id',id);
+  if(error){toast(error.message,'err');try{usageQueue('competitors.overview.remove_competitor','error');}catch(_e){}return;}
   toast('Removed','ok');
+  try{usageQueue('competitors.overview.remove_competitor','delete');}catch(_e){}
   await compRender();
 };
 // featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
@@ -12087,6 +12534,10 @@ window.compOpenDetail=function(id){
   window._compDetailIdx=0;
   openModal(compDetailHtml(a),'lg');
   compRenderDetailMedia();
+  // Logged directly, after the ad is actually found and the detail modal opens, rather than
+  // through USAGE_MAP - a stale id (filtered list moved on, page refreshed) hits the "Ad not
+  // found" branch above and would otherwise still have counted as a detail view.
+  try{usageQueue('competitors.overview.view_ad_detail','view',{page:a.page_name});}catch(_e){}
 };
 function compDetailHtml(a){
   const stillRunning=!a.ad_delivery_stop_time;
@@ -15926,16 +16377,6 @@ function traRender(full){
   const c=$('traCount');if(c)c.textContent=rows.length+' of '+all.length+' call'+(all.length===1?'':'s');
 }
 
-/* Copy Response - the complete CRM record for this row, exactly as the API sent it. No download
-   button anywhere on this page, by requirement. */
-window.traCopy=async function(id){
-  const r=(TRA_ROWS||[]).find(function(x){return x.id===id;});
-  if(!r)return toast('Call not found','err');
-  const payload=r.original_crm_response||null;
-  if(!payload)return toast('No CRM response stored for this call','warn');
-  await traClip(JSON.stringify(payload,null,2),'CRM response copied');
-};
-
 /* ============ HOW A CALL RECORDING IS OFFERED, everywhere in this module ============
    A real <a href>, not a button. Clicking it downloads the audio, and so do all the things a link
    gets for free and a button never had: middle-click, Save link as, right-click Copy link address,
@@ -15947,18 +16388,30 @@ window.traCopy=async function(id){
    captured from it is dead almost immediately; the Knowlarity one keeps working and is handed a
    fresh signature every time it is followed.
 
-   What decides download-versus-playback is the Content-Disposition the recording host answers with,
-   not this markup: following a Knowlarity link has always produced a file rather than a player,
-   which is what makes a plain link enough here. download= cannot change that - browsers honour the
-   attribute same-origin only - so it is intent for the day these are served from our own origin.
-   target=_blank is the safety net for the other case: a host that ever did answer inline would then
-   render in a new tab instead of replacing the app in this one. */
+   A PLAIN LINK WAS NOT ACTUALLY ENOUGH, WHICH IS WHY THE CLICK IS NOW HANDLED.
+   Left to the browser, following that link fails in two ways that both end with the reader having
+   no file:
+
+     - The chain ends on PLAIN HTTP. sr.knowlarity.com 302s to kservices.knowlarity.com, which 302s
+       to a presigned http://kstoragerecording.s3.amazonaws.com/... URL. Chrome BLOCKS an insecure
+       download started from an https:// page, so on the live domain the click can do nothing at all.
+     - download= is honoured SAME-ORIGIN ONLY, so even when the file does arrive it is named after
+       the host's own uuid - 0a9fbfcb-..._0_r.mp3 - and is untraceable to a lead or a caller.
+
+   So the click goes through trRecClick, which asks the crm-recording edge function for the bytes
+   over https and saves them under the name trRecFile picked. The href stays the Knowlarity URL: it
+   is what makes middle-click, "Save link as" and "Copy link address" keep working, and it is what
+   the handler falls back to opening if the proxy is unreachable. */
 function trRecFile(r){
   /* A name the reader can find again in a downloads folder, rather than the opaque id the host uses.
-     Only honoured same-origin (see above), so this is intent, not a promise. */
+     Now a promise rather than just intent: the proxy sets Content-Disposition from this. */
   const id=(r&&(r.follow_up_id||r.callid||r.id));
   return 'call-recording'+(id?'-'+String(id).replace(/[^A-Za-z0-9_-]/g,''):'')+'.mp3';
 }
+/* A value on its way into a single-quoted JS string inside an onclick attribute - so it needs the
+   attribute escaping esc() does AND the string escaping it does not (esc leaves ' alone). Same
+   idiom as the rest of this file's inline handlers; here so the url is not pasted through it twice. */
+function trRecJs(s){return esc(String(s==null?'':s)).replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 /* opts: label (button text, '' for icon only), icon (defaults to a download arrow), cls (defaults to
    a small button), file (download filename), feat (the USAGE_MAP feature key to log this particular
    link under, when its context is one that was being counted before), missing (what to render when
@@ -15967,11 +16420,12 @@ function trRecLink(url,opts){
   opts=opts||{};
   if(!url)return opts.missing||'';
   const label=(opts.label===undefined?'Download':opts.label);
+  const file=esc(opts.file||'call-recording.mp3');
   return '<a class="'+(opts.cls||'btn btn-sm')+'" href="'+esc(url)+'"'
-    +' download="'+esc(opts.file||'call-recording.mp3')+'"'
+    +' download="'+file+'"'
     +' target="_blank" rel="noopener noreferrer"'
     +' title="'+esc(opts.title||'Download this call recording')+'"'
-    +' onclick="trRecClick(event,\''+esc(opts.feat||'')+'\')">'
+    +' onclick="trRecClick(event,\''+esc(opts.feat||'')+'\',\''+trRecJs(url)+'\',\''+trRecJs(opts.file||'call-recording.mp3')+'\')">'
     +'<i class="fa-solid '+esc(opts.icon||'fa-download')+'"></i>'+(label?' '+esc(label):'')
   +'</a>';
 }
@@ -15979,36 +16433,89 @@ function trRecLink(url,opts){
    label/value row - the address stays readable and copyable, and is now also clickable. */
 function trRecLinkText(url){
   return '<a href="'+esc(url)+'" download="call-recording.mp3" target="_blank" rel="noopener noreferrer"'
-    +' title="Download this call recording" onclick="trRecClick(event,\'\')"'
+    +' title="Download this call recording" onclick="trRecClick(event,\'\',\''+trRecJs(url)+'\',\'\')"'
     +' style="color:#0d9488;text-decoration:underline">'+esc(url)+'</a>';
 }
-/* Everything the anchor cannot do for itself. It does NOT preventDefault - the navigation IS the
-   download - it only stops the click reaching a clickable <tr> underneath, which would otherwise
-   open the lead instead of fetching the audio. It is also where USAGE_MAP now hangs the telemetry
-   that used to sit on the copy button: the feature key travels from the call site rather than being
-   fixed here, because these links appear in several views that count as different features (and in
-   some that were never counted at all, which pass '' and log nothing). */
-window.trRecClick=function(ev,feat){
-  if(ev&&ev.stopPropagation)ev.stopPropagation();
-};
 
-/* One clipboard write, used by the two Copy CRM response buttons (the recording URLs are download
-   links now, see above). navigator.clipboard needs a secure context and a permission that is not
-   always granted, and silently doing nothing is the worst outcome for a button whose entire job is
-   to copy - so there is a fallback that always works. */
-async function traClip(text,okMsg){
-  try{
-    await navigator.clipboard.writeText(text);
-    toast(okMsg,'ok');
-  }catch(e){
-    const ta=document.createElement('textarea');
-    ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
-    document.body.appendChild(ta);ta.select();
-    try{document.execCommand('copy');toast(okMsg,'ok');}
-    catch(e2){toast('Could not copy to clipboard','err');}
-    ta.remove();
+/* THE CLICK. Takes over from the anchor and saves the file itself, for the two reasons in the block
+   comment above (the chain's last hop is plain http, which Chrome refuses to download from an https
+   page; and download= is ignored cross-origin, so the name is lost).
+
+   It still stops the click reaching a clickable <tr> underneath, which would otherwise open the lead
+   instead of fetching the audio. And it is still where USAGE_MAP hangs the telemetry that used to
+   sit on the copy button: the feature key travels from the call site rather than being fixed here,
+   because these links appear in several views that count as different features (and in some that
+   were never counted at all, which pass '' and log nothing) - which is also why `feat` keeps its
+   position as the second argument, where USAGE_MAP's resolver reads it from.
+
+   WHAT IS DELIBERATELY LEFT TO THE BROWSER: a modified click. Ctrl/cmd/shift/alt-click and
+   middle-click mean "open this somewhere else", and answering them with a download in the current
+   tab is not what was asked for - those fall straight through to the href.
+
+   AND IF THE PROXY CANNOT BE REACHED, the old behaviour comes back rather than being simulated.
+   The obvious move - window.open(url) from the catch - does not survive a popup blocker: by then the
+   await has ended the user-gesture context, so the tab is refused and the click still ends in
+   nothing. So a failed link is MARKED instead, and the next click on it is left entirely to the
+   browser: the href is untouched, so that second click does exactly what this link did before any
+   of this existed. The toast is what tells the reader that clicking again is the thing to do. */
+window.trRecClick=async function(ev,feat,url,file){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  /* No url means this is markup from before the handler took arguments - let the anchor do what it
+     always did rather than swallowing the click and doing nothing. */
+  if(!url)return;
+  if(ev&&(ev.ctrlKey||ev.metaKey||ev.shiftKey||ev.altKey||ev.button===1))return;
+  /* Already tried and failed once - this click is the browser's (see the note above). The mark is
+     per element and dies with the next repaint, so it is a fallback for this reader on this link
+     right now, never a permanent downgrade of the feature. */
+  if(ev&&ev.currentTarget&&ev.currentTarget.dataset.recFallback==='1')return;
+  if(ev&&ev.preventDefault)ev.preventDefault();
+
+  /* The clicked element, dimmed while the bytes are on their way. A ~1 MB fetch through the proxy
+     is not instant, and a link that looks untouched for a second reads as a link that did nothing -
+     which is the complaint this whole change is answering. Guarded against a second click landing
+     on the same in-flight link. */
+  const a=(ev&&ev.currentTarget)||null;
+  if(a){
+    if(a.dataset.recBusy==='1')return;
+    a.dataset.recBusy='1';
+    a.style.opacity='0.55';a.style.pointerEvents='none';
   }
-}
+  const done=function(){ if(a){delete a.dataset.recBusy;a.style.opacity='';a.style.pointerEvents='';} };
+
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/crm-recording',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({url:url,filename:file||''})});
+    if(!res.ok){
+      const out=await res.json().catch(function(){return {};});
+      throw new Error(out.error||('HTTP '+res.status));
+    }
+    const blob=await res.blob();
+    /* The proxy's own Content-Disposition wins - it is the one that knows the lead and follow-up ids
+       when the call site had no name to offer (the free-text URL links pass ''). */
+    const cd=res.headers.get('content-disposition')||'';
+    const m=/filename="?([^";]+)"?/i.exec(cd);
+    const name=(m&&m[1])||file||'call-recording.mp3';
+    const objUrl=URL.createObjectURL(blob);
+    const dl=document.createElement('a');
+    dl.href=objUrl;dl.download=name;dl.style.display='none';
+    document.body.appendChild(dl);dl.click();dl.remove();
+    setTimeout(function(){URL.revokeObjectURL(objUrl);},2000);
+    toast('Downloading '+name,'ok');
+  }catch(e){
+    if(a){
+      a.dataset.recFallback='1';
+      toast('Could not download the recording ('+((e&&e.message)||e)+') - click it again to open it directly','warn');
+    }else{
+      /* No element to mark (a programmatic call), so the tab attempt is all there is. */
+      toast('Could not download the recording ('+((e&&e.message)||e)+')','warn');
+      try{window.open(url,'_blank','noopener');}catch(e2){}
+    }
+  }
+  done();
+};
 
 /* Retry - hands the call back to the same pipeline. The backend re-queues it at the BACK of the
    FIFO queue and increments the attempt count; nothing here duplicates a row or clears a result. */
@@ -16195,6 +16702,19 @@ window.traCmDelete=async function(cid,id){
   traDetail($('view'),id);
 };
 
+/* Re-reads this one call and repaints the page. Nothing to invalidate first: unlike the lead page,
+   this view fetches straight from acc.transcriptions on every render and keeps no snapshot. */
+window.traDetailRefresh=async function(id){
+  const b=document.getElementById('traDetailRefreshBtn');
+  if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Refreshing';}
+  try{
+    await traDetail($('view'),id);
+  }catch(e){
+    toast('Could not refresh this call: '+((e&&e.message)||e),'err');
+    if(b&&document.body.contains(b)){b.disabled=false;b.innerHTML='<i class="fa-solid fa-rotate"></i> Refresh';}
+  }
+};
+
 async function traDetail(v,id){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Call']);
   v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -16217,7 +16737,13 @@ async function traDetail(v,id){
   const back='<button class="btn btn-sm" onclick="navTo(\'transcription/0\')"><i class="fa-solid fa-arrow-left"></i> All calls</button>';
   const retry=(st==='failed')
     ?'<button class="btn btn-primary" onclick="traRetry('+r.id+')"><i class="fa-solid fa-rotate-right"></i> Retry</button>':'';
-  const copy='<button class="btn" onclick="traCopy('+r.id+')"><i class="fa-regular fa-copy"></i> Copy Response</button>';
+  /* Was "Copy Response" - the same JSON-to-clipboard button the lead page carried as "Copy CRM
+     response", and removed for the same reason: the whole CRM record is already laid out in the
+     card below, field by field, and a blob of JSON on the clipboard answered a question nobody on
+     this page was asking. Refresh is what that spot is actually wanted for - this page has no cache
+     to drop, so it simply re-reads the call and repaints. */
+  const refresh='<button class="btn" id="traDetailRefreshBtn" onclick="traDetailRefresh('+r.id+')">'
+    +'<i class="fa-solid fa-rotate"></i> Refresh</button>';
 
   /* The CRM record, whatever keys it carried. Rendered from the stored response rather than from
      the unpacked columns, so a field the API starts sending tomorrow shows up here on its own. */
@@ -16238,7 +16764,7 @@ async function traDetail(v,id){
   v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-phone" style="color:#0d9488"></i> '
       +esc(r.customer_name||r.title||('Lead '+(r.lead_id||'')))+'</h1>'
       +'<p>Lead '+esc(String(r.lead_id||'—'))+' · '+esc(traRowDate(r)||'—')+'</p></div>'
-      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+back+copy+retry+'</div></div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+back+refresh+retry+'</div></div>'
     +'<div class="card card-pad" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
       +traStatusTag(r)+traMatchTag(r)
       +(r.crm_status?'<span class="tag t-blue">CRM: '+esc(r.crm_status)+'</span>':'')
@@ -16402,13 +16928,13 @@ let TRC_ROWS_RANGE=null;
 
 /* TRC_ROWS/TR_ROWS only survive as long as this tab's JS does - a reload throws the fetch away and
    pays the full CRM-join + transcription cost again even one minute later. sessionStorage backs the
-   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 2h of
-   the last real fetch reads from the browser instead of hitting Supabase again. 2h, not "until the
-   tab closes", because the underlying data does keep changing (new calls come in, transcriptions
-   complete) - it just doesn't need re-checking on every reload.
+   same rows with a wall-clock expiry, so a reload (or someone flipping tabs and back) within 5h of
+   the last real fetch reads from the browser instead of hitting Supabase again. 5h - a full working
+   session, not "until the tab closes" - because the underlying data does keep changing (new calls
+   come in, transcriptions complete) - it just doesn't need re-checking on every reload.
    sessionStorage (not localStorage): this is a cache of one tab's own last fetch, not something that
    should leak into a different tab that might be looking at a different filter/date range. */
-const TRC_CACHE_TTL_MS=2*60*60*1000;
+const TRC_CACHE_TTL_MS=5*60*60*1000;
 function trCacheRead(key,matchKey){
   try{
     const c=JSON.parse(sessionStorage.getItem(key)||'null');
@@ -16424,11 +16950,11 @@ function trCacheWrite(key,matchKey,rows){
 }
 /* Every place that changes TR_ROWS/TRC_ROWS without going through a real trFetch/trcFetch
    (delete, restore, a fresh upload, a poll that just finished) has to drop the cached copy too -
-   otherwise a reload in the next 2h would resurrect a deleted call, or hide one just restored or
+   otherwise a reload in the next 5h would resurrect a deleted call, or hide one just restored or
    just uploaded, straight out of the stale snapshot. */
 function trCacheClear(key){try{sessionStorage.removeItem(key);}catch(e){}}
 
-/* ---- one lead's WHOLE follow-up history, cached under the same 2h expiry as the list itself.
+/* ---- one lead's WHOLE follow-up history, cached under the same 5h expiry as the list itself.
    The list's own fetch (TRC_LIGHT) deliberately leaves out the transcripts and the five QA blobs,
    so opening a lead has always meant a second, per-lead round trip for select('*') - and clicking
    the same lead twice, or backing out and clicking back in, paid for it again every time. Every
@@ -16482,7 +17008,7 @@ function trcLeadCacheSweep(expiredOnly){
 }
 /* Anything that makes a lead's stored history wrong (an explicit Refresh, a Retry that re-runs the
    pipeline for one call) has to drop it here too - otherwise the detail page would render the
-   pre-change snapshot straight back out of the cache for the next 2h. */
+   pre-change snapshot straight back out of the cache for the next 5h. */
 function trcLeadCacheDrop(id){
   const k=String(id);
   delete TRC_LEAD_MEM[k];
@@ -16522,34 +17048,23 @@ async function trcPrefetchHistories(leadIds){
     if(gen!==TRC_PREFETCH_GEN)return;            // a newer prefetch (or a page change) owns this now
     const ids=todo.slice(i,i+TRC_PREFETCH_CHUNK);
     try{
-      /* The same two queries the detail page runs, just for 25 leads instead of one. crm_leads is a
-         plain indexed lookup and costs next to nothing; the timeline view is the expensive half, and
-         this is the whole point of batching it.
-         Both are PAGED to completion rather than taken as-returned. A single-lead query can safely
-         assume one page; a 25-lead one cannot, and PostgREST answers an over-long result by silently
-         truncating it at its own max-rows - which here would mean caching a lead's history with its
-         oldest calls quietly missing, and the detail page then showing that as the whole story. A
-         short page is the only proof there is nothing more to fetch. */
-      const [leadsAll,rowsAll]=await Promise.all([
-        trcFetchAllPages(function(from,to){
-          return sb.schema('acc').from('crm_leads').select('*').in('lead_id',ids).order('lead_id').range(from,to);
-        }),
-        trcFetchAllPages(function(from,to){
-          return sb.schema('acc').from('followup_timeline_v').select('*').in('lead_id',ids)
-            .order('follow_up_id').range(from,to);
-        })
-      ]);
+      /* ONE request for the whole chunk, where this used to make two - and the per-lead pair the
+         detail page makes on a click is the same one call. See acc.crm_lead_detail: the lead row
+         and its complete follow-up history come back together, keyed by the id that was asked for.
+         It also retires the paging this loop needed. The old shape asked for 25 leads' worth of
+         timeline ROWS, and PostgREST answers an over-long result by silently truncating it at its
+         own max-rows - which would have meant caching a lead's history with its oldest calls
+         quietly missing, and the detail page then showing that as the whole story. Here each
+         lead's history is one jsonb value inside its own row, so 25 leads is 25 rows and there is
+         nothing left to truncate. */
+      const byId=await trcLeadFetchByIds(ids);
       if(gen!==TRC_PREFETCH_GEN)return;
-      const leadById=Object.create(null);
-      leadsAll.forEach(function(l){leadById[String(l.lead_id)]=l;});
-      const rowsById=Object.create(null);
-      rowsAll.forEach(function(r){(rowsById[String(r.lead_id)]||(rowsById[String(r.lead_id)]=[])).push(r);});
       /* Written for every id asked for, not just the ones that came back with rows - a lead with no
          follow-up history at all is a real answer, and caching it is what stops the detail page
          re-asking for that same empty answer on every click. */
       ids.forEach(function(id){
-        const k=String(id);
-        trcLeadCacheWrite(id,leadById[k]||null,(rowsById[k]||[]).slice().sort(trcChrono));
+        const d=byId[String(id)];
+        trcLeadCacheWrite(id,(d&&d.lead)||null,(d&&d.rows)||[]);
       });
     }catch(e){
       /* Silent by design: nothing on screen is waiting for this, and the detail page still fetches
@@ -16558,21 +17073,74 @@ async function trcPrefetchHistories(leadIds){
   }
 }
 
-/* Runs a range()d query to exhaustion. build(from,to) has to apply a stable order() as well as the
-   range - paging an unordered query is how rows get both duplicated and dropped between pages. */
-async function trcFetchAllPages(build){
-  const PAGE=1000;let out=[],from=0;
-  for(;;){
-    const {data,error}=await build(from,from+PAGE-1);
-    if(error)throw error;
-    const batch=data||[];out=out.concat(batch);
-    if(batch.length<PAGE)break;
-    from+=PAGE;
-    if(from>50000)break;                       // backstop, never a real workload for 25 leads
-  }
+/* THE ONE PLACE A LEAD'S HISTORY IS FETCHED, for the click and for the prefetch alike.
+   acc.crm_lead_detail is the find-a-lead-by-id API this module now goes through: it takes the ids
+   as an array, and for each one returns that lead's row and its WHOLE follow-up timeline together,
+   so opening a lead is a single round trip instead of two.
+   WHY IT LIVES IN THE DATABASE rather than as two client queries. acc.followup_timeline_v joins a
+   five-deep chain of window functions over every follow-up there has ever been, and until the
+   matching migration the lead_id filter could not reach inside that chain - so asking for one
+   lead's six calls cost the same ~7-8 SECONDS as asking for all thirteen thousand, which is what
+   every click on this table was paying. Filtering by a single id now pushes all the way down to an
+   index scan (measured 7839ms -> 15ms); filtering by a LIST still cannot, which is exactly why the
+   batch is a loop inside the function rather than one `in('lead_id', ids)` out here. 25 leads:
+   ~4.8s before, ~0.2s now.
+   Returns a map keyed by the STRING id, with an entry for every id asked for - including ids that
+   have nothing behind them, since "this lead has no history" is a real answer worth caching. */
+async function trcLeadFetchByIds(ids){
+  const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:ids});
+  if(error)throw error;
+  const out=Object.create(null);
+  (data||[]).forEach(function(d){
+    out[String(d.lead_id)]={lead:d.lead||null,rows:trcSortHistory(d.followups)};
+  });
+  ids.forEach(function(id){
+    const k=String(id);
+    if(!out[k])out[k]={lead:null,rows:[]};
+  });
   return out;
 }
+/* The function already orders a lead's history by communication_time then follow_up_id. It is
+   sorted again here because trcChrono is what the REST of this module means by chronological (it
+   reads call_start_text first, see the note on trcChrono) - and a history that arrives in one
+   order and is rolled up in another is how a lead's "latest call" quietly becomes the wrong call. */
+function trcSortHistory(rows){
+  return (Array.isArray(rows)?rows:[]).slice().sort(trcChrono);
+}
+
 const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+
+/* THE PRE-SALES TEAM, from the roster table rather than from whoever happens to be in the fetched
+   rows. The Personnel filter used to be built entirely out of TRC_ROWS, which meant it could only
+   ever offer the callers with a call in the selected date range: a caller who was on leave, or who
+   simply had no lost/follow-up call that day, was missing from the dropdown altogether - and a
+   missing name is indistinguishable from a name with nothing to show. Someone checking "did Rani
+   take any calls yesterday" could not ask the question.
+
+   Nine rows, so it is fetched once per page life and kept - the roster changes when someone joins
+   or leaves the team, not between two clicks of a date preset. null means "not fetched yet", [] is
+   a real answer (and the filter falls back to the rows, exactly as before, so a failed fetch or an
+   older database costs nothing).
+   See acc.crm_presales_personnel - the same list acc.crm_presales_emails() reads to decide which
+   calls are queued for transcription at all, so the dropdown and the pipeline cannot disagree. */
+let TRC_PERSONNEL=null;
+async function trcPersonnelFetch(){
+  if(TRC_PERSONNEL)return TRC_PERSONNEL;
+  try{
+    const {data,error}=await sb.schema('acc').from('crm_presales_personnel')
+      .select('email,full_name,active,sort_order').eq('active',true)
+      .order('sort_order',{ascending:true,nullsFirst:false}).order('full_name');
+    if(error)throw error;
+    TRC_PERSONNEL=(data||[]).map(function(p){
+      return {email:String(p.email||'').toLowerCase(),name:p.full_name||p.email};
+    }).filter(function(p){return p.email;});
+  }catch(e){
+    /* Silent: the filter has a working fallback and a toast here would fire on every visit to a
+       page whose main job has nothing to do with the roster. */
+    TRC_PERSONNEL=[];
+  }
+  return TRC_PERSONNEL;
+}
 /* The lead (and, when the click came from the call-level Mismatch table, the exact follow-up) most
    recently opened from this list, so coming back from its detail page (the in-app Back button, or
    the browser's own back button - both re-run trcView the same way) highlights and scrolls to the
@@ -16682,6 +17250,11 @@ function trcIsRegression(r){
    "All time" (both dates cleared) does the original full fetch - that is a real request for
    everything, not the default. */
 async function trcFetch(force){
+  /* Awaited, and deliberately not fired off in parallel: nine rows once per page life, a no-op on
+     every call after the first, against a view query that costs seconds. Racing it instead would
+     save nothing measurable and would let the roster land AFTER the render that needed it, leaving
+     the dropdown short a caller until something else happened to repaint it. */
+  await trcPersonnelFetch();
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
   if(!force){
@@ -16760,7 +17333,11 @@ function trcApply(rows,skipCards){
     if(TRC_F.to&&(!d||d>TRC_F.to))return false;
     if(TRC_F.crm!=='all'&&String(r.crm_status||'')!==TRC_F.crm)return false;
     if(TRC_F.bu!=='all'&&String(r.business_unit_name||'')!==TRC_F.bu)return false;
-    if(TRC_F.personnel!=='all'&&String(r.personnel_email||'')!==TRC_F.personnel)return false;
+    /* Case-insensitively: the option values come from the roster, which stores addresses lowercased
+       (that is what acc.crm_presales_emails() compares against), while personnel_email is whatever
+       casing the CRM happened to send. Matching those exactly is how a selected caller's own calls
+       end up filtered out from under them. */
+    if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
     if(!skipCards){
       if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
@@ -17046,12 +17623,21 @@ function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
     .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
   const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
+  /* The whole team first, in the roster's own order (the manager, then the callers), so every
+     pre-sales caller is selectable whether or not they have a call in this date range. Anyone
+     pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
+     dropped: that combination means the CRM sent a caller the roster has not caught up with, and
+     hiding their calls behind a filter that cannot name them is the worse of the two failures. */
   const seenP={};
-  const personnelValues=(all||[]).reduce(function(out,r){
-    const email=r.personnel_email;
-    if(!email||seenP[email]||String(r.personnel_team||'')!=='Pre-Sales')return out;
-    seenP[email]=1;out.push({email:email,name:r.personnel_name||email});return out;
-  },[]).sort(function(a,b){return a.name.localeCompare(b.name);});
+  const personnelValues=(TRC_PERSONNEL||[]).map(function(p){
+    seenP[p.email]=1;return {email:p.email,name:p.name};
+  });
+  (all||[]).forEach(function(r){
+    const email=String(r.personnel_email||'').toLowerCase();
+    if(!email||seenP[email]||String(r.personnel_team||'')!=='Pre-Sales')return;
+    seenP[email]=1;
+    personnelValues.push({email:email,name:(r.personnel_name||email)+' (not on the roster)'});
+  });
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -17096,7 +17682,7 @@ window.trcClear=async function(){
 };
 /* The one button that means "I don't trust what's on screen" - so it drops BOTH caches, the list's
    and every lead history cached under it, rather than refetching the table and then still handing
-   out 2h-old transcripts on the next click. */
+   out 5h-old transcripts on the next click. */
 window.trcRefresh=async function(){
   trcShowLoading();
   trcLeadCacheClearAll();
@@ -17666,9 +18252,39 @@ function trcOvHealthHtml(h){
   +'</div>';
 }
 
+/* What this page was last rendered with, so its Refresh button can render it AGAIN identically -
+   same lead, same ringed call, same row number in the Back link - without the reader having to go
+   back to the list and click in a second time. Kept here rather than read back off the URL because
+   the row number arrives as an argument on some routes and not others (see trcView). */
+let TRC_LEAD_ARGS=null;
+/* Refresh on the lead page means the same thing it means on the list: what is on screen is not
+   trusted. So this lead's cached history goes - it is a 5h snapshot, and rendering it back out is
+   precisely what the reader is asking not to happen - and the page refetches from scratch.
+   Deliberately NOT trcLeadCacheClearAll(): the other leads' snapshots are not what is in doubt, and
+   throwing away the list's whole prefetch would make the next click on every one of them slow. */
+window.trcLeadRefresh=async function(){
+  if(!TRC_LEAD_ARGS)return;
+  const b=document.getElementById('trcLeadRefreshBtn');
+  if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Refreshing';}
+  const a=TRC_LEAD_ARGS;
+  trcLeadCacheDrop(a.leadId);
+  try{
+    await trcLeadDetail($('view'),a.leadId,a.targetFollowUpId,a.rowHint);
+  }catch(e){
+    toast('Could not refresh this lead: '+((e&&e.message)||e),'err');
+    /* Only reached if the re-render itself threw - trcLeadDetail handles a failed fetch by drawing
+       its own error card, and in that case the button it just drew is a fresh one, already enabled.
+       This puts the OLD button back so the page is not left with a dead spinner on it. */
+    if(b&&document.body.contains(b)){b.disabled=false;b.innerHTML='<i class="fa-solid fa-rotate"></i> Refresh';}
+  }
+};
+
 async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   setCrumb([['Growth & Strategy','#/'],['Transcription','#/'],'Lead']);
   const id=Number(leadId);
+  /* The NUMERIC id, not the route's string - it is what trcLeadCacheWrite keys the snapshot under,
+     so it has to be what Refresh hands trcLeadCacheDrop. */
+  TRC_LEAD_ARGS={leadId:id,targetFollowUpId:targetFollowUpId||null,rowHint:rowHint||null};
   TRC_LAST_LEAD_ID=id;
   TRC_LAST_FOLLOWUP_ID=targetFollowUpId||null;
   /* Set before anything can fail: backing out of "Lead not found" or a failed fetch still has to put
@@ -17694,7 +18310,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
      is only meaningful against it. */
   trcRememberRow(rowHint,id,targetFollowUpId);
   let lead=null,rows=[];
-  /* Already fetched, within the last 2h - by an earlier visit to this same lead, or by the list's
+  /* Already fetched, within the last 5h - by an earlier visit to this same lead, or by the list's
      own background prefetch (see trcPrefetchHistories). Nothing is awaited on this path, so the
      skeleton below is never even reached: the page renders in the same task as the click. */
   const cached=trcLeadCacheRead(id);
@@ -17703,13 +18319,14 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   }else{
     v.innerHTML=trcLeadSkeletonHtml();
     try{
-      const r1=await sb.schema('acc').from('crm_leads').select('*').eq('lead_id',id).maybeSingle();
-      lead=r1.data||null;
-      /* `*` here, unlike the list: this is the one place the transcripts and the five QA blobs are
-         actually read, and asking for them by name would silently drop whatever the pipeline starts
-         storing tomorrow. */
-      const r2=await sb.schema('acc').from('followup_timeline_v').select('*').eq('lead_id',id);
-      rows=(r2.data||[]).slice().sort(trcChrono);
+      /* One call, not two, and the whole row rather than a column list: this is the one place the
+         transcripts and the five QA blobs are actually read, and naming the columns would silently
+         drop whatever the pipeline starts storing tomorrow. acc.crm_lead_detail returns both halves
+         together - see trcLeadFetchByIds, which is also what the list's prefetch goes through, so a
+         clicked lead and a prefetched one are cached from the identical shape. */
+      const got=(await trcLeadFetchByIds([id]))[String(id)]||{};
+      lead=got.lead||null;
+      rows=got.rows||[];
       trcLeadCacheWrite(id,lead,rows);
     }catch(e){
       v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')
@@ -17743,7 +18360,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
         +(rowHint?' · Row #'+esc(String(rowHint))+' in the list':'')+'</p></div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn btn-sm" onclick="navTo(\''+backRoute+'\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>'
-        +'<button class="btn" onclick="trcCopy()"><i class="fa-regular fa-copy"></i> Copy CRM response</button>'
+        +'<button class="btn" id="trcLeadRefreshBtn" onclick="trcLeadRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
       +'</div></div>';
 
   /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
@@ -17813,17 +18430,6 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
   }
 }
 
-/* Copy, never download - the same rule the rest of this page follows. */
-/* Only the CRM response now. This used to copy a call's recording URL too, which is what every
-   Copy URL button on this page called - those are download links (see trRecLink), so that branch
-   had no caller left. */
-window.trcCopy=async function(){
-  if(!TRC_LEAD)return toast('Nothing loaded to copy','warn');
-  const payload=(TRC_LEAD.lead&&TRC_LEAD.lead.raw)||null;
-  if(!payload)return toast('No CRM response stored for this lead','warn');
-  return traClip(JSON.stringify(payload,null,2),'CRM response copied');
-};
-
 /* Retry sends the follow-up back to the pipeline, which resumes at the PHASE that failed: a QA
    failure never re-transcribes and never re-bills the audio call. */
 window.trcRetry=async function(followUpId){
@@ -17847,7 +18453,7 @@ window.trcRetry=async function(followUpId){
   TRC_ROWS=null;
   trCacheClear('trc_fetch_cache');
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
-     about to change, so re-rendering the detail page off the 2h snapshot would show the reader the
+     about to change, so re-rendering the detail page off the 5h snapshot would show the reader the
      exact state they just asked to have redone. */
   if(lead)trcLeadCacheDrop(lead);
   if(lead)await trcLeadDetail($('view'),lead);
@@ -17908,7 +18514,7 @@ VIEWS.transcription=async function(v,seg){
        recordings were listed here too, burying the real mismatches under rows needing no judgement.
        A matching follow-up date is the same kind of noise — so a row must carry at least one
        genuinely FAILED check to appear, which is what leaves only the dates that differ. */
-    const rows=(await trFetch(true)).filter(function(r){
+    const rows=(await trFetch()).filter(function(r){
       if(r.source!=='lost_call_sync')return false;
       const cs=Array.isArray(r.discrepancy)?r.discrepancy:[];
       return cs.some(function(c){ return c&&c.status==='fail'; });
@@ -17919,7 +18525,7 @@ VIEWS.transcription=async function(v,seg){
     return;
   }
   if(ti===5){
-    const all=(await trFetch(true)).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
+    const all=(await trFetch()).filter(function(r){return r.source==='lost_call_sync'&&r.lead_id;});
     const groups={};
     all.forEach(function(r){ (groups[r.lead_id]=groups[r.lead_id]||[]).push(r); });
     const leads=Object.keys(groups).map(function(id){
@@ -17935,6 +18541,10 @@ VIEWS.transcription=async function(v,seg){
     const leadParam=seg[1]?decodeURIComponent(seg[1]):null;
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
       +'<div id="trCompArea">'+(leadParam?trCompDetailHtml(leads,leadParam):trCompGridHtml(leads))+'</div>';
+    // trCompDetailHtml always renders the combined qualification checklist card - USAGE_VIEWS'
+    // 'transcription/5' key already covers "view a lead's combined call history" for this same
+    // route; this is the second, distinct catalog feature that route also satisfies.
+    if(leadParam){ try{ usageQueue('transcription.compilation.view_combined_qualification_checklist','view'); }catch(_e){} }
     return;
   }
   if(ti===3){
@@ -17947,7 +18557,7 @@ VIEWS.transcription=async function(v,seg){
     return;
   }
   if(ti===2){
-    const rows=await trFetch(true);
+    const rows=await trFetch();
     const folder=seg[1]?decodeURIComponent(seg[1]):null;
     TR_FOLDER=folder;
     v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+banner+TRA_TABS_HTML(ti)
@@ -17963,7 +18573,7 @@ VIEWS.transcription=async function(v,seg){
     +'<div id="trSelBar"></div>'
     +'<div class="toolbar" style="margin:16px 0 0;flex-wrap:wrap;gap:10px">'+trDateRangeHtml()+'<div class="grow"></div><button class="btn btn-primary" onclick="trUploadModal()"><i class="fa-solid fa-cloud-arrow-up"></i> Upload recording</button></div>'
     +'<div class="card" style="margin-top:14px"><div style="overflow:auto;max-height:62vh"><table class="tbl"><thead><tr><th style="width:34px"></th><th>Recording</th><th>Status</th><th>CRM</th><th>Date / Reason</th><th>Reason</th><th>Languages</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead><tbody id="trRows"><tr><td colspan="10"><div class="loader"><div class="spin"></div></div></td></tr></tbody></table></div></div>';
-  const rows=await trFetch(true);
+  const rows=await trFetch();
   trRenderList();
   rows.forEach(function(r){if(r.status==='processing')trStartPolling(r.id);});
 };
@@ -18189,7 +18799,7 @@ function trFolderRows(rows,name){return (rows||[]).filter(function(r){return r.f
 // never has to embed the folder name itself as a JS string literal (quote-escaping headaches).
 function trFolderCardHtml(name,list,idx){
   const qual=list.filter(function(r){return r.qualification==='Qualified';}).length;
-  return '<div class="card card-pad" style="position:relative;cursor:pointer" onclick="navTo(\'transcription/1/'+encodeURIComponent(name)+'\')">'
+  return '<div class="card card-pad" style="position:relative;cursor:pointer" onclick="navTo(\'transcription/2/'+encodeURIComponent(name)+'\')">'
     +'<div style="position:absolute;top:8px;right:8px;display:flex;gap:2px" onclick="event.stopPropagation()">'
       +'<button class="btn btn-sm btn-ghost" title="Rename folder" onclick="trFolderRenameModal('+idx+')"><i class="fa-solid fa-pen" style="font-size:11px"></i></button>'
       +'<button class="btn btn-sm btn-ghost" title="Delete folder" onclick="trFolderDeleteConfirm('+idx+')"><i class="fa-solid fa-trash" style="font-size:11px"></i></button>'
@@ -18211,7 +18821,7 @@ function trFolderGridHtml(rows){
 }
 function trFolderCallsHtml(rows,name){
   const list=trFolderRows(rows,name);
-  return '<div class="toolbar" style="margin:16px 0;flex-wrap:wrap;gap:10px"><button class="btn btn-sm" onclick="navTo(\'transcription/1\')"><i class="fa-solid fa-arrow-left"></i> All folders</button>'+trDateRangeHtml()+'<div class="grow"></div>'
+  return '<div class="toolbar" style="margin:16px 0;flex-wrap:wrap;gap:10px"><button class="btn btn-sm" onclick="navTo(\'transcription/2\')"><i class="fa-solid fa-arrow-left"></i> All folders</button>'+trDateRangeHtml()+'<div class="grow"></div>'
     +'<button class="btn btn-sm" onclick="trGoAddCalls()"><i class="fa-solid fa-plus"></i> Add calls</button>'
     +'<button class="btn btn-sm" onclick="trFolderRenameModal()"><i class="fa-solid fa-pen"></i> Rename</button>'
     +'<button class="btn btn-sm" onclick="trFolderDeleteConfirm()"><i class="fa-solid fa-trash"></i> Delete folder</button>'
@@ -18285,7 +18895,7 @@ function trCompGridHtml(leads){
     const nm=last.customer_name||('Lead '+g.leadId);
     const latest=trLatestVerdict(g.rows);
     const o=trOutcome(latest.qualification);
-    return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/4/'+encodeURIComponent(g.leadId)+'\')">'
+    return '<div class="card card-pad" style="cursor:pointer" onclick="navTo(\'transcription/5/'+encodeURIComponent(g.leadId)+'\')">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
         +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(nm)+'</div>'
         +'<div style="font-size:12px;color:var(--slate);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(last.business_unit_name||'')+'</div></div>'
@@ -18297,12 +18907,12 @@ function trCompGridHtml(leads){
 }
 function trCompDetailHtml(leads,leadId){
   const g=leads.find(function(x){return String(x.leadId)===String(leadId);});
-  if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/4\')">Back</button></div>';
+  if(!g)return '<div class="card card-pad empty" style="margin-top:16px;padding:40px"><i class="fa-solid fa-triangle-exclamation"></i><div>Lead not found</div><button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\'transcription/5\')">Back</button></div>';
   const last=g.rows[g.rows.length-1];
   const combined=trCombinedQualify(g.rows);
   const latest=trLatestVerdict(g.rows);
   const o=trOutcome(latest.qualification);
-  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/4\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
+  const backBtn='<button class="btn btn-sm" onclick="navTo(\'transcription/5\')"><i class="fa-solid fa-arrow-left"></i> Back to all leads</button>';
   const header='<div class="page-head" style="padding:0 0 10px"><div><h1 style="font-size:17px"><i class="fa-solid fa-user" style="color:#0d9488"></i> '+esc(last.customer_name||('Lead '+leadId))+'</h1><p>'+esc(trPhoneFmt(trPhone(last)))+' · '+esc(last.business_unit_name||'')+' · lead #'+esc(leadId)+' · '+g.rows.length+' call'+(g.rows.length===1?'':'s')+'</p></div>'+backBtn+'</div>';
   // Says which call the verdict came from, so nobody reads it as a merge of all of them.
   const verdictFrom=latest.row
@@ -18344,7 +18954,7 @@ window.trGoAddCalls=function(){
 window.trCancelAddTarget=function(){ TR_ADD_TARGET=null; renderPage(); };
 window.trDoneAddTarget=function(){
   const f=TR_ADD_TARGET; TR_ADD_TARGET=null;
-  if(f) navTo('transcription/1/'+encodeURIComponent(f)); else navTo('transcription/1');
+  if(f) navTo('transcription/2/'+encodeURIComponent(f)); else navTo('transcription/2');
 };
 window.trAddSelectedToTarget=async function(){
   if(!TR_ADD_TARGET)return;
@@ -18359,7 +18969,7 @@ window.trAddSelectedToTarget=async function(){
   // from the DB, so jumping there too early could show the list without what was just added.
   try{await sb.schema('acc').from('transcriptions').update({folder:name}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
   TR_ADD_TARGET=null;
-  navTo('transcription/1/'+encodeURIComponent(name));
+  navTo('transcription/2/'+encodeURIComponent(name));
 };
 // Redraws whatever is currently on screen on the Folders tab (grid or a drill-in) from the
 // in-memory TR_ROWS — no refetch, so an in-flight DB write for the same rows can't be raced.
@@ -18409,7 +19019,7 @@ window.trFolderDeleteConfirm=async function(idx){
   const wasViewing=(TR_FOLDER===name);
   toast('Folder deleted','ok');
   if(ids.length)try{await sb.schema('acc').from('transcriptions').update({folder:null}).in('id',ids);}catch(e){toast('Saved locally, but failed to sync: '+((e&&e.message)||e),'err');}
-  if(wasViewing){ navTo('transcription/1'); } else { trRenderFolderArea(); }
+  if(wasViewing){ navTo('transcription/2'); } else { trRenderFolderArea(); }
 };
 
 /* ---------- Download ---------- */
@@ -18501,7 +19111,7 @@ function trStartPolling(id){
     const st=out&&(out.status||(out.row&&out.row.status));
     if(st==='done'||st==='error'){
       delete TR_TIMERS[id];
-      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 2h cache now
+      if(TR_ROWS)trCacheWrite('tr_fetch_cache','all',TR_ROWS); // this call is done transcribing - worth freezing into the 5h cache now
       if(PAGE==='transcription')renderPage();
       return;
     }
@@ -18689,7 +19299,7 @@ window.trUploadStart=async function(){
         if(!res.ok||!out.row) throw new Error(out.error||'could not start');
         if(!TR_ROWS)TR_ROWS=[];
         TR_ROWS.unshift(out.row);
-        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 2h cache - trStartPolling re-freezes it once it's actually done
+        trCacheClear('tr_fetch_cache'); // a call still processing has no business in the 5h cache - trStartPolling re-freezes it once it's actually done
         trStartPolling(out.row.id);
         done++;
       }catch(e){ failed++; }
@@ -18739,7 +19349,7 @@ async function trDetail(v,id){
   TR_DETAIL_ROW=r;
   const st=document.createElement('style');st.textContent='@media(max-width:800px){#trGrid{grid-template-columns:1fr!important}}';document.head.appendChild(st);
   if(r.s3_path){
-    try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah)ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';}}catch(e){}
+    try{const key=r.s3_path.slice(3);const {data}=await s3Sign('get',key);if(data&&data.url){const ah=$('trAudio');if(ah){ah.innerHTML='<audio controls preload="none" style="width:100%" src="'+data.url+'"></audio>';const au=ah.querySelector('audio');if(au)au.addEventListener('play',function(){try{usageQueue('transcription.call_detail.play_download_recording','view',{title:name});}catch(_e){}},{once:true});}}}catch(e){}
   }
 }
 // Remarks — open to anyone who can reach this page (same access model as the rest of the
@@ -18890,6 +19500,187 @@ window.trDownload=async function(id){
    The wrapper must be incapable of breaking the app it measures: the logging is inside its own
    try/catch, and the original function is called through unconditionally whatever happens. Events
    are queued and sent in batches, never one request per click. */
+/* ============ WHAT EACH MODULE'S ACTIONS ARE ABOUT ==========================================
+   The drill-down's last column used to be "Assigned to" everywhere, which only means something in
+   Accountability - a task is handed to somebody; a document is not. Everywhere else it was a column
+   of dashes taking the width that the one useful fact should have had, and which fact that is
+   depends on what the module does: an inspection happens to a flat, a document lives in a folder,
+   a call belongs to a lead, a requisition is for a position.
+
+   These helpers answer that question per module. Every one of them is defensive on purpose: they
+   read whatever list the screen already has in memory, and if the row is not there (a stale id, a
+   list not loaded yet, a global that does not exist on this page) they return null and the column
+   shows a dash rather than a wrong answer. Telemetry must never be the thing that breaks a click.
+
+   Note on the wrapper: it logs BEFORE the function it wraps runs, so anything read here must be the
+   state as it is at the moment of the click. That is why these take the id from the click's own
+   arguments rather than reading "what is currently open" - the latter would describe the record the
+   person just left. */
+function usbFrom(list, id, build){
+  try{
+    if(id==null) return null;
+    const r=(list||[]).find(function(x){ return String(x.id)===String(id); });
+    return r?build(r):null;
+  }catch(e){ return null; }
+}
+// Legal · MIS — which case, and where it is being heard
+function usbMisMeta(id){
+  return usbFrom(window._misRows, id, function(r){
+    return {title:r.cause_title||r.case_no||undefined, case_no:r.case_no||undefined, court:r.court||undefined};
+  });
+}
+// Legal · Advocates — which court they appear in
+function usbAdvMeta(id){
+  return usbFrom(window._advRows, id, function(r){
+    return {title:r.advocate_name||undefined, court:r.court||undefined, case_type:r.case_type||undefined};
+  });
+}
+/* Legal · Documents and Document Library — where the document sits. There is no in-memory list of
+   documents (they are fetched one at a time), so this reports the folder the screen is currently
+   showing, which is the folder the document being acted on is in. */
+function usbDocScope(){
+  try{
+    const d=(typeof DOC!=='undefined')?DOC:null; if(!d) return null;
+    const out={};
+    if(d.dept) out.department=String(d.dept);
+    if(d.cat)  out.folder=String(d.cat);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+// Transcription — the lead the call belongs to. Checks the deleted list and the open call too, so
+// restoring a call or acting from the detail screen still names it.
+function usbCallMeta(id){
+  const pick=function(r){
+    return {title:r.title||r.file_name||undefined, lead:r.customer_name||undefined, project:r.project||undefined};
+  };
+  try{
+    return usbFrom(TR_ROWS, id, pick) || usbFrom(TR_DELETED_ROWS, id, pick)
+        || (TR_DETAIL_ROW?pick(TR_DETAIL_ROW):null);
+  }catch(e){ return null; }
+}
+// Recruitment — the position or the thing being acted on
+function usbTestMeta(id){ return usbFrom((typeof RT_RECORDS!=='undefined')?RT_RECORDS:null, id,
+  function(r){ return {title:r.name||undefined}; }); }
+// A job description IS a position - its name is the position's name - so it fills both, and the
+// column stops being blank on the preview and download actions that only had an id to go on.
+function usbJdMeta(id){ return usbFrom(window._recAllJDs, id,
+  function(r){ var n=r.name||r.file_name||undefined; return {title:n, position:r.name||undefined}; }); }
+function usbMpMeta(id){ return usbFrom((typeof MP_RECORDS!=='undefined')?MP_RECORDS:null, id,
+  function(r){ return {title:r.job_title||undefined, position:r.job_title||undefined, department:r.department||undefined}; }); }
+function usbRefMeta(id){ return usbFrom((typeof REF_RECORDS!=='undefined')?REF_RECORDS:null, id,
+  function(r){ return {title:r.referred_name||undefined, position:r.position||undefined}; }); }
+// HR — the candidate, and the position they are for
+function usbTrkMeta(id){ return usbFrom(window._trRows, id,
+  function(r){ return {title:r.candidate_name||undefined, position:r.position||undefined}; }); }
+// Resumes are filed against a ROLE, not a position - that is the word the rows actually carry, and
+// picking 'position' for the column meant it could never match no matter how much was captured.
+function usbResumeMeta(id){ return usbFrom((typeof RS_ROWS!=='undefined')?RS_ROWS:null, id,
+  function(r){ return {title:r.file_name||undefined, role:r.role||r.position||undefined}; }); }
+/* HR · Monthly Update is keyed by the requisition behind the row, not by an id of its own.
+   The position's name is the thing the row is ABOUT, so it goes in Details as a bare name. What
+   the click decided - approved or rejected, hiring closed or reopened - is a different fact and
+   gets its own column: one button that can go two ways is unreadable if both ways look identical
+   in the report. Only 'title' is returned, never 'position' as well, or Details would print the
+   same name twice. */
+function usbMuRow(manpowerId){
+  try{
+    const r=((typeof MU_ROWS!=='undefined'&&MU_ROWS)||[]).find(function(x){ return x.manpower_id===manpowerId; });
+    return r||null;
+  }catch(e){ return null; }
+}
+function usbMuBase(manpowerId){
+  const r=usbMuRow(manpowerId);
+  const out={};
+  if(r&&r.position_title) out.title=String(r.position_title);
+  try{ if(typeof MU_CUR!=='undefined'&&MU_CUR) out.month=muMonthLabel(MU_CUR); }catch(e){}
+  return out;
+}
+function usbMuMeta(manpowerId){
+  const o=usbMuBase(manpowerId);
+  return Object.keys(o).length?o:null;
+}
+function usbMuDecision(manpowerId, decision){
+  const o=usbMuBase(manpowerId);
+  if(decision) o.decision=decision;
+  return Object.keys(o).length?o:null;
+}
+/* Campaign Analytics — every number on this screen is "for this period, from this source", so that
+   pair is the context every action here needs. Read from the state rather than the click, because
+   most of these buttons change one half of it and the other half still matters. */
+function usbCmpMeta(){
+  try{
+    const per=(typeof CMP_PERIOD!=='undefined')?CMP_PERIOD:null;
+    const label=(per==='custom' && typeof CMP_SINCE!=='undefined' && CMP_SINCE)
+      ? (CMP_SINCE+' → '+((typeof CMP_UNTIL!=='undefined'&&CMP_UNTIL)||'today'))
+      : (per?String(per).replace(/_/g,' '):null);
+    const out={};
+    if(label) out.period=label;
+    if(typeof CMP_SOURCE!=='undefined'&&CMP_SOURCE) out.source=String(CMP_SOURCE);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+/* Internet Speed — the window being looked at. The speed reading itself was the first idea, but it
+   is not in hand at the moment of the click (the refresh that produces it has not run yet, and the
+   chart's numbers live inside the render), so reporting it here would mean reporting the PREVIOUS
+   reading against this action - worse than useless. The range is what every feature on this screen
+   genuinely has, and it is what tells two otherwise identical rows apart. */
+function usbNetMeta(){
+  try{
+    const r=(typeof NET_RANGE!=='undefined')?NET_RANGE:null;
+    if(!r) return null;
+    const l=((typeof NET_RANGES!=='undefined'&&NET_RANGES)||[]).find(function(x){ return x[0]===r; });
+    return {range:(l&&l[1])||String(r)};
+  }catch(e){ return null; }
+}
+/* Post Sales · ADHOC — how the replacement job is doing. The document's own name goes in Details;
+   what the column adds is the thing you would ask next, which is whether it worked and how many
+   replacements it covers. Both are on the row already. */
+function usbPsaMeta(id){
+  try{
+    const r=(typeof PSA!=='undefined'&&PSA&&PSA.queue)?PSA.queue.find(function(x){return x.id===id;}):null;
+    if(!r) return null;
+    return {title:r.name||undefined, status:r.status||undefined,
+            replacements:(r.count!=null?r.count+' replacement'+(r.count===1?'':'s'):undefined)};
+  }catch(e){ return null; }
+}
+// Competitor Ads — whose ads, and over what window. Read from the filter bar, which is what every
+// action on that screen is relative to.
+function usbCompMeta(){
+  try{
+    const f=(typeof COMP_F!=='undefined')?COMP_F:null; if(!f) return null;
+    const out={};
+    if(f.wl && f.wl!=='all') out.competitor=String(f.wl);
+    if(f.range==='custom' && (f.from||f.to)) out.range=(f.from||'any')+' → '+(f.to||'today');
+    else if(f.range) out.range=String(f.range).replace(/_/g,' ');
+    if(f.media && f.media!=='all') out.media=String(f.media);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+// Posts & Reels — which window, and which network's content is being looked at.
+function usbOrgMeta(){
+  try{
+    const p=(typeof ORG_PERIOD!=='undefined')?ORG_PERIOD:null;
+    const out={};
+    if(p==='custom' && typeof ORG_SINCE!=='undefined' && ORG_SINCE)
+      out.period=ORG_SINCE+' → '+((typeof ORG_UNTIL!=='undefined'&&ORG_UNTIL)||'today');
+    else if(p) out.period=String(p).replace(/_/g,' ');
+    if(typeof ORG_NET!=='undefined' && ORG_NET && ORG_NET!=='all') out.network=String(ORG_NET);
+    if(typeof ORG_KIND!=='undefined' && ORG_KIND && ORG_KIND!=='all') out.kind=String(ORG_KIND);
+    return Object.keys(out).length?out:null;
+  }catch(e){ return null; }
+}
+// Procurement · Quote Comp — which category of document. It arrives as the click's own argument on
+// every one of these, which is why they are wired to read it rather than to a lookup.
+function usbProcCat(cat){
+  try{ return cat?{category:String(cat)}:null; }catch(e){ return null; }
+}
+// Procurement · Vendor Trends — which vendor
+function usbVendorMeta(id){
+  try{
+    const v=(typeof VT_CACHE!=='undefined'&&VT_CACHE&&VT_CACHE.vendors)?VT_CACHE.vendors[id]:null;
+    return v?{title:v.name||undefined, vendor:v.name||undefined}:null;
+  }catch(e){ return null; }
+}
 const USAGE_MAP={
   // Accountability — Tasks
   // taskSave itself is NOT mapped here (see the direct usageQueue call inside it) - the title it
@@ -18902,10 +19693,20 @@ const USAGE_MAP={
   // silently inflating that count every time someone reopened a task by mistake.
   taskMarkComplete:function(id,makeComplete){ return makeComplete ? 'tasks.tasks.mark_task_done_send_for_approval' : 'tasks.tasks.revert_reopen_a_task'; },
   taskApprove:'tasks.tasks.approve_a_completed_task', taskDecline:'tasks.tasks.decline_a_completed_task',
-  taskReorderDrop:'tasks.tasks.insert_a_task_at_a_specific_position',
+  // This entry is what made "Insert a task at a specific position" read 0 uses for months.
+  // window.taskReorderDrop is still defined further up this file, so the wrapper installed
+  // cleanly and nothing ever looked wrong - but no element carries an ondrop for it any more:
+  // the HTML5 drag it belonged to was replaced by the pointer-events one (wireProjTaskDrag),
+  // and the old handler was left behind unreachable. A wrapped function that is never called
+  // logs nothing. The three places the feature really happens - the "+ Add task here" strip
+  // and the swap drag in accountability.js, and persistProjTaskOrder here - log themselves at
+  // the point the position is actually saved.
   cmAdd:'tasks.tasks.comment_on_a_task', taskAttachUpload:'tasks.tasks.attach_file_to_a_task_or_comment',
   taskAttachDelete:'tasks.tasks.delete_attached_file', taskAttachDeleteSel:'tasks.tasks.delete_attached_file',
-  notifDismissAllDue:'tasks.tasks.mark_all_notifications_as_read',
+  // notifDismissAllDue and notifMarkAllGeneralRead both log 'mark all notifications as read'
+  // directly at their source instead - see the note on each. Mapped here they would have carried
+  // two different verbs ('delete' vs 'view', read off their names) for one feature, and would have
+  // counted clicks that cleared nothing.
   /* The Accountability module's OWN Tasks tab (accountability.js, table ptasks) turned out to have a
      second, separate implementation of most of these actions from the Projects/Goals one above
      (table acc.tasks) - global functions, just never added here. Real day-to-day task editing goes
@@ -18935,7 +19736,9 @@ const USAGE_MAP={
      which is why Meetings read as untouched however much it was used. mtgFormSave is mapped to
      scheduling rather than editing because it saves both and scheduling is the act it usually is;
      "Edit a meeting" is deliberately left unmapped rather than counted wrongly. */
-  mtgFormSave:'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
+  // mtgFormSave logs itself in accountability.js instead - one form saves a NEW meeting and an
+  // EDIT, and a fixed key here counted every edit, and every click validation turned back, as a
+  // meeting scheduled.
   mtgCancelDo:'tasks.meetings.cancel_a_meeting',
   mtgReschedApply:'tasks.meetings.reschedule_one_occurrence_or_a_whole_series',
   mtgTryJoin:'tasks.meetings.join_a_meeting',
@@ -18945,7 +19748,10 @@ const USAGE_MAP={
   mtgSetGroup:'tasks.meetings.filter_meetings_by_group',
   // Inspection / Campaigns entry points that had no mapping
   inspGo:'inspection.console.start_new_inspection',
-  cmpShowProjectAds:'campaigns.by_project.drill_into_a_project_s_campaigns',
+  // cmpShowProjectAds (the Ads tab's own row-click drill-down into per-ad spend) is NOT mapped here
+  // on purpose - it opens a different table than the By Project tab's campaign rollup, and there is
+  // no catalog feature for an Ads-tab drill-in; mapping it to by_project's key (as it was) miscredited
+  // Ads-tab clicks to a By Project feature that in fact never logged anything.
   /* Accountability — Workflow.
      Almost nothing from this tab is mapped here any more, and the reason is worth stating: a
      generic wrapper fires on the CLICK, before the work happens and before anything is known
@@ -18965,46 +19771,70 @@ const USAGE_MAP={
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
   wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
   // Transcription
-  trUploadStart:'transcription.all_calls.upload_call_recording_s',
-  trSetFilter:'transcription.all_calls.filter_calls_by_outcome_or_date',
-  trApplyDateRange:'transcription.all_calls.filter_calls_by_outcome_or_date',
-  trPinSelected:'transcription.all_calls.pin_unpin_calls',
-  trAssignToFolder:'transcription.all_calls.add_calls_to_a_folder',
-  trDownloadReport:'transcription.all_calls.download_call_report_or_copy_link',
+  /* An upload is the one action on this screen with no lead behind it yet - the call does not
+     exist until it has been uploaded, so there is nothing to look up. 517 uses, and the column
+     would have been a dash on every one of them. What it genuinely has is the files themselves:
+     how many, and the first one's name. */
+  trUploadStart:{key:'transcription.all_calls.upload_call_recording_s',
+    meta:function(){
+      try{
+        const f=Array.prototype.slice.call(($('trFile')&&$('trFile').files)||[]);
+        if(!f.length) return null;
+        return {title:f[0].name, files:f.length===1?'1 recording':f.length+' recordings'};
+      }catch(e){ return null; }
+    }},
+  /* Which filter, and which dates - a "Filter calls" row with nothing beside it says only that
+     somebody narrowed the list, never to what. Both read what the click itself carries. */
+  trSetFilter:{key:"transcription.all_calls.filter_calls_by_outcome_or_date",
+               meta:function(f){ return f?{filter:String(f)}:null; }},
+  trApplyDateRange:{key:"transcription.all_calls.filter_calls_by_outcome_or_date",
+               meta:function(){ var a=$("trDateFrom"),b=$("trDateTo");
+                 return (a&&a.value)||(b&&b.value) ? {from:(a&&a.value)||"any", to:(b&&b.value)||"any"} : null; }},
+  trPinSelected:{key:'transcription.all_calls.pin_unpin_calls', meta:usbCallMeta},
+  trAssignToFolder:{key:'transcription.all_calls.add_calls_to_a_folder', meta:usbCallMeta},
+  trDownloadReport:{key:'transcription.all_calls.download_call_report_or_copy_link', meta:usbCallMeta},
   /* Every recording download link routes its click through trRecClick (see trRecLink). One handler
      serves several views that are different features, so the key travels in the call site's own
      `feat` and this resolver just passes it through - a link from a view that was never counted
      passes '' and, since the wrapper skips a falsy key, logs nothing. */
   trRecClick:function(ev,feat){return feat||'';},
-  trRetry:'transcription.all_calls.retry_failed_transcription', trDelete:'transcription.all_calls.delete_a_call',
+  trRetry:{key:'transcription.all_calls.retry_failed_transcription', meta:usbCallMeta}, trDelete:{key:'transcription.all_calls.delete_a_call', meta:usbCallMeta},
   trFolderRenameSave:'transcription.folders.rename_delete_a_folder',
   trFolderDeleteConfirm:'transcription.folders.rename_delete_a_folder',
   trRemoveFromFolder:'transcription.folders.add_or_remove_calls_from_a_folder',
   trAddSelectedToTarget:'transcription.folders.add_or_remove_calls_from_a_folder',
   trDownloadFolder:'transcription.folders.download_all_calls_in_a_folder',
-  trRestore:'transcription.deleted.restore_a_deleted_call_single_or_all',
+  trRestore:{key:'transcription.deleted.restore_a_deleted_call_single_or_all', meta:usbCallMeta},
   trRestoreAll:'transcription.deleted.restore_a_deleted_call_single_or_all',
   trShowHistory:'transcription.deleted.view_delete_restore_activity_history',
-  trSetLang:'transcription.call_detail.switch_transcript_language',
-  trCmAdd:'transcription.call_detail.add_delete_a_remark', trCmDelete:'transcription.call_detail.add_delete_a_remark',
-  trDownload:'transcription.call_detail.play_download_recording',
+  // Which language, on which call - the language is the whole point of the click, and the call is
+  // what makes the row identifiable among everybody else's language switches.
+  trSetLang:{key:'transcription.call_detail.switch_transcript_language',
+             meta:function(lang){ const m=usbCallMeta()||{};
+               if(lang) m.language=String(lang);
+               return Object.keys(m).length?m:null; }},
+  trCmAdd:{key:'transcription.call_detail.add_delete_a_remark', meta:usbCallMeta}, trCmDelete:{key:'transcription.call_detail.add_delete_a_remark', meta:usbCallMeta},
+  trDownload:{key:'transcription.call_detail.play_download_recording', act:'export', meta:usbCallMeta},
   // Legal — Documents
-  docNewFolderSave:'legal.documents.add_folder_sub_category', docUploadSave:'legal.documents.upload_document',
-  docPreview:'legal.documents.preview_download_document', docDownload:'legal.documents.preview_download_document',
-  docRenameSave:'legal.documents.rename_document',
-  docMoveSave:'legal.documents.move_document_to_another_category',
-  docMoveSaveLegal:'legal.documents.move_document_to_another_category',
-  docReplaceSave:'legal.documents.replace_document_version', docPin:'legal.documents.pin_unpin_document',
-  docDeleteConfirm:'legal.documents.delete_document_s',
-  docBulkDeleteConfirm:'legal.documents.bulk_download_delete',
+  docNewFolderSave:{key:'legal.documents.add_folder_sub_category', meta:usbDocScope}, docUploadSave:{key:'legal.documents.upload_document', meta:usbDocScope},
+  // docPreview / docDownload are NOT mapped here: the document is fetched inside the function, so
+  // only the function itself can say WHICH document was opened. They log directly at their source.
+  docRenameSave:{key:'legal.documents.rename_document', meta:usbDocScope},
+  docMoveSave:{key:'legal.documents.move_document_to_another_category', meta:usbDocScope},
+  docMoveSaveLegal:{key:'legal.documents.move_document_to_another_category', meta:usbDocScope},
+  docReplaceSave:{key:'legal.documents.replace_document_version', meta:usbDocScope}, docPin:{key:'legal.documents.pin_unpin_document', meta:usbDocScope},
+  docDeleteConfirm:{key:'legal.documents.delete_document_s', meta:usbDocScope},
+  docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', act:'delete', meta:usbDocScope},
   // Legal — MIS / Actions / Advocates
-  misSave:'legal.mis.add_case', misUpdate:'legal.mis.edit_case', misDeleteSel:'legal.mis.delete_case_s',
-  misSetRange:'legal.mis.filter_cases_by_hearing_date_range',
-  misRangePick:'legal.mis.filter_cases_by_hearing_date_range',
-  misActionExecute:'legal.mis.record_execute_a_case_action',
-  misActionSave:'legal.mis.record_execute_a_case_action',
-  misSwipeToggle:'legal.mis.mark_case_complete_reopen',
-  misDocsPick:'legal.mis.upload_documents_for_a_case',
+  misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
+  misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
+               meta:function(v){ return v?{range:String(v)}:null; }},
+  misRangePick:{key:"legal.mis.filter_cases_by_hearing_date_range",
+               meta:function(v){ return v?{range:String(v)}:null; }},
+  misActionExecute:{key:'legal.mis.record_execute_a_case_action', meta:usbMisMeta},
+  misActionSave:{key:'legal.mis.record_execute_a_case_action', meta:usbMisMeta},
+  misSwipeToggle:{key:'legal.mis.mark_case_complete_reopen', meta:usbMisMeta},
+  misDocsPick:{key:'legal.mis.upload_documents_for_a_case', meta:usbMisMeta},
   // misExportCauselist / misViewCauselist are NOT mapped here on purpose - they log directly,
   // after misBuildCauselist actually produces a sheet, so a click warned off for no date
   // range or no matching hearings doesn't count as a use the way the generic wrapper would.
@@ -19013,94 +19843,144 @@ const USAGE_MAP={
   // of them is wired to oninput for instant live filtering, and the generic wrapper logging on
   // every keystroke turned one real search into a burst of single/two-character fragments a few
   // milliseconds apart. Each logs directly via usageQueueDebounced, once typing actually settles.
-  advSave:'legal.advocates.add_advocate', advDelete:'legal.advocates.remove_advocate',
+  // advSave logs itself below - the same button adds AND edits, so a fixed key here counted
+  // every edit as an advocate added.
+  advDelete:{key:'legal.advocates.remove_advocate', meta:usbAdvMeta},
   // Human Resources
   // H/S Candidates was removed - nothing left to log.
   // Monthly Update no longer has cells anybody types into - the nine columns are counted from the
   // candidates - so the old create-month / add-row / edit-cell actions have nothing to log.
-  muViewMonth:'hr.monthly_update.open_a_month',
-  muDeleteSel:'hr.monthly_update.remove_position_from_month',
-  muApprove:'hr.monthly_update.approve_reject_requisition',
-  muSetHiring:'hr.monthly_update.close_reopen_hiring',
+  // Which month was opened - the whole point of the action, and it is right there in the argument.
+  muViewMonth:{key:"hr.monthly_update.open_a_month",
+               meta:function(iso){ var l=muMonthLabel(iso); return l?{month:l}:null; }},
+  // muDeleteSel logs directly (see below) after the delete actually succeeds, using the catalog's
+  // real key 'delete_rows_or_whole_month' - the string that was here, 'remove_position_from_month',
+  // does not exist in erp_feature_catalog and so could never be attributed to anything.
+  /* Both of these are one button that goes two ways, and the way it went is the whole point. The
+     position's name lands in Details; the decision gets its own column, so an approval and a
+     rejection of the same requisition can be told apart at a glance instead of reading as the
+     same row twice. */
+  muApprove:{key:'hr.monthly_update.approve_reject_requisition',
+             meta:function(manpowerId, ok){ return usbMuDecision(manpowerId, ok?'Approved':'Rejected'); }},
+  muSetHiring:{key:'hr.monthly_update.close_reopen_hiring',
+             meta:function(manpowerId, open){ return usbMuDecision(manpowerId, open?'Hiring reopened':'Hiring closed'); }},
   muFilter:'hr.monthly_update.search_filter_positions',
-  trackerSave:'hr.interview_tracker.add_interview', trackerUpdate:'hr.interview_tracker.edit_interview_entry',
-  trackerDelete:'hr.interview_tracker.delete_interview_entry_ies',
+  trackerSave:{key:'hr.interview_tracker.add_interview', meta:function(){ try{ var a=$('trFName'),b=$('trFPos'); var nm=a&&a.value.trim(), p=b&&b.value.trim(); return (nm||p)?{title:nm||undefined, position:p||undefined}:null; }catch(e){ return null; } }}, trackerUpdate:{key:'hr.interview_tracker.edit_interview_entry', meta:usbTrkMeta},
+  trackerDelete:{key:'hr.interview_tracker.delete_interview_entry_ies', meta:usbTrkMeta},
   trackerDeleteSel:'hr.interview_tracker.delete_interview_entry_ies',
   // trackerFilter is NOT mapped here - it logs directly via usageQueueDebounced.
-  trResumeOpen:'hr.interview_tracker.preview_download_candidate_cv',
-  rsUploadSave:'hr.resumes.upload_resume', rsPreview:'hr.resumes.preview_download_resume',
-  rsDownload:'hr.resumes.preview_download_resume', rsDelete:'hr.resumes.delete_resume_s',
+  trResumeOpen:{key:'hr.interview_tracker.preview_download_candidate_cv', meta:usbTrkMeta},
+  rsUploadSave:{key:'hr.resumes.upload_resume', meta:function(){ try{ var el=$('rsFile'); var f=el&&el.files&&el.files[0]; return f?{title:f.name}:null; }catch(e){ return null; } }}, rsPreview:{key:'hr.resumes.preview_download_resume', meta:usbResumeMeta},
+  rsDownload:{key:'hr.resumes.preview_download_resume', act:'export', meta:usbResumeMeta}, rsDelete:{key:'hr.resumes.delete_resume_s', meta:usbResumeMeta},
   rsBulkDelete:'hr.resumes.delete_resume_s',
-  // the AI resume search is gone - a plain name/file filter replaced it
-  rsFilter:'hr.resumes.search_resumes', rsDownload:'hr.resumes.preview_download_resume',
+  // the AI resume search is gone - a plain name/file filter replaced it. rsDownload used to be
+  // listed a second time on the next line, and the later, meta-less copy silently won - downloads
+  // lost their Details for as long as both existed.
+  rsFilter:'hr.resumes.search_resumes',
   igGenerate:'hr.interview_qs.generate_ai_interview_guide', igDelete:'hr.interview_qs.delete_interview_guide',
   // Recruitment (ATS)
-  rtSave:'recruitment.tests.add_test', rtRename:'recruitment.tests.rename_test',
-  rtDelete:'recruitment.tests.delete_test_s', rtShareSend:'recruitment.tests.share_test_via_email',
-  rtPreview:'recruitment.tests.preview_test_responses_scores',
-  recJdSave:'recruitment.descriptions.upload_job_description',
-  recJdOpen:'recruitment.descriptions.preview_download_job_description',
-  recJdDownload:'recruitment.descriptions.preview_download_job_description',
+  rtSave:{key:'recruitment.tests.add_test', meta:function(){ try{ var a=$('rtFName'); var nm=a&&a.value&&a.value.trim(); return nm?{title:nm}:null; }catch(e){ return null; } }}, rtUpdate:{key:'recruitment.tests.rename_test', meta:usbTestMeta},
+  rtDelete:'recruitment.tests.delete_test_s',
+  rtPreview:{key:"recruitment.tests.preview_test_responses_scores",
+               meta:function(id){ var r=(RT_RECORDS||[]).find(function(x){return x.id===id;});
+                 return r&&r.name?{title:r.name}:null; }},
+  recJdSave:{key:'recruitment.descriptions.upload_job_description', meta:function(){ try{ var a=$('recJdName'); var nm=a&&a.value.trim(); return nm?{title:nm, position:nm}:null; }catch(e){ return null; } }},
+  recJdOpen:{key:"recruitment.descriptions.preview_download_job_description",
+               meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
+                 return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
+  recJdDownload:{key:"recruitment.descriptions.preview_download_job_description", act:'export',
+               meta:function(id){ var j=(window._recAllJDs||[]).find(function(x){return x.id===id;});
+                 return j&&(j.name||j.file_name)?{title:j.name||j.file_name}:null; }},
   recDeleteSel:'recruitment.descriptions.delete_job_description_s',
-  mpSave:'recruitment.manpower_form.submit_requisition', mpUpdate:'recruitment.manpower_form.edit_requisition',
+  mpSave:{key:'recruitment.manpower_form.submit_requisition', meta:function(){ try{ var d=mpCollect()||{}; return d.job_title?{title:d.job_title, position:d.job_title, department:d.department||undefined}:null; }catch(e){ return null; } }}, mpUpdate:{key:'recruitment.manpower_form.edit_requisition', meta:usbMpMeta},
   mpDeleteSel:'recruitment.manpower_form.delete_requisition_s',
-  mpDeleteOne:'recruitment.manpower_form.delete_requisition_s',
-  mpAiGenerate:'recruitment.manpower_form.generate_jd_post_text_creative',
+  mpDeleteOne:{key:'recruitment.manpower_form.delete_requisition_s', meta:usbMpMeta},
+  mpAiGenerate:{key:'recruitment.manpower_form.generate_jd_post_text_creative', meta:usbMpMeta},
   mpAiCopyPost:'recruitment.manpower_form.copy_platform_post_text',
-  refSave:'recruitment.referrals.refer_someone', refDecide:'recruitment.referrals.approve_reject_referral',
-  refDelete:'recruitment.referrals.delete_referral',
-  // Inspection
-  inspSave:'inspection.new_inspection.submit_inspection', inspDrill:'inspection.console.drill_into_a_status_count',
-  inspScope:'inspection.console.filter_by_project_block_floor_flat_work_type',
-  inspOpenSub:'inspection.responses.open_and_edit_a_submission',
-  inspEditSub:'inspection.responses.open_and_edit_a_submission',
-  inspUpdateSub:'inspection.responses.update_check_status_per_item',
-  inspBulkE:'inspection.responses.bulk_mark_all_checks_ok',
-  inspBulk:'inspection.new_inspection.bulk_mark_all_items_ok',
-  inspPick:'inspection.new_inspection.mark_item_ok_not_ok_n_a',
-  inspLevelPick:'inspection.new_inspection.select_project_block_floor_flat_work_category',
-  inspOpenPhoto:'inspection.responses.add_replace_defect_photo',
+  refSave:{key:'recruitment.referrals.refer_someone', meta:function(){ try{ var a=$('refFName'); var nm=a&&a.value&&a.value.trim(); return nm?{title:nm}:null; }catch(e){ return null; } }}, refDecide:{key:'recruitment.referrals.approve_reject_referral', meta:usbRefMeta},
+  refDelete:{key:'recruitment.referrals.delete_referral', meta:usbRefMeta},
+  /* Inspection. Every one of these carries the unit it happened to - the flat, floor, tower or
+     project - because that is the fact an inspection row is useless without. New Inspection reads
+     the form as it stands, Form Responses reads the submission that is open, and the Console
+     reports whatever it is currently narrowed to. */
+  inspSave:{key:'inspection.new_inspection.submit_inspection', meta:inspFormUnit},
+  inspBulk:{key:'inspection.new_inspection.bulk_mark_all_items_ok', meta:inspFormUnit},
+  inspPick:{key:'inspection.new_inspection.mark_item_ok_not_ok_n_a', meta:inspFormUnit},
+  inspLevelPick:{key:'inspection.new_inspection.select_project_block_floor_flat_work_category', meta:inspFormUnit},
+  inspDrill:{key:'inspection.console.drill_into_a_status_count', meta:inspScopeMeta},
+  inspScope:{key:'inspection.console.filter_by_project_block_floor_flat_work_type',
+             // called as inspScope(dim, val) - read the choice being made, not the state before it
+             meta:function(dim,val){ const m=inspScopeMeta()||{};
+               if(dim && val && val!=='All') m[String(dim)]=String(val);
+               return m; }},
+  inspOpenSub:{key:'inspection.responses.open_and_edit_a_submission', meta:inspSubUnit},
+  inspEditSub:{key:'inspection.responses.open_and_edit_a_submission', meta:inspSubUnit},
+  inspUpdateSub:{key:'inspection.responses.update_check_status_per_item', meta:inspSubUnit},
+  inspBulkE:{key:'inspection.responses.bulk_mark_all_checks_ok', meta:inspSubUnit},
+  // inspOpenPhoto only OPENS a photo for viewing - it was counted as adding one. The real
+  // add happens on the submit, logged at its own source.
   // Campaign Analytics
-  cmpSetSource:'campaigns.overview.switch_data_source_meta_google_both',
-  cmpSetPeriod:'campaigns.overview.select_or_customize_date_range',
-  cmpSetCustom:'campaigns.overview.select_or_customize_date_range',
-  cmpShowProject:'campaigns.overview.drill_into_a_project_s_campaigns',
-  cmpSetStatus:'campaigns.campaigns.filter_campaigns_by_project_status',
-  cmpSetCampProject:'campaigns.campaigns.filter_campaigns_by_project_status',
-  cmpSetAdProject:'campaigns.ads.filter_ads_by_project',
+  /* These three read the choice from the CLICK, not from the state. The wrapper logs before the
+     wrapped function runs, so usbCmpMeta - which reads CMP_SOURCE and CMP_PERIOD - was reporting
+     what the person switched AWAY from, not what they switched to. "Switched to Meta" recorded as
+     Google is a wrong answer, and a quiet one. */
+  cmpSetSource:{key:'campaigns.overview.switch_data_source_meta_google_both',
+    meta:function(s){ const m=usbCmpMeta()||{}; if(s) m.source=String(s); return Object.keys(m).length?m:null; }},
+  cmpSetPeriod:{key:'campaigns.overview.select_or_customize_date_range',
+    meta:function(p){ const m=usbCmpMeta()||{}; if(p) m.period=String(p).replace(/_/g,' '); return Object.keys(m).length?m:null; }},
+  cmpSetCustom:{key:'campaigns.overview.select_or_customize_date_range',
+    meta:function(){ const m=usbCmpMeta()||{};
+      const a=$('cmpSince'), b=$('cmpUntil');
+      if(a&&a.value&&b&&b.value) m.period=a.value+' → '+b.value;
+      return Object.keys(m).length?m:null; }},
+  // cmpShowProject opens the same project drill-down modal from two places that are two distinct
+  // catalog features - the Overview tab's chart bars and the By Project tab's table rows. The By
+  // Project row's onclick now passes 'by_project' as a second argument so this resolver can tell
+  // them apart; the Overview chart click passes nothing, which resolves to the Overview key.
+  cmpShowProject:function(accId,srcTab){return srcTab==='by_project'?'campaigns.by_project.drill_into_a_project_s_campaigns':'campaigns.overview.drill_into_a_project_s_campaigns';},
+  cmpSetStatus:{key:'campaigns.campaigns.filter_campaigns_by_project_status', meta:usbCmpMeta},
+  cmpSetCampProject:{key:'campaigns.campaigns.filter_campaigns_by_project_status', meta:usbCmpMeta},
+  cmpSetAdProject:{key:'campaigns.ads.filter_ads_by_project', meta:usbCmpMeta},
   // Internet Speed
-  netRefresh:'network.overview.refresh_speed_test_now',
-  netRangeChange:'network.overview.filter_chart_by_date_range',
+  netRefresh:{key:'network.overview.refresh_speed_test_now', meta:usbNetMeta},
+  // netRangeChange logs itself - the same picker serves both Network tabs, and a fixed key
+  // here credited every All-readings filter to Overview.
   // Post Sales
-  psaUploadStart:'postsales.adhoc.upload_document_for_adhoc_replacement',
-  psaDrop:'postsales.adhoc.bulk_drag_and_drop_upload', psaRenameSave:'postsales.adhoc.rename_a_document',
-  psaRemove:'postsales.adhoc.remove_a_document', psaPreview:'postsales.adhoc.preview_a_document',
-  psaDownloadOne:'postsales.adhoc.download_a_document',
-  psaDownloadAllZip:'postsales.adhoc.download_all_documents_as_zip',
+  psaUploadStart:{key:'postsales.adhoc.upload_document_for_adhoc_replacement', meta:function(){ try{ var el=document.getElementById('psaFile'); var f=el&&el.files; return (f&&f.length)?{title:f[0].name, replacements:(f.length===1?'1 file':f.length+' files')}:null; }catch(e){ return null; } }},
+  psaRenameSave:{key:'postsales.adhoc.rename_a_document', meta:usbPsaMeta},
+  psaRemove:{key:'postsales.adhoc.remove_a_document', meta:usbPsaMeta}, psaPreview:{key:'postsales.adhoc.preview_a_document', meta:usbPsaMeta},
+  psaDownloadOne:{key:'postsales.adhoc.download_a_document', meta:usbPsaMeta},
+  psaDownloadAllZip:{key:'postsales.adhoc.download_all_documents_as_zip', meta:function(){ try{ var q=(typeof PSA!=='undefined'&&PSA&&PSA.queue)?PSA.queue.length:0; return q?{replacements:q+' document'+(q===1?'':'s')}:null; }catch(e){ return null; } }},
   // Procurement / Projects / Construction — previously untracked
-  procUploadSave:'procurement.quote_comp.upload_document', procEditSave:'procurement.quote_comp.rename_replace_document',
-  procDeleteSel:'procurement.quote_comp.delete_document_s', procDownloadSel:'procurement.quote_comp.download_document_s',
-  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit', vtFilterVendors:'procurement.vendor_trends.search_filter_vendors',
-  vtOpenVendor:'procurement.vendor_trends.view_vendor_detail_spend_history',
+  procUploadSave:{key:'procurement.quote_comp.upload_document', meta:usbProcCat}, procEditSave:{key:'procurement.quote_comp.rename_replace_document', meta:function(id,cat){ return usbProcCat(cat); }},
+  procDeleteSel:{key:'procurement.quote_comp.delete_document_s', meta:usbProcCat}, procDownloadSel:{key:'procurement.quote_comp.download_document_s', meta:function(){ try{ var k=(typeof PROC!=='undefined'&&PROC)?PROC.sel.size:0; return {category:(typeof PROC!=='undefined'&&PROC&&PROC.tab)||undefined, replacements:k?k+' file'+(k===1?'':'s'):undefined}; }catch(e){ return null; } }},
+  vtBuToggle:'procurement.vendor_trends.filter_by_business_unit',
+  vtOpenVendor:{key:'procurement.vendor_trends.view_vendor_detail_spend_history', meta:usbVendorMeta},
   // Finance / Compliance / Documents / Video — previously untracked
-  docPickCat:'documents.department_library.browse_filter_by_category_folder',
+  // Same trap as cmpSetSource: docPickCat(c) is what SETS DOC.cat, and the wrapper logs before it
+  // runs - so usbDocScope() would read the folder being left, not the one being opened, and picking
+  // "All" would record whatever folder happened to be open before it. The picked value is the
+  // argument, so take it from there. Nothing wrong is stored yet: this feature has 0 uses so far.
+  docPickCat:{key:'documents.department_library.browse_filter_by_category_folder',
+    meta:function(c){ try{ var d=(typeof DOC!=='undefined')?DOC:null; var out={};
+      if(d&&d.dept) out.department=String(d.dept);
+      out.folder=c?String(c):'All';
+      return out; }catch(e){ return null; } }},
   // Competitors / Organic / Scaling / Playbook — previously untracked
-  compToggleActive:'competitors.overview.toggle_auto_sync_for_a_competitor',
-  compRemove:'competitors.overview.remove_competitor',
-  compShowOnly:'competitors.overview.drill_into_a_single_competitor',
-  compSetFilter:'competitors.overview.filter_by_competitor_date_range_status_or_media',
-  compSetDate:'competitors.overview.filter_by_competitor_date_range_status_or_media',
-  compOpenDetail:'competitors.overview.view_ad_detail',
-  // compSave and compRunSync (compSyncFiltered/compRefreshMedia) are NOT mapped here on purpose -
-  // both have real validation/network failure paths and log directly, after success is actually
-  // confirmed, same as misExportCauselist/taskSave above. compSearch is likewise unmapped - see
-  // the oninput/usageQueueDebounced note further up.
-  orgSetPeriod:'organic.all_content.filter_by_date_range',
-  orgSetNet:'organic.all_content.filter_by_network_content_type_or_page',
-  orgSetKind:'organic.all_content.filter_by_network_content_type_or_page',
-  orgSetPageId:'organic.all_content.filter_by_network_content_type_or_page',
-  orgSetSort:'organic.all_content.sort_content_by_metric',
-  orgOpen:'organic.all_content.view_post_detail'
+  compShowOnly:{key:'competitors.overview.drill_into_a_single_competitor', meta:usbCompMeta},
+  compSetFilter:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
+  compSetDate:{key:'competitors.overview.filter_by_competitor_date_range_status_or_media', meta:usbCompMeta},
+  // compSave, compRunSync (compSyncFiltered/compRefreshMedia), compToggleActive, compRemove and
+  // compOpenDetail are NOT mapped here on purpose - each has a real success/failure (or
+  // found/not-found, or confirmed/cancelled) branch and logs directly, only once that branch is
+  // actually known, same as misExportCauselist/taskSave above. compSearch is likewise unmapped -
+  // see the oninput/usageQueueDebounced note further up.
+  orgSetPeriod:{key:'organic.all_content.filter_by_date_range', meta:usbOrgMeta},
+  orgSetNet:{key:'organic.all_content.filter_by_network_content_type_or_page', meta:usbOrgMeta},
+  orgSetKind:{key:'organic.all_content.filter_by_network_content_type_or_page', meta:usbOrgMeta},
+  orgSetPageId:{key:'organic.all_content.filter_by_network_content_type_or_page', meta:usbOrgMeta},
+  orgSetSort:{key:'organic.all_content.sort_content_by_metric', meta:usbOrgMeta},
+  orgOpen:{key:'organic.all_content.view_post_detail', meta:usbOrgMeta}
   // orgApplyCustom is NOT mapped here on purpose - it has real validation (missing dates, From
   // after To) and logs directly, same reason as compSave above. orgSearch is likewise unmapped -
   // see the oninput/usageQueueDebounced note further up. Scaling Up and Playbook are both
@@ -19112,7 +19992,14 @@ const USAGE_MAP={
    there" when it actually meant "nothing here reports".
    Keyed on page/tab. The numeric ones are the tab index the module already routes on. */
 const USAGE_VIEWS={
-  'tasks/calendar':      'tasks.calendar.view_month_week_day_calendar',
+  /* Two catalog features describe this one screen: the month/week/day calendar itself, and the fact
+     that tasks, meetings and Legal hearing dates all land on it together. The second had no mapping
+     anywhere in the app, so it was the only active feature in the whole catalogue guaranteed to read
+     zero forever - not because nobody opens the calendar, but because nothing reported it. Logged as
+     an array (same shape network/0 already uses) so one look at the screen counts once for each,
+     rather than a second navigation being invented to carry it. */
+  'tasks/calendar':      ['tasks.calendar.view_month_week_day_calendar',
+                           'tasks.calendar.see_tasks_meetings_and_legal_dates_in_one_view'],
   'tasks/archive':       'tasks.archive.view_completed_archived_tasks',
   'tasks/scoreboard':    'tasks.scoreboard.view_task_completion_leaderboard',
   'campaigns/0':         'campaigns.overview.view_spend_leads_cost_charts',
@@ -19121,7 +20008,14 @@ const USAGE_VIEWS={
   'campaigns/3':         'campaigns.ads.view_ad_level_performance_table',
   'campaigns/4':         'campaigns.trend.view_spend_results_trend_vs_previous_period',
   'campaigns/5':         'campaigns.ad_fatigue.view_fatigue_ranking_by_ad_campaign',
-  'network/0':           'network.overview.view_live_monitoring_status',
+  // Overview is one render that shows five distinct catalog features at once (live status, the
+  // three KPI cards, the chart, and the settings block) - USAGE_VIEWS values can now be an array
+  // so a single navigation logs all of them, instead of only the first one ever tracked here.
+  'network/0':           ['network.overview.view_live_monitoring_status',
+                           'network.overview.view_latest_download_upload_ping_readings',
+                           'network.overview.view_low_reading_count_24h',
+                           'network.overview.view_speed_over_time_chart',
+                           'network.overview.view_monitoring_threshold_settings'],
   'network/1':           'network.all_readings.view_full_readings_table',
   // Console is Inspection's default landing tab, reached with NO segment in the hash at all
   // (inspGo builds a bare '#/inspection' for it) - usageViewTick's own fallback for "no segment"
@@ -19182,6 +20076,9 @@ const USAGE_VIEWS={
   // bodies carry no onclick besides mTabs' own tab-switch navTo), so opening each tab is the
   // only distinguishable action there is. Dashboard has no tabs at all - a bare landing and
   // every navTo('dashboard') both fall through usageViewTick's no-segment default of '0'.
+  'transcription/4':     'transcription.discrepancies.view_calls_flagged_with_a_data_mismatch',
+  'transcription/5':     'transcription.compilation.view_a_lead_s_combined_call_history',
+  'transcription/view':  'transcription.call_detail.view_qualification_checklist_and_entities',
   'dashboard/0':         'dashboard.overview.view_home_dashboard_summary',
   'gtd/0':               'gtd.inbox.view_capture_inbox_clarify_queue',
   'gtd/1':               'gtd.next_actions.view_next_actions_by_context',
@@ -19208,16 +20105,68 @@ function usageViewTick(){
     const key=USAGE_VIEWS[PAGE+'/'+tab];
     if(!key) return;
     /* renderPage can fire twice for one navigation - accountability.js re-renders defensively after
-       it loads - and two events for one look would overstate every view feature. */
+       it loads - and two events for one look would overstate every view feature. Dedup on the hash
+       segment itself, not the resolved key(s), so a tab mapped to SEVERAL distinct catalog features
+       (e.g. network/0's Overview widgets) still collapses to one log per look instead of one per key. */
+    const dedupeId=PAGE+'/'+tab;
     const now=Date.now();
-    if(key===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
-    USAGE_LAST_VIEW=key; USAGE_LAST_VIEW_AT=now;
-    usageQueue(key,'view');
+    if(dedupeId===USAGE_LAST_VIEW && (now-USAGE_LAST_VIEW_AT)<3000) return;
+    USAGE_LAST_VIEW=dedupeId; USAGE_LAST_VIEW_AT=now;
+    /* Opening a screen has no object behind it, but on some modules it does have a CONTEXT worth
+       recording - which date range the Internet Speed chart is on, which period and source the
+       campaign numbers are for, which department's library is open. Without it every view of those
+       screens reads identically, and the last column has nothing to show. */
+    const vm=(USAGE_VIEW_META[PAGE]&&USAGE_VIEW_META[PAGE]())||null;
+    // whatever screen they were on is now finished - close it before opening the next
+    usageCloseView();
+    const drawn=[];
+    (Array.isArray(key)?key:[key]).forEach(function(k){
+      // cleared first, so a key usageQueue refuses (no feature, not signed in) cannot make the
+      // previous event get described a second time
+      USAGE_LAST_QUEUED=null;
+      usageQueue(k,'view',vm?Object.assign({},vm):null);
+      if(USAGE_LAST_QUEUED) drawn.push(USAGE_LAST_QUEUED);
+    });
+    // 700ms is after the render this navigation triggered and long before the batch is sent.
+    if(drawn.length) setTimeout(function(){ usageDescribeScreen(drawn); }, 700);
+    // held from here until they leave, so the event can carry how long they stayed
+    USAGE_OPEN_VIEW={evs:drawn, at:Date.now()};
   }catch(e){}
 }
-/* The verb, read off the function's own name rather than kept in a second map that could drift out
-   of step with the first. Only ever used to label the event; the feature is what is counted. */
-function usageAction(fn){
+/* The verb the report prints in its Action column. It used to be guessed from the JavaScript
+   FUNCTION'S name, which records how the code happens to be written rather than what the person
+   did - and the two drift apart badly. cmpSetPeriod contains "set", so changing the date filter on
+   a read-only spend chart was filed as "update": somebody who did nothing but look at last month's
+   numbers appeared in the report to have edited something. accSubDel contains no word the list
+   recognised, so deleting a sub-task fell through to "view" - the same mistake pointing the other
+   way, and the more dangerous one, because the report then says nobody deleted anything.
+   "Delete an instance" ended up split 17 "delete" / 7 "view" purely on which code path logged it.
+   The feature key already states the act, in words written for a human to read -
+   "filter_cases_by_hearing_date_range", "delete_an_instance", "switch_data_source". Reading the verb
+   from there is not a guess, and it stays right for features nobody has written yet: a new key
+   named after what it does is labelled correctly the first time it is ever clicked.
+   The old name-based guess survives only as a fallback for the few callers that log a bare module
+   key with no feature part on it. */
+function usageActionFromKey(key){
+  const parts=String(key||'').split('.');
+  if(parts.length<3) return null;
+  // "bulk_" only says how many; the verb is whatever follows it (bulk_mark_all_ok is still a mark).
+  const leaf=parts.slice(2).join('.').toLowerCase().replace(/^bulk_/,'');
+  if(!leaf) return null;
+  if(/^(delete|remove|cancel)_/.test(leaf))                            return 'delete';
+  if(/^(download|export|print|copy)_/.test(leaf))                      return 'export';
+  if(/^(filter|search|sort|ask)_/.test(leaf) || /_search(_|$)/.test(leaf)) return 'search';
+  // only a leading or trailing "upload" is a file going up - "download_upload_ping_readings" is a
+  // network measurement, and matching the word anywhere would have filed reading it as a create.
+  if(/^upload_/.test(leaf) || /_upload$/.test(leaf))                   return 'create';
+  if(/^(view|open|browse|select|switch|drill|preview|see|play|read|expand|show|join|click|refresh|disabled)_/.test(leaf)) return 'view';
+  if(/^(add|create|new|submit|save|raise|start|log|record|attach|post|insert|comment|schedule|refer|generate|email|share|fetch)_/.test(leaf)) return 'create';
+  if(/^(update|edit|rename|move|mark|approve|decline|reject|forward|revert|reopen|toggle|set|assign|delegate|change|complete|replace|pin|restore|retry|receive|reschedule|drag|close|rebuild|ai)_/.test(leaf)) return 'update';
+  return 'view';
+}
+function usageAction(fn, key){
+  const fromKey=usageActionFromKey(key);
+  if(fromKey) return fromKey;
   if(/delete|remove|dismiss/i.test(fn))            return 'delete';
   if(/download|export|print/i.test(fn))            return 'export';
   if(/filter|search/i.test(fn))                    return 'search';
@@ -19230,6 +20179,111 @@ function usageAction(fn){
   return 'view';
 }
 let USAGE_Q=[], USAGE_TIMER=null;
+/* The event the most recent click queued, and when. Only ever read by the confirm-dialog retraction
+   above: an "are you sure?" that opens within a moment of a click is that click's dialog, and a
+   "no" means the thing the event claims happened never did. 1.5s is generous for a modal that opens
+   in the same call stack as the click, and tight enough that an older, unrelated event can never be
+   mistaken for this one. Held here rather than on the event itself so nothing extra travels to the
+   server in the batch payload. */
+let USAGE_LAST_EV=null, USAGE_LAST_AT=0, USAGE_LAST_QUEUED=null;
+/* ---- How long somebody actually stayed on a screen -------------------------------------------
+   A read-only screen has one honest usability question: was it read, or bounced off? Opening the
+   Scoreboard for six seconds and sitting with it for six minutes are different facts, and the
+   report could tell them apart for none of its 1,000-odd view events.
+   duration_ms has been on the events table from the start, erp_log_usage already reads it out of
+   the payload, and in 9,258 events not one has ever carried a value - the browser simply never
+   sent one. This fills it in.
+   The catch is timing: the event is queued the moment the screen opens, and the batch leaves eight
+   seconds later, long before anybody has finished reading. So the view event is HELD back - kept in
+   the queue, skipped by the flush - until the person navigates away, hides the tab or closes it.
+   Then its duration is stamped on and it goes with the next batch.
+   Holding it is safe because every exit path closes it: the next navigation, visibilitychange, and
+   the unload flush. The count itself is never at risk - the event exists in the queue from the
+   first moment, so the worst case is a use recorded without a duration, never a lost use. */
+let USAGE_OPEN_VIEW={evs:[], at:0};
+const USAGE_MAX_VIEW_MS=4*60*60*1000;   // a tab left open overnight is not four hours of reading
+function usageSpan(ms){
+  const s=Math.round(ms/1000);
+  if(s<60) return s+'s';
+  const m=Math.floor(s/60); if(m<60) return m+'m'+(s%60?' '+(s%60)+'s':'');
+  const h=Math.floor(m/60); return h+'h'+(m%60?' '+(m%60)+'m':'');
+}
+function usageCloseView(){
+  try{
+    const open=USAGE_OPEN_VIEW;
+    USAGE_OPEN_VIEW={evs:[], at:0};
+    if(!open.evs.length || !open.at) return;
+    const ms=Date.now()-open.at;
+    if(ms>0 && ms<USAGE_MAX_VIEW_MS){
+      const span=usageSpan(ms);
+      open.evs.forEach(function(ev){
+        ev.duration_ms=ms;                                   // the column that has always been there
+        ev.meta=Object.assign({}, ev.meta||{}, {time_spent:span});  // and a readable copy for the report
+      });
+    }
+    // the flush timer may have given up while the only thing queued was being held
+    if(USAGE_Q.length && !USAGE_TIMER) USAGE_TIMER=setTimeout(usageFlush, 8000);
+  }catch(e){ USAGE_OPEN_VIEW={evs:[], at:0}; }
+}
+// Everything queued EXCEPT a view still being timed. Used instead of splicing from the front, so
+// one held event cannot block the batch behind it.
+function usageTakeBatch(n){
+  const out=[];
+  for(let i=0;i<USAGE_Q.length && out.length<n;i++){
+    if(USAGE_OPEN_VIEW.evs.indexOf(USAGE_Q[i])!==-1) continue;
+    out.push(USAGE_Q[i]);
+  }
+  out.forEach(function(ev){ const i=USAGE_Q.indexOf(ev); if(i!==-1) USAGE_Q.splice(i,1); });
+  return out;
+}
+/* What was actually on the screen, written onto a "view" event after the screen has drawn.
+   Opening a tab is the one kind of action with no object behind it - no task, no document, nobody
+   it went to - so the report's Details column has always been a dash for all 984 of them, and there
+   is nothing in the database that could ever fill it in, because nothing specific happened. What
+   CAN be said is what the person was looking at: "View completed/archived tasks - 128 rows" answers
+   the next question, where a bare dash answers none.
+   It has to run after the render, so the event is queued first and annotated a moment later - the
+   batch does not leave for eight seconds, so there is time. If the screen has no table, or the
+   event has already gone, nothing is written and the dash stays honest. */
+function usageDescribeScreen(evs){
+  try{
+    const v=$('view'); if(!v) return;
+    const n=v.querySelectorAll('table tbody tr').length;
+    if(!n) return;
+    evs.forEach(function(ev){
+      // merged into whatever context the navigation already recorded, rather than replacing it:
+      // "Last 3 days" and "50 rows" are both worth having, and neither is the other.
+      if(USAGE_Q.indexOf(ev)!==-1){
+        ev.meta=Object.assign({}, ev.meta||{}, {showing:n+' row'+(n===1?'':'s')});
+      }
+    });
+  }catch(e){}
+}
+/* Screen-level context per module, for "opened a screen" events only. Deliberately short: a module
+   belongs here when the screen genuinely has a state worth recording, not just to fill the column.
+   Transcription is absent on purpose - viewing the call list is not about any one call, and
+   attaching the last-opened one would be a wrong answer dressed as a right one. */
+const USAGE_VIEW_META={
+  network:    function(){ return usbNetMeta(); },
+  campaigns:  function(){ return usbCmpMeta(); },
+  documents:  function(){ return usbDocScope(); },
+  /* Accountability's only screen with a screen-level state worth recording is the Calendar, and it
+     keeps that state in accountability.js's own closure - hence the window hop. It returns null off
+     the Calendar tab, so the Tasks, Workflow, Archive and Scoreboard views are unaffected. */
+  tasks:      function(){ try{ return (window.gcalUsageMeta && window.gcalUsageMeta()) || null; }
+                          catch(e){ return null; } }
+};
+function usagePendingClick(){
+  return (USAGE_LAST_EV && (Date.now()-USAGE_LAST_AT)<1500) ? USAGE_LAST_EV : null;
+}
+function usageRetract(ev){
+  if(!ev) return false;
+  const i=USAGE_Q.indexOf(ev);
+  if(i===-1) return false;                       // already flushed - too late to take it back
+  USAGE_Q.splice(i,1);
+  if(USAGE_LAST_EV===ev){ USAGE_LAST_EV=null; USAGE_LAST_AT=0; }
+  return true;
+}
 // During an extended outage the queue would otherwise grow without bound; past this it's the
 // freshest activity that's kept, not the oldest, since an approximate recent picture beats an
 // exact but ancient one for a report read in terms of "the last 30 days".
@@ -19243,13 +20297,31 @@ const USAGE_MAX_Q=600;
 // rows logged so far, because nothing ever passed one. It is the project a task/record belongs to,
 // which the Usability report shows in its own column; a call site that doesn't know one passes
 // nothing, exactly as before. Trimmed to 64 chars because that is what erp_log_usage stores.
+/* A once-only id for each event, so a batch that arrives at the server twice is only stored once.
+   This is not hypothetical: 28 events are sitting in the table as exact duplicates - same person,
+   same feature, same microsecond - and the retry path is how they got there. usageFlush puts a
+   failed batch back on the queue and sends it again, but "failed" from the client's side includes
+   the case where the server committed the rows and the response was lost on the way back (a tab
+   going hidden mid-request does exactly this, which is why forwarding and receiving workflow steps
+   - clicked and immediately navigated away from - are the worst affected). The client cannot tell
+   that apart from a real failure, and it should not have to: the id makes re-sending harmless, so
+   the retry stays as safe as it is useful. randomUUID needs a secure context; the fallback is only
+   ever reached on http or a very old browser, and being unique per event is all that is asked of
+   it. */
+function usageEventId(){
+  try{ if(window.crypto&&crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+  return 'x'+Date.now().toString(16)+'-'+Math.random().toString(16).slice(2,10)
+        +'-'+Math.random().toString(16).slice(2,10);
+}
 function usageQueue(featureKey, action, meta, project){
   if(!featureKey || !(state&&state.email)) return;
   const ev={module_id:String(featureKey).split('.')[0], feature_key:featureKey,
-                action:action||'view', occurred_at:new Date().toISOString()};
+                action:action||'view', occurred_at:new Date().toISOString(), eid:usageEventId()};
   if(meta && typeof meta==='object') ev.meta=meta;
   if(project) ev.project=String(project).trim().slice(0,64) || undefined;
   USAGE_Q.push(ev);
+  USAGE_LAST_EV=ev; USAGE_LAST_AT=Date.now();    // so a refused confirm can take it back out again
+  USAGE_LAST_QUEUED=ev;                          // and so a view can be described once it has drawn
   if(USAGE_Q.length>USAGE_MAX_Q) USAGE_Q.splice(0, USAGE_Q.length-USAGE_MAX_Q);
   // 60 is the server's own per-call ceiling; flush before reaching it rather than losing the tail.
   if(USAGE_Q.length>=40){ usageFlush(); }
@@ -19279,7 +20351,8 @@ function usageQueueDebounced(featureKey, val, action, delay){
 async function usageFlush(){
   if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
   if(!USAGE_Q.length) return;
-  const batch=USAGE_Q.splice(0, 60);
+  const batch=usageTakeBatch(60);
+  if(!batch.length) return;                // only a view still being timed - nothing to send yet
   try{
     const {error}=await sb.rpc('erp_log_usage',{p_events:batch});
     if(error) throw error;
@@ -19298,6 +20371,8 @@ async function usageFlush(){
    hood, the same problem all over again — so it's built here from the token boot() already keeps
    cached for exactly this: a fetch fired from an unload handler can't safely await getSession(). */
 function usageFlushOnUnload(){
+  // the screen is going away, so whatever was being timed is finished - stamp it and send it too
+  usageCloseView();
   if(USAGE_TIMER){ clearTimeout(USAGE_TIMER); USAGE_TIMER=null; }
   if(!USAGE_Q.length || !USAGE_TOKEN) return;
   const batch=USAGE_Q.splice(0, 60);
@@ -19332,7 +20407,8 @@ function usageInstall(){
   Object.keys(USAGE_MAP).forEach(function(fn){
     const orig=window[fn];
     if(typeof orig!=='function' || orig.__usageWrapped) return;
-    const mapped=USAGE_MAP[fn], act=usageAction(fn);
+    const mapped=USAGE_MAP[fn];
+
     // Most entries are one function, one feature - a plain string. A few functions do two different
     // things depending on an argument (taskSave(kind) creates a task OR delegates one from the same
     // modal and Save button), and a fixed string would count every delegation as "create task" while
@@ -19344,6 +20420,11 @@ function usageInstall(){
     // what a wrapper can see, and is logged directly at the source instead (see crystallizeAndSwap).
     const isDescriptor=mapped&&typeof mapped==='object'&&('key' in mapped);
     const keySrc=isDescriptor?mapped.key:mapped;
+    // act: is the escape hatch for the few rows where one catalogue entry covers two different
+    // buttons - "Preview / Download document" is one feature but a preview is not an export, and
+    // only the function that was actually called knows which of the two happened.
+    const actOverride=(isDescriptor && mapped.act) ? mapped.act : null;
+
     const metaFn=isDescriptor?mapped.meta:null;
     const wrapped=function(){
       try{
@@ -19351,7 +20432,8 @@ function usageInstall(){
         if(key){
           let meta=null;
           if(metaFn){ try{ meta=metaFn.apply(this, arguments); }catch(_e){} }
-          usageQueue(key, act, meta);
+          usageQueue(key, actOverride || usageAction(fn, key), meta);
+
         }
       }catch(e){}
       return orig.apply(this, arguments);      // called through no matter what happened above
