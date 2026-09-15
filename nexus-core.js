@@ -8527,7 +8527,11 @@ const USB_COL4={
   'dashboard':            {header:'Time spent', keys:['time_spent']},
   'projects':             {header:'Time spent', keys:['time_spent']},
   'video':                {header:'Time spent', keys:['time_spent']},
-  'crm':                  {header:'Time spent', keys:['time_spent']},
+  /* All 8 CRM & Sales features are named "View ..." and every one of them is exactly that - a tab
+     that opens a list. Nothing is ever chosen, filtered or changed, so the only things the events
+     ever carried were the row count and how long the tab stayed open, neither of which answers a
+     question anybody asks. When and Action say the whole truth here. */
+  'crm':                  {header:null, keys:[], hideDetails:true},
   'scaling':              {header:'Time spent', keys:['time_spent']},
   'gtd':                  {header:'Time spent', keys:['time_spent']},
   'compliance':           {header:'Time spent', keys:['time_spent']},
