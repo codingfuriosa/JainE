@@ -8384,8 +8384,12 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
          printed as "07:43 pm", which reads as the same row repeated and was reported as duplicate
          data. The clock is the only thing that tells two real actions apart here. */
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-      const who=usbCol4Value(e.meta, col4.keys)||'—';
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col4.keys)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      // Only what the column ACTUALLY printed is held back from Details. Passing the whole key list
+      // hid fields the column then had no room for - "Open a month" lost its month from Details to a
+      // column that never showed it, which is how a working row ended up blank at both ends.
+      const col=usbCol4Value(e.meta, col4.keys);
+      const who=col.text||'—';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col.used)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8422,33 +8426,58 @@ const USB_META_INTERNAL_KEYS=['ref','backfill','assignee'];
    mistake this is meant to end. Accountability keeps 'Assigned to'; the rest follow as their
    capture lands. */
 const USB_COL4={
-  'tasks':                {header:'Assigned to', keys:['assignee']},
-  'inspection':           {header:'Unit',        keys:['unit','category']},
-  // Legal is three different subjects under one roof, so it is keyed per tab rather than per module
-  'legal.mis':            {header:'Case · Court', keys:['case_no','court']},
-  'legal.actions':        {header:'Case · Court', keys:['case_no','court']},
-  'legal.advocates':      {header:'Court',        keys:['court','case_type']},
-  'legal.documents':      {header:'Folder',       keys:['folder','category','department']},
-  'documents':            {header:'Department',   keys:['department','folder']},
-  'transcription':        {header:'Lead · Project', keys:['lead','project','language']},
-  'network':              {header:'Range',        keys:['range']},
-  'campaigns':            {header:'Period · Source', keys:['period','source']},
-  'hr':                   {header:'Position',     keys:['position','month']},
-  // Monthly Update's two buttons each go two ways, so its column carries the decision rather than
-  // the position - the position is already the Details on those rows.
-  'hr.monthly_update':    {header:'Decision',     keys:['decision','month']},
-  'recruitment':          {header:'Position',     keys:['position','department']},
-  'procurement':          {header:'Vendor',       keys:['vendor']},
-  'procurement.quote_comp':{header:'Category',    keys:['category','replacements']},
-  'postsales':            {header:'Status',       keys:['status','replacements']},
-  'competitors':          {header:'Competitor · Range', keys:['competitor','range','media']},
-  'organic':              {header:'Period · Network',   keys:['period','network','kind']},
-  'helpdesk':             {header:'Topic',        keys:['category','subject']},
-  /* Screens you only look at. There is no record and nobody it went to, so the honest last column
-     is how much was in front of the person - which is recorded once the screen has drawn. Three
-     Accountability tabs are listed individually for the same reason: the Scoreboard, the Archive
-     and the Calendar are things you read, not things you hand to anybody, and "Assigned to" was
-     never going to say anything on them. The Tasks, Meetings and Workflow tabs keep it. */
+  /* --- whole modules ------------------------------------------------------------------------ */
+  'tasks':                {header:'Assigned to',       keys:['assignee']},
+  'inspection':           {header:'Unit',              keys:['unit','category']},
+  'documents':            {header:'Department',        keys:['department','folder']},
+  'transcription':        {header:'Lead · Project',    keys:['lead','project','language']},
+  'network':              {header:'Range',             keys:['range']},
+  'campaigns':            {header:'Period · Source',   keys:['period','source']},
+  'recruitment':          {header:'Position',          keys:['position','department']},
+  'procurement':          {header:'Vendor',            keys:['vendor']},
+  'postsales':            {header:'Status',            keys:['status','replacements']},
+  'competitors':          {header:'Competitor · Range',keys:['competitor','range','media']},
+  'organic':              {header:'Period · Network',  keys:['period','network','kind']},
+
+  /* --- tabs that are about something different from the rest of their module ----------------- */
+  // Legal is three different subjects under one roof
+  'legal.mis':            {header:'Case · Court',      keys:['case_no','court']},
+  'legal.actions':        {header:'Case · Court',      keys:['case_no','court']},
+  'legal.advocates':      {header:'Court',             keys:['court','case_type']},
+  'legal.documents':      {header:'Folder',            keys:['folder','category','department']},
+  // HR's three tabs hold three different things: a candidate's interview, a resume for a role, and
+  // a month's requisitions. 'position' fitted only the first of them.
+  'hr':                   {header:'Position',          keys:['position']},
+  'hr.resumes':           {header:'Role',              keys:['role','position']},
+  'hr.interview_qs':      {header:'On screen',         keys:['showing']},
+  // A test has a name and nothing else; the name is already the Details.
+  'recruitment.tests':    {header:'On screen',         keys:['showing']},
+  'procurement.quote_comp':{header:'Category',         keys:['category','replacements']},
+  // Asking the assistant carries the question; raising a ticket carries its category.
+  'helpdesk.assistant':   {header:'Question',          keys:['query']},
+  'helpdesk.tickets':     {header:'Topic',             keys:['category']},
+
+  /* --- single features whose subject is unlike anything else in their tab -------------------- */
+  /* Monthly Update is the case that proved per-tab was not enough. Approve/reject and close/reopen
+     are decisions; opening a month is a month; searching is a typed query. One header across all
+     three put the month under "Decision" AND took it out of Details, leaving a row that had been
+     working blank at both ends. Each is named for its own subject now.
+     "Open a month" keeps the month in Details rather than in the column: the When column already
+     says the date, so the month only earns its place when it is NOT the current one - somebody
+     opening June's record in September - and Details is where that belongs. */
+  'hr.monthly_update.approve_reject_requisition': {header:'Decision', keys:['decision']},
+  'hr.monthly_update.close_reopen_hiring':        {header:'Decision', keys:['decision']},
+  'hr.monthly_update.open_a_month':               {header:'On screen',keys:['showing']},
+  'hr.monthly_update.search_filter_positions':    {header:'On screen',keys:['showing']},
+  'hr.monthly_update.delete_rows_or_whole_month': {header:'On screen',keys:['showing']},
+  // An upload has no lead yet - the call does not exist until it has run - so it reports the files.
+  'transcription.all_calls.upload_call_recording_s': {header:'Files', keys:['files']},
+
+  /* --- screens you only look at -------------------------------------------------------------- */
+  /* No record and nobody it went to, so the honest column is how much was in front of the person.
+     Three Accountability tabs are here for the same reason: the Scoreboard, the Archive and the
+     Calendar are things you read, not things you hand to anybody. Tasks, Meetings and Workflow
+     keep "Assigned to". */
   'tasks.scoreboard':     {header:'On screen',    keys:['showing']},
   'tasks.archive':        {header:'On screen',    keys:['showing']},
   'tasks.calendar':       {header:'On screen',    keys:['showing']},
@@ -8458,7 +8487,6 @@ const USB_COL4={
   'crm':                  {header:'On screen',    keys:['showing']},
   'scaling':              {header:'On screen',    keys:['showing']},
   'gtd':                  {header:'On screen',    keys:['showing']},
-  'organic':              {header:'On screen',    keys:['showing']},
   'compliance':           {header:'On screen',    keys:['showing']},
   'maintenance':          {header:'On screen',    keys:['showing']},
   'inventory':            {header:'On screen',    keys:['showing']},
@@ -8466,9 +8494,15 @@ const USB_COL4={
   'finance':              {header:'On screen',    keys:['showing']}
 };
 const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
+/* Most specific wins: the feature itself, then its tab, then its module.
+   The per-feature level is not a refinement, it is the level this needed from the start. A tab
+   holds features that are about completely different things - Monthly Update has "Approve / reject
+   a requisition" (a decision), "Open a month" (a month) and "Search positions" (a typed query)
+   sitting together - and one header across all three put the month under a column headed
+   "Decision", which is worse than the dash it replaced. */
 function usbCol4(featureKey){
-  const p=String(featureKey||'').split('.');
-  return USB_COL4[p[0]+'.'+p[1]] || USB_COL4[p[0]] || USB_COL4_DEFAULT;
+  const k=String(featureKey||''), p=k.split('.');
+  return USB_COL4[k] || USB_COL4[p[0]+'.'+p[1]] || USB_COL4[p[0]] || USB_COL4_DEFAULT;
 }
 /* Whatever of the chosen keys this particular event actually carries, in the order listed.
    Falls back to what was on the screen when none of them apply. That fallback matters more than it
@@ -8478,15 +8512,15 @@ function usbCol4(featureKey){
    instead of a dash. Only used when the primary keys give nothing, so it never dilutes a real
    answer. */
 function usbCol4Value(meta, keys){
-  if(!meta || typeof meta!=='object') return '';
-  const out=[];
+  if(!meta || typeof meta!=='object') return {text:'', used:[]};
+  const out=[], used=[];
   keys.forEach(function(k){
-    if(meta[k]!=null && String(meta[k]).trim()!=='') out.push(String(meta[k]).trim());
+    if(meta[k]!=null && String(meta[k]).trim()!==''){ out.push(String(meta[k]).trim()); used.push(k); }
   });
-  if(out.length) return out.join(' · ');
+  if(out.length) return {text:out.join(' · '), used:used};
   if(keys.indexOf('showing')===-1 && meta.showing!=null && String(meta.showing).trim()!=='')
-    return String(meta.showing).trim();
-  return '';
+    return {text:String(meta.showing).trim(), used:['showing']};
+  return {text:'', used:[]};
 }
 /* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
    and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
@@ -8553,8 +8587,9 @@ window.usbOpenUserActivity=async function(){
          data. The clock is the only thing that tells two real actions apart here. */
       const when=dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' · '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
       const col4=usbCol4(e.feature_key);
-      const who=usbCol4Value(e.meta, col4.keys)||'—';
-      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col4.keys)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      const col=usbCol4Value(e.meta, col4.keys);
+      const who=col.text||'—';
+      return '<tr><td style="white-space:nowrap">'+esc(when)+'</td><td>'+esc(e.module_label||'—')+'</td><td>'+esc(e.tab||'—')+'</td><td>'+esc(e.feature||e.feature_key||'—')+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col.used)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -18439,8 +18474,10 @@ function usbCallMeta(id){
 // Recruitment — the position or the thing being acted on
 function usbTestMeta(id){ return usbFrom((typeof RT_RECORDS!=='undefined')?RT_RECORDS:null, id,
   function(r){ return {title:r.name||undefined}; }); }
+// A job description IS a position - its name is the position's name - so it fills both, and the
+// column stops being blank on the preview and download actions that only had an id to go on.
 function usbJdMeta(id){ return usbFrom(window._recAllJDs, id,
-  function(r){ return {title:r.name||r.file_name||undefined}; }); }
+  function(r){ var n=r.name||r.file_name||undefined; return {title:n, position:r.name||undefined}; }); }
 function usbMpMeta(id){ return usbFrom((typeof MP_RECORDS!=='undefined')?MP_RECORDS:null, id,
   function(r){ return {title:r.job_title||undefined, position:r.job_title||undefined, department:r.department||undefined}; }); }
 function usbRefMeta(id){ return usbFrom((typeof REF_RECORDS!=='undefined')?REF_RECORDS:null, id,
@@ -18448,8 +18485,10 @@ function usbRefMeta(id){ return usbFrom((typeof REF_RECORDS!=='undefined')?REF_R
 // HR — the candidate, and the position they are for
 function usbTrkMeta(id){ return usbFrom(window._trRows, id,
   function(r){ return {title:r.candidate_name||undefined, position:r.position||undefined}; }); }
+// Resumes are filed against a ROLE, not a position - that is the word the rows actually carry, and
+// picking 'position' for the column meant it could never match no matter how much was captured.
 function usbResumeMeta(id){ return usbFrom((typeof RS_ROWS!=='undefined')?RS_ROWS:null, id,
-  function(r){ return {title:r.file_name||undefined, position:r.position||undefined}; }); }
+  function(r){ return {title:r.file_name||undefined, role:r.role||r.position||undefined}; }); }
 /* HR · Monthly Update is keyed by the requisition behind the row, not by an id of its own.
    The position's name is the thing the row is ABOUT, so it goes in Details as a bare name. What
    the click decided - approved or rejected, hiring closed or reopened - is a different fact and
@@ -18654,7 +18693,7 @@ const USAGE_MAP={
       try{
         const f=Array.prototype.slice.call(($('trFile')&&$('trFile').files)||[]);
         if(!f.length) return null;
-        return {title:f[0].name, lead:f.length===1?'1 recording':f.length+' recordings'};
+        return {title:f[0].name, files:f.length===1?'1 recording':f.length+' recordings'};
       }catch(e){ return null; }
     }},
   /* Which filter, and which dates - a "Filter calls" row with nothing beside it says only that
