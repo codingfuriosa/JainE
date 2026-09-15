@@ -653,12 +653,19 @@
   const PPL_TTL=180000;
   async function people(force){
     if(PPL && !force && (Date.now()-PPL_AT)<PPL_TTL) return PPL;
-    try{ const {data}=await sb.schema('acc').rpc('people'); if(data&&data.length){PPL=data.map(p=>({email:p.email,name:p.full_name||p.email,depts:Array.isArray(p.department)?p.department:[]}));PPL_AT=Date.now();return PPL;} }catch(e){}
-    try{ if(typeof getPeople==='function'){const g=await getPeople(); PPL=(g||[]).map(p=>({email:p.email,name:p.name||p.email,depts:Array.isArray(p.depts)?p.depts:(Array.isArray(p.department)?p.department:[])}));PPL_AT=Date.now();return PPL;} }catch(e){}
+    try{ const {data}=await sb.schema('acc').rpc('people'); if(data&&data.length){PPL=data.map(p=>({email:p.email,name:p.full_name||String(p.email||'').split('@')[0],depts:Array.isArray(p.department)?p.department:[]}));PPL_AT=Date.now();return PPL;} }catch(e){}
+    try{ if(typeof getPeople==='function'){const g=await getPeople(); PPL=(g||[]).map(p=>({email:p.email,name:p.name||String(p.email||'').split('@')[0],depts:Array.isArray(p.depts)?p.depts:(Array.isArray(p.department)?p.department:[])}));PPL_AT=Date.now();return PPL;} }catch(e){}
     if(PPL) return PPL;            // a failed refresh keeps the last good list rather than emptying it
     PPL=[]; PPL_AT=0; return PPL;
   }
-  const nameOf=(l,e)=>{const p=(l||[]).find(x=>eq(x.email,e));return p?p.name:e;};
+  /* Never hand back a whole address. The Usability report prints whatever this returns straight into
+     its "Assigned to" column, and 267 rows ended up reading "accounts5@thejaingroup.com" instead of
+     "Bachchu Samanta" - unreadable, and it leaks a mailbox into a report about people.
+     acc.people() already resolves a name for everyone (full name, then profile, then sign-in
+     metadata, then the part before the @), so a miss here means the list simply had not loaded yet.
+     The part before the @ is the right answer in that case: recognisable, and never an address. */
+  const nameOf=(l,e)=>{const p=(l||[]).find(x=>eq(x.email,e));
+    return p&&p.name ? p.name : String(e||'').split('@')[0]||String(e||'');};
   const iniOf=(n)=> (typeof initials==='function'?initials(n):(String(n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('')))||'?';
   function avatars(list,emails){ emails=emails||[]; return '<div class="ac-avs">'+emails.slice(0,4).map(e=>`<span class="ac-av" style="background:${colorFor(e)}" title="${esc2(nameOf(list,e))}">${esc2(iniOf(nameOf(list,e)).toUpperCase())}</span>`).join('')+(emails.length>4?`<span class="ac-av" style="background:#94a3b8" title="${esc2(emails.slice(4).map(e=>nameOf(list,e)).join(', '))}">+${emails.length-4}</span>`:'')+'</div>'; }
   const stChip = s => { const k=(s||'Pending').replace(/\s.*/,''); return `<span class="ac-chip ac-c-${k}">${esc2(s||'Pending')}</span>`; };
