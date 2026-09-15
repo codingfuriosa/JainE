@@ -8376,8 +8376,17 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
   // Details so it appears once, in its own column.
   /* Every row here is the same feature, so the last column can be named for exactly what that
      feature's work is about - "Unit" on an inspection, "Assigned to" on a task. */
+  /* A feature that has nothing to put in a column does not get the column. Some screens are only
+     looked at - the Scoreboard and the Archive have no record behind them, nobody they went to and
+     nothing they are about - so a Details and a last column would be two permanently empty cells
+     taking width from the two that do say something. Better a narrow honest table than a wide one
+     padded with dashes. */
   const col4=usbCol4(featureKey);
-  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th><th>Details</th><th>'+esc(col4.header)+'</th></tr></thead><tbody>'
+  const showCol4=!!col4.header, showDetails=!col4.hideDetails;
+  const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
+    +(showDetails?'<th>Details</th>':'')
+    +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
+    +'</tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
       /* Seconds, not just the minute. Three separate actions eleven and fourteen seconds apart all
@@ -8388,8 +8397,10 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
       // hid fields the column then had no room for - "Open a month" lost its month from Details to a
       // column that never showed it, which is how a working row ended up blank at both ends.
       const col=usbCol4Value(e.meta, col4.keys);
-      const who=col.text||'—';
-      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td><td>'+usbMetaHtml(e.meta,col.used)+'</td><td style="color:var(--slate)">'+esc(who)+'</td></tr>';
+      return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td>'
+        +(showDetails?('<td>'+usbMetaHtml(e.meta,col.used)+'</td>'):'')
+        +(showCol4?('<td style="color:var(--slate)">'+esc(col.text||'—')+'</td>'):'')
+      +'</tr>';
     }).join('')
     +'</tbody></table></div></div>';
   wrap.innerHTML=head+body;
@@ -8489,8 +8500,11 @@ const USB_COL4={
      Three Accountability tabs are here for the same reason: the Scoreboard, the Archive and the
      Calendar are things you read, not things you hand to anybody. Tasks, Meetings and Workflow
      keep "Assigned to". */
-  'tasks.scoreboard':     {header:'Time spent', keys:['time_spent']},
-  'tasks.archive':        {header:'Time spent', keys:['time_spent']},
+  // Two screens you only read. There is no record behind them, nobody they went to, and nothing
+  // they are about - so both the Details and the last column would be permanently empty. Removed
+  // rather than filled with something that only looks like an answer.
+  'tasks.scoreboard':     {header:null, keys:[], hideDetails:true},
+  'tasks.archive':        {header:null, keys:[], hideDetails:true},
   // The Calendar is read four different ways and they are not interchangeable - a team living in
   // Day view needs a good agenda panel, one that only opens Month needs a good month grid, and the
   // report could not tell them apart. How long they stayed still shows in Details.
@@ -8526,16 +8540,19 @@ function usbCol4(featureKey){
    header has to serve both, so the row that has no subject shows what the person was looking at
    instead of a dash. Only used when the primary keys give nothing, so it never dilutes a real
    answer. */
+/* Whatever of the chosen keys this event actually carries, in the order listed - and nothing else.
+   There used to be a fallback here: when none of the chosen keys applied it showed what was on the
+   screen instead. That was a mistake, and a visible one - the Scoreboard printed "85 rows" under a
+   column headed "Time spent", and the grouped-by views would have printed it under "Assigned to".
+   A wrong label on real data is worse than an empty cell; the empty cell is at least honest about
+   not knowing. A column now shows its own fact or shows nothing. */
 function usbCol4Value(meta, keys){
-  if(!meta || typeof meta!=='object') return {text:'', used:[]};
+  if(!meta || typeof meta!=='object' || !keys || !keys.length) return {text:'', used:[]};
   const out=[], used=[];
   keys.forEach(function(k){
     if(meta[k]!=null && String(meta[k]).trim()!==''){ out.push(String(meta[k]).trim()); used.push(k); }
   });
-  if(out.length) return {text:out.join(' · '), used:used};
-  if(keys.indexOf('showing')===-1 && meta.showing!=null && String(meta.showing).trim()!=='')
-    return {text:String(meta.showing).trim(), used:['showing']};
-  return {text:'', used:[]};
+  return out.length ? {text:out.join(' · '), used:used} : {text:'', used:[]};
 }
 /* What the row is ABOUT is a name, and a name does not need labelling - "Title: Reimbursement"
    and "Workflow: Invoice Processing · Instance: New Bill Recording · Step: Bill Checking" read as
