@@ -11028,17 +11028,11 @@ function cmpPrevRange(){
 }
 function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
 function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
-// Sync the previous window for META only — google-ads-live now fills both buckets in one call
-// (see its prev_since/prev_until parameters), so asking it twice is unnecessary.
-async function cmpSyncPrev(which){
-  if(which!=='meta'&&which!=='both')return;
-  const p=cmpPrevRange(); if(!p)return;
-  try{
-    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
-    const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-    await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){});
-  }catch(e){}
-}
+// Meta's previous-period window is now filled by the MCP ingest pipeline (mcp-ads-ingest),
+// not fetched live — see camp.campaign_insights' own synced_at. google-ads-live still fills
+// both of its own buckets in one call (its prev_since/prev_until parameters), so there's
+// nothing left for this to do; kept as a no-op so its two call sites don't need to change.
+async function cmpSyncPrev(which){}
 // Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
 function cmpTrend(cur,prev,lowerIsBetter){
   cur=Number(cur)||0;
@@ -11341,17 +11335,15 @@ async function cmpBothView(v,seg){
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  // Meta's half of this view is now MCP-fed (see camp.campaign_insights' synced_at), not
+  // fetched live — only google-ads-live still needs asking here.
   if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
     try{
       const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
       const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-      const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
       const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
       const pr0=cmpPrevRange(); if(pr0){gbody.prev_since=pr0.since;gbody.prev_until=pr0.until;}
-      await Promise.all([
-        fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
-        fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
-      ]);
+      await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){});
     }catch(e){}
   }
   await cmpSyncPrev('both');
@@ -12233,17 +12225,8 @@ VIEWS.campaigns=async function(v,seg){
   const needAd=(ti===3||ti===5);
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
-  // Ask the live Edge Function to make sure this exact period+level is fresh (it caches
-  // for a few minutes server-side, so repeat opens are fast — only a real cache miss
-  // actually calls out to Meta).
-  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
-    try{
-      const {data:{session}}=await sb.auth.getSession();
-      const token=session&&session.access_token;
-      const reqBody=CMP_PERIOD==='custom'?{level:needAd?'ad':'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:needAd?'ad':'campaign',period:CMP_PERIOD};
-      await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(reqBody)});
-    }catch(e){}
-  }
+  // Data comes from the MCP ingest pipeline now (camp.campaign_insights' own synced_at),
+  // not a live Graph API call on every open — see mcp-ads-ingest.
   await cmpSyncPrev('meta');
   const CMP=()=>sb.schema('camp');
   const prevKey=cmpPrevKey();
