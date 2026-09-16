@@ -158,6 +158,52 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
 /* Applied to Customer Portal's content wrapper (nexus-core.js, VIEWS.customer) - #view itself is
    never replaced, only its innerHTML, so every section change inserts a brand-new element and this
    plays automatically, same reasoning as sbItemActivate above. */
+/* --- Sidebar animated construction scene (customer portal only) --- */
+.cust-sb-scene{
+  margin-top:auto;padding:0 16px 16px;position:relative;height:140px;opacity:.35;
+  animation:csbFadeIn 1.2s ease .5s both
+}
+@keyframes csbFadeIn{from{opacity:0}to{opacity:.35}}
+
+/* Ground */
+.csb-ground{position:absolute;bottom:0;left:8px;right:8px;height:2px;background:linear-gradient(90deg,transparent,#4a5568,#64748b,#4a5568,transparent);border-radius:1px}
+
+/* Buildings */
+.csb-buildings{position:absolute;bottom:2px;left:8px;right:8px;display:flex;align-items:flex-end;justify-content:space-around}
+.csb-b{border-radius:2px 2px 0 0;background:linear-gradient(180deg,#2563eb,#1e40af);position:relative;
+  animation:csbBuildRise .6s cubic-bezier(.22,1,.36,1) both}
+.csb-b::after{
+  content:'';position:absolute;inset:4px 3px 3px;
+  background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,.25) 7px,rgba(255,255,255,.25) 8px),
+    repeating-linear-gradient(90deg,transparent 0px,transparent 6px,rgba(255,255,255,.2) 6px,rgba(255,255,255,.2) 7px)
+}
+.csb-b1{width:32px;height:55px;animation-delay:.3s}
+.csb-b2{width:28px;height:75px;animation-delay:.5s;background:linear-gradient(180deg,#3b82f6,#2563eb)}
+.csb-b3{width:36px;height:45px;animation-delay:.7s;background:linear-gradient(180deg,#60a5fa,#3b82f6)}
+.csb-b4{width:30px;height:65px;animation-delay:.9s}
+@keyframes csbBuildRise{from{height:0;opacity:0}to{opacity:1}}
+
+/* Crane */
+.csb-crane{position:absolute;bottom:2px;left:50%;transform:translateX(-50%)}
+/* Mast (vertical pole) */
+.csb-mast{width:3px;height:105px;background:linear-gradient(180deg,#f59e0b,#d97706);border-radius:1px;position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+  animation:csbMastGrow .8s cubic-bezier(.22,1,.36,1) .2s both}
+@keyframes csbMastGrow{from{height:0}to{height:105px}}
+/* Jib (horizontal arm) */
+.csb-jib{position:absolute;bottom:103px;left:50%;width:80px;height:2.5px;transform:translateX(-65%);
+  background:linear-gradient(90deg,#d97706,#f59e0b,#d97706);border-radius:1px;
+  animation:csbJibExtend .5s ease 1s both}
+@keyframes csbJibExtend{from{width:0;opacity:0}to{width:80px;opacity:1}}
+/* Cable (drops from jib) */
+.csb-cable{position:absolute;bottom:60px;left:calc(50% - 36px);width:1px;height:0;background:#94a3b8;
+  animation:csbCableDrop 2s ease-in-out 1.5s infinite alternate}
+@keyframes csbCableDrop{0%{height:15px}100%{height:42px}}
+/* Hook */
+.csb-hook{position:absolute;bottom:60px;left:calc(50% - 40px);width:8px;height:6px;
+  border:1.5px solid #f59e0b;border-top:0;border-radius:0 0 3px 3px;
+  animation:csbHookMove 2s ease-in-out 1.5s infinite alternate}
+@keyframes csbHookMove{0%{bottom:60px}100%{bottom:18px}}
+
 @keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .cust-view-fade{animation:custViewFade .28s ease;position:relative}
 

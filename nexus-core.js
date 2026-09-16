@@ -358,6 +358,15 @@ function custSidebarTabs(ti){
   // Same "tap a nav item, close the mobile drawer" behavior renderShell() wires up for staff pages
   // (nexus-core.js:432) - this sidebar is rebuilt fresh on every render so it needs its own copy.
   nav.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
+  // Animated crane + building scene at the bottom of the sidebar
+  if(!nav.querySelector('.cust-sb-scene')){
+    var scene=document.createElement('div');
+    scene.className='cust-sb-scene';
+    scene.innerHTML='<div class="csb-crane"><div class="csb-mast"></div><div class="csb-jib"></div><div class="csb-cable"></div><div class="csb-hook"></div></div>'+
+      '<div class="csb-buildings"><div class="csb-b csb-b1"></div><div class="csb-b csb-b2"></div><div class="csb-b csb-b3"></div><div class="csb-b csb-b4"></div></div>'+
+      '<div class="csb-ground"></div>';
+    nav.appendChild(scene);
+  }
 }
 // A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
 // so the existing CSS just works, but with the section list instead of a search box, and a
