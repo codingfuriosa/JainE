@@ -16076,7 +16076,13 @@ VIEWS.customer=async function(v,seg){
   else if(ti===10)body=await custTabReferrals(unit);
   else if(ti===11)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+  var bgScene='<div class="cust-bg-scene">'+
+    '<div class="cbg-b cbg-b1"></div><div class="cbg-b cbg-b2"></div><div class="cbg-b cbg-b3"></div><div class="cbg-b cbg-b4"></div>'+
+    '<div class="cbg-b cbg-b5"></div><div class="cbg-b cbg-b6"></div><div class="cbg-b cbg-b7"></div><div class="cbg-b cbg-b8"></div>'+
+    '<div class="cbg-crane cbg-crane1"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
+    '<div class="cbg-crane cbg-crane2"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
+    '<div class="cbg-ground"></div></div>';
+  v.innerHTML='<div class="cust-view-fade">'+bgScene+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
     banner+
     custUnitPicker(data.units,unit.id)+
     '<div style="margin-top:14px">'+body+'</div></div>';

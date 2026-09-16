@@ -207,64 +207,59 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
 @keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .cust-view-fade{animation:custViewFade .28s ease;position:relative}
 
-/* --- Background construction skyline animation --- */
-.cust-view-fade::before{
-  content:'';position:fixed;bottom:0;left:var(--sidebar);right:0;height:220px;
-  pointer-events:none;z-index:0;opacity:.045;
-  background:
-    /* Building 1 — tall tower left */
-    linear-gradient(0deg,#1d4ed8 0%,#1d4ed8 100%) no-repeat 8% 100%/42px 160px,
-    linear-gradient(0deg,#1e40af 0%,#1e40af 100%) no-repeat 8% 100%/42px 160px,
-    /* windows B1 */
-    repeating-linear-gradient(0deg,transparent 0px,transparent 14px,rgba(255,255,255,.5) 14px,rgba(255,255,255,.5) 16px) no-repeat 8% 100%/42px 160px,
-    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.4) 8px,rgba(255,255,255,.4) 10px) no-repeat 8% 100%/42px 160px,
-    /* Building 2 — medium left-center */
-    linear-gradient(0deg,#2563eb 0%,#2563eb 100%) no-repeat 22% 100%/50px 120px,
-    repeating-linear-gradient(0deg,transparent 0px,transparent 12px,rgba(255,255,255,.4) 12px,rgba(255,255,255,.4) 14px) no-repeat 22% 100%/50px 120px,
-    repeating-linear-gradient(90deg,transparent 0px,transparent 10px,rgba(255,255,255,.35) 10px,rgba(255,255,255,.35) 12px) no-repeat 22% 100%/50px 120px,
-    /* Building 3 — short wide center */
-    linear-gradient(0deg,#3b82f6 0%,#3b82f6 100%) no-repeat 38% 100%/64px 90px,
-    repeating-linear-gradient(0deg,transparent 0px,transparent 10px,rgba(255,255,255,.35) 10px,rgba(255,255,255,.35) 12px) no-repeat 38% 100%/64px 90px,
-    repeating-linear-gradient(90deg,transparent 0px,transparent 12px,rgba(255,255,255,.3) 12px,rgba(255,255,255,.3) 14px) no-repeat 38% 100%/64px 90px,
-    /* Building 4 — tallest right-center */
-    linear-gradient(0deg,#1d4ed8 0%,#1d4ed8 100%) no-repeat 56% 100%/38px 185px,
-    repeating-linear-gradient(0deg,transparent 0px,transparent 16px,rgba(255,255,255,.45) 16px,rgba(255,255,255,.45) 18px) no-repeat 56% 100%/38px 185px,
-    repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,.4) 7px,rgba(255,255,255,.4) 9px) no-repeat 56% 100%/38px 185px,
-    /* Building 5 — medium-tall right */
-    linear-gradient(0deg,#2563eb 0%,#2563eb 100%) no-repeat 72% 100%/46px 140px,
-    repeating-linear-gradient(0deg,transparent 0px,transparent 13px,rgba(255,255,255,.4) 13px,rgba(255,255,255,.4) 15px) no-repeat 72% 100%/46px 140px,
-    repeating-linear-gradient(90deg,transparent 0px,transparent 9px,rgba(255,255,255,.35) 9px,rgba(255,255,255,.35) 11px) no-repeat 72% 100%/46px 140px,
-    /* Building 6 — small far right */
-    linear-gradient(0deg,#3b82f6 0%,#3b82f6 100%) no-repeat 88% 100%/36px 100px,
-    repeating-linear-gradient(0deg,transparent 0px,transparent 11px,rgba(255,255,255,.35) 11px,rgba(255,255,255,.35) 13px) no-repeat 88% 100%/36px 100px,
-    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.3) 8px,rgba(255,255,255,.3) 10px) no-repeat 88% 100%/36px 100px,
-    /* Ground line */
-    linear-gradient(0deg,#94a3b8 0%,#94a3b8 100%) no-repeat 0% 100%/100% 2px;
-  animation:custSkylineRise 1.8s cubic-bezier(.22,1,.36,1) both
+/* --- Background animated construction scene --- */
+.cust-bg-scene{
+  position:fixed;bottom:0;left:var(--sidebar);right:0;height:260px;
+  pointer-events:none;z-index:0;
+  animation:custBgSceneIn 2s ease both
 }
-@keyframes custSkylineRise{from{opacity:0;transform:translateY(60px)}to{opacity:.045;transform:translateY(0)}}
+@keyframes custBgSceneIn{0%{opacity:0}40%{opacity:.12}100%{opacity:.055}}
 
-/* Floating construction particles */
-.cust-view-fade::after{
-  content:'';position:fixed;bottom:0;left:var(--sidebar);right:0;height:220px;
-  pointer-events:none;z-index:0;opacity:.035;
-  background:
-    radial-gradient(circle 2px,#1d4ed8 100%,transparent 100%) no-repeat 15% 30%/4px 4px,
-    radial-gradient(circle 1.5px,#3b82f6 100%,transparent 100%) no-repeat 35% 55%/3px 3px,
-    radial-gradient(circle 2px,#2563eb 100%,transparent 100%) no-repeat 55% 20%/4px 4px,
-    radial-gradient(circle 1.5px,#1d4ed8 100%,transparent 100%) no-repeat 75% 45%/3px 3px,
-    radial-gradient(circle 2px,#3b82f6 100%,transparent 100%) no-repeat 90% 35%/4px 4px,
-    radial-gradient(circle 1px,#60a5fa 100%,transparent 100%) no-repeat 25% 70%/2px 2px,
-    radial-gradient(circle 1px,#60a5fa 100%,transparent 100%) no-repeat 65% 65%/2px 2px;
-  animation:custParticleFloat 6s ease-in-out infinite alternate
-}
-@keyframes custParticleFloat{
-  0%{transform:translateY(0)}
-  100%{transform:translateY(-12px)}
-}
-/* Content stays above the background */
+/* BG Ground */
+.cbg-ground{position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent 2%,#94a3b8 20%,#64748b 50%,#94a3b8 80%,transparent 98%);border-radius:2px}
+
+/* BG Buildings */
+.cbg-b{position:absolute;bottom:3px;border-radius:3px 3px 0 0;opacity:0;animation:cbgBuildUp .7s cubic-bezier(.22,1,.36,1) forwards}
+.cbg-b::after{content:'';position:absolute;inset:5px 4px 4px;
+  background:repeating-linear-gradient(0deg,transparent 0px,transparent 10px,rgba(255,255,255,.3) 10px,rgba(255,255,255,.3) 11.5px),
+    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.22) 8px,rgba(255,255,255,.22) 9.5px)}
+@keyframes cbgBuildUp{from{height:0;opacity:0}to{opacity:1}}
+.cbg-b1{left:4%;width:48px;height:140px;background:linear-gradient(180deg,#1e40af,#1d4ed8);animation-delay:.2s}
+.cbg-b2{left:14%;width:40px;height:100px;background:linear-gradient(180deg,#2563eb,#3b82f6);animation-delay:.5s}
+.cbg-b3{left:26%;width:56px;height:170px;background:linear-gradient(180deg,#1d4ed8,#1e40af);animation-delay:.3s}
+.cbg-b4{left:38%;width:44px;height:120px;background:linear-gradient(180deg,#3b82f6,#2563eb);animation-delay:.7s}
+.cbg-b5{left:52%;width:38px;height:195px;background:linear-gradient(180deg,#1e40af,#1d4ed8);animation-delay:.15s}
+.cbg-b6{left:62%;width:52px;height:135px;background:linear-gradient(180deg,#2563eb,#3b82f6);animation-delay:.55s}
+.cbg-b7{left:75%;width:42px;height:160px;background:linear-gradient(180deg,#1d4ed8,#2563eb);animation-delay:.4s}
+.cbg-b8{left:87%;width:36px;height:90px;background:linear-gradient(180deg,#3b82f6,#60a5fa);animation-delay:.8s}
+
+/* BG Crane 1 (left-center) */
+.cbg-crane{position:absolute;bottom:3px}
+.cbg-crane1{left:32%}
+.cbg-crane2{left:68%}
+.cbg-cm{width:3px;background:linear-gradient(180deg,#f59e0b,#d97706);border-radius:1px;position:absolute;bottom:0;
+  animation:cbgMast .8s cubic-bezier(.22,1,.36,1) both}
+.cbg-crane1 .cbg-cm{height:200px;animation-delay:.3s}
+.cbg-crane2 .cbg-cm{height:175px;animation-delay:.6s}
+@keyframes cbgMast{from{height:0}to{}}
+.cbg-cj{position:absolute;height:2.5px;background:linear-gradient(90deg,#d97706,#f59e0b,#d97706);border-radius:1px;
+  animation:cbgJib .5s ease both}
+.cbg-crane1 .cbg-cj{top:0;left:-50px;width:100px;animation-delay:1.1s}
+.cbg-crane2 .cbg-cj{top:0;left:-40px;width:80px;animation-delay:1.4s}
+@keyframes cbgJib{from{width:0;opacity:0}to{opacity:1}}
+.cbg-cc{position:absolute;width:1px;background:#94a3b8;animation:cbgCable 3s ease-in-out infinite alternate}
+.cbg-crane1 .cbg-cc{left:-35px;top:2px;animation-delay:1.6s}
+.cbg-crane2 .cbg-cc{left:-28px;top:2px;animation-delay:2s}
+@keyframes cbgCable{0%{height:20px}100%{height:70px}}
+.cbg-ch{position:absolute;width:8px;height:6px;border:1.5px solid #f59e0b;border-top:0;border-radius:0 0 3px 3px;
+  animation:cbgHook 3s ease-in-out infinite alternate}
+.cbg-crane1 .cbg-ch{left:-39px;top:22px;animation-delay:1.6s}
+.cbg-crane2 .cbg-ch{left:-32px;top:22px;animation-delay:2s}
+@keyframes cbgHook{0%{top:22px}100%{top:72px}}
+
+/* Content stays above */
 .cust-view-fade>*{position:relative;z-index:1}
-@media(max-width:1024px){.cust-view-fade::before,.cust-view-fade::after{left:0}}
+@media(max-width:1024px){.cbg-scene,.cust-bg-scene{left:0}}
 /* Premium profile card */
 @keyframes custProfileSlideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes custProfileItemIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
