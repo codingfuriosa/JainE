@@ -3953,7 +3953,7 @@
     let row=null;
     try{
       const {data}=await ACC().from('booking_audits')
-        .select('status,result,error,queued_at,started_at,attempts')
+        .select('status,result,error,queued_at,started_at,attempts,market_valuation')
         .eq('case_id',caseId).maybeSingle();
       row=data;
     }catch(_e){
@@ -3977,6 +3977,33 @@
     if(row.status!=='done'||!row.result){
       throw new Error('The attachments could not be read: '+(row.error||'unknown reason')
         +((row.attempts>1)?(' (tried '+row.attempts+' times)'):''));
+    }
+    /* Cowork fills this in separately, straight into this same row's market_valuation column -
+       independently of the audit itself, and often long after it last ran. Picked up live here so
+       the checklist shows it the moment it is written, with no need to re-run the audit.
+
+       The valuation has to be judged against the Unit Price at the same moment it is shown, not
+       baked into the reading when it was stored - the reading is frozen days before Cowork ever
+       writes a figure, but the cost sheet's own Unit Price (area x base rate, before PLC/FLC/
+       parking) it is judged against was already captured then, in result.unit_price, so nothing
+       here has to be re-read to compare the two.
+
+       THIS LINE IS A VERDICT, NOT A VALUE - Ok when the valuation is under the Unit Price, Not Ok
+       when it is over. The figure itself is never printed either way; it did its job by being
+       compared, the same as every other check on this sheet only ever shows OK or NOT OK. A
+       valuation that cannot be judged at all - no Unit Price on this reading to compare it against
+       - reads NOT OK too, same as everywhere else in this file: a doubt is never shown as a plain
+       value, and the reason line says why (see clWhy below). */
+    if(row.market_valuation){
+      row.result.checklist=row.result.checklist||{};
+      const mv=Number(String(row.market_valuation).replace(/[^0-9.]/g,''));
+      const up=Number(row.result.unit_price);
+      if(isFinite(mv)&&mv>0&&isFinite(up)&&up>0){
+        row.result.checklist['Market valuation Sheet']=(mv>up)?'Not Ok':'Ok';
+      }else{
+        row.result.checklist['Market valuation Sheet']='Not Ok';
+        row.result.market_valuation_reason='no Unit Price on this reading to check it against';
+      }
     }
     return row.result;
   }
@@ -4933,24 +4960,29 @@
     const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
     const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
     const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
-    // When the base rate came in under the approved one, the Base Rate line shows the sum
-    // ("5,399 - 5,349 = 50/-") rather than the bare figure - that comparison IS the point of the
-    // line. Detected by the "=" the baserate check's own detail only carries in that branch. Equal
-    // to the approved rate, or no approved rate on file, falls back to the plain document value -
-    // there is nothing to compare, so nothing but the figure is shown.
+    // Base Rate and Discount are read straight off the baserate check's own fields rather than
+    // parsed back out of a sentence - see booking-audit's baseRateCheck for the three cases:
+    //   document rate = approved     Base Rate is that rate, Discount is Nil.
+    //   document rate < approved     Base Rate is the APPROVED (cross-check) rate, not the
+    //                                 document's own lower one, and Discount is the shortfall x the
+    //                                 area, as a plain figure: 61,750/-.
+    //   document rate > approved     Base Rate is the document's own (higher) rate, Discount Nil.
     const baseRateArith=(res.arithmetic||[]).filter(function(c){ return c.kind==='baserate'; })[0];
-    const baseRateVal=(baseRateArith&&baseRateArith.detail&&baseRateArith.detail.indexOf('=')!==-1)
-      ? baseRateArith.detail : (v('base_rate')?(grp(v('base_rate'))+'/-'):'');
-    // Base Rate gets its own line - the "X - Y = Z/-" form runs long, and on the same line as
-    // PLC/FLC/Parking (itself now sometimes "OPEN Parking : 4,00,000" rather than a bare figure)
-    // the combined text can run past the printable width. Each field is still measured and placed
-    // by its own actual width (see runLine), so nothing overlaps - this is purely about not running
-    // off the right margin.
-    runLine([['Base Rate',baseRateVal]]);
-    runLine([['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+    const baseRateVal=(baseRateArith&&baseRateArith.display_rate)
+      ? baseRateArith.display_rate+'/-' : (v('base_rate')?(grp(v('base_rate'))+'/-'):'');
+    // Just the resulting amount, not the "X - Y = Z X area = amount/-" working - the arithmetic
+    // that got there lives in the reading for anyone who wants it; the check list only needs the
+    // figure itself, the same way every other money field on this row is a bare figure.
+    const discountVal=(baseRateArith&&baseRateArith.discount&&baseRateArith.discount.amount)
+      ? baseRateArith.discount.amount+'/-' : 'Nil';
+    // Base Rate back on the same row as PLC/FLC/Parking - now that it and Discount are both short
+    // figures rather than a spelled-out sum, there is no more risk of running past the printable
+    // width, so this is the plain grouping every other cost-sheet figure on the sheet uses. Each
+    // field is still measured and placed by its own actual width (see runLine), so nothing overlaps
+    // even when Parking carries a kind ("OPEN Parking : 4,00,000") rather than a bare figure.
+    runLine([['Base Rate',baseRateVal],['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
              [parkLabel,parkValue]]);
-    // Left blank for now, per request.
-    runLine([['Discount','']]);
+    runLine([['Discount',discountVal]]);
     y-=13;
 
     page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
@@ -4971,10 +5003,33 @@
        still in the reading for anyone who wants it. */
     const clWhy=function(key){
       if(key==='Cost Sheet'){
+        // NOT a list of which parts failed - "car parking, base rate" says WHERE to look, not
+        // WHAT is wrong, and reads as though those were the reasons rather than just the labels.
+        // Each one is instead built from the same structured evidence the verdict itself came
+        // from, the same way KYC's reason below points at the actual card rather than just
+        // saying "KYC" failed.
         const parts=((res.cost_sheet_verdict||{}).parts)||[];
-        const bad=parts.filter(function(p){ return !p.ok; })
-                       .map(function(p){ return String(p.what||'').replace(/^the /,''); });
-        return bad.join(', ');
+        const bad=parts.filter(function(p){ return !p.ok; }).map(function(p){ return p.what; });
+        const bits=[];
+        if(bad.indexOf('the sums')>=0)
+          bits.push((res.cost_sheets&&res.cost_sheets.length) ? "sums don't add up" : 'no cost sheet found');
+        if(bad.indexOf('the car parking')>=0){
+          const pc=((res.parking||{}).check)||{};
+          const marked=pc.marked?nameCase(pc.marked):null, charged=pc.charged?nameCase(pc.charged):null;
+          bits.push(marked&&charged&&marked!==charged ? (marked+' marked, '+charged+' charged')
+            : marked&&!charged ? (marked+' marked, nothing charged')
+            : !marked&&charged ? (charged+' charged, nothing marked')
+            : 'parking disagrees with the form');
+        }
+        if(bad.indexOf('the unit')>=0){
+          const uc=Array.isArray(res.unit&&res.unit.comparison)?res.unit.comparison:[];
+          const diff=uc.filter(function(f){ return f.matches===false; })[0];
+          bits.push(diff?(diff.field+' differs'):'unit details differ');
+        }
+        // Kept for safety even though the base rate no longer fails the cost sheet on its own -
+        // see booking-audit's baseRateCheck, which is now informational only.
+        if(bad.indexOf('the base rate')>=0) bits.push('base rate below approved');
+        return bits.join('; ');
       }
       if(key==='KYC of Customer'){
         // a card that is plainly the applicant's, spelt differently - the commonest failure
@@ -5009,6 +5064,7 @@
         if(sg.cost_sheet_signed===false) return 'cost sheet unsigned';
         return 'a signature is missing';
       }
+      if(key==='Market valuation Sheet') return res.market_valuation_reason || 'higher than the unit price';
       return '';
     };
 
@@ -5017,19 +5073,31 @@
       page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
       page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
       /* IT MUST NOT WRAP. The row is one line and a second one would push the whole sheet out of
-         shape, so the reason is measured against the space actually left on this line and left
-         off altogether if it will not fit. A missing note costs nothing; a broken sheet costs a
-         reprint. */
+         shape, so the reason has to fit in whatever space is actually left on this line.
+         SHRINK THE FONT BEFORE SHORTENING THE WORDS - the full reason a size or two smaller reads
+         better, and is more useful, than a cut-down one at full size, and either way it stays on
+         this line rather than wrapping. Cutting the words is the last resort, only once the font
+         has already shrunk as far as it can still be read, and even then from the END - a
+         reason that starts making sense and trails off beats one sliced from the front. A
+         reason that still will not fit at the smallest size is left off; a missing note costs
+         nothing, a broken sheet costs a reprint. */
       if(String(value)==='NOT OK'){
         const why=clWhy(label);
         if(why){
           const vw=bold.widthOfTextAtSize(String(value),10.5);
           const sx=VX+vw+7, room=(edge||R)-6-sx;
-          let t='('+why+')';
-          while(t.length>6 && reg.widthOfTextAtSize(t,8.5)>room)
-            t='('+t.slice(1,-2).replace(/[ ,;]+$/,'')+')';
-          if(reg.widthOfTextAtSize(t,8.5)<=room)
-            page.drawText(t,{x:sx,y:y,size:8.5,font:reg,color:soft});
+          const full='('+why+')';
+          let size=8.5;
+          while(size>6.5 && reg.widthOfTextAtSize(full,size)>room) size-=0.25;
+          if(reg.widthOfTextAtSize(full,size)<=room){
+            page.drawText(full,{x:sx,y:y,size:size,font:reg,color:soft});
+          }else{
+            let s=why;
+            while(s.length>6 && reg.widthOfTextAtSize('('+s+'…)',size)>room) s=s.slice(0,-1);
+            const cut='('+s+'…)';
+            if(reg.widthOfTextAtSize(cut,size)<=room)
+              page.drawText(cut,{x:sx,y:y,size:size,font:reg,color:soft});
+          }
         }
       }
       page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
