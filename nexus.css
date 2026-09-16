@@ -159,7 +159,66 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
    never replaced, only its innerHTML, so every section change inserts a brand-new element and this
    plays automatically, same reasoning as sbItemActivate above. */
 @keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.cust-view-fade{animation:custViewFade .28s ease}
+.cust-view-fade{animation:custViewFade .28s ease;position:relative}
+
+/* --- Background construction skyline animation --- */
+.cust-view-fade::before{
+  content:'';position:fixed;bottom:0;left:var(--sidebar);right:0;height:220px;
+  pointer-events:none;z-index:0;opacity:.045;
+  background:
+    /* Building 1 — tall tower left */
+    linear-gradient(0deg,#1d4ed8 0%,#1d4ed8 100%) no-repeat 8% 100%/42px 160px,
+    linear-gradient(0deg,#1e40af 0%,#1e40af 100%) no-repeat 8% 100%/42px 160px,
+    /* windows B1 */
+    repeating-linear-gradient(0deg,transparent 0px,transparent 14px,rgba(255,255,255,.5) 14px,rgba(255,255,255,.5) 16px) no-repeat 8% 100%/42px 160px,
+    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.4) 8px,rgba(255,255,255,.4) 10px) no-repeat 8% 100%/42px 160px,
+    /* Building 2 — medium left-center */
+    linear-gradient(0deg,#2563eb 0%,#2563eb 100%) no-repeat 22% 100%/50px 120px,
+    repeating-linear-gradient(0deg,transparent 0px,transparent 12px,rgba(255,255,255,.4) 12px,rgba(255,255,255,.4) 14px) no-repeat 22% 100%/50px 120px,
+    repeating-linear-gradient(90deg,transparent 0px,transparent 10px,rgba(255,255,255,.35) 10px,rgba(255,255,255,.35) 12px) no-repeat 22% 100%/50px 120px,
+    /* Building 3 — short wide center */
+    linear-gradient(0deg,#3b82f6 0%,#3b82f6 100%) no-repeat 38% 100%/64px 90px,
+    repeating-linear-gradient(0deg,transparent 0px,transparent 10px,rgba(255,255,255,.35) 10px,rgba(255,255,255,.35) 12px) no-repeat 38% 100%/64px 90px,
+    repeating-linear-gradient(90deg,transparent 0px,transparent 12px,rgba(255,255,255,.3) 12px,rgba(255,255,255,.3) 14px) no-repeat 38% 100%/64px 90px,
+    /* Building 4 — tallest right-center */
+    linear-gradient(0deg,#1d4ed8 0%,#1d4ed8 100%) no-repeat 56% 100%/38px 185px,
+    repeating-linear-gradient(0deg,transparent 0px,transparent 16px,rgba(255,255,255,.45) 16px,rgba(255,255,255,.45) 18px) no-repeat 56% 100%/38px 185px,
+    repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,.4) 7px,rgba(255,255,255,.4) 9px) no-repeat 56% 100%/38px 185px,
+    /* Building 5 — medium-tall right */
+    linear-gradient(0deg,#2563eb 0%,#2563eb 100%) no-repeat 72% 100%/46px 140px,
+    repeating-linear-gradient(0deg,transparent 0px,transparent 13px,rgba(255,255,255,.4) 13px,rgba(255,255,255,.4) 15px) no-repeat 72% 100%/46px 140px,
+    repeating-linear-gradient(90deg,transparent 0px,transparent 9px,rgba(255,255,255,.35) 9px,rgba(255,255,255,.35) 11px) no-repeat 72% 100%/46px 140px,
+    /* Building 6 — small far right */
+    linear-gradient(0deg,#3b82f6 0%,#3b82f6 100%) no-repeat 88% 100%/36px 100px,
+    repeating-linear-gradient(0deg,transparent 0px,transparent 11px,rgba(255,255,255,.35) 11px,rgba(255,255,255,.35) 13px) no-repeat 88% 100%/36px 100px,
+    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.3) 8px,rgba(255,255,255,.3) 10px) no-repeat 88% 100%/36px 100px,
+    /* Ground line */
+    linear-gradient(0deg,#94a3b8 0%,#94a3b8 100%) no-repeat 0% 100%/100% 2px;
+  animation:custSkylineRise 1.8s cubic-bezier(.22,1,.36,1) both
+}
+@keyframes custSkylineRise{from{opacity:0;transform:translateY(60px)}to{opacity:.045;transform:translateY(0)}}
+
+/* Floating construction particles */
+.cust-view-fade::after{
+  content:'';position:fixed;bottom:0;left:var(--sidebar);right:0;height:220px;
+  pointer-events:none;z-index:0;opacity:.035;
+  background:
+    radial-gradient(circle 2px,#1d4ed8 100%,transparent 100%) no-repeat 15% 30%/4px 4px,
+    radial-gradient(circle 1.5px,#3b82f6 100%,transparent 100%) no-repeat 35% 55%/3px 3px,
+    radial-gradient(circle 2px,#2563eb 100%,transparent 100%) no-repeat 55% 20%/4px 4px,
+    radial-gradient(circle 1.5px,#1d4ed8 100%,transparent 100%) no-repeat 75% 45%/3px 3px,
+    radial-gradient(circle 2px,#3b82f6 100%,transparent 100%) no-repeat 90% 35%/4px 4px,
+    radial-gradient(circle 1px,#60a5fa 100%,transparent 100%) no-repeat 25% 70%/2px 2px,
+    radial-gradient(circle 1px,#60a5fa 100%,transparent 100%) no-repeat 65% 65%/2px 2px;
+  animation:custParticleFloat 6s ease-in-out infinite alternate
+}
+@keyframes custParticleFloat{
+  0%{transform:translateY(0)}
+  100%{transform:translateY(-12px)}
+}
+/* Content stays above the background */
+.cust-view-fade>*{position:relative;z-index:1}
+@media(max-width:1024px){.cust-view-fade::before,.cust-view-fade::after{left:0}}
 /* Premium profile card */
 @keyframes custProfileSlideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes custProfileItemIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
