@@ -1107,17 +1107,27 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 .cust-view-fade .tbl tbody tr:hover td{background:rgba(239,244,255,.5)}
 .cust-view-fade .tbl tbody tr:last-child td{border-bottom:0}
 
-/* --- Buttons: premium styling --- */
-.cust-view-fade .btn{
+/* --- Buttons: premium styling (secondary only, preserve .btn-primary) --- */
+.cust-view-fade .btn:not(.btn-primary){
   border-radius:10px;border:1px solid rgba(29,78,216,.15);
   background:linear-gradient(135deg,#fff 0%,#f8fafc 100%);
   box-shadow:0 1px 3px rgba(29,78,216,.06);
   transition:transform .15s ease,box-shadow .15s ease,background .15s ease
 }
-.cust-view-fade .btn:hover{
+.cust-view-fade .btn:not(.btn-primary):hover{
   transform:translateY(-1px);
   box-shadow:0 4px 12px rgba(29,78,216,.1);
   background:linear-gradient(135deg,#eff4ff 0%,#dbeafe 100%)
+}
+.cust-view-fade .btn-primary{
+  border-radius:10px;
+  box-shadow:0 2px 8px rgba(29,78,216,.2);
+  transition:transform .15s ease,box-shadow .15s ease,background .15s ease
+}
+.cust-view-fade .btn-primary:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 16px rgba(29,78,216,.25);
+  background:var(--brand-700)
 }
 
 /* --- Mobile responsive --- */
