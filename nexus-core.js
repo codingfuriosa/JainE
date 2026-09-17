@@ -10722,17 +10722,33 @@ function cmpPrevRange(){
 }
 function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
 function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
-// Sync the previous window for META only — google-ads-live now fills both buckets in one call
-// (see its prev_since/prev_until parameters), so asking it twice is unnecessary.
+// Meta's previous-period window is no longer live-fetched here: Meta is fully MCP-sourced now
+// (the account owner's own call, over the Graph API), and MCP can only be reached by a manually
+// triggered Claude Code task (see the "Refresh JainE Campaign Analytics (Meta) from MCP" task),
+// which computes and writes these same custom:since:until previous-period rows itself. Calling
+// campaign-analytics-live here would silently overwrite that MCP data with live Graph API numbers
+// the next time anyone opened this page - exactly the two-source race this retirement avoids.
 async function cmpSyncPrev(which){
-  if(which!=='meta'&&which!=='both')return;
-  const p=cmpPrevRange(); if(!p)return;
-  try{
-    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
-    const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-    await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){});
-  }catch(e){}
+  if(which!=='both')return;
+  // Google's own previous window still comes from google-ads-live inside cmpBothView itself
+  // (prev_since/prev_until on that one call) - nothing left for this function to do for 'both'
+  // either now that its Meta half is gone, but it stays as a documented no-op rather than being
+  // deleted, since cmpBothView still calls it.
 }
+/* "Run via MCP" button (Campaign Analytics, Meta tab). A browser cannot call the Meta Ads MCP
+   tool itself - only a live Claude Code session can - so this just drops a pending row into
+   camp.mcp_refresh_requests (an RLS policy lets any authenticated user do that) and lets the
+   local watcher script on the always-on PC (meta-mcp-watcher.ps1) pick it up, run the full
+   refresh, and write the result back. Re-rendering the page right after just shows the button
+   as queued/running - see refreshReq in VIEWS.campaigns - it does not itself wait for the run. */
+window.cmpRunMcpRefresh=async function(){
+  try{
+    const {error}=await sb.schema('camp').from('mcp_refresh_requests').insert({requested_by:me()});
+    if(error){ toast('Could not queue the refresh: '+error.message,'err'); return; }
+    toast('Queued — the local watcher will pick this up within about 20 seconds','ok');
+    renderPage();
+  }catch(e){ toast('Could not queue the refresh: '+((e&&e.message)||e),'err'); }
+};
 // Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
 function cmpTrend(cur,prev,lowerIsBetter){
   cur=Number(cur)||0;
@@ -11035,17 +11051,15 @@ async function cmpBothView(v,seg){
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  // Meta's half of this refresh is gone - its data now comes solely from the manually-triggered
+  // Meta Ads MCP task (see cmpSyncPrev). Google's own live pipeline is untouched.
   if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
     try{
       const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
       const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-      const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
       const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
       const pr0=cmpPrevRange(); if(pr0){gbody.prev_since=pr0.since;gbody.prev_until=pr0.until;}
-      await Promise.all([
-        fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
-        fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
-      ]);
+      await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){});
     }catch(e){}
   }
   await cmpSyncPrev('both');
@@ -11418,26 +11432,26 @@ VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
   if(CMP_SOURCE==='both'){ return cmpBothView(v,seg); }
-  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue'];const ti=mTab(seg,tabs.length);
+  const tabs=['Overview','Campaigns','By Project','Ads','Trend','Ad Fatigue','AI Insights'];const ti=mTab(seg,tabs.length);
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const needAd=(ti===3||ti===5);
+  // AI Insights: Opportunity Score, anomalies and performance trend from the Meta Ads MCP tool -
+  // not something a browser or a period/date query can fetch live, since only a Claude Code
+  // session with the Meta Ads MCP connector can call those tools. A local scheduled task refreshes
+  // camp.mcp_ad_insights hourly (see mcp-ads-ingest edge function); this tab just reads it.
+  const needMcp=(ti===6);
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
-  // Ask the live Edge Function to make sure this exact period+level is fresh (it caches
-  // for a few minutes server-side, so repeat opens are fast — only a real cache miss
-  // actually calls out to Meta).
-  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
-    try{
-      const {data:{session}}=await sb.auth.getSession();
-      const token=session&&session.access_token;
-      const reqBody=CMP_PERIOD==='custom'?{level:needAd?'ad':'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:needAd?'ad':'campaign',period:CMP_PERIOD};
-      await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(reqBody)});
-    }catch(e){}
-  }
-  await cmpSyncPrev('meta');
+  // NO LIVE REFRESH HERE ANY MORE. Meta data is fully MCP-sourced now (the account owner's own
+  // choice, over the Graph API) - campaign_insights/ad_insights/campaigns/ads/ad_accounts are
+  // written by a manually-triggered Claude Code task ("Refresh JainE Campaign Analytics (Meta)
+  // from MCP") using the Meta Ads MCP tool, since that tool cannot be called from a browser or a
+  // cron-only edge function. This page just reads whatever that task last wrote - see the
+  // "Last synced" line below for how stale that might be, and trigger the task again for fresher
+  // numbers rather than expecting this page load to fetch anything itself.
   const CMP=()=>sb.schema('camp');
   const prevKey=cmpPrevKey();
-  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[];
+  let accounts=[],campaigns=[],cIns=[],ads=[],aIns=[],cPrev=[],aPrev=[],mcpRows=[],refreshReq=null;
   try{
     const calls=[
       CMP().from('ad_accounts').select('*').order('name'),
@@ -11445,13 +11459,19 @@ VIEWS.campaigns=async function(v,seg){
       CMP().from('campaign_insights').select('*').eq('period',periodKey)
     ];
     const iPrevC=calls.length; if(prevKey)calls.push(CMP().from('campaign_insights').select('*').eq('period',prevKey));
-    let iAds=-1,iAdIns=-1,iPrevA=-1;
+    let iAds=-1,iAdIns=-1,iPrevA=-1,iMcp=-1;
     if(needAd){ iAds=calls.length; calls.push(CMP().from('ads').select('*')); iAdIns=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',periodKey)); if(prevKey){ iPrevA=calls.length; calls.push(CMP().from('ad_insights').select('*').eq('period',prevKey)); } }
+    if(needMcp){ iMcp=calls.length; calls.push(CMP().from('mcp_ad_insights').select('*')); }
+    // The "Run via MCP" button's own state — shown on every sub-tab, not just AI Insights, since
+    // it affects every number on the whole Meta side.
+    const iReq=calls.length; calls.push(CMP().from('mcp_refresh_requests').select('*').order('requested_at',{ascending:false}).limit(1));
     const results=await Promise.all(calls);
     const at=function(i){return (i>=0&&results[i]&&results[i].data)?results[i].data:[];};
     accounts=at(0);campaigns=at(1);cIns=at(2);
     if(prevKey)cPrev=at(iPrevC);
     if(needAd){ads=at(iAds);aIns=at(iAdIns);if(iPrevA>=0)aPrev=at(iPrevA);}
+    if(needMcp)mcpRows=at(iMcp);
+    refreshReq=at(iReq)[0]||null;
   }catch(e){}
   const cPrevMap={};cPrev.forEach(function(x){cPrevMap[x.campaign_id]=x;});
   const aPrevMap={};aPrev.forEach(function(x){aPrevMap[x.ad_id]=x;});
@@ -11591,6 +11611,50 @@ VIEWS.campaigns=async function(v,seg){
     }
     body=cmpFatiguePage(fr.filter(function(x){return x.spend>0||x.impr>0;}),inr,num,'Meta · per-person frequency + CTR trend');
   }
+  else if(ti===6){
+    // ---- AI Insights: Opportunity Score, anomalies, performance trend (Meta Ads MCP) ----
+    const mcpByAcc={}; mcpRows.forEach(function(r){ mcpByAcc[r.ad_account_id]=r; });
+    const scoreColor=function(s){ return s==null?'var(--slate)':(s>=80?'#16a34a':(s>=50?'#c2410c':'#b91c1c')); };
+    const agoText=function(iso){
+      if(!iso) return null;
+      const mins=Math.round((Date.now()-new Date(iso).getTime())/60000);
+      if(mins<2) return 'just now';
+      if(mins<60) return mins+' min ago';
+      const hrs=Math.round(mins/60);
+      if(hrs<48) return hrs+' hr'+(hrs===1?'':'s')+' ago';
+      return Math.round(hrs/24)+' days ago';
+    };
+    const pre=function(text){ return '<pre style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;color:var(--ink,#0f172a);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0 0;max-height:260px;overflow:auto">'+esc(text)+'</pre>'; };
+    const cards=accounts.map(function(acc){
+      const m=mcpByAcc[acc.ad_account_id];
+      if(!m){
+        return '<div class="cmp-chcard"><h4>'+esc(acc.name)+'</h4><div class="sub">Not yet refreshed — the hourly Meta Ads MCP job hasn\'t run for this account yet.</div></div>';
+      }
+      const recs=(Array.isArray(m.recommendations)?m.recommendations:[])
+        .slice().sort(function(a,b){ return (Number(b&&b.recommendation_content&&b.recommendation_content.opportunity_score_lift)||0)-(Number(a&&a.recommendation_content&&a.recommendation_content.opportunity_score_lift)||0); })
+        .slice(0,3);
+      const recsHtml=recs.length?('<ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.6">'+recs.map(function(r){
+        const rc=r&&r.recommendation_content||{};
+        return '<li><b>'+esc(rc.lift_estimate||'Recommendation')+'</b> — '+esc(rc.body||'')+(r.url?' <a href="'+esc(r.url)+'" target="_blank" rel="noopener" style="color:var(--brand)">Open in Ads Manager</a>':'')+'</li>';
+      }).join('')+'</ul>'):'<div class="sub">No recommendations returned.</div>';
+      const anomText=(m.anomalies&&m.anomalies.result)?m.anomalies.result:null;
+      const trendAd=(m.performance_trends&&m.performance_trends.ad&&m.performance_trends.ad.result)?m.performance_trends.ad.result:null;
+      const trendAdset=(m.performance_trends&&m.performance_trends.adset&&m.performance_trends.adset.result)?m.performance_trends.adset.result:null;
+      return '<div class="cmp-chcard">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">'
+          +'<h4>'+esc(acc.name)+'</h4>'
+          +'<span style="font-weight:800;font-size:16px;color:'+scoreColor(m.opportunity_score)+'">'+(m.opportunity_score!=null?m.opportunity_score:'—')+(m.opportunity_score!=null?'<span style="font-size:11px;font-weight:600;color:var(--slate)">/100</span>':'')+'</span>'
+        +'</div>'
+        +'<div class="sub">Opportunity Score'+(agoText(m.fetched_at)?(' · updated '+agoText(m.fetched_at)):'')+'</div>'
+        +'<h5 style="margin:12px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Top recommendations</h5>'+recsHtml
+        +'<h5 style="margin:14px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Anomalies</h5>'+(anomText?pre(anomText):'<div class="sub">No anomalies flagged.</div>')
+        +'<h5 style="margin:14px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Performance trend — Ads</h5>'+(trendAd?pre(trendAd):'<div class="sub">Not available.</div>')
+        +'<h5 style="margin:14px 0 0;font-size:12px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">Performance trend — Ad sets</h5>'+(trendAdset?pre(trendAdset):'<div class="sub">Not available.</div>')
+      +'</div>';
+    });
+    body='<div class="cmp-cap"><i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i> From the Meta Ads MCP tool · refreshed hourly by a scheduled Claude Code job, independent of the period picker above</div>'
+      +'<div class="cmp-charts">'+cards.join('')+'</div>';
+  }
   else {
     const filteredAccIds=new Set((CMP_AD_PROJECT==='all'?accounts:accounts.filter(a=>a.ad_account_id===CMP_AD_PROJECT)).map(a=>a.ad_account_id));
     const allAdRows=ads.map(a=>{const i=aInsMap[a.id];const camp=campMap[a.campaign_id];const acc=accounts.find(x=>x.ad_account_id===a.ad_account_id);return {a,i,camp,acc,spend:i?Number(i.spend)||0:0};})
@@ -11665,9 +11729,40 @@ VIEWS.campaigns=async function(v,seg){
     +cmpKpi('fa-coins','Avg CPC',avgCpc!=null?inr(avgCpc):'—','per click','#c2410c','#fff7ed',cmpTrend(avgCpc,pAvgCpc,true))
     +cmpKpi('fa-fire','Ad Fatigue',metaFreq?(metaFreq.toFixed(1)+'x'):'—','seen per person','#e11d48','#fff1f2',cmpFatigue(metaFreq,avgCtr,pAvgCtr))
     +'</div>';
-  const syncCap='<div class="cmp-cap"><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Live Meta Ads · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+'</div>';
+  // No longer "Live" - see the note above where the old refresh call used to be. last_synced_at
+  // is stamped by the MCP ingest task each time it writes ad_accounts, so this is genuinely when
+  // the numbers on screen were last fetched, not just when the page happened to load.
+  const lastSynced=accounts.map(function(a){return a.last_synced_at;}).filter(Boolean).sort().pop();
+  // Shared by the sync caption below and the last-run-result line further down.
+  const agoWords=function(iso){
+    if(!iso) return null;
+    const mins=Math.round((Date.now()-new Date(iso).getTime())/60000);
+    if(mins<2) return 'just now';
+    if(mins<60) return mins+' min ago';
+    const hrs=Math.round(mins/60);
+    if(hrs<48) return hrs+' hr'+(hrs===1?'':'s')+' ago';
+    return Math.round(hrs/24)+' days ago';
+  };
+  const syncAgo=lastSynced?('synced '+agoWords(lastSynced)):'never synced — run the MCP refresh task';
+  // The button itself. A pending/running request disables it and shows a spinner instead - the
+  // watcher polls every ~20s and a full refresh can take several minutes (6 accounts x 16
+  // period-buckets x 2 levels, plus the AI Insights calls), so repeated clicks would just queue
+  // more work behind the one already running for no benefit.
+  const reqBusy=refreshReq&&(refreshReq.status==='pending'||refreshReq.status==='running');
+  const runBtn=reqBusy
+    ? '<button class="ac-btn ic" disabled title="'+(refreshReq.status==='pending'?'Waiting for the local watcher to pick this up':'Running — this can take several minutes')+'"><i class="fa-solid fa-spinner fa-spin"></i> '+(refreshReq.status==='pending'?'Queued…':'Running…')+'</button>'
+    : '<button class="ac-btn ic" onclick="cmpRunMcpRefresh()" title="Queues a full Meta Ads MCP refresh — picked up by the local watcher on the always-on PC, not run in this browser"><i class="fa-solid fa-arrows-rotate"></i> Run via MCP</button>';
+  const lastResult=(refreshReq&&(refreshReq.status==='done'||refreshReq.status==='failed'))
+    ? '<div class="cmp-cap" style="color:'+(refreshReq.status==='failed'?'#b91c1c':'var(--slate)')+'"><i class="fa-solid '+(refreshReq.status==='failed'?'fa-triangle-exclamation':'fa-circle-check')+'"></i> Last run '+(refreshReq.status==='failed'?'failed':'finished')+(refreshReq.finished_at?(' '+esc(agoWords(refreshReq.finished_at)||'')):'')+(refreshReq.summary?(': '+esc(refreshReq.summary)):'')+'</div>'
+    : '';
+  const syncCap='<div class="cmp-cap" style="justify-content:space-between;display:flex;align-items:center;flex-wrap:wrap;gap:10px"><span><i class="fa-brands fa-facebook" style="color:#1877f2"></i> Meta Ads via MCP · '+esc(periodLabel)+(accounts.length?(' · '+accounts.length+' ad account'+(accounts.length===1?'':'s')):'')+' · <span title="Data comes from a manually-triggered Claude Code task, not a live page-load fetch">'+esc(syncAgo)+'</span></span>'+runBtn+'</div>'+lastResult
+    // Custom ranges are the one thing the MCP refresh task does not pre-compute (it only fetches
+    // the 10 fixed presets, each account x each preset x campaign+ad level being expensive enough
+    // already) - a picked custom range will show empty rather than fetch anything, so say so
+    // plainly instead of leaving a silent "no data" that looks like a bug.
+    +(CMP_PERIOD==='custom'?'<div class="cmp-cap" style="color:#c2410c"><i class="fa-solid fa-triangle-exclamation"></i> Custom ranges aren\'t fetched by the MCP refresh task — pick one of the preset periods above, or ask for this range to be pulled directly.</div>':'');
   const legend='<div class="cmp-legend"><span>Trend compares with '+esc(cmpPrevLabel())+'</span><span>Fatigue = times each person saw the ad + whether CTR is falling</span></div>';
-  const showKpis=(ti!==4&&ti!==5);
+  const showKpis=(ti!==4&&ti!==5&&ti!==6);
   v.innerHTML=cmpCss+CMP_EXTRA_CSS+mHead('fa-bullhorn','#db2777','Campaign Analytics')+cmpSourceBar()+cmpPeriodBar()+mTabs('campaigns',tabs,ti)+'<div style="margin-top:14px">'+(showKpis?kpiStrip:'')+syncCap+legend+body+'</div>';
   cmpRunAlerts();
   if(ti===0&&window.Chart){setTimeout(function(){
