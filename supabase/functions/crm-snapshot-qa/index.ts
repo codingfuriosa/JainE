@@ -690,7 +690,7 @@ function priorQualificationFrom(prior: PriorCall[],
    counted, so the dashboard cannot show the downgrade the CRM is not allowed to make. Lost is
    untouched - a qualified lead CAN die, and closing the door is the one move that still counts. */
 function deriveStatusMatch(crmStatus: string | null, ai: string | null,
-                           prior: PriorQualification | null):
+                           prior: PriorQualification | null, visitPending: boolean):
   { status_match: boolean | null; mismatch_type: string | null; note: string;
     effective_status: string | null; ratcheted: boolean } {
   const crm = String(crmStatus || "").trim();
@@ -729,6 +729,18 @@ carried forward as Qualified.`.replace(/\s+/g, " ")
   if (a === "Lost") {
     return done({ status_match: false, mismatch_type: "in_followup_should_have_been_lost",
       note: "The CRM still has this lead In Follow Up, but on the call the customer closed the door - the team is chasing a closed lead." });
+  }
+  /* By requirement (2026-09-18): a lead that qualifies and wants to buy, but simply has not been
+     able to fix a site-visit date, is not a CRM ERROR to surface - "In Follow Up" is a reasonable
+     working label for exactly that state, not a downgrade. sa.visit_pending is what the model itself
+     names this as (see QA_OUTPUT_SHAPE); trusting it here, rather than re-deriving it from
+     qualification_check, is deliberate - the call, not this function, is what actually knows whether
+     the visit is the one open item. This does not touch the ratchet above: a lead already qualified
+     on an earlier call still carries forward as Qualified either way, visit-pending or not - this
+     only changes whether THAT combination then counts as a mismatch. */
+  if (a === "Qualified" && visitPending) {
+    return done({ status_match: true, mismatch_type: null,
+      note: "The lead qualifies and wants to buy, but the site visit itself has not been fixed yet - the CRM's In Follow Up is a fair working label for that, not an error to flag." });
   }
   return done({ status_match: false, mismatch_type: "in_followup_should_have_been_qualified",
     note: ratcheted
@@ -937,7 +949,8 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
     return failQueue(`the QA reply's ai_assessed_status was not one of the four allowed values (got ${JSON.stringify(sa.ai_assessed_status ?? null)})`);
   }
 
-  const derived = deriveStatusMatch(ctx.crm_status, String(sa.ai_assessed_status || ""), priorQual);
+  const visitPending = sa.visit_pending === true;
+  const derived = deriveStatusMatch(ctx.crm_status, String(sa.ai_assessed_status || ""), priorQual, visitPending);
   /* A pitch that never happened has no score. Storing 0 would drag the day's average down as though
      the agent had pitched badly. */
   const modelStatus = String(sa.ai_assessed_status || "").trim() || null;
@@ -985,6 +998,7 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
     lost_reason_status: String(lreason.status || "").trim() || null,
     remarks_status: String(rem.status || "").trim() || null,
     ai_assessed_status: aiStatus,
+    visit_pending: visitPending,
     status_match: derived.status_match,
     mismatch_type: derived.mismatch_type,
     agent_qa: Array.isArray(p.agent_qa) ? p.agent_qa : null,

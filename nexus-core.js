@@ -65,6 +65,10 @@ function ensurePageScript(id){
 // update the tab title (no new document is loaded, so nothing else will), then render. Called from
 // navTo() for a sidebar click and from popstate for Back/Forward across modules.
 async function activateModule(id){
+  // Arriving at Transcription from a DIFFERENT module - not a reload of it, not an in-tab filter
+  // change, both of which never call this function at all - so this is the one place "just came back
+  // from elsewhere" is visible, and the one place that should reset it to its defaults. See TRC_F.
+  if(id==='transcription'&&PAGE!=='transcription'&&typeof trcResetFilters==='function')trcResetFilters();
   PAGE=id; window.PAGE=id;
   await ensurePageScript(id);
   document.title=(LABELS[id]||id)+' · Nexus-RE · Jain Group';
@@ -3394,6 +3398,17 @@ function misBuildCauselist(){
 }
 // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
 // laid out exactly as it renders here — print it from the browser's own File > Print when needed.
+/* What a causelist row is actually about: the window it covers and how many matters came out of
+   it. Six exports and six views sat in the report looking identical, saying only that somebody had
+   pressed a button. Both facts are already in hand at the log site - misBuildCauselist hands back
+   the rows it listed, and misRangeLabel formats the window - so this reads them rather than
+   plumbing anything new. On "All dates" there is no window to name, and the heading says so. */
+function usbCauselistMeta(built){
+  try{
+    const n=(built&&built.rows&&built.rows.length)||0;
+    return {range:misRangeLabel()||'All dates', cases:n+' case'+(n===1?'':'s')};
+  }catch(e){ return null; }
+}
 window.misExportCauselist=function(){
   const built=misBuildCauselist();
   if(!built) return;   // misBuildCauselist already toasted why
@@ -3410,7 +3425,7 @@ window.misExportCauselist=function(){
   // USAGE_MAP wrapper - that would have counted a click that was warned off by
   // misBuildCauselist (no date range, or nothing in range) as a use just the same as a real
   // export, which is exactly the bug that made "1 use" unverifiable as a real success.
-  try{ usageQueue('legal.mis.export_causelist','export'); }catch(_e){}
+  try{ usageQueue('legal.mis.export_causelist','export', usbCauselistMeta(built)); }catch(_e){}
 };
 // View is the same sheet, opened for on-screen reading instead of forced onto disk - the
 // causelist-format equivalent of every other module's Preview/Download pair.
@@ -3420,7 +3435,7 @@ window.misViewCauselist=function(){
   const w=window.open('', '_blank');
   if(!w){ toast('Could not open a new tab — check your browser’s pop-up blocker','warn'); return; }
   w.document.open(); w.document.write(built.html); w.document.close();
-  try{ usageQueue('legal.mis.view_causelist','view'); }catch(_e){}
+  try{ usageQueue('legal.mis.view_causelist','view', usbCauselistMeta(built)); }catch(_e){}
 };
 
 window.misRowCheck=function(cb){
@@ -3859,10 +3874,29 @@ window.misUpdate=async function(id){
 window.misDeleteSel=async function(){
   const sel=[...window._misSel];
   if(!sel.length)return;
+  // Read the cases BEFORE they are deleted - a moment later there is nothing left to read, and
+  // this row becomes the only surviving trace of what was removed (mis_cases has no deleted_at;
+  // the rows are gone for good).
+  const gone=(window._misRows||[]).filter(function(r){ return sel.indexOf(r.id)!==-1; });
   if(!await confirmDialog('Delete '+sel.length+' case'+(sel.length>1?'s':'')+'?'))return;
   const {error}=await sb.from('mis_cases').delete().in('id',sel);
   if(error){toast(error.message,'err');return;}
   toast(sel.length>1?(sel.length+' cases deleted'):'Case deleted','ok');
+  /* Logged here rather than through USAGE_MAP for the reason the causelist is: the wrapper fires
+     on the click, so a delete refused by the server would have been recorded as one that happened.
+     One case names itself and its court; several list their case numbers and let the column carry
+     the count, since no single case number is the answer then. */
+  try{
+    if(gone.length===1){
+      const r=gone[0];
+      usageQueue('legal.mis.delete_case_s','delete',
+        {title:r.cause_title||r.case_no||undefined, case_no:r.case_no||undefined, court:r.court||undefined});
+    }else{
+      const nos=gone.map(function(r){ return r.case_no||r.cause_title; }).filter(Boolean);
+      usageQueue('legal.mis.delete_case_s','delete',
+        {title:nos.join(', ')||undefined, cases:sel.length+' cases'});
+    }
+  }catch(_e){}
   legalMIS();
 };
 window.misStats=function(){
@@ -8615,6 +8649,18 @@ const USB_COL4={
   /* --- tabs that are about something different from the rest of their module ----------------- */
   // Legal is three different subjects under one roof
   'legal.mis':            {header:'Case · Court',      keys:['case_no','court']},
+  /* A causelist is not about one case, so MIS's "Case · Court" was the wrong heading for it - what
+     it is about is the window it covers and how many matters fell in that window. Details comes off
+     because those two facts are the whole of it. */
+  'legal.mis.export_causelist':
+                          {header:'Range · Cases', keys:['range','cases'], hideDetails:true},
+  'legal.mis.view_causelist':
+                          {header:'Range · Cases', keys:['range','cases'], hideDetails:true},
+  /* Deleting one case names it; deleting several leaves no single case number to name, so the
+     column carries the count and Details lists which ones. Same header either way - the reader is
+     asking the same question. */
+  'legal.mis.delete_case_s':
+                          {header:'Case · Court', keys:['case_no','court','cases']},
   'legal.actions':        {header:'Case · Court',      keys:['case_no','court']},
   'legal.advocates':      {header:'Court',             keys:['court','case_type']},
   'legal.documents':      {header:'Folder',            keys:['folder','category','department']},
@@ -8685,6 +8731,20 @@ const USB_COL4={
   // rather than filled with something that only looks like an answer.
   'tasks.scoreboard':     {header:null, keys:[], hideDetails:true},
   'tasks.archive':        {header:null, keys:[], hideDetails:true},
+  /* Six more of the same kind, found by reading their rows rather than their config: 214 uses
+     between them and not one has ever put anything in either column.
+     The three Tasks ones inherit "Assigned to" from the module, but regrouping a list assigns
+     nothing to anybody - there is no person in the act at all, so it could never have filled.
+     The three Calendar ones should have carried which view was open, and the helper for it has
+     been live since 1684217 - yet "view" has never once been recorded on any of them. That is a
+     real fault and worth chasing on its own; until it is chased, a header promising something the
+     rows have never held is the thing to remove. */
+  'tasks.tasks.view_tasks_grouped_by_workflow':                {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.view_tasks_grouped_by_person':                  {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.view_tasks_grouped_by_tag':                     {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.view_month_week_day_calendar':               {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.see_tasks_meetings_and_legal_dates_in_one_view': {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.open_a_day_s_agenda_panel':                  {header:null, keys:[], hideDetails:true},
   // The Calendar is read four different ways and they are not interchangeable - a team living in
   // Day view needs a good agenda panel, one that only opens Month needs a good month grid, and the
   // report could not tell them apart. How long they stayed still shows in Details.
@@ -16935,7 +16995,8 @@ function trIsRepeatVisitStatus(s){return /^\s*repeat\s+site\s+visit/i.test(Strin
 function traFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
     .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="traSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -17529,7 +17590,28 @@ function trcTrStatus(r){
   const st=String(r.transcription_status||'');
   return (st==='not_transcribed'&&!r.queue_status) ? 'out_of_scope' : st;
 }
+/* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
+   included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
+   nothing of its own worth putting in front of a reader: no CRM-vs-call comparison ran, so there is
+   no AI status and no verdict, only a blank card where one would expect to see something. Filtered
+   out wherever a lead's calls are listed, so what's left visible is the CALL that carries the last
+   real verdict - by construction, whatever showed before this one stays the newest thing on screen. A
+   Sales call that DID finish (has_recording and actually transcribed) is a real, QA'd conversation and
+   is shown exactly like any other. */
+function trcIsSkippedSalesCall(r){
+  return !!(r && r.personnel_team==='Sales' && r.transcription_status!=='completed');
+}
 const TRC_AI_TAG = {Lost:'t-red','In Follow Up':'t-amber',Qualified:'t-green',Unclear:'t-gray'};
+/* "Qualified" alone reads as though the visit is done too - the one thing this label exists to say is
+   that it is not, by requirement (2026-09-18). r.visit_pending comes off followup_qa (see
+   crm-snapshot-qa/index.ts - it is the model's own call, checked against the EFFECTIVE status by the
+   pipeline, so it can be true here even on a row whose own ai_assessed_status reads "In Follow Up").
+   The colour lookup (TRC_AI_TAG) still keys off the raw status - only the text changes. */
+function trcAiStatusLabel(r){
+  if(!r||!r.ai_assessed_status)return null;
+  return (r.ai_assessed_status==='Qualified'&&r.visit_pending)
+    ? 'Qualified (visit pending)' : r.ai_assessed_status;
+}
 
 function trcTag(cls, icon, label, title){
   return '<span class="tag '+cls+'"'+(title?' title="'+esc(title)+'"':'')+'>'
@@ -17547,6 +17629,16 @@ function trcMismatchTag(r){
   }
   return '<span style="color:var(--slate)">—</span>';
 }
+/* By requirement (2026-09-18): the mismatch DASHBOARD counts a lead's CURRENT state, not every call
+   it ever had - a lead the CRM had wrong on the 1st that got corrected by the 4th, with a call to
+   match, stops counting the moment that later call is assessed. is_latest_assessed is what says
+   "this row IS that lead's most recent QA'd call" (see acc.crm_recompute_latest_assessed) - only rows
+   where it's true ever count toward a total, a card, a chip or the Mismatch drill-down table.
+   Deliberately NOT used for a single lead's own call-by-call HISTORY (trcCallHtml, trcMismatchTag) -
+   the 1st's row still shows it disagreed on the 1st, exactly as it should; only what gets SUMMED
+   changes, never what a single call's own record says happened. */
+function trcCountsMatch(r){return !!(r&&r.status_match===true&&r.is_latest_assessed);}
+function trcCountsMismatch(r){return !!(r&&r.status_match===false&&r.is_latest_assessed);}
 
 /* call_start_time and next_follow_up_date arrive from the CRM as IST WALL CLOCK wearing a Z. Putting
    them through new Date() shifts every one of them by five and a half hours, which is how an 11 AM
@@ -17568,6 +17660,10 @@ let TRC_ROWS=null;
 /* Which window TRC_ROWS was actually fetched for ('from|to', '' meaning All time) - so a filter
    change knows whether the cache still answers it or a fresh, still-scoped fetch is needed. */
 let TRC_ROWS_RANGE=null;
+/* Whether TRC_ROWS is the full followup_timeline_v join (transcription_status/status_match present
+   on every row) or the fast crm_followups-only fetch (present on none, until trcEnrichVisiblePage
+   fills in whichever leads are on screen). See trcFetchLight/trcFetchFull/trcEnsureFullEnrichment. */
+let TRC_ROWS_ENRICHED=false;
 
 /* TRC_ROWS/TR_ROWS only survive as long as this tab's JS does - a reload throws the fetch away and
    pays the full CRM-join + transcription cost again even one minute later. sessionStorage backs the
@@ -17751,7 +17847,63 @@ function trcSortHistory(rows){
   return (Array.isArray(rows)?rows:[]).slice().sort(trcChrono);
 }
 
-const TRC_F={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+/* By requirement (2026-09-18): a real browser reload of this page should show exactly the range and
+   filters someone was just looking at; leaving to a different tab and coming back should not - that
+   is a fresh visit to the page, not a continuation of the last one. The two need different mechanics
+   because they are different EVENTS on a page that never fully reloads between them:
+   - A reload re-runs this whole script from scratch, so TRC_F's own initial value - computed exactly
+     once, right here - is the only chance to recover what was on screen. sessionStorage is what
+     survives that reload (a plain JS variable does not); trc_filters_state is written on every render
+     (see trcRender) precisely so it is always current when a reload happens to catch it.
+   - Switching to a different tab and back does NOT reload the script - TRC_F is a module-level object
+     that would otherwise just sit there unchanged. See trcResetFilters, called from activateModule the
+     moment the incoming tab is 'transcription' and the outgoing one was something else - the one place
+     that transition is visible - which resets TRC_F back to these same defaults and clears this same
+     key, so a reload caught right after landing here restores THIS visit, not the one before it. */
+const TRC_F=(function(){
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+  try{
+    const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
+    if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
+  }catch(e){}
+  return fallback;
+})();
+/* Written on every render (trcRender) rather than at each individual setter, so one place is
+   guaranteed current instead of every future TRC_F.x=y call site having to remember to call it too. */
+function trcSaveFilterState(){
+  try{sessionStorage.setItem('trc_filters_state',JSON.stringify(TRC_F));}catch(e){}
+}
+/* The "coming back from elsewhere" half of the rule above - see activateModule. Deliberately mutates
+   the existing TRC_F object rather than reassigning the const, since closures elsewhere already hold
+   this exact reference. */
+function trcResetFilters(){
+  const y=traYesterday();
+  TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
+  TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
+  TRC_PAGE=0;
+  TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;
+  TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
+  try{sessionStorage.removeItem('trc_filters_state');}catch(e){}
+}
+
+/* THE TABLE, PAGED. A wide range can mean 500+ leads; rendering all of them as DOM at once (and, until
+   this, prefetching every one of their full transcripts in the background right after) is what made
+   the page hang, not the network fetch - trcFetch itself dropped under 4s once 20260917090000 fixed
+   the query underneath. TRC_PAGE_ROWS is always exactly what's on screen right now (the current page's
+   items, lead-groups or calls depending on view), so trcPrefetchListedHistories warms only that instead
+   of re-deriving "what's visible" by scraping the DOM or re-touching the whole filtered set. */
+const TRC_PAGE_SIZE=50;
+let TRC_PAGE=0;
+let TRC_PAGE_ROWS=[];
+
+/* THE FOUR KPI CARDS AND FIVE CHIPS, from acc.daily_qa_summary instead of counting every fetched row
+   in the browser (see 20260917110000) - one row per calendar day, summed over the selected range. Only
+   valid when the range's OWN totals are what the cards should show: the moment a CRM-status, business
+   unit or personnel filter narrows the scope, the day table can't answer it (it isn't broken down that
+   way), and trcKpiHtml falls back to counting `rows` exactly as it always did. Keyed on the range so a
+   stale fetch from a previous range is never read as this one's numbers. */
+let TRC_KPI_FAST=null;
+let TRC_KPI_FAST_RANGE=null;
 
 /* THE PRE-SALES TEAM, from the roster table rather than from whoever happens to be in the fetched
    rows. The Personnel filter used to be built entirely out of TRC_ROWS, which meant it could only
@@ -17856,9 +18008,23 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
   +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
-  +'lost_reason_status,remarks_status,ai_assessed_status,status_match,mismatch_type,qa_score,qa_model,'
+  +'lost_reason_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
-  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team';
+  +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,is_latest_assessed';
+const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
+
+/* THE FAST FETCH. acc.crm_followups directly - no join to call_transcripts, followup_qa,
+   transcription_queue or lead_level_progress_v, which is exactly what made even a page-1-only
+   request slow (see trcFetch below): a LIMIT cannot help when the query underneath needs those four
+   tables sorted for a merge join before it can even apply the date filter's own ORDER BY. Measured
+   directly - this fetch alone: ~90ms for a 79-day range, ~1.6s for the whole table's history, against
+   followup_timeline_v's 3-6s+ for the same. crm_status/crm_status_raw/crm_remarks/crm_lost_reason are
+   aliased to match TRC_LIGHT's names so every existing reader (trcApply, trcLeads, trcTableHtml, the
+   filter bar) keeps working unchanged against a row from either source. */
+const TRC_CRM_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
+  +'call_start_text,next_follow_up_text,crm_status:status,crm_status_raw:status_raw,status_detail,'
+  +'crm_remarks:remarks,crm_lost_reason:lost_reason,recording_url,callid,has_recording,call_duration,'
+  +'personnel_id,personnel_name,personnel_email,personnel_role';
 
 /* A lead that already reached Qualified (or beyond) has no legitimate way back to Fresh or In Follow
    Up - acc.lead_level_progress_v already audits every follow-up for exactly this and marks the ones
@@ -17891,18 +18057,99 @@ function trcIsRegression(r){
    for one lead_id). So this goes back to a single, directly date-filtered fetch: cost scales with the
    window's own row count, not with any lead's lifetime history.
    "All time" (both dates cleared) does the original full fetch - that is a real request for
-   everything, not the default. */
+   everything, not the default.
+
+   THIS NOW SPLITS IN TWO. Even a LIMIT 1 against followup_timeline_v pays the full cost below - a
+   merge join needs both sides sorted by the join key before a LIMIT can even look at the first row,
+   so a plain page-1 request over a wide range still scans followup_qa, transcription_queue and
+   lead_level_progress_v in full first (measured: 3-6s+, worse as those tables grow). Whether a
+   request needs that at all depends only on whether transcription_status/status_match are actually
+   being filtered on (the proc/match/mismatch cards) - crm/business-unit/personnel/search all live on
+   crm_followups itself and cost nothing extra. So: */
 async function trcFetch(force){
   /* Awaited, and deliberately not fired off in parallel: nine rows once per page life, a no-op on
      every call after the first, against a view query that costs seconds. Racing it instead would
      save nothing measurable and would let the roster land AFTER the render that needed it, leaving
      the dropdown short a caller until something else happened to repaint it. */
   await trcPersonnelFetch();
+  const needsFull=TRC_F.proc!=='all'||TRC_F.match!=='all'||TRC_F.mismatch!=='all';
+  return needsFull ? trcFetchFull(force) : trcFetchLight(force);
+}
+
+/* THE FAST PATH - crm_followups alone, no joins, so a proc/match/mismatch-free view (the common
+   case: just browsing or filtering by CRM status/business unit/personnel/search) never pays the join
+   cost at all. transcription_status, status_match and every QA field are simply absent on these rows
+   until trcEnrichVisiblePage fills them in for whichever leads are actually on screen (see below) -
+   trcRowDate, trcApply's crm/bu/personnel/q filters and trcLeads' grouping/sorting only ever needed
+   the columns this DOES carry, so nothing downstream has to know which path a row came from. */
+async function trcFetchLight(force){
   const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey)return TRC_ROWS;
+  /* Its own sessionStorage key, never trc_fetch_cache (that one is trcFetchFull's) - the two must
+     never collide, or a light snapshot read back under the full-fetch's key would be trusted as
+     already enriched, and a full snapshot read back here would get silently thrown away in favour
+     of a lighter one. See trcFetchFull for the one place a full fetch also writes THIS key, because
+     full data is strictly good enough to answer a light request too. */
+  if(!force){
+    const cached=trCacheRead('trc_fetch_light_cache',rangeKey);
+    if(cached){
+      TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;
+      TRC_ROWS_ENRICHED=cached.length>0&&cached.every(function(r){return r._enriched;});
+      return TRC_ROWS;
+    }
+  }
+  try{
+    let q=sb.schema('acc').from('crm_followups').select(TRC_CRM_LIGHT)
+      .order('call_date',{ascending:false,nullsFirst:false})
+      .order('communication_time',{ascending:false,nullsFirst:false})
+      .order('follow_up_id',{ascending:false});
+    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+    const {data,error}=await q;
+    if(error)throw error;
+    const rows=data||[];
+    /* lead_current_status/lead_current_lost_reason live on acc.crm_leads, one row per lead - a second
+       light query, keyed on just the distinct leads this range actually has, rather than folding
+       crm_leads into the query above and paying a join for it. */
+    const leadIds=Array.from(new Set(rows.map(function(r){return r.lead_id;}).filter(function(v){return v!=null;})));
+    let leadMap={};
+    if(leadIds.length){
+      const {data:leads,error:e2}=await sb.schema('acc').from('crm_leads')
+        .select('lead_id,status,lost_reason').in('lead_id',leadIds);
+      if(e2)throw e2;
+      (leads||[]).forEach(function(l){leadMap[String(l.lead_id)]=l;});
+    }
+    rows.forEach(function(r){
+      const l=leadMap[String(r.lead_id)];
+      r.lead_current_status=l?l.status:null;
+      r.lead_current_lost_reason=l?l.lost_reason:null;
+      /* Same rule acc.crm_personnel_team applies (STABLE SQL, see 20260831090000): Pre-Sales when the
+         lowercased, trimmed email is on the active roster TRC_PERSONNEL already holds, Sales
+         otherwise, null for no email at all - so this can never disagree with what queued the call. */
+      const email=String(r.personnel_email||'').trim().toLowerCase();
+      r.personnel_team=!email?null:((TRC_PERSONNEL||[]).some(function(p){return p.email===email;})?'Pre-Sales':'Sales');
+    });
+    TRC_ROWS=rows;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=false;
+    trCacheWrite('trc_fetch_light_cache',rangeKey,rows);
+  }catch(e){
+    TRC_ROWS=TRC_ROWS&&TRC_ROWS_RANGE===rangeKey?TRC_ROWS:[];TRC_ROWS_RANGE=null;
+    toast('Could not load the call history: '+((e&&e.message)||e),'err');
+  }
+  return TRC_ROWS;
+}
+
+/* THE FULL PATH - unchanged from before this split, and still exactly what a proc/match/mismatch
+   view needs: those three read transcription_status/status_match/mismatch_type, which only exist
+   after the join, and filtering or counting by them correctly needs every row in range to have it,
+   not just whichever page is on screen. TRC_ROWS_ENRICHED marks the result so trcEnsureFullEnrichment
+   (called the moment one of those three is turned on) knows whether today's TRC_ROWS already qualifies
+   or a real fetch is still owed. */
+async function trcFetchFull(force){
+  const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
+  if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey&&TRC_ROWS_ENRICHED)return TRC_ROWS;
   if(!force){
     const cached=trCacheRead('trc_fetch_cache',rangeKey);
-    if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;return TRC_ROWS;}
+    if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;return TRC_ROWS;}
   }
   /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
      history through a chain of window functions - a cost paid IN FULL on every request to this
@@ -17928,17 +18175,140 @@ async function trcFetch(force){
       if(batch.length<PAGE)break;
       from+=PAGE;if(from>50000)break;
     }
-    TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;
+    out.forEach(function(r){r._enriched=true;});
+    TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;
     trCacheWrite('trc_fetch_cache',rangeKey,out);
+    // Full data answers a light request too (see trcFetchLight) - written under its key as well so a
+    // later visit to this same range never fetches a step down from what is already sitting here.
+    trCacheWrite('trc_fetch_light_cache',rangeKey,out);
   }catch(e){
-    TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;
+    TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
   }
   return TRC_ROWS;
 }
 
+/* Called the instant a proc/match/mismatch card is touched, before that filtered view renders -
+   those three need every row in range to actually carry transcription_status/status_match, which
+   the fast path never fetched. A no-op once TRC_ROWS already is the full join (see trcFetchFull). */
+async function trcEnsureFullEnrichment(){
+  if(TRC_ROWS_ENRICHED)return;
+  trcShowLoading();
+  await trcFetchFull(false);
+}
+
+/* Bumped on every fetch and page change; an in-flight enrichment request checks it after the await
+   and drops its own answer if something else has already moved on - the same cancellation shape
+   trcPrefetchCancel uses for the history prefetch below. */
+let TRC_ENRICH_GEN=0;
+/* THE LAZY HALF OF THE FAST PATH. Only the leads on the CURRENT PAGE get enriched - not the whole
+   range, which is exactly the cost trcFetchLight exists to avoid paying up front. Merges straight
+   into TRC_ROWS by follow_up_id (acc.crm_lead_detail returns full followup_timeline_v-shaped rows
+   per lead, see 20260911090000), marks each merged row _enriched so revisiting this page later, or
+   the background history prefetch warming the same lead, never re-asks for it, then re-renders the
+   table in place. A no-op once TRC_ROWS is already the full join, or once every row on this page
+   already is. */
+async function trcEnrichVisiblePage(){
+  if(TRC_ROWS_ENRICHED)return;
+  const gen=++TRC_ENRICH_GEN;
+  const ids=[],seen={};
+  (TRC_PAGE_ROWS||[]).forEach(function(g){
+    if(g==null||g.lead_id==null)return;
+    const k=String(g.lead_id);
+    if(seen[k])return;
+    const underlying=g.rows||[g];
+    if(!underlying.some(function(r){return !r._enriched;}))return;
+    seen[k]=1;ids.push(g.lead_id);
+  });
+  if(!ids.length)return;
+  try{
+    const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:ids});
+    if(error)throw error;
+    if(gen!==TRC_ENRICH_GEN)return;
+    const byFollowUp={};
+    (data||[]).forEach(function(row){
+      (row.followups||[]).forEach(function(f){byFollowUp[String(f.follow_up_id)]=f;});
+    });
+    let changed=false;
+    (TRC_ROWS||[]).forEach(function(r,i){
+      const f=byFollowUp[String(r.follow_up_id)];
+      if(!f)return;
+      /* Only TRC_LIGHT's own fields, not everything acc.crm_lead_detail hands back (it returns whole
+         followup_timeline_v rows, lead_level_progress fields included) - a list row was never meant
+         to carry level_regression_severity (see trcIsRegression's own comment: that flag is
+         deliberately lead-detail-only), and enrichment must not start smuggling it in sideways just
+         because this row now happens to be fully fetched. */
+      const merged={_enriched:true};
+      TRC_LIGHT_FIELDS.forEach(function(k){if(f[k]!==undefined)merged[k]=f[k];});
+      TRC_ROWS[i]=Object.assign({},r,merged);
+      changed=true;
+    });
+    if(changed&&gen===TRC_ENRICH_GEN){
+      // Persisted under the same key trcFetchLight reads, so a reload within the cache window comes
+      // back with whichever leads this tab already paid to enrich, not the original blank snapshot.
+      trCacheWrite('trc_fetch_light_cache',TRC_ROWS_RANGE,TRC_ROWS);
+      trcRender(false,true);
+    }
+  }catch(e){
+    /* Silent: the page still shows every CRM field correctly, just without a transcription/AI status
+       yet - the next render of this same page (a re-sort, a page revisit) tries again. */
+  }
+}
+
 function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
+}
+
+/* The fast path for the KPI cards: one row per day, summed here instead of scanning every fetched
+   follow-up. total_leads is deliberately NOT summed from daily_qa_summary - a lead who called on two
+   different days in range is one lead, not two - so it comes from its own COUNT(DISTINCT) against
+   crm_followups, which needs no join to the heavy tables and stays cheap on any range. Never throws:
+   a failure here just means trcKpiHtml falls back to counting rows itself, exactly as before this
+   existed. */
+async function trcKpiFastFetch(force){
+  const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
+  if(TRC_KPI_FAST&&!force&&TRC_KPI_FAST_RANGE===rangeKey)return TRC_KPI_FAST;
+  try{
+    let sq=sb.schema('acc').from('daily_qa_summary').select('*');
+    if(TRC_F.from)sq=sq.gte('date',TRC_F.from);
+    if(TRC_F.to)sq=sq.lte('date',TRC_F.to);
+    const lq=sb.schema('acc').rpc('crm_lead_count_in_range',{p_from:TRC_F.from||null,p_to:TRC_F.to||null});
+    const [{data:days,error:e1},{data:leadCount,error:e2}]=await Promise.all([sq,lq]);
+    if(e1||e2)throw (e1||e2);
+    const sum={total_followups:0,recordings_available:0,transcribed:0,already_transcribed:0,
+      non_transcribable:0,transcription_failed:0,pending:0,not_in_scope:0,qa_assessed:0,
+      pitch_score_sum:0,pitch_score_n:0,pitch_accurate:0,pitch_partially_accurate:0,pitch_inaccurate:0,
+      followup_date_accurate:0,followup_date_inaccurate:0,followup_date_not_verifiable:0,
+      lost_reason_accurate:0,lost_reason_inaccurate:0,lost_reason_not_verifiable:0,
+      remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
+      status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
+      qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
+      in_followup_should_have_been_qualified:0,agent_qa_score_sum:0,agent_qa_score_n:0,
+      reused_transcription:0};
+    (days||[]).forEach(function(d){
+      Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
+    });
+    sum.total_leads=Number(leadCount||0);
+    TRC_KPI_FAST=sum;TRC_KPI_FAST_RANGE=rangeKey;
+  }catch(e){
+    TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
+  }
+  return TRC_KPI_FAST;
+}
+
+/* THE RECONCILIATION CHECK. daily_qa_summary is kept live by triggers - the moment a recording gets
+   transcribed or judged, its day's row updates - but trcFetch's own row-level cache is sessionStorage,
+   good for TRC_CACHE_TTL_MS (hours). Between those two, "how many follow-ups in this range" can
+   disagree: the fast total already counts a call the pipeline finished ten minutes ago, the cached row
+   list still doesn't have it. That gap is exactly what surfaced as "9 mismatches, but only 1 row in the
+   table" - the count was live, the list was stale. One cheap check catches it: if the two totals for
+   the SAME range don't match, the row cache is behind, so force one real refetch (bypassing the cache)
+   to bring it current. Only ever fires the extra request when there is actually something to fix. */
+async function trcFetchBoth(){
+  await Promise.all([trcFetch(false),trcKpiFastFetch()]);
+  if(TRC_KPI_FAST&&TRC_ROWS&&TRC_KPI_FAST.total_followups!==TRC_ROWS.length){
+    await trcFetch(true);
+  }
 }
 
 /* Makes good on the promise above: if the lead a deep link names isn't in the date-ranged fetch at
@@ -17983,10 +18353,12 @@ function trcApply(rows,skipCards){
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
     if(!skipCards){
       if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
-      if(TRC_F.match==='MATCH'&&r.status_match!==true)return false;
-      if(TRC_F.match==='MISMATCH'&&r.status_match!==false)return false;
+      // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
+      // verdict does not belong in either drill-down, only in the lead's own history.
+      if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
+      if(TRC_F.match==='MISMATCH'&&!trcCountsMismatch(r))return false;
       if(TRC_F.match==='NONE'&&r.status_match!==null&&r.status_match!==undefined)return false;
-      if(TRC_F.mismatch!=='all'&&String(r.mismatch_type||'')!==TRC_F.mismatch)return false;
+      if(TRC_F.mismatch!=='all'&&(!trcCountsMismatch(r)||String(r.mismatch_type||'')!==TRC_F.mismatch))return false;
     }
     if(q){
       const hay=String(r.lead_id||'')+' '+String(r.lead_name||'')+' '+String(r.follow_up_id||'')
@@ -18002,7 +18374,12 @@ function trcApply(rows,skipCards){
    conversation history only means anything read forwards. */
 function trcLeads(rows){
   const by={};
-  (rows||[]).forEach(function(r){
+  /* A Sales call that never actually transcribed has no verdict of its own to roll up - counting it
+     among "recordings"/"transcribed"/"assessed", or letting it be g.last, would show a lead's summary
+     pointing at a blank call instead of the one that actually carries the last real read on it. See
+     trcIsSkippedSalesCall. This only changes what the LEAD'S OWN rollup and "last call" are built
+     from - the chips and KPI cards above the table still count every follow-up, Sales included. */
+  (rows||[]).filter(function(r){return !trcIsSkippedSalesCall(r);}).forEach(function(r){
     const k=String(r.lead_id);
     if(!by[k])by[k]={lead_id:r.lead_id,name:r.lead_name,bu:r.business_unit_name,
                      status:r.lead_current_status,lost_reason:r.lead_current_lost_reason,rows:[]};
@@ -18025,7 +18402,7 @@ function trcLeads(rows){
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
-    g.mismatches=g.rows.filter(function(r){return r.status_match===false;}).length;
+    g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
     g.trail=[];
@@ -18144,22 +18521,62 @@ function trcLeadSkeletonHtml(){
    a "call" is now a follow-up in the CRM's own history rather than a row we happened to import. ---- */
 function trcKpiHtml(rows){
   const n=function(st){return rows.filter(function(r){return trcTrStatus(r)===st;}).length;};
-  const leadCount=new Set(rows.map(function(r){return r.lead_id;})).size;
+  /* The four cards, "QA assessed" and "Reused an existing transcript" all have one unambiguous,
+     purely-additive definition each, verified to match acc.daily_qa_summary_v exactly (see
+     20260917110000) - so they can come from that day-summed table instead of scanning every fetched
+     row. Only when the scope is genuinely "the whole range, no extra narrowing": daily_qa_summary has
+     no breakdown by CRM status, business unit, personnel or search text, so any of those being active
+     means the day totals can no longer answer the question and this falls back to counting `rows`
+     exactly as it always did. The five status chips below stay on that same client count in every
+     case - trcTrStatus's not_transcribed/queue_status split is a per-row judgement call this table
+     does not attempt to reproduce, and getting that wrong quietly would be worse than leaving it slow. */
+  const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
+  const fast=(TRC_F.crm==='all'&&TRC_F.bu==='all'&&TRC_F.personnel==='all'&&!String(TRC_F.q||'').trim()
+              &&TRC_KPI_FAST&&TRC_KPI_FAST_RANGE===rangeKey)?TRC_KPI_FAST:null;
+  const totalCalls=fast?fast.total_followups:rows.length;
+  /* Every card's own lead count - always counted from `rows` (the fetched range, filtered by date/CRM
+     status/business unit/personnel/search but not by which card is active), never from the fast path:
+     there is no per-category distinct-lead total to sum from acc.daily_qa_summary (the same reason
+     total_leads has its own RPC instead of being a column there - a lead transcribed on two different
+     days is one lead, not two), and this is cheap enough as a plain array scan that it never needed
+     one. */
+  const leadsOf=function(pred){return new Set(rows.filter(pred).map(function(r){return r.lead_id;})).size;};
+  const leadCount=fast?fast.total_leads:leadsOf(function(){return true;});
+  /* Total Calls' own lead count is safe unconditionally - lead_id is on every row whether or not it
+     has been enriched yet. Transcribed/Match/Mismatch's lead counts are NOT: they read
+     trcTrStatus/status_match, which the fast crm_followups-only fetch never carries (see
+     trcFetchLight) until trcEnrichVisiblePage fills in whichever leads are actually on screen. Asking
+     for them across the whole range before that would silently undercount almost everything, so the
+     subtitle just leaves the lead count off until the row data backs it up. */
+  const haveDetail=TRC_ROWS_ENRICHED;
+  const transcribedLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='completed';}):null;
+  const matchLeads=haveDetail?leadsOf(trcCountsMatch):null;
+  const mismatchLeads=haveDetail?leadsOf(trcCountsMismatch):null;
+  const inLeads=function(c){return c+' lead'+(c===1?'':'s');};
   const cards=[
-    ['Total Calls',rows.length,'follow-ups in '+leadCount+' lead'+(leadCount===1?'':'s'),'var(--slate)','all','proc'],
-    ['Transcribed',n('completed'),'with a full transcript','#16a34a','completed','proc'],
-    ['CRM Match',rows.filter(function(r){return r.status_match===true;}).length,'call agrees with the CRM','#16a34a','MATCH','match'],
-    ['CRM Mismatch',rows.filter(function(r){return r.status_match===false;}).length,'call disagrees with the CRM','#dc2626','MISMATCH','match']
+    ['Total Calls',totalCalls,'follow-ups in '+inLeads(leadCount),'var(--slate)','all','proc'],
+    ['Transcribed',fast?fast.transcribed:n('completed'),
+      'with a full transcript'+(haveDetail?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
+    ['CRM Match',fast?fast.status_match:rows.filter(trcCountsMatch).length,
+      'agrees with the CRM'+(haveDetail?', in '+inLeads(matchLeads):''),'#16a34a','MATCH','match'],
+    ['CRM Mismatch',fast?fast.status_mismatch:rows.filter(trcCountsMismatch).length,
+      'disagrees with the CRM'+(haveDetail?', in '+inLeads(mismatchLeads):''),'#dc2626','MISMATCH','match']
   ];
+  /* Same fast/slow split as the cards above - these five read trcTrStatus per row exactly like the
+     lead counts do, so they are just as blind on an unenriched fast fetch. acc.daily_qa_summary
+     stores the closest matching column for each (see 20260917110000's own note on where its
+     pending/not_in_scope categories drift slightly from trcTrStatus's queue_status-truthiness split -
+     an approximation, but a far closer one than reading undefined off every row not yet enriched). */
+  // "Not in scope" chip removed by request (2026-09-18) - a row that is out of scope still shows its
+  // own "Not in scope" tag in the table (see TRC_TR_META), this just drops it as a KPI-row filter chip.
   const sub=[
-    ['Waiting','not_transcribed',n('not_transcribed'),'fa-clock'],
-    ['No recording','no_recording',n('no_recording'),'fa-phone-slash'],
-    ['No conversation','non_transcribable',n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',n('failed'),'fa-circle-exclamation'],
-    ['Not in scope','out_of_scope',n('out_of_scope'),'fa-user-slash']
+    ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
+    ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
+    ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
+    ['Failed','failed',fast?fast.transcription_failed:n('failed'),'fa-circle-exclamation']
   ];
-  const assessed=rows.filter(function(r){return r.qa_id;}).length;
-  const reused=rows.filter(function(r){return r.reused_transcription;}).length;
+  const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
+  const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -18178,27 +18595,49 @@ function trcKpiHtml(rows){
        transcript already paid for, which is the whole point of keying on recording_url. */
     +'<span style="font-size:12.5px;color:var(--slate)">Reused an existing transcript <b style="color:var(--ink)">'+reused+'</b></span>'
     +'</div>'
-    +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows):'');
+    +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
 /* The four counts the specification asks for, by name. Only rendered when Mismatch is the active
    card, because that is the question they answer: of the calls where the CRM and the conversation
    disagree, WHICH WAY do they disagree. Each one filters the table under it. */
-function trcMismatchPanel(rows){
+function trcMismatchPanel(rows,fast){
+  /* Same fast/slow split as the cards above, and for the same reason the CRM Mismatch card itself can
+     read 289 while these four used to read 51 and stop: rows only ever holds what date/CRM
+     status/business unit/personnel/search let through, but the CARD's own number came from the day
+     table, so the two could silently disagree the moment fast was eligible. Reading these four counts
+     from the SAME source as the card (fast.* here, exactly the columns acc.daily_qa_summary stores)
+     keeps the panel's own total honest against it - "other" then also comes from fast, only falling
+     back to rows when fast is not eligible in the first place. */
+  const total=fast?fast.status_mismatch:rows.filter(trcCountsMismatch).length;
   const counts={};
   TRC_MISMATCH_KEYS.forEach(function(k){
-    counts[k]=rows.filter(function(r){return r.status_match===false&&r.mismatch_type===k;}).length;
+    counts[k]=fast?(fast[k]||0):rows.filter(function(r){return trcCountsMismatch(r)&&r.mismatch_type===k;}).length;
   });
-  const other=rows.filter(function(r){return r.status_match===false&&TRC_MISMATCH_KEYS.indexOf(String(r.mismatch_type||''))<0;}).length;
+  const known=TRC_MISMATCH_KEYS.reduce(function(a,k){return a+counts[k];},0);
+  const other=Math.max(0,total-known);
+  /* Lead counts here have no fast path of their own, unlike the counts above - acc.daily_qa_summary
+     has nowhere to keep "how many distinct leads" per category (same reason total_leads on the main
+     cards has its own RPC instead of a column: a lead disagreeing on two different days is one lead,
+     summed as two). rows is `scope` from trcRender - the whole range's fetched rows, not narrowed by
+     whichever mismatch category is currently selected - so this is always the true set to count over. */
+  const leadsOf=function(pred){return new Set(rows.filter(pred).map(function(r){return r.lead_id;})).size;};
+  const totalLeads=leadsOf(trcCountsMismatch);
+  const leadCounts={};
+  TRC_MISMATCH_KEYS.forEach(function(k){
+    leadCounts[k]=leadsOf(function(r){return trcCountsMismatch(r)&&r.mismatch_type===k;});
+  });
   return '<div class="card card-pad" style="margin-top:14px">'
-    +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree</div>'
+    +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree'
+    +'<span style="font-weight:400;color:var(--slate);font-size:13px;margin-left:8px">'+total+' total, in '+totalLeads+' lead'+(totalLeads===1?'':'s')+'</span></div>'
     +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Counted per follow-up, from the CRM status recorded against that call and what the conversation actually established.</div>'
     +'<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px">'
     +TRC_MISMATCH_KEYS.map(function(k){
       const m=TRC_MISMATCH[k],on=TRC_F.mismatch===k;
       return '<div class="card card-pad" style="margin:0;cursor:pointer'+(on?';box-shadow:inset 0 0 0 2px '+m.colour:'')+'" onclick="trcSet(\'mismatch\',\''+(on?'all':k)+'\')">'
         +'<div style="display:flex;align-items:center;gap:8px"><i class="fa-solid '+m.icon+'" style="color:'+m.colour+'"></i>'
-        +'<div style="font-size:26px;font-weight:700;line-height:1">'+counts[k]+'</div></div>'
+        +'<div style="font-size:26px;font-weight:700;line-height:1">'+counts[k]+'</div>'
+        +'<span style="font-size:11.5px;color:var(--slate)">in '+leadCounts[k]+' lead'+(leadCounts[k]===1?'':'s')+'</span></div>'
         +'<div style="font-size:12.5px;font-weight:600;margin-top:8px">'+esc(m.label)+'</div>'
         +'<div style="font-size:11.5px;color:var(--slate);line-height:1.5;margin-top:4px">'+esc(m.blurb)+'</div>'
       +'</div>';
@@ -18211,7 +18650,7 @@ function trcMismatchPanel(rows){
 /* The four KPI cards act as one set of tabs, not two independent filters - picking "CRM Mismatch"
    while "Transcribed" was still active used to AND the two together and silently empty the table.
    So every card click closes whichever of the other three was open before opening this one. */
-window.trcCard=function(kind,val){
+window.trcCard=async function(kind,val){
   if(kind==='proc'){
     TRC_F.proc=(TRC_F.proc===val?'all':val);
     TRC_F.match='all';TRC_F.mismatch='all';
@@ -18221,6 +18660,9 @@ window.trcCard=function(kind,val){
     // Leaving Mismatch must not leave its category filter behind, silently hiding rows.
     if(TRC_F.match!=='MISMATCH')TRC_F.mismatch='all';
   }
+  // Turning any of these three on is what needs transcription_status/status_match on every row in
+  // range, not just the page on screen - see trcEnsureFullEnrichment.
+  if(TRC_F.proc!=='all'||TRC_F.match!=='all')await trcEnsureFullEnrichment();
   trcRender(true);
 };
 
@@ -18256,16 +18698,20 @@ window.trcSetRange=async function(f,t){
   if(!f&&!t){const y=traYesterday();f=y;t=y;}
   TRC_F.from=f||null;TRC_F.to=t||null;
   trcShowLoading();
-  await trcFetch(false);trcRender(true);
+  await trcFetchBoth();trcRender(true);
   /* A different window is a different set of leads, so the background history prefetch has to be
      re-aimed at them - trcPrefetchHistories abandons whatever the old range had left to download. */
-  trcPrefetchListedHistories();
+  trcAfterListRender();
 };
 
 function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
     .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;}).filter(Boolean))).sort();
+  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
+     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
+     offering to filter down to a project this pipeline no longer transcribes. */
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   /* The whole team first, in the roster's own order (the manager, then the callers), so every
      pre-sales caller is selectable whether or not they have a call in this date range. Anyone
      pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
@@ -18303,12 +18749,16 @@ function trcFilterBar(all){
     +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
+    // Refresh now lives at the top of the page, beside the count it reloads - see trcView.
     +'<button class="btn btn-sm" onclick="trcClear()"><i class="fa-solid fa-filter-circle-xmark"></i> Clear filters</button>'
-    +'<button class="btn btn-sm" onclick="trcRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
   +'</div>';
 }
-window.trcSet=function(k,v){
+window.trcSet=async function(k,v){
   TRC_F[k]=v;
+  // Reaching this with an actual category is only possible from the Mismatch panel, which already
+  // required full enrichment to be showing at all - this is a no-op in that case, and a safety net
+  // otherwise, not the normal way this gets triggered (see trcCard).
+  if(k==='mismatch'&&v!=='all')await trcEnsureFullEnrichment();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
@@ -18320,8 +18770,8 @@ window.trcClear=async function(){
   // Previous day default the page opens with, rather than reopening that door.
   const y=traYesterday();TRC_F.from=y;TRC_F.to=y;
   trcShowLoading();
-  await trcFetch(false);trcRender(true);
-  trcPrefetchListedHistories();
+  await trcFetchBoth();trcRender(true);
+  trcAfterListRender();
 };
 /* The one button that means "I don't trust what's on screen" - so it drops BOTH caches, the list's
    and every lead history cached under it, rather than refetching the table and then still handing
@@ -18329,8 +18779,10 @@ window.trcClear=async function(){
 window.trcRefresh=async function(){
   trcShowLoading();
   trcLeadCacheClearAll();
-  await trcFetch(true);trcRender(true);
-  trcPrefetchListedHistories();
+  // keepPage: Refresh means "get me current data for exactly what I'm looking at", not "start over" -
+  // every filter in TRC_F is already untouched by this function, and the page number should be too.
+  await Promise.all([trcFetch(true),trcKpiFastFetch(true)]);trcRender(true,true);
+  trcAfterListRender();
 };
 
 function trcTextCell(v,width){
@@ -18381,7 +18833,7 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
-    +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',last.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',trcAiStatusLabel(last)):'<span style="color:var(--slate)">—</span>')
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
@@ -18407,19 +18859,23 @@ function trcCallRowHtml(r){
       +'<div style="font-size:11.5px;color:var(--slate)">follow-up '+esc(String(r.follow_up_id))+'</div></td>'
     +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||'—')+'</td>'
     +trcClipCell(r.crm_status?trcTag('t-blue','',r.crm_status):'<span style="color:var(--slate)">—</span>')
-    +trcClipCell(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',r.ai_assessed_status):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(r.ai_assessed_status?trcTag(TRC_AI_TAG[r.ai_assessed_status]||'t-gray','',trcAiStatusLabel(r)):'<span style="color:var(--slate)">—</span>')
     +trcClipCell(m?trcTag(m.tag,m.icon,m.short):trcMismatchTag(r))
     +trcTextCell(r.crm_remarks,260)
   +'</tr>';
 }
 
-function trcTableHtml(items,callLevel){
+function trcTableHtml(items,callLevel,slOffset){
   if(!items.length){
     return '<tr><td colspan="'+(callLevel?TRC_CALL_COLS:TRC_LEAD_COLS)+'"><div class="empty" style="padding:40px">'
       +'<i class="fa-solid fa-inbox"></i><div>Nothing matches these filters</div></div></td></tr>';
   }
   if(callLevel)return items.map(trcCallRowHtml).join('');
-  return items.map(function(g,i){return trcLeadRowHtml(g,i+1);}).join('');
+  /* SL No counts from the page's own offset, not from 1 on every page - "51" on page 2's first row,
+     not another "1", since #/r<SL NO> (see trcView) treats it as this row's position in the WHOLE
+     list, not just the page it happens to be on. */
+  const off=slOffset||0;
+  return items.map(function(g,i){return trcLeadRowHtml(g,off+i+1);}).join('');
 }
 function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
@@ -18441,7 +18897,12 @@ function trcColsHtml(){
       +'<col style="width:10%"><col style="width:13%">';
 }
 
-function trcRender(full){
+/* keepPage: true for a plain page-turn (Prev/Next), which must not reset back to page 1 or fight the
+   deep-link jump below. Anything else - a new range, a filter, a card click - always lands on page 1;
+   staying on "page 6" after the underlying set changes underneath it would show whatever happens to
+   be there now, not the six pages someone actually paged through. */
+function trcRender(full,keepPage){
+  trcSaveFilterState();
   const all=TRC_ROWS||[];
   let rows=trcApply(all);
   const scope=trcApply(all,true);
@@ -18461,15 +18922,61 @@ function trcRender(full){
     rows=rows.concat(TRC_PIN_ROWS);
   }
   const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
-  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(items,callLevel);
+  const totalItems=items.length;
+  const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
+  if(!keepPage){
+    /* A deep link (or a "back" from a lead's detail page) still deserves to land on its own row even
+       though the list is now paged - so jump to whichever page that row fell on, rather than always
+       forcing page 1 out from under it. Anything else (a fresh range, a filter, a card) has no row to
+       protect and starts at the top. */
+    TRC_PAGE=0;
+    if(TRC_LAST_LEAD_ID!=null){
+      const idx=items.findIndex(function(it){return String(it.lead_id)===String(TRC_LAST_LEAD_ID);});
+      if(idx>=0)TRC_PAGE=Math.floor(idx/TRC_PAGE_SIZE);
+    }
+  }
+  if(TRC_PAGE>totalPages-1)TRC_PAGE=totalPages-1;
+  if(TRC_PAGE<0)TRC_PAGE=0;
+  const pageOffset=TRC_PAGE*TRC_PAGE_SIZE;
+  const pageItems=items.slice(pageOffset,pageOffset+TRC_PAGE_SIZE);
+  TRC_PAGE_ROWS=pageItems;
+  const b=$('trcRows');if(b)b.innerHTML=trcTableHtml(pageItems,callLevel,pageOffset);
+  const pg=$('trcPager');if(pg)pg.innerHTML=trcPagerHtml(totalItems,totalPages);
   const c=$('trcCount');
   if(c){
-    const leads=callLevel?null:items.length;
-    c.textContent=(leads===null?rows.length+' call'+(rows.length===1?'':'s')
-                               :leads+' lead'+(leads===1?'':'s')+' · '+rows.length+' follow-up'+(rows.length===1?'':'s'))
+    const rangeStart=totalItems?TRC_PAGE*TRC_PAGE_SIZE+1:0;
+    const rangeEnd=Math.min(totalItems,rangeStart+TRC_PAGE_SIZE-1);
+    const noun=callLevel?'call':'lead';
+    c.textContent=rangeStart+'–'+rangeEnd+' of '+totalItems+' '+noun+(totalItems===1?'':'s')
+      +(callLevel?'':' · '+rows.length+' follow-up'+(rows.length===1?'':'s'))
       +' of '+all.length;
   }
 }
+
+/* Prev/Next plus "page N of M" - deliberately not a full page-number strip, since M can run into the
+   dozens on a wide range and this list has no use for jumping to an arbitrary one. */
+function trcPagerHtml(totalItems,totalPages){
+  if(totalItems<=0||totalPages<=1)return '';
+  /* Text labels, not bare chevrons - "Previous"/"Next" reads at a glance, where an icon alone asks
+     someone to guess. Centered, not pinned to an edge: this is the page's own control, not one more
+     item in a toolbar, and centering is what keeps it findable at a consistent spot no matter how
+     wide the window is. Fixed width on the page label so the two buttons either side of it do not
+     shift left and right as the page number's own digit count changes (9 of 12 vs 10 of 12). */
+  return '<div style="display:flex;align-items:center;justify-content:center;gap:16px;'
+      +'padding:14px 12px;border-top:1px solid var(--line);margin-top:2px">'
+    +'<button class="btn btn-sm" '+(TRC_PAGE<=0?'disabled':'')+' onclick="trcSetPage(-1)">'
+      +'<i class="fa-solid fa-chevron-left"></i> Previous</button>'
+    +'<span style="color:var(--slate);font-size:12.5px;min-width:90px;text-align:center">Page '
+      +(TRC_PAGE+1)+' of '+totalPages+'</span>'
+    +'<button class="btn btn-sm" '+(TRC_PAGE>=totalPages-1?'disabled':'')+' onclick="trcSetPage(1)">'
+      +'Next <i class="fa-solid fa-chevron-right"></i></button>'
+  +'</div>';
+}
+window.trcSetPage=function(delta){
+  TRC_PAGE=TRC_PAGE+delta;
+  trcRender(false,true);
+  trcAfterListRender();
+};
 
 async function trcView(v,seg){
   /* THE WAYS BACK INTO THIS LIST, and the one rule they share: the list only moves the page when it
@@ -18512,25 +19019,40 @@ async function trcView(v,seg){
   v.innerHTML=mHead('fa-microphone-lines','#0d9488','Transcription')+TRA_TABS_HTML(0)
     +'<div class="card card-pad" style="margin:14px 0 0"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-calendar-days" style="color:#0d9488"></i> Leads and their calls</div>'
-      +'<div id="trcCount" style="font-size:12.5px;color:var(--slate)"></div></div>'
+      +'<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">'
+        +'<div id="trcCount" style="font-size:12.5px;color:var(--slate)"></div>'
+        /* Moved up from the filter bar below, where it read as one option among many (next to Clear
+           filters, a dropdown or two away from the data it actually refreshes) - here it sits right
+           beside the count it updates, which is what makes it legible as "reload THIS" rather than
+           just another button in a row of them. */
+        +'<button class="btn btn-sm" onclick="trcRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+      +'</div></div>'
       +'<div id="trcDates" style="margin-top:12px">'+trcDateBar()+'</div></div>'
     +'<div id="trcKpis" style="margin-top:16px">'+trcSkeletonKpis()+'</div>'
     +'<div id="trcFilters"></div>'
-    /* overflow-x only, no max-height - the list is unpaginated, so a vertical scrollbox here would
-       just hide rows inside their own little scrollbar instead of the page's normal one.
-       table-layout:fixed + the colgroup below is what makes a max-width on a cell actually mean
-       something - without it, a table sizes each column to its widest cell (one long badge value
+    /* overflow-x only, no max-height - each page is at most TRC_PAGE_SIZE rows, so a vertical
+       scrollbox here would just hide them inside their own little scrollbar instead of the page's
+       normal one. table-layout:fixed + the colgroup below is what makes a max-width on a cell actually
+       mean something - without it, a table sizes each column to its widest cell (one long badge value
        stretches its whole column, and every column after it), no matter what a <td> asks for. */
-    +'<div class="card" style="margin-top:14px"><div style="overflow-x:auto"><table class="tbl" style="table-layout:fixed;width:100%">'
-      +'<colgroup id="trcCols">'+trcColsHtml()+'</colgroup>'
-      +'<thead id="trcHead">'+trcHeadHtml()+'</thead>'
-      +'<tbody id="trcRows">'+trcSkeletonRows()+'</tbody>'
-    +'</table></div></div>';
+    +'<div class="card" style="margin-top:14px">'
+      /* The pager is a sibling of the scrolling div, not a child of it - inside it, scrolling the
+         table sideways to see a clipped column dragged the Prev/Next controls out of view (or off to
+         the side) right along with it, and a wide table could stretch the scrollable area further
+         than the pager itself ever needed. Its own row never scrolls and never adds width. */
+      +'<div style="overflow-x:auto"><table class="tbl" style="table-layout:fixed;width:100%">'
+        +'<colgroup id="trcCols">'+trcColsHtml()+'</colgroup>'
+        +'<thead id="trcHead">'+trcHeadHtml()+'</thead>'
+        +'<tbody id="trcRows">'+trcSkeletonRows()+'</tbody>'
+      +'</table></div>'
+      +'<div id="trcPager"></div>'
+    +'</div>';
   /* Not a forced refetch: coming back here from a lead's detail page (the in-app Back button, or the
      browser's own back button) must not re-download the whole day's rows and drop someone at the top
-     of the table while it loads - trcFetch already caches, and the explicit Refresh button still
-     forces a reload when the data itself might actually be stale. */
-  await trcFetch(false);
+     of the table while it loads - trcFetch already caches, trcFetchBoth catches a cache that fell
+     behind the live pipeline on its own (see its own comment), and the explicit Refresh button still
+     forces a reload on demand besides. */
+  await trcFetchBoth();
   await trcEnsurePinnedLead();
   trcRender(true);
   /* Only ever after a render that was asked to restore a row (see wantsRow above). */
@@ -18539,7 +19061,7 @@ async function trcView(v,seg){
      a background download of every listed lead's full call history so the first click into one is
      instant. Kicked off from here rather than from trcFetch so a filter change that reuses the
      cached rows still re-aims it at the leads now on screen. */
-  trcPrefetchListedHistories();
+  trcAfterListRender();
 }
 
 /* Puts the exact row someone came back from on screen, and nothing else - no smooth scroll (this is
@@ -18570,21 +19092,22 @@ function trcScrollToRow(rowHint){
    rows someone is most likely to click first. Reads the rendered rows rather than re-deriving the
    grouping, so it can never disagree with what is on screen. */
 function trcPrefetchListedHistories(){
-  const b=$('trcRows');
-  if(!b)return;
+  /* TRC_PAGE_ROWS is exactly the current page - lead-groups normally, raw call rows in the Mismatch
+     view - and both shapes carry lead_id directly, so this warms only what's actually on screen right
+     now instead of every lead the filters match (which, before pagination existed, could be the
+     hundreds of leads in a wide range downloading their full transcripts in the background at once). */
   const ids=[];
-  if(TRC_F.match==='MISMATCH'){
-    /* The Mismatch card puts one row per CALL on screen, keyed by follow_up_id - there are no lead
-       rows to read ids off, so the filtered rows themselves are the list (the cache is per lead, and
-       several of those rows can belong to the same one). */
-    trcApply(TRC_ROWS||[]).forEach(function(r){if(r.lead_id!=null)ids.push(r.lead_id);});
-  }else{
-    Array.prototype.forEach.call(b.children,function(tr){
-      const m=/^trcLeadRow(.+)$/.exec(tr.id||'');
-      if(m)ids.push(m[1]);
-    });
-  }
+  (TRC_PAGE_ROWS||[]).forEach(function(r){if(r&&r.lead_id!=null)ids.push(r.lead_id);});
   if(ids.length)trcPrefetchHistories(ids);
+}
+/* The two background jobs every render of the list kicks off, never awaited: fill in this page's
+   own transcription/AI-status columns (trcEnrichVisiblePage, only when the fast fetch left them
+   blank) and warm the full history behind each of these same leads for an instant click-through
+   (trcPrefetchListedHistories). Independent of each other - one fills what's on screen, the other
+   fills what a click would open next - so there is no ordering to get right between them. */
+function trcAfterListRender(){
+  trcEnrichVisiblePage();
+  trcPrefetchListedHistories();
 }
 
 /* ================================================ ONE LEAD, THE WHOLE STORY */
@@ -18662,7 +19185,9 @@ function trcQaTableHtml(r,m){
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
-     why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(r.ai_assessed_status||'—'),
+     why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(trcAiStatusLabel(r)||'—'),
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending)
+                 ?'Qualified and wants to buy - the site visit itself is the one thing still open, which is why this is not counted as a disagreement with the CRM\'s In Follow Up.':null,
                m?m.label:null,sa.reason])}
   ];
   if(Array.isArray(r.agent_qa)){
@@ -18985,6 +19510,14 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
       +'<button class="btn btn-sm" style="margin-top:12px" onclick="navTo(\''+backRoute+'\')">Back</button></div>';
     return;
   }
+  /* Dropped before anything below counts or renders a single row, so recordings/transcribed/assessed,
+     the CRM trail, "latest", and the call cards themselves all agree with each other - see
+     trcIsSkippedSalesCall. The one exception is the deep-linked row itself (targetFollowUpId): a link
+     that named this exact follow-up is trusted over the general rule, the same way a pinned lead
+     already overrides the list's own date filter elsewhere on this page. */
+  rows=rows.filter(function(r){
+    return !trcIsSkippedSalesCall(r) || String(r.follow_up_id)===String(targetFollowUpId);
+  });
   TRC_LEAD={lead:lead,rows:rows};
 
   const name=(lead&&lead.lead_name)||(rows[0]&&rows[0].lead_name)||('Lead '+id);
@@ -19013,7 +19546,7 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
 
   const strip='<div class="card card-pad" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
     +((lead&&lead.status)?trcTag('t-blue','','CRM: '+lead.status):'')
-    +(latest.ai_assessed_status?trcTag(TRC_AI_TAG[latest.ai_assessed_status]||'t-gray','','AI: '+latest.ai_assessed_status):'')
+    +(latest.ai_assessed_status?trcTag(TRC_AI_TAG[latest.ai_assessed_status]||'t-gray','','AI: '+trcAiStatusLabel(latest)):'')
     +trcMismatchTag(latest)
     +trcTag('t-gray','fa-phone',recordings+' recording'+(recordings===1?'':'s'))
     +trcTag(transcribed?'t-green':'t-gray','fa-file-lines',transcribed+' transcribed')
@@ -19093,8 +19626,9 @@ window.trcRetry=async function(followUpId){
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
   const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
-  TRC_ROWS=null;
+  TRC_ROWS=null;TRC_ROWS_ENRICHED=false;
   trCacheClear('trc_fetch_cache');
+  trCacheClear('trc_fetch_light_cache');
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
      about to change, so re-rendering the detail page off the 5h snapshot would show the reader the
      exact state they just asked to have redone. */
@@ -20469,7 +21003,9 @@ const USAGE_MAP={
   docDeleteConfirm:{key:'legal.documents.delete_document_s', meta:usbDocScope},
   docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', act:'delete', meta:usbDocScope},
   // Legal — MIS / Actions / Advocates
-  misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
+  misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta},
+  // misDeleteSel is NOT mapped here on purpose - it logs directly, after the delete has actually
+  // succeeded, and reads the cases before they are gone. See the note at its definition.
   misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
                meta:function(v){ return v?{range:String(v)}:null; }},
   misRangePick:{key:"legal.mis.filter_cases_by_hearing_date_range",
