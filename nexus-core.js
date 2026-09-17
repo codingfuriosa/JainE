@@ -21,14 +21,74 @@ const state={user:null,email:null,profile:null,roles:null,super:false};
 // declared up here, by state, rather than down by the telemetry code that's its only reader, so
 // boot() setting it doesn't read as a forward reference to something declared hundreds of lines later.
 let USAGE_TOKEN=null;
-const PAGE=window.PAGE||'dashboard';
+// Mutable (not const): the App Shell reassigns this on an in-place cross-module navigation instead
+// of loading a different .html document — see navTo()/activateModule() below. A direct load or
+// refresh still sets it once from window.PAGE exactly as before; nothing about that path changes.
+let PAGE=window.PAGE||'dashboard';
 // A customer session never signs in through login.html and must never be sent back to it — see
-// the customer-detection block in boot() below and the isolation-retrofit migration.
+// the customer-detection block in boot() below and the isolation-retrofit migration. Computed once
+// here rather than read live off PAGE: a real customer session's own nav (renderCustomerShell(),
+// navTo('customer/'+i)) never leaves PAGE==='customer' via activateModule(), so this can't go stale.
 const LOGIN_PAGE=(PAGE==='customer')?'customer-login.html':'login.html';
 function fileFor(id){if(id==='dashboard')return 'index.html';if(id==='tasks')return 'accountability.html';if(id==='custportal_admin')return 'custportal-admin.html';return id+'.html';}
-function navTo(path){const seg=String(path).split('/');const first=seg[0];if(first===PAGE){location.hash=seg.length>1?('#/'+seg.slice(1).join('/')):'#/';renderPage();}else{const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';location.href=fileFor(first)+hash;}}
+// Reverse of fileFor(): which module id does a given pathname's filename belong to. Used by
+// popstate (browser Back/Forward across modules) to recover PAGE from the URL alone.
+function pageIdFromPath(pathname){
+  const file=(pathname.split('/').pop()||'index.html');
+  if(file==='index.html'||file==='')return 'dashboard';
+  if(file==='accountability.html')return 'tasks';
+  if(file==='custportal-admin.html')return 'custportal_admin';
+  return file.replace(/\.html$/,'');
+}
+// Page-specific scripts that used to be a second <script> tag on that one .html file, loaded in
+// parallel with nexus-core.js (see accountability.js's own "loads after nexus-core.js" comment, and
+// the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
+// these needs the same script loaded on demand, once, before rendering — never re-fetched on a
+// second visit in the same tab.
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js'};
+const _loadedPageScripts=new Set();
+function ensurePageScript(id){
+  const src=PAGE_EXTRA_SCRIPT[id];
+  if(!src||_loadedPageScripts.has(src))return Promise.resolve();
+  return new Promise((resolve)=>{
+    const s=document.createElement('script');
+    s.src=src+'?v=20260913c';
+    s.onload=()=>{_loadedPageScripts.add(src);resolve();};
+    // A failed load shouldn't hang navigation forever — render with whatever's already there
+    // (the legacy VIEWS.tasks placeholder already has its own "could not finish loading" message
+    // for exactly this case) rather than block the rest of the app on one missing file.
+    s.onerror=()=>resolve();
+    document.body.appendChild(s);
+  });
+}
+// The in-place cross-module transition: swap PAGE, load that module's extra script if it has one,
+// update the tab title (no new document is loaded, so nothing else will), then render. Called from
+// navTo() for a sidebar click and from popstate for Back/Forward across modules.
+async function activateModule(id){
+  PAGE=id; window.PAGE=id;
+  await ensurePageScript(id);
+  document.title=(LABELS[id]||id)+' · Nexus-RE · Jain Group';
+  renderPage();
+}
+window.addEventListener('popstate',function(){
+  const id=pageIdFromPath(location.pathname);
+  if(id!==PAGE){ activateModule(id); }else{ renderPage(); }
+});
+function navTo(path){
+  const seg=String(path).split('/');
+  const first=seg[0];
+  const hash=seg.length>1?('#/'+seg.slice(1).join('/')):'';
+  if(first===PAGE){ location.hash=hash||'#/'; renderPage(); return; }
+  // Customer sessions (and an admin previewing one) never have a sidebar item for another module
+  // to begin with, but navTo() is also called from things like breadcrumbs — staying on the current
+  // real document for a customer session is the one case still worth a true navigation rather than
+  // an in-place swap, since renderCustomerShell() is a different shell entirely from renderShell().
+  if(state.isCustomer||state.impersonating){ location.href=fileFor(first)+hash; return; }
+  try{ history.pushState({spaPageId:first},'',fileFor(first)+hash); }catch(e){ location.href=fileFor(first)+hash; return; }
+  activateModule(first);
+}
 window.navTo=navTo;
-function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+id;renderPage();} else location.href='tasks.html#/task/'+id; }
+function goToTask(id){ const dd=$('notifDd'); if(dd)dd.classList.remove('show'); if(PAGE==='tasks'){location.hash='#/task/'+id;renderPage();} else navTo('tasks/task/'+id); }
 
 /* ============================ HELPERS ============================ */
 function toast(msg,type){if(type==='err')console.error('[toast]',msg);const t=el('div','toast '+(type||''),'<i class="fa-solid fa-'+(type==='err'?'circle-exclamation':type==='ok'?'circle-check':type==='warn'?'triangle-exclamation':'circle-info')+'"></i>'+esc(msg));$('toasts').appendChild(t);setTimeout(()=>t.remove(),(type==='err'||type==='warn')?9000:3400);}
@@ -108,6 +168,30 @@ function fatal(msg){
   if(a){a.style.display='flex';a.innerHTML='<div style="text-align:center;max-width:420px;padding:30px;font-family:Inter,system-ui,sans-serif"><div style="font-size:34px">⚠️</div><div style="margin-top:12px;font-weight:700;font-size:17px">Couldn’t load the workspace</div><div style="color:#64748b;font-size:13.5px;margin-top:8px;line-height:1.5">'+msg+'</div><a href="'+LOGIN_PAGE+'" style="display:inline-block;margin-top:16px;background:#1d4ed8;color:#fff;padding:10px 18px;border-radius:9px;text-decoration:none;font-weight:600;font-size:14px">Go to Sign In</a></div>';}
 }
 window.addEventListener('error',function(e){ if(!state.user){ fatal((e.message||'A script error occurred')+'.'); } });
+
+// Every navigation between modules is a full page load of a different .html file (each pulling in
+// this same multi-megabyte script fresh), so boot()'s who-is-this + profile/roles/permissions
+// fetches used to re-run in full on every single click between tabs — the visible "Loading your
+// workspace" pause. This sessionStorage cache skips that on every navigation after the first one in
+// a tab; refreshBootCache() is called anywhere state.profile/roles/super changes mid-session (a
+// Settings save, password-set, onboarding) so a cache hit within BOOT_CACHE_TTL_MS never serves data
+// staler than the user's own last edit. An admin changing someone ELSE's access still takes up to
+// BOOT_CACHE_TTL_MS to show up for that person — an acceptable trade for data that changes by
+// administrative action, not by the second.
+const BOOT_CACHE_KEY='nexusBootCacheV1';
+const BOOT_CACHE_TTL_MS=3*60*1000;
+function refreshBootCache(){
+  try{ sessionStorage.setItem(BOOT_CACHE_KEY,JSON.stringify({email:state.email,at:Date.now(),profile:state.profile,roles:state.roles,super:state.super})); }catch(e){}
+}
+function readBootCache(){
+  try{
+    const raw=sessionStorage.getItem(BOOT_CACHE_KEY);
+    if(!raw)return null;
+    const parsed=JSON.parse(raw);
+    if(parsed&&parsed.email===state.email&&(Date.now()-parsed.at)<BOOT_CACHE_TTL_MS)return parsed;
+  }catch(e){}
+  return null;
+}
 async function autoProvisionGoogleProfile(){
   try{
     const meta=(state.user&&state.user.user_metadata)||{};
@@ -138,11 +222,21 @@ async function boot(){
   // Every existing staff table's RLS was `using(true)` until a real customer login existed
   // (see 20260828090100_customer_portal_isolation_retrofit.sql), so the ONLY safe place to keep a
   // customer session away from the staff shell is here, before anything staff-only is fetched.
+  // RLS is the real boundary now (prof_read is `not app.is_customer()`, adm.* keys off the caller's
+  // own email/super_admin), so this ordering is a courtesy fast-path today, not the security check
+  // it originally had to be — which is what makes it safe to cache (see refreshBootCache() above).
+  const cachedBoot=readBootCache();
   let custRow=null;
-  try{
-    const {data}=await sb.schema('cust').from('customers').select('id,full_name').eq('auth_user_id',state.user.id).eq('status','active').is('deleted_at',null).maybeSingle();
-    custRow=data||null;
-  }catch(e){}
+  if(cachedBoot){
+    state.profile=cachedBoot.profile;
+    state.roles=cachedBoot.roles;
+    state.super=cachedBoot.super;
+  }else{
+    try{
+      const {data}=await sb.schema('cust').from('customers').select('id,full_name').eq('auth_user_id',state.user.id).eq('status','active').is('deleted_at',null).maybeSingle();
+      custRow=data||null;
+    }catch(e){}
+  }
   if(custRow){
     if(PAGE!=='customer'){
       // A customer JWT trying to load a staff page. Sign out rather than silently redirect — an
@@ -161,12 +255,12 @@ async function boot(){
     const asId=Number(new URLSearchParams(location.search).get('as'));
     if(asId){
       try{
-        const {data:me}=await sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle();
-        state.roles=me;
-      }catch(e){}
-      try{
-        const {data:p}=await sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle();
-        state.super=!!(p&&p.super_admin);
+        const [rolesRes,permRes]=await Promise.all([
+          sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+          sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+        ]);
+        state.roles=rolesRes.data||null;
+        state.super=!!(permRes.data&&permRes.data.super_admin);
       }catch(e){}
       // Client-side check decides only whether we ATTEMPT the preview — same as every other
       // module-visibility check in this app (see hasUsability() above). The real boundary is RLS:
@@ -182,18 +276,22 @@ async function boot(){
   }
 
   // ensure profile + permission rows exist (idempotent self-provision)
-  try{
-    const {data:prof}=await sb.schema('acc').from('user_profile').select('*').eq('email',state.email).maybeSingle();
-    state.profile=prof;
-  }catch(e){}
-  try{
-    const {data:me}=await sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle();
-    state.roles=me;
-  }catch(e){}
-  try{
-    const {data:p}=await sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle();
-    state.super=!!(p&&p.super_admin);
-  }catch(e){}
+  // These three are independent of each other (different tables, no data dependency), so a fresh
+  // fetch runs them together instead of one-after-another — and a cache hit above skips this
+  // whole block, since state.profile/roles/super are already populated from it.
+  if(!cachedBoot){
+    try{
+      const [profRes,rolesRes,permRes]=await Promise.all([
+        sb.schema('acc').from('user_profile').select('*').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+        sb.schema('adm').from('users').select('*').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+        sb.schema('adm').from('user_permissions').select('super_admin').eq('email',state.email).maybeSingle().then(r=>r,()=>({data:null})),
+      ]);
+      state.profile=profRes.data||null;
+      state.roles=rolesRes.data||null;
+      state.super=!!(permRes.data&&permRes.data.super_admin);
+      refreshBootCache();
+    }catch(e){}
+  }
 
   // Landed here right after a Google OAuth redirect (oauth-verify.html forwards
   // straight to index.html?intent=login|signup with no visible page of its own).
@@ -215,14 +313,20 @@ async function boot(){
       location.replace('login.html?alreadyhave=1');
       return;
     }
-    if(_viaGoogle && !_completed){ await autoProvisionGoogleProfile(); }
+    if(_viaGoogle && !_completed){
+      await autoProvisionGoogleProfile();
+      refreshBootCache();
+    }
   }
 
   renderShell();
   $('authLoad').style.display='none';
   if(!state.super && !(state.profile&&state.profile.onboarded)){
     const viaGoogle=!!(state.user&&state.user.app_metadata&&state.user.app_metadata.provider==='google');
-    if(viaGoogle) await autoProvisionGoogleProfile();
+    if(viaGoogle){
+      await autoProvisionGoogleProfile();
+      refreshBootCache();
+    }
   }
   // A brand-new signup who hasn't finished onboarding yet still gets straight into the same
   // baseline modules an onboarded-but-unassigned user already has (DEFAULT_MODULES) — dashboard,
@@ -254,6 +358,15 @@ function custSidebarTabs(ti){
   // Same "tap a nav item, close the mobile drawer" behavior renderShell() wires up for staff pages
   // (nexus-core.js:432) - this sidebar is rebuilt fresh on every render so it needs its own copy.
   nav.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
+  // Animated crane + building scene at the bottom of the sidebar
+  if(!nav.querySelector('.cust-sb-scene')){
+    var scene=document.createElement('div');
+    scene.className='cust-sb-scene';
+    scene.innerHTML='<div class="csb-crane"><div class="csb-mast"></div><div class="csb-jib"></div><div class="csb-cable"></div><div class="csb-hook"></div></div>'+
+      '<div class="csb-buildings"><div class="csb-b csb-b1"></div><div class="csb-b csb-b2"></div><div class="csb-b csb-b3"></div><div class="csb-b csb-b4"></div></div>'+
+      '<div class="csb-ground"></div>';
+    nav.appendChild(scene);
+  }
 }
 // A minimal shell for a customer session: same DOM (sidebar/topbar/view) every staff page uses,
 // so the existing CSS just works, but with the section list instead of a search box, and a
@@ -375,6 +488,7 @@ const NAV=[
   {group:'People',items:[
     {id:'hr',label:'Human Resources',icon:'fa-users'},
     {id:'recruitment',label:'Recruitment (ATS)',icon:'fa-user-plus'},
+    {id:'talent',label:'HR & Recruitment (New)',icon:'fa-people-arrows'},
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
@@ -436,10 +550,29 @@ function renderShell(){
     nav.appendChild(el('div','sb-group',g.group));
     g.items.forEach(it=>{
       const a=el('a','sb-item','<i class="fa-solid '+it.icon+'"></i> '+it.label);
+      // href stays a real URL — Ctrl/Cmd/middle-click still opens a genuine new tab, which should
+      // do its own real boot() rather than inherit this tab's SPA state. A plain left-click is
+      // intercepted below to swap in place instead, which is what actually removes the reload.
       a.href=fileFor(it.id);a.dataset.id=it.id;
+      a.onclick=function(e){
+        if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+        e.preventDefault();
+        navTo(it.id);
+      };
       nav.appendChild(a);
     });
   });
+  // The logo/"back to home" link is static markup in each .html shell (not built by effectiveNav()
+  // above), but it's the exact same kind of cross-module link, so it gets the exact same treatment.
+  const brand=document.querySelector('.sb-brand');
+  if(brand&&!brand.dataset.spaBound){
+    brand.dataset.spaBound='1';
+    brand.addEventListener('click',function(e){
+      if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+      e.preventDefault();
+      navTo('dashboard');
+    });
+  }
   if(state.super)secPendingBadge();
   // profile avatar + dropdown
   const nm=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||state.email.split('@')[0];
@@ -475,7 +608,7 @@ function renderShell(){
   var bd=$('sbBackdrop'); if(bd) bd.onclick=function(){ document.body.classList.remove('nav-open'); };
   document.querySelectorAll('.sb-item').forEach(function(a){ a.addEventListener('click',function(){ document.body.classList.remove('nav-open'); }); });
 }
-async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} location.replace(LOGIN_PAGE); }
+async function doSignOut(){ try{ await sb.auth.signOut(); }catch(e){} try{ Object.keys(localStorage).forEach(function(k){ if(/sb-.*-auth-token/.test(k)||k.indexOf('supabase')>=0) localStorage.removeItem(k); }); }catch(e){} try{ sessionStorage.removeItem(BOOT_CACHE_KEY); }catch(e){} location.replace(LOGIN_PAGE); }
 window.doSignOut=doSignOut;
 
 // Universal live document search (top nav)
@@ -1024,6 +1157,8 @@ function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/$
 function s3KeyForProjectPhoto(projectId,filename){return `customer-portal/projects/${projectId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProjectDoc(projectId,docType,filename){return `customer-portal/projects/${projectId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForUnitPhoto(unitId,filename){return `customer-portal/units/${unitId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForFloorPhoto(projectId,floorNo,filename){return `customer-portal/projects/${projectId}/floors/${s3SafeSeg(floorNo)}/${s3Stamp()}_${s3SafeName(filename)}`;}
+function s3KeyForTowerPhoto(projectId,tower,filename){return `customer-portal/projects/${projectId}/towers/${s3SafeSeg(tower)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/units/${unitId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForInspectionChecklist(unitId,filename){return `customer-portal/units/${unitId}/inspection-checklist/${s3Stamp()}_${s3SafeName(filename)}`;}
@@ -3882,7 +4017,7 @@ window.taskOnboardSave=async function(){
   const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
   const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
   if(error){toast(error.message,'err');return;}
-  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;toast('Profile saved','ok');location.hash='#/tasks';route();
+  state.profile=Object.assign(state.profile||{},row);refreshBootCache();PEOPLE=null;toast('Profile saved','ok');location.hash='#/tasks';route();
 };
 async function taskProfile(v){
   await taskOnboard(v);
@@ -5804,7 +5939,7 @@ window.setProfileSave=async function(){
   const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
   const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
   if(error){toast(error.message,'err');return;}
-  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;toast('Profile saved','ok');
+  state.profile=Object.assign(state.profile||{},row);refreshBootCache();PEOPLE=null;toast('Profile saved','ok');
   VIEWS.settings($('view'));
 };
 
@@ -6200,7 +6335,10 @@ function recGuard(){
 }
 const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareAddN','rtShareSend',
   'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
-  'recUploadModal','recDeleteSel','recJdSave','recJdDelete'];
+  'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
+  'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
+  'tpRefApprove','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrDeleteSel',
+  'tpMuOpenMonth','tpMuDeleteRow'];
 function recStripWriteControls(root){
   if(recCanWrite()) return;
   const re=new RegExp('^\\s*(?:'+REC_WRITE_FNS.join('|')+')\\s*\\(');
@@ -7611,7 +7749,7 @@ window.setPasswordSave=async function(){
   const b=$('spwBtn');if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.auth.updateUser({password:p});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='Save password';}return;}
-  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); }catch(e){}
+  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); refreshBootCache(); }catch(e){}
   closeModal();toast('Password set — you can now sign in with email + password too','ok');
 };
 /* ---- complete a "Forgot password" reset (lands here via PASSWORD_RECOVERY after the emailed link) ---- */
@@ -7631,7 +7769,7 @@ window.resetPasswordSave=async function(){
   const b=$('rpwBtn');if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {error}=await sb.auth.updateUser({password:p});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='Save new password';}return;}
-  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); }catch(e){}
+  try{ await sb.schema('acc').from('user_profile').update({password_set:true}).eq('email',state.email); state.profile=Object.assign(state.profile||{},{password_set:true}); refreshBootCache(); }catch(e){}
   closeModal();toast('Password updated — you can sign in with it from now on','ok');
 };
 function promptSetPassword(){
@@ -7793,7 +7931,7 @@ window.onboardSave=async function(){
   const row={email:state.email,full_name:name,designation:$('obDesig').value,reporting_manager:$('obMgr').value||null,onboarded:true,avatar_color:colorFor(state.email)};
   const {error}=await sb.schema('acc').from('user_profile').upsert(row,{onConflict:'email'});
   if(error){toast(error.message,'err');if(b){b.disabled=false;b.innerHTML='<i class="fa-solid fa-check"></i> Complete setup';}return;}
-  state.profile=Object.assign(state.profile||{},row);PEOPLE=null;
+  state.profile=Object.assign(state.profile||{},row);refreshBootCache();PEOPLE=null;
   const host=document.getElementById('onboardHost');if(host)host.remove();
   $('shell').style.display='block';location.hash='';renderShell();renderPage();startSessionGuard();
 };
@@ -8777,7 +8915,9 @@ VIEWS.crm=function(v,seg){
   else if(ti===5){ body=mTable(['Customer','Demand','Due','Amount','Status'],[['Rahul Mehta','On RCC F10','30 Jun','₹4.2L','Pending']]); }
   else if(ti===6){ body=mTable(['Broker','Deals','Commission','Status'],[['Skyline Realty','12','₹6.2L','Active']]); }
   else { body=mSoon(tabs[ti]); }
-  v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')+mTabs('crm',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+  v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
+    +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
+    +mTabs('crm',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
 };
 
 /* ============================ POST SALES — ADHOC bulk replace ============================
@@ -10866,16 +11006,33 @@ async function recLoadJDs(v){
 }
 window.recJdOpen=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
+  if(jd.source==='ai_generated'){
+    if(jd.jd_document_path){window.open(jd.jd_document_path,'_blank');return;}
+    // Older AI-generated rows made before the document file existed — fall back to a plain-text view.
+    const blob=new Blob([jd.content_text||''],{type:'text/plain'});
+    window.open(URL.createObjectURL(blob),'_blank');
+    return;
+  }
   if(jd.isDefault){window.open(jd.url,'_blank');return;}
   if(isS3Path(jd.storage_path)){await s3OpenSigned(jd.storage_path);return;}
+  if(!jd.storage_path){toast('This entry has no file attached','err');return;}
   const {data,error}=await sb.storage.from('recruitment').createSignedUrl(jd.storage_path,300);
   if(error){toast('Could not open file: '+error.message,'err');return;}
   window.open(data.signedUrl,'_blank');
 };
 window.recJdDownload=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
+  if(jd.source==='ai_generated'){
+    if(jd.jd_document_path){await tpDownloadUrl(jd.jd_document_path,(jd.name||'job-description')+'.html');return;}
+    const blob=new Blob([jd.content_text||''],{type:'text/plain'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=(jd.name||'job-description')+'.txt';a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    return;
+  }
   if(jd.isDefault){const a=document.createElement('a');a.href=jd.url;a.download=jd.name+'.pdf';a.click();return;}
   if(isS3Path(jd.storage_path)){await s3OpenSigned(jd.storage_path,jd.name+'.pdf');return;}
+  if(!jd.storage_path){toast('This entry has no file attached','err');return;}
   const {data,error}=await sb.storage.from('recruitment').createSignedUrl(jd.storage_path,300);
   if(error){toast('Could not download file: '+error.message,'err');return;}
   const a=document.createElement('a');a.href=data.signedUrl;a.download=jd.name+'.pdf';a.click();
@@ -10885,9 +11042,10 @@ function recJDCard(jd){
   return `<div class="card card-pad lib-card${sel?' selected':''}" id="rjd_${jd.id}" style="cursor:pointer;border:2px solid ${sel?'var(--brand)':'var(--line)'};position:relative" onclick="recToggleSel('${jd.id}')" ondblclick="event.stopPropagation();recJdOpen('${jd.id}')">
     ${sel?`<div style="position:absolute;top:10px;right:10px;width:20px;height:20px;background:var(--brand);border-radius:50%;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-check" style="color:#fff;font-size:10px"></i></div>`:''}
     ${jd.isDefault?`<div style="position:absolute;top:10px;left:10px"><span class="tag t-gray" style="font-size:10px">Default</span></div>`:''}
-    <div style="display:flex;align-items:center;gap:12px;${jd.isDefault?'margin-top:18px':''}">
-      <div style="width:44px;height:48px;background:#fff5f5;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid #fecaca">
-        <i class="fa-solid fa-file-pdf" style="color:#dc2626;font-size:20px"></i>
+    ${jd.source==='ai_generated'?`<div style="position:absolute;top:10px;left:10px"><span class="tag" style="font-size:10px;background:#ede9fe;color:#6d28d9"><i class="fa-solid fa-wand-magic-sparkles"></i> AI</span></div>`:''}
+    <div style="display:flex;align-items:center;gap:12px;${jd.isDefault||jd.source==='ai_generated'?'margin-top:18px':''}">
+      <div style="width:44px;height:48px;background:${jd.source==='ai_generated'?'#f5f3ff':'#fff5f5'};border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid ${jd.source==='ai_generated'?'#ddd6fe':'#fecaca'}">
+        <i class="fa-solid ${jd.source==='ai_generated'?'fa-wand-magic-sparkles':'fa-file-pdf'}" style="color:${jd.source==='ai_generated'?'#7c3aed':'#dc2626'};font-size:20px"></i>
       </div>
       <div style="min-width:0">
         <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(jd.name)}</div>
@@ -11016,17 +11174,11 @@ function cmpPrevRange(){
 }
 function cmpPrevKey(){const p=cmpPrevRange();return p?('custom:'+p.since+':'+p.until):null;}
 function cmpPrevLabel(){const p=cmpPrevRange();return p?(p.since===p.until?p.since:(p.since+' → '+p.until)):'previous period';}
-// Sync the previous window for META only — google-ads-live now fills both buckets in one call
-// (see its prev_since/prev_until parameters), so asking it twice is unnecessary.
-async function cmpSyncPrev(which){
-  if(which!=='meta'&&which!=='both')return;
-  const p=cmpPrevRange(); if(!p)return;
-  try{
-    const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
-    const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-    await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify({level:'campaign',period:'custom',since:p.since,until:p.until})}).catch(function(){});
-  }catch(e){}
-}
+// Meta's previous-period window is now filled by the MCP ingest pipeline (mcp-ads-ingest),
+// not fetched live — see camp.campaign_insights' own synced_at. google-ads-live still fills
+// both of its own buckets in one call (its prev_since/prev_until parameters), so there's
+// nothing left for this to do; kept as a no-op so its two call sites don't need to change.
+async function cmpSyncPrev(which){}
 // Trend pill. lowerIsBetter=true for cost metrics (a fall is good).
 function cmpTrend(cur,prev,lowerIsBetter){
   cur=Number(cur)||0;
@@ -11329,17 +11481,15 @@ async function cmpBothView(v,seg){
   v.innerHTML=cmpSourceBar()+cmpPeriodBar()+'<div class="loader"><div class="spin"></div></div>';
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
+  // Meta's half of this view is now MCP-fed (see camp.campaign_insights' synced_at), not
+  // fetched live — only google-ads-live still needs asking here.
   if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
     try{
       const {data:{session}}=await sb.auth.getSession();const token=session&&session.access_token;
       const hdr={'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY};
-      const mbody=CMP_PERIOD==='custom'?{level:'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:'campaign',period:CMP_PERIOD};
       const gbody=CMP_PERIOD==='custom'?{period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{period:CMP_PERIOD};
       const pr0=cmpPrevRange(); if(pr0){gbody.prev_since=pr0.since;gbody.prev_until=pr0.until;}
-      await Promise.all([
-        fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:hdr,body:JSON.stringify(mbody)}).catch(function(){}),
-        fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){})
-      ]);
+      await fetch(SUPABASE_URL+'/functions/v1/google-ads-live',{method:'POST',headers:hdr,body:JSON.stringify(gbody)}).catch(function(){});
     }catch(e){}
   }
   await cmpSyncPrev('both');
@@ -11708,6 +11858,510 @@ async function cmpGoogleView(v,seg){
     try{new Chart(document.getElementById('gCh4'),{type:'bar',data:{labels:labels,datasets:[{label:'Cost / Conv (₹)',data:rows.map(function(r){return r.cpl!=null?Math.round(r.cpl):0;}),backgroundColor:'#0ea5e9',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
   },60);}
 }
+// ── HR & Recruitment (New) ───────────────────────────────────────────────────
+// Parallel to VIEWS.recruitment/VIEWS.hr — same underlying data (hr.manpower_requests,
+// recruit.tests, recruit.job_descriptions), redesigned UI + the approval workflow. Nothing here
+// is read by the old "hr"/"recruitment" tabs, so this is safe to iterate on independently.
+const TP_CSS='<style id="tpCss">.tp-lbl{font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em}.tp-mp-row:hover,.tp-ref-row:hover{background:#f8fafc}</style>';
+let TP_REF_RECORDS=null;
+VIEWS.talent=async function(v,seg){
+  setCrumb(['People','HR & Recruitment (New)']);
+  const tabs=['ManPower Form','Referrals','Tracker','Monthly Update','Tests','Descriptions'];
+  const ti=mTab(seg,tabs.length);
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-people-arrows','#0369a1','HR & Recruitment (New)')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
+    +mTabs('talent',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  recWatchPerms();
+  if(ti===0){await tpManpower();return;}
+  if(ti===1){await tpReferrals();return;}
+  if(ti===2){await tpTracker();return;}
+  if(ti===3){await tpMonthlyUpdate();return;}
+  if(ti===4){await recTests();return;}
+  await recLoadJDs(v);
+};
+
+window.tpDownloadUrl=async function(url,filename){
+  try{
+    const res=await fetch(url);
+    const blob=await res.blob();
+    const objUrl=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=objUrl;a.download=filename;a.click();
+    setTimeout(()=>URL.revokeObjectURL(objUrl),1000);
+  }catch(e){toast('Download failed: '+(e&&e.message||e),'err');}
+};
+function tpApprovalTag(rec){
+  const s=rec.approval_status||'Pending';
+  if(s==='Approved')return '<span class="tag t-green"><i class="fa-solid fa-check"></i> Approved</span>';
+  if(s==='Rejected')return '<span class="tag t-red"><i class="fa-solid fa-xmark"></i> Rejected</span>';
+  return '<span class="tag t-amber"><i class="fa-solid fa-hourglass-half"></i> Pending Approval</span>';
+}
+
+/* ── ManPower Form v2 (approval workflow + AI-content preview) ── */
+async function tpManpower(){
+  const b=$('recBody');
+  if(!MP_RECORDS){
+    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+    try{const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
+      if(error)throw error; MP_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  }
+  tpMpRender();
+}
+function tpMpRender(){
+  const b=$('recBody'); if(!b)return;
+  const rows=MP_RECORDS||[];
+  const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
+  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">ManPower Requisitions <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn" onclick="tpMpPreviewCreative()"><i class="fa-solid fa-image"></i> Preview Creative Design</button>
+      <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Click a row for its status, the AI-generated Job Description / Description / Creative, and to Approve or Reject it.</div>
+  <div style="overflow-x:auto">
+  <table class="tbl" id="tpMpTbl">
+    <thead><tr><th>Job Title</th><th>Department</th><th>Date</th><th style="text-align:center">Vacancy</th><th>Priority</th><th>Approval</th></tr></thead>
+    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row" data-id="${r.id}" style="cursor:pointer" onclick="tpMpShowDetail(${r.id})">
+      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
+      <td>${esc(r.department||'—')}</td>
+      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
+      <td style="text-align:center">${esc(String(r.no_of_vacancy||'—'))}</td>
+      <td>${priTag(r.priority)}</td>
+      <td>${tpApprovalTag(r)}</td>
+    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--slate)">No requisitions yet — click <b>Fill Form</b> to add one</td></tr>'}
+    </tbody>
+  </table>
+  </div>
+  <div id="tpMpDetail" style="display:none"></div>`;
+}
+window.tpMpPreviewCreative=function(){
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-image"></i> Preview Creative Design</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <div class="two"><div><label>Sample Job Title</label><input id="tpPvTitle" class="inp" value="Sales Manager"></div><div><label>Sample Department</label><input id="tpPvDept" class="inp" value="Sales"></div></div>
+    <div id="tpPvResult" style="margin-top:14px;text-align:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Generating preview…</div>
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="tpMpPreviewCreativeRun()"><i class="fa-solid fa-rotate"></i> Regenerate Preview</button></div>`);
+  tpMpPreviewCreativeRun();
+};
+window.tpMpPreviewCreativeRun=async function(){
+  const box=$('tpPvResult');if(!box)return;
+  box.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Generating preview…';
+  const job_title=($('tpPvTitle')||{}).value?.trim()||'Sample Position';
+  const department=($('tpPvDept')||{}).value?.trim()||'';
+  const {data,error}=await sb.functions.invoke('manpower-ai-generate',{body:{sample:true,job_title,department}});
+  if(error||!data||data.error){box.innerHTML='<span style="color:var(--err)">'+((error&&error.message)||(data&&data.error)||'Failed')+'</span>';return;}
+  box.innerHTML=data.creative_path?`<img src="${esc(data.creative_path)}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`:'<span style="color:var(--err)">No creative returned</span>';
+};
+window.tpMpFillForm=function(){
+  // Open to everyone — this is the "raise a need" side of the approval workflow, not a write-guarded action.
+  mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="tpMpSave()"><i class="fa-solid fa-check"></i> Submit</button>');
+};
+window.tpMpSave=async function(){
+  const d=mpCollect();
+  if(!d.job_title){toast('Job Title is required','err');return;}
+  d.raised_by=state.email||'';
+  const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
+  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();
+  toast(data.approval_status==='Approved'?'Requisition submitted and auto-approved':'Requisition submitted — pending HR approval');
+  tpMpRender();
+  // Fire the AI JD/Description/Creative generation in the background — the submitter doesn't need
+  // to wait or have write access for this; it's just drafting content, not an approval action.
+  sb.functions.invoke('manpower-ai-generate',{body:{request_id:data.id,requested_by:state.email||''}}).then(({data:gen,error})=>{
+    const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
+    if(error||!gen||gen.error){rec.ai_status='failed';return;}
+    rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
+  });
+};
+window.tpMpShowDetail=function(id){
+ try{
+  const rec=(MP_RECORDS||[]).find(r=>r.id===id);
+  if(!rec){toast('Could not find requisition #'+id+' — try refreshing the page','err');console.error('tpMpShowDetail: no record with id',id,'in MP_RECORDS',MP_RECORDS);return;}
+  const panel=$('tpMpDetail');
+  if(!panel){toast('Detail panel container missing from the page — try refreshing','err');console.error('tpMpShowDetail: #tpMpDetail not found in DOM');return;}
+  document.querySelectorAll('.tp-mp-row').forEach(tr=>tr.style.background='');
+  const activeRow=document.querySelector('.tp-mp-row[data-id="'+id+'"]');
+  if(activeRow)activeRow.style.background='#fdf4f6';
+  panel.style.display='block';
+  const canAct=recCanWrite(), pending=(rec.approval_status||'Pending')==='Pending';
+  const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
+  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px;position:relative">
+    <button style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--slate);line-height:1" onclick="tpMpCloseDetail()">&times;</button>
+    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-right:32px">
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
+        <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)} &nbsp;·&nbsp; raised by ${esc(rec.raised_by||'—')}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${priTag(rec.priority)}${tpApprovalTag(rec)}
+        ${canAct&&pending?`<button class="btn btn-sm btn-primary" onclick="tpMpApprove(${rec.id})"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpReject(${rec.id})"><i class="fa-solid fa-xmark"></i> Reject</button>`:''}
+        <button class="btn btn-sm" onclick="mpEdit(${rec.id})"><i class="fa-solid fa-pen"></i> Edit</button>
+        ${canAct?`<button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpDeleteOne(${rec.id})"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+      </div>
+    </div>
+    ${rec.approval_status==='Rejected'&&rec.rejection_reason?`<div style="margin-top:10px;padding:10px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#b91c1c">Rejection reason · </span><span style="font-size:13px;color:#7f1d1d">${esc(rec.rejection_reason)}</span></div>`:''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+      <div><div class="tp-lbl">Vacancies</div><div style="font-size:14px;margin-top:2px">${esc(String(rec.no_of_vacancy||'—'))}</div></div>
+      <div><div class="tp-lbl">Reporting To / HOD</div><div style="font-size:14px;margin-top:2px">${esc(rec.reporting_person||'—')}</div></div>
+      <div><div class="tp-lbl">Qualification</div><div style="font-size:14px;margin-top:2px">${esc(rec.qualification||'—')}</div></div>
+      <div><div class="tp-lbl">Experience</div><div style="font-size:14px;margin-top:2px">${esc(rec.experience||'—')}</div></div>
+      <div><div class="tp-lbl">Gender</div><div style="font-size:14px;margin-top:2px">${esc(rec.gender||'—')}</div></div>
+      <div><div class="tp-lbl">Salary Range</div><div style="font-size:14px;margin-top:2px">${esc(rec.salary_range||'—')}</div></div>
+      <div><div class="tp-lbl">Location</div><div style="font-size:14px;margin-top:2px">${esc(rec.location||'—')}</div></div>
+    </div>
+    ${rec.job_description?`<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)"><div class="tp-lbl" style="margin-bottom:6px">Job Description / KPI (as filled in the form)</div><div style="font-size:13.5px;white-space:pre-wrap;line-height:1.6;color:var(--ink)">${esc(rec.job_description)}</div></div>`:''}
+    ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i><span style="font-weight:700;font-size:13.5px">AI-generated for this posting</span>
+        ${rec.ai_status==='generating'?'<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Generating…</span>':''}
+        ${rec.ai_status==='failed'?'<span class="tag t-red">Generation failed</span>':''}
+        ${canAct&&rec.ai_status!=='generating'?`<button class="btn btn-sm" style="margin-left:auto" onclick="tpMpGenerate(${rec.id})"><i class="fa-solid fa-wand-magic-sparkles"></i> ${rec.ai_status==='ready'?'Regenerate':'Generate with AI'}</button>`:''}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+        <div class="card" style="padding:12px">
+          <div class="tp-lbl" style="margin-bottom:6px">Creative</div>
+          ${rec.ai_creative_path?`<img src="${esc(rec.ai_creative_path)}" style="width:100%;border-radius:8px;display:block;margin-bottom:8px;border:1px solid var(--line)">
+            <div style="display:flex;gap:6px"><button class="btn btn-sm" style="flex:1" onclick="window.open('${esc(rec.ai_creative_path)}','_blank')"><i class="fa-solid fa-eye"></i> Preview</button><button class="btn btn-sm" style="flex:1" onclick="tpDownloadUrl('${esc(rec.ai_creative_path)}','${esc(rec.job_title||'creative')}.svg')"><i class="fa-solid fa-download"></i> Download</button></div>`
+            :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
+        </div>
+        <div class="card" style="padding:12px">
+          <div class="tp-lbl" style="margin-bottom:6px">Job Description Document</div>
+          ${rec.ai_jd_document_path?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><i class="fa-solid fa-file-lines" style="font-size:28px;color:${'#D21F3C'}"></i><span style="font-size:12.5px;color:var(--slate)">Formatted document, ready to share</span></div>
+            <div style="display:flex;gap:6px"><button class="btn btn-sm" style="flex:1" onclick="window.open('${esc(rec.ai_jd_document_path)}','_blank')"><i class="fa-solid fa-eye"></i> Preview</button><button class="btn btn-sm" style="flex:1" onclick="tpDownloadUrl('${esc(rec.ai_jd_document_path)}','${esc(rec.job_title||'job-description')}.html')"><i class="fa-solid fa-download"></i> Download</button></div>`
+            :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
+        </div>
+        <div class="card" style="padding:12px"><div class="tp-lbl">Description (Post Text)</div><div style="margin-top:8px;font-size:12.5px;${rec.ai_platform_post_text?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_platform_post_text?esc(rec.ai_platform_post_text):'Not generated yet'}</div></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The Careers Page Link is wired up next — this panel will get a Link field once that's live.</div>
+    </div>
+  </div>`;
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+ }catch(e){
+  console.error('tpMpShowDetail threw:',e);
+  toast('Could not open that requisition: '+(e&&e.message||e),'err');
+ }
+};
+window.tpMpGenerate=async function(id){
+  if(!recGuard())return;
+  const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
+  rec.ai_status='generating';tpMpShowDetail(id);
+  const {data,error}=await sb.functions.invoke('manpower-ai-generate',{body:{request_id:id,requested_by:state.email||''}});
+  if(error||!data||data.error){
+    toast((error&&error.message)||(data&&data.error)||'Generation failed','err');
+    rec.ai_status='failed';tpMpShowDetail(id);return;
+  }
+  rec.ai_status='ready';rec.ai_job_description=data.job_description;rec.ai_job_description_json=data.job_description_json;rec.ai_platform_post_text=data.platform_post_text;rec.ai_creative_path=data.creative_path;
+  toast('Generated');tpMpShowDetail(id);
+};
+window.tpMpCloseDetail=function(){const p=$('tpMpDetail');if(p)p.style.display='none';document.querySelectorAll('.tp-mp-row').forEach(tr=>tr.style.background='');};
+window.tpMpApprove=async function(id){if(!recGuard())return;
+  const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
+  if(error){toast(error.message,'err');return;}
+  const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
+  toast('Approved');tpMpRender();tpMpShowDetail(id);
+};
+window.tpMpReject=function(id){if(!recGuard())return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Requisition</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm"><label>Reason (optional, shown to the requester)</label><textarea id="tpRejReason" class="inp" rows="3" placeholder="Why is this being rejected?"></textarea></div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" style="background:var(--err);border-color:var(--err)" onclick="tpMpRejectConfirm(${id})"><i class="fa-solid fa-xmark"></i> Reject</button></div>`);
+};
+window.tpMpRejectConfirm=async function(id){
+  const reason=($('tpRejReason')||{}).value?.trim()||null;
+  const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:reason}).eq('id',id).select().single();
+  if(error){toast(error.message,'err');return;}
+  const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
+  closeModal();toast('Rejected');tpMpRender();tpMpShowDetail(id);
+};
+window.tpMpDeleteOne=async function(id){if(!recGuard())return;
+  if(!await confirmDialog('Delete this requisition?'))return;
+  const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
+  if(error){toast(error.message,'err');return;}
+  MP_RECORDS=(MP_RECORDS||[]).filter(r=>r.id!==id);
+  tpMpCloseDetail();toast('Deleted');tpMpRender();
+};
+
+/* ── Referral Tab ── */
+async function tpReferrals(){
+  const b=$('recBody');
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{const {data,error}=await sb.schema('hr').from('referrals').select('*').order('created_at',{ascending:false});
+    if(error)throw error; TP_REF_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  tpRefRender();
+}
+function tpRefRender(){
+  const b=$('recBody'); if(!b)return;
+  const rows=TP_REF_RECORDS||[];
+  const canAct=recCanWrite();
+  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Employee Referrals <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div style="margin-left:auto"><button class="btn btn-primary" onclick="tpRefAdd()"><i class="fa-solid fa-user-plus"></i> Refer Someone</button></div>
+  </div>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th>Candidate</th><th>Position</th><th>Phone</th><th>Email</th><th>Referred By</th><th>Date</th><th>Approval</th></tr></thead>
+    <tbody>${rows.length?rows.map(r=>`<tr class="tp-ref-row">
+      <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
+      <td>${esc(r.position||'—')}</td>
+      <td>${esc(r.referred_phone||'—')}</td>
+      <td>${esc(r.referred_email||'—')}</td>
+      <td>${esc(r.referred_by||'—')}</td>
+      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${new Date(r.created_at).toLocaleDateString()}</td>
+      <td>${tpApprovalTag(r)}${canAct&&(r.approval_status||'Pending')==='Pending'?` <button class="btn btn-sm btn-primary" style="margin-left:6px;padding:3px 8px" onclick="tpRefApprove(${r.id})"><i class="fa-solid fa-check"></i></button><button class="btn btn-sm" style="margin-left:4px;padding:3px 8px;color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})"><i class="fa-solid fa-xmark"></i></button>`:''}</td>
+    </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--slate)">No referrals yet — click <b>Refer Someone</b></td></tr>'}
+    </tbody>
+  </table></div>`;
+}
+window.tpRefAdd=function(){
+  // Open to everyone — referring a candidate is the "raise" side of the approval workflow.
+  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer Someone</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Candidate Name *</label><input id="tpRfName" class="inp">
+    <div class="two"><div><label>Phone</label><input id="tpRfPhone" class="inp"></div><div><label>Email</label><input id="tpRfEmail" class="inp"></div></div>
+    <label>Position *</label><select id="tpRfPosition" class="sel">
+      <option value="">— Select an open requisition —</option>
+      ${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}${r.department?' · '+esc(r.department):''}</option>`).join('')}
+    </select>
+    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet — ask HR to approve a ManPower Form first, or refer against a future opening once one exists.</div>':''}
+    <label>Notes</label><textarea id="tpRfNotes" class="inp" rows="2"></textarea>
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfSaveBtn" onclick="tpRefSave()"><i class="fa-solid fa-check"></i> Submit Referral</button></div>`);
+  setTimeout(()=>{const el=$('tpRfName');if(el)el.focus();},100);
+};
+window.tpRefSave=async function(){
+  const name=($('tpRfName')||{}).value?.trim();
+  if(!name){toast('Candidate name is required','err');return;}
+  const reqId=parseInt(($('tpRfPosition')||{}).value||'');
+  if(!reqId){toast('Please pick a position','err');return;}
+  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
+  const d={referred_name:name,referred_phone:($('tpRfPhone')||{}).value?.trim()||null,referred_email:($('tpRfEmail')||{}).value?.trim()||null,
+    manpower_request_id:reqId,position:req&&req.job_title||null,notes:($('tpRfNotes')||{}).value?.trim()||null,referred_by:state.email||''};
+  const btn=$('tpRfSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const {data,error}=await sb.schema('hr').from('referrals').insert(d).select().single();
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}return;}
+  TP_REF_RECORDS=[data,...(TP_REF_RECORDS||[])];closeModal();
+  toast(data.approval_status==='Approved'?'Referral submitted and auto-approved':'Referral submitted — pending HR approval');
+  tpRefRender();
+};
+window.tpRefApprove=async function(id){if(!recGuard())return;
+  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
+  if(error){toast(error.message,'err');return;}
+  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
+  toast('Approved');tpRefRender();
+};
+window.tpRefReject=async function(id){if(!recGuard())return;
+  if(!await confirmDialog('Reject this referral?'))return;
+  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString()}).eq('id',id).select().single();
+  if(error){toast(error.message,'err');return;}
+  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
+  toast('Rejected');tpRefRender();
+};
+
+/* ── Interview Tracker v2 ──
+   Shows the Hold-only baseline (kept from before the reset) plus every fresh candidate created
+   going forward by an Approved Referral or added here directly. Feedback drives hr.candidate_set_stage(),
+   which keeps hr.candidates.stage and the legacy interview_tracker.feedback/status in sync. */
+const TP_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Done','Selected','Rejected','Hold','Backed Out','Joined'];
+let TP_TR_RECORDS=null, TP_TR_SEL=new Set();
+async function tpTracker(){
+  const b=$('recBody'); if(!b)return;
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{const {data,error}=await sb.schema('hr').from('interview_tracker').select('*').order('id',{ascending:false});
+    if(error)throw error; TP_TR_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  TP_TR_SEL=new Set();
+  tpTrRender();
+}
+function tpTrFbTag(s){
+  const m={'Selected':'t-green','Joined':'t-green','Rejected':'t-red','Backed Out':'t-red','Hold':'t-amber','Tests Sent':'t-gray','Test Passed':'t-gray','Interview Scheduled':'t-gray','Interview Done':'t-gray'};
+  return s?`<span class="tag ${m[s]||'t-gray'}">${esc(s)}</span>`:'<span class="tag t-gray">—</span>';
+}
+function tpTrRender(){
+  const b=$('recBody'); if(!b)return;
+  const rows=TP_TR_RECORDS||[];
+  const canAct=recCanWrite();
+  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Interview Tracker <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add Candidate</button>
+      ${canAct?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email Selected</button>
+      <button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Only Hold candidates from before today, plus fresh ones from Approved Referrals or added directly here.</div>
+  <div style="overflow-x:auto"><table class="tbl" style="min-width:1200px">
+    <thead><tr>
+      ${canAct?'<th style="width:32px"><input type="checkbox" onchange="tpTrToggleAll(this)"></th>':''}
+      <th>Candidate</th><th>Position</th><th>Source</th><th>Entity</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Feedback</th><th>Notes</th>
+    </tr></thead>
+    <tbody>${rows.length?rows.map(r=>`<tr>
+      ${canAct?`<td><input type="checkbox" class="tp-tr-cb" data-id="${r.id}" data-email="${esc(r.email||'')}" onchange="tpTrRowCheck(this)"></td>`:''}
+      <td style="font-weight:600">${esc(r.candidate_name||'—')}</td>
+      <td>${esc(r.position||'—')}</td>
+      <td style="font-size:12px;color:var(--slate)">${esc(r.source||'—')}</td>
+      <td style="font-size:12px">${esc(r.entity||'—')}</td>
+      <td style="font-family:monospace;font-size:12px">${esc(r.number||'—')}</td>
+      <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:'—'}</td>
+      <td style="font-size:12px;color:var(--slate);white-space:nowrap">${esc(r.scheduled_date||'—')}</td>
+      <td>${canAct?`<select class="sel" style="font-size:12px;padding:4px 6px" onchange="tpTrFeedback(${r.id},this.value)">
+          <option value="">— Select —</option>
+          ${TP_STAGES.map(s=>`<option${r.feedback===s?' selected':''}>${s}</option>`).join('')}
+        </select>`:tpTrFbTag(r.feedback)}</td>
+      <td style="font-size:12px;color:var(--slate)">${esc(r.notes||'—')}</td>
+    </tr>`).join(''):`<tr><td colspan="${canAct?9:8}" style="text-align:center;padding:40px;color:var(--slate)">No candidates yet — click <b>Add Candidate</b></td></tr>`}
+    </tbody>
+  </table></div>`;
+}
+window.tpTrToggleAll=function(el){document.querySelectorAll('.tp-tr-cb').forEach(c=>{c.checked=el.checked;const id=Number(c.dataset.id);if(el.checked)TP_TR_SEL.add(id);else TP_TR_SEL.delete(id);});tpTrSyncToolbar();};
+window.tpTrRowCheck=function(cb){const id=Number(cb.dataset.id);if(cb.checked)TP_TR_SEL.add(id);else TP_TR_SEL.delete(id);tpTrSyncToolbar();};
+function tpTrSyncToolbar(){
+  const n=TP_TR_SEL.size;
+  const eb=$('tpTrEmailBtn'),db=$('tpTrDelBtn');
+  if(eb){eb.disabled=n===0;eb.style.opacity=n>0?'1':'.4';}
+  if(db){db.disabled=n===0;db.style.opacity=n>0?'1':'.4';}
+}
+// candidate_set_stage takes a candidates.id, but the Tracker row's own id (interview_tracker.id) is what
+// we render against — resolve via candidate_id when present, otherwise fall back to a direct tracker update
+// (rows with no candidate_id are the pre-reset Hold rows carried over, which never got a hr.candidates row).
+window.tpTrFeedback=async function(trackerId,stage){
+  if(!recGuard()||!stage)return;
+  const rec=(TP_TR_RECORDS||[]).find(r=>r.id===trackerId); if(!rec)return;
+  if(rec.candidate_id){
+    const {error}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:rec.candidate_id,p_stage:stage});
+    if(error){toast(error.message,'err');return;}
+  }else{
+    const {error}=await sb.schema('hr').from('interview_tracker').update({feedback:stage,status:stage}).eq('id',trackerId);
+    if(error){toast(error.message,'err');return;}
+  }
+  rec.feedback=stage;toast('Updated');
+};
+window.tpTrAdd=function(){
+  if(!recGuard())return;
+  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved');
+  const entities=(window._tpEntities||[]);
+  const sources=(window._tpSources||[]);
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Candidate</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <div class="two"><div><label>Candidate Name *</label><input id="tpTrName" class="inp"></div>
+    <div><label>Position *</label><select id="tpTrPos" class="sel"><option value="">— Select —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
+    <div class="two"><div><label>Source</label><select id="tpTrSrc" class="sel"><option value="">— Select —</option>${sources.map(s=>`<option>${esc(s.name)}</option>`).join('')}</select></div>
+    <div><label>Entity (recruiter)</label><select id="tpTrEntity" class="sel"><option value="">— Select —</option>${entities.map(e=>`<option>${esc(e.name)}</option>`).join('')}</select></div></div>
+    <div class="two"><div><label>Phone</label><input id="tpTrPhone" class="inp"></div><div><label>Email</label><input id="tpTrEmail" class="inp"></div></div>
+    <label>Notes</label><textarea id="tpTrNotes" class="inp" rows="2"></textarea>
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrSaveBtn" onclick="tpTrSave()"><i class="fa-solid fa-check"></i> Add</button></div>`);
+  if(!window._tpEntities){
+    sb.schema('hr').from('entities').select('name').eq('active',true).order('sort').then(({data})=>{window._tpEntities=data||[];const s=$('tpTrEntity');if(s&&data)s.innerHTML='<option value="">— Select —</option>'+data.map(e=>`<option>${esc(e.name)}</option>`).join('');});
+  }
+  if(!window._tpSources){
+    sb.schema('hr').from('sources').select('name').order('sort').then(({data})=>{window._tpSources=data||[];const s=$('tpTrSrc');if(s&&data)s.innerHTML='<option value="">— Select —</option>'+data.map(x=>`<option>${esc(x.name)}</option>`).join('');});
+  }
+  setTimeout(()=>{const el=$('tpTrName');if(el)el.focus();},100);
+};
+window.tpTrSave=async function(){
+  const name=($('tpTrName')||{}).value?.trim();
+  const reqId=parseInt(($('tpTrPos')||{}).value||'');
+  if(!name||!reqId){toast('Name and Position are required','err');return;}
+  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
+  const btn=$('tpTrSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const {data:rowId,error:rrErr}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+  if(rrErr){toast(rrErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
+  const source=($('tpTrSrc')||{}).value||null, entity=($('tpTrEntity')||{}).value||(req?req.approved_by:null)||null;
+  const phone=($('tpTrPhone')||{}).value?.trim()||null, email=($('tpTrEmail')||{}).value?.trim()||null;
+  const {data:cand,error:cErr}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,name,email,phone,
+    position:req&&req.job_title,source,entity,stage:'Tests Sent',created_by:state.email,applied_at:new Date().toISOString()}).select().single();
+  if(cErr){toast(cErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
+  const notes=($('tpTrNotes')||{}).value?.trim()||null;
+  const {data:tr,error:tErr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:name,position:req&&req.job_title,source,entity,number:phone,email,notes,candidate_id:cand.id}).select().single();
+  if(tErr){toast(tErr.message,'err');return;}
+  await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+  TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();toast('Candidate added');tpTrRender();
+};
+window.tpTrEmailSel=function(){
+  const emails=[...TP_TR_SEL].map(id=>{const r=(TP_TR_RECORDS||[]).find(x=>x.id===id);return r&&r.email;}).filter(Boolean);
+  if(!emails.length){toast('None of the selected candidates have an email on file','err');return;}
+  window.open('mailto:?bcc='+encodeURIComponent(emails.join(','))+'&subject='+encodeURIComponent('Regarding your application'),'_blank');
+};
+window.tpTrDeleteSel=async function(){
+  if(!recGuard())return;
+  const ids=[...TP_TR_SEL]; if(!ids.length)return;
+  if(!await confirmDialog('Delete '+ids.length+' candidate(s) from the Tracker? This cannot be undone.'))return;
+  const {error}=await sb.schema('hr').from('interview_tracker').delete().in('id',ids);
+  if(error){toast(error.message,'err');return;}
+  TP_TR_RECORDS=(TP_TR_RECORDS||[]).filter(r=>!ids.includes(r.id));TP_TR_SEL=new Set();
+  toast(ids.length+' deleted');tpTrRender();
+};
+
+/* ── Monthly Update v2 — one row per position per month, live stage counts, deletable ── */
+let TP_MU_MONTHS=null, TP_MU_CUR=null, TP_MU_ROWS=null;
+async function tpMonthlyUpdate(){
+  const b=$('recBody'); if(!b)return;
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{const {data,error}=await sb.schema('hr').from('tracker_rows').select('month').order('month',{ascending:false});
+    if(error)throw error;
+    TP_MU_MONTHS=[...new Set((data||[]).map(r=>r.month))];
+  }catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  const curMonth=new Date().toISOString().slice(0,7)+'-01';
+  if(!TP_MU_MONTHS.includes(curMonth))TP_MU_MONTHS=[curMonth,...TP_MU_MONTHS];
+  TP_MU_CUR=TP_MU_CUR||TP_MU_MONTHS[0];
+  await tpMuLoad();
+}
+function tpMuMonthLabel(m){const[y,mo]=m.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1]+' '+y;}
+async function tpMuLoad(){
+  const b=$('recBody'); if(!b)return;
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  let rows=[];
+  try{const {data,error}=await sb.schema('hr').from('tracker_rows').select('*,manpower_requests(department)').eq('month',TP_MU_CUR).order('position');
+    if(error)throw error; rows=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  let counts={};
+  if(rows.length){
+    const {data:cands}=await sb.schema('hr').from('candidates').select('tracker_row_id,stage').in('tracker_row_id',rows.map(r=>r.id));
+    (cands||[]).forEach(c=>{counts[c.tracker_row_id]=counts[c.tracker_row_id]||{};counts[c.tracker_row_id][c.stage]=(counts[c.tracker_row_id][c.stage]||0)+1;});
+  }
+  TP_MU_ROWS=rows;
+  tpMuRender(counts);
+}
+function tpMuRender(counts){
+  const b=$('recBody'); if(!b)return;
+  const rows=TP_MU_ROWS||[];
+  const canAct=recCanWrite();
+  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Monthly Update</div>
+    <select class="sel" style="margin-left:8px" onchange="tpMuSwitchMonth(this.value)">${(TP_MU_MONTHS||[]).map(m=>`<option value="${m}"${m===TP_MU_CUR?' selected':''}>${tpMuMonthLabel(m)}</option>`).join('')}</select>
+    ${canAct?`<button class="btn" style="margin-left:auto" onclick="tpMuOpenMonth()"><i class="fa-solid fa-rotate"></i> Refresh open positions into this month</button>`:''}
+  </div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">One row per position; counts update live as candidates move through Tracker feedback. No manual data entry.</div>
+  <div style="overflow-x:auto"><table class="tbl" style="min-width:1100px">
+    <thead><tr><th>Position</th><th>Department</th>${TP_STAGES.map(s=>`<th style="text-align:center;font-size:11px">${esc(s)}</th>`).join('')}${canAct?'<th></th>':''}</tr></thead>
+    <tbody>${rows.length?rows.map(r=>{
+      const c=counts[r.id]||{};
+      return `<tr>
+        <td style="font-weight:600">${esc(r.position||'—')}${r.carried_from_row_id?' <span class="tag t-amber" style="margin-left:4px">carried</span>':''}</td>
+        <td style="font-size:12px;color:var(--slate)">${esc((r.manpower_requests&&r.manpower_requests.department)||'—')}</td>
+        ${TP_STAGES.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
+        ${canAct?`<td><button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMuDeleteRow(${r.id})"><i class="fa-solid fa-trash"></i></button></td>`:''}
+      </tr>`;
+    }).join(''):`<tr><td colspan="${2+TP_STAGES.length+(canAct?1:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
+    </tbody>
+  </table></div>`;
+}
+window.tpMuSwitchMonth=function(m){TP_MU_CUR=m;tpMuLoad();};
+window.tpMuOpenMonth=async function(){
+  if(!recGuard())return;
+  const {error}=await sb.schema('hr').rpc('tracker_open_month',{p_month:null});
+  if(error){toast(error.message,'err');return;}
+  toast('Refreshed');await tpMonthlyUpdate();
+};
+window.tpMuDeleteRow=async function(id){
+  if(!recGuard())return;
+  const {count}=await sb.schema('hr').from('candidates').select('id',{count:'exact',head:true}).eq('tracker_row_id',id);
+  if(count){toast('Can\'t delete — '+count+' candidate(s) are linked to this row','err');return;}
+  if(!await confirmDialog('Delete this row?'))return;
+  const {error}=await sb.schema('hr').from('tracker_rows').delete().eq('id',id);
+  if(error){toast(error.message,'err');return;}
+  toast('Deleted');await tpMuLoad();
+};
+
 VIEWS.campaigns=async function(v,seg){
   setCrumb(['Growth & Strategy','Campaign Analytics']);
   if(CMP_SOURCE==='google'){ return cmpGoogleView(v,seg); }
@@ -11717,17 +12371,8 @@ VIEWS.campaigns=async function(v,seg){
   const needAd=(ti===3||ti===5);
   const periodKey=CMP_PERIOD==='custom'?('custom:'+CMP_SINCE+':'+CMP_UNTIL):CMP_PERIOD;
   const periodLabel=CMP_PERIOD==='custom'?(CMP_SINCE&&CMP_UNTIL?CMP_SINCE+' → '+CMP_UNTIL:'Custom range'):((CMP_PRESETS.find(function(p){return p[0]===CMP_PERIOD;})||[])[1]||CMP_PERIOD);
-  // Ask the live Edge Function to make sure this exact period+level is fresh (it caches
-  // for a few minutes server-side, so repeat opens are fast — only a real cache miss
-  // actually calls out to Meta).
-  if(CMP_PERIOD!=='custom'||(CMP_SINCE&&CMP_UNTIL)){
-    try{
-      const {data:{session}}=await sb.auth.getSession();
-      const token=session&&session.access_token;
-      const reqBody=CMP_PERIOD==='custom'?{level:needAd?'ad':'campaign',period:'custom',since:CMP_SINCE,until:CMP_UNTIL}:{level:needAd?'ad':'campaign',period:CMP_PERIOD};
-      await fetch(SUPABASE_URL+'/functions/v1/campaign-analytics-live',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},body:JSON.stringify(reqBody)});
-    }catch(e){}
-  }
+  // Data comes from the MCP ingest pipeline now (camp.campaign_insights' own synced_at),
+  // not a live Graph API call on every open — see mcp-ads-ingest.
   await cmpSyncPrev('meta');
   const CMP=()=>sb.schema('camp');
   const prevKey=cmpPrevKey();
@@ -12720,7 +13365,7 @@ async function cpaStaffOptions(force){
 
 VIEWS.custportal_admin=async function(v,seg){
   setCrumb(['Stakeholder Portals','Customer Portal Admin']);
-  const tabs=['Projects & Units','Customers','Farvision Import','Photos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
+  const tabs=['Projects & Units','Customers','Farvision Import','Photos & Videos','Inspection','Documents','Amenities','Sub-meter','Support','Referrals','Maintenance','Modification Requests'];
   const ti=mTab(seg,tabs.length);
   v.innerHTML=mHead('fa-address-card','#0f766e','Customer Portal Admin')+mTabs('custportal_admin',tabs,ti)+'<div id="cpaBody" style="margin-top:14px"><div class="loader"><div class="spin"></div></div></div>';
   const host=$('cpaBody');if(!host)return;
@@ -13271,31 +13916,152 @@ window.cpaUndoImport=async function(id){
   toast('Import undone','ok');route();
 };
 
-/* ---------- Tab 4: Photos ---------- */
+/* ---------- Tab 4: Photos (project-wide, tower-wide, floor-wide, per-flat - each accepts
+   images and videos together, multiple files at once, and lists what's already there with a
+   Delete button so staff can remove anything wrongly uploaded) ---------- */
+function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)&&u.tower).map(u=>u.tower))].sort();}
+function cpaFloorsForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)).map(u=>custDeriveFloor(u.unit_code)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));}
+// A cancelled booking's unit row stays in cust.units for audit history (see the
+// units_project_tower_code_active_uq migration) - fine for financial records, but it means the
+// same physical flat can appear 2-4 times in a flat unit list (one 'booked' row plus every
+// historical 'cancelled' one). For picking WHICH flat to upload photos against, only the
+// currently-occupied row is ever relevant, so this list drops cancelled rows entirely - which
+// also removes every duplicate, since no physical unit has more than one non-cancelled row.
+// Grouped by tower (Farvision's own Project >> Block >> Unit hierarchy) so the list reads like
+// a floor plan instead of 90+ flat, unsorted options.
+function cpaUnitOptionsGrouped(units){
+  const active=units.filter(u=>u.status!=='cancelled');
+  const byTower={};
+  active.forEach(u=>{(byTower[u.tower||'Ungrouped']=byTower[u.tower||'Ungrouped']||[]).push(u);});
+  return Object.keys(byTower).sort().map(tower=>{
+    const group=byTower[tower];
+    const projName=(group[0].projects&&group[0].projects.name)||'';
+    const opts=group.slice().sort((a,b)=>{
+      const fa=Number(custDeriveFloor(a.unit_code))||0,fb=Number(custDeriveFloor(b.unit_code))||0;
+      return fa-fb||String(a.unit_code).localeCompare(String(b.unit_code));
+    }).map(u=>`<option value="${u.id}">Unit ${esc(u.unit_code)}${u.floor_casting_completed_at?'':' · casting pending'}</option>`).join('');
+    return `<optgroup label="${esc(projName)} » ${esc(tower)}">${opts}</optgroup>`;
+  }).join('');
+}
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const unitOpts=units.map(u=>`<option value="${u.id}">${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}${u.floor_casting_completed_at?'':' (casting pending)'}</option>`).join('');
+  const unitOpts=cpaUnitOptionsGrouped(units);
   const today=new Date().toISOString().slice(0,10);
+  const firstProjectId=projects[0]?projects[0].id:null;
+  const towerOpts=firstProjectId?cpaTowersForProject(units,firstProjectId).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(''):'';
+  const floorOpts=firstProjectId?cpaFloorsForProject(units,firstProjectId).map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join(''):'';
   host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos</div>
-    <label>Project</label><select id="cpaPhProject">${projOpts}</select>
+    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos/videos</div>
+    <label>Project</label><select id="cpaPhProject" onchange="cpaRenderProjectPhotoList()">${projOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaPhCaption">
-    <label>Photos</label><input type="file" id="cpaPhFiles" accept="image/*" multiple>
+    <label>Photos / videos</label><input type="file" id="cpaPhFiles" accept="image/*,video/*" multiple>
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaPhList" style="margin-top:14px"></div>
     </div>
-    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos</div>
-    <label>Unit</label><select id="cpaUhUnit">${unitOpts}</select>
+    <div class="card card-pad frm"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
+    <label>Project</label><select id="cpaTwProject" onchange="cpaOnTwProjectChange()">${projOpts}</select>
+    <label>Tower / Block</label><select id="cpaTwTower" onchange="cpaRenderTowerPhotoList()">${towerOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaTwDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaTwCaption">
+    <label>Photos / videos</label><input type="file" id="cpaTwFiles" accept="image/*,video/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaTwList" style="margin-top:14px"></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Floor-wise construction photos/videos</div>
+    <label>Project</label><select id="cpaFlProject" onchange="cpaOnFlProjectChange()">${projOpts}</select>
+    <label>Floor</label><select id="cpaFlFloor" onchange="cpaRenderFloorPhotoList()">${floorOpts}</select>
+    <label>Date shown to customers</label><input type="date" id="cpaFlDate" value="${today}">
+    <label>Caption (optional)</label><input id="cpaFlCaption">
+    <label>Photos / videos</label><input type="file" id="cpaFlFiles" accept="image/*,video/*" multiple>
+    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaFlList" style="margin-top:14px"></div>
+    </div>
+    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos/videos</div>
+    <label>Unit</label><select id="cpaUhUnit" onchange="cpaRenderUnitPhotoList()">${unitOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaUhCaption">
-    <label>Photos</label><input type="file" id="cpaUhFiles" accept="image/*" multiple>
+    <label>Photos / videos</label><input type="file" id="cpaUhFiles" accept="image/*,video/*" multiple>
     <div style="margin-top:12px"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaUhList" style="margin-top:14px"></div>
     </div></div>`;
+  cpaRenderProjectPhotoList();cpaRenderTowerPhotoList();cpaRenderFloorPhotoList();cpaRenderUnitPhotoList();
 }
+window.cpaOnTwProjectChange=async function(){
+  const units=await cpaUnits();
+  const towers=cpaTowersForProject(units,$('cpaTwProject').value);
+  $('cpaTwTower').innerHTML=towers.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  cpaRenderTowerPhotoList();
+};
+window.cpaOnFlProjectChange=async function(){
+  const units=await cpaUnits();
+  const floors=cpaFloorsForProject(units,$('cpaFlProject').value);
+  $('cpaFlFloor').innerHTML=floors.map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join('');
+  cpaRenderFloorPhotoList();
+};
+// A real thumbnail (not just a generic file-type icon) so staff can see at a glance that the
+// right photo actually made it in, right after uploading - videos get a play-icon tile since
+// signing a video URL just to build a thumbnail isn't worth the round trip, only opened on click.
+async function cpaMediaThumb(p){
+  // Every branch below needs exactly one style="" attribute - a second style attribute on the
+  // same tag is silently dropped by the browser (first one wins), which is why the sizing here
+  // used to be ignored entirely and thumbnails rendered at their native full size.
+  const isVideo=(p.file_type||'').indexOf('video')===0;
+  const onclickAttr=`onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"`;
+  if(isVideo)return `<div ${onclickAttr} title="Open video" style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b;cursor:pointer"><i class="fa-solid fa-circle-play"></i></div>`;
+  const url=await s3SignedUrl(p.storage_path);
+  return url
+    ?`<img src="${url}" alt="" ${onclickAttr} title="Open full size" style="width:52px;height:52px;object-fit:cover;border-radius:6px;display:block;cursor:pointer">`
+    :`<div ${onclickAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8;cursor:pointer"><i class="fa-solid fa-image"></i></div>`;
+}
+async function cpaMediaRow(p){return [await cpaMediaThumb(p),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
+// Caps each "Existing uploads" panel at roughly 5 rows tall (thumbnail rows run ~64px incl.
+// padding) and scrolls internally past that, so uploading a dozen photos to one scope doesn't
+// push the Upload button and every panel after it down the page - only this list scrolls.
+function cpaMediaListWrap(label,tableHtml){
+  return '<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">'+label+'</div>'+
+    '<div style="max-height:320px;overflow-y:auto">'+tableHtml+'</div>';
+}
+async function cpaRenderProjectPhotoList(){
+  const host=$('cpaPhList');if(!host)return;
+  const projectId=Number($('cpaPhProject').value);
+  const {data}=await sb.schema('cust').from('project_photos').select('*').eq('project_id',projectId).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('project_photos',${p.id},'cpaRenderProjectPhotoList')">Delete</button>`]));
+  host.innerHTML=cpaMediaListWrap('Existing uploads',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+}
+async function cpaRenderTowerPhotoList(){
+  const host=$('cpaTwList');if(!host)return;
+  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value;
+  if(!tower){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no towers on record.</div>';return;}
+  const {data}=await sb.schema('cust').from('tower_photos').select('*').eq('project_id',projectId).eq('tower',tower).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('tower_photos',${p.id},'cpaRenderTowerPhotoList')">Delete</button>`]));
+  host.innerHTML=cpaMediaListWrap('Existing uploads for '+esc(tower),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+}
+async function cpaRenderFloorPhotoList(){
+  const host=$('cpaFlList');if(!host)return;
+  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value;
+  if(!floorNo){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no units to derive floors from.</div>';return;}
+  const {data}=await sb.schema('cust').from('floor_photos').select('*').eq('project_id',projectId).eq('floor_no',floorNo).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('floor_photos',${p.id},'cpaRenderFloorPhotoList')">Delete</button>`]));
+  host.innerHTML=cpaMediaListWrap('Existing uploads for Floor '+esc(floorNo),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+}
+async function cpaRenderUnitPhotoList(){
+  const host=$('cpaUhList');if(!host)return;
+  const unitId=Number($('cpaUhUnit').value);
+  const {data}=await sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unitId).is('deleted_at',null).order('taken_on',{ascending:false});
+  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('unit_photos',${p.id},'cpaRenderUnitPhotoList')">Delete</button>`]));
+  host.innerHTML=cpaMediaListWrap('Existing uploads for this flat',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+}
+window.cpaDeletePhoto=async function(table,id,refreshFn){
+  if(!await confirmDialog('Remove this photo/video from the customer portal?',{okLabel:'Delete'}))return;
+  const {error}=await sb.schema('cust').from(table).update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
+  if(error){toast('Delete failed: '+error.message,'err');return;}
+  toast('Removed','ok');window[refreshFn]();
+};
 window.cpaUploadProjectPhotos=async function(){
   const projectId=Number($('cpaPhProject').value),takenOn=$('cpaPhDate').value,caption=$('cpaPhCaption').value.trim()||null;
-  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo','err');return;}
+  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
   const btn=$('cpaPhBtn');btn.disabled=true;let ok=0;
   for(const f of files){
     btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
@@ -13305,12 +14071,47 @@ window.cpaUploadProjectPhotos=async function(){
     if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' photo(s) uploaded','ok');
+  if(ok)toast(ok+' file(s) uploaded','ok');
   $('cpaPhFiles').value='';
+  cpaRenderProjectPhotoList();
+};
+window.cpaUploadTowerPhotos=async function(){
+  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value,takenOn=$('cpaTwDate').value,caption=$('cpaTwCaption').value.trim()||null;
+  if(!tower){toast('This project has no towers on record','err');return;}
+  const files=[...$('cpaTwFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
+  const btn=$('cpaTwBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForTowerPhoto(projectId,tower,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('tower_photos').insert({project_id:projectId,tower,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' file(s) uploaded','ok');
+  $('cpaTwFiles').value='';
+  cpaRenderTowerPhotoList();
+};
+window.cpaUploadFloorPhotos=async function(){
+  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value,takenOn=$('cpaFlDate').value,caption=$('cpaFlCaption').value.trim()||null;
+  if(!floorNo){toast('This project has no units to derive floors from','err');return;}
+  const files=[...$('cpaFlFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
+  const btn=$('cpaFlBtn');btn.disabled=true;let ok=0;
+  for(const f of files){
+    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
+    const {data,error}=await uploadFileToS3(s3KeyForFloorPhoto(projectId,floorNo,f.name),f);
+    if(error){toast('Upload failed: '+error.message,'err');continue;}
+    const {error:insErr}=await sb.schema('cust').from('floor_photos').insert({project_id:projectId,floor_no:floorNo,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
+    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
+  }
+  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+  if(ok)toast(ok+' file(s) uploaded','ok');
+  $('cpaFlFiles').value='';
+  cpaRenderFloorPhotoList();
 };
 window.cpaUploadUnitPhotos=async function(){
   const unitId=Number($('cpaUhUnit').value),takenOn=$('cpaUhDate').value,caption=$('cpaUhCaption').value.trim()||null;
-  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo','err');return;}
+  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
   const btn=$('cpaUhBtn');btn.disabled=true;let ok=0;
   for(const f of files){
     btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
@@ -13320,8 +14121,9 @@ window.cpaUploadUnitPhotos=async function(){
     if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' photo(s) uploaded','ok');
+  if(ok)toast(ok+' file(s) uploaded','ok');
   $('cpaUhFiles').value='';
+  cpaRenderUnitPhotoList();
 };
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
@@ -13831,11 +14633,24 @@ function custFormatUnitType(t){
   if(!m)return t;
   return (parseFloat(m[1]))+' BHK';
 }
+// Floor number derived from the leading digits of unit_code (e.g. "5" from "5A", "12" from
+// "12C") - the same Farvision <floor><unit-letter> convention the RLS policy on
+// cust.floor_photos matches against (substring(unit_code from '^[0-9]+')), so a customer's own
+// derived floor always lines up with what the admin picks when uploading floor-wise media.
+function custDeriveFloor(unitCode){
+  const m=String(unitCode||'').match(/^\d+/);
+  return m?m[0]:null;
+}
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
   return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
     units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
 }
+// Farvision keeps cancelled demands in the Invoice Register with Status=Cancel (a quarter of the
+// rows), and the cost sheet carries an offsetting negative against them. Showing them to a
+// customer would restate demands that were withdrawn, so every customer-facing read excludes
+// them - and a cancelled invoice must never be downloadable as a tax document.
+const CUST_INVOICE_CANCELLED='Cancel';
 // Statement of Account - modelled on Farvision's own customer portal (a Farvision export a
 // customer sent us as a reference), which frames the landing tab as a bank-statement-style
 // summary rather than a raw ledger: property value / paid-to-date / demand due / remaining, a
@@ -13844,45 +14659,56 @@ function custUnitPicker(units,selUnitId){
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:demand},{data:receipts},{data:snapRows},{data:costItemRows}]=await Promise.all([
-    sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
-    sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id),
+  const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
-    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order')
+    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
+    sb.schema('cust').from('outstanding_items').select('document_no,schedule,bill_amount').eq('unit_id',unit.id).eq('is_current',true)
   ]);
   const snap=snapRows||null;
-  const demandRows=demand||[], receiptRows=receipts||[], costItems=costItemRows||[];
-  const totalDemand=demandRows.reduce((s,d)=>s+Number(d.amount||0),0);
-  const totalReceived=receiptRows.reduce((s,r)=>s+Number(r.amount||0),0);
-  // A pre-possession project (no Invoice/Receipt Register import yet - that report only exists
-  // once a project starts maintenance billing) has no demand/receipt rows at all. The cost sheet
-  // from Sales Details already carries Billed/Received/Balance/Onaccount per charge line, so it
-  // stands in as the statement's numbers until a real demand/receipt import exists.
+  const invoices=invRows||[], receiptRows=rcptRows||[], reversalRows=revRows||[], costItems=costItemRows||[], osItems=osRows||[];
+  // Per-invoice amount for the "Recent transactions" list below (still sourced from
+  // outstanding_items, which only carries currently-unpaid documents - a fully-paid invoice
+  // shows as 0 there, which is a display-only limitation for that one list, not the KPIs below).
+  const osTotals={};
+  osItems.forEach(o=>{const d=o.document_no||'';osTotals[d]=(osTotals[d]||0)+Number(o.bill_amount||0);});
+  // "Demand due" must compare like with like: total ever billed (cost_sheet_items.bill_amount,
+  // which already accounts for every invoice raised to date) against total ever actually
+  // received (money_receipts minus receipt_reversals). Comparing outstanding_items (which only
+  // lists currently-unpaid documents) against all-time gross receipts - the old formula here -
+  // guarantees a false ~0 for anyone who has ever fully paid off an earlier invoice.
+  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
+  // Total property cost, computed live from the cost sheet (Basic + Extra + Adhoc + Tax) rather
+  // than the units.agreement_value column - keeps every figure on this page traceable to the
+  // same imported Sales Details cost sheet the customer's own charge breakdown comes from.
+  const totalCostWithTax=costItems.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
+  const grossReceipts=receiptRows.reduce((s,r)=>s+Number(r.total_amount||0),0);
+  const grossReversals=reversalRows.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
+  const netReceived=grossReceipts-grossReversals;
   const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-  const useCostSheet=!demandRows.length&&!receiptRows.length&&costItems.length>0;
-  // The snapshot (Farvision's own Outstanding Summary) is authoritative when we have one - it
-  // accounts for On Account and Late Payment Fee, which a plain demand-minus-receipts sum can't.
-  // Falls back to the computed figure for a unit that hasn't had an Outstanding import yet.
-  const propertyValue=snap?Number(snap.total_consideration||0):Number(unit.agreement_value||0);
-  const totalReceivedFinal=useCostSheet?csiReceived:totalReceived;
-  const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalDemand-totalReceived));
-  const netOutstanding=snap?Number(snap.net_outstanding||0):billOutstanding;
+  const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
+  const propertyValue=snap?Number(snap.total_consideration||0):totalCostWithTax;
+  const totalReceivedFinal=useCostSheet?csiReceived:netReceived;
+  const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalBilled-netReceived));
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
   const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
   const remaining=Math.max(0,propertyValue-totalReceivedFinal);
-  const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalDemand?Math.round(totalReceivedFinal/totalDemand*100):0);
+  const paidPct=propertyValue?Math.round(totalReceivedFinal/propertyValue*100):(totalBilled?Math.round(totalReceivedFinal/totalBilled*100):0);
 
-  // "Demand due" banner: the most recently raised bill still outstanding, if any.
-  const nextDemand=demandRows.slice().sort((a,b)=>new Date(b.demand_date||0)-new Date(a.demand_date||0))[0];
+  const lastInv=invoices.slice().sort((a,b)=>new Date(b.document_date||0)-new Date(a.document_date||0))[0];
   let dueBanner='';
-  if(nextDemand&&billOutstanding>0){
-    const due=nextDemand.due_date?new Date(nextDemand.due_date):null;
+  if(lastInv&&billOutstanding>0){
+    const due=lastInv.due_date?new Date(lastInv.due_date):null;
     const days=due?Math.round((due-new Date(new Date().toDateString()))/86400000):null;
     const dueText=days==null?'':(days<0?Math.abs(days)+' day'+(Math.abs(days)===1?'':'s')+' overdue':days===0?'due today':'due in '+days+' day'+(days===1?'':'s'));
+    const osScheds=osItems.filter(o=>o.document_no===lastInv.document_no&&o.schedule).map(o=>o.schedule);
+    const schedules=[...new Set(osScheds)];
     dueBanner=`<div class="card card-pad" style="background:${days!=null&&days<0?'#fef2f2':'#eff4ff'};border-color:${days!=null&&days<0?'#fecaca':'#cfe0ef'};margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(nextDemand.milestone||nextDemand.revenue_head||'')}${nextDemand.due_date?' · due '+fmtDate(nextDemand.due_date):''}</span></div>
+      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
       ${dueText?`<span class="tag ${days!=null&&days<0?'t-red':'t-blue'}">${esc(dueText)}</span>`:''}
     </div>`;
   }
@@ -13890,12 +14716,17 @@ async function custTabOverview(data,unit){
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
     ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
-    ['Demand due',custInr(billOutstanding),nextDemand?esc(nextDemand.milestone||nextDemand.revenue_head||''):'—',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'incl. handover')]
+    ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
+    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
   ];
 
-  const entries=[].concat(demandRows.map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone||d.revenue_head,amount:Number(d.amount||0)})))
-    .concat(receiptRows.map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  const entries=[];
+  invoices.forEach(inv=>{
+    const total=osTotals[inv.document_no]||0;
+    const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
+    entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
+  });
+  receiptRows.forEach(r=>{entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-Number(r.total_amount||0)});});
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let bal=0;
   const withBalance=entries.map(e=>{bal+=e.amount;return Object.assign({},e,{balance:bal});});
@@ -13914,7 +14745,42 @@ async function custTabOverview(data,unit){
     mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
 
   window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
+  const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
+  const basicAmt=Number(unitCostItem?.amount||0);
+  const sba=Number(unit.super_built_up_area_sqft||0);
+  const rate=sba?Math.round(basicAmt/sba):null;
+  const myUnitSection='<div class="sec-title" style="margin:18px 0 8px">My unit</div>'+mTable(
+    ['Unit','Project','Type','Block/Tower','Super Built-Up','Built-Up','Carpet','Rate','Booking date','Status','Total cost'],
+    [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
+      esc(unit.tower||'—'),
+      unit.super_built_up_area_sqft?unit.super_built_up_area_sqft+' sqft':'—',
+      unit.built_up_area_sqft?unit.built_up_area_sqft+' sqft':'—',
+      unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
+      rate?custInr(rate)+'/sqft':'—',
+      c?fmtDate(c.booking_date):'—',
+      unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
+      custInr(propertyValue)]]);
+  const custName=c?c.contact_name||'':'';
+  const initials=custName.replace(/^(Mr\.|Ms\.|Mrs\.|Md\.|Dr\.)\s*/i,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const profileSection=c?
+    '<div class="cust-profile" style="margin:22px 0 8px;animation:custProfileSlideIn .5s ease both">'+
+      '<div class="cust-profile-header">'+
+        '<div class="cust-profile-avatar">'+esc(initials)+'</div>'+
+        '<div class="cust-profile-name">'+
+          '<h3 style="margin:0;font-size:18px;font-weight:700;color:#0f172a">'+esc(custName)+'</h3>'+
+          (c.co_applicant_name?'<div style="font-size:13px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-user-group" style="margin-right:4px;font-size:11px"></i>Co-Applicant: '+esc(c.co_applicant_name)+'</div>':'')+
+          '<div style="font-size:12px;color:var(--slate);margin-top:4px">'+esc(unit.booking_no||'')+' · '+esc((unit.projects&&unit.projects.name)||'')+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="cust-profile-details">'+
+        '<div class="cust-profile-item" style="animation-delay:.1s"><div class="cust-profile-icon"><i class="fa-solid fa-phone"></i></div><div><div class="cust-profile-label">Phone</div><div class="cust-profile-value">'+esc(c.contact_phone||'—')+'</div></div></div>'+
+        '<div class="cust-profile-item" style="animation-delay:.15s"><div class="cust-profile-icon"><i class="fa-solid fa-envelope"></i></div><div><div class="cust-profile-label">Email</div><div class="cust-profile-value">'+esc(c.contact_email||'—')+'</div></div></div>'+
+        '<div class="cust-profile-item cust-profile-addr" style="animation-delay:.2s"><div class="cust-profile-icon"><i class="fa-solid fa-location-dot"></i></div><div><div class="cust-profile-label">Correspondence address</div><div class="cust-profile-value">'+esc(c.contact_address||'—')+'</div></div></div>'+
+      '</div>'+
+    '</div>'
+    :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
   return dueBanner+mKpis(kpis)+
+    myUnitSection+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
@@ -13923,18 +14789,7 @@ async function custTabOverview(data,unit){
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>'+
-    '<div class="sec-title" style="margin:22px 0 8px">My unit</div>'+mTable(['Unit','Project','Type','Carpet','Status','Agreement value'],
-      [[esc(unit.unit_code),esc((unit.projects&&unit.projects.name)||'—'),esc(custFormatUnitType(unit.unit_type)||'—'),
-        unit.carpet_area_sqft?unit.carpet_area_sqft+' sqft':'—',
-        // Every unit starts life as 'booked' and stays that way through most of a normal, on-track
-        // purchase - a status badge that says so on every single statement is just noise. Worth
-        // flagging only once something has actually gone wrong with the booking.
-        unit.status==='cancelled'?'<span class="tag t-red">Cancelled</span>':'—',
-        custInr(unit.agreement_value)]])+
-    '<div class="sec-title" style="margin:18px 0 8px">Contact & key dates (as recorded with us)</div>'+
-    (c?mTable(['Contact name','Phone','Email','Booking date','Agreement date'],
-      [[esc(c.contact_name||'—'),esc(c.contact_phone||'—'),esc(c.contact_email||'—'),fmtDate(c.booking_date),fmtDate(c.agreement_date)]]):
-      '<div class="card card-pad empty">Not yet available — this updates after our next records sync.</div>');
+    profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
 // synchronously, before anything is awaited, or the popup blocker eats it) - the browser's own
@@ -13969,51 +14824,826 @@ window.custPrintStatement=function(){
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
 async function custTabLedger(unit){
-  const [{data:demand},{data:receipts}]=await Promise.all([
-    sb.schema('cust').from('farvision_demand').select('*').eq('unit_id',unit.id),
-    sb.schema('cust').from('farvision_receipts').select('*').eq('unit_id',unit.id)
+  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
+    sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
   ]);
-  const entries=[].concat((demand||[]).map(d=>({date:d.demand_date,type:'Demand',ref:d.demand_no,desc:d.milestone,amount:Number(d.amount||0)})))
-    .concat((receipts||[]).map(r=>({date:r.receipt_date,type:'Receipt',ref:r.receipt_no,desc:r.mode,amount:-Number(r.amount||0)})));
+  const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
+  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
+  const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
+  const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
+  const netReceived=grossReceipts-grossReversals;
+  const balance=totalBilled-netReceived;
+  const entries=[];
+  invoices.forEach(inv=>{
+    // Farvision's real Applicant Ledger shows one row per (Document No x Schedule) -
+    // never merged/summed across schedules even when they share a document number
+    // (confirmed against two real Farvision PDF exports).
+    const items=inv.invoice_items||[];
+    if(!items.length) return;
+    const bySchedule={};
+    const order=[];
+    items.forEach(it=>{
+      const s=it.schedule||inv.invoice_type||'—';
+      if(!(s in bySchedule)){bySchedule[s]=0;order.push(s);}
+      bySchedule[s]+=Number(it.net_amount||0);
+    });
+    order.forEach(s=>{
+      const amt=bySchedule[s];
+      if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,iid:inv.id,desc:s,debit:amt,credit:0});
+    });
+  });
+  receipts.forEach(r=>{
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
+  });
+  reversals.forEach(rv=>{
+    entries.push({date:rv.receipt_reversal_date,type:'CQRV',ref:rv.receipt_reversal_no,desc:'Cheque return'+(rv.instrument_no?' · '+rv.instrument_no:''),debit:Number(rv.reversal_amount||0),credit:0});
+  });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let bal=0;
-  const rows=entries.map(e=>{bal+=e.amount;
-    return [fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
-      esc(e.ref||'—'),esc(e.desc||'—'),custInr(Math.abs(e.amount)),custInr(bal)];});
-  return rows.length?mTable(['Date','Type','Reference','Details','Amount','Running balance'],rows):
-    '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>';
+  let runBal=0;
+  function balCell(b){
+    if(b>0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>';
+    if(b<0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>';
+    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
+  }
+  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
+  const seenInvoice={};
+  const pick=(kind,id)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'" onchange="custDocPickChanged()">';
+  const refCell=e=>{
+    if(e.rid) return '<span class="rcpt-ref">'+pick('receipt',e.rid)+
+      esc(e.ref||'—')+'<button class="btn btn-sm rcpt-view" title="View / download this receipt" onclick="custViewReceipt('+e.rid+')"><i class="fa-solid fa-file-arrow-down"></i></button></span>';
+    if(e.iid){
+      const first=!seenInvoice[e.iid]; seenInvoice[e.iid]=1;
+      return '<span class="rcpt-ref">'+(first?pick('invoice',e.iid):'')+
+        esc(e.ref||'—')+(first?'<button class="btn btn-sm rcpt-view" title="View / download this invoice" onclick="custViewInvoice('+e.iid+')"><i class="fa-solid fa-file-arrow-down"></i></button>':'')+'</span>';
+    }
+    return esc(e.ref||'—');
+  };
+  const rows=entries.map(e=>{runBal+=e.debit-e.credit;
+    return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
+  if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
+  const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
+  const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
+  window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
+  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
+  const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
+    '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
+    '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
+    '<span><b>Balance:</b> '+balLabel+'</span>'+
+    '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
+    '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+    '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
+    '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
-async function custTabCostSheet(unit){
-  // Cost sheets differ enough per unit that they aren't structured/imported data - they're a
-  // document, shown here the same way the Documents tab shows any other per-unit file.
-  const {data}=await sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false});
-  if(!data||!data.length)return '<div class="card card-pad empty">Your cost sheet hasn’t been shared yet.</div>';
-  const rows=data.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
-    `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
-  return cpaTable(['Document','Shared on','Download'],rows);
+window.custPrintLedger=function(){
+  const unit=window._custLedgerUnit,entries=window._custLedgerEntries,totalBilled=window._custLedgerTotalBilled||0,netReceived=window._custLedgerNetReceived||0;
+  if(!unit){toast('Nothing to print yet','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to print','err');return;}
+  let runBal=0;
+  const balance=totalBilled-netReceived;
+  function balText(b){return b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0';}
+  const totalDebit=(entries||[]).reduce((s,e)=>s+(e.debit||0),0);
+  const totalCredit=(entries||[]).reduce((s,e)=>s+(e.credit||0),0);
+  const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
+    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
+  }).join('');
+  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'0.00';
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
+    'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
+    'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
+    '.summary{font-size:13px;margin-bottom:14px}'+
+    'table{width:100%;border-collapse:collapse}th,td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:11.5px}'+
+    'th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.03em;background:#f8fafc}'+
+    'td:nth-child(5),td:nth-child(6),td:nth-child(7),th:nth-child(5),th:nth-child(6),th:nth-child(7){text-align:right}'+
+    'tfoot td{font-weight:700;border-top:2px solid #334155}'+
+    '@media print{body{margin:16px}}'+
+    '</style></head><body>'+
+    '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
+    '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
+    '<div class="summary"><b>Total billed:</b> '+custInr(totalBilled)+' &nbsp;|&nbsp; <b>Net received:</b> '+custInr(netReceived)+' &nbsp;|&nbsp; <b>Balance:</b> '+balLabel+'</div>'+
+    '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
+    '<tbody>'+trs+'</tbody>'+
+    '<tfoot><tr><td colspan="4">Periodic Ledger Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr></tfoot>'+
+    '</table></body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the printout','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
+};
+
+/* ---------- Money receipt (viewed / downloaded from a ledger receipt row) ----------
+   Every figure below comes from the Farvision Receipt Register import - money_receipts for the
+   header, receipt_items for the allocation lines - so the portal never invents a receipt number,
+   date, amount or adjustment. The issuer block is the only static part: it is the company
+   letterhead, identical on every Farvision receipt, not per-customer data. */
+const CUST_RECEIPT_ISSUER={
+  name:'DREAM GATEWAY HOTELS LIMITED',
+  address:'JAIN GROUP, 44/2A, HAZRA ROAD, KOLKATA-19, KOLKATA, WEST BENGAL, INDIA, PIN:700019',
+  gstin:'19AADCD0692H1ZL',
+  pan:'AADCD0692H'
+};
+// Indian-system amount in words ("Rupees One Lac Eighty Four Thousand Six Hundred Eighty Four Only"),
+// matching how Farvision spells the total on its own receipt.
+function custAmountInWords(n){
+  n=Math.floor(Math.abs(Number(n)||0));
+  if(!n) return 'Rupees Zero Only';
+  const ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve',
+    'Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two=v=>v<20?ones[v]:(tens[Math.floor(v/10)]+(v%10?' '+ones[v%10]:''));
+  const three=v=>(v>=100?ones[Math.floor(v/100)]+' Hundred'+(v%100?' ':''):'')+(v%100?two(v%100):'');
+  const parts=[];
+  const crore=Math.floor(n/10000000); n%=10000000;
+  const lac=Math.floor(n/100000);     n%=100000;
+  const thou=Math.floor(n/1000);      n%=1000;
+  if(crore) parts.push(three(crore)+' Crore');
+  if(lac)   parts.push(three(lac)+' Lac');
+  if(thou)  parts.push(three(thou)+' Thousand');
+  if(n)     parts.push(three(n));
+  return 'Rupees '+parts.join(' ')+' Only';
+}
+// Builds the receipt document once; the modal preview and the printable page share it so what a
+// customer sees on screen is exactly what downloads.
+function custReceiptDocHtml(r,items,unit,contact,forPrint){
+  const c=contact||{}, p=(unit&&unit.projects&&unit.projects.name)||'';
+  const field=(l,v)=>'<div class="rcpt-f"><span>'+esc(l)+'</span><b>'+(v?esc(v):'—')+'</b></div>';
+  const left=[
+    field('Email',c.contact_email),
+    field('Contact No',c.contact_phone),
+    field('Booking No',unit&&unit.booking_no),
+    field('Customer No',unit&&unit.application_no)
+  ].join('');
+  // Farvision prints the unit's category letter (its Level4 in the ERP hierarchy). That letter is
+  // the tail of the unit code - checked against all 145 rows of the Sales Details export, where
+  // Level4 equalled the unit-code tail every time - so it needs no separate column.
+  const category=String((unit&&unit.unit_code)||'').replace(/^\d+/,'').trim().toUpperCase();
+  const right=[
+    field('Receipt No',r.receipt_no),
+    field('Receipt Date',r.receipt_date?fmtDate(r.receipt_date):''),
+    field('Project',p),
+    field('Category',category),
+    field('Unit No',unit&&unit.unit_code),
+    field('Payment Mode',r.payment_mode),
+    field('Drawn On',r.drawn_on),
+    field('Instn. No.',r.instrument_no),
+    field('Instn. Date',r.instrument_date?fmtDate(r.instrument_date):'')
+  ].join('');
+  const rowsHtml=(items||[]).map((it,i)=>'<tr>'+
+    '<td>'+(i+1)+'</td>'+
+    '<td>'+(it.line_type==='on_account'?'On Account':'Bill')+'</td>'+
+    '<td>'+esc(it.schedule||'—')+'</td>'+
+    '<td>'+esc(it.revenue_head||'—')+'</td>'+
+    '<td>'+esc(it.against_demand_no||'—')+'</td>'+
+    '<td>'+(it.invoice_date?fmtDate(it.invoice_date):'—')+'</td>'+
+    '<td>'+esc(it.particulars||'—')+'</td>'+
+    '<td class="amt">'+custInr(it.amount||0)+'</td></tr>').join('');
+  const total=Number(r.total_amount||0);
+  const badge=r.is_reversed?'<span class="tag t-red">Reversed</span>':'';
+  return ''+
+    '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
+      '<div class="rcpt-issuer"><h2>'+esc(CUST_RECEIPT_ISSUER.name)+'</h2>'+
+        '<div class="rcpt-addr">'+esc(CUST_RECEIPT_ISSUER.address)+'</div>'+
+        '<div class="rcpt-addr">GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+' &nbsp;·&nbsp; PAN : '+esc(CUST_RECEIPT_ISSUER.pan)+'</div>'+
+      '</div>'+
+      '<div class="rcpt-title">Receipt '+badge+'</div>'+
+      '<div class="rcpt-grid">'+
+        '<div><div class="rcpt-name">'+esc((c.contact_name)||(unit&&unit.customer_name)||'')+'</div>'+
+          (c.contact_address?'<div class="rcpt-addr">'+esc(c.contact_address)+'</div>':'')+left+'</div>'+
+        '<div>'+right+'</div>'+
+      '</div>'+
+      (r.narration?'<div class="rcpt-remarks"><span>Remarks :</span> <b>'+esc(r.narration)+'</b></div>':'')+
+      '<div class="rcpt-tblwrap"><table class="rcpt-tbl"><thead><tr>'+
+        '<th>Sl. #</th><th>Type</th><th>Schedule Name</th><th>Revenue Name</th>'+
+        '<th>Invoice No</th><th>Invoice Dt</th><th>Particulars</th><th class="amt">Total Amt</th>'+
+      '</tr></thead><tbody>'+(rowsHtml||'<tr><td colspan="8" style="text-align:center;color:#64748b">No allocation lines recorded for this receipt.</td></tr>')+'</tbody>'+
+      '<tfoot><tr><td colspan="7">Total Receipt Amount</td><td class="amt">'+custInr(total)+'</td></tr>'+
+      '<tr><td colspan="8" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(total))+'</td></tr></tfoot>'+
+      '</table></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+    '</div>';
+}
+// Styles are shared by the on-screen modal and the printable window.
+const CUST_RECEIPT_CSS=
+  '.rcpt-doc{color:#0f172a;font-size:12.5px}'+
+  '.rcpt-issuer{border-bottom:1px solid #e2e8f0;padding-bottom:10px;margin-bottom:12px}'+
+  '.rcpt-issuer h2{margin:0 0 3px;font-size:16px;letter-spacing:.01em}'+
+  '.rcpt-addr{color:#64748b;font-size:11.5px;line-height:1.5}'+
+  '.rcpt-title{text-align:center;font-size:14px;font-weight:700;letter-spacing:.06em;margin:0 0 14px;display:flex;align-items:center;justify-content:center;gap:10px}'+
+  '.rcpt-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:12px}'+
+  '.rcpt-name{font-weight:700;margin-bottom:3px}'+
+  '.rcpt-f{display:flex;gap:8px;padding:1.5px 0;font-size:12px}'+
+  '.rcpt-f span{color:#64748b;min-width:96px;flex:0 0 96px}'+
+  '.rcpt-f b{font-weight:600;word-break:break-word}'+
+  '.rcpt-remarks{margin:0 0 10px;font-size:12px}.rcpt-remarks span{color:#64748b}'+
+  '.rcpt-tblwrap{overflow-x:auto}'+
+  '.rcpt-tbl{width:100%;border-collapse:collapse;font-size:11.5px;min-width:660px}'+
+  '.rcpt-tbl th,.rcpt-tbl td{border:1px solid #e2e8f0;padding:5px 7px;text-align:left;vertical-align:top}'+
+  '.rcpt-tbl thead th{background:#f8fafc;color:#475569;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}'+
+  '.rcpt-tbl .amt{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}'+
+  '.rcpt-tbl tfoot td{font-weight:700;background:#f8fafc}'+
+  '.rcpt-tbl tfoot td:first-child{text-align:right}'+
+  '.rcpt-tbl tfoot tr.rcpt-strong td{background:#f1f5f9}'+
+  '.rcpt-tbl tfoot .rcpt-words{font-weight:600;text-align:left;background:#fff}'+
+  // Demand-letter terms: small print, and it must not be split mid-clause across printed pages.
+  '.rcpt-terms{margin-top:18px;font-size:11px;line-height:1.55;color:#334155;break-inside:avoid}'+
+  '.rcpt-terms h4{margin:12px 0 4px;font-size:11.5px;font-weight:700;color:#0f172a}'+
+  '.rcpt-terms p{margin:0 0 6px;text-align:justify}'+
+  '.rcpt-terms ul{margin:0 0 6px;padding-left:16px}.rcpt-terms li{margin-bottom:3px}'+
+  '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
+  '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
+  // On a phone the two header columns cannot sit side by side without clipping the right one.
+  '@media(max-width:640px){.rcpt-grid{grid-template-columns:1fr;gap:12px}'+
+  '.rcpt-f span{min-width:82px;flex:0 0 82px}.rcpt-title{font-size:13px}}';
+
+window.custViewReceipt=async function(id){
+  const unit=window._custLedgerUnit;
+  if(!unit){toast('Open the ledger first','err');return;}
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>','lg');
+  const [{data:rcpt,error:re},{data:its},{data:cts}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('*').eq('id',id).maybeSingle(),
+    sb.schema('cust').from('receipt_items').select('*').eq('receipt_id',id).order('sort_order'),
+    sb.schema('cust').from('farvision_contacts').select('*').eq('unit_id',unit.id).eq('is_current',true).limit(1)
+  ]);
+  if(re||!rcpt){openModal('<div class="modal-head"><h3>Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="card card-pad empty">This receipt could not be loaded.</div></div>','lg');return;}
+  window._custReceiptCache={r:rcpt,items:its||[],unit:unit,contact:(cts&&cts[0])||null};
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
+      custReceiptDocHtml(rcpt,its||[],unit,(cts&&cts[0])||null,false)+'</div>'+
+    '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
+    '<button class="btn btn-primary" onclick="custPrintReceipt()"><i class="fa-solid fa-download"></i> Download PDF</button></div>','lg');
+};
+
+window.custPrintReceipt=function(){
+  const s=window._custReceiptCache;
+  if(!s){toast('Open a receipt first','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to download','err');return;}
+  const fileName='Money-Receipt-'+String(s.r.receipt_no||'').replace(/[^A-Za-z0-9]+/g,'-');
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(fileName)+'</title><style>'+
+    'body{margin:26px;font-family:Inter,system-ui,sans-serif}'+CUST_RECEIPT_CSS+
+    '.rcpt-tbl{min-width:0}.rcpt-tblwrap{overflow:visible}'+
+    '@media print{body{margin:12px}}'+
+    '</style></head><body>'+custReceiptDocHtml(s.r,s.items,s.unit,s.contact,true)+'</body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the receipt','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
+};
+
+window.custDocPickChanged=function(){
+  const picks=Array.from(document.querySelectorAll('.rcpt-pick'));
+  const checked=picks.filter(p=>p.checked);
+  const n=checked.length;
+  // Determine which kind is being selected — lock out the other kind
+  const activeKind=checked.length?checked[0].dataset.kind:null;
+  picks.forEach(p=>{
+    if(activeKind&&p.dataset.kind!==activeKind){p.disabled=true;p.checked=false;}
+    else p.disabled=false;
+  });
+  const btn=document.getElementById('custBulkDlBtn');
+  const lbl=document.getElementById('custBulkDlLabel');
+  if(btn){
+    btn.style.display=n?'':'none';
+    if(lbl) lbl.textContent='Download '+(activeKind==='invoice'?'invoices':'receipts')+' ('+n+')';
+  }
+};
+
+// Bulk download: multiple receipts OR multiple invoices as one multi-page PDF.
+// Receipts and invoices are never mixed — the checkbox handler enforces same-type selection.
+window.custDownloadSelectedDocs=async function(){
+  const unit=window._custLedgerUnit;
+  if(!unit){toast('Open the ledger first','err');return;}
+  const checked=Array.from(document.querySelectorAll('.rcpt-pick:checked'));
+  const kind=checked.length?checked[0].dataset.kind:null;
+  const rcptIds=kind==='receipt'?checked.map(p=>Number(p.value)).filter(Boolean):[];
+  const invIds=kind==='invoice'?checked.map(p=>Number(p.value)).filter(Boolean):[];
+  if(!rcptIds.length&&!invIds.length){toast('Tick the documents you want to download','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to download','err');return;}
+  const total=rcptIds.length+invIds.length;
+  try{w.document.write('<!DOCTYPE html><title>Documents</title><body style="font:14px Inter,system-ui,sans-serif;margin:26px;color:#475569">Preparing '+total+' document'+(total===1?'':'s')+'…');}catch(_e){}
+  const [{data:cts},{data:csi},{data:snap}]=await Promise.all([
+    sb.schema('cust').from('farvision_contacts').select('*').eq('unit_id',unit.id).eq('is_current',true).limit(1),
+    sb.schema('cust').from('cost_sheet_items').select('component,amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('outstanding_snapshot').select('late_fee_accrued').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
+  ]);
+  const contact=(cts&&cts[0])||null;
+  const pages=[];
+  // Receipts
+  if(rcptIds.length){
+    const [{data:rcpts},{data:rItems}]=await Promise.all([
+      sb.schema('cust').from('money_receipts').select('*').in('id',rcptIds).eq('unit_id',unit.id).eq('is_current',true),
+      sb.schema('cust').from('receipt_items').select('*').in('receipt_id',rcptIds).order('sort_order')
+    ]);
+    const byReceipt={};
+    (rItems||[]).forEach(it=>{(byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(it);});
+    const rank={}; rcptIds.forEach((id,i)=>{rank[id]=i;});
+    (rcpts||[]).slice().sort((a,b)=>rank[a.id]-rank[b.id]).forEach(r=>{
+      pages.push(custReceiptDocHtml(r,byReceipt[r.id]||[],unit,contact,true));
+    });
+  }
+  // Invoices (as Tax Invoice format)
+  if(invIds.length){
+    const [{data:invs},{data:allInv},{data:rcpts2}]=await Promise.all([
+      sb.schema('cust').from('invoices').select('*').in('id',invIds).eq('unit_id',unit.id).eq('is_current',true),
+      sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_items(schedule,revenue_head,amount,tax,net_amount,sort_order)')
+        .eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('due_date'),
+      sb.schema('cust').from('money_receipts').select('id,receipt_date').eq('unit_id',unit.id).eq('is_current',true)
+    ]);
+    const rids2=(rcpts2||[]).map(r=>r.id).filter(Boolean);
+    const {data:alloc2}=rids2.length
+      ? await sb.schema('cust').from('receipt_items').select('against_demand_no,schedule,revenue_head,amount,line_type,particulars,receipt_id').in('receipt_id',rids2)
+      : {data:[]};
+    const receiptDates={};(rcpts2||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
+    const sba=Number(unit.super_built_up_area_sqft||0);
+    const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
+    const rate=sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null;
+    const lateFee=Number((snap&&snap.late_fee_accrued)||0);
+    (invs||[]).forEach(inv=>{
+      const {data:its}={data:(allInv||[]).find(a=>a.document_no===inv.document_no)};
+      const items=its&&its.invoice_items?its.invoice_items:[];
+      const {plan,prevDues}=custBuildPlan(allInv,alloc2,inv.document_date,receiptDates);
+      pages.push(custInvoiceDocHtml({inv:inv,items:items,plan:plan,prevDues:prevDues,lateFee:lateFee,rate:rate,unit:unit,contact:contact},'invoice',true));
+    });
+  }
+  if(!pages.length){try{w.close();}catch(_e){} toast('No documents could be loaded','err');return;}
+  const fileName='Documents-'+String(unit.unit_code||'').replace(/[^A-Za-z0-9]+/g,'-')+'-'+pages.length;
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(fileName)+'</title><style>'+
+    'body{margin:26px;font-family:Inter,system-ui,sans-serif}'+CUST_RECEIPT_CSS+
+    '.rcpt-tbl{min-width:0}.rcpt-tblwrap{overflow:visible}'+
+    '.rcpt-page+.rcpt-page{margin-top:34px;border-top:1px dashed #cbd5e1;padding-top:34px}'+
+    '@media print{body{margin:12px}'+
+    '.rcpt-page{page-break-after:always;break-after:page}'+
+    '.rcpt-page:last-child{page-break-after:auto;break-after:auto}'+
+    '.rcpt-page+.rcpt-page{margin-top:0;border-top:0;padding-top:0}}'+
+    '</style></head><body>'+
+    pages.map(p=>'<div class="rcpt-page">'+p+'</div>').join('')+
+    '</body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the documents','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},450);
+};
+
+/* --------------------------- Tax Invoice / Demand Letter ---------------------------
+   One invoice, two printable formats - the same choice Farvision's Document Print dialog
+   offers. Both are built from cust.invoices + invoice_items, verified line for line against
+   Farvision's own PDF exports for OHINV/0008725-26.
+
+   The GST column is deliberately Amount / GST / Total rather than Farvision's HSN +
+   CGST/SGST + taxable-value breakup: we hold a single tax figure per line, and the taxable
+   value cannot be derived from it reliably - Unit Cost is taxed at 7.5% on two-thirds of
+   value (land abatement) while Legal Documentation is 18% on the full value. Reconstructing
+   the split lands ~0.07% off the filed GSTR1 figure, which is not good enough for a tax
+   document, so it is omitted rather than guessed. */
+const CUST_INVOICE_FORMATS={invoice:'Tax Invoice',demand:'Demand Letter'};
+
+// Reproduced from Farvision's own demand letter template, which is the wording the company
+// already sends - not drafted here. The bank-details block that follows it on the Farvision
+// printout is blank at source, so it is omitted rather than printed as empty labels.
+const CUST_DEMAND_TERMS=[
+  'The above mentioned total due amount is excluding interest for late payment. You are therefore requested to remit/pay the above mentioned amount immediately to avoid further interest accrual @ 18 % p.a. However, interest on previous outstanding shall be payable till the date of payment. Please ignore this demand letter, if already paid. Demand letter does not mean revocation of termination. If you have been issued termination letter, kindly contact us immediately at 033-40319999'
+];
+const CUST_DEMAND_NOTES=[
+  'Jain Group is committed towards transparency, customer satisfaction and highest ethics. Please mail assistant.md@thejaingroup.com or call 9330026077, if any Jain Group employee requests cash, gifts or any benefits whatsover.',
+  'Bank charges (if any) will also be payable plus GST.',
+  'Interest @ 18% p.a. will be charged as applicable.',
+  'If your accounts do not tally with our records, please contact us immediately.',
+  'Please mention Customer Name, Customer Code, Project Name & Payment details behind your cheque / DD.',
+  'Status of Project Completion ( As per Demand).'
+];
+
+// ctx: {inv, items, prevDues, plan, lateFee, unit, contact, rate}
+//   inv/items - the selected invoice, for the Tax Invoice format
+//   plan      - every non-cancelled billed line for the unit with what has been paid against it,
+//               for the Demand format, which Farvision issues over the whole payment plan rather
+//               than a single invoice
+function custInvoiceDocHtml(ctx,fmt,forPrint){
+  const inv=ctx.inv||{}, unit=ctx.unit||{}, c=ctx.contact||{};
+  const p=(unit.projects&&unit.projects.name)||'';
+  const demand=fmt==='demand';
+  const field=(l,v)=>'<div class="rcpt-f"><span>'+esc(l)+'</span><b>'+(v?esc(v):'—')+'</b></div>';
+  // Same derivation the money receipt uses: the category letter is the tail of the unit code.
+  const category=String(unit.unit_code||'').replace(/^\d+/,'').trim().toUpperCase();
+  const sba=Number(unit.super_built_up_area_sqft||0);
+  // Farvision labels the co-applicant differently on the two documents, and prints the line only
+  // when there is one - 95 of our 145 bookings have one, so an always-present empty row would be
+  // wrong on a third of them.
+  const left=[
+    c.co_applicant_name?field(demand?'Co Applicant(S)':'Co Applicant Name',c.co_applicant_name):'',
+    field('Email',c.contact_email),
+    field('Contact No',c.contact_phone),
+    field('GSTIN',inv.gstin),
+    field(demand?'Application Code No.':'Booking No',unit.booking_no),
+    field('Customer No',unit.application_no)
+  ].join('');
+  // Farvision dates a demand letter to the invoice it was raised against while reporting paid
+  // amounts as they stand now - confirmed against its own export for OHINV/0008725-26, dated
+  // 05/05/2025 yet carrying today's payment position. Mirrored here rather than "corrected".
+  const right=(demand?[
+    field('Dated',inv.document_date?fmtDate(inv.document_date):fmtDate(new Date())),
+    field('Demand Against',inv.document_no),
+    field('Project',p),
+    field('Category',category),
+    field('Unit No',unit.unit_code),
+    sba?field('Total Sale Area',sba+' SQ. FT.'):'',
+    ctx.rate?field('Rate',ctx.rate+' per SQ.FT.'):''
+  ]:[
+    field('Invoice No',inv.document_no),
+    field('Invoice Date',inv.document_date?fmtDate(inv.document_date):''),
+    field('Due Date',inv.due_date?fmtDate(inv.due_date):''),
+    field('Project',p),
+    field('Category',category),
+    field('Unit No',unit.unit_code),
+    field('Invoice Type',inv.invoice_type)
+  ]).join('');
+
+  let head,rowsHtml,foot,tail='';
+  if(demand){
+    head='<th>Due Date</th><th>Description</th><th>Charge Type</th>'+
+      '<th class="amt">Amount Due</th><th class="amt">Amount Paid</th><th class="amt">Amount Payable</th>';
+    let due=0,paid=0;
+    rowsHtml=(ctx.plan||[]).map(r=>{
+      due+=r.due; paid+=r.paid;
+      return '<tr><td>'+(r.dueDate?fmtDate(r.dueDate):'—')+'</td>'+
+        '<td>'+esc(r.schedule||'—')+'</td><td>'+esc(r.head||'—')+'</td>'+
+        '<td class="amt">'+custInr(r.due)+'</td><td class="amt">'+custInr(r.paid)+'</td>'+
+        '<td class="amt">'+custInr(r.due-r.paid)+'</td></tr>';
+    }).join('');
+    // On-account receipts are rows in the table above, so the totals already account for them.
+    const payable=due-paid;
+    foot='<tr><td colspan="3">Total Amount Due</td><td class="amt">'+custInr(due)+'</td>'+
+      '<td class="amt">'+custInr(paid)+'</td><td class="amt">'+custInr(payable)+'</td></tr>'+
+      '<tr><td colspan="6" class="rcpt-words">Amount payable in words : '+esc(custAmountInWords(Math.max(0,payable)))+'</td></tr>';
+    tail='<div class="rcpt-terms">'+
+      '<h4>Terms &amp; Condition:</h4>'+
+      CUST_DEMAND_TERMS.map(t=>'<p>'+esc(t)+'</p>').join('')+
+      '<h4>Note :</h4><ul>'+CUST_DEMAND_NOTES.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul>'+
+      '<p>Expecting your prompt action in this regard, and assuring you of our best services always, we remain.</p>'+
+      '<p>Yours faithfully,</p></div>';
+  }else{
+    head='<th>Sl. #</th><th>Schedule Name</th><th>Revenue Name</th>'+
+      '<th class="amt">Amount</th><th class="amt">GST</th><th class="amt">Total Amt</th>';
+    let amt=0,tax=0,net=0;
+    rowsHtml=(ctx.items||[]).map((it,i)=>{
+      amt+=Number(it.amount||0); tax+=Number(it.tax||0); net+=Number(it.net_amount||0);
+      return '<tr><td>'+(i+1)+'</td><td>'+esc(it.schedule||'—')+'</td><td>'+esc(it.revenue_head||'—')+'</td>'+
+        '<td class="amt">'+custInr(it.amount||0)+'</td><td class="amt">'+custInr(it.tax||0)+'</td>'+
+        '<td class="amt">'+custInr(it.net_amount||0)+'</td></tr>';
+    }).join('');
+    // Previous dues is what is still unpaid on invoices raised before this one. It can only be
+    // stated as a single figure: receipts allocate against the net of a line, never split across
+    // its basic and tax, so an amount/GST breakup of a part-paid line would be invented.
+    const prev=Number(ctx.prevDues||0);
+    const lateFee=Number(ctx.lateFee||0);
+    const sumRow=(label,a,t,n,strong)=>'<tr'+(strong?' class="rcpt-strong"':'')+'><td colspan="3">'+esc(label)+'</td>'+
+      '<td class="amt">'+a+'</td><td class="amt">'+t+'</td><td class="amt">'+n+'</td></tr>';
+    // Previous dues and late fees carry no basic/GST split of their own, so a running total can
+    // only show those two columns while both are nil - which is the normal case, and then the
+    // running totals simply repeat the invoice's own figures, exactly as Farvision prints them.
+    // Once either is non-nil the split is genuinely unknown and the column shows a dash rather
+    // than a made-up number.
+    const carry=(v,blocked)=>blocked?'—':custInr(v);
+    foot=
+      sumRow('Total Invoice Amount :',custInr(amt),custInr(tax),custInr(net))+
+      sumRow('Previous dues :',carry(0,prev),carry(0,prev),custInr(prev))+
+      sumRow('Total Payable :',carry(amt,prev),carry(tax,prev),custInr(net+prev),true)+
+      sumRow('Late Payment fees :',carry(0,lateFee),carry(0,lateFee),custInr(lateFee))+
+      sumRow('Total payable with interest :',carry(amt,prev||lateFee),carry(tax,prev||lateFee),custInr(net+prev+lateFee),true)+
+      '<tr><td colspan="6" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(net+prev+lateFee))+'</td></tr>';
+  }
+  return ''+
+    '<div class="rcpt-doc'+(forPrint?' print':'')+'">'+
+      '<div class="rcpt-issuer"><h2>'+esc(CUST_RECEIPT_ISSUER.name)+'</h2>'+
+        '<div class="rcpt-addr">'+esc(CUST_RECEIPT_ISSUER.address)+'</div>'+
+        '<div class="rcpt-addr">GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+' &nbsp;·&nbsp; PAN : '+esc(CUST_RECEIPT_ISSUER.pan)+'</div>'+
+      '</div>'+
+      '<div class="rcpt-title">'+(demand?'DEMAND LETTER':'TAX INVOICE')+'</div>'+
+      '<div class="rcpt-grid">'+
+        '<div><div class="rcpt-name">'+esc(c.contact_name||'')+'</div>'+
+          (c.contact_address?'<div class="rcpt-addr">'+esc(c.contact_address)+'</div>':'')+left+'</div>'+
+        '<div>'+right+'</div>'+
+      '</div>'+
+      (demand?'<div class="rcpt-remarks">Dear Sir / Madam,<br>We wish to inform you that your following installments are falling due on the dates indicated against them.</div>':'')+
+      '<div class="rcpt-tblwrap"><table class="rcpt-tbl"><thead><tr>'+head+'</tr></thead>'+
+      '<tbody>'+(rowsHtml||'<tr><td colspan="6" style="text-align:center;color:#64748b">No charge lines recorded.</td></tr>')+'</tbody>'+
+      '<tfoot>'+foot+'</tfoot></table></div>'+
+      tail+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
+      '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
+    '</div>';
+}
+
+// Every billed line for the unit with what has been paid against it, plus what was still unpaid
+// on invoices raised before `beforeDate`. Receipts are matched the way Farvision allocates them:
+// against the invoice number, then the schedule and revenue head within it. Kept pure so it can
+// be checked against the ledger and against Farvision's own demand letter without a round trip.
+function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
+  const SEP=String.fromCharCode(31);
+  const key=(doc,sch,head)=>[String(doc||''),String(sch||''),String(head||'')].join(SEP);
+  // An "On Account" receipt line is money received against the unit but not applied to any
+  // particular demand, so it has no invoice number to match on. It still belongs in the table as
+  // a payment in its own right - dated by the receipt it came in on, which is what our data
+  // records - rather than being spread across plan lines by guesswork or bolted on as a footer
+  // adjustment. Nothing owes against it, so it carries no Amount Due.
+  const paidByKey={}; let onAccount=0; const onAccountRows=[];
+  (alloc||[]).forEach(a=>{
+    const amt=Number(a.amount||0);
+    if(a.line_type==='on_account'||!a.against_demand_no){
+      onAccount+=amt;
+      onAccountRows.push({dueDate:(receiptDates&&receiptDates[a.receipt_id])||null,
+        schedule:a.particulars||'On Account',head:'',due:0,paid:amt});
+      return;
+    }
+    const k=key(a.against_demand_no,a.schedule,a.revenue_head);
+    paidByKey[k]=(paidByKey[k]||0)+amt;
+  });
+  const plan=[]; let prevDues=0;
+  (allInv||[]).forEach(iv=>{
+    (iv.invoice_items||[]).slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(it=>{
+      const due=Number(it.net_amount||0);
+      const paid=Math.min(due,Number(paidByKey[key(iv.document_no,it.schedule,it.revenue_head)]||0));
+      plan.push({dueDate:iv.due_date||iv.document_date,schedule:it.schedule,head:it.revenue_head,due:due,paid:paid});
+      if(beforeDate&&iv.document_date&&iv.document_date<beforeDate) prevDues+=Math.max(0,due-paid);
+    });
+  });
+  onAccountRows.forEach(r=>plan.push(r));
+  plan.sort((a,b)=>String(a.dueDate||'').localeCompare(String(b.dueDate||''))||
+    String(a.schedule||'').localeCompare(String(b.schedule||''))||
+    String(a.head||'').localeCompare(String(b.head||'')));
+  // Money on account is available to settle what is outstanding, so it reduces previous dues
+  // before any of it is left over.
+  return {plan:plan,prevDues:Math.max(0,prevDues-onAccount),onAccount:onAccount};
+}
+
+window.custViewInvoice=async function(id){
+  const unit=window._custLedgerUnit;
+  if(!unit){toast('Open the ledger first','err');return;}
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-invoice"></i> Invoice</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>','lg');
+  const [{data:inv,error:ie},{data:its},{data:cts},{data:allInv},{data:rcpts},{data:csi},{data:snap}]=await Promise.all([
+    sb.schema('cust').from('invoices').select('*').eq('id',id).eq('unit_id',unit.id).neq('status',CUST_INVOICE_CANCELLED).maybeSingle(),
+    sb.schema('cust').from('invoice_items').select('*').eq('invoice_id',id).order('sort_order'),
+    sb.schema('cust').from('farvision_contacts').select('*').eq('unit_id',unit.id).eq('is_current',true).limit(1),
+    sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_items(schedule,revenue_head,amount,tax,net_amount,sort_order)')
+      .eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('due_date'),
+    sb.schema('cust').from('money_receipts').select('id,receipt_date').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('cost_sheet_items').select('component,amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('outstanding_snapshot').select('late_fee_accrued').eq('unit_id',unit.id).eq('is_current',true).maybeSingle()
+  ]);
+  if(ie||!inv){openModal('<div class="modal-head"><h3>Invoice</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><div class="card card-pad empty">This invoice could not be loaded.</div></div>','lg');return;}
+
+  // Fetched by receipt id rather than by filtering an embedded money_receipts join: the embed
+  // form returned nothing here, which silently made every earlier invoice look unpaid and put a
+  // phantom "Previous dues" on the printed invoice.
+  const rids=(rcpts||[]).map(r=>r.id).filter(Boolean);
+  const {data:alloc}=rids.length
+    ? await sb.schema('cust').from('receipt_items').select('against_demand_no,schedule,revenue_head,amount,line_type,particulars,receipt_id').in('receipt_id',rids)
+    : {data:[]};
+  const receiptDates={};
+  (rcpts||[]).forEach(r=>{receiptDates[r.id]=r.receipt_date;});
+  const {plan,prevDues,onAccount}=custBuildPlan(allInv,alloc,inv.document_date,receiptDates);
+
+  const sba=Number(unit.super_built_up_area_sqft||0);
+  const unitCost=(csi||[]).find(i=>/unit cost/i.test(i.component||''));
+  window._custInvoiceCache={
+    inv:inv, items:its||[], plan:plan, prevDues:prevDues, onAccount:onAccount,
+    lateFee:Number((snap&&snap.late_fee_accrued)||0),
+    rate:sba&&unitCost?Math.round(Number(unitCost.amount||0)/sba):null,
+    unit:unit, contact:(cts&&cts[0])||null, fmt:'invoice'
+  };
+  custRenderInvoiceModal();
+};
+function custRenderInvoiceModal(){
+  const s=window._custInvoiceCache;
+  if(!s) return;
+  // A segmented control rather than a dropdown: there are exactly two formats, and which one is
+  // about to be downloaded should be readable at a glance instead of hidden behind a closed
+  // select. Uses the portal's own .seg component so it matches every other switcher.
+  const icons={invoice:'fa-file-invoice',demand:'fa-file-lines'};
+  const seg=Object.keys(CUST_INVOICE_FORMATS).map(k=>
+    '<button type="button" class="seg-btn'+(k===s.fmt?' on':'')+'" aria-pressed="'+(k===s.fmt)+'"'+
+    ' onclick="custSetInvoiceFormat(\''+k+'\')"><i class="fa-solid '+icons[k]+'"></i> '+
+    esc(CUST_INVOICE_FORMATS[k])+'</button>').join('');
+  openModal('<div class="modal-head"><h3><i class="fa-solid '+icons[s.fmt]+'"></i> '+esc(CUST_INVOICE_FORMATS[s.fmt])+'</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
+    '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
+      '<div class="rcpt-fmt">'+
+        '<span class="rcpt-fmt-lbl">Format</span>'+
+        '<div class="seg" role="group" aria-label="Document format">'+seg+'</div>'+
+        '<span class="rcpt-fmt-hint">'+(s.fmt==='demand'
+          ? 'Whole payment plan for this unit, with what has been paid against each instalment'
+          : 'This invoice only — '+esc(s.inv.document_no||''))+'</span>'+
+      '</div>'+
+      custInvoiceDocHtml(s,s.fmt,false)+'</div>'+
+    '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
+    '<button class="btn btn-primary" onclick="custPrintInvoice()"><i class="fa-solid fa-download"></i> Download '+esc(CUST_INVOICE_FORMATS[s.fmt])+'</button></div>','lg');
+}
+
+window.custSetInvoiceFormat=function(fmt){
+  const s=window._custInvoiceCache;
+  if(!s||!CUST_INVOICE_FORMATS[fmt]) return;
+  s.fmt=fmt;
+  custRenderInvoiceModal();
+};
+
+// Prints whatever format is currently selected - the preview and the download are always the
+// same document, so choosing "Tax Invoice" can never hand the customer a demand letter.
+window.custPrintInvoice=function(){
+  const s=window._custInvoiceCache;
+  if(!s){toast('Open an invoice first','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to download','err');return;}
+  const label=s.fmt==='demand'?'Demand-Letter':'Tax-Invoice';
+  const fileName=label+'-'+String(s.inv.document_no||'').replace(/[^A-Za-z0-9]+/g,'-');
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(fileName)+'</title><style>'+
+    'body{margin:26px;font-family:Inter,system-ui,sans-serif}'+CUST_RECEIPT_CSS+
+    '.rcpt-tbl{min-width:0}.rcpt-tblwrap{overflow:visible}'+
+    '@media print{body{margin:12px}}'+
+    '</style></head><body>'+custInvoiceDocHtml(s,s.fmt,true)+'</body></html>';
+  try{w.document.open();w.document.write(html);w.document.close();}
+  catch(_e){toast('Could not build the document','err');return;}
+  setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
+};
+
+async function custTabCostSheet(data,unit){
+  const c=data.contactByUnit[unit.id];
+  const [{data:costItemRows},{data:invRows},{data:uploadedDocs},{data:rcptRows},{data:revRows}]=await Promise.all([
+    sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
+    sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false}),
+    sb.schema('cust').from('money_receipts').select('total_amount').eq('unit_id',unit.id).eq('is_current',true),
+    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true)
+  ]);
+  const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
+  const receipts=rcptRows||[], reversals=revRows||[];
+  if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
+
+  let out='';
+  if(items.length){
+    // "Cost Summary" card - mirrors the Basic/Extra/Tax breakup and Due/Received/Balance/
+    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout,
+    // built entirely from our own cost_sheet_items + money_receipts + receipt_reversals (no
+    // guessed basic/tax split on the actuals - only the static per-component agreement figures
+    // carry that split reliably).
+    const unitCostItem=items.find(i=>/unit cost/i.test(i.component||''));
+    const basicCost=Number(unitCostItem?.amount||0);
+    // The standard, recurring per-unit charge types that make up every Dream project's cost
+    // sheet (verified against Farvision's own "Cost breakup" printout). Anything outside this
+    // set - e.g. a one-off "Cheque Dishonoured Charges" penalty - is a later ad-hoc charge, not
+    // part of the original agreement cost, and Farvision itself reports it as a separate figure.
+    const STANDARD_COMPONENTS=/legal documentation|advance maintenance|maintenance deposit|generator charges|flc charges|plc charge|vehicle parking|club membership|infrastructure for club facility|infrastructure for electricity|electricity charges|association formation charges/i;
+    const extraCharges=items.reduce((s,i)=>s+(i===unitCostItem||!STANDARD_COMPONENTS.test(i.component||'')?0:Number(i.amount||0)),0);
+    const adhocCharges=items.reduce((s,i)=>s+(i===unitCostItem||STANDARD_COMPONENTS.test(i.component||'')?0:Number(i.amount||0)),0);
+    const totalTax=items.reduce((s,i)=>s+Number(i.tax_amount||0),0);
+    const totalWithoutTax=basicCost+extraCharges+adhocCharges;
+    const totalWithTax=totalWithoutTax+totalTax;
+    const totalBilled=items.reduce((s,i)=>s+Number(i.bill_amount||0),0);
+    const onAccount=items.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
+    const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
+    const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
+    const netReceived=grossReceipts-grossReversals;
+    const balance=totalBilled-netReceived;
+    const futureDue=Math.max(0,totalWithTax-netReceived);
+    const duePct=totalWithTax?Math.round(totalBilled/totalWithTax*1000)/10:0;
+    const recdPct=totalWithTax?Math.round(netReceived/totalWithTax*1000)/10:0;
+    const balLabel=balance>0?'<span style="color:#e08600">'+custInr(balance)+' due</span>':balance<0?'<span style="color:#16855a">'+custInr(Math.abs(balance))+' advance</span>':'<span style="color:#16855a">0.00</span>';
+    const stat=(label,val,sub,color)=>'<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">'+label+'</div>'+
+      '<div style="font-size:19px;font-weight:700;margin-top:3px'+(color?';color:'+color:'')+'">'+val+'</div>'+
+      (sub?'<div style="font-size:11.5px;color:var(--slate);margin-top:1px">'+sub+'</div>':'')+'</div>';
+    out+='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
+      '<div class="sec-title" style="margin:0 0 14px">Cost Summary</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:16px">'+
+        stat('Due as on '+fmtDate(new Date()),custInr(totalBilled),duePct+'% of agreement value')+
+        stat('Received till '+fmtDate(new Date()),custInr(netReceived),recdPct+'%'+(onAccount?' · '+custInr(onAccount)+' on account':''),'#16855a')+
+        stat('Balance',balLabel,'')+
+        stat('Total due (incl. future bills)',custInr(futureDue),'against full agreement value')+
+      '</div>'+
+      '<div style="border-top:1px solid #e2e8f0;padding-top:12px;font-size:13px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">'+
+        '<span><b>Basic Cost:</b> '+custInr(basicCost)+'</span><span style="color:var(--slate)">+</span>'+
+        '<span><b>Extra Charges:</b> '+custInr(extraCharges)+'</span><span style="color:var(--slate)">+</span>'+
+        (adhocCharges?'<span><b>Other Charges (Adhoc):</b> '+custInr(adhocCharges)+'</span><span style="color:var(--slate)">+</span>':'')+
+        '<span><b>Taxes:</b> '+custInr(totalTax)+'</span><span style="color:var(--slate)">=</span>'+
+        '<span><b>Total (excl. tax):</b> '+custInr(totalWithoutTax)+'</span>'+
+        '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
+      '</div></div>';
+
+    // Cost Breakup below shows the agreement's cost estimate itself (Amount/GST/Gross per
+    // charge, grouped like Farvision's own "Estimated Offer Price" sheet into Unit Charges vs
+    // Extra Development Charges) - not payment status, which already lives in the Cost Summary
+    // card above (Billed/Received/Balance).
+    const UNIT_GROUP=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+    const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
+    const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
+    const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
+    const breakupRow=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
+      return [esc(i.component),custInr(amt),gstPct+'%',custInr(tax),custInr(amt+tax)];};
+    const breakupTotal=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
+      return ['<b>'+label+'</b>','<b>'+custInr(amt)+'</b>','','<b>'+custInr(tax)+'</b>','<b>'+custInr(amt+tax)+'</b>'];};
+    const groupTitle=t=>'<div style="font-size:12px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;margin:16px 0 6px">'+t+'</div>';
+    window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
+    out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
+      '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
+    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+
+      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],unitGroupItems.map(breakupRow).concat([breakupTotal(unitGroupItems,'Total Flat Value')]));
+    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+
+      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],edcGroupItems.map(breakupRow).concat([breakupTotal(edcGroupItems,'Total EDC')]));
+    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+
+      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],adhocGroupItems.map(breakupRow).concat([breakupTotal(adhocGroupItems,'Total Adhoc')]));
+    out+='<div style="margin-top:8px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14.5px"><b>Grand Total: '+custInr(totalWithTax)+'</b></div>';
+  }
+  if(invoices.length){
+    const schedRows=[];
+    invoices.forEach(inv=>{
+      const lineItems=inv.invoice_items||[];
+      if(!lineItems.length) return;
+      const bySchedule={};
+      lineItems.forEach(li=>{const s=li.schedule||'—';bySchedule[s]=(bySchedule[s]||0)+Number(li.net_amount||0);});
+      Object.keys(bySchedule).forEach(s=>{schedRows.push([fmtDate(inv.document_date),esc(s),custInr(bySchedule[s]),fmtDate(inv.due_date),'<span class="tag t-green">Raised</span>']);});
+    });
+    out+='<div class="sec-title" style="margin:22px 0 8px">Payment Schedule</div>'+
+      mTable(['Invoice date','Milestone','Amount','Due date','Status'],schedRows);
+  }
+  if(uploaded.length){
+    const docRows=uploaded.map(d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Cost Sheet'),fmtDate(d.created_at),
+      `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'cost-sheet').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`]);
+    out+='<div class="sec-title" style="margin:22px 0 8px">Signed document'+(uploaded.length>1?'s':'')+'</div>'+cpaTable(['Document','Shared on','Download'],docRows);
+  }
+  return out;
+}
+window.custPrintCostSheet=function(){
+  const unit=window._custCostSheetUnit,c=window._custCostSheetContact,items=window._custCostSheetItems;
+  if(!unit||!items){toast('Nothing to print yet','err');return;}
+  const w=window.open('','_blank');
+  if(!w){toast('Please allow popups to print','err');return;}
+  const STANDARD_COMPONENTS=/legal documentation|advance maintenance|maintenance deposit|generator charges|flc charges|plc charge|vehicle parking|club membership|infrastructure for club facility|infrastructure for electricity|electricity charges|association formation charges/i;
+  const UNIT_GROUP=/^unit cost$|flc charges|plc charge|vehicle parking/i;
+  const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
+  const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
+  const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
+  const rowHtml=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
+    return '<tr><td>'+esc(i.component)+'</td><td>'+custInr(amt)+'</td><td>'+gstPct+'%</td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
+  const totalHtml=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
+    return '<tr style="font-weight:700"><td>'+label+'</td><td>'+custInr(amt)+'</td><td></td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
+  const groupTable=(label,list,totalLabel)=>list.length?'<h3>'+label+'</h3><table><thead><tr><th>Particulars</th><th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
+    list.map(rowHtml).join('')+totalHtml(list,totalLabel)+'</tbody></table>':'';
+  const grandTotal=items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
+  const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cost Sheet — '+esc(unit.unit_code)+'</title><style>'+
+    'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
+    'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 20px}'+
+    'h3{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;margin:20px 0 4px}'+
+    'table{width:100%;border-collapse:collapse;margin-top:4px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12.5px}'+
+    'th{color:#64748b;font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.03em}'+
+    '.grand{margin-top:14px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14px;font-weight:700}'+
+    '</style></head><body>'+
+    '<h1>Cost Sheet — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
+    '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
+    groupTable('Unit Charges',unitGroupItems,'Total Flat Value')+
+    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC')+
+    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc')+
+    '<div class="grand">Grand Total: '+custInr(grandTotal)+'</div>'+
+    '</body></html>';
+  try{ w.document.open(); w.document.write(html); w.document.close(); }
+  catch(_e){ toast('Could not build the printout','err'); return; }
+  setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
+};
+// Shared photo/video grid used by every construction-media level (project, tower, floor, unit)
+// and by the inspection-update trail - a card per file, showing a real thumbnail for images and
+// a play-icon placeholder for video (signing a video's URL up front isn't needed for the
+// thumbnail, only when the customer actually opens it via s3OpenSigned).
+async function custMediaGrid(list){
+  const urls=await Promise.all(list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;return isVideo?Promise.resolve(null):s3SignedUrl(p.storage_path);}));
+  return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
+    list.map((p,i)=>{const isVideo=(p.file_type||'').indexOf('video')===0;const url=urls[i];
+      const thumb=url
+        ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
+        :`<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div>`;
+      return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
+    <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
 }
 async function custTabProgress(unit){
-  const [{data:pPhotos},{data:uPhotos}]=await Promise.all([
+  const floorNo=custDeriveFloor(unit.unit_code);
+  const [{data:pPhotos},{data:tPhotos},{data:fPhotos},{data:uPhotos}]=await Promise.all([
     sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
+    floorNo?sb.schema('cust').from('floor_photos').select('*').eq('project_id',unit.project_id).eq('floor_no',floorNo).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
     unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
   ]);
-  const photoGrid=async list=>{
-    const urls=await Promise.all(list.map(p=>s3SignedUrl(p.storage_path)));
-    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
-      list.map((p,i)=>{const url=urls[i];
-        const thumb=url
-          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
-          :'<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid fa-image fa-lg"></i></div>';
-        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
-      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
-  };
   let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
-    ((pPhotos&&pPhotos.length)?await photoGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
+    ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
+  out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your floor'+(floorNo?' — Floor '+esc(floorNo):'')+'</div>';
+  out+=(fPhotos&&fPhotos.length)?await custMediaGrid(fPhotos):'<div class="card card-pad empty">No floor-wide updates yet — check back soon.</div>';
   out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
   if(!unit.floor_casting_completed_at){
     out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
   }else{
-    out+=(uPhotos&&uPhotos.length)?await photoGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+    out+=(uPhotos&&uPhotos.length)?await custMediaGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
   }
   return out;
 }
@@ -14039,18 +15669,8 @@ async function custTabInspection(unit){
     (checklist?
       `<div class="card card-pad" style="display:flex;justify-content:space-between;align-items:center">${fileIcon(checklist.file_type||'')} ${esc(checklist.file_name||'Inspection checklist')}<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${checklist.storage_path.replace(/'/g,"\\'")}','${(checklist.file_name||'checklist').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button></div>`:
       '<div class="card card-pad empty">Your inspection checklist hasn\u2019t been uploaded yet.</div>');
-  const mediaGrid=async list=>{
-    const urls=await Promise.all(list.map(p=>{const isVideo=(p.file_type||'').indexOf('video')===0;return isVideo?Promise.resolve(null):s3SignedUrl(p.storage_path);}));
-    return '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">'+
-      list.map((p,i)=>{const isVideo=(p.file_type||'').indexOf('video')===0;const url=urls[i];
-        const thumb=url
-          ?`<img src="${url}" alt="" style="width:100%;height:110px;object-fit:cover;border-radius:6px;display:block">`
-          :`<div style="background:#eef2f7;border-radius:6px;height:110px;display:flex;align-items:center;justify-content:center;color:#94a3b8"><i class="fa-solid ${isVideo?'fa-circle-play':'fa-image'} fa-lg"></i></div>`;
-        return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
-      <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
-  };
   const updatesSection='<div class="sec-title" style="margin:20px 0 10px">Updates against the checklist</div>'+
-    ((updates&&updates.length)?await mediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
+    ((updates&&updates.length)?await custMediaGrid(updates):'<div class="card card-pad empty">No updates yet — photo or video updates against your checklist will appear here.</div>');
   return checklistSection+updatesSection;
 }
 async function custTabVideos(){
@@ -14431,7 +16051,10 @@ window.custModReqDecide=async function(id,decision){
   closeModal();toast(decision==='accepted'?'Accepted':'Rejected','ok');route();
 };
 VIEWS.customer=async function(v,seg){
-  v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  v.innerHTML='<div class="cust-building-loader"><div class="cbl-site">'+
+    '<div class="cbl-crane"><div class="cbl-crane-arm"></div><div class="cbl-crane-hook"></div></div>'+
+    '<div class="cbl-building"><div class="cbl-floor cbl-f1"></div><div class="cbl-floor cbl-f2"></div><div class="cbl-floor cbl-f3"></div><div class="cbl-floor cbl-f4"></div><div class="cbl-floor cbl-f5"></div></div>'+
+    '<div class="cbl-ground"></div></div><div class="cbl-text">Building your experience...</div></div>';
   const tabs=CUST_TABS;
   const ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
@@ -14456,7 +16079,7 @@ VIEWS.customer=async function(v,seg){
   let body;
   if(ti===0)body=await custTabOverview(data,unit);
   else if(ti===1)body=await custTabLedger(unit);
-  else if(ti===2)body=await custTabCostSheet(unit);
+  else if(ti===2)body=await custTabCostSheet(data,unit);
   else if(ti===3)body=await custTabProgress(unit);
   else if(ti===4)body=await custTabInspection(unit);
   else if(ti===5)body=await custTabDocuments(unit);
@@ -14471,6 +16094,27 @@ VIEWS.customer=async function(v,seg){
     banner+
     custUnitPicker(data.units,unit.id)+
     '<div style="margin-top:14px">'+body+'</div></div>';
+  // Animated count-up on KPI values (Statement tab only)
+  if(ti===0){requestAnimationFrame(function(){
+    v.querySelectorAll('.cust-view-fade .kpi .val').forEach(function(el){
+      var raw=el.textContent.trim();
+      var m=raw.match(/[\d,.]+/);
+      if(!m)return;
+      var target=parseFloat(m[0].replace(/,/g,''));
+      if(isNaN(target)||target===0)return;
+      var prefix=raw.slice(0,raw.indexOf(m[0]));
+      var suffix=raw.slice(raw.indexOf(m[0])+m[0].length);
+      var duration=700,start=performance.now();
+      el.textContent=prefix+'0'+suffix;
+      function tick(now){
+        var t=Math.min((now-start)/duration,1);
+        var ease=1-Math.pow(1-t,3);
+        el.textContent=prefix+Math.round(target*ease).toLocaleString('en-IN')+suffix;
+        if(t<1)requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+  });}
 };
 VIEWS.supplier=function(v,seg){
   setCrumb(['Stakeholder Portals','Supplier Portal']);

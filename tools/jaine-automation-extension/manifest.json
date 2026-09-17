@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "JainE Automation",
+  "version": "1.0.0",
+  "description": "Watches JainE's Supabase job queue and runs browser automations in this signed-in browser -- no separate Chrome process, no Playwright.",
+  "permissions": ["debugger", "alarms", "storage", "tabs", "downloads"],
+  "host_permissions": [
+    "https://rkxsgtauigjrpcjkmccu.supabase.co/*",
+    "https://docs.google.com/*",
+    "https://api.anthropic.com/*",
+    "https://realtybucket.com/*",
+    "https://www.realtybucket.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}
