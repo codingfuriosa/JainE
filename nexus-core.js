@@ -13726,10 +13726,33 @@ let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
   if(seg&&seg[1]==='history'){ await cpaRenderImportHistory(host,projects); return; }
+
+  // Gmail queue section
+  const {data:queueRows}=await sb.schema('cust').from('import_queue').select('*').eq('status','pending').order('created_at',{ascending:false});
+  const queue=queueRows||[];
+  let queueHtml='';
+  if(queue.length){
+    const qRows=queue.map(q=>[
+      '<i class="fa-solid fa-file-excel" style="color:#16a34a"></i> '+esc(q.file_name),
+      (q.file_size/1024).toFixed(0)+' KB',
+      fmtDate(q.created_at),
+      esc(q.email_subject||'—'),
+      `<button class="btn btn-sm btn-primary" onclick="cpaQueueImport(${q.id})"><i class="fa-solid fa-file-import"></i> Import</button>`+
+      ` <button class="btn btn-sm" onclick="cpaQueueDismiss(${q.id})" title="Skip this file"><i class="fa-solid fa-xmark"></i></button>`
+    ]);
+    queueHtml=`<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div><i class="fa-solid fa-envelope-open-text" style="color:var(--brand)"></i> <b>${queue.length} file${queue.length>1?'s':''} from Gmail</b>
+        <span style="font-size:12.5px;color:var(--slate);margin-left:8px">Auto-fetched from Farvision email</span></div>
+        <button class="btn btn-sm btn-primary" onclick="cpaQueueImportAll()"><i class="fa-solid fa-bolt"></i> Import all</button>
+      </div>`+cpaTable(['File','Size','Received','Email subject','Action'],qRows)+`</div>`;
+  }
+
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
+    ${queueHtml}
     <div class="card card-pad frm"><div class="two"><div><label>Import type</label><select id="cpaImpType" onchange="cpaImportTypeChange()">${typeOpts}</select></div>
     <div id="cpaImpProjectWrap"><label>Project (for matching unit codes)</label><select id="cpaImpProject">${projOpts}</select></div></div>
     <label id="cpaImpFileLabel">File</label><input type="file" id="cpaImpFile">
@@ -13738,6 +13761,54 @@ async function cpaRenderImport(host,seg){
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
 }
+// Queue import: download from storage, feed into existing xlsx preview/import flow
+window.cpaQueueImport=async function(queueId){
+  const {data:q,error}=await sb.schema('cust').from('import_queue').select('*').eq('id',queueId).single();
+  if(error||!q){toast('Queue item not found','err');return;}
+  // Mark as processing
+  await sb.schema('cust').from('import_queue').update({status:'processing'}).eq('id',queueId);
+  toast('Downloading '+q.file_name+'…','ok');
+  try{
+    const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(q.storage_path);
+    if(dlErr||!blob)throw new Error(dlErr?.message||'Download failed');
+    const buf=await blob.arrayBuffer();
+    const wb=XLSX.read(new Uint8Array(buf),{cellDates:true});
+    // Detect type by anchor column
+    const {rows}=xlsxSheetRows(wb);
+    let type=null;
+    for(let r=0;r<Math.min(rows.length,20);r++){
+      const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
+      if(vals.includes('Payment Plan')){type='sales_details';break;}
+      if(vals.includes('Net Outstanding')){type='outstanding';break;}
+      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
+      if(vals.includes('Money Receipt No')){type='receipt_register';break;}
+    }
+    if(!type){
+      await sb.schema('cust').from('import_queue').update({status:'failed',error_message:'Could not detect report type'}).eq('id',queueId);
+      toast('Could not detect report type in '+q.file_name,'err');route();return;
+    }
+    // Feed into existing preview flow
+    $('cpaImpType').value=type;
+    window.cpaImportTypeChange();
+    await cpaImportPreviewXlsx(type,null,wb);
+    // Mark queue item — will be marked completed after user confirms import
+    window._cpaQueueId=queueId;
+    toast('Preview ready — review and confirm the import','ok');
+  }catch(e){
+    await sb.schema('cust').from('import_queue').update({status:'failed',error_message:e.message}).eq('id',queueId);
+    toast('Failed: '+e.message,'err');route();
+  }
+};
+window.cpaQueueImportAll=async function(){
+  const {data:pending}=await sb.schema('cust').from('import_queue').select('id').eq('status','pending').order('created_at');
+  if(!pending||!pending.length){toast('No pending files','err');return;}
+  // Import first one — user reviews, confirms, then next appears on reload
+  await cpaQueueImport(pending[0].id);
+};
+window.cpaQueueDismiss=async function(queueId){
+  await sb.schema('cust').from('import_queue').update({status:'completed',processed_at:new Date().toISOString()}).eq('id',queueId);
+  toast('Dismissed','ok');route();
+};
 window.cpaImportTypeChange=function(){
   const type=$('cpaImpType').value, help=$('cpaImpColsHelp'), file=$('cpaImpFile'), projWrap=$('cpaImpProjectWrap');
   const isXlsx=CPA_XLSX_IMPORT_TYPES.has(type);
@@ -13766,13 +13837,13 @@ window.cpaImportPreview=async function(){
   if(CPA_XLSX_IMPORT_TYPES.has(type)){ await cpaImportPreviewXlsx(type,file); return; }
   await cpaImportPreviewCsv(type,file);
 };
-async function cpaImportPreviewXlsx(type,file){
+async function cpaImportPreviewXlsx(type,file,preloadedWb){
   const XL=await loadXLSX();
   if(!XL){toast('Could not load the spreadsheet reader — check your connection','err');return;}
   let wb,parsed;
   try{
-    const buf=await file.arrayBuffer();
-    wb=XL.read(buf,{type:'array'});
+    if(preloadedWb){wb=preloadedWb;}
+    else{const buf=await file.arrayBuffer();wb=XL.read(buf,{type:'array'});}
     parsed=type==='sales_details'?cpaParseSalesDetails(wb)
       :type==='outstanding'?cpaParseOutstanding(wb)
       :type==='invoice_register'?cpaParseInvoiceRegister(wb)
@@ -13851,6 +13922,11 @@ window.cpaImportConfirm=async function(btn){
   try{
     if(CPA_XLSX_IMPORT_TYPES.has(st.type)){ await cpaImportConfirmXlsx(st); }
     else{ await cpaImportConfirmCsv(st); }
+    // Mark queue item as completed if this import came from Gmail queue
+    if(window._cpaQueueId){
+      await sb.schema('cust').from('import_queue').update({status:'completed',processed_at:new Date().toISOString()}).eq('id',window._cpaQueueId);
+      window._cpaQueueId=null;
+    }
     CPA_IMPORT_STATE=null;
     navTo('custportal_admin/2/history');
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
