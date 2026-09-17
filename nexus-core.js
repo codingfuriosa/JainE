@@ -17664,6 +17664,12 @@ let TRC_ROWS_RANGE=null;
    on every row) or the fast crm_followups-only fetch (present on none, until trcEnrichVisiblePage
    fills in whichever leads are on screen). See trcFetchLight/trcFetchFull/trcEnsureFullEnrichment. */
 let TRC_ROWS_ENRICHED=false;
+/* Which range's rows already have status_match/mismatch_type/ai_assessed_status/visit_pending merged
+   in from acc.followup_qa directly (see trcEnsureQaFieldsMerged) - a light, join-free fetch that is
+   enough to answer CRM Match/CRM Mismatch/a mismatch category without ever paying for
+   transcription_status (call_transcripts/transcription_queue), which only trcEnsureFullEnrichment's
+   full join provides. null whenever TRC_ROWS itself was replaced, exactly like TRC_ROWS_ENRICHED. */
+let TRC_QA_MERGED_RANGE=null;
 
 /* TRC_ROWS/TR_ROWS only survive as long as this tab's JS does - a reload throws the fetch away and
    pays the full CRM-join + transcription cost again even one minute later. sessionStorage backs the
@@ -17881,7 +17887,7 @@ function trcResetFilters(){
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
   TRC_PAGE=0;
-  TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;
+  TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
   try{sessionStorage.removeItem('trc_filters_state');}catch(e){}
 }
@@ -18095,6 +18101,11 @@ async function trcFetchLight(force){
     if(cached){
       TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;
       TRC_ROWS_ENRICHED=cached.length>0&&cached.every(function(r){return r._enriched;});
+      /* A cached snapshot can hold a mix - some rows enriched by trcEnrichVisiblePage, some not, none
+         necessarily qa-field-merged - so this cannot claim the merge already happened. A genuinely
+         merged range re-merges once more here, which is cheap (an indexed, join-free query) compared
+         to getting it wrong and showing blank match/mismatch data back out of the cache. */
+      TRC_QA_MERGED_RANGE=null;
       return TRC_ROWS;
     }
   }
@@ -18129,10 +18140,10 @@ async function trcFetchLight(force){
       const email=String(r.personnel_email||'').trim().toLowerCase();
       r.personnel_team=!email?null:((TRC_PERSONNEL||[]).some(function(p){return p.email===email;})?'Pre-Sales':'Sales');
     });
-    TRC_ROWS=rows;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=false;
+    TRC_ROWS=rows;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
     trCacheWrite('trc_fetch_light_cache',rangeKey,rows);
   }catch(e){
-    TRC_ROWS=TRC_ROWS&&TRC_ROWS_RANGE===rangeKey?TRC_ROWS:[];TRC_ROWS_RANGE=null;
+    TRC_ROWS=TRC_ROWS&&TRC_ROWS_RANGE===rangeKey?TRC_ROWS:[];TRC_ROWS_RANGE=null;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
   }
   return TRC_ROWS;
@@ -18149,7 +18160,7 @@ async function trcFetchFull(force){
   if(TRC_ROWS&&!force&&TRC_ROWS_RANGE===rangeKey&&TRC_ROWS_ENRICHED)return TRC_ROWS;
   if(!force){
     const cached=trCacheRead('trc_fetch_cache',rangeKey);
-    if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;return TRC_ROWS;}
+    if(cached){TRC_ROWS=cached;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;return TRC_ROWS;}
   }
   /* followup_timeline_v joins lead_level_progress_v, which ranks every lead's whole follow-up
      history through a chain of window functions - a cost paid IN FULL on every request to this
@@ -18176,13 +18187,13 @@ async function trcFetchFull(force){
       from+=PAGE;if(from>50000)break;
     }
     out.forEach(function(r){r._enriched=true;});
-    TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;
+    TRC_ROWS=out;TRC_ROWS_RANGE=rangeKey;TRC_ROWS_ENRICHED=true;TRC_QA_MERGED_RANGE=null;
     trCacheWrite('trc_fetch_cache',rangeKey,out);
     // Full data answers a light request too (see trcFetchLight) - written under its key as well so a
     // later visit to this same range never fetches a step down from what is already sitting here.
     trCacheWrite('trc_fetch_light_cache',rangeKey,out);
   }catch(e){
-    TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;
+    TRC_ROWS=out.length?out:[];TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
     toast('Could not load the call history: '+((e&&e.message)||e),'err');
   }
   return TRC_ROWS;
@@ -18195,6 +18206,41 @@ async function trcEnsureFullEnrichment(){
   if(TRC_ROWS_ENRICHED)return;
   trcShowLoading();
   await trcFetchFull(false);
+}
+
+/* THE LIGHT HALF-STEP between the fast path and a full enrichment. CRM Match/CRM Mismatch/a mismatch
+   category only ever read status_match/mismatch_type/ai_assessed_status/visit_pending/
+   is_latest_assessed - all five are native columns on acc.followup_qa itself, indexed by call_date,
+   no join to call_transcripts or transcription_queue needed at all (that heavier join is what
+   transcription_status - the 'proc' cards - genuinely still requires, via trcEnsureFullEnrichment).
+   Cached per range the same way that one is (TRC_QA_MERGED_RANGE), so switching between CRM Match,
+   CRM Mismatch and the four mismatch categories after the first click is a plain guard clause, not a
+   refetch every time - which is what made switching between them look like the page kept reloading. */
+async function trcEnsureQaFieldsMerged(){
+  if(TRC_ROWS_ENRICHED)return;
+  const rangeKey=(TRC_F.from||'')+'|'+(TRC_F.to||'');
+  if(TRC_QA_MERGED_RANGE===rangeKey)return;
+  trcShowLoading();
+  try{
+    let q=sb.schema('acc').from('followup_qa').select(
+      'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
+      +'remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+      +'qa_error,reused_transcription,is_latest_assessed');
+    if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
+    if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
+    const {data,error}=await q;
+    if(error)throw error;
+    const byFollowUp={};
+    (data||[]).forEach(function(r){byFollowUp[String(r.follow_up_id)]=r;});
+    (TRC_ROWS||[]).forEach(function(r,i){
+      if(r._enriched)return; // a full enrichment already covers this row and then some - never downgrade it
+      const f=byFollowUp[String(r.follow_up_id)];
+      if(f)TRC_ROWS[i]=Object.assign({},r,f);
+    });
+    TRC_QA_MERGED_RANGE=rangeKey;
+  }catch(e){
+    toast('Could not load match/mismatch data: '+((e&&e.message)||e),'err');
+  }
 }
 
 /* Bumped on every fetch and page change; an in-flight enrichment request checks it after the await
@@ -18284,7 +18330,13 @@ async function trcKpiFastFetch(force){
       status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
       qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
       in_followup_should_have_been_qualified:0,agent_qa_score_sum:0,agent_qa_score_n:0,
-      reused_transcription:0};
+      reused_transcription:0,
+      /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
+         (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
+         contribution lands on exactly one day, ever. See 20260918110000. */
+      status_match_leads:0,status_mismatch_leads:0,
+      lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
+      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
     (days||[]).forEach(function(d){
       Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
     });
@@ -18550,17 +18602,24 @@ function trcKpiHtml(rows){
      subtitle just leaves the lead count off until the row data backs it up. */
   const haveDetail=TRC_ROWS_ENRICHED;
   const transcribedLeads=haveDetail?leadsOf(function(r){return trcTrStatus(r)==='completed';}):null;
-  const matchLeads=haveDetail?leadsOf(trcCountsMatch):null;
-  const mismatchLeads=haveDetail?leadsOf(trcCountsMismatch):null;
+  /* Match/Mismatch's lead counts, unlike Transcribed's, DO have a fast source now
+     (acc.daily_qa_summary's *_leads columns, 20260918110000) - is_latest_assessed makes a lead's
+     match/mismatch contribution land on exactly one day ever, so summing per-day distinct-lead
+     counts across a range is exact, not an approximation. Reading it here means these two numbers
+     are correct even when most of `rows` was never enriched (a wide range, most pages never
+     visited) - which is exactly the gap that once showed "216 total, in 0 leads". */
+  const haveMatchLeads=fast||haveDetail;
+  const matchLeads=fast?fast.status_match_leads:(haveDetail?leadsOf(trcCountsMatch):null);
+  const mismatchLeads=fast?fast.status_mismatch_leads:(haveDetail?leadsOf(trcCountsMismatch):null);
   const inLeads=function(c){return c+' lead'+(c===1?'':'s');};
   const cards=[
     ['Total Calls',totalCalls,'follow-ups in '+inLeads(leadCount),'var(--slate)','all','proc'],
     ['Transcribed',fast?fast.transcribed:n('completed'),
       'with a full transcript'+(haveDetail?', in '+inLeads(transcribedLeads):''),'#16a34a','completed','proc'],
     ['CRM Match',fast?fast.status_match:rows.filter(trcCountsMatch).length,
-      'agrees with the CRM'+(haveDetail?', in '+inLeads(matchLeads):''),'#16a34a','MATCH','match'],
+      'agrees with the CRM'+(haveMatchLeads?', in '+inLeads(matchLeads):''),'#16a34a','MATCH','match'],
     ['CRM Mismatch',fast?fast.status_mismatch:rows.filter(trcCountsMismatch).length,
-      'disagrees with the CRM'+(haveDetail?', in '+inLeads(mismatchLeads):''),'#dc2626','MISMATCH','match']
+      'disagrees with the CRM'+(haveMatchLeads?', in '+inLeads(mismatchLeads):''),'#dc2626','MISMATCH','match']
   ];
   /* Same fast/slow split as the cards above - these five read trcTrStatus per row exactly like the
      lead counts do, so they are just as blind on an unenriched fast fetch. acc.daily_qa_summary
@@ -18616,16 +18675,19 @@ function trcMismatchPanel(rows,fast){
   });
   const known=TRC_MISMATCH_KEYS.reduce(function(a,k){return a+counts[k];},0);
   const other=Math.max(0,total-known);
-  /* Lead counts here have no fast path of their own, unlike the counts above - acc.daily_qa_summary
-     has nowhere to keep "how many distinct leads" per category (same reason total_leads on the main
-     cards has its own RPC instead of a column: a lead disagreeing on two different days is one lead,
-     summed as two). rows is `scope` from trcRender - the whole range's fetched rows, not narrowed by
-     whichever mismatch category is currently selected - so this is always the true set to count over. */
+  /* Lead counts DO have a fast source now (acc.daily_qa_summary's *_leads columns, 20260918110000) -
+     is_latest_assessed makes a lead's mismatch contribution land on exactly one day ever, so summing
+     per-day distinct-lead counts across a range is exact. This is what fixed "216 total, in 0 leads":
+     the old client-side count read status_match/is_latest_assessed off `rows`, which on a wide range
+     mostly was never enriched (see trcFetchLight) and so silently read as 0 almost everywhere.
+     Falls back to counting `rows` (scope, the whole range's fetched rows - not narrowed by whichever
+     category is currently selected) only when fast is not eligible (a CRM/business-unit/personnel/
+     search filter is active - the day table has no breakdown by those). */
   const leadsOf=function(pred){return new Set(rows.filter(pred).map(function(r){return r.lead_id;})).size;};
-  const totalLeads=leadsOf(trcCountsMismatch);
+  const totalLeads=fast?fast.status_mismatch_leads:leadsOf(trcCountsMismatch);
   const leadCounts={};
   TRC_MISMATCH_KEYS.forEach(function(k){
-    leadCounts[k]=leadsOf(function(r){return trcCountsMismatch(r)&&r.mismatch_type===k;});
+    leadCounts[k]=fast?(fast[k+'_leads']||0):leadsOf(function(r){return trcCountsMismatch(r)&&r.mismatch_type===k;});
   });
   return '<div class="card card-pad" style="margin-top:14px">'
     +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree'
@@ -18660,9 +18722,11 @@ window.trcCard=async function(kind,val){
     // Leaving Mismatch must not leave its category filter behind, silently hiding rows.
     if(TRC_F.match!=='MISMATCH')TRC_F.mismatch='all';
   }
-  // Turning any of these three on is what needs transcription_status/status_match on every row in
-  // range, not just the page on screen - see trcEnsureFullEnrichment.
-  if(TRC_F.proc!=='all'||TRC_F.match!=='all')await trcEnsureFullEnrichment();
+  // proc genuinely needs transcription_status (call_transcripts/transcription_queue - the full join);
+  // match/mismatch only ever need what acc.followup_qa already carries on its own - see
+  // trcEnsureQaFieldsMerged for why that is the lighter, and much more common, of the two.
+  if(TRC_F.proc!=='all')await trcEnsureFullEnrichment();
+  else if(TRC_F.match!=='all')await trcEnsureQaFieldsMerged();
   trcRender(true);
 };
 
@@ -18756,9 +18820,9 @@ function trcFilterBar(all){
 window.trcSet=async function(k,v){
   TRC_F[k]=v;
   // Reaching this with an actual category is only possible from the Mismatch panel, which already
-  // required full enrichment to be showing at all - this is a no-op in that case, and a safety net
-  // otherwise, not the normal way this gets triggered (see trcCard).
-  if(k==='mismatch'&&v!=='all')await trcEnsureFullEnrichment();
+  // required at least the qa-fields merge to be showing at all - this is a no-op in that case, and a
+  // safety net otherwise, not the normal way this gets triggered (see trcCard).
+  if(k==='mismatch'&&v!=='all')await trcEnsureQaFieldsMerged();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
@@ -19626,7 +19690,7 @@ window.trcRetry=async function(followUpId){
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
   const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
-  TRC_ROWS=null;TRC_ROWS_ENRICHED=false;
+  TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   trCacheClear('trc_fetch_cache');
   trCacheClear('trc_fetch_light_cache');
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
