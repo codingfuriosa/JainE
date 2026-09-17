@@ -653,12 +653,19 @@
   const PPL_TTL=180000;
   async function people(force){
     if(PPL && !force && (Date.now()-PPL_AT)<PPL_TTL) return PPL;
-    try{ const {data}=await sb.schema('acc').rpc('people'); if(data&&data.length){PPL=data.map(p=>({email:p.email,name:p.full_name||p.email,depts:Array.isArray(p.department)?p.department:[]}));PPL_AT=Date.now();return PPL;} }catch(e){}
-    try{ if(typeof getPeople==='function'){const g=await getPeople(); PPL=(g||[]).map(p=>({email:p.email,name:p.name||p.email,depts:Array.isArray(p.depts)?p.depts:(Array.isArray(p.department)?p.department:[])}));PPL_AT=Date.now();return PPL;} }catch(e){}
+    try{ const {data}=await sb.schema('acc').rpc('people'); if(data&&data.length){PPL=data.map(p=>({email:p.email,name:p.full_name||String(p.email||'').split('@')[0],depts:Array.isArray(p.department)?p.department:[]}));PPL_AT=Date.now();return PPL;} }catch(e){}
+    try{ if(typeof getPeople==='function'){const g=await getPeople(); PPL=(g||[]).map(p=>({email:p.email,name:p.name||String(p.email||'').split('@')[0],depts:Array.isArray(p.depts)?p.depts:(Array.isArray(p.department)?p.department:[])}));PPL_AT=Date.now();return PPL;} }catch(e){}
     if(PPL) return PPL;            // a failed refresh keeps the last good list rather than emptying it
     PPL=[]; PPL_AT=0; return PPL;
   }
-  const nameOf=(l,e)=>{const p=(l||[]).find(x=>eq(x.email,e));return p?p.name:e;};
+  /* Never hand back a whole address. The Usability report prints whatever this returns straight into
+     its "Assigned to" column, and 267 rows ended up reading "accounts5@thejaingroup.com" instead of
+     "Bachchu Samanta" - unreadable, and it leaks a mailbox into a report about people.
+     acc.people() already resolves a name for everyone (full name, then profile, then sign-in
+     metadata, then the part before the @), so a miss here means the list simply had not loaded yet.
+     The part before the @ is the right answer in that case: recognisable, and never an address. */
+  const nameOf=(l,e)=>{const p=(l||[]).find(x=>eq(x.email,e));
+    return p&&p.name ? p.name : String(e||'').split('@')[0]||String(e||'');};
   const iniOf=(n)=> (typeof initials==='function'?initials(n):(String(n||'?').trim().split(/\s+/).slice(0,2).map(w=>w[0]).join('')))||'?';
   function avatars(list,emails){ emails=emails||[]; return '<div class="ac-avs">'+emails.slice(0,4).map(e=>`<span class="ac-av" style="background:${colorFor(e)}" title="${esc2(nameOf(list,e))}">${esc2(iniOf(nameOf(list,e)).toUpperCase())}</span>`).join('')+(emails.length>4?`<span class="ac-av" style="background:#94a3b8" title="${esc2(emails.slice(4).map(e=>nameOf(list,e)).join(', '))}">+${emails.length-4}</span>`:'')+'</div>'; }
   const stChip = s => { const k=(s||'Pending').replace(/\s.*/,''); return `<span class="ac-chip ac-c-${k}">${esc2(s||'Pending')}</span>`; };
@@ -3953,7 +3960,7 @@
     let row=null;
     try{
       const {data}=await ACC().from('booking_audits')
-        .select('status,result,error,queued_at,started_at,attempts')
+        .select('status,result,error,queued_at,started_at,attempts,market_valuation')
         .eq('case_id',caseId).maybeSingle();
       row=data;
     }catch(_e){
@@ -3977,6 +3984,33 @@
     if(row.status!=='done'||!row.result){
       throw new Error('The attachments could not be read: '+(row.error||'unknown reason')
         +((row.attempts>1)?(' (tried '+row.attempts+' times)'):''));
+    }
+    /* Cowork fills this in separately, straight into this same row's market_valuation column -
+       independently of the audit itself, and often long after it last ran. Picked up live here so
+       the checklist shows it the moment it is written, with no need to re-run the audit.
+
+       The valuation has to be judged against the Unit Price at the same moment it is shown, not
+       baked into the reading when it was stored - the reading is frozen days before Cowork ever
+       writes a figure, but the cost sheet's own Unit Price (area x base rate, before PLC/FLC/
+       parking) it is judged against was already captured then, in result.unit_price, so nothing
+       here has to be re-read to compare the two.
+
+       THIS LINE IS A VERDICT, NOT A VALUE - Ok when the valuation is under the Unit Price, Not Ok
+       when it is over. The figure itself is never printed either way; it did its job by being
+       compared, the same as every other check on this sheet only ever shows OK or NOT OK. A
+       valuation that cannot be judged at all - no Unit Price on this reading to compare it against
+       - reads NOT OK too, same as everywhere else in this file: a doubt is never shown as a plain
+       value, and the reason line says why (see clWhy below). */
+    if(row.market_valuation){
+      row.result.checklist=row.result.checklist||{};
+      const mv=Number(String(row.market_valuation).replace(/[^0-9.]/g,''));
+      const up=Number(row.result.unit_price);
+      if(isFinite(mv)&&mv>0&&isFinite(up)&&up>0){
+        row.result.checklist['Market valuation Sheet']=(mv>up)?'Not Ok':'Ok';
+      }else{
+        row.result.checklist['Market valuation Sheet']='Not Ok';
+        row.result.market_valuation_reason='no Unit Price on this reading to check it against';
+      }
     }
     return row.result;
   }
@@ -4933,10 +4967,29 @@
     const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
     const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
     const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
-    runLine([['Base Rate',v('base_rate')?(grp(v('base_rate'))+'/-'):''],
-             ['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+    // Base Rate and Discount are read straight off the baserate check's own fields rather than
+    // parsed back out of a sentence - see booking-audit's baseRateCheck for the three cases:
+    //   document rate = approved     Base Rate is that rate, Discount is Nil.
+    //   document rate < approved     Base Rate is the APPROVED (cross-check) rate, not the
+    //                                 document's own lower one, and Discount is the shortfall x the
+    //                                 area, as a plain figure: 61,750/-.
+    //   document rate > approved     Base Rate is the document's own (higher) rate, Discount Nil.
+    const baseRateArith=(res.arithmetic||[]).filter(function(c){ return c.kind==='baserate'; })[0];
+    const baseRateVal=(baseRateArith&&baseRateArith.display_rate)
+      ? baseRateArith.display_rate+'/-' : (v('base_rate')?(grp(v('base_rate'))+'/-'):'');
+    // Just the resulting amount, not the "X - Y = Z X area = amount/-" working - the arithmetic
+    // that got there lives in the reading for anyone who wants it; the check list only needs the
+    // figure itself, the same way every other money field on this row is a bare figure.
+    const discountVal=(baseRateArith&&baseRateArith.discount&&baseRateArith.discount.amount)
+      ? baseRateArith.discount.amount+'/-' : 'Nil';
+    // Base Rate back on the same row as PLC/FLC/Parking - now that it and Discount are both short
+    // figures rather than a spelled-out sum, there is no more risk of running past the printable
+    // width, so this is the plain grouping every other cost-sheet figure on the sheet uses. Each
+    // field is still measured and placed by its own actual width (see runLine), so nothing overlaps
+    // even when Parking carries a kind ("OPEN Parking : 4,00,000") rather than a bare figure.
+    runLine([['Base Rate',baseRateVal],['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
              [parkLabel,parkValue]]);
-    runLine([['Discount',v('discount')||'NIL']]);
+    runLine([['Discount',discountVal]]);
     y-=13;
 
     page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
@@ -4957,10 +5010,33 @@
        still in the reading for anyone who wants it. */
     const clWhy=function(key){
       if(key==='Cost Sheet'){
+        // NOT a list of which parts failed - "car parking, base rate" says WHERE to look, not
+        // WHAT is wrong, and reads as though those were the reasons rather than just the labels.
+        // Each one is instead built from the same structured evidence the verdict itself came
+        // from, the same way KYC's reason below points at the actual card rather than just
+        // saying "KYC" failed.
         const parts=((res.cost_sheet_verdict||{}).parts)||[];
-        const bad=parts.filter(function(p){ return !p.ok; })
-                       .map(function(p){ return String(p.what||'').replace(/^the /,''); });
-        return bad.join(', ');
+        const bad=parts.filter(function(p){ return !p.ok; }).map(function(p){ return p.what; });
+        const bits=[];
+        if(bad.indexOf('the sums')>=0)
+          bits.push((res.cost_sheets&&res.cost_sheets.length) ? "sums don't add up" : 'no cost sheet found');
+        if(bad.indexOf('the car parking')>=0){
+          const pc=((res.parking||{}).check)||{};
+          const marked=pc.marked?nameCase(pc.marked):null, charged=pc.charged?nameCase(pc.charged):null;
+          bits.push(marked&&charged&&marked!==charged ? (marked+' marked, '+charged+' charged')
+            : marked&&!charged ? (marked+' marked, nothing charged')
+            : !marked&&charged ? (charged+' charged, nothing marked')
+            : 'parking disagrees with the form');
+        }
+        if(bad.indexOf('the unit')>=0){
+          const uc=Array.isArray(res.unit&&res.unit.comparison)?res.unit.comparison:[];
+          const diff=uc.filter(function(f){ return f.matches===false; })[0];
+          bits.push(diff?(diff.field+' differs'):'unit details differ');
+        }
+        // Kept for safety even though the base rate no longer fails the cost sheet on its own -
+        // see booking-audit's baseRateCheck, which is now informational only.
+        if(bad.indexOf('the base rate')>=0) bits.push('base rate below approved');
+        return bits.join('; ');
       }
       if(key==='KYC of Customer'){
         // a card that is plainly the applicant's, spelt differently - the commonest failure
@@ -4995,6 +5071,7 @@
         if(sg.cost_sheet_signed===false) return 'cost sheet unsigned';
         return 'a signature is missing';
       }
+      if(key==='Market valuation Sheet') return res.market_valuation_reason || 'higher than the unit price';
       return '';
     };
 
@@ -5003,19 +5080,31 @@
       page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
       page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
       /* IT MUST NOT WRAP. The row is one line and a second one would push the whole sheet out of
-         shape, so the reason is measured against the space actually left on this line and left
-         off altogether if it will not fit. A missing note costs nothing; a broken sheet costs a
-         reprint. */
+         shape, so the reason has to fit in whatever space is actually left on this line.
+         SHRINK THE FONT BEFORE SHORTENING THE WORDS - the full reason a size or two smaller reads
+         better, and is more useful, than a cut-down one at full size, and either way it stays on
+         this line rather than wrapping. Cutting the words is the last resort, only once the font
+         has already shrunk as far as it can still be read, and even then from the END - a
+         reason that starts making sense and trails off beats one sliced from the front. A
+         reason that still will not fit at the smallest size is left off; a missing note costs
+         nothing, a broken sheet costs a reprint. */
       if(String(value)==='NOT OK'){
         const why=clWhy(label);
         if(why){
           const vw=bold.widthOfTextAtSize(String(value),10.5);
           const sx=VX+vw+7, room=(edge||R)-6-sx;
-          let t='('+why+')';
-          while(t.length>6 && reg.widthOfTextAtSize(t,8.5)>room)
-            t='('+t.slice(1,-2).replace(/[ ,;]+$/,'')+')';
-          if(reg.widthOfTextAtSize(t,8.5)<=room)
-            page.drawText(t,{x:sx,y:y,size:8.5,font:reg,color:soft});
+          const full='('+why+')';
+          let size=8.5;
+          while(size>6.5 && reg.widthOfTextAtSize(full,size)>room) size-=0.25;
+          if(reg.widthOfTextAtSize(full,size)<=room){
+            page.drawText(full,{x:sx,y:y,size:size,font:reg,color:soft});
+          }else{
+            let s=why;
+            while(s.length>6 && reg.widthOfTextAtSize('('+s+'…)',size)>room) s=s.slice(0,-1);
+            const cut='('+s+'…)';
+            if(reg.widthOfTextAtSize(cut,size)<=room)
+              page.drawText(cut,{x:sx,y:y,size:size,font:reg,color:soft});
+          }
         }
       }
       page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
@@ -7513,10 +7602,32 @@
     if(flowName) m.workflow=flowName;
     return m;
   }
+  /* How long this step had been sitting before the click that is being logged.
+     The Usability report already says WHICH workflow, instance and step a row is about - what it
+     could never say is how long the work had been waiting, which on this portal is the number that
+     matters: across 410 measurable steps the average wait is 45.9 hours, 204 of them sat for more
+     than a day, and the worst went 11 days. Both timestamps are already on the step row.
+     Which gap is meant depends on where the step is. Before somebody receives it, received_at is
+     null and the wait runs from appeared_at - how long it sat unclaimed. Once received, the wait
+     runs from received_at - how long that person has been holding it. Both answer the same
+     question, "how long before this happened", so they share one field. */
+  function wfWaitedSince(iso){
+    try{
+      if(!iso) return null;
+      let s=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+      if(!isFinite(s) || s<0) return null;
+      if(s<60) return s+'s';
+      const m=Math.floor(s/60); if(m<60) return m+'m';
+      const h=Math.floor(m/60); if(h<24) return h+'h'+(m%60?' '+(m%60)+'m':'');
+      const d=Math.floor(h/24);
+      if(d>365) return null;              // a clock that far out is wrong, not informative
+      return d+'d'+(h%24?' '+(h%24)+'h':'');
+    }catch(_e){ return null; }
+  }
   async function wfStepUsageMeta(fcsId){
     try{
       const {data:s}=await ACC().from('flow_case_steps')
-        .select('title,case_id').eq('id',fcsId).maybeSingle();
+        .select('title,case_id,appeared_at,received_at').eq('id',fcsId).maybeSingle();
       if(!s) return null;
       let c=null;
       if(s.case_id!=null){
@@ -7526,6 +7637,8 @@
       }
       const m=wfCaseMetaFrom(c, await wfFlowNameFor(c));
       if(s.title) m.step=s.title;
+      const w=wfWaitedSince(s.received_at||s.appeared_at);
+      if(w) m.waited=w;
       return Object.keys(m).length?m:null;
     }catch(_e){ return null; }
   }
@@ -8571,6 +8684,37 @@
       {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
     gcalRenderOnly(); };
 
+  /* Which way the calendar is being read, for the Usability report.
+     Opening the calendar was one of the few actions with nothing at all beside it - the report
+     could say somebody looked at it, never how. That matters here more than most screens, because
+     the four views answer different needs: a team living in Day view wants the agenda panel to be
+     good, a team that only ever opens Month wants the month grid to be. Both look identical in the
+     report today.
+     Read live off the toolbar's own state, and worded the way the toolbar words it, so the report
+     and the screen never disagree. Called from nexus-core through window because this file keeps
+     its state in a closure. */
+  window.gcalUsageMeta=function(){
+    try{
+      // GCAL_DATE survives leaving the Calendar, so without this the Scoreboard and Archive would
+      // each be labelled with whichever month was last open - a wrong answer, not a missing one.
+      if(!/^#\/?tasks\/calendar(\/|$)/.test(location.hash||'')) return null;
+      if(!GCAL_DATE) return null;
+      const d=new Date(GCAL_DATE+'T00:00:00');
+      if(isNaN(d.getTime())) return null;
+      const label={day:'Day', week:'Week', month:'Month', year:'Year'}[GCAL_VIEW]||GCAL_VIEW;
+      let period;
+      if(GCAL_VIEW==='month')      period=d.toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+      else if(GCAL_VIEW==='year')  period=String(d.getFullYear());
+      else if(GCAL_VIEW==='week'){
+        const days=gcalListRange(GCAL_DATE);
+        const sd=new Date(days[0]+'T00:00:00'), ed=new Date(days[days.length-1]+'T00:00:00');
+        period=sd.toLocaleDateString('en-IN',{day:'numeric',month:'short'})+'–'
+              +ed.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+      }
+      else period=d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+      return {view:label+' · '+period};
+    }catch(_e){ return null; }
+  };
   /* ---- toolbar ---- */
   function gcalToolbarHtml(){
     let title='';
@@ -9179,6 +9323,18 @@
 
   /* ---------- MEETINGS ---------- */
   let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
+  /* How many people a meeting action actually serves, for the Usability report.
+     "Scheduled a meeting" is the same row whether two people spoke for ten minutes or fifteen sat
+     through a review, and those are not the same fact about the feature. The attendee list is
+     already loaded on this screen, so the count costs nothing to record.
+     A meeting with nobody invited yet returns null rather than "0 people" - the organiser is
+     mid-way through setting it up, and a zero there reads as a finding when it is just a draft. */
+  function mtgUsageAttendees(id){
+    try{
+      const n=((MTG_ATT&&MTG_ATT[id])||[]).length;
+      return n?{attendees:n+(n===1?' person':' people')}:null;
+    }catch(_e){ return null; }
+  }
   let GOOGLE_CONNECTED=null;
   let MTG_GROUP='all';
   function mtgDurationMinutes(start,end){
@@ -9408,7 +9564,7 @@
     if((m.recur_type==='none'||!m.recur_type) && m.meeting_date && m.meeting_date>istTodayISO()){
       if(!window.confirm('This meeting is scheduled for '+fmtDate(m.meeting_date)+' (in the future). Join it now anyway?')) return;
     }
-    try{ usageQueue('tasks.meetings.join_a_meeting','view',{title:m.title}); }catch(_e){}
+    try{ usageQueue('tasks.meetings.join_a_meeting','view',Object.assign({title:m.title}, mtgUsageAttendees(id)||{})); }catch(_e){}
     window.open(m.meet_link,'_blank','noopener');
   };
   function mtgCard(m,weekCount){
@@ -9705,7 +9861,8 @@
        edit and every click the validation above turned back counted as a meeting scheduled.
        editing is the only thing that tells the two apart, and it is only known inside here. */
     try{ usageQueue(editing?'tasks.meetings.edit_a_meeting':'tasks.meetings.schedule_a_meeting_one_time_or_recurring',
-      editing?'update':'create',{title:title}); }catch(_e){}
+      editing?'update':'create',
+      {title:title, attendees:(attendees.length?attendees.length+(attendees.length===1?' person':' people'):undefined)}); }catch(_e){}
     closeModal(); toast(editing?'Meeting updated':'Meeting scheduled','ok');
     if(mode==='online'){ await mtgSyncGoogle(mtgId,'sync'); }
     await mtgLoadData(); mtgRenderOnly();
@@ -9724,7 +9881,7 @@
     if(m&&attendees.length){
       try{ await ACC().from('notifications').insert(attendees.map(function(e){return {recipient:e,kind:'meeting_cancel',title:'Meeting cancelled: '+m.title,body:(m.recur_type&&m.recur_type!=='none'?'A recurring':fmtDateY(m.meeting_date))+' meeting was cancelled by the organizer.'};})); }catch(e){}
     }
-    if(!delErr){ try{ usageQueue('tasks.meetings.cancel_a_meeting','delete',{title:m&&m.title}); }catch(_e){} }
+    if(!delErr){ try{ usageQueue('tasks.meetings.cancel_a_meeting','delete',Object.assign({title:m&&m.title}, mtgUsageAttendees(id)||{})); }catch(_e){} }
     closeModal(); toast('Meeting cancelled','ok');
     await mtgLoadData(); mtgRenderOnly();
   };

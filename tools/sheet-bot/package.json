@@ -1,0 +1,17 @@
+{
+  "name": "sheet-bot",
+  "version": "1.0.0",
+  "description": "Appends a JAIN-E booking's OCR'd fields to a Google Sheet by driving an already-running Chrome over the DevTools Protocol -- no Playwright, no Claude Code.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "chrome-remote-interface": "^0.33.0",
+    "dotenv": "^16.4.5"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "smoke-test": "node scripts/smoke-test-once.js",
+    "test": "node --test src/*.test.js"
+  }
+}
