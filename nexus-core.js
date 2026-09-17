@@ -3398,6 +3398,17 @@ function misBuildCauselist(){
 }
 // Downloads as a file rather than opening a tab. Opening the saved file shows the causelist
 // laid out exactly as it renders here — print it from the browser's own File > Print when needed.
+/* What a causelist row is actually about: the window it covers and how many matters came out of
+   it. Six exports and six views sat in the report looking identical, saying only that somebody had
+   pressed a button. Both facts are already in hand at the log site - misBuildCauselist hands back
+   the rows it listed, and misRangeLabel formats the window - so this reads them rather than
+   plumbing anything new. On "All dates" there is no window to name, and the heading says so. */
+function usbCauselistMeta(built){
+  try{
+    const n=(built&&built.rows&&built.rows.length)||0;
+    return {range:misRangeLabel()||'All dates', cases:n+' case'+(n===1?'':'s')};
+  }catch(e){ return null; }
+}
 window.misExportCauselist=function(){
   const built=misBuildCauselist();
   if(!built) return;   // misBuildCauselist already toasted why
@@ -3414,7 +3425,7 @@ window.misExportCauselist=function(){
   // USAGE_MAP wrapper - that would have counted a click that was warned off by
   // misBuildCauselist (no date range, or nothing in range) as a use just the same as a real
   // export, which is exactly the bug that made "1 use" unverifiable as a real success.
-  try{ usageQueue('legal.mis.export_causelist','export'); }catch(_e){}
+  try{ usageQueue('legal.mis.export_causelist','export', usbCauselistMeta(built)); }catch(_e){}
 };
 // View is the same sheet, opened for on-screen reading instead of forced onto disk - the
 // causelist-format equivalent of every other module's Preview/Download pair.
@@ -3424,7 +3435,7 @@ window.misViewCauselist=function(){
   const w=window.open('', '_blank');
   if(!w){ toast('Could not open a new tab — check your browser’s pop-up blocker','warn'); return; }
   w.document.open(); w.document.write(built.html); w.document.close();
-  try{ usageQueue('legal.mis.view_causelist','view'); }catch(_e){}
+  try{ usageQueue('legal.mis.view_causelist','view', usbCauselistMeta(built)); }catch(_e){}
 };
 
 window.misRowCheck=function(cb){
@@ -3863,10 +3874,29 @@ window.misUpdate=async function(id){
 window.misDeleteSel=async function(){
   const sel=[...window._misSel];
   if(!sel.length)return;
+  // Read the cases BEFORE they are deleted - a moment later there is nothing left to read, and
+  // this row becomes the only surviving trace of what was removed (mis_cases has no deleted_at;
+  // the rows are gone for good).
+  const gone=(window._misRows||[]).filter(function(r){ return sel.indexOf(r.id)!==-1; });
   if(!await confirmDialog('Delete '+sel.length+' case'+(sel.length>1?'s':'')+'?'))return;
   const {error}=await sb.from('mis_cases').delete().in('id',sel);
   if(error){toast(error.message,'err');return;}
   toast(sel.length>1?(sel.length+' cases deleted'):'Case deleted','ok');
+  /* Logged here rather than through USAGE_MAP for the reason the causelist is: the wrapper fires
+     on the click, so a delete refused by the server would have been recorded as one that happened.
+     One case names itself and its court; several list their case numbers and let the column carry
+     the count, since no single case number is the answer then. */
+  try{
+    if(gone.length===1){
+      const r=gone[0];
+      usageQueue('legal.mis.delete_case_s','delete',
+        {title:r.cause_title||r.case_no||undefined, case_no:r.case_no||undefined, court:r.court||undefined});
+    }else{
+      const nos=gone.map(function(r){ return r.case_no||r.cause_title; }).filter(Boolean);
+      usageQueue('legal.mis.delete_case_s','delete',
+        {title:nos.join(', ')||undefined, cases:sel.length+' cases'});
+    }
+  }catch(_e){}
   legalMIS();
 };
 window.misStats=function(){
@@ -8619,6 +8649,18 @@ const USB_COL4={
   /* --- tabs that are about something different from the rest of their module ----------------- */
   // Legal is three different subjects under one roof
   'legal.mis':            {header:'Case · Court',      keys:['case_no','court']},
+  /* A causelist is not about one case, so MIS's "Case · Court" was the wrong heading for it - what
+     it is about is the window it covers and how many matters fell in that window. Details comes off
+     because those two facts are the whole of it. */
+  'legal.mis.export_causelist':
+                          {header:'Range · Cases', keys:['range','cases'], hideDetails:true},
+  'legal.mis.view_causelist':
+                          {header:'Range · Cases', keys:['range','cases'], hideDetails:true},
+  /* Deleting one case names it; deleting several leaves no single case number to name, so the
+     column carries the count and Details lists which ones. Same header either way - the reader is
+     asking the same question. */
+  'legal.mis.delete_case_s':
+                          {header:'Case · Court', keys:['case_no','court','cases']},
   'legal.actions':        {header:'Case · Court',      keys:['case_no','court']},
   'legal.advocates':      {header:'Court',             keys:['court','case_type']},
   'legal.documents':      {header:'Folder',            keys:['folder','category','department']},
@@ -8689,6 +8731,20 @@ const USB_COL4={
   // rather than filled with something that only looks like an answer.
   'tasks.scoreboard':     {header:null, keys:[], hideDetails:true},
   'tasks.archive':        {header:null, keys:[], hideDetails:true},
+  /* Six more of the same kind, found by reading their rows rather than their config: 214 uses
+     between them and not one has ever put anything in either column.
+     The three Tasks ones inherit "Assigned to" from the module, but regrouping a list assigns
+     nothing to anybody - there is no person in the act at all, so it could never have filled.
+     The three Calendar ones should have carried which view was open, and the helper for it has
+     been live since 1684217 - yet "view" has never once been recorded on any of them. That is a
+     real fault and worth chasing on its own; until it is chased, a header promising something the
+     rows have never held is the thing to remove. */
+  'tasks.tasks.view_tasks_grouped_by_workflow':                {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.view_tasks_grouped_by_person':                  {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.view_tasks_grouped_by_tag':                     {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.view_month_week_day_calendar':               {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.see_tasks_meetings_and_legal_dates_in_one_view': {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.open_a_day_s_agenda_panel':                  {header:null, keys:[], hideDetails:true},
   // The Calendar is read four different ways and they are not interchangeable - a team living in
   // Day view needs a good agenda panel, one that only opens Month needs a good month grid, and the
   // report could not tell them apart. How long they stayed still shows in Details.
@@ -20947,7 +21003,9 @@ const USAGE_MAP={
   docDeleteConfirm:{key:'legal.documents.delete_document_s', meta:usbDocScope},
   docBulkDeleteConfirm:{key:'legal.documents.bulk_download_delete', act:'delete', meta:usbDocScope},
   // Legal — MIS / Actions / Advocates
-  misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta}, misDeleteSel:'legal.mis.delete_case_s',
+  misSave:{key:'legal.mis.add_case', meta:function(){ try{ var r=misCollect()||{}; var t=r.cause_title||r.case_no; return t?{title:t, case_no:r.case_no||undefined, court:r.court||undefined}:null; }catch(e){ return null; } }}, misUpdate:{key:'legal.mis.edit_case', meta:usbMisMeta},
+  // misDeleteSel is NOT mapped here on purpose - it logs directly, after the delete has actually
+  // succeeded, and reads the cases before they are gone. See the note at its definition.
   misSetRange:{key:"legal.mis.filter_cases_by_hearing_date_range",
                meta:function(v){ return v?{range:String(v)}:null; }},
   misRangePick:{key:"legal.mis.filter_cases_by_hearing_date_range",
