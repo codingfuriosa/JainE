@@ -1,19 +1,14 @@
-// FARVISION GMAIL -> SUPABASE STORAGE (Phase 1)
+// FARVISION GMAIL -> SUPABASE STORAGE
 //
-// Lightweight edge function that:
-//   1. Searches Gmail for unprocessed Farvision xlsx emails
-//   2. Downloads the attachments
-//   3. Uploads them to Supabase Storage (farvision-imports bucket)
-//   4. Inserts a pending row in cust.import_queue
-//   5. Labels the email so it's not reprocessed
-//
-// The actual xlsx parsing happens in the browser (Admin Panel → Farvision Import tab)
-// using the existing SheetJS parsers — no heavy xlsx library needed here.
+// Lightweight: downloads xlsx from Gmail, uploads to Storage, queues for import.
+// Parsing happens browser-side (admin panel) where memory is unlimited.
 //
 // Actions:
-//   POST { action: "poll" }   — daily safety-net scan (pg_cron)
-//   POST { action: "push" }   — Gmail Pub/Sub webhook (near-instant)
-//   POST { action: "renew" }  — renew Gmail watch() (pg_cron every 6 days)
+//   poll       — daily safety-net (pg_cron)
+//   push       — Gmail Pub/Sub webhook
+//   renew      — renew Gmail watch (pg_cron every 6 days)
+//   unlabel_all — one-time cleanup of test labels
+//   debug      — diagnostic Gmail search
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -37,245 +32,132 @@ const json = (o: unknown, status = 200) =>
 
 // ─── Gmail Auth ──────────────────────────────────────────────────────────────
 
-let cachedAccessToken: string | null = null;
-let tokenExpiresAt = 0;
+let cachedToken: string | null = null;
+let tokenExp = 0;
 
 async function gmailToken(): Promise<string> {
-  if (cachedAccessToken && Date.now() < tokenExpiresAt - 30_000) return cachedAccessToken;
+  if (cachedToken && Date.now() < tokenExp - 30000) return cachedToken;
   const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: GMAIL_CLIENT_ID,
-      client_secret: GMAIL_CLIENT_SECRET,
-      refresh_token: GMAIL_REFRESH_TOKEN,
-      grant_type: "refresh_token",
-    }),
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: GMAIL_CLIENT_ID, client_secret: GMAIL_CLIENT_SECRET, refresh_token: GMAIL_REFRESH_TOKEN, grant_type: "refresh_token" }),
   });
-  if (!res.ok) throw new Error("Gmail token refresh failed: " + (await res.text()));
-  const data = await res.json();
-  cachedAccessToken = data.access_token;
-  tokenExpiresAt = Date.now() + (data.expires_in || 3600) * 1000;
-  return cachedAccessToken!;
+  if (!res.ok) throw new Error("Token refresh failed: " + (await res.text()));
+  const d = await res.json();
+  cachedToken = d.access_token; tokenExp = Date.now() + (d.expires_in || 3600) * 1000;
+  return cachedToken!;
 }
 
 async function gmail(path: string, opts?: RequestInit) {
   const token = await gmailToken();
-  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, {
-    ...opts,
-    headers: { Authorization: `Bearer ${token}`, ...(opts?.headers || {}) },
-  });
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, { ...opts, headers: { Authorization: `Bearer ${token}`, ...(opts?.headers || {}) } });
   if (!res.ok) throw new Error(`Gmail ${path}: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
-// ─── Gmail Label ─────────────────────────────────────────────────────────────
+// ─── Label ───────────────────────────────────────────────────────────────────
 
 async function getOrCreateLabel(): Promise<string> {
   const { labels } = await gmail("labels");
-  const existing = labels.find((l: any) => l.name === IMPORT_LABEL);
-  if (existing) return existing.id;
-  const created = await gmail("labels", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: IMPORT_LABEL, labelListVisibility: "labelShow", messageListVisibility: "show" }),
-  });
-  return created.id;
+  const e = labels.find((l: any) => l.name === IMPORT_LABEL);
+  if (e) return e.id;
+  const c = await gmail("labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: IMPORT_LABEL, labelListVisibility: "labelShow", messageListVisibility: "show" }) });
+  return c.id;
 }
 
-async function labelMessage(messageId: string, labelId: string) {
-  await gmail(`messages/${messageId}/modify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ addLabelIds: [labelId] }),
-  });
+async function labelMsg(id: string, labelId: string) {
+  await gmail(`messages/${id}/modify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ addLabelIds: [labelId] }) });
 }
 
-// ─── Gmail Search & Download ─────────────────────────────────────────────────
+// ─── Search & Download ──────────────────────────────────────────────────────
 
-async function findUnprocessedEmails(): Promise<string[]> {
+async function findEmails(): Promise<string[]> {
   const q = `from:${GMAIL_SENDER} has:attachment filename:xlsx -label:${IMPORT_LABEL}`;
   const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=5`);
   return (res.messages || []).map((m: any) => m.id);
 }
 
-interface EmailMeta { messageId: string; subject: string; date: string; }
-
-async function getEmailMeta(messageId: string): Promise<EmailMeta> {
-  const msg = await gmail(`messages/${messageId}?format=metadata&metadataHeaders=Subject&metadataHeaders=Date`);
-  const headers = msg.payload?.headers || [];
-  const subject = headers.find((h: any) => h.name === "Subject")?.value || "";
-  const date = headers.find((h: any) => h.name === "Date")?.value || "";
-  return { messageId, subject, date };
+async function emailMeta(id: string) {
+  const msg = await gmail(`messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=Date`);
+  const h = msg.payload?.headers || [];
+  return { subject: h.find((x: any) => x.name === "Subject")?.value || "", date: h.find((x: any) => x.name === "Date")?.value || "" };
 }
 
-interface AttachmentInfo { filename: string; attachmentId: string; size: number; }
-
-async function listXlsxAttachments(messageId: string): Promise<AttachmentInfo[]> {
-  const msg = await gmail(`messages/${messageId}?format=full`);
-  return (msg.payload?.parts || [])
-    .filter((p: any) => p.filename && /\.xlsx$/i.test(p.filename) && p.body?.attachmentId)
-    .map((p: any) => ({ filename: p.filename, attachmentId: p.body.attachmentId, size: p.body.size || 0 }));
+async function xlsxParts(id: string) {
+  const msg = await gmail(`messages/${id}?format=full`);
+  return (msg.payload?.parts || []).filter((p: any) => p.filename && /\.xlsx$/i.test(p.filename) && p.body?.attachmentId)
+    .map((p: any) => ({ name: p.filename, attId: p.body.attachmentId }));
 }
 
-async function downloadAttachment(messageId: string, attachmentId: string): Promise<Uint8Array> {
-  const att = await gmail(`messages/${messageId}/attachments/${attachmentId}`);
+async function downloadAtt(msgId: string, attId: string): Promise<Uint8Array> {
+  const att = await gmail(`messages/${msgId}/attachments/${attId}`);
   const b64 = att.data.replace(/-/g, "+").replace(/_/g, "/");
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
 }
 
-// ─── Storage & Queue ─────────────────────────────────────────────────────────
+// ─── Upload & Queue ─────────────────────────────────────────────────────────
 
-async function ensureBucket(db: any) {
-  // Create bucket if it doesn't exist (private, no public access)
-  await db.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {/* already exists */});
-}
-
-async function uploadAndQueue(
-  db: any, data: Uint8Array, filename: string, emailMeta: EmailMeta, log: string[]
-): Promise<boolean> {
-  const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const storagePath = `${ts}/${filename}`;
-
-  // Upload to storage
-  const { error: uploadErr } = await db.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  if (uploadErr) {
-    log.push(`UPLOAD FAILED ${filename}: ${uploadErr.message}`);
-    return false;
-  }
-  log.push(`Uploaded ${filename} (${(data.length / 1024).toFixed(0)}KB) → ${storagePath}`);
-
-  // Insert queue row
-  const { error: qErr } = await db.schema("cust").from("import_queue").insert({
-    storage_path: storagePath,
-    file_name: filename,
-    file_size: data.length,
-    gmail_message_id: emailMeta.messageId,
-    email_subject: emailMeta.subject,
-    email_date: emailMeta.date,
-    status: "pending",
-  });
-  if (qErr) {
-    log.push(`QUEUE INSERT FAILED ${filename}: ${qErr.message}`);
-    return false;
-  }
-  log.push(`Queued ${filename} for import`);
-  return true;
-}
-
-// ─── Core ────────────────────────────────────────────────────────────────────
-
-async function processEmails(db: any): Promise<{ processed: number; queued: number; log: string[] }> {
+async function processEmails(db: any) {
   const log: string[] = [];
-  const messageIds = await findUnprocessedEmails();
-  log.push(`Found ${messageIds.length} unprocessed email(s)`);
-  if (!messageIds.length) return { processed: 0, queued: 0, log };
+  const ids = await findEmails();
+  log.push(`Found ${ids.length} email(s)`);
+  if (!ids.length) return { processed: 0, queued: 0, log };
 
-  await ensureBucket(db);
+  await db.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {});
   const labelId = await getOrCreateLabel();
   let processed = 0, queued = 0;
 
-  for (const msgId of messageIds) {
+  for (const msgId of ids) {
     try {
-      const meta = await getEmailMeta(msgId);
-      const attachments = await listXlsxAttachments(msgId);
-      log.push(`Email "${meta.subject}" (${msgId}): ${attachments.length} xlsx file(s)`);
-
-      let anyQueued = false;
-      for (const att of attachments) {
+      const meta = await emailMeta(msgId);
+      const parts = await xlsxParts(msgId);
+      log.push(`"${meta.subject}" — ${parts.length} xlsx`);
+      let ok = true;
+      for (const p of parts) {
         try {
-          const data = await downloadAttachment(msgId, att.attachmentId);
-          const ok = await uploadAndQueue(db, data, att.filename, meta, log);
-          if (ok) { anyQueued = true; queued++; }
-        } catch (err) {
-          log.push(`FAILED ${att.filename}: ${(err as Error).message}`);
-        }
+          const data = await downloadAtt(msgId, p.attId);
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const path = `${ts}/${p.name}`;
+          const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+          if (ue) { log.push(`Upload fail: ${ue.message}`); ok = false; continue; }
+          await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: msgId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
+          log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
+          queued++;
+        } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); ok = false; }
       }
-
-      if (anyQueued || attachments.length === 0) {
-        await labelMessage(msgId, labelId);
-        log.push(`Labeled email ${msgId}`);
-        processed++;
-      }
-    } catch (err) {
-      log.push(`ERROR email ${msgId}: ${(err as Error).message}`);
-    }
+      if (ok && parts.length) { await labelMsg(msgId, labelId); processed++; }
+    } catch (e) { log.push(`Error ${msgId}: ${(e as Error).message}`); }
   }
-
   return { processed, queued, log };
 }
 
-// ─── Gmail Watch ─────────────────────────────────────────────────────────────
-
-async function renewWatch(): Promise<any> {
-  return gmail("watch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topicName: GMAIL_PUBSUB_TOPIC, labelIds: ["INBOX"] }),
-  });
-}
-
-// ─── HTTP Handler ────────────────────────────────────────────────────────────
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
-
   try {
     const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    let body: any = {};
-    try { body = await req.json(); } catch { /* empty body ok for push */ }
-
+    let body: any = {}; try { body = await req.json(); } catch {}
     const action = body.action || "push";
 
     if (action === "renew") {
-      const result = await renewWatch();
-      return json({ ok: true, action: "renew", expiration: result.expiration });
+      const r = await gmail("watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topicName: GMAIL_PUBSUB_TOPIC, labelIds: ["INBOX"] }) });
+      return json({ ok: true, action: "renew", expiration: r.expiration });
     }
-
+    if (action === "unlabel_all") {
+      const labelId = await getOrCreateLabel();
+      const { messages } = await gmail(`messages?q=label:${IMPORT_LABEL}&maxResults=50`);
+      for (const m of (messages || [])) { await gmail(`messages/${m.id}/modify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ removeLabelIds: [labelId] }) }); }
+      return json({ ok: true, unlabeled: (messages || []).length });
+    }
     if (action === "debug") {
-      // Broad search to diagnose why emails aren't found
-      const token = await gmailToken();
-      const queries = [
-        `from:${GMAIL_SENDER} has:attachment filename:xlsx -label:${IMPORT_LABEL}`,
-        `from:${GMAIL_SENDER} has:attachment`,
-        `from:${GMAIL_SENDER}`,
-        `has:attachment filename:xlsx`,
-        `newer_than:1d has:attachment`,
-      ];
-      const results: any[] = [];
-      for (const q of queries) {
-        const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=3`);
-        results.push({ query: q, count: (res.messages || []).length, ids: (res.messages || []).map((m: any) => m.id) });
-      }
-      return json({ ok: true, sender: GMAIL_SENDER, label: IMPORT_LABEL, results });
+      const qs = [`from:${GMAIL_SENDER} has:attachment filename:xlsx -label:${IMPORT_LABEL}`, `from:${GMAIL_SENDER} has:attachment`, `has:attachment filename:xlsx newer_than:1d`];
+      const r: any[] = [];
+      for (const q of qs) { const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=3`); r.push({ query: q, count: (res.messages || []).length }); }
+      return json({ ok: true, results: r });
     }
-
     if (action === "poll" || action === "push") {
-      const result = await processEmails(db);
-      return json({ ok: true, action, ...result });
+      return json({ ok: true, action, ...await processEmails(db) });
     }
-
-    if (action === "process_id" && body.messageId) {
-      // Force-process a specific email by ID (ignores label)
-      const log: string[] = [];
-      await ensureBucket(db);
-      const meta = await getEmailMeta(body.messageId);
-      const attachments = await listXlsxAttachments(body.messageId);
-      log.push(`Email "${meta.subject}" (${body.messageId}): ${attachments.length} xlsx file(s)`);
-      let queued = 0;
-      for (const att of attachments) {
-        const data = await downloadAttachment(body.messageId, att.attachmentId);
-        const ok = await uploadAndQueue(db, data, att.filename, meta, log);
-        if (ok) queued++;
-      }
-      return json({ ok: true, action, queued, log });
-    }
-
-    return json({ error: "Unknown action: " + action }, 400);
-  } catch (err) {
-    console.error("farvision-import error:", err);
-    return json({ error: (err as Error).message }, 500);
-  }
+    return json({ error: "Unknown action" }, 400);
+  } catch (e) { return json({ error: (e as Error).message }, 500); }
 });

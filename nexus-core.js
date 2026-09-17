@@ -13744,7 +13744,7 @@ async function cpaRenderImport(host,seg){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div><i class="fa-solid fa-envelope-open-text" style="color:var(--brand)"></i> <b>${queue.length} file${queue.length>1?'s':''} from Gmail</b>
         <span style="font-size:12.5px;color:var(--slate);margin-left:8px">Auto-fetched from Farvision email</span></div>
-        <button class="btn btn-sm btn-primary" onclick="cpaQueueImportAll()"><i class="fa-solid fa-bolt"></i> Import all</button>
+        <button class="btn btn-sm btn-primary" id="cpaAutoImportBtn" onclick="cpaQueueImportAll()"><i class="fa-solid fa-bolt"></i> Import all</button>
       </div>`+cpaTable(['File','Size','Received','Email subject','Action'],qRows)+`</div>`;
   }
 
@@ -13760,20 +13760,22 @@ async function cpaRenderImport(host,seg){
     <div style="margin-top:14px"><button class="btn btn-primary" onclick="cpaImportPreview()"><i class="fa-solid fa-magnifying-glass"></i> Preview</button></div>
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
+  // Auto-import pending queue items on page load
+  if(queue.length) setTimeout(()=>cpaAutoImportPending(),500);
 }
-// Queue import: download from storage, feed into existing xlsx preview/import flow
+// Queue: auto-detect type, parse, and import directly — no manual steps
 window.cpaQueueImport=async function(queueId){
   const {data:q,error}=await sb.schema('cust').from('import_queue').select('*').eq('id',queueId).single();
   if(error||!q){toast('Queue item not found','err');return;}
-  // Mark as processing
   await sb.schema('cust').from('import_queue').update({status:'processing'}).eq('id',queueId);
-  toast('Downloading '+q.file_name+'…','ok');
+  toast('Importing '+q.file_name+'…','ok');
   try{
+    const XL=await loadXLSX(); if(!XL) throw new Error('Could not load spreadsheet reader');
     const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(q.storage_path);
     if(dlErr||!blob)throw new Error(dlErr?.message||'Download failed');
     const buf=await blob.arrayBuffer();
-    const wb=XLSX.read(new Uint8Array(buf),{cellDates:true});
-    // Detect type by anchor column
+    const wb=XL.read(new Uint8Array(buf),{cellDates:true});
+    // Detect type
     const {rows}=xlsxSheetRows(wb);
     let type=null;
     for(let r=0;r<Math.min(rows.length,20);r++){
@@ -13782,33 +13784,71 @@ window.cpaQueueImport=async function(queueId){
       if(vals.includes('Net Outstanding')){type='outstanding';break;}
       if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
       if(vals.includes('Money Receipt No')){type='receipt_register';break;}
+      if(vals.includes('Receipt Reversal No')){type='receipt_reversal';break;}
+      if(vals.includes('Booking Id')){type='booking_register';break;}
     }
-    if(!type){
-      await sb.schema('cust').from('import_queue').update({status:'failed',error_message:'Could not detect report type'}).eq('id',queueId);
-      toast('Could not detect report type in '+q.file_name,'err');route();return;
+    if(!type) throw new Error('Could not detect report type');
+    // Parse
+    let parsed;
+    if(type==='sales_details') parsed=cpaParseSalesDetails(wb);
+    else if(type==='outstanding') parsed=cpaParseOutstanding(wb);
+    else if(type==='invoice_register') parsed=cpaParseInvoiceRegister(wb);
+    else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
+    else throw new Error('Type '+type+' not yet supported for auto-import');
+    // Match to projects/units (only registered projects pass through)
+    const projects=await cpaProjects();
+    const units=await cpaUnits();
+    const matched=[],unmatched=[];
+    for(const rec of parsed){
+      const project=cpaResolveProject(projects,rec.businessUnit);
+      if(!project){unmatched.push(rec);continue;}
+      if(type==='sales_details'){matched.push({project,rec});}
+      else{
+        const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+        if(unit) matched.push({project,unit,rec}); else unmatched.push(rec);
+      }
     }
-    // Feed into existing preview flow
-    $('cpaImpType').value=type;
-    window.cpaImportTypeChange();
-    await cpaImportPreviewXlsx(type,null,wb);
-    // Mark queue item — will be marked completed after user confirms import
+    if(!matched.length) throw new Error('No rows matched registered projects ('+unmatched.length+' unmatched)');
+    // Import using existing confirm logic
+    const st={type,fileName:q.file_name,parsedCount:parsed.length,matched,unmatched};
+    CPA_IMPORT_STATE=st;
     window._cpaQueueId=queueId;
-    toast('Preview ready — review and confirm the import','ok');
+    if(CPA_XLSX_IMPORT_TYPES.has(type)) await cpaImportConfirmXlsx(st);
+    // Queue item is marked completed inside cpaImportConfirm
+    await sb.schema('cust').from('import_queue').update({status:'completed',processed_at:new Date().toISOString()}).eq('id',queueId);
+    window._cpaQueueId=null;
+    toast(matched.length+' rows imported from '+q.file_name,'ok');
+    return true;
   }catch(e){
     await sb.schema('cust').from('import_queue').update({status:'failed',error_message:e.message}).eq('id',queueId);
-    toast('Failed: '+e.message,'err');route();
+    toast('Failed: '+e.message,'err');
+    return false;
   }
 };
 window.cpaQueueImportAll=async function(){
-  const {data:pending}=await sb.schema('cust').from('import_queue').select('id').eq('status','pending').order('created_at');
-  if(!pending||!pending.length){toast('No pending files','err');return;}
-  // Import first one — user reviews, confirms, then next appears on reload
-  await cpaQueueImport(pending[0].id);
+  const {data:pending}=await sb.schema('cust').from('import_queue').select('id,file_name').eq('status','pending').order('created_at');
+  if(!pending||!pending.length){toast('No pending files','ok');return;}
+  const btn=document.getElementById('cpaAutoImportBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Importing…';}
+  let done=0,failed=0;
+  for(const item of pending){
+    try{
+      const ok=await cpaQueueImport(item.id);
+      if(ok) done++; else failed++;
+    }catch(e){failed++;}
+  }
+  toast(done+' file(s) imported'+(failed?' ('+failed+' failed)':''),'ok');
+  route();
 };
 window.cpaQueueDismiss=async function(queueId){
   await sb.schema('cust').from('import_queue').update({status:'completed',processed_at:new Date().toISOString()}).eq('id',queueId);
   toast('Dismissed','ok');route();
 };
+// Auto-import on page load if pending items exist
+async function cpaAutoImportPending(){
+  const {data:pending}=await sb.schema('cust').from('import_queue').select('id').eq('status','pending');
+  if(pending&&pending.length) await cpaQueueImportAll();
+}
 window.cpaImportTypeChange=function(){
   const type=$('cpaImpType').value, help=$('cpaImpColsHelp'), file=$('cpaImpFile'), projWrap=$('cpaImpProjectWrap');
   const isXlsx=CPA_XLSX_IMPORT_TYPES.has(type);
