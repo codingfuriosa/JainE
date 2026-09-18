@@ -102,11 +102,18 @@ async function processEmails(db: any) {
   log.push(`Found ${ids.length} email(s)`);
   if (!ids.length) return { processed: 0, queued: 0, log };
 
+  // Dedup: skip emails already in the queue
+  const { data: existingQueue } = await db.schema("cust").from("import_queue").select("gmail_message_id").not("gmail_message_id", "is", null);
+  const alreadyQueued = new Set((existingQueue || []).map((r: any) => r.gmail_message_id));
+  const newIds = ids.filter((id: string) => !alreadyQueued.has(id));
+  log.push(`${newIds.length} new email(s) after dedup`);
+  if (!newIds.length) return { processed: 0, queued: 0, log };
+
   await db.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {});
   const labelId = await getOrCreateLabel();
   let processed = 0, queued = 0;
 
-  for (const msgId of ids) {
+  for (const msgId of newIds) {
     try {
       const meta = await emailMeta(msgId);
       const parts = await xlsxParts(msgId);
