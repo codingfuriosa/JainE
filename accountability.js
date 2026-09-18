@@ -2774,6 +2774,19 @@
       .concat(sumField?[{k:'Total Amount'}]
         :(bkCols?bkCols.map(function(k){ return {k:k}; }):tmpl.map(function(f){ return {k:f.label}; })));
     const F=fixed.length;
+    /* WHERE THE PINNING STOPS (flows.tracker_pin_through, a label).
+       Pinned columns must be a contiguous run from the left edge, so the only choice available is
+       where that run ends - there is no pinning column four and six while five scrolls between
+       them. This names the last column to stay put; everything after it travels with the steps.
+       Null, which is every other workflow, pins the whole block as before.
+       Invoice Processing stops at Vendor: with Company Name added the block reached eight columns,
+       and the registered company name is not what anybody picks a bill out by. */
+    const pinThrough=String((flow&&flow.tracker_pin_through)||'').trim();
+    let FP=F;
+    if(pinThrough){
+      const at=fixed.findIndex(function(f){ return eq(f.k, pinThrough); });
+      if(at>-1) FP=at+1;
+    }
     const byCase={}; fcs.forEach(function(x){ (byCase[x.case_id]=byCase[x.case_id]||{})[x.seq]=x; });
 
     // A step's Department is whoever owns it — a shared step's people are drawn from the same
@@ -2803,12 +2816,27 @@
     };
     // The bill columns get no step code of their own — the sheet doesn't label them either.
     const span=function(s){ return s.is_manual_date?1:3; };   // manual-date steps are one column
-    const codeRow='<tr class="wf-tk-code"><th colspan="'+F+'" class="wf-tk-nocode"></th>'
+    /* The header's left-hand cells are SPLIT at the pin boundary when there is one. A single cell
+       spanning the whole block would straddle it: pin it and it covers scrolling columns as they
+       pass underneath, leave it unpinned and the header slides away from the body columns still
+       pinned below it. Splitting keeps both halves honest. Where nothing is unpinned (FP===F) the
+       cell is emitted whole, exactly as before, so no other workflow's header changes at all. */
+    const splitLeft=function(pinnedHtml, restHtml){
+      return (FP<F) ? (pinnedHtml+restHtml) : pinnedHtml;
+    };
+    const codeRow='<tr class="wf-tk-code">'
+      +splitLeft('<th colspan="'+(FP<F?FP:F)+'" class="wf-tk-nocode"></th>',
+                 '<th colspan="'+(F-FP)+'" class="wf-tk-nocode"></th>')
       +steps.map(function(s,i){ return '<th colspan="'+span(s)+'" class="wf-tk-gap">o'+(i+1)+'</th>'; }).join('')
       +'<th class="wf-tk-gap"></th></tr>';
     const bandRow=function(label,zeroVal,pick){
+      /* The zero column's text sits in the pinned half, since that is the half that stays on screen
+         to be read. The unpinned remainder is left blank rather than repeating it. */
+      const zeroSpan=(FP<F?FP:F)-1;
       return '<tr class="wf-tk-band"><th class="wf-tk-bandlbl">'+label+'</th>'
-        +(F>1?('<th colspan="'+(F-1)+'" title="'+esc2(zeroVal||'')+'">'+esc2(zeroVal||'—')+'</th>'):'')
+        +(F>1?splitLeft(
+            (zeroSpan>0?('<th colspan="'+zeroSpan+'" title="'+esc2(zeroVal||'')+'">'+esc2(zeroVal||'—')+'</th>'):''),
+            '<th colspan="'+(F-FP)+'"></th>'):'')
         +steps.map(function(s){ const v=pick(s); return '<th colspan="'+span(s)+'" class="wf-tk-gap" title="'+esc2(v||'')+'">'+esc2(v||'—')+'</th>'; }).join('')
         +'<th class="wf-tk-gap"></th></tr>';
     };
@@ -2927,12 +2955,11 @@
         +'<input class="ac-in" id="wfTkSearch" placeholder="Search by '+esc2(tkFindWhat.join(', '))+'\u2026" oninput="wfTrackerFilter()">'
         +'<button class="ac-btn ic" title="Clear" onclick="wfTrackerFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
       +'</div>';
-    /* data-frozen = how many columns belong to the INSTANCE rather than to a step, so
-       wfTrackerFreeze knows where the pinned block ends without having to guess from labels. It is
-       the same F the header bands span, which is what keeps the two in step on every workflow:
-       Invoice Processing pins Bill No. and Company along with No./Timestamp/Owner, Reimbursement
-       pins its Total Amount, Booking Form its Name/Project/Block/Flat. */
-    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable" data-frozen="'+F+'"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+    /* data-frozen = how many columns stay pinned, so wfTrackerFreeze never has to guess from
+       labels. Normally that is the whole instance block (F); a flow naming tracker_pin_through
+       stops earlier (FP) and the columns past it scroll with the steps. The header cells above were
+       split on the same boundary, so the two cannot disagree. */
+    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable" data-frozen="'+FP+'"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
       +'<div id="wfTkNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div>';
   }
   /* Filters the Tracker's own rows - independent of the Instances table's search, which is a
