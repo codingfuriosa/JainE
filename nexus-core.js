@@ -13700,6 +13700,27 @@ function cpaParseReceiptRegister(wb){
     mode:get('PaymentMode'),isReversed:get('Is Reversed'),unitStatus:get('Unit Status'),
   }));
 }
+function cpaParseReceiptReversal(wb){
+  return cpaParseFlatSheet(wb,'Receipt Reversal No',['Receipt Reversal No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),reversalNo:String(get('Receipt Reversal No')),
+    reversalDate:xlsxExcelDate(get('Receipt Reversal Date')),
+    receiptNo:get('Receipt No')!=null?String(get('Receipt No')):null,
+    receiptDate:xlsxExcelDate(get('Receipt Date')),
+    bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    instrumentNo:get('Instrument No'),instrumentDate:xlsxExcelDate(get('Instrument Date')),
+    reversalAmount:Number(get('Reversal Amount')||0),totalReversalAmount:Number(get('Total Reversal Amount')||0),
+    narration:get('Narration'),bankDescription:get('Bank Description'),reason:get('Reason'),
+  }));
+}
+function cpaParseBookingRegister(wb){
+  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),bookingId:get('Booking Id'),
+    bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    customerName:get('Customer Name'),status:get('Status'),
+    unitCode:get('Unit Code'),tower:get('Level3'),
+    bookingDate:xlsxExcelDate(get('Booking Date')),
+  }));
+}
 // Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
 // (project, tower, unit code) only for the rare pre-Booking-No-convention record.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
@@ -13720,7 +13741,7 @@ function cpaResolveProject(projects,businessUnit){
     ||projects.find(p=>norm(p.name)===bu)||null;
 }
 
-const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register']);
+const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register']);
 const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
@@ -13783,12 +13804,14 @@ window.cpaQueueImport=async function(queueId){
     let type=null;
     for(let r=0;r<Math.min(rows.length,20);r++){
       const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
-      if(vals.includes('Payment Plan')){type='sales_details';break;}
-      if(vals.includes('Net Outstanding')){type='outstanding';break;}
-      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
-      if(vals.includes('Money Receipt No')){type='receipt_register';break;}
+      // Check most specific first — Booking Register has "Payment Plan" too, so
+      // must check "Booking Id" (unique to it) before "Payment Plan"
       if(vals.includes('Receipt Reversal No')){type='receipt_reversal';break;}
-      if(vals.includes('Booking Id')){type='booking_register';break;}
+      if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')){type='receipt_register';break;}
+      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
+      if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
+      if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
+      if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
     }
     if(!type) throw new Error('Could not detect report type');
     // Parse
@@ -13797,6 +13820,8 @@ window.cpaQueueImport=async function(queueId){
     else if(type==='outstanding') parsed=cpaParseOutstanding(wb);
     else if(type==='invoice_register') parsed=cpaParseInvoiceRegister(wb);
     else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
+    else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
+    else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
     else throw new Error('Type '+type+' not yet supported for auto-import');
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
@@ -14113,6 +14138,27 @@ async function cpaImportConfirmXlsx(st){
       revenue_head:m.rec.revenueHead,import_batch_id:batchId}));
     for(let i=0;i<oldRows.length;i+=500){
       await sb.schema('cust').from('farvision_receipts').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,receipt_no,against_demand_no'});
+    }
+  }else if(st.type==='receipt_reversal'){
+    for(const m of st.matched){
+      const r=m.rec;
+      // Skip if already exists
+      const {data:existing}=await sb.schema('cust').from('receipt_reversals').select('id').eq('unit_id',m.unit.id).eq('receipt_reversal_no',r.reversalNo).limit(1);
+      if(existing&&existing.length) continue;
+      const {error}=await sb.schema('cust').from('receipt_reversals').insert({
+        unit_id:m.unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
+        receipt_no:r.receiptNo,receipt_date:r.receiptDate,
+        instrument_no:r.instrumentNo,instrument_date:r.instrumentDate,
+        reversal_amount:r.reversalAmount,total_reversal_amount:r.totalReversalAmount,
+        narration:r.narration,bank_description:r.bankDescription,reason:r.reason,
+        is_current:true,import_batch_id:batchId});
+      if(error)throw error;
+    }
+  }else if(st.type==='booking_register'){
+    for(const m of st.matched){
+      const r=m.rec;
+      const newStatus=r.status==='Cancel'?'cancelled':'booked';
+      await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
     }
   }
   toast(st.matched.length+' row(s) imported','ok');
