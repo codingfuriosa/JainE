@@ -45,7 +45,7 @@ function pageIdFromPath(pathname){
 // the legacy-view race it guards against in VIEWS.tasks below). An in-place SPA navigation to one of
 // these needs the same script loaded on demand, once, before rendering — never re-fetched on a
 // second visit in the same tab.
-const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js'};
+const PAGE_EXTRA_SCRIPT={tasks:'accountability.js',inspection:'insp-items.js',assistant:'assistant.js'};
 const _loadedPageScripts=new Set();
 function ensurePageScript(id){
   const src=PAGE_EXTRA_SCRIPT[id];
@@ -337,6 +337,10 @@ async function boot(){
   renderPage();
   startSessionGuard();
   promptSetPassword();
+  // Quick Add (AI) is a topbar widget available on every staff page, not a routed module -
+  // loaded once per tab via the same on-demand script loader SPA nav already uses for
+  // per-page scripts (see PAGE_EXTRA_SCRIPT/ensurePageScript above).
+  if(!state.isCustomer) ensurePageScript('assistant');
 }
 // The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
