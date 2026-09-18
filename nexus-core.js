@@ -18570,6 +18570,14 @@ function trcLeads(rows){
     for(let i=g.rows.length-1;i>=0&&!g.nextFollowUp;i--){
       if(g.rows[i].next_follow_up_text)g.nextFollowUp=g.rows[i].next_follow_up_text;
     }
+    /* By requirement (2026-09-19): if the lead's last call has no recording, wasn't transcribed, or is
+       otherwise unassessed, the AI-status column should keep showing the last call that WAS actually
+       assessed, not go blank. g.last stays "the most recent call" for remarks/navigation, which are
+       about the latest interaction regardless of whether it produced a verdict. */
+    g.lastAssessed=null;
+    for(let i=g.rows.length-1;i>=0&&!g.lastAssessed;i--){
+      if(g.rows[i].ai_assessed_status)g.lastAssessed=g.rows[i];
+    }
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
@@ -19016,7 +19024,7 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
-    +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',trcAiStatusLabel(last)):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(g.lastAssessed?trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)):'<span style="color:var(--slate)">—</span>')
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
@@ -19722,15 +19730,23 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
         +'<button class="btn" id="trcLeadRefreshBtn" onclick="trcLeadRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
       +'</div></div>';
 
-  /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
-     not per-lead, so they come off the latest follow-up - rows is chronological ascending, so the
-     last element is the most recent one. */
+  /* remarks and next follow-up (below) are per-follow-up, not per-lead, so they come off the latest
+     follow-up - rows is chronological ascending, so the last element is the most recent one. */
   const latest=rows[rows.length-1]||{};
+  /* The AI comparison, though, needs the last call that was actually ASSESSED (by requirement,
+     2026-09-19): if the latest call has no recording or is non-transcribable, this strip should keep
+     showing the last available AI status instead of dropping the AI badge and the agree/mismatch tag
+     entirely. */
+  let lastAssessed=null;
+  for(let i=rows.length-1;i>=0&&!lastAssessed;i--){
+    if(rows[i].ai_assessed_status)lastAssessed=rows[i];
+  }
+  lastAssessed=lastAssessed||{};
 
   const strip='<div class="card card-pad" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
     +((lead&&lead.status)?trcTag('t-blue','','CRM: '+lead.status):'')
-    +(latest.ai_assessed_status?trcTag(TRC_AI_TAG[latest.ai_assessed_status]||'t-gray','','AI: '+trcAiStatusLabel(latest)):'')
-    +trcMismatchTag(latest)
+    +(lastAssessed.ai_assessed_status?trcTag(TRC_AI_TAG[lastAssessed.ai_assessed_status]||'t-gray','','AI: '+trcAiStatusLabel(lastAssessed)):'')
+    +trcMismatchTag(lastAssessed)
     +trcTag('t-gray','fa-phone',recordings+' recording'+(recordings===1?'':'s'))
     +trcTag(transcribed?'t-green':'t-gray','fa-file-lines',transcribed+' transcribed')
     +trcTag(assessed?'t-green':'t-gray','fa-clipboard-check',assessed+' assessed')
