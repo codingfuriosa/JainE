@@ -64,6 +64,7 @@ const MIN_DURATION_SECONDS = Number(Deno.env.get("MIN_DURATION_SECONDS") || 60);
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 
 const MAX_ATTEMPTS = Number(Deno.env.get("MAX_ATTEMPTS") || 3);
+const RETRY_AFTER_MINUTES = Number(Deno.env.get("RETRY_AFTER_MINUTES") || 10);
 const STALE_MINUTES = 15;
 
 const MAX_STEPS_PER_TICK = Number(Deno.env.get("MAX_STEPS_PER_TICK") || 2);
@@ -1019,20 +1020,24 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
 }
 
 async function promoteRetries(db: DB) {
+  const cutoff = new Date(Date.now() - RETRY_AFTER_MINUTES * 60e3).toISOString();
   const stale = new Date(Date.now() - STALE_MINUTES * 60e3).toISOString();
 
-  /* NO MORE BLIND, TIME-BASED RETRIES OF A FAILED RECORDING (2026-09-19, by requirement). A failed
-     recording now stays failed - permanently, if that lead never calls again - instead of getting
-     silently re-attempted every few minutes regardless of whether anything about the lead has
-     changed. The only thing that revives it is the SAME lead qualifying again on a later decision
-     day: crm_build_queue resets that lead's own failed rows back to pending/qa_pending right alongside
-     the new recording that day's Pre-Sales call adds, so an active lead eventually gets everything
-     transcribed without spending retries on a lead that never called back.
+  /* A failure resumes at the PHASE THAT FAILED. An OpenAI QA call that 429'd must not send the
+     recording back through Gemini - the transcript is already stored and already paid for. That the
+     two phases now sit with two different vendors is exactly why this distinction matters more, not
+     less: a rate limit on one half must never re-bill the other. */
+  const { data: reTranscribe } = await db.schema("acc").from("transcription_queue")
+    .update({ status: "pending", updated_at: nowIso() })
+    .eq("status", "failed").eq("fail_phase", "transcribe")
+    .lt("attempt_count", MAX_ATTEMPTS).lt("updated_at", cutoff).select("id");
+  const { data: reQa } = await db.schema("acc").from("transcription_queue")
+    .update({ status: "qa_pending", updated_at: nowIso() })
+    .eq("status", "failed").eq("fail_phase", "qa")
+    .lt("qa_attempt_count", MAX_ATTEMPTS).lt("updated_at", cutoff).select("id");
 
-     RECLAIMING A KILLED INVOCATION STILL MUST COUNT AS AN ATTEMPT, though - this is not a retry of a
-     failure, it is finishing an attempt that was already in flight when the worker itself was cut off,
-     and skipping it would let a recording whose model call always overruns the worker limit sit
-     claimed and stuck forever. */
+  /* RECLAIMING A KILLED INVOCATION MUST COUNT AS AN ATTEMPT, or a recording whose model call always
+     overruns the worker limit is reclaimed and re-billed for ever. */
   let reclaimed = 0;
   const { data: stuckT } = await db.schema("acc").from("transcription_queue")
     .select("id, attempt_count").eq("status", "transcribing").lt("started_at", stale);
@@ -1062,7 +1067,7 @@ async function promoteRetries(db: DB) {
     }).eq("id", s.id);
     reclaimed++;
   }
-  return { reclaimed };
+  return { requeued_transcribe: (reTranscribe || []).length, requeued_qa: (reQa || []).length, reclaimed };
 }
 
 async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel: string, qaModel: string) {

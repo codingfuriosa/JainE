@@ -13765,7 +13765,7 @@ async function cpaRenderImport(host,seg){
       `<button class="btn btn-sm btn-primary" onclick="cpaQueueImport(${q.id})"><i class="fa-solid fa-file-import"></i> Import</button>`+
       ` <button class="btn btn-sm" onclick="cpaQueueDismiss(${q.id})" title="Skip this file"><i class="fa-solid fa-xmark"></i></button>`
     ]);
-    queueHtml=`<div id="cpaQueueBanner" class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin-bottom:16px">
+    queueHtml=`<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div><i class="fa-solid fa-envelope-open-text" style="color:var(--brand)"></i> <b>${queue.length} file${queue.length>1?'s':''} from Gmail</b>
         <span style="font-size:12.5px;color:var(--slate);margin-left:8px">Auto-fetched from Farvision email</span></div>
@@ -13846,21 +13846,10 @@ window.cpaQueueImport=async function(queueId){
     await sb.schema('cust').from('import_queue').update({status:'completed',processed_at:new Date().toISOString()}).eq('id',queueId);
     window._cpaQueueId=null;
     toast(matched.length+' rows imported from '+q.file_name,'ok');
-    // Remove this row from UI without full page refresh
-    var btn=document.querySelector('[onclick="cpaQueueImport('+queueId+')"]');
-    if(btn){var tr=btn.closest('tr');if(tr)tr.remove();}
-    // If no more pending rows, remove the whole Gmail banner
-    var remaining=document.querySelectorAll('.cpa-queue-row');
-    if(!remaining.length||!document.querySelector('[onclick^="cpaQueueImport"]')){
-      var banner=document.getElementById('cpaQueueBanner');if(banner)banner.remove();
-    }
     return true;
   }catch(e){
     await sb.schema('cust').from('import_queue').update({status:'failed',error_message:e.message}).eq('id',queueId);
     toast('Failed: '+e.message,'err');
-    // Mark row as failed visually
-    var btn2=document.querySelector('[onclick="cpaQueueImport('+queueId+')"]');
-    if(btn2){btn2.disabled=true;btn2.innerHTML='<i class="fa-solid fa-xmark"></i> Failed';}
     return false;
   }
 };
@@ -14075,21 +14064,17 @@ async function cpaImportConfirmXlsx(st){
     }
     for(const key of Object.keys(byDoc)){
       const {unit,rec,items}=byDoc[key];
-      // Find existing or insert new invoice header
-      let invId;
-      const {data:existing}=await sb.schema('cust').from('invoices').select('id').eq('unit_id',unit.id).eq('document_no',rec.docNo).eq('is_current',true).is('deleted_at',null).maybeSingle();
-      if(existing){
-        await sb.schema('cust').from('invoices').update({document_date:rec.docDate,invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,status:rec.status,import_batch_id:batchId}).eq('id',existing.id);
-        invId=existing.id;
-      }else{
-        const {data:created,error:ie}=await sb.schema('cust').from('invoices').insert({unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,status:rec.status,is_current:true,import_batch_id:batchId}).select('id').single();
-        if(ie)throw ie;
-        invId=created.id;
-      }
-      // Replace items for this invoice
-      await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',invId);
+      // Upsert invoice header
+      const {data:inv,error:ie}=await sb.schema('cust').from('invoices').upsert({
+        unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
+        invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,
+        status:rec.status,is_current:true,import_batch_id:batchId
+      },{onConflict:'unit_id,document_no'}).select('id').single();
+      if(ie)throw ie;
+      // Delete old items for this invoice, insert fresh
+      await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',inv.id);
       const itemRows=items.map((r,i)=>({
-        invoice_id:invId,schedule:r.schedule,revenue_head:r.revenueHead,
+        invoice_id:inv.id,schedule:r.schedule,revenue_head:r.revenueHead,
         amount:r.amount,tax:r.tax,net_amount:r.netAmount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('invoice_items').insert(itemRows);if(error)throw error;}
@@ -14113,21 +14098,20 @@ async function cpaImportConfirmXlsx(st){
     for(const key of Object.keys(byReceipt)){
       const {unit,rec,items}=byReceipt[key];
       const totalAmt=items.reduce((s,r)=>s+Number(r.totalAmount||r.amount||0),0);
-      // Find existing or insert new receipt header
-      let rcptId;
-      const {data:existingR}=await sb.schema('cust').from('money_receipts').select('id').eq('unit_id',unit.id).eq('receipt_no',rec.receiptNo).eq('is_current',true).is('deleted_at',null).maybeSingle();
-      if(existingR){
-        await sb.schema('cust').from('money_receipts').update({receipt_date:rec.receiptDate,payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,narration:rec.narration,total_amount:totalAmt,is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,import_batch_id:batchId}).eq('id',existingR.id);
-        rcptId=existingR.id;
-      }else{
-        const {data:created,error:re}=await sb.schema('cust').from('money_receipts').insert({unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,narration:rec.narration,total_amount:totalAmt,is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,is_current:true,import_batch_id:batchId}).select('id').single();
-        if(re)throw re;
-        rcptId=created.id;
-      }
-      // Replace items for this receipt
-      await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcptId);
+      // Upsert receipt header
+      const {data:rcpt,error:re}=await sb.schema('cust').from('money_receipts').upsert({
+        unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
+        payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
+        drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
+        narration:rec.narration,total_amount:totalAmt,
+        is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
+        is_current:true,import_batch_id:batchId
+      },{onConflict:'unit_id,receipt_no'}).select('id').single();
+      if(re)throw re;
+      // Delete old items, insert fresh
+      await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcpt.id);
       const itemRows=items.map((r,i)=>({
-        receipt_id:rcptId,against_demand_no:r.invoiceNo,schedule:r.schedule,
+        receipt_id:rcpt.id,against_demand_no:r.invoiceNo,schedule:r.schedule,
         revenue_head:r.revenueHead,amount:r.amount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
