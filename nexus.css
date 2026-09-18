@@ -158,8 +158,108 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
 /* Applied to Customer Portal's content wrapper (nexus-core.js, VIEWS.customer) - #view itself is
    never replaced, only its innerHTML, so every section change inserts a brand-new element and this
    plays automatically, same reasoning as sbItemActivate above. */
+/* --- Sidebar animated construction scene (customer portal only) --- */
+.cust-sb-scene{
+  margin-top:auto;padding:0 16px 16px;position:relative;height:140px;opacity:.35;
+  animation:csbFadeIn 1.2s ease .5s both
+}
+@keyframes csbFadeIn{from{opacity:0}to{opacity:.35}}
+
+/* Ground */
+.csb-ground{position:absolute;bottom:0;left:8px;right:8px;height:2px;background:linear-gradient(90deg,transparent,#4a5568,#64748b,#4a5568,transparent);border-radius:1px}
+
+/* Buildings */
+.csb-buildings{position:absolute;bottom:2px;left:8px;right:8px;display:flex;align-items:flex-end;justify-content:space-around}
+.csb-b{border-radius:2px 2px 0 0;background:linear-gradient(180deg,#2563eb,#1e40af);position:relative;
+  animation:csbBuildRise .6s cubic-bezier(.22,1,.36,1) both}
+.csb-b::after{
+  content:'';position:absolute;inset:4px 3px 3px;
+  background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,.25) 7px,rgba(255,255,255,.25) 8px),
+    repeating-linear-gradient(90deg,transparent 0px,transparent 6px,rgba(255,255,255,.2) 6px,rgba(255,255,255,.2) 7px)
+}
+.csb-b1{width:32px;height:55px;animation-delay:.3s}
+.csb-b2{width:28px;height:75px;animation-delay:.5s;background:linear-gradient(180deg,#3b82f6,#2563eb)}
+.csb-b3{width:36px;height:45px;animation-delay:.7s;background:linear-gradient(180deg,#60a5fa,#3b82f6)}
+.csb-b4{width:30px;height:65px;animation-delay:.9s}
+@keyframes csbBuildRise{from{height:0;opacity:0}to{opacity:1}}
+
+/* Crane */
+.csb-crane{position:absolute;bottom:2px;left:50%;transform:translateX(-50%)}
+/* Mast (vertical pole) */
+.csb-mast{width:3px;height:105px;background:linear-gradient(180deg,#f59e0b,#d97706);border-radius:1px;position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+  animation:csbMastGrow .8s cubic-bezier(.22,1,.36,1) .2s both}
+@keyframes csbMastGrow{from{height:0}to{height:105px}}
+/* Jib (horizontal arm) */
+.csb-jib{position:absolute;bottom:103px;left:50%;width:80px;height:2.5px;transform:translateX(-65%);
+  background:linear-gradient(90deg,#d97706,#f59e0b,#d97706);border-radius:1px;
+  animation:csbJibExtend .5s ease 1s both}
+@keyframes csbJibExtend{from{width:0;opacity:0}to{width:80px;opacity:1}}
+/* Cable (drops from jib) */
+.csb-cable{position:absolute;bottom:60px;left:calc(50% - 36px);width:1px;height:0;background:#94a3b8;
+  animation:csbCableDrop 2s ease-in-out 1.5s infinite alternate}
+@keyframes csbCableDrop{0%{height:15px}100%{height:42px}}
+/* Hook */
+.csb-hook{position:absolute;bottom:60px;left:calc(50% - 40px);width:8px;height:6px;
+  border:1.5px solid #f59e0b;border-top:0;border-radius:0 0 3px 3px;
+  animation:csbHookMove 2s ease-in-out 1.5s infinite alternate}
+@keyframes csbHookMove{0%{bottom:60px}100%{bottom:18px}}
+
 @keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.cust-view-fade{animation:custViewFade .28s ease}
+.cust-view-fade{animation:custViewFade .28s ease;position:relative}
+
+/* --- Background animated construction scene --- */
+.cust-bg-scene{
+  position:fixed;bottom:0;left:var(--sidebar);right:0;height:260px;
+  pointer-events:none;z-index:0;
+  animation:custBgSceneIn 2s ease both
+}
+@keyframes custBgSceneIn{0%{opacity:0}40%{opacity:.12}100%{opacity:.055}}
+
+/* BG Ground */
+.cbg-ground{position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent 2%,#94a3b8 20%,#64748b 50%,#94a3b8 80%,transparent 98%);border-radius:2px}
+
+/* BG Buildings */
+.cbg-b{position:absolute;bottom:3px;border-radius:3px 3px 0 0;opacity:0;animation:cbgBuildUp .7s cubic-bezier(.22,1,.36,1) forwards}
+.cbg-b::after{content:'';position:absolute;inset:5px 4px 4px;
+  background:repeating-linear-gradient(0deg,transparent 0px,transparent 10px,rgba(255,255,255,.3) 10px,rgba(255,255,255,.3) 11.5px),
+    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.22) 8px,rgba(255,255,255,.22) 9.5px)}
+@keyframes cbgBuildUp{from{height:0;opacity:0}to{opacity:1}}
+.cbg-b1{left:4%;width:48px;height:140px;background:linear-gradient(180deg,#1e40af,#1d4ed8);animation-delay:.2s}
+.cbg-b2{left:14%;width:40px;height:100px;background:linear-gradient(180deg,#2563eb,#3b82f6);animation-delay:.5s}
+.cbg-b3{left:26%;width:56px;height:170px;background:linear-gradient(180deg,#1d4ed8,#1e40af);animation-delay:.3s}
+.cbg-b4{left:38%;width:44px;height:120px;background:linear-gradient(180deg,#3b82f6,#2563eb);animation-delay:.7s}
+.cbg-b5{left:52%;width:38px;height:195px;background:linear-gradient(180deg,#1e40af,#1d4ed8);animation-delay:.15s}
+.cbg-b6{left:62%;width:52px;height:135px;background:linear-gradient(180deg,#2563eb,#3b82f6);animation-delay:.55s}
+.cbg-b7{left:75%;width:42px;height:160px;background:linear-gradient(180deg,#1d4ed8,#2563eb);animation-delay:.4s}
+.cbg-b8{left:87%;width:36px;height:90px;background:linear-gradient(180deg,#3b82f6,#60a5fa);animation-delay:.8s}
+
+/* BG Crane 1 (left-center) */
+.cbg-crane{position:absolute;bottom:3px}
+.cbg-crane1{left:32%}
+.cbg-crane2{left:68%}
+.cbg-cm{width:3px;background:linear-gradient(180deg,#f59e0b,#d97706);border-radius:1px;position:absolute;bottom:0;
+  animation:cbgMast .8s cubic-bezier(.22,1,.36,1) both}
+.cbg-crane1 .cbg-cm{height:200px;animation-delay:.3s}
+.cbg-crane2 .cbg-cm{height:175px;animation-delay:.6s}
+@keyframes cbgMast{from{height:0}to{}}
+.cbg-cj{position:absolute;height:2.5px;background:linear-gradient(90deg,#d97706,#f59e0b,#d97706);border-radius:1px;
+  animation:cbgJib .5s ease both}
+.cbg-crane1 .cbg-cj{top:0;left:-50px;width:100px;animation-delay:1.1s}
+.cbg-crane2 .cbg-cj{top:0;left:-40px;width:80px;animation-delay:1.4s}
+@keyframes cbgJib{from{width:0;opacity:0}to{opacity:1}}
+.cbg-cc{position:absolute;width:1px;background:#94a3b8;animation:cbgCable 3s ease-in-out infinite alternate}
+.cbg-crane1 .cbg-cc{left:-35px;top:2px;animation-delay:1.6s}
+.cbg-crane2 .cbg-cc{left:-28px;top:2px;animation-delay:2s}
+@keyframes cbgCable{0%{height:20px}100%{height:70px}}
+.cbg-ch{position:absolute;width:8px;height:6px;border:1.5px solid #f59e0b;border-top:0;border-radius:0 0 3px 3px;
+  animation:cbgHook 3s ease-in-out infinite alternate}
+.cbg-crane1 .cbg-ch{left:-39px;top:22px;animation-delay:1.6s}
+.cbg-crane2 .cbg-ch{left:-32px;top:22px;animation-delay:2s}
+@keyframes cbgHook{0%{top:22px}100%{top:72px}}
+
+/* Content stays above */
+.cust-view-fade>*{position:relative;z-index:1}
+@media(max-width:1024px){.cbg-scene,.cust-bg-scene{left:0}}
 /* Premium profile card */
 @keyframes custProfileSlideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes custProfileItemIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
@@ -1107,17 +1207,27 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 .cust-view-fade .tbl tbody tr:hover td{background:rgba(239,244,255,.5)}
 .cust-view-fade .tbl tbody tr:last-child td{border-bottom:0}
 
-/* --- Buttons: premium styling --- */
-.cust-view-fade .btn{
+/* --- Buttons: premium styling (secondary only, preserve .btn-primary) --- */
+.cust-view-fade .btn:not(.btn-primary){
   border-radius:10px;border:1px solid rgba(29,78,216,.15);
   background:linear-gradient(135deg,#fff 0%,#f8fafc 100%);
   box-shadow:0 1px 3px rgba(29,78,216,.06);
   transition:transform .15s ease,box-shadow .15s ease,background .15s ease
 }
-.cust-view-fade .btn:hover{
+.cust-view-fade .btn:not(.btn-primary):hover{
   transform:translateY(-1px);
   box-shadow:0 4px 12px rgba(29,78,216,.1);
   background:linear-gradient(135deg,#eff4ff 0%,#dbeafe 100%)
+}
+.cust-view-fade .btn-primary{
+  border-radius:10px;
+  box-shadow:0 2px 8px rgba(29,78,216,.2);
+  transition:transform .15s ease,box-shadow .15s ease,background .15s ease
+}
+.cust-view-fade .btn-primary:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 16px rgba(29,78,216,.25);
+  background:var(--brand-700)
 }
 
 /* --- Mobile responsive --- */

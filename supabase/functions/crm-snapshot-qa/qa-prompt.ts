@@ -20,43 +20,75 @@ import { QA_RUBRIC } from "../_shared/qa-rubric.ts";
 
 export const CATALOGUE = `APPROVED PROJECT INFORMATION (Jain Group). This is the reference for
 judging whether what the agent said was correct. Do not treat anything absent from this list as
-false - treat it as unverifiable.
+false - treat it as unverifiable. Synced against the sales team's own Reckoner spreadsheet
+(2026-09-17) - where this disagrees with an older figure you may recall, THIS is current.
 Every price is the "onwards" figure and excludes GST, registration and parking unless stated.
 Carpet area runs roughly 25-30% below the super built-up areas given here.
 
 - Dream Ananta - the project customers hear pitched as "the new project near the Airport".
-  UNDER CONSTRUCTION, launching 2026. Doltala, Old Jessore Rd, Madhyamgram / near the Airport;
-  landmark Fortune City / Julien Day School. Base rate 5,950/sft.
+  UNDER CONSTRUCTION. launching 2026, Doltala, Old Jessore Rd, Madhyamgram / near the Airport; landmark Fortune
+  City / Julien Day School. Base rate 5,950/sft.
   2BHK 62 lakh (940-1015 sqft) - 3BHK 68 lakh (1075-1405 sqft) - 4BHK 1.14 crore (1780-1805 sqft).
-  Parking: covered 5 lakh, open 4 lakh. 5.12 acres, 67% open space, 465 flats, 6 towers, G+8.
-  Possession date and RERA number are not yet announced - "not yet announced" is the correct answer.
+  Parking: covered 5 lakh, open 4 lakh. About 5.5 acres, 296 flats, G+8.
+  Possession date and RERA number are not yet announced - "not yet announced" is the correct
+  answer regardless of any rough internal estimate a caller may have heard.
 - Dream Gurukul - a SEPARATE project from Dream Ananta, on the same Doltala / Madhyamgram side near
-  the Airport. Do not treat the two as one. UNDER CONSTRUCTION. 2BHK from 57 lakh, 3BHK from
-  80 lakh. Possession 2027/2028.
-- Dream Diamond - UNDER CONSTRUCTION. 100 bungalows, G+1, 3 bed and 3 bath, on 3.06 acres.
-  Nepalgunge Rd, Daulatpur, Pailan; landmark near Joka Metro.
+  the Airport (Jessore Road, Doltala Crossing, near Julien Day School, about 10 minutes from the
+  Airport). Do not treat the two as one - but see the PROJECT-SPECIFIC RULE on redirecting a lead
+  from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres, 6 towers, G+7,
+  450+ flats. 2BHK 58 lakh onwards (860-875 sqft) - 3BHK 82-85 lakh (1225-1290 sqft).
+  Parking: covered 5 lakh, open 4 lakh.
+- Dream Diamond - UNDER CONSTRUCTION, handover 2027 (first 36 of 100 bungalows). G+1, row house,
+  3 bed and 3 bath, GST applicable. Nepalgunge Rd, Daulatpur, Pailan; landmark near Joka Metro.
   2006 sqft on 1.25 kattha 79 lakh - 2033 sqft on 1.30 kattha 82 lakh.
   RERA WBRERA/P/SOU/2023/00729. Possession mid-2027.
-- Dream World City - READY TO MOVE. Nepalgunge Rd, Daulatpur, Pailan, about 10 minutes from Joka
-  Metro. 1BHK 25 lakh (560-575 sqft) - 2BHK 29 lakh (630-800 sqft) - 3BHK 36 lakh (795-930 sqft).
-  20 acres, 400+ flats, 6 towers.
-- Dream Valley - READY TO MOVE. Hill Cart Road, near Dagapur Tea Estate, Siliguri. 3BHK ONLY - there
-  is no 1BHK, 2BHK or 4BHK here: 72 lakh (1540-1645 sqft). Base rate 3,900/sft. Open parking
-  4.5 lakh. 7 acres, 258 flats, 4 towers.
+- Dream World City - READY TO MOVE (2018 launch, completion certificate in hand). Nepalgunge Rd,
+  Daulatpur, Pailan, about 5 minutes from Joka Metro. 1BHK 25 lakh (560-575 sqft) - 2BHK 29 lakh
+  (630-800 sqft) - 3BHK 36 lakh onwards (795-1390 sqft, price scales up with size within that
+  range - a larger 3BHK in this project costing well above 36 lakh is not itself an error).
+  Parking: open 2.75 lakh, covered 3.50 lakh. 20 acres, 450 flats, 6 towers, G+9, over 70% open
+  space.
+- Dream Valley - READY TO MOVE. Hill Cart Road, near Dagapur Tea Estate, Siliguri. PRIMARILY 3BHK -
+  there is no 1BHK or 2BHK here, and an agent offering either has given wrong product information.
+  A single 4BHK unit now also exists (1860 sqft, 2nd floor) - offering it is no longer an error,
+  though it should be described as the one remaining unit, not as a regular configuration.
+  3BHK 74-85 lakh (1540-1645 sqft) - 4BHK 86 lakh onwards (1860 sqft). Base rate 4,150/sft.
+  Parking: open 4.5 lakh, covered 6-6.5 lakh. 3.5 acres, 264 flats, 4 towers, G+10.
 - Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur, beside NH-2; landmark Kalpana Inn.
-  2BHK 34 lakh (880 sqft) - 2BHK with study room 39 lakh (1045 sqft). 22 bighas, 198 flats, 3 towers.
-- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowrasta).
-  1BHK studio 16 lakh (one open kitchen and toilet, no car parking) - 2BHK 42 lakh (1015 sqft) -
-  3BHK 50 lakh (1235-1400 sqft). 2 acres, 154 flats, 7 towers.
+  2BHK 36-39 lakh (880 sqft) - 2.5BHK (a 2BHK with an added study room) 41-43 lakh (1045 sqft) -
+  3BHK 54 lakh onwards (1285 sqft). Base rate 3,495/sft. Parking: open 4.5 lakh.
+  22 bighas, 200 flats, 3 towers, G+11 (only 17 units remain).
+- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowrasta, beside the
+  West Bengal Electricity power house). Base rate 3,900/sft.
+  1BHK studio 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK 45 lakh
+  (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft).
+  2 acres, 154 flats, 7 towers, G+4.
 - Dream One - READY TO MOVE. Kadampukur-Jhalgachhi Rd, Patharghata, New Town / Rajarhat, beside the
-  Westin and opposite Eco Park Gate 1. Base rate 9,000/sft.
-  2BHK 98 lakh (945-1080 sqft) - 3BHK 1.30 crore (1325-2045 sqft in the G+14 towers, 1650-1655 sqft
-  in the G+7) - 4BHK 2.25 crore (2395 sqft) - Penthouse 3.75 crore (3770 sqft).
-  Parking: covered 7 lakh, open 5.25 lakh. 3.2 acres, 65% open space, 243 flats, 6 towers.
-- Dream Residency Manor - a live project in its own right. No approved figures are held here, so
-  nothing said about it can be marked wrong - treat every claim about it as unverifiable.
+  Westin and opposite Eco Park Gate 1. Base rate 11,000/sft.
+  2BHK 1.16-1.25 crore (945-1010 sqft) - 3BHK (ready to move) 2.02-2.55 crore (1650-2045 sqft) -
+  3BHK Pent House 3770 sqft from 4.72 crore (a second, 2395 sqft pent-house variant also exists
+  with no separately confirmed price - treat that unit's own price as unverifiable, not as
+  whatever the 3770 sqft figure works out to per sqft).
+  Only 13 of 213 flats remain. Parking: open 7.25 lakh (no covered figure currently quoted -
+  treat a covered-parking price for this project as unverifiable rather than assumed absent).
+  3.2 acres, 4 towers (three G+14, one G+7 - note the G+7 tower carries 3BHK only, on its 1st and
+  2nd floors).
+- Dream Residency Manor - a live project in its own right, separate from every project above.
+  READY TO MOVE. Rajarhat, on Salwa Bazar Main Road (211 bus route). Base rate 4,900/sft.
+  Only one unit remains, a 2BHK, 1115 sqft, 63 lakh onwards inclusive of open parking, on the 6th
+  (top) floor. The project's 4BHK configuration is SOLD OUT - an agent offering one has given
+  wrong product information. 1 acre, 8 towers, G+6, 173 flats total.
+- Dream Palazzo - a live project in its own right, separate from every project above. On 100
+  katha of land in Rajarhat, Narayanpur, near Koikhali (opposite Sidha Town). READY TO MOVE. Base
+  rate 3,900/sft. Almost entirely SOLD OUT: only one unit remains, a 3BHK, 1385 sqft, 75 lakh all
+  inclusive, on the 1st floor. Its 2BHK configuration is SOLD OUT entirely - an agent offering one
+  has given wrong product information. 10 towers, G+6.
 - Ecocity Bungalows - a live project in its own right, and NOT another name for Dream Diamond or for
-  Dream Eco City. No approved figures are held here - treat every claim about it as unverifiable.
+  Dream Eco City. UNDER CONSTRUCTION, handover 2028. Row-house bungalows, G+1, 3BHK duplex, 3
+  toilets, 2 attached private gardens each. STANDARD tier: 1.5 kattha land, 2210 sqft usable
+  (1452 sqft built-up), 85.62 lakh all inclusive (no private swimming pool). A separate PREMIUM
+  tier also exists (3.5 cottah land) with no confirmed price - treat that tier's price as
+  unverifiable. 92 bungalows total across 13 blocks, on 1.33 acres (standard) plus premium plots.
 - Durbaar Banquets - a banquet venue, not a residential project. Run by Jain Group inside the
   Holiday Inn Kolkata Airport, Bishwa Bangla Sarani, near City Center 2, New Town. A 12,000 sqft
   pillar-less banquet hall and a 10,000 sqft lawn, 137 hotel rooms, 200+ car parks with valet,
@@ -90,20 +122,37 @@ lead belongs to, and only where the subject actually came up on the call.
   project does not include one. On any other project this is unverifiable either way.
 - Pick-up and drop: Dream World City DOES offer it. Dream Ananta, Dream Eco City, Dream Exotica and
   Dream Valley do NOT. On any other project this is unverifiable either way.
-- Dream One rate per square foot: the approved answer is the 9,000/sft base rate. A per-sqft figure
+- Dream One rate per square foot: the approved answer is the 11,000/sft base rate. A per-sqft figure
   reached by dividing a flat's total price by its area is an error even when the arithmetic is
   correct, because it is not the rate the company quotes.
-- Dream Valley configuration: only 3BHK exists. An agent who offers a 2BHK or a 4BHK there has given
-  wrong product information. An agent who says plainly that only 3BHK is available has not, and
-  should not be marked down for it.
+- Dream Valley configuration: PRIMARILY 3BHK. An agent who offers a 2BHK there has given wrong
+  product information - 2BHK does not exist here. A single 4BHK unit now exists (see CATALOGUE), so
+  offering a 4BHK is no longer itself an error - but an agent who describes 4BHK as freely available
+  rather than the one remaining unit has overstated it. An agent who says plainly that the project is
+  3BHK (with limited 4BHK) has not erred and should not be marked down.
+- Dream Residency Manor and Dream Palazzo: both are almost entirely sold out (see CATALOGUE for
+  which single unit remains in each). Offering the configuration each has SOLD OUT - 4BHK at
+  Residency Manor, 2BHK at Palazzo - is wrong product information, exactly as with Dream Valley's
+  2BHK above. Offering the one unit that does remain is not an error even though stock is scarce.
+- Dream Gurukul redirected to Dream Ananta ("the new project near the Airport"): both are
+  under-construction projects in the same Doltala/Madhyamgram corridor near the Airport, and it is
+  standard, encouraged practice for an agent to pitch Ananta instead once a Gurukul lead makes clear
+  they do not want Gurukul (wrong possession timeline, price, room size, or simply no interest).
+  Where the transcript shows exactly that - the customer declining Gurukul, the agent then pitching
+  Ananta - judge the "Project" fact_check (point 1) on whichever project the call actually ended up
+  discussing, not on the lead's original business_unit, and do not mark this a Mismatch for
+  discussing a different project. Every fact actually stated about Ananta is still checked against
+  Ananta's own catalogue entry as rigorously as any other claim (see OTHER PROJECTS MENTIONED) - only
+  the redirect itself is not an error. This exception is specific to this one project pair; it is not
+  a licence to excuse pitching an unrelated project as though the lead's own were not discussed.
 - Durbaar Banquets runs a DIFFERENT funnel, and point 1 of the rubric must be read against this one:
   greet -> what kind of event -> expected guest count -> hall, lawn or both -> ask for the venue
   visit. There is no configuration step and no BHK question, so their absence is not a skipped step.
   Exact pricing, date availability, decoration packages, and the alcohol and DJ policies are all
   venue-visit matters - quoting any of them on the call is leakage under point 5.
 - Possession date is not volunteered unless the customer asks for it. That only bites on the
-  under-construction projects - Dream Ananta, Dream Gurukul and Dream Diamond. On the ready-to-move
-  projects, saying it is ready to move is the pitch, not a disclosure.`;
+  under-construction projects - Dream Ananta, Dream Gurukul, Dream Diamond and Ecocity Bungalows. On
+  the ready-to-move projects, saying it is ready to move is the pitch, not a disclosure.`;
 
 export const LOST_REASON_VOCABULARY = `CRM LOST REASON VOCABULARY - when naming the reason the
 conversation actually supports, use one of these exact strings wherever one fits:
@@ -196,6 +245,27 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "prior_qualification_note": "what the LEAD HISTORY told you about an earlier qualification and
                                  what it means for this call, or null when there is no earlier one",
     "ai_assessed_status": "Lost" | "Qualified" | "In Follow Up" | "Unclear",
+    "visit_pending": true | false - a question about THIS CALL'S OWN FACTS, answered independently of
+                     whatever you wrote for ai_assessed_status on this same call: does the lead
+                     qualify (the four gates are met, or the customer wants to buy or has shown
+                     interest in visiting) or was ALREADY qualified on an earlier call (see LEAD
+                     HISTORY), AND is the site visit itself the one thing still not done - not
+                     firmly fixed, postponed, rescheduled, or the customer just has not gotten to it
+                     yet? Answer true whenever that describes the lead, EVEN IF you wrote "In Follow
+                     Up" for ai_assessed_status on this call rather than "Qualified" - the two fields
+                     are not the same question, and this one is read by the pipeline against the
+                     EFFECTIVE status (yours, or the ratchet's, whichever ends up higher) precisely so
+                     it still applies when a previously-qualified lead's visit gets pushed again and
+                     you call this particular call "In Follow Up" yourself.
+                     Answer false whenever the lead has NOT actually qualified - genuinely undecided,
+                     budget or project still unfixed, no interest in visiting shown at all. A customer
+                     who says "I don't know if I'll buy, budget isn't fixed, project isn't decided" is
+                     In Follow Up on the merits and visit_pending is false; do not set it true just
+                     because a visit has not come up, when nothing else qualifies the lead either.
+                     This is read by the pipeline, not just for show: a CRM status of "In Follow Up"
+                     against an effective "Qualified" verdict is not counted as a mismatch when this
+                     is true, because "In Follow Up" is a fair label for a lead that qualifies but has
+                     not yet visited - see the rule below.
     "score": 0-100, or null when ai_assessed_status is "Unclear",
     "status_match": true | false | null,
     "mismatch_type": "lost_should_not_have_been_lost" | "qualified_should_not_have_been_qualified"
@@ -425,7 +495,13 @@ So: "In Follow Up" is the WRONG answer for a qualified lead who moved their visi
 
 Use these definitions:
 - Lost         - the customer has closed the door: no requirement, already bought elsewhere, a wrong
-                 or prank enquiry, a broker, or a clear refusal to proceed.
+                 or prank enquiry, a broker, a clear refusal to proceed, OR this is a DUPLICATE LEAD -
+                 the same customer already exists as another lead or enquiry (the customer says so
+                 themselves, "I already spoke to someone else about this", "I already have an executive
+                 calling me", the agent recognises them as already in the system, or the CRM's own
+                 remarks or lost_reason for this follow-up already say Duplicate). A duplicate is Lost
+                 regardless of anything else the call establishes about budget, location or interest -
+                 the four qualification gates do not apply to a lead that is not a distinct lead at all.
 - Qualified    - the four gates are met, or the customer agreed to (or showed interest in) a site
                  visit, asked to proceed or asked to book - and they have not closed the door.
 - In Follow Up - the gates are not settled and the lead is still open: genuinely undecided, or
@@ -435,14 +511,24 @@ Use these definitions:
                  date on one of those is Qualified, not this.
 - Unclear      - the conversation does not establish any of the three. Use it rather than guessing.
 
+A CRM STATUS OF "Lost, then Reopened" IS A LIVE LEAD, NOT A LOST ONE. This exact CRM status exists in
+the data and means the sales team has already reopened a lead that was once marked Lost - treat it as
+you would any other live lead currently being worked (closest to In Follow Up in spirit), assessing
+this call on its own evidence exactly as above. Do not read the word "Lost" in that label as the
+customer having closed the door - the "then Reopened" half of it says the opposite. It sits outside
+crm_status/qualification_check's four recognised values (Lost, Qualified, In Follow Up, Unclear), so a
+status_match is not counted against it either way - report ai_assessed_status on the call's own merits
+regardless.
+
 QUALIFICATION ONLY EVER MOVES FORWARD. THIS IS A HARD RULE, NOT A PREFERENCE.
 The LEAD HISTORY block in the message below tells you whether this lead was ALREADY QUALIFIED on an
 earlier call. Read it before you decide anything. Where it says the lead was already qualified:
 - Your assessment for this call may be "Qualified" or "Lost". It may NOT be "In Follow Up".
 - A next follow-up date and fresh remarks on a qualified lead are the normal and correct way to work
   one. They are NOT evidence that the lead slipped back, and a callback date is never a downgrade.
-- Only the customer closing the door - no requirement, bought elsewhere, a flat refusal to proceed -
-  moves a qualified lead at all, and it moves it to Lost. There is no route back to In Follow Up.
+- Only the customer closing the door - no requirement, bought elsewhere, a flat refusal to proceed, or
+  this turning out to be a duplicate lead - moves a qualified lead at all, and it moves it to Lost.
+  There is no route back to In Follow Up.
 - A customer who RESETS OR POSTPONES THEIR SITE VISIT DATE stays Qualified. The visit moved; the
   lead did not. Log the new date and keep the status where it is.
 - A customer who cannot attend the site visit at all but still wants a flat and asks the agent to
@@ -496,6 +582,43 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
                                                     the history says was already qualified and that
                                                     the agent has now logged back as In Follow Up.
                                                     That downgrade is a CRM error and belongs here.
+                                                    BY REQUIREMENT (2026-09-18), THIS EXCLUDES THE
+                                                    VISIT-PENDING CASE: a customer who has cleared the
+                                                    four gates (or already wants to buy) but simply
+                                                    cannot make the site visit work yet - busy,
+                                                    travelling, asks to be called after a date, sends
+                                                    someone else instead. Set "visit_pending": true on
+                                                    that call, and that combination is NOT this
+                                                    mismatch_type - it is not counted as a disagreement
+                                                    at all (see status_match below). "In Follow Up" is
+                                                    a fair working label for a lead that qualifies but
+                                                    has not yet visited, not a CRM error.
+                                                    THIS INCLUDES A LEAD ALREADY QUALIFIED ON AN
+                                                    EARLIER CALL who, on THIS call, only reports the
+                                                    same visit still postponed - "not this week, call
+                                                    me after the 20th", "still hasn't arranged it,
+                                                    will do so soon". Set "visit_pending": true on THIS
+                                                    call too, even if you find yourself writing "In
+                                                    Follow Up" for its own ai_assessed_status - the
+                                                    ratchet already carries the EFFECTIVE status back
+                                                    up to Qualified for a lead like that (see the
+                                                    ratchet rule above), and visit_pending is checked
+                                                    against that effective status, not your raw word
+                                                    for this one call. The two fields answer different
+                                                    questions on purpose.
+                                                    Use this mismatch_type instead for a Qualified
+                                                    verdict the CRM has left In Follow Up for some OTHER
+                                                    reason - the visit already happened, or the four
+                                                    gates were met independently of any visit - where
+                                                    "visit_pending" is false because the visit is not
+                                                    the (or not the only) open item. It is also still
+                                                    correct for a lead that has NOT actually qualified -
+                                                    a customer who says "I don't know if I'll buy, my
+                                                    budget isn't fixed, I haven't decided on a project"
+                                                    is genuinely In Follow Up, not Qualified, and
+                                                    visit_pending is false there: nothing qualified this
+                                                    lead in the first place, so there is no visit to be
+                                                    "pending" on.
 - null                                              the two agree, the CRM status is one this scheme
                                                     does not cover (Site Visited, OV, and similar),
                                                     or your assessment is Unclear.
