@@ -1884,7 +1884,7 @@
     return '<div class="wf-dw">'+head+t+'</div>';
   }
   /* What a task is CALLED, ordered for the people who have to act on it. A flow may name the
-     fields it wants first (flows.task_fields - Invoice Processing: Company, Bill Date, Amount);
+     fields it wants first (flows.task_fields - Invoice Processing: Vendor, Bill Date, Amount);
      everything else follows in the order the form asks for it, so nothing is hidden, just ranked.
 
      Setting that order also drops the STEP NAME, on purpose: which step a task is sitting at is the
@@ -1907,8 +1907,8 @@
     return rows.slice().sort(function(a,b){
         return (rank(a.label)-rank(b.label)) || (seen[a.label]-seen[b.label]);
       })
-      /* Just the value. "Company: X · Bill Date: Y" spent half the line repeating words the
-         reader already knows from position - the company is obviously the company. */
+      /* Just the value. "Vendor: X · Bill Date: Y" spent half the line repeating words the
+         reader already knows from position - the vendor is obviously the vendor. */
       .map(function(d){ return wfDetailDisp(d.value); })
       .join(' \u00b7 ');
   }
@@ -1945,13 +1945,17 @@
     return [step,line].filter(Boolean).join(' - ');
   }
   function wfInstanceLabel(info){ var base=(info&&(info.triggerEvent||info.flowName))||'Workflow'; return base+(info&&info.caseNo?(' #'+info.caseNo):''); }
-  // Curated instance summary — Bill No./Bill Date/Company/Amount (+ the instance No./JainE id),
-  // explicitly WITHOUT User. Falls back to null (caller shows
+  // Curated instance summary — Bill No./Bill Date/Vendor/Company Name/Amount (+ the instance
+  // No./JainE id), explicitly WITHOUT User. Falls back to null (caller shows
   // the generic full detail list instead) for any workflow that doesn't have these field labels,
   // so other workflows (Leave approval, etc.) are unaffected.
   // Wheredoc Id deliberately left out: it's gone from the form, but old instances still carry one
   // in their stored trigger_details, and listing the label here would surface it again regardless.
-  var WF_SUMMARY_FIELDS=['Bill No.','Bill Date','Company','Amount'];
+  // "Company" was renamed to "Vendor" on the form AND in every stored bill (see the
+  // 20260911 invoice_vendor_dropdown_and_company_name migration), so there is one label to match,
+  // not two. Company Name is new: bills filed before it existed have no value for it and the
+  // builders below skip an empty one, so nothing old grows a blank card.
+  var WF_SUMMARY_FIELDS=['Bill No.','Bill Date','Vendor','Company Name','Amount'];
   function wfCaseSummaryHtml(c,flow){
     const det=Array.isArray(c.trigger_details)?c.trigger_details:[];
     const by={}; det.forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
@@ -1985,9 +1989,9 @@
        Nothing is widened just for being last: an odd count used to push the final item — usually
        Total Amount — onto a stretched row of its own, which read as a mistake rather than as
        emphasis. Only a field the flow actually declares wide (Remarks) spans the row. */
-    // Invoice Processing shows just the value, leading with the JainE id — "Bill No.", "Company"
+    // Invoice Processing shows just the value, leading with the JainE id — "Bill No.", "Vendor"
     // etc. don't need repeating on screen once the item order itself already reads as: id, then
-    // bill no., then date, then company, then amount.
+    // bill no., then date, then vendor, then company name, then amount.
     const bareValues=flow&&flow.id===26;
     const gridItems=items.map(function(it){
       return bareValues
@@ -2000,7 +2004,7 @@
   /* The Step Task page's own Description block — a separate render path from wfCaseSummaryHtml
      above (that one is the case-timeline panel), so fixing one was never going to touch the other.
      Same rule, same field list (WF_SUMMARY_FIELDS, already without Wheredoc Id): just the value,
-     leading with the JainE id, no "Company"/"Bill No."/"Bill Date" labels repeated on screen. */
+     leading with the JainE id, no "Vendor"/"Bill No."/"Bill Date" labels repeated on screen. */
   function wfInvoiceTaskDetailsHtml(details,caseRow){
     const by={}; (details||[]).forEach(function(d){ if(d&&d.label) by[d.label]=d.value; });
     const lines=[esc2(wfCaseNoText(caseRow))];
@@ -2877,15 +2881,22 @@
       else if(c.status!=='Done'){ const cur=steps.filter(function(s){ return s.seq===c.current_step; })[0];
         now=cur?(cur.title||('Step '+cur.seq)):'—'; }
       // Clicking a tracker row opens that instance's own timeline, same as the Instances table.
-      /* Everything a row can be found by. Company / Wheredoc Id / Bill No. are read the same way
-         on any workflow that happens to have them (Invoice Processing does; most others won't and
-         simply never match). The instance number and its owner apply everywhere. */
+      /* Everything a row can be found by. Wheredoc Id / Bill No. are read the same way on any
+         workflow that happens to have them (Invoice Processing does; most others won't and simply
+         never match). The instance number and its owner apply everywhere.
+
+         The party a row was raised about used to be read by naming the label - findLabel('Company')
+         - which meant renaming that field to Vendor would have quietly emptied this index and left
+         the Tracker unsearchable by the one thing anybody looks a bill up by. It reads the generic
+         index instead (wfFindExtra's `text`, every filled-in field that isn't an amount, a date or
+         a file), which is what the Instances list beside it already searched: no label is named, so
+         Vendor, Company Name and whatever the next workflow calls its parties are all covered. */
       const findLabel=function(name){ const k=Object.keys(by).find(function(l){return eq(l,name);}); return k?String(by[k]||''):''; };
       const tkKey=(wfCaseNoText(c)+' '+wfOwnerKey(c, byCase)).toLowerCase();
       // The same index the Instances search uses, so the two boxes agree on what is findable.
       const tkX=wfFindExtra(Array.isArray(c.trigger_details)?c.trigger_details:[], flow);
       return '<tr class="wf-tk-row" data-case="'+c.id+'" data-find="'+esc2(tkKey)+'" onclick="wfTrackerOpen('+c.id+')" '
-        +'data-company="'+esc2(findLabel('Company').toLowerCase())+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
+        +'data-text="'+esc2(tkX.text)+'" data-wheredoc="'+esc2(findLabel('Wheredoc Id').toLowerCase())+'" data-billno="'+esc2(findLabel('Bill No.').toLowerCase())+'" '
         +'data-amount="'+esc2(tkX.amount)+'" data-desc="'+esc2(tkX.desc)+'" '
         +'title="Open this '+esc2((flow.instance_noun||'instance')).toLowerCase()+'’s timeline">'
         /* The route goes under "now at" rather than in a column of its own: the Tracker's header is
@@ -2897,7 +2908,7 @@
     }).join('');
 
     /* One row per instance and potentially hundreds of them, so the Tracker gets its own way in.
-       Both a Company/Wheredoc/Bill No. search and a No./owner one were written for this at the same
+       Both a Vendor/Wheredoc/Bill No. search and a No./owner one were written for this at the same
        time, for different workflows; they are one box now, matching whichever of those a row
        actually carries.
 
@@ -2909,14 +2920,19 @@
     const tkFindWhat=[ 'No.', 'anyone it is with' ]
       .concat(tmpl.some(function(f){ return eq(f.label,(flow&&flow.tracker_sum_field)||'Amount'); })?['amount']:[])
       .concat(tmpl.some(function(f){ return /descript/i.test((f&&f.label)||''); })?['description']:[])
-      .concat(tmpl.some(function(f){ return eq(f.label,'Company'); })?['Company']:[])
+      .concat(tmpl.some(function(f){ return eq(f.label,'Vendor'); })?['Vendor']:[])
       .concat(tmpl.some(function(f){ return eq(f.label,'Wheredoc Id'); })?['Wheredoc Id']:[])
       .concat(tmpl.some(function(f){ return eq(f.label,'Bill No.'); })?['Bill No.']:[]);
     window._wfTkFindBar='<div class="wf-tk-find"><i class="fa-solid fa-magnifying-glass"></i>'
         +'<input class="ac-in" id="wfTkSearch" placeholder="Search by '+esc2(tkFindWhat.join(', '))+'\u2026" oninput="wfTrackerFilter()">'
         +'<button class="ac-btn ic" title="Clear" onclick="wfTrackerFilterClear()"><i class="fa-solid fa-xmark"></i></button>'
       +'</div>';
-    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
+    /* data-frozen = how many columns belong to the INSTANCE rather than to a step, so
+       wfTrackerFreeze knows where the pinned block ends without having to guess from labels. It is
+       the same F the header bands span, which is what keeps the two in step on every workflow:
+       Invoice Processing pins Bill No. and Company along with No./Timestamp/Owner, Reimbursement
+       pins its Total Amount, Booking Form its Name/Project/Block/Flat. */
+    return '<div class="wf-tablewrap wf-tk-wrap"><table class="wf-itable wf-tktable" data-frozen="'+F+'"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>'
       +'<div id="wfTkNoMatch" class="ac-empty" style="cursor:default;display:none">No matches</div></div>';
   }
   /* Filters the Tracker's own rows - independent of the Instances table's search, which is a
@@ -2929,7 +2945,7 @@
     const rows=[].slice.call(document.querySelectorAll('.wf-tktable tbody tr.wf-tk-row'));
     let shown=0;
     rows.forEach(function(r){
-      const ok=!q || ['data-find','data-company','data-wheredoc','data-billno','data-amount','data-desc'].some(function(a){
+      const ok=!q || ['data-find','data-text','data-wheredoc','data-billno','data-amount','data-desc'].some(function(a){
         return (r.getAttribute(a)||'').indexOf(q)!==-1;
       });
       r.style.display=ok?'':'none';
@@ -2976,6 +2992,81 @@
       [].slice.call(tr.children).forEach(function(th){ th.style.top=top+'px'; });
       top+=tr.getBoundingClientRect().height;
     });
+  };
+  /* THE INSTANCE COLUMNS STAY PUT WHILE THE STEPS SCROLL SIDEWAYS.
+     Invoice Processing has twelve steps and three columns apiece, so the table is several screens
+     wide. Scrolling right to read a step used to carry the bill number off the left-hand edge with
+     it, leaving a row of dates belonging to a bill you could no longer name. The instance's own
+     columns are pinned instead - on Invoice Processing that is No., Timestamp, Owner, Bill No.,
+     Bill Date and Company - and the step columns slide underneath them.
+
+     WHY THE WHOLE BLOCK AND NOT JUST THE TWO COLUMNS ASKED FOR. A sticky column has to be backed by
+     every column to its left, or it floats over its own neighbours as they scroll past. Bill No.
+     and Company sit fourth and sixth, so pinning exactly those two is not a thing a table can do.
+     Pinning the block they live in is, it needs no column reordering, and it generalises: every
+     workflow pins its own identity columns without this code knowing any of their names.
+
+     Offsets are MEASURED, not assumed - the columns size to their content, so there is no width to
+     hard-code. They come from the .wf-tk-cols row, the one row with exactly one cell per column.
+
+     Rows are walked by COLUMN INDEX, never by cell index: a cell may span several columns. Every
+     header band does, and so does a Booking Form row whose check list is still being read. Counting
+     cells would pin the wrong ones on precisely those rows. */
+  window.wfTrackerFreeze=function(){
+    const t=document.querySelector('.wf-tktable'); if(!t) return;
+    const F=Number(t.getAttribute('data-frozen')||0);
+    const wrap=t.closest('.wf-tk-wrap');
+    // A hidden pane measures zero, and freezing against that would stack every column at left:0.
+    // The Tracker starts hidden behind its tab, so this runs again when the tab is opened.
+    if(!F || !wrap || !wrap.offsetWidth) return;
+    const colRow=t.querySelector('thead tr.wf-tk-cols'); if(!colRow) return;
+
+    // Always start from nothing: this re-runs on resize and on every tab switch.
+    [].slice.call(t.querySelectorAll('.wf-tk-frozen')).forEach(function(c){
+      c.classList.remove('wf-tk-frozen','wf-tk-frozen-last');
+      c.style.left=''; c.style.top='';
+    });
+    t.classList.remove('wf-tk-hasfrozen');
+
+    /* On a phone there is no room for a pinned block AND something to read beside it, so the table
+       stays one plain sheet - exactly how it behaved before any of this. */
+    if(wrap.offsetWidth < 760) return;
+
+    const heads=[].slice.call(colRow.children).slice(0,F);
+    if(heads.length<F) return;
+    /* Offsets are floored to whole pixels. Columns size to their content, so the running total lands
+       on fractions (58.17, 148.88, 216.59…). Chrome at 1x was measured with both and neither leaked,
+       so this is not fixing an observed gap - it is guarding the class of problem: a fractional
+       sticky `left` has to be snapped to a device pixel, and on a 1.25x or 1.5x display that
+       rounding can fall either side, leaving a hairline for the scrolling columns to show through.
+       Flooring lands each cell a fraction LEFT of true, so it overlaps its neighbour rather than
+       risking a seam, and the later cell paints over the earlier one so the overlap never shows.
+       The running total is floored rather than each width, so the error stays under one pixel
+       across the block instead of compounding column by column. */
+    const offs=[]; let acc=0;
+    heads.forEach(function(th){ offs.push(Math.floor(acc)); acc+=th.getBoundingClientRect().width; });
+
+    /* If the pinned block would swallow most of the width there is nothing worth scrolling into,
+       and the reader is worse off than with no pinning at all. */
+    if(acc > wrap.offsetWidth*0.6) return;
+
+    [].slice.call(t.querySelectorAll('thead tr, tbody tr')).forEach(function(tr){
+      let col=0;
+      [].slice.call(tr.children).forEach(function(cell){
+        const span=cell.colSpan||1;
+        if(col<F){
+          cell.classList.add('wf-tk-frozen');
+          cell.style.left=offs[col]+'px';
+          /* wfTrackerSticky() still writes a `top` for a vertical pin that was removed long ago. It
+             does nothing to a static cell, but these are about to become sticky and would inherit
+             it - so it is cleared here rather than left to surprise somebody after a resize. */
+          cell.style.top='auto';
+          if(col+span>=F) cell.classList.add('wf-tk-frozen-last');
+        }
+        col+=span;
+      });
+    });
+    t.classList.add('wf-tk-hasfrozen');
   };
   /* ----- Forms tab --------------------------------------------------------------------------
      The Google Forms this workflow actually runs on, and who is expected to fill each one - the
@@ -3085,10 +3176,18 @@
     // show while the tracker is
     const right=$('wfTabsRight');
     if(right) right.style.display=(which==='tracker' && (window._wfTkFindBar||''))?'':'none';
+    /* The pinned columns are measured from what is on screen, and a hidden pane measures zero - so
+       this has to happen once the pane is actually showing, not when the table was built. */
+    if(which==='tracker'){ try{ wfTrackerFreeze(); }catch(_e){} }
   };
   if(!window._wfTkResizeWired){
     window._wfTkResizeWired=true;
-    window.addEventListener('resize',function(){ if(document.querySelector('.wf-tktable')) wfTrackerSticky(); });
+    window.addEventListener('resize',function(){
+      if(!document.querySelector('.wf-tktable')) return;
+      wfTrackerSticky();
+      // Column widths move with the window, so the pinned offsets are re-measured, not kept.
+      try{ wfTrackerFreeze(); }catch(_e){}
+    });
   }
 
   /* ---------- Reimbursement claimant/bill lookup (jaingrouppc2.ankita@/pc.thejaingroup1@ only) ----
@@ -3402,7 +3501,7 @@
                           +' ('+wfDefStepWho(s)+')')+'</option>'; }).join('')
                +'</select></div>')
             : ('<div class="wf-inst-filter-search"><i class="fa-solid fa-magnifying-glass"></i>'
-               +'<input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Company, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'))
+               +'<input class="ac-in" id="wfInstSearch" placeholder="'+(isBill?'Search by No., Vendor, Bill No., Wheredoc Id, anyone it is with, or amount…':'Search by No., anyone it is with, amount, description or anything it was raised with…')+'" oninput="wfInstFilter()"></div>'))
           +'<div class="wf-inst-filter-dates">'
             +'<label class="wf-lbl">From<input type="date" class="ac-in" id="wfInstDateFrom" onchange="wfInstDateFromChange()"></label>'
             +'<i class="fa-solid fa-arrow-right-long wf-daterange-sep"></i>'
@@ -3682,13 +3781,18 @@
      it - the same file can be shared, e.g. an instance attachment that was also posted as an
      Update. Failures are swallowed on purpose: the records are already gone, and a file left
      behind is not worth showing the user an error they can do nothing about. */
+  /* Each path costs a reference check AND, if it is genuinely orphaned, a signing round trip plus
+     the delete itself - and this is awaited on the way INTO every workflow form (sweeping what a
+     closed-without-saving form left behind) and again on the way out of a save. Taken one at a
+     time that wait sat between the person and the form they were trying to open. They do not
+     depend on each other, so they go a few at a time. */
   async function wfPurgeCaseFiles(paths){
-    for(const path of (paths||[])){
+    await wfRunPool(paths||[], 3, async function(path){
       try{
         const {data:used}=await ACC().rpc('wf_file_referenced',{p_path:path});
         if(!used) await s3Delete(path);
       }catch(e){}
-    }
+    });
   }
 
   window.wfInstDelSel=function(){
@@ -6246,6 +6350,35 @@
       +'<i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(name)+'">'+esc2(name)+'</span> '
       +'<button type="button" class="ac-btn ic" onclick="wfEvtAttDrop(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span>';
   }
+  /* A chip for a file that is still going up. It exists to HOLD THE FILE'S PLACE, not to report on
+     it: files now go up several at a time, so without a slot booked in the order they were picked
+     the chips would land in whatever order the uploads happened to finish. Deliberately WITHOUT
+     data-path - the hidden value is rebuilt from data-path alone, so a form saved mid-upload
+     cannot record a file that is not in the bucket yet. */
+  function wfAttPendingChipHtml(name){
+    return '<span class="wf-evt-att-name wf-evt-att-pending">'
+      +'<i class="fa-solid fa-spinner fa-spin"></i> <span class="wf-evt-att-fname" title="'+esc2(name)+'">'+esc2(name)+'</span></span>';
+  }
+  /* Runs a batch of independent per-file round trips a few at a time instead of strictly one
+     after another. Used by every attachment path on every workflow - uploading them, and deleting
+     the ones an edit or a cancel left behind.
+
+     Every single upload costs a round trip to the signing function BEFORE a byte of the file
+     moves, and every delete costs a reference check and a signing round trip of its own. The old
+     loops paid each of those end to end, one file at a time, so four pages of a bill cost the SUM
+     of four uploads when the line could have carried them together. Three at a time is the width:
+     enough to overlap the signing of the next file with the sending of the current one, and well
+     inside what the browser will open to one host.
+
+     Order is not the pool's job - a caller that needs it books a slot per file up front (an
+     indexed array, or a placeholder chip) and fills it in by index. */
+  async function wfRunPool(items, width, run){
+    let next=0;
+    const worker=async function(){
+      while(next<items.length){ const i=next++; await run(items[i], i); }
+    };
+    await Promise.all(Array.from({length:Math.min(width,items.length)}, worker));
+  }
   // Rewrites the hidden value from the chips actually present, and keeps the box's wording honest.
   function wfEvtAttSync(wrap){
     if(!wrap) return;
@@ -6285,25 +6418,40 @@
   window.wfEvtAttPick=async function(input){
     const wrapM=input.closest('.wf-evt-att-multi');
     if(wrapM){
-      /* Several files can be chosen at once, and the box can be used again afterwards, so they are
-         uploaded one after another and each appends its own chip. One failure is reported and the
-         rest still go - losing four good receipts because the fifth timed out would be worse. */
+      /* Several files can be chosen at once, and the box can be used again afterwards. They go up
+         a few at a time (wfRunPool) rather than one behind the other, each into a chip that was
+         placed the moment the files were chosen - so the list reads in the order they were picked
+         however the uploads themselves finish. One failure is reported and the rest still go -
+         losing four good receipts because the fifth timed out would be worse. */
       const chosen=[].slice.call(input.files||[]); if(!chosen.length) return;
       const box=input.closest('.wf-evt-attbox');
       const list=wrapM.querySelector('.wf-evt-attlist');
       const evtForm=document.querySelector('.wf-evt-form');
       const flowIdAttr=(evtForm&&evtForm.getAttribute('data-flow'))||'0';
       input.disabled=true; if(box) box.classList.add('busy');
-      for(const file of chosen){
-        if(box){ const t=box.childNodes[1]; if(t&&t.nodeType===3) t.nodeValue=' Uploading '+file.name+'…'; }
+      if(box){ const t=box.childNodes[1]; if(t&&t.nodeType===3)
+        t.nodeValue=' Uploading '+chosen.length+(chosen.length>1?' files…':' file…'); }
+      const slots=chosen.map(function(f){
+        if(!list) return null;
+        list.insertAdjacentHTML('beforeend', wfAttPendingChipHtml(f.name));
+        return list.lastElementChild;
+      });
+      await wfRunPool(chosen, 3, async function(file, i){
+        const slot=slots[i];
         try{
           const key=s3KeyForFlowEvent(flowIdAttr, file.name);
           const {data,error}=await uploadFileToS3(key,file);
           if(error) throw error;
           wfEvtTrackUpload(data.path);
-          if(list) list.insertAdjacentHTML('beforeend', wfAttChipHtml(data.path));
-        }catch(e){ toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err'); }
-      }
+          // Swapped for the real chip, which carries data-path and so counts towards the value.
+          if(slot) slot.outerHTML=wfAttChipHtml(data.path);
+        }catch(e){
+          // The placeholder goes with it — a chip for a file that never arrived would read as an
+          // attachment this instance has, and it has not.
+          if(slot) slot.remove();
+          toast('Could not upload '+file.name+': '+((e&&e.message)||e),'err');
+        }
+      });
       input.disabled=false; if(box) box.classList.remove('busy');
       input.value='';
       wfEvtAttSync(wrapM);
@@ -6570,9 +6718,14 @@
     }catch(_e){}
     /* One failure is reported and the rest still go: losing three good pages because the fourth
        timed out would be worse than a booking that is short one scan and can be edited. */
-    const paths=[];
-    for(let i=0;i<files.length;i++){
-      const file=files[i];
+    /* Several at a time rather than one behind the other. A booking is a stack of scans and each
+       one used to wait for the whole of the one before it - its signing round trip AND its
+       transfer - so six pages cost six uploads end to end when the line can carry several at once.
+
+       Kept in a slot per file rather than pushed as they land: the pages are a document and must
+       stay in the order they were chosen, which is no longer the order they finish in. */
+    const got=new Array(files.length);
+    await wfRunPool(files, 3, async function(file, i){
       try{
         const key=s3KeyForFlowEvent(String(flowId), file.name);
         const {data,error}=await uploadFileToS3(key,file,function(pct){
@@ -6580,11 +6733,12 @@
         });
         if(error) throw error;
         state[i].done=true; draw('Uploading — please keep this page open.');
-        paths.push(data.path);
+        got[i]=data.path;
       }catch(e){
         state[i].failed=((e&&e.message)||String(e)); draw('Uploading — please keep this page open.');
       }
-    }
+    });
+    const paths=got.filter(Boolean);
     if(!paths.length){
       window.removeEventListener('beforeunload',guard);
       draw('');   // the "keep this page open" line has had its day
@@ -6753,7 +6907,7 @@
       }
     }
     // A text field can opt into a growing autocomplete list (flow.autocomplete_fields, e.g.
-    // Invoice Processing's Company) drawn from every value ever entered for it on this flow's own
+    // Invoice Processing's Vendor) drawn from every value ever entered for it on this flow's own
     // past instances — no separate admin-maintained list, it just learns from real usage.
     const autoFields=(Array.isArray(flow.autocomplete_fields)?flow.autocomplete_fields:[]).filter(Boolean);
     if(autoFields.length && !editing && src.length){
@@ -7209,7 +7363,9 @@
           });
         }); }
         const {error}=await ACC().rpc('wf_update_instance',{p_case_id:caseId, p_details:details}); if(error)throw error;
-        for(const oldPath of replacedAtts){ try{ await s3Delete(oldPath); }catch(_e){} }
+        // Independent of one another, so they go together rather than one signing round trip and
+        // one delete at a time while the person waits on Save changes.
+        await wfRunPool(replacedAtts, 3, async function(oldPath){ try{ await s3Delete(oldPath); }catch(_e){} });
         // a file uploaded during this edit and then taken off again before saving
         try{ await wfEvtSweepUploads(details.map(function(d){ return String((d&&d.value)||''); })); }catch(_e){}
         try{ closeModal(); }catch(e){}
@@ -7928,7 +8084,10 @@
     let updateId=null;
     try{ const {data,error}=await ACC().rpc('wf_post_update',{p_case_id:caseId, p_body:body}); if(error)throw error; updateId=data; }
     catch(e){ toast('Could not post update: '+((e&&e.message)||e),'err'); return; }
-    for(const file of files){
+    /* The same treatment as the form's own attachment box: a few at a time rather than each one
+       waiting on the last. Three scans on one update used to be three whole round trips end to
+       end - sign, send, sign, send, sign, send - when the line can carry them together. */
+    await wfRunPool(files, 3, async function(file){
       try{
         const key=s3KeyForFlowUpdate(caseId, file.name);
         const {data:up,error:upErr}=await uploadFileToS3(key,file);
@@ -7936,7 +8095,7 @@
         const {error:insErr}=await ACC().from('flow_update_attachments').insert({update_id:updateId, storage_path:up.path, file_name:file.name});
         if(insErr) throw insErr;
       }catch(e){ toast('Attachment "'+file.name+'" failed: '+((e&&e.message)||e),'err'); }
-    }
+    });
     // What the update was about, not just that one was posted - the instance it is on, plus a
     // short excerpt of the text and how many files came with it.
     try{
@@ -8397,6 +8556,9 @@
     .wf-evt-att-name i{flex:none}
     .wf-evt-att-name .ac-btn{flex:none;margin-left:auto}
     .wf-evt-att-fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* A chip holding a place in the list while its file goes up — muted and dashed so it reads as
+       not-yet-there next to the solid chips of files that have arrived. */
+    .wf-evt-att-pending{color:var(--slate);border-style:dashed}
     /* instances table */
     .wf-tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
     .wf-itable{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
@@ -8416,6 +8578,28 @@
     .wf-tab:hover{color:var(--ink)}
     .wf-tab.on{background:var(--bg-card,#fff);color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
     .wf-tk-wrap{max-height:72vh;overflow:auto;border-radius:10px}
+    /* The sideways scrollbar is the only thing on screen saying there is more table to the right,
+       so it gets a real track instead of the thin overlay some systems fade in only while moving. */
+    .wf-tk-wrap{scrollbar-color:var(--slate) var(--bg-subtle,#f1f5f9);scrollbar-width:auto}
+    .wf-tk-wrap::-webkit-scrollbar{height:13px;width:13px}
+    .wf-tk-wrap::-webkit-scrollbar-track{background:var(--bg-subtle,#f1f5f9)}
+    .wf-tk-wrap::-webkit-scrollbar-thumb{background:var(--slate);border-radius:8px;border:3px solid var(--bg-subtle,#f1f5f9)}
+    .wf-tk-wrap::-webkit-scrollbar-thumb:hover{background:var(--ink)}
+    .wf-tk-wrap::-webkit-scrollbar-corner{background:var(--bg-subtle,#f1f5f9)}
+    /* ---- the pinned instance columns (wfTrackerFreeze decides which, and measures the offsets) --
+       A sticky cell is painted over by whatever scrolls beneath it unless it carries a ground of
+       its own. The row stripe and the hover tint are set on the ROW, which a sticky cell does not
+       paint from, so each of those states is restated here on the cell itself - otherwise the step
+       columns show straight through the pinned block as they pass. */
+    .wf-tktable .wf-tk-frozen{position:sticky;z-index:2;background:var(--bg-card,#fff)}
+    .wf-tktable thead .wf-tk-frozen{z-index:4;background:var(--bg-subtle,#f8fafc)}
+    .wf-tktable tbody tr:nth-child(even) .wf-tk-frozen{background:var(--bg-subtle,#fafbfc)}
+    .wf-tktable tbody tr:hover .wf-tk-frozen{background:var(--brand-a10,#eef2ff)}
+    /* The seam. A rule alone reads as just another column divider, so it gets a short shadow too -
+       the step columns then visibly pass UNDER the pinned block rather than appearing to stop at
+       it. Drawn as a shadow rather than a border because a sticky cell in a border-collapse table
+       drops its own borders in some browsers, and the seam is the one that must not go missing. */
+    .wf-tktable .wf-tk-frozen-last{box-shadow:inset -2px 0 0 var(--line), 7px 0 9px -7px rgba(15,23,42,.3)}
     .wf-tktable{min-width:100%;font-size:12px}
     .wf-tktable th,.wf-tktable td{padding:8px 11px;white-space:nowrap;border-right:1px solid var(--line)}
     .wf-tktable tbody tr.wf-tk-row{cursor:pointer}
@@ -8445,8 +8629,11 @@
       .wf-tab{padding:0 12px;font-size:12.5px}
       .wf-tktable th,.wf-tktable td{padding:7px 8px}
     }
-    /* Nothing in the tracker is pinned: the header bands and the left-hand bill columns scroll
-       with everything else, so a wide table behaves like one sheet rather than two halves. */
+    /* The left-hand instance columns ARE pinned now (see wfTrackerFreeze) - they were not, on the
+       argument that a wide table should read as one sheet rather than two halves. Twelve steps
+       later that stopped being true in practice: scrolling to a step took the bill number with it.
+       The header bands still scroll vertically with everything else; only the sideways pin was
+       restored, and only on a screen wide enough for it to leave something worth reading. */
     .wf-tktable thead th{background:var(--bg-subtle,#f8fafc)}
     .wf-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
     .wf-pill.ok{background:#dcfce7;color:#166534}
