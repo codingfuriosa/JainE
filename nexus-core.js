@@ -13744,7 +13744,7 @@ async function cpaRenderImport(host,seg){
       `<button class="btn btn-sm btn-primary" onclick="cpaQueueImport(${q.id})"><i class="fa-solid fa-file-import"></i> Import</button>`+
       ` <button class="btn btn-sm" onclick="cpaQueueDismiss(${q.id})" title="Skip this file"><i class="fa-solid fa-xmark"></i></button>`
     ]);
-    queueHtml=`<div class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin-bottom:16px">
+    queueHtml=`<div id="cpaQueueBanner" class="card card-pad" style="background:#eff6ff;border-color:#bfdbfe;margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div><i class="fa-solid fa-envelope-open-text" style="color:var(--brand)"></i> <b>${queue.length} file${queue.length>1?'s':''} from Gmail</b>
         <span style="font-size:12.5px;color:var(--slate);margin-left:8px">Auto-fetched from Farvision email</span></div>
@@ -13821,10 +13821,21 @@ window.cpaQueueImport=async function(queueId){
     await sb.schema('cust').from('import_queue').update({status:'completed',processed_at:new Date().toISOString()}).eq('id',queueId);
     window._cpaQueueId=null;
     toast(matched.length+' rows imported from '+q.file_name,'ok');
+    // Remove this row from UI without full page refresh
+    var btn=document.querySelector('[onclick="cpaQueueImport('+queueId+')"]');
+    if(btn){var tr=btn.closest('tr');if(tr)tr.remove();}
+    // If no more pending rows, remove the whole Gmail banner
+    var remaining=document.querySelectorAll('.cpa-queue-row');
+    if(!remaining.length||!document.querySelector('[onclick^="cpaQueueImport"]')){
+      var banner=document.getElementById('cpaQueueBanner');if(banner)banner.remove();
+    }
     return true;
   }catch(e){
     await sb.schema('cust').from('import_queue').update({status:'failed',error_message:e.message}).eq('id',queueId);
     toast('Failed: '+e.message,'err');
+    // Mark row as failed visually
+    var btn2=document.querySelector('[onclick="cpaQueueImport('+queueId+')"]');
+    if(btn2){btn2.disabled=true;btn2.innerHTML='<i class="fa-solid fa-xmark"></i> Failed';}
     return false;
   }
 };
