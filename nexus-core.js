@@ -18069,6 +18069,98 @@ function trcResetFilters(){
   try{sessionStorage.removeItem('trc_filters_state');}catch(e){}
 }
 
+/* THE DAILY BREAKDOWN TABLE (2026-09-19, not yet on main). One row per calendar day, straight off
+   acc.daily_qa_summary (pkey on date - this is already a single indexed range scan, not a fetch of
+   every follow-up), independent of the main list's own date range so a wide breakdown and a narrow
+   drill-down don't fight over the same two boxes. Every number in it is clickable: it re-points the
+   main list at that exact day and category (trcDailyDrill), reusing trcFetchBoth/trcRender exactly the
+   way the KPI cards above the table already do - no new fetch path, just a different way to set TRC_F. */
+let TRC_DAILY_ROWS=null, TRC_DAILY_RANGE=null, TRC_DAILY_OPEN=false;
+let TRC_DAILY_FROM=trcAddDays(traYesterday(),-6), TRC_DAILY_TO=traYesterday();
+
+async function trcFetchDaily(force){
+  const range=TRC_DAILY_FROM+'|'+TRC_DAILY_TO;
+  if(!force&&TRC_DAILY_ROWS&&TRC_DAILY_RANGE===range)return TRC_DAILY_ROWS;
+  const {data,error}=await sb.schema('acc').from('daily_qa_summary').select('*')
+    .gte('date',TRC_DAILY_FROM).lte('date',TRC_DAILY_TO).order('date',{ascending:false});
+  if(error){toast(error.message,'err');return TRC_DAILY_ROWS||[];}
+  TRC_DAILY_ROWS=data||[];TRC_DAILY_RANGE=range;
+  return TRC_DAILY_ROWS;
+}
+
+window.trcToggleDaily=async function(){
+  TRC_DAILY_OPEN=!TRC_DAILY_OPEN;
+  if(TRC_DAILY_OPEN)await trcFetchDaily(false);
+  trcRenderDaily();
+};
+window.trcDailyApplyRange=async function(){
+  const f=($('trcDailyFrom')&&$('trcDailyFrom').value)||TRC_DAILY_FROM;
+  const t=($('trcDailyTo')&&$('trcDailyTo').value)||TRC_DAILY_TO;
+  TRC_DAILY_FROM=f;TRC_DAILY_TO=t;
+  await trcFetchDaily(true);
+  trcRenderDaily();
+};
+/* Jumps the main list (below this panel, same page) at one exact day and category - the actual
+   filtering, fetching and rendering is entirely trcCard/trcSetRange's own machinery; this only sets
+   the same TRC_F fields those already set, so every existing rule (light vs full fetch, pagination,
+   the mismatch sub-panel) applies unchanged. kind: 'all' | 'proc' | 'match' | 'mismatch'. */
+window.trcDailyDrill=async function(date,kind,val){
+  TRC_F.from=date;TRC_F.to=date;
+  TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
+  if(kind==='proc')TRC_F.proc=val;
+  else if(kind==='match')TRC_F.match=val;
+  else if(kind==='mismatch'){TRC_F.match='MISMATCH';TRC_F.mismatch=val;}
+  trcShowLoading();
+  if(TRC_F.proc!=='all')await trcEnsureFullEnrichment();
+  await trcFetchBoth();
+  trcRender(true);
+  trcAfterListRender();
+  const anchor=$('trcKpis');if(anchor)anchor.scrollIntoView({behavior:'smooth',block:'start'});
+};
+
+function trcDailyCell(date,kind,val,n,cls){
+  const shown=n||0;
+  if(!shown)return '<td style="text-align:center;color:var(--slate)">0</td>';
+  return '<td style="text-align:center">'
+    +'<a href="javascript:void(0)" onclick="trcDailyDrill(\''+date+'\',\''+kind+'\',\''+esc(val)+'\')"'
+    +(cls?' class="'+cls+'"':'')+' style="font-weight:600">'+shown+'</a></td>';
+}
+function trcRenderDaily(){
+  const el=$('trcDaily');if(!el)return;
+  if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
+  const rows=TRC_DAILY_ROWS||[];
+  const mmHead=TRC_MISMATCH_KEYS.map(function(k){return '<th title="'+esc(TRC_MISMATCH[k].label)+'">'+esc(TRC_MISMATCH[k].short)+'</th>';}).join('');
+  const body=rows.length?rows.map(function(r){
+    return '<tr>'
+      +'<td style="white-space:nowrap;font-weight:600">'+esc(trcWall(r.date,true)||r.date)+'</td>'
+      +trcDailyCell(r.date,'all','all',r.total_leads)
+      +trcDailyCell(r.date,'all','all',r.total_followups)
+      +trcDailyCell(r.date,'proc','completed',r.transcribed)
+      +trcDailyCell(r.date,'match','MATCH',r.status_match)
+      +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
+      +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
+    +'</tr>';
+  }).join(''):'<tr><td colspan="'+(6+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        +'<label style="font-size:12px;color:var(--slate)">From</label>'
+        +'<input type="date" id="trcDailyFrom" value="'+esc(TRC_DAILY_FROM||'')+'" style="padding:5px 8px">'
+        +'<label style="font-size:12px;color:var(--slate)">To</label>'
+        +'<input type="date" id="trcDailyTo" value="'+esc(TRC_DAILY_TO||'')+'" style="padding:5px 8px">'
+        +'<button class="btn btn-sm btn-primary" onclick="trcDailyApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply</button>'
+      +'</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
+      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
+        +'<th>Matched</th><th>Mismatched</th>'+mmHead+'</tr></thead>'
+      +'<tbody>'+body+'</tbody>'
+    +'</table></div>'
+    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day.</div>'
+  +'</div>';
+}
+
 /* THE TABLE, PAGED. A wide range can mean 500+ leads; rendering all of them as DOM at once (and, until
    this, prefetching every one of their full transcripts in the background right after) is what made
    the page hang, not the network fetch - trcFetch itself dropped under 4s once 20260917090000 fixed
@@ -19275,8 +19367,10 @@ async function trcView(v,seg){
            beside the count it updates, which is what makes it legible as "reload THIS" rather than
            just another button in a row of them. */
         +'<button class="btn btn-sm" onclick="trcRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+        +'<button class="btn btn-sm" onclick="trcToggleDaily()"><i class="fa-solid fa-table-list"></i> Daily breakdown</button>'
       +'</div></div>'
       +'<div id="trcDates" style="margin-top:12px">'+trcDateBar()+'</div></div>'
+    +'<div id="trcDaily"></div>'
     +'<div id="trcKpis" style="margin-top:16px">'+trcSkeletonKpis()+'</div>'
     +'<div id="trcFilters"></div>'
     /* overflow-x only, no max-height - each page is at most TRC_PAGE_SIZE rows, so a vertical
