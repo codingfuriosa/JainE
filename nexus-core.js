@@ -14039,17 +14039,21 @@ async function cpaImportConfirmXlsx(st){
     }
     for(const key of Object.keys(byDoc)){
       const {unit,rec,items}=byDoc[key];
-      // Upsert invoice header
-      const {data:inv,error:ie}=await sb.schema('cust').from('invoices').upsert({
-        unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
-        invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,
-        status:rec.status,is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,document_no'}).select('id').single();
-      if(ie)throw ie;
-      // Delete old items for this invoice, insert fresh
-      await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',inv.id);
+      // Find existing or insert new invoice header
+      let invId;
+      const {data:existing}=await sb.schema('cust').from('invoices').select('id').eq('unit_id',unit.id).eq('document_no',rec.docNo).eq('is_current',true).is('deleted_at',null).maybeSingle();
+      if(existing){
+        await sb.schema('cust').from('invoices').update({document_date:rec.docDate,invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,status:rec.status,import_batch_id:batchId}).eq('id',existing.id);
+        invId=existing.id;
+      }else{
+        const {data:created,error:ie}=await sb.schema('cust').from('invoices').insert({unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,status:rec.status,is_current:true,import_batch_id:batchId}).select('id').single();
+        if(ie)throw ie;
+        invId=created.id;
+      }
+      // Replace items for this invoice
+      await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',invId);
       const itemRows=items.map((r,i)=>({
-        invoice_id:inv.id,schedule:r.schedule,revenue_head:r.revenueHead,
+        invoice_id:invId,schedule:r.schedule,revenue_head:r.revenueHead,
         amount:r.amount,tax:r.tax,net_amount:r.netAmount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('invoice_items').insert(itemRows);if(error)throw error;}
@@ -14073,20 +14077,21 @@ async function cpaImportConfirmXlsx(st){
     for(const key of Object.keys(byReceipt)){
       const {unit,rec,items}=byReceipt[key];
       const totalAmt=items.reduce((s,r)=>s+Number(r.totalAmount||r.amount||0),0);
-      // Upsert receipt header
-      const {data:rcpt,error:re}=await sb.schema('cust').from('money_receipts').upsert({
-        unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
-        payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
-        drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
-        narration:rec.narration,total_amount:totalAmt,
-        is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
-        is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,receipt_no'}).select('id').single();
-      if(re)throw re;
-      // Delete old items, insert fresh
-      await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcpt.id);
+      // Find existing or insert new receipt header
+      let rcptId;
+      const {data:existingR}=await sb.schema('cust').from('money_receipts').select('id').eq('unit_id',unit.id).eq('receipt_no',rec.receiptNo).eq('is_current',true).is('deleted_at',null).maybeSingle();
+      if(existingR){
+        await sb.schema('cust').from('money_receipts').update({receipt_date:rec.receiptDate,payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,narration:rec.narration,total_amount:totalAmt,is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,import_batch_id:batchId}).eq('id',existingR.id);
+        rcptId=existingR.id;
+      }else{
+        const {data:created,error:re}=await sb.schema('cust').from('money_receipts').insert({unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,narration:rec.narration,total_amount:totalAmt,is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,is_current:true,import_batch_id:batchId}).select('id').single();
+        if(re)throw re;
+        rcptId=created.id;
+      }
+      // Replace items for this receipt
+      await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcptId);
       const itemRows=items.map((r,i)=>({
-        receipt_id:rcpt.id,against_demand_no:r.invoiceNo,schedule:r.schedule,
+        receipt_id:rcptId,against_demand_no:r.invoiceNo,schedule:r.schedule,
         revenue_head:r.revenueHead,amount:r.amount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
