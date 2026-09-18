@@ -13764,8 +13764,7 @@ async function cpaRenderImport(host,seg){
     <div style="margin-top:14px"><button class="btn btn-primary" onclick="cpaImportPreview()"><i class="fa-solid fa-magnifying-glass"></i> Preview</button></div>
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
-  // Auto-import pending queue items on page load
-  if(queue.length) setTimeout(()=>cpaAutoImportPending(),500);
+  // No auto-import on load — user clicks "Import all" when ready
 }
 // Queue: auto-detect type, parse, and import directly — no manual steps
 window.cpaQueueImport=async function(queueId){
