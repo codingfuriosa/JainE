@@ -13621,6 +13621,7 @@ function cpaParseSalesDetails(wb){
   const out=[];
   for(let r=hr+1;r<rows.length;r++){
     const row=rows[r]; if(!row||row[idx['Business Unit']]==null||row[idx['Application No']]==null) continue;
+    if(String(row[idx['Status']]||'').trim()==='Cancel') continue; // Skip cancelled customers
     const get=h=>(idx[h]!=null?row[idx[h]]:null);
     const rec={businessUnit:get('Business Unit'),status:get('Status'),applicationNo:String(get('Application No')),
       bookingNo:get('Booking No')!=null?String(get('Booking No')):null,customerName:get('Customer Name'),
