@@ -13367,7 +13367,7 @@ window.compDetailNav=function(delta){
 // same cust.* schema. A customer's RLS (20260828090000_customer_portal_schema.sql) scopes every query
 // to their own unit(s) automatically, so the customer-facing view code never filters by customer_id
 // itself; it only ever sees what RLS already let through.
-const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});
+const custInr=n=>{const v=Number(n||0);return '₹'+v.toLocaleString('en-IN',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});};
 // A non-escaping sibling of mTable (nexus-core.js) — this module builds every cell itself (escaping
 // DB text with esc() inline) so it can freely embed buttons/tags without mTable's "only <span survives
 // unescaped" rule getting in the way.
