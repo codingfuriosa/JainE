@@ -15625,7 +15625,7 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     const amt=Number(a.amount||0);
     if(a.line_type==='on_account'||!a.against_demand_no){
       onAccount+=amt;
-      onAccountRows.push({dueDate:(receiptDates&&receiptDates[a.receipt_id])||null,
+      onAccountRows.push({dueDate:beforeDate||null,
         schedule:a.particulars||'On Account',head:'',due:0,paid:amt});
       return;
     }
