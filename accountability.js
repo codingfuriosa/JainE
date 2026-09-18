@@ -3758,6 +3758,12 @@
        One consequence worth knowing: an instance RETURNED for correction can only be corrected by
        those two as well. On this workflow that is who raises them anyway. */
     const wfBookingCanAct=eq(me(),'ayushruia1@gmail.com')||wfInDept('Post Sales');
+    /* Arijit Sarkar (agm.sales@thejaingroup.com), Sales Head, is not Post Sales, but his own
+       department is the one raising these bookings in the first place, and as its manager he
+       needs to see what has been uploaded. That is a VIEWING need, not an editing one, so it
+       widens wfBookingCanView below - which only ever feeds the audit downloads - and deliberately
+       leaves wfBookingCanAct itself untouched, so canEditThis right below still does not admit him. */
+    const wfBookingCanView=wfBookingCanAct||eq(me(),'agm.sales@thejaingroup.com');
     const canEditThis=!pastStep1Locked&&!bookingStarted&&(c.status!=='Done'&&c.status!=='Cancelled')
       &&(c.flow_id===41
          ? wfBookingCanAct
@@ -3769,9 +3775,9 @@
     /* Booking Form only: the checklist being filled is specific to it. Reading the attachments
        takes a minute or two, so it is a button somebody presses - not something that runs on open.
        These carry customer KYC and Aadhaar, so - unlike every other download in this file - only
-       the Administrator or Post Sales dept get to see the buttons at all, regardless of who
-       created the instance. */
-    const auditBtn=(c.flow_id===41&&wfBookingCanAct)
+       the Administrator, Post Sales dept, or the named viewing exemption above get to see the
+       buttons at all, regardless of who created the instance. */
+    const auditBtn=(c.flow_id===41&&wfBookingCanView)
       ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
