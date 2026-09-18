@@ -15128,8 +15128,15 @@ async function custTabLedger(unit){
   receipts.forEach(r=>{
     entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
   });
+  // Group reversals by reversal_no — one ledger row per cheque bounce, not per revenue-head line
+  const revByNo={};
   reversals.forEach(rv=>{
-    entries.push({date:rv.receipt_reversal_date,type:'CQRV',ref:rv.receipt_reversal_no,desc:'Cheque return'+(rv.instrument_no?' · '+rv.instrument_no:''),debit:Number(rv.reversal_amount||0),credit:0});
+    const k=rv.receipt_reversal_no;
+    if(!revByNo[k]) revByNo[k]={date:rv.receipt_reversal_date,ref:k,instrument:rv.instrument_no,total:0};
+    revByNo[k].total+=Number(rv.reversal_amount||0);
+  });
+  Object.values(revByNo).forEach(rv=>{
+    entries.push({date:rv.date,type:'CQRV',ref:rv.ref,desc:'Cheque return'+(rv.instrument?' · '+rv.instrument:''),debit:rv.total,credit:0});
   });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let runBal=0;
