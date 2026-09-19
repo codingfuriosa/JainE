@@ -10114,21 +10114,30 @@ function rtRender(){
     <thead><tr>
       <th style="width:36px;text-align:center"><input type="checkbox" id="rtChkAll" onchange="rtToggleAll(this)"></th>
       <th style="width:56px;text-align:center">Sl.</th>
+      <th style="width:64px;text-align:center">Type</th>
       <th style="width:160px">Test Name</th>
       <th>Form Link</th>
-      <th style="width:120px;text-align:center">Actions</th>
+      <th style="width:190px;text-align:center">Actions</th>
     </tr></thead>
-    <tbody>${rows.length?rows.map(t=>`<tr>
+    <tbody>${rows.length?rows.map(t=>{
+      const native=t.engine==='native';
+      return `<tr>
       <td style="text-align:center"><input type="checkbox" class="rt-chk" value="${t.id}" onchange="rtSyncToolbar()"></td>
       <td style="text-align:center;color:var(--slate);font-size:13px">${t.sl}</td>
-      <td style="font-weight:500;overflow-wrap:anywhere">${esc(t.name)}</td>
-      <td style="overflow-wrap:anywhere">${t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>'}</td>
-      <td style="text-align:center"><button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button></td>
-    </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
+      <td style="text-align:center"><span class="tag ${native?'t-green':'t-gray'}" style="font-size:11px">${native?'Native':'Legacy'}</span></td>
+      <td style="font-weight:500;overflow-wrap:anywhere">${esc(t.name)}${native&&t.duration_seconds?`<div style="font-size:11px;color:var(--slate);font-weight:400">${Math.round(t.duration_seconds/60)} min</div>`:''}</td>
+      <td style="overflow-wrap:anywhere">${native?'<span style="color:var(--slate);font-size:12px">Built in JainE — no external link</span>':(t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>')}</td>
+      <td style="text-align:center;white-space:nowrap">${native
+        ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtManageQuestions(${t.id})"><i class="fa-solid fa-list-check"></i> Questions</button>
+           ${rtCanManage()?`<button class="btn btn-sm" style="font-size:12px" onclick="rtPreviewNative(${t.id})"><i class="fa-solid fa-eye"></i> Preview</button>
+           <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtGetLink(${t.id})"><i class="fa-solid fa-link"></i> Get Link</button>`:''}`
+        :`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button>`}</td>
+    </tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
     </tbody>
   </table>
   </div>
-  <div id="rtPreviewPanel" style="display:none;margin-top:16px"></div>`;
+  <div id="rtPreviewPanel" style="display:none;margin-top:16px"></div>
+  <div id="rtQuestionsPanel" style="display:none;margin-top:16px"></div>`;
 }
 window.rtToggleAll=function(el){document.querySelectorAll('.rt-chk').forEach(c=>c.checked=el.checked);rtSyncToolbar();};
 window.rtSyncToolbar=function(){
@@ -10146,25 +10155,193 @@ window.rtSyncToolbar=function(){
 window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
-    <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
-    <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
-    <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
+    <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Sales Aptitude">
+    <label>Type *</label>
+    <select id="rtFEngine" class="inp" onchange="rtAddEngineToggle()">
+      <option value="native">Native — built in JainE (MCQ + descriptive, AI-graded)</option>
+      <option value="legacy">Legacy — external Google Form link</option>
+    </select>
+    <div id="rtFNativeFields">
+      <label>Duration <span style="font-size:11px;color:var(--slate)">(minutes — shown to the candidate, informational only)</span></label>
+      <input id="rtFDuration" class="inp" type="number" min="1" placeholder="e.g. 20">
+    </div>
+    <div id="rtFLegacyFields" style="display:none">
+      <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
+      <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
+      <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
+    </div>
   </div>
   <div class="modal-foot"><button class="btn btn-primary" onclick="rtSave()">Add Test</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
   setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
+window.rtAddEngineToggle=function(){
+  const native=($('rtFEngine')||{}).value==='native';
+  if($('rtFNativeFields'))$('rtFNativeFields').style.display=native?'':'none';
+  if($('rtFLegacyFields'))$('rtFLegacyFields').style.display=native?'none':'';
+};
 window.rtSave=async function(){
   if(!rtTestsGuard())return;
   const name=($('rtFName')||{}).value?.trim();
-  const link=($('rtFLink')||{}).value?.trim()||'';
-  const sheet=($('rtFSheet')||{}).value?.trim()||'';
+  const engine=($('rtFEngine')||{}).value==='legacy'?'legacy':'native';
   if(!name){toast('Test name is required','err');return;}
   const maxSl=(RT_RECORDS||[]).reduce((m,r)=>Math.max(m,r.sl||0),0)+1;
-  const{data,error}=await sb.schema('recruit').from('tests').insert({sl:maxSl,name,link,response_sheet_url:sheet||null}).select().single();
+  const row={sl:maxSl,name,engine};
+  if(engine==='native'){
+    const mins=parseInt(($('rtFDuration')||{}).value||'',10);
+    row.link=''; row.duration_seconds=mins>0?mins*60:null;
+  }else{
+    row.link=($('rtFLink')||{}).value?.trim()||'';
+    row.response_sheet_url=($('rtFSheet')||{}).value?.trim()||null;
+  }
+  const{data,error}=await sb.schema('recruit').from('tests').insert(row).select().single();
   if(error){toast(error.message,'err');return;}
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
+  if(engine==='native')rtManageQuestions(data.id);
+};
+
+/* ── Native test authoring ("the making part") — questions live in recruit.test_questions, one
+   row per question, MCQ or descriptive. Nothing here is exposed publicly: only the 4 people in
+   RT_TESTS_ALLOWED can reach this panel; the public candidate side is recruit-test-start/submit,
+   which strip correct_option/model_answer before anything leaves the server. ── */
+let RT_QUESTIONS=null, RT_QUESTIONS_TEST=null;
+window.rtManageQuestions=async function(testId){
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId); if(!test)return;
+  RT_QUESTIONS_TEST=test;
+  const panel=$('rtQuestionsPanel'); if(!panel)return;
+  panel.style.display='';
+  panel.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  const{data,error}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',testId).order('seq',{ascending:true});
+  if(error){panel.innerHTML='<div class="empty" style="padding:20px;color:var(--err)">'+esc(error.message)+'</div>';return;}
+  RT_QUESTIONS=data||[];
+  rtQuestionsRender();
+};
+function rtQuestionsRender(){
+  const panel=$('rtQuestionsPanel'); if(!panel||!RT_QUESTIONS_TEST)return;
+  const rows=RT_QUESTIONS||[];
+  const canEdit=rtCanManage();
+  panel.innerHTML=`<div class="card" style="padding:16px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <div class="sec-title" style="margin:0">Questions — ${esc(RT_QUESTIONS_TEST.name)} <span class="tag t-gray">${rows.length}</span></div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        ${canEdit?`<button class="btn btn-sm btn-primary" onclick="rtQAdd()"><i class="fa-solid fa-plus"></i> Add Question</button>`:''}
+        <button class="btn btn-sm" onclick="rtQuestionsClose()"><i class="fa-solid fa-xmark"></i> Close</button>
+      </div>
+    </div>
+    ${rows.length?rows.map((q,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;background:var(--bg2)">
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <span class="tag ${q.type==='mcq'?'t-blue':'t-amber'}" style="font-size:11px;flex:none">${q.type==='mcq'?'MCQ':'Descriptive'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500">${i+1}. ${esc(q.prompt)}</div>
+          ${q.type==='mcq'?`<div style="font-size:12px;color:var(--slate);margin-top:4px">${(q.options||[]).map(o=>`<div style="${o===q.correct_option?'color:var(--ok);font-weight:600':''}">${o===q.correct_option?'✓ ':'· '}${esc(o)}</div>`).join('')}</div>`
+            :`<div style="font-size:12px;color:var(--slate);margin-top:4px">Model answer: ${esc(q.model_answer||'—')}</div>`}
+          <div style="font-size:11px;color:var(--slate);margin-top:4px">${q.max_marks} mark${q.max_marks==1?'':'s'}</div>
+        </div>
+        ${canEdit?`<button class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none" onclick="rtQDelete(${q.id})"><i class="fa-solid fa-trash"></i></button>`:''}
+      </div>
+    </div>`).join(''):'<div class="empty" style="padding:20px;color:var(--slate)">No questions yet — click Add Question</div>'}
+  </div>`;
+}
+window.rtQuestionsClose=function(){RT_QUESTIONS=null;RT_QUESTIONS_TEST=null;const p=$('rtQuestionsPanel');if(p){p.style.display='none';p.innerHTML='';}};
+window.rtQAdd=function(){if(!rtTestsGuard()||!RT_QUESTIONS_TEST)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Question</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Type *</label>
+    <select id="rtQFType" class="inp" onchange="rtQTypeToggle()">
+      <option value="mcq">Multiple Choice</option>
+      <option value="descriptive">Descriptive (AI-graded)</option>
+    </select>
+    <label>Question *</label><textarea id="rtQFPrompt" class="inp" rows="2" placeholder="Type the question..."></textarea>
+    <div id="rtQFMcq">
+      <label>Options *</label>
+      <input id="rtQFOpt0" class="inp" placeholder="Option 1" style="margin-bottom:6px">
+      <input id="rtQFOpt1" class="inp" placeholder="Option 2" style="margin-bottom:6px">
+      <input id="rtQFOpt2" class="inp" placeholder="Option 3 (optional)" style="margin-bottom:6px">
+      <input id="rtQFOpt3" class="inp" placeholder="Option 4 (optional)" style="margin-bottom:6px">
+      <label>Correct Option *</label>
+      <select id="rtQFCorrect" class="inp"><option value="0">Option 1</option><option value="1">Option 2</option><option value="2">Option 3</option><option value="3">Option 4</option></select>
+    </div>
+    <div id="rtQFDescriptive" style="display:none">
+      <label>Model Answer <span style="font-size:11px;color:var(--slate)">(what ChatGPT grades against — not shown to the candidate)</span></label>
+      <textarea id="rtQFModel" class="inp" rows="3" placeholder="An ideal answer..."></textarea>
+    </div>
+    <label>Marks *</label><input id="rtQFMarks" class="inp" type="number" min="1" value="1">
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" onclick="rtQSave()">Add Question</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  setTimeout(()=>{const el=$('rtQFPrompt');if(el)el.focus();},100);
+};
+window.rtQTypeToggle=function(){
+  const mcq=($('rtQFType')||{}).value==='mcq';
+  if($('rtQFMcq'))$('rtQFMcq').style.display=mcq?'':'none';
+  if($('rtQFDescriptive'))$('rtQFDescriptive').style.display=mcq?'none':'';
+};
+window.rtQSave=async function(){
+  if(!rtTestsGuard()||!RT_QUESTIONS_TEST)return;
+  const type=($('rtQFType')||{}).value==='descriptive'?'descriptive':'mcq';
+  const prompt=($('rtQFPrompt')||{}).value?.trim();
+  const marks=parseFloat(($('rtQFMarks')||{}).value||'1')||1;
+  if(!prompt){toast('Question text is required','err');return;}
+  const seq=((RT_QUESTIONS||[]).reduce((m,q)=>Math.max(m,q.seq||0),0))+1;
+  const row={test_id:RT_QUESTIONS_TEST.id,seq,type,max_marks:marks};
+  if(type==='mcq'){
+    const opts=[0,1,2,3].map(i=>($('rtQFOpt'+i)||{}).value?.trim()).filter(Boolean);
+    if(opts.length<2){toast('Add at least 2 options','err');return;}
+    const correctIdx=parseInt(($('rtQFCorrect')||{}).value||'0',10);
+    const correct=opts[correctIdx]||opts[0];
+    row.options=opts; row.correct_option=correct;
+  }else{
+    row.model_answer=($('rtQFModel')||{}).value?.trim()||'';
+  }
+  const{data,error}=await sb.schema('recruit').from('test_questions').insert(row).select().single();
+  if(error){toast(error.message,'err');return;}
+  RT_QUESTIONS=[...(RT_QUESTIONS||[]),data];
+  closeModal();toast('Question added');rtQuestionsRender();
+};
+window.rtQDelete=async function(qId){
+  if(!rtTestsGuard())return;
+  if(!await confirmDialog('Delete this question? This cannot be undone.'))return;
+  const{error}=await sb.schema('recruit').from('test_questions').delete().eq('id',qId);
+  if(error){toast(error.message,'err');return;}
+  RT_QUESTIONS=(RT_QUESTIONS||[]).filter(q=>q.id!==qId);
+  toast('Question deleted');rtQuestionsRender();
+};
+
+/* ── Get Link: mints one recruit.test_attempts row via the already-authenticated edge function,
+   for a specific candidate's email (and candidate_id if this test is being sent from a candidate's
+   own row elsewhere — from the Tests tab directly there is no candidate context, so it's left null
+   and Tests Sent/Test Passed stage automation simply does not fire for a link generated this way). ── */
+/* One click, no form: mints a real attempt under the previewer's own email and opens it
+   immediately in a new tab, so "does this test actually work" is answered by trying it, not by
+   reading a link out of a modal. Uses the exact same recruit-test-generate-link function a real
+   candidate's link comes from — this is not a fake/simulated preview, it is the real thing. */
+window.rtPreviewNative=async function(testId){
+  if(!rtTestsGuard())return;
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId);
+  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',{body:{test_id:testId,candidate_email:state.email||'preview@thejaingroup.com',origin:location.origin}});
+  if(error||data?.error){toast((data&&data.error)||error.message,'err');return;}
+  window.open(data.link,'_blank','noopener');
+  toast('Preview opened in a new tab');
+};
+window.rtGetLink=function(testId){if(!rtTestsGuard())return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Get Test Link</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Candidate Email *</label><input id="rtLinkEmail" class="inp" placeholder="candidate@example.com">
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" onclick="rtGetLinkGo(${testId})">Generate Link</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  setTimeout(()=>{const el=$('rtLinkEmail');if(el)el.focus();},100);
+};
+window.rtGetLinkGo=async function(testId){
+  const email=($('rtLinkEmail')||{}).value?.trim();
+  if(!email){toast('Candidate email is required','err');return;}
+  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',{body:{test_id:testId,candidate_email:email,origin:location.origin}});
+  if(error||data?.error){toast((data&&data.error)||error.message,'err');return;}
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-check"></i> Link Ready</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>Send this link to ${esc(email)}</label>
+    <input id="rtLinkOut" class="inp" readonly value="${esc(data.link)}" onclick="this.select()">
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" onclick="navigator.clipboard.writeText('${esc(data.link)}');toast('Copied')"><i class="fa-solid fa-copy"></i> Copy</button><button class="btn" onclick="closeModal()">Close</button></div>`);
 };
 window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
@@ -11043,6 +11220,20 @@ async function recLoadJDs(v){
   REC_SEL=new Set();
   let uploaded=[];
   try{const {data,error}=await sb.schema('recruit').from('job_descriptions').select('*').order('created_at',{ascending:true});if(!error)uploaded=data||[];}catch(e){}
+  /* AI-generated descriptions are written the moment generation succeeds — including a draft
+     nobody has reviewed yet, and a fresh rewrite sitting there while its requisition is back to
+     Pending after a reject. Descriptions is the published library, so a generated-but-not-yet-
+     Approved one is held back from it; manually uploaded reference JDs (source 'upload') were
+     never part of any approval workflow and are shown unconditionally, same as always. */
+  const genReqIds=[...new Set(uploaded.filter(j=>j.source==='ai_generated'&&j.manpower_request_id!=null).map(j=>j.manpower_request_id))];
+  let approvedSet=new Set();
+  if(genReqIds.length){
+    try{
+      const {data:reqs}=await sb.schema('hr').from('manpower_requests').select('id,approval_status').in('id',genReqIds);
+      approvedSet=new Set((reqs||[]).filter(r=>r.approval_status==='Approved').map(r=>r.id));
+    }catch(e){}
+  }
+  uploaded=uploaded.filter(jd=>jd.source!=='ai_generated'||approvedSet.has(jd.manpower_request_id));
   const uploadedCards=uploaded.map(jd=>({...jd,isDefault:false}));
   const allJDs=[...DEFAULT_JDS,...uploadedCards];
   window._recAllJDs=allJDs;
@@ -12174,7 +12365,18 @@ window.tpMpShowDetail=function(id){
         </div>
         <div class="card" style="padding:12px"><div class="tp-lbl">Description (Post Text)</div><div style="margin-top:8px;font-size:12.5px;${rec.ai_platform_post_text?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_platform_post_text?esc(rec.ai_platform_post_text):'Not generated yet'}</div></div>
       </div>
-      <div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The Careers Page Link is wired up next — this panel will get a Link field once that's live.</div>
+      ${(rec.approval_status==='Approved')?`<div class="card" style="padding:12px;margin-top:12px">
+        <div class="tp-lbl" style="margin-bottom:6px">JainGroup Careers Page</div>
+        ${rec.status==='Open'?`
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input class="ac-in" readonly style="flex:1;min-width:220px;font-size:12.5px" value="https://thejaingroup.com/career-position.html?slug=${esc(rec.slug||'')}" onclick="this.select()">
+            <button class="btn btn-sm" onclick="navigator.clipboard.writeText('https://thejaingroup.com/career-position.html?slug=${esc(rec.slug||'')}');toast('Link copied')"><i class="fa-solid fa-copy"></i> Copy</button>
+            <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpCloseHiring(${rec.id})"><i class="fa-solid fa-lock"></i> Close Hiring</button>
+          </div>
+          <div style="font-size:11px;color:var(--slate);margin-top:6px">Live now — anyone with this link can apply. Closing hiring takes the page down.</div>`
+        :`<div style="font-size:12.5px;color:var(--slate)">Hiring is closed for this position — its page is no longer live.</div>
+          <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="tpMpReopenHiring(${rec.id})"><i class="fa-solid fa-unlock"></i> Reopen Hiring</button>`}
+      </div>`:`<div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The Careers Page link appears here once this requisition is Approved.</div>`}
     </div>
   </div>`;
   panel.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -12201,6 +12403,24 @@ window.tpMpApprove=async function(id){if(!recGuard())return;
   if(error){toast(error.message,'err');return;}
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
   toast('Approved');tpMpRender();tpMpShowDetail(id);
+};
+/* Opening/closing hiring reuses hr.set_hiring_open exactly as it always did — that RPC already
+   flips status Open/Filled and is what hr.public_position (and so career-apply / career-position.html)
+   gates on, so this is the real "take the page down" switch, not just a label change here. */
+window.tpMpCloseHiring=async function(id){
+  if(!await confirmDialog('Close hiring for this position? Its Careers Page will stop accepting applications immediately.'))return;
+  try{
+    await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:false});
+    const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Filled';
+    toast('Hiring closed');tpMpRender();tpMpShowDetail(id);
+  }catch(e){toast('Could not close hiring: '+((e&&e.message)||e),'err');}
+};
+window.tpMpReopenHiring=async function(id){
+  try{
+    await sb.schema('hr').rpc('set_hiring_open',{p_manpower_id:id,p_open:true});
+    const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx].status='Open';
+    toast('Hiring reopened');tpMpRender();tpMpShowDetail(id);
+  }catch(e){toast('Could not reopen hiring: '+((e&&e.message)||e),'err');}
 };
 window.tpMpReject=function(id){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Requisition</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -12302,8 +12522,30 @@ window.tpRefSave=async function(){
 window.tpRefApprove=async function(id){if(!recGuard())return;
   const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
   if(error){toast(error.message,'err');return;}
+  // Connecting a referral to the position it names — Interview Tracker is where an approved
+  // candidate lives, same destination as a manually-added one (tpTrSave) or a careers-page
+  // application. Guarded by candidate_id so re-approving (or a slow double-click) never doubles it.
+  if(!data.candidate_id && data.manpower_request_id){
+    try{
+      const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:data.manpower_request_id,p_month:null});
+      const req=(MP_RECORDS||[]).find(r=>r.id===data.manpower_request_id);
+      const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:data.manpower_request_id,
+        name:data.referred_name,email:data.referred_email,phone:data.referred_phone,position:(req&&req.job_title)||data.position,
+        source:'Referral',stage:'Tests Sent',created_by:state.email,applied_at:new Date().toISOString()}).select().single();
+      if(cand){
+        const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:data.referred_name,
+          position:(req&&req.job_title)||data.position,source:'Referral',number:data.referred_phone,email:data.referred_email,
+          notes:'Referred by '+(data.referred_by||'someone')+(data.notes?(' — '+data.notes):''),candidate_id:cand.id}).select().single();
+        if(tr){
+          await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+          await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',id);
+          data.candidate_id=cand.id; data.tracker_id=tr.id;
+        }
+      }
+    }catch(e){ toast('Approved, but could not connect it to Interview Tracker: '+((e&&e.message)||e),'err'); }
+  }
   const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
-  toast('Approved');tpRefRender();
+  toast('Approved and connected to Interview Tracker');tpRefRender();
 };
 window.tpRefReject=async function(id){if(!recGuard())return;
   if(!await confirmDialog('Reject this referral?'))return;
