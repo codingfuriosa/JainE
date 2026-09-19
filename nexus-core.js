@@ -490,9 +490,8 @@ const NAV=[
     {id:'inspection',label:'Inspection',icon:'fa-clipboard-list'},
   ]},
   {group:'People',items:[
-    {id:'hr',label:'Human Resources',icon:'fa-users'},
-    {id:'recruitment',label:'Recruitment (ATS)',icon:'fa-user-plus'},
-    {id:'talent',label:'HR & Recruitment (New)',icon:'fa-people-arrows'},
+    {id:'recruitment_new',label:'Recruitment (New)',icon:'fa-user-plus'},
+    {id:'hr_new',label:'Human Resources (New)',icon:'fa-users'},
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
@@ -6393,27 +6392,24 @@ function recWatchPerms(){
 }
 function hrEmpOptions(sel){return (HR_EMP||[]).map(e=>`<option value="${esc(e.emp_code)}" ${e.emp_code===sel?'selected':''}>${esc(e.full_name)} (${esc(e.emp_code)})</option>`).join('');}
 
-VIEWS.hr=async function(v,seg){
-  setCrumb(['People','Human Resources']);
-  if(!hrCan()){
-    v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1></div></div><div class="card card-pad empty"><i class="fa-solid fa-lock"></i><div style="font-weight:600;font-size:15px;color:var(--ink)">Restricted</div><p style="max-width:420px;margin:8px auto 0">You don't have HR access. Ask a director to grant you the HR role in Settings.</p></div>`;
-    return;
-  }
-  // H/S Candidates is gone - it was a second, hand-kept list of the same people the Interview
-  // Tracker already holds. 'hs' still resolves, so an old bookmark or a stale link lands on
-  // Monthly Update rather than a blank page.
-  const tab=(seg[0]==='hs'?'monthly':seg[0])||'monthly';
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-users" style="color:#be123c"></i> Human Resources</h1><p>Monthly Update · Interview Tracker · Resumes · Interview Qs</p></div></div>
-  <div class="tabs">
-    <div class="tab ${tab==='monthly'?'active':''}" onclick="navTo('hr/monthly')"><i class="fa-solid fa-chart-bar"></i> Monthly Update</div>
-    <div class="tab ${tab==='tracker'?'active':''}" onclick="navTo('hr/tracker')"><i class="fa-solid fa-calendar-check"></i> Interview Tracker</div>
-    <div class="tab ${tab==='resumes'?'active':''}" onclick="navTo('hr/resumes')"><i class="fa-solid fa-id-card-clip"></i> Resumes</div>
-    <div class="tab ${tab==='interviewqs'?'active':''}" onclick="navTo('hr/interviewqs')"><i class="fa-solid fa-comments"></i> Interview Qs</div>
-  </div><div id="hrBody"><div class="loader"><div class="spin"></div></div></div>`;
-  if(tab==='tracker') hrTracker();
-  else if(tab==='resumes') hrResumes();
-  else if(tab==='interviewqs') hrInterviewQs();
-  else hrMonthlyUpdate();
+// Human Resources (New) -- retired hr.html's four tabs, rebuilt on talent's better Tracker/Monthly
+// Update (tpTracker/tpMonthlyUpdate: counted from hr.candidates, never hand-typed) instead of v1's
+// hrTracker/hrMonthlyUpdate, which are deleted. Resumes and Interview Qs had no v2 equivalent in
+// talent, so hrResumes/hrInterviewQs are reused as-is -- they, and tp*, disagree on which body
+// container id they render into (hrBody vs recBody), so the id switches per tab below.
+VIEWS.hr_new=async function(v,seg){
+  setCrumb(['People','Human Resources (New)']);
+  const tabs=['Interview Tracker','Monthly Update','Resumes','Interview Qs'];
+  const ti=mTab(seg,tabs.length);
+  const bodyId=(ti<=1)?'recBody':'hrBody';
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-users','#be123c','Human Resources (New)')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
+    +mTabs('hr_new',tabs,ti)+'<div id="'+bodyId+'" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  recWatchPerms();
+  if(ti===0){await tpTracker();return;}
+  if(ti===1){await tpMonthlyUpdate();return;}
+  if(ti===2){await hrResumes();return;}
+  await hrInterviewQs();
 };
 
 /* ── Monthly Update ──
@@ -10060,17 +10056,30 @@ let RT_RECORDS=null; // cached tests from DB
 // Default JDs bundled with the app (from ./jd/ folder)
 const DEFAULT_JDS=[]; // all JDs now stored in Supabase (recruit.job_descriptions)
 let REC_SEL=new Set();
-VIEWS.recruitment=async function(v,seg){
-  setCrumb(['People','Recruitment (ATS)']);
-  const tabs=['Tests','Descriptions','ManPower Form','Referrals'];const ti=mTab(seg,tabs.length);
-  v.innerHTML=REC_RO_CSS+mHead('fa-user-plus','#0369a1','Recruitment (ATS)')
-    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Read-only — adding, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
-    +mTabs('recruitment',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+// Recruitment (New) -- retired recruitment.html's four tabs, ManPower Form/Referrals rebuilt on
+// talent's approval-workflow versions (tpManpower/tpReferrals) instead of v1's recManpower/
+// recReferrals, which are deleted. Tests are unchanged (recTests) -- both v1 and talent already
+// shared it. Descriptions and the new Pending Approvals tab are both restricted to the 3 named HR
+// approvers + Administrator (rtCanManage()'s own allowlist, not the wider recCanWrite()
+// HR-department group) -- the tabs simply don't exist in the array for anyone else, same posture
+// as hiding an individual control, just extended to a whole tab. See tpApprovalsQueue below.
+VIEWS.recruitment_new=async function(v,seg){
+  setCrumb(['People','Recruitment (New)']);
+  const canApprove=rtCanManage();
+  const slots=[
+    {label:'Tests',run:recTests},
+    canApprove?{label:'Descriptions',run:()=>recLoadJDs(v)}:null,
+    {label:'ManPower Form',run:tpManpower},
+    {label:'Referrals',run:tpReferrals},
+    canApprove?{label:'Pending Approvals',run:tpApprovalsQueue}:null,
+  ].filter(Boolean);
+  const tabs=slots.map(s=>s.label);
+  const ti=mTab(seg,tabs.length);
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment (New)')
+    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
+    +mTabs('recruitment_new',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
-  if(ti===3){recReferrals();return;}
-  if(ti===2){recManpower();return;}
-  if(ti===0){await recTests();return;}
-  await recLoadJDs(v);
+  await slots[ti].run();
 };
 
 /* ── Tests (dynamic, DB-backed) ── */
@@ -11904,27 +11913,12 @@ async function cmpGoogleView(v,seg){
     try{new Chart(document.getElementById('gCh4'),{type:'bar',data:{labels:labels,datasets:[{label:'Cost / Conv (₹)',data:rows.map(function(r){return r.cpl!=null?Math.round(r.cpl):0;}),backgroundColor:'#0ea5e9',borderRadius:6,maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:gy,x:gx}}});}catch(e){}
   },60);}
 }
-// ── HR & Recruitment (New) ───────────────────────────────────────────────────
-// Parallel to VIEWS.recruitment/VIEWS.hr — same underlying data (hr.manpower_requests,
-// recruit.tests, recruit.job_descriptions), redesigned UI + the approval workflow. Nothing here
-// is read by the old "hr"/"recruitment" tabs, so this is safe to iterate on independently.
+// ── HR & Recruitment helpers (used by Recruitment (New) / Human Resources (New) above) ────────
+// talent.html/VIEWS.talent (the module these were built for) is retired -- its tabs are now split
+// across VIEWS.recruitment_new and VIEWS.hr_new, both of which call straight into the same
+// functions below, unchanged.
 const TP_CSS='<style id="tpCss">.tp-lbl{font-size:11px;font-weight:600;text-transform:uppercase;color:var(--slate);letter-spacing:.04em}.tp-mp-row:hover,.tp-ref-row:hover{background:#f8fafc}</style>';
 let TP_REF_RECORDS=null;
-VIEWS.talent=async function(v,seg){
-  setCrumb(['People','HR & Recruitment (New)']);
-  const tabs=['ManPower Form','Referrals','Tracker','Monthly Update','Tests','Descriptions'];
-  const ti=mTab(seg,tabs.length);
-  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-people-arrows','#0369a1','HR & Recruitment (New)')
-    +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
-    +mTabs('talent',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
-  recWatchPerms();
-  if(ti===0){await tpManpower();return;}
-  if(ti===1){await tpReferrals();return;}
-  if(ti===2){await tpTracker();return;}
-  if(ti===3){await tpMonthlyUpdate();return;}
-  if(ti===4){await recTests();return;}
-  await recLoadJDs(v);
-};
 
 window.tpDownloadUrl=async function(url,filename){
   try{
@@ -11941,6 +11935,89 @@ function tpApprovalTag(rec){
   if(s==='Rejected')return '<span class="tag t-red"><i class="fa-solid fa-xmark"></i> Rejected</span>';
   return '<span class="tag t-amber"><i class="fa-solid fa-hourglass-half"></i> Pending Approval</span>';
 }
+
+/* ── Pending Approvals (Suchandra Das / Khushbu Singh / Uzma Ahmed / Administrator only) ──
+   A dedicated tab rather than the notification bell: there are exactly 3 named people, not a
+   role, and acc.my_pending_approvals() (the bell's own feed) is a different, unrelated
+   Accountability-module concept that was never meant to carry HR items. No email is sent here —
+   this tab IS the notification surface. Approve/Reject reuse tpMpApprove/tpMpReject/tpRefApprove/
+   tpRefReject unchanged; only the listing and the PDF download are new. */
+async function tpApprovalsQueue(){
+  const b=$('recBody'); if(!b)return;
+  if(!rtCanManage()){ b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-lock"></i><div style="margin-top:8px">Pending Approvals is limited to HR and Administrators.</div></div>'; return; }
+  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  const [mpR,refR]=await Promise.all([
+    sb.schema('hr').from('manpower_requests').select('*').eq('approval_status','Pending').order('submitted_at',{ascending:false}),
+    sb.schema('hr').from('referrals').select('*').eq('approval_status','Pending').order('created_at',{ascending:false})
+  ]);
+  if(mpR.error||refR.error){ b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc((mpR.error||refR.error).message)+'</div>'; return; }
+  MP_RECORDS=MP_RECORDS||[]; // tpMpApprove/tpMpReject look candidates up here — make sure it exists
+  (mpR.data||[]).forEach(r=>{ const i=MP_RECORDS.findIndex(x=>x.id===r.id); if(i>-1)MP_RECORDS[i]=r; else MP_RECORDS.push(r); });
+  TP_REF_RECORDS=TP_REF_RECORDS||[];
+  (refR.data||[]).forEach(r=>{ const i=TP_REF_RECORDS.findIndex(x=>x.id===r.id); if(i>-1)TP_REF_RECORDS[i]=r; else TP_REF_RECORDS.push(r); });
+  const mp=mpR.data||[], ref=refR.data||[];
+  b.innerHTML=`
+  <div class="sec-title">ManPower Requisitions Pending <span class="tag t-amber" style="margin-left:4px">${mp.length}</span></div>
+  <div style="overflow-x:auto;margin-bottom:20px"><table class="tbl">
+    <thead><tr><th>Job Title</th><th>Department</th><th>Requested By</th><th>Date</th><th>Description</th><th>Action</th></tr></thead>
+    <tbody>${mp.length?mp.map(r=>`<tr>
+      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
+      <td>${esc(r.department||'—')}</td>
+      <td>${esc(r.raised_by||'—')}</td>
+      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
+      <td>${r.ai_job_description?`<button class="btn btn-sm" onclick="hrJdPdfDownload(${r.id})"><i class="fa-solid fa-file-pdf"></i> View PDF</button>`:'<span style="color:var(--slate);font-size:12px">Generating…</span>'}</td>
+      <td><button class="btn btn-sm btn-primary" onclick="tpMpApprove(${r.id})"><i class="fa-solid fa-check"></i></button> <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpReject(${r.id})"><i class="fa-solid fa-xmark"></i></button></td>
+    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--slate)">Nothing pending</td></tr>'}</tbody>
+  </table></div>
+  <div class="sec-title">Referrals Pending <span class="tag t-amber" style="margin-left:4px">${ref.length}</span></div>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr><th>Candidate</th><th>Phone</th><th>Email</th><th>Position</th><th>Referred By</th><th>Action</th></tr></thead>
+    <tbody>${ref.length?ref.map(r=>`<tr>
+      <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
+      <td>${esc(r.referred_phone||'—')}</td>
+      <td>${esc(r.referred_email||'—')}</td>
+      <td>${esc(r.position||'—')}</td>
+      <td>${esc(r.referred_by||'—')}</td>
+      <td><button class="btn btn-sm btn-primary" onclick="tpRefApprove(${r.id})"><i class="fa-solid fa-check"></i></button> <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})"><i class="fa-solid fa-xmark"></i></button></td>
+    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--slate)">Nothing pending</td></tr>'}</tbody>
+  </table></div>`;
+}
+/* Plain, professional one-column PDF of the AI-generated Job Description text (already the exact
+   wording an approver is judging) -- reuses loadPdfLib(), the same lazy-loaded pdf-lib this app
+   already uses for the Booking Form checklist / Welcome Letter / Allotment Letter, rather than
+   adding new PDF infrastructure. Paginates plainly; this is an internal approval attachment, not a
+   branded document, so no logo/letterhead. */
+window.hrJdPdfDownload=async function(manpowerId){
+  const rec=(MP_RECORDS||[]).find(r=>r.id===manpowerId);
+  if(!rec||!rec.ai_job_description){toast('No description to show yet','err');return;}
+  try{
+    const L=await loadPdfLib(); if(!L)throw new Error('the PDF library could not be loaded');
+    const doc=await L.PDFDocument.create();
+    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD=15,MAXW=W-2*M;
+    function wrapLine(text,font,size){
+      const words=String(text||'').split(' ');const out=[];let cur='';
+      words.forEach(w=>{const t=cur?cur+' '+w:w; if(font.widthOfTextAtSize(t,size)<=MAXW){cur=t;}else{if(cur)out.push(cur);cur=w;}});
+      if(cur)out.push(cur); return out.length?out:[''];
+    }
+    let page=doc.addPage([W,Hh]),y=Hh-M;
+    page.drawText('Job Description — '+(rec.job_title||''),{x:M,y,size:14,font:bold});y-=26;
+    (rec.ai_job_description.split('\n')).forEach(line=>{
+      const isHead=/:$/.test(line.trim())&&line.trim().length<40;
+      wrapLine(line,isHead?bold:reg,SIZE).forEach(l=>{
+        if(y<M+20){page=doc.addPage([W,Hh]);y=Hh-M;}
+        page.drawText(l,{x:M,y,size:SIZE,font:isHead?bold:reg});y-=LEAD;
+      });
+      if(!line.trim())y-=4;
+    });
+    const bytes=await doc.save();
+    const blob=new Blob([bytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob);
+    window.open(url,'_blank');
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(e){toast('Could not build the PDF: '+((e&&e.message)||e),'err');}
+};
 
 /* ── ManPower Form v2 (approval workflow + AI-content preview) ── */
 async function tpManpower(){
@@ -12118,7 +12195,22 @@ window.tpMpRejectConfirm=async function(id){
   const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:reason}).eq('id',id).select().single();
   if(error){toast(error.message,'err');return;}
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
-  closeModal();toast('Rejected');tpMpRender();tpMpShowDetail(id);
+  closeModal();toast('Rejected — regenerating the description with your reason');tpMpRender();tpMpShowDetail(id);
+  // Reject implies the draft needs to change, not just be recorded as refused -- regenerate right
+  // away with the reason folded in, then (on success) manpower-ai-generate itself flips the row
+  // back to Pending so the approver reviews a fresh version instead of a dead rejected one.
+  if(reason){
+    const rec=(MP_RECORDS||[]).find(r=>r.id===id);
+    sb.functions.invoke('manpower-ai-generate',{body:{request_id:id,requested_by:state.email||'',rejection_reason:reason}}).then(({data:gen,error})=>{
+      const rec2=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec2)return;
+      if(error||!gen||gen.error){rec2.ai_status='failed';tpMpRender();return;}
+      rec2.ai_status='ready';rec2.ai_job_description=gen.job_description;rec2.ai_job_description_json=gen.job_description_json;
+      rec2.ai_platform_post_text=gen.platform_post_text;rec2.ai_creative_path=gen.creative_path;
+      if(gen.reset_to_pending){rec2.approval_status='Pending';rec2.rejection_reason=null;}
+      tpMpRender();
+    });
+    if(rec)rec.ai_status='generating';
+  }
 };
 window.tpMpDeleteOne=async function(id){if(!recGuard())return;
   if(!await confirmDialog('Delete this requisition?'))return;
@@ -12209,12 +12301,25 @@ window.tpRefReject=async function(id){if(!recGuard())return;
    going forward by an Approved Referral or added here directly. Feedback drives hr.candidate_set_stage(),
    which keeps hr.candidates.stage and the legacy interview_tracker.feedback/status in sync. */
 const TP_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Done','Selected','Rejected','Hold','Backed Out','Joined'];
-let TP_TR_RECORDS=null, TP_TR_SEL=new Set();
+// "Tests Sent"/"Test Passed" are set automatically (a test link being generated/sent, or a test
+// being graded a pass) -- deliberately NOT removed from TP_STAGES itself (hr.candidate_set_stage
+// looks stages up by label there and would break for that automatic path, and max_stage_seq
+// sequencing assumes the full 9-value domain), just filtered out of what a person can pick by hand.
+const TP_STAGES_SELECTABLE=TP_STAGES.filter(s=>s!=='Tests Sent'&&s!=='Test Passed');
+let TP_TR_RECORDS=null, TP_TR_SEL=new Set(), TP_TR_COMPLETED_ROWS=new Set();
 async function tpTracker(){
   const b=$('recBody'); if(!b)return;
   b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-  try{const {data,error}=await sb.schema('hr').from('interview_tracker').select('*').order('id',{ascending:false});
-    if(error)throw error; TP_TR_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  try{
+    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates(tracker_row_id)').order('id',{ascending:false});
+    if(error)throw error; TP_TR_RECORDS=data||[];
+    const rowIds=[...new Set((TP_TR_RECORDS||[]).map(r=>r.candidates&&r.candidates.tracker_row_id).filter(Boolean))];
+    TP_TR_COMPLETED_ROWS=new Set();
+    if(rowIds.length){
+      const {data:cr}=await sb.schema('hr').from('tracker_rows').select('id').in('id',rowIds).not('completed_at','is',null);
+      (cr||[]).forEach(r=>TP_TR_COMPLETED_ROWS.add(r.id));
+    }
+  }catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
   TP_TR_SEL=new Set();
   tpTrRender();
 }
@@ -12249,10 +12354,20 @@ function tpTrRender(){
       <td style="font-family:monospace;font-size:12px">${esc(r.number||'—')}</td>
       <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:'—'}</td>
       <td style="font-size:12px;color:var(--slate);white-space:nowrap">${esc(r.scheduled_date||'—')}</td>
-      <td>${canAct?`<select class="sel" style="font-size:12px;padding:4px 6px" onchange="tpTrFeedback(${r.id},this.value)">
-          <option value="">— Select —</option>
-          ${TP_STAGES.map(s=>`<option${r.feedback===s?' selected':''}>${s}</option>`).join('')}
-        </select>`:tpTrFbTag(r.feedback)}</td>
+      <td>${(()=>{
+          const rowId=r.candidates&&r.candidates.tracker_row_id;
+          const locked=rowId&&TP_TR_COMPLETED_ROWS.has(rowId);
+          if(locked)return tpTrFbTag(r.feedback)+' <i class="fa-solid fa-lock" style="color:var(--slate);font-size:10px" title="This position is marked Complete in Monthly Update"></i>';
+          if(!canAct)return tpTrFbTag(r.feedback);
+          // Tests Sent/Test Passed aren't offered here -- they're set automatically when a test
+          // link is sent / graded a pass. If a candidate is already at one of those two (set
+          // automatically), it shows as a read-only tag instead of a dropdown that can't represent it.
+          if(r.feedback==='Tests Sent'||r.feedback==='Test Passed')return tpTrFbTag(r.feedback);
+          return `<select class="sel" style="font-size:12px;padding:4px 6px" onchange="tpTrFeedback(${r.id},this.value)">
+            <option value="">— Select —</option>
+            ${TP_STAGES_SELECTABLE.map(s=>`<option${r.feedback===s?' selected':''}>${s}</option>`).join('')}
+          </select>`;
+        })()}</td>
       <td style="font-size:12px;color:var(--slate)">${esc(r.notes||'—')}</td>
     </tr>`).join(''):`<tr><td colspan="${canAct?9:8}" style="text-align:center;padding:40px;color:var(--slate)">No candidates yet — click <b>Add Candidate</b></td></tr>`}
     </tbody>
@@ -12385,7 +12500,9 @@ function tpMuRender(counts){
         <td style="font-weight:600">${esc(r.position||'—')}${r.carried_from_row_id?' <span class="tag t-amber" style="margin-left:4px">carried</span>':''}</td>
         <td style="font-size:12px;color:var(--slate)">${esc((r.manpower_requests&&r.manpower_requests.department)||'—')}</td>
         ${TP_STAGES.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
-        ${canAct?`<td><button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMuDeleteRow(${r.id})"><i class="fa-solid fa-trash"></i></button></td>`:''}
+        ${canAct?`<td>${r.completed_at
+            ?`<button class="btn btn-sm" onclick="tpMuUncompleteRow(${r.id})" title="Completed ${esc(new Date(r.completed_at).toLocaleDateString())} — click to reopen"><i class="fa-solid fa-lock"></i> Un-complete</button>`
+            :`<button class="btn btn-sm btn-primary" onclick="tpMuCompleteRow(${r.id})"><i class="fa-solid fa-check-double"></i> Complete</button>`}</td>`:''}
       </tr>`;
     }).join(''):`<tr><td colspan="${2+TP_STAGES.length+(canAct?1:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
     </tbody>
@@ -12398,14 +12515,22 @@ window.tpMuOpenMonth=async function(){
   if(error){toast(error.message,'err');return;}
   toast('Refreshed');await tpMonthlyUpdate();
 };
-window.tpMuDeleteRow=async function(id){
+// Replaces the old tpMuDeleteRow -- a filled position should be closed out, not deleted (it's
+// expected to have candidates linked, unlike the old delete which refused exactly that case).
+// Completing locks every one of this row's candidates' Feedback dropdowns in Interview Tracker
+// (see tpTrRender's completedRowIds check).
+window.tpMuCompleteRow=async function(id){
   if(!recGuard())return;
-  const {count}=await sb.schema('hr').from('candidates').select('id',{count:'exact',head:true}).eq('tracker_row_id',id);
-  if(count){toast('Can\'t delete — '+count+' candidate(s) are linked to this row','err');return;}
-  if(!await confirmDialog('Delete this row?'))return;
-  const {error}=await sb.schema('hr').from('tracker_rows').delete().eq('id',id);
+  if(!await confirmDialog('Mark this position complete? Feedback will be locked for all its candidates in Interview Tracker.'))return;
+  const {error}=await sb.schema('hr').from('tracker_rows').update({completed_at:new Date().toISOString()}).eq('id',id);
   if(error){toast(error.message,'err');return;}
-  toast('Deleted');await tpMuLoad();
+  toast('Marked complete');await tpMuLoad();
+};
+window.tpMuUncompleteRow=async function(id){
+  if(!recGuard())return;
+  const {error}=await sb.schema('hr').from('tracker_rows').update({completed_at:null}).eq('id',id);
+  if(error){toast(error.message,'err');return;}
+  toast('Reopened');await tpMuLoad();
 };
 
 VIEWS.campaigns=async function(v,seg){
