@@ -10129,6 +10129,7 @@ function rtRender(){
       <td style="overflow-wrap:anywhere">${native?'<span style="color:var(--slate);font-size:12px">Built in JainE — no external link</span>':(t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>')}</td>
       <td style="text-align:center;white-space:nowrap">${native
         ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtManageQuestions(${t.id})"><i class="fa-solid fa-list-check"></i> Questions</button>
+           <button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>
            ${rtCanManage()?`<button class="btn btn-sm" style="font-size:12px" onclick="rtPreviewNative(${t.id})"><i class="fa-solid fa-eye"></i> Preview</button>
            <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtGetLink(${t.id})"><i class="fa-solid fa-link"></i> Get Link</button>`:''}`
         :`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button>`}</td>
@@ -10334,14 +10335,45 @@ window.rtGetLink=function(testId){if(!rtTestsGuard())return;
 window.rtGetLinkGo=async function(testId){
   const email=($('rtLinkEmail')||{}).value?.trim();
   if(!email){toast('Candidate email is required','err');return;}
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId);
   const{data,error}=await sb.functions.invoke('recruit-test-generate-link',{body:{test_id:testId,candidate_email:email,origin:location.origin}});
   if(error||data?.error){toast((data&&data.error)||error.message,'err');return;}
+  window._rtLinkCtx={link:data.link,email,testId,testName:(test&&test.name)||data.test_name||'Assessment'};
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-check"></i> Link Ready</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Send this link to ${esc(email)}</label>
     <input id="rtLinkOut" class="inp" readonly value="${esc(data.link)}" onclick="this.select()">
   </div>
-  <div class="modal-foot"><button class="btn btn-primary" onclick="navigator.clipboard.writeText('${esc(data.link)}');toast('Copied')"><i class="fa-solid fa-copy"></i> Copy</button><button class="btn" onclick="closeModal()">Close</button></div>`);
+  <div class="modal-foot"><button class="btn btn-primary" onclick="rtNativeSendPrompt()"><i class="fa-solid fa-envelope"></i> Send Email</button><button class="btn" onclick="navigator.clipboard.writeText('${esc(data.link)}');toast('Copied')"><i class="fa-solid fa-copy"></i> Copy</button><button class="btn" onclick="closeModal()">Close</button></div>`);
+};
+/* Same send-test-email function the legacy Google-Forms Share button already uses (recipients,
+   subject, body, link) — a native test's link works there exactly the same way, so this reuses it
+   rather than building a second mail-sending path. Requires the sender's own Gmail be connected
+   (or falls back to the shared address with Reply-To them), same as Share already does. */
+window.rtNativeSendPrompt=function(){
+  const ctx=window._rtLinkCtx; if(!ctx)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Send Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>To</label><input class="inp" value="${esc(ctx.email)}" disabled>
+    <label>Subject</label><input id="rtSendSubject" class="inp" value="Check This ${esc(ctx.testName)} provided by JainGroup">
+    <label>Message</label><textarea id="rtSendBody" class="inp" rows="4">Hi,\n\nPlease complete the assessment below at your convenience.\n\nThanks</textarea>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="rtSendGoBtn" onclick="rtNativeSendGo()"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.rtNativeSendGo=async function(){
+  const ctx=window._rtLinkCtx; if(!ctx)return;
+  const subject=($('rtSendSubject')||{}).value?.trim()||('Check This '+ctx.testName);
+  const body=($('rtSendBody')||{}).value?.trim()||'';
+  const btn=$('rtSendGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  try{
+    const{data,error}=await sb.functions.invoke('send-test-email',{body:{test_name:ctx.testName,link:ctx.link,subject,body,recipients:[ctx.email]}});
+    if(error||data?.error)throw new Error((data&&data.error)||error.message);
+    closeModal();
+    toast('Test sent to '+ctx.email+(data.via==='gmail'?' from '+(data.sent_as||'your address'):' from the shared address'));
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
 };
 window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
@@ -10519,6 +10551,103 @@ window.rtShareSend=async function(id){
     if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
     toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
   }
+};
+/* Native tests' own results view — same shape as the Google-Forms one above (Score, Timestamps,
+   one row per person), except the row is real and clicking it opens that person's actual answers,
+   since native tests grade themselves instead of needing a response sheet imported by hand. */
+window.rtResultsNative=async function(testId){
+  const test=(RT_RECORDS||[]).find(t=>t.id===testId);if(!test)return;
+  const panel=$('rtPreviewPanel');if(!panel)return;
+  panel.style.display='block';
+  panel.innerHTML=`<div class="card card-pad">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
+      <span style="font-weight:700;font-size:15px">${esc(test.name)} — Results</span>
+      <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
+    </div>
+    <div id="rtResultsBody"><div class="loader"><div class="spin"></div></div></div>
+  </div>`;
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  const rb=$('rtResultsBody');
+  try{
+    const{data,error}=await sb.schema('recruit').from('test_attempts')
+      .select('id,candidate_email,status,started_at,submitted_at,mcq_score,mcq_max,ai_score,ai_max,ai_status,final_pct,pass_fail')
+      .eq('test_id',testId).order('submitted_at',{ascending:false,nullsFirst:false});
+    if(error)throw new Error(error.message);
+    if(!data||!data.length){
+      rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)"><i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>Nobody has taken this test yet.</div>';
+      return;
+    }
+    window._rtResultsCache=data;
+    const fmt=ts=>{if(!ts)return '—';try{return new Date(ts).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch{return ts;}};
+    const scoreTag=r=>{
+      if(r.status!=='submitted')return '<span style="color:var(--slate)">In progress</span>';
+      if(r.final_pct==null)return '<span style="color:#c08000">Grading '+(r.ai_status==='failed'?'failed — click to retry':'pending')+'</span>';
+      const col=r.pass_fail?'#16855a':'#c83232';
+      return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
+    };
+    rb.innerHTML=`
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} response${data.length!==1?'s':''} · click a row to see answers</div>
+      <div style="overflow-x:auto">
+      <table class="tbl" style="min-width:500px">
+        <thead><tr>
+          <th style="width:36px;text-align:center">#</th>
+          <th>Respondent</th>
+          <th style="white-space:nowrap">Score</th>
+          <th style="white-space:nowrap">Started</th>
+          <th style="white-space:nowrap">Submitted</th>
+        </tr></thead>
+        <tbody>${data.map((r,i)=>`<tr style="cursor:pointer" onclick="rtResultsAttemptDetail('${r.id}')">
+          <td style="text-align:center;color:var(--slate);font-size:12px">${i+1}</td>
+          <td style="font-weight:500">${esc(r.candidate_email||'—')}</td>
+          <td style="white-space:nowrap">${scoreTag(r)}</td>
+          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmt(r.started_at)}</td>
+          <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmt(r.submitted_at)}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  }catch(e){
+    rb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+  }
+};
+window.rtResultsAttemptDetail=async function(attemptId){
+  const rb=$('rtResultsBody');if(!rb)return;
+  rb.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  try{
+    // The cached row from the results list doesn't carry test_id, so the full attempt is re-fetched here.
+    const{data:full}=await sb.schema('recruit').from('test_attempts').select('*').eq('id',attemptId).single();
+    const{data:qs}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',full.test_id).order('seq',{ascending:true});
+    const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
+    const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
+    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to Results</button>
+      <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
+        ${full.ai_status==='failed'?`<button class="btn btn-sm" style="margin-left:8px" onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> Retry AI Grading</button>`:''}
+      </div>
+      ${(qs||[]).map((q,i)=>{
+        const a=byQ[q.id]||{};
+        const given=a.answer_text||'(no answer)';
+        const isMcq=q.type==='mcq';
+        return `<div class="card" style="padding:12px;margin-bottom:8px;background:var(--bg2)">
+          <div style="font-weight:500">${i+1}. ${esc(q.prompt)}</div>
+          <div style="font-size:12.5px;margin-top:6px;${isMcq?(a.is_correct?'color:var(--ok)':'color:var(--err)'):''}">
+            ${isMcq?(a.is_correct?'✓ ':'✗ '):''}${esc(given)}
+          </div>
+          ${!isMcq&&a.ai_feedback?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px;font-style:italic">${esc(a.ai_feedback)}</div>`:''}
+          <div style="font-size:11px;color:var(--slate);margin-top:4px">${a.marks_earned!=null?a.marks_earned:'—'} / ${q.max_marks} marks</div>
+        </div>`;
+      }).join('')}`;
+  }catch(e){
+    rb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+  }
+};
+window.rtRegradeAttempt=async function(attemptId){
+  toast('Regrading…');
+  try{
+    const{data,error}=await sb.functions.invoke('recruit-test-regrade',{body:{attempt_id:attemptId}});
+    if(error||data?.error)throw new Error((data&&data.error)||error.message);
+    toast('Regraded: '+data.final_pct+'% — '+(data.pass_fail?'Pass':'Fail'));
+    rtResultsAttemptDetail(attemptId);
+  }catch(e){toast('Regrade failed: '+((e&&e.message)||e),'err');}
 };
 window.rtPreview=async function(id){
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
