@@ -13363,7 +13363,7 @@ window.compDetailNav=function(delta){
 // same cust.* schema. A customer's RLS (20260828090000_customer_portal_schema.sql) scopes every query
 // to their own unit(s) automatically, so the customer-facing view code never filters by customer_id
 // itself; it only ever sees what RLS already let through.
-const custInr=n=>'₹'+Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0});
+const custInr=n=>{const v=Number(n||0);return '₹'+v.toLocaleString('en-IN',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2});};
 // A non-escaping sibling of mTable (nexus-core.js) — this module builds every cell itself (escaping
 // DB text with esc() inline) so it can freely embed buttons/tags without mTable's "only <span survives
 // unescaped" rule getting in the way.
@@ -13617,6 +13617,7 @@ function cpaParseSalesDetails(wb){
   const out=[];
   for(let r=hr+1;r<rows.length;r++){
     const row=rows[r]; if(!row||row[idx['Business Unit']]==null||row[idx['Application No']]==null) continue;
+    if(String(row[idx['Status']]||'').trim()==='Cancel') continue; // Skip cancelled customers
     const get=h=>(idx[h]!=null?row[idx[h]]:null);
     const rec={businessUnit:get('Business Unit'),status:get('Status'),applicationNo:String(get('Application No')),
       bookingNo:get('Booking No')!=null?String(get('Booking No')):null,customerName:get('Customer Name'),
@@ -13696,6 +13697,27 @@ function cpaParseReceiptRegister(wb){
     mode:get('PaymentMode'),isReversed:get('Is Reversed'),unitStatus:get('Unit Status'),
   }));
 }
+function cpaParseReceiptReversal(wb){
+  return cpaParseFlatSheet(wb,'Receipt Reversal No',['Receipt Reversal No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),reversalNo:String(get('Receipt Reversal No')),
+    reversalDate:xlsxExcelDate(get('Receipt Reversal Date')),
+    receiptNo:get('Receipt No')!=null?String(get('Receipt No')):null,
+    receiptDate:xlsxExcelDate(get('Receipt Date')),
+    bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    instrumentNo:get('Instrument No'),instrumentDate:xlsxExcelDate(get('Instrument Date')),
+    reversalAmount:Number(get('Reversal Amount')||0),totalReversalAmount:Number(get('Total Reversal Amount')||0),
+    narration:get('Narration'),bankDescription:get('Bank Description'),reason:get('Reason'),
+  }));
+}
+function cpaParseBookingRegister(wb){
+  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),bookingId:get('Booking Id'),
+    bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    customerName:get('Customer Name'),status:get('Status'),
+    unitCode:get('Unit Code'),tower:get('Level3'),
+    bookingDate:xlsxExcelDate(get('Booking Date')),
+  }));
+}
 // Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
 // (project, tower, unit code) only for the rare pre-Booking-No-convention record.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
@@ -13716,7 +13738,7 @@ function cpaResolveProject(projects,businessUnit){
     ||projects.find(p=>norm(p.name)===bu)||null;
 }
 
-const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register']);
+const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register']);
 const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
@@ -13760,8 +13782,7 @@ async function cpaRenderImport(host,seg){
     <div style="margin-top:14px"><button class="btn btn-primary" onclick="cpaImportPreview()"><i class="fa-solid fa-magnifying-glass"></i> Preview</button></div>
     </div><div id="cpaImpPreview" style="margin-top:16px"></div>`;
   window.cpaImportTypeChange();
-  // Auto-import pending queue items on page load
-  if(queue.length) setTimeout(()=>cpaAutoImportPending(),500);
+  // No auto-import on load — user clicks "Import all" when ready
 }
 // Queue: auto-detect type, parse, and import directly — no manual steps
 window.cpaQueueImport=async function(queueId){
@@ -13780,12 +13801,14 @@ window.cpaQueueImport=async function(queueId){
     let type=null;
     for(let r=0;r<Math.min(rows.length,20);r++){
       const vals=(rows[r]||[]).map(v=>typeof v==='string'?v.trim():'');
-      if(vals.includes('Payment Plan')){type='sales_details';break;}
-      if(vals.includes('Net Outstanding')){type='outstanding';break;}
-      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
-      if(vals.includes('Money Receipt No')){type='receipt_register';break;}
+      // Check most specific first — Booking Register has "Payment Plan" too, so
+      // must check "Booking Id" (unique to it) before "Payment Plan"
       if(vals.includes('Receipt Reversal No')){type='receipt_reversal';break;}
-      if(vals.includes('Booking Id')){type='booking_register';break;}
+      if(vals.includes('Money Receipt No')&&vals.includes('Drawn On')){type='receipt_register';break;}
+      if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
+      if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
+      if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
+      if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
     }
     if(!type) throw new Error('Could not detect report type');
     // Parse
@@ -13794,6 +13817,8 @@ window.cpaQueueImport=async function(queueId){
     else if(type==='outstanding') parsed=cpaParseOutstanding(wb);
     else if(type==='invoice_register') parsed=cpaParseInvoiceRegister(wb);
     else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
+    else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
+    else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
     else throw new Error('Type '+type+' not yet supported for auto-import');
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
@@ -14026,17 +14051,96 @@ async function cpaImportConfirmXlsx(st){
       if(error)throw error;
     }
   }else if(st.type==='invoice_register'){
-    const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,demand_no:m.rec.docNo,
+    // Write to NEW tables: cust.invoices (headers) + cust.invoice_items (lines)
+    // Group by document_no → one invoice header per doc, multiple item lines
+    const byDoc={};
+    for(const m of st.matched){
+      const r=m.rec, key=m.unit.id+'|'+r.docNo;
+      if(!byDoc[key]) byDoc[key]={unit:m.unit,rec:r,items:[]};
+      byDoc[key].items.push(r);
+    }
+    for(const key of Object.keys(byDoc)){
+      const {unit,rec,items}=byDoc[key];
+      // Upsert invoice header
+      const {data:inv,error:ie}=await sb.schema('cust').from('invoices').upsert({
+        unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
+        invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,
+        status:rec.status,is_current:true,import_batch_id:batchId
+      },{onConflict:'unit_id,document_no'}).select('id').single();
+      if(ie)throw ie;
+      // Delete old items for this invoice, insert fresh
+      await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',inv.id);
+      const itemRows=items.map((r,i)=>({
+        invoice_id:inv.id,schedule:r.schedule,revenue_head:r.revenueHead,
+        amount:r.amount,tax:r.tax,net_amount:r.netAmount,sort_order:i
+      }));
+      if(itemRows.length){const {error}=await sb.schema('cust').from('invoice_items').insert(itemRows);if(error)throw error;}
+    }
+    // Also write to old table for backwards compatibility
+    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,demand_no:m.rec.docNo,
       milestone:m.rec.schedule,revenue_head:m.rec.revenueHead,demand_date:m.rec.docDate,due_date:m.rec.dueDate,
-      amount:m.rec.amount,gst_amount:m.rec.tax,total_amount:m.rec.netAmount,status:m.rec.status,raw:m.rec,import_batch_id:batchId}));
-    const {error}=await sb.schema('cust').from('farvision_demand').upsert(rows,{onConflict:'unit_id,demand_no'});
-    if(error)throw error;
-  }else{ // receipt_register
-    const rows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,receipt_no:m.rec.receiptNo,
+      amount:m.rec.amount,gst_amount:m.rec.tax,total_amount:m.rec.netAmount,status:m.rec.status,import_batch_id:batchId}));
+    for(let i=0;i<oldRows.length;i+=500){
+      await sb.schema('cust').from('farvision_demand').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,demand_no'});
+    }
+  }else if(st.type==='receipt_register'){
+    // Write to NEW tables: cust.money_receipts (headers) + cust.receipt_items (lines)
+    // Group by receipt_no → one receipt header per receipt, multiple item lines
+    const byReceipt={};
+    for(const m of st.matched){
+      const r=m.rec, key=m.unit.id+'|'+r.receiptNo;
+      if(!byReceipt[key]) byReceipt[key]={unit:m.unit,rec:r,items:[]};
+      byReceipt[key].items.push(r);
+    }
+    for(const key of Object.keys(byReceipt)){
+      const {unit,rec,items}=byReceipt[key];
+      const totalAmt=items.reduce((s,r)=>s+Number(r.totalAmount||r.amount||0),0);
+      // Upsert receipt header
+      const {data:rcpt,error:re}=await sb.schema('cust').from('money_receipts').upsert({
+        unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
+        payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
+        drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
+        narration:rec.narration,total_amount:totalAmt,
+        is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
+        is_current:true,import_batch_id:batchId
+      },{onConflict:'unit_id,receipt_no'}).select('id').single();
+      if(re)throw re;
+      // Delete old items, insert fresh
+      await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcpt.id);
+      const itemRows=items.map((r,i)=>({
+        receipt_id:rcpt.id,against_demand_no:r.invoiceNo,schedule:r.schedule,
+        revenue_head:r.revenueHead,amount:r.amount,sort_order:i
+      }));
+      if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
+    }
+    // Also write to old table
+    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,receipt_no:m.rec.receiptNo,
       receipt_date:m.rec.receiptDate,amount:m.rec.amount,mode:m.rec.mode,against_demand_no:m.rec.invoiceNo,
-      revenue_head:m.rec.revenueHead,raw:m.rec,import_batch_id:batchId}));
-    const {error}=await sb.schema('cust').from('farvision_receipts').upsert(rows,{onConflict:'unit_id,receipt_no,against_demand_no'});
-    if(error)throw error;
+      revenue_head:m.rec.revenueHead,import_batch_id:batchId}));
+    for(let i=0;i<oldRows.length;i+=500){
+      await sb.schema('cust').from('farvision_receipts').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,receipt_no,against_demand_no'});
+    }
+  }else if(st.type==='receipt_reversal'){
+    for(const m of st.matched){
+      const r=m.rec;
+      // Skip if already exists
+      const {data:existing}=await sb.schema('cust').from('receipt_reversals').select('id').eq('unit_id',m.unit.id).eq('receipt_reversal_no',r.reversalNo).limit(1);
+      if(existing&&existing.length) continue;
+      const {error}=await sb.schema('cust').from('receipt_reversals').insert({
+        unit_id:m.unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
+        receipt_no:r.receiptNo,receipt_date:r.receiptDate,
+        instrument_no:r.instrumentNo,instrument_date:r.instrumentDate,
+        reversal_amount:r.reversalAmount,total_reversal_amount:r.totalReversalAmount,
+        narration:r.narration,bank_description:r.bankDescription,reason:r.reason,
+        is_current:true,import_batch_id:batchId});
+      if(error)throw error;
+    }
+  }else if(st.type==='booking_register'){
+    for(const m of st.matched){
+      const r=m.rec;
+      const newStatus=r.status==='Cancel'?'cancelled':'booked';
+      await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+    }
   }
   toast(st.matched.length+' row(s) imported','ok');
 }
@@ -15020,8 +15124,15 @@ async function custTabLedger(unit){
   receipts.forEach(r=>{
     entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
   });
+  // Group reversals by reversal_no — one ledger row per cheque bounce, not per revenue-head line
+  const revByNo={};
   reversals.forEach(rv=>{
-    entries.push({date:rv.receipt_reversal_date,type:'CQRV',ref:rv.receipt_reversal_no,desc:'Cheque return'+(rv.instrument_no?' · '+rv.instrument_no:''),debit:Number(rv.reversal_amount||0),credit:0});
+    const k=rv.receipt_reversal_no;
+    if(!revByNo[k]) revByNo[k]={date:rv.receipt_reversal_date,ref:k,instrument:rv.instrument_no,total:0};
+    revByNo[k].total+=Number(rv.reversal_amount||0);
+  });
+  Object.values(revByNo).forEach(rv=>{
+    entries.push({date:rv.date,type:'CQRV',ref:rv.ref,desc:'Cheque return'+(rv.instrument?' · '+rv.instrument:''),debit:rv.total,credit:0});
   });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let runBal=0;
@@ -15517,7 +15628,7 @@ function custBuildPlan(allInv,alloc,beforeDate,receiptDates){
     const amt=Number(a.amount||0);
     if(a.line_type==='on_account'||!a.against_demand_no){
       onAccount+=amt;
-      onAccountRows.push({dueDate:(receiptDates&&receiptDates[a.receipt_id])||null,
+      onAccountRows.push({dueDate:new Date().toISOString().slice(0,10),
         schedule:a.particulars||'On Account',head:'',due:0,paid:amt});
       return;
     }
@@ -18008,6 +18119,98 @@ function trcResetFilters(){
   try{sessionStorage.removeItem('trc_filters_state');}catch(e){}
 }
 
+/* THE DAILY BREAKDOWN TABLE (2026-09-19, not yet on main). One row per calendar day, straight off
+   acc.daily_qa_summary (pkey on date - this is already a single indexed range scan, not a fetch of
+   every follow-up), independent of the main list's own date range so a wide breakdown and a narrow
+   drill-down don't fight over the same two boxes. Every number in it is clickable: it re-points the
+   main list at that exact day and category (trcDailyDrill), reusing trcFetchBoth/trcRender exactly the
+   way the KPI cards above the table already do - no new fetch path, just a different way to set TRC_F. */
+let TRC_DAILY_ROWS=null, TRC_DAILY_RANGE=null, TRC_DAILY_OPEN=false;
+let TRC_DAILY_FROM=trcAddDays(traYesterday(),-6), TRC_DAILY_TO=traYesterday();
+
+async function trcFetchDaily(force){
+  const range=TRC_DAILY_FROM+'|'+TRC_DAILY_TO;
+  if(!force&&TRC_DAILY_ROWS&&TRC_DAILY_RANGE===range)return TRC_DAILY_ROWS;
+  const {data,error}=await sb.schema('acc').from('daily_qa_summary').select('*')
+    .gte('date',TRC_DAILY_FROM).lte('date',TRC_DAILY_TO).order('date',{ascending:false});
+  if(error){toast(error.message,'err');return TRC_DAILY_ROWS||[];}
+  TRC_DAILY_ROWS=data||[];TRC_DAILY_RANGE=range;
+  return TRC_DAILY_ROWS;
+}
+
+window.trcToggleDaily=async function(){
+  TRC_DAILY_OPEN=!TRC_DAILY_OPEN;
+  if(TRC_DAILY_OPEN)await trcFetchDaily(false);
+  trcRenderDaily();
+};
+window.trcDailyApplyRange=async function(){
+  const f=($('trcDailyFrom')&&$('trcDailyFrom').value)||TRC_DAILY_FROM;
+  const t=($('trcDailyTo')&&$('trcDailyTo').value)||TRC_DAILY_TO;
+  TRC_DAILY_FROM=f;TRC_DAILY_TO=t;
+  await trcFetchDaily(true);
+  trcRenderDaily();
+};
+/* Jumps the main list (below this panel, same page) at one exact day and category - the actual
+   filtering, fetching and rendering is entirely trcCard/trcSetRange's own machinery; this only sets
+   the same TRC_F fields those already set, so every existing rule (light vs full fetch, pagination,
+   the mismatch sub-panel) applies unchanged. kind: 'all' | 'proc' | 'match' | 'mismatch'. */
+window.trcDailyDrill=async function(date,kind,val){
+  TRC_F.from=date;TRC_F.to=date;
+  TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
+  if(kind==='proc')TRC_F.proc=val;
+  else if(kind==='match')TRC_F.match=val;
+  else if(kind==='mismatch'){TRC_F.match='MISMATCH';TRC_F.mismatch=val;}
+  trcShowLoading();
+  if(TRC_F.proc!=='all')await trcEnsureFullEnrichment();
+  await trcFetchBoth();
+  trcRender(true);
+  trcAfterListRender();
+  const anchor=$('trcKpis');if(anchor)anchor.scrollIntoView({behavior:'smooth',block:'start'});
+};
+
+function trcDailyCell(date,kind,val,n,cls){
+  const shown=n||0;
+  if(!shown)return '<td style="text-align:center;color:var(--slate)">0</td>';
+  return '<td style="text-align:center">'
+    +'<a href="javascript:void(0)" onclick="trcDailyDrill(\''+date+'\',\''+kind+'\',\''+esc(val)+'\')"'
+    +(cls?' class="'+cls+'"':'')+' style="font-weight:600">'+shown+'</a></td>';
+}
+function trcRenderDaily(){
+  const el=$('trcDaily');if(!el)return;
+  if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
+  const rows=TRC_DAILY_ROWS||[];
+  const mmHead=TRC_MISMATCH_KEYS.map(function(k){return '<th title="'+esc(TRC_MISMATCH[k].label)+'">'+esc(TRC_MISMATCH[k].short)+'</th>';}).join('');
+  const body=rows.length?rows.map(function(r){
+    return '<tr>'
+      +'<td style="white-space:nowrap;font-weight:600">'+esc(trcWall(r.date,true)||r.date)+'</td>'
+      +trcDailyCell(r.date,'all','all',r.total_leads)
+      +trcDailyCell(r.date,'all','all',r.total_followups)
+      +trcDailyCell(r.date,'proc','completed',r.transcribed)
+      +trcDailyCell(r.date,'match','MATCH',r.status_match)
+      +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
+      +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
+    +'</tr>';
+  }).join(''):'<tr><td colspan="'+(6+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+      +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        +'<label style="font-size:12px;color:var(--slate)">From</label>'
+        +'<input type="date" id="trcDailyFrom" value="'+esc(TRC_DAILY_FROM||'')+'" style="padding:5px 8px">'
+        +'<label style="font-size:12px;color:var(--slate)">To</label>'
+        +'<input type="date" id="trcDailyTo" value="'+esc(TRC_DAILY_TO||'')+'" style="padding:5px 8px">'
+        +'<button class="btn btn-sm btn-primary" onclick="trcDailyApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply</button>'
+      +'</div>'
+    +'</div>'
+    +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
+      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
+        +'<th>Matched</th><th>Mismatched</th>'+mmHead+'</tr></thead>'
+      +'<tbody>'+body+'</tbody>'
+    +'</table></div>'
+    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day.</div>'
+  +'</div>';
+}
+
 /* THE TABLE, PAGED. A wide range can mean 500+ leads; rendering all of them as DOM at once (and, until
    this, prefetching every one of their full transcripts in the background right after) is what made
    the page hang, not the network fetch - trcFetch itself dropped under 4s once 20260917090000 fixed
@@ -18567,6 +18770,14 @@ function trcLeads(rows){
     for(let i=g.rows.length-1;i>=0&&!g.nextFollowUp;i--){
       if(g.rows[i].next_follow_up_text)g.nextFollowUp=g.rows[i].next_follow_up_text;
     }
+    /* By requirement (2026-09-19): if the lead's last call has no recording, wasn't transcribed, or is
+       otherwise unassessed, the AI-status column should keep showing the last call that WAS actually
+       assessed, not go blank. g.last stays "the most recent call" for remarks/navigation, which are
+       about the latest interaction regardless of whether it produced a verdict. */
+    g.lastAssessed=null;
+    for(let i=g.rows.length-1;i>=0&&!g.lastAssessed;i--){
+      if(g.rows[i].ai_assessed_status)g.lastAssessed=g.rows[i];
+    }
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
@@ -19013,7 +19224,7 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
-    +trcClipCell(last.ai_assessed_status?trcTag(TRC_AI_TAG[last.ai_assessed_status]||'t-gray','',trcAiStatusLabel(last)):'<span style="color:var(--slate)">—</span>')
+    +trcClipCell(g.lastAssessed?trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)):'<span style="color:var(--slate)">—</span>')
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
@@ -19206,8 +19417,10 @@ async function trcView(v,seg){
            beside the count it updates, which is what makes it legible as "reload THIS" rather than
            just another button in a row of them. */
         +'<button class="btn btn-sm" onclick="trcRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
+        +'<button class="btn btn-sm" onclick="trcToggleDaily()"><i class="fa-solid fa-table-list"></i> Daily breakdown</button>'
       +'</div></div>'
       +'<div id="trcDates" style="margin-top:12px">'+trcDateBar()+'</div></div>'
+    +'<div id="trcDaily"></div>'
     +'<div id="trcKpis" style="margin-top:16px">'+trcSkeletonKpis()+'</div>'
     +'<div id="trcFilters"></div>'
     /* overflow-x only, no max-height - each page is at most TRC_PAGE_SIZE rows, so a vertical
@@ -19719,15 +19932,23 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
         +'<button class="btn" id="trcLeadRefreshBtn" onclick="trcLeadRefresh()"><i class="fa-solid fa-rotate"></i> Refresh</button>'
       +'</div></div>';
 
-  /* remarks and next follow-up (below) and the AI's read of the latest call (here) are per-follow-up,
-     not per-lead, so they come off the latest follow-up - rows is chronological ascending, so the
-     last element is the most recent one. */
+  /* remarks and next follow-up (below) are per-follow-up, not per-lead, so they come off the latest
+     follow-up - rows is chronological ascending, so the last element is the most recent one. */
   const latest=rows[rows.length-1]||{};
+  /* The AI comparison, though, needs the last call that was actually ASSESSED (by requirement,
+     2026-09-19): if the latest call has no recording or is non-transcribable, this strip should keep
+     showing the last available AI status instead of dropping the AI badge and the agree/mismatch tag
+     entirely. */
+  let lastAssessed=null;
+  for(let i=rows.length-1;i>=0&&!lastAssessed;i--){
+    if(rows[i].ai_assessed_status)lastAssessed=rows[i];
+  }
+  lastAssessed=lastAssessed||{};
 
   const strip='<div class="card card-pad" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">'
     +((lead&&lead.status)?trcTag('t-blue','','CRM: '+lead.status):'')
-    +(latest.ai_assessed_status?trcTag(TRC_AI_TAG[latest.ai_assessed_status]||'t-gray','','AI: '+trcAiStatusLabel(latest)):'')
-    +trcMismatchTag(latest)
+    +(lastAssessed.ai_assessed_status?trcTag(TRC_AI_TAG[lastAssessed.ai_assessed_status]||'t-gray','','AI: '+trcAiStatusLabel(lastAssessed)):'')
+    +trcMismatchTag(lastAssessed)
     +trcTag('t-gray','fa-phone',recordings+' recording'+(recordings===1?'':'s'))
     +trcTag(transcribed?'t-green':'t-gray','fa-file-lines',transcribed+' transcribed')
     +trcTag(assessed?'t-green':'t-gray','fa-clipboard-check',assessed+' assessed')

@@ -1083,9 +1083,13 @@ async function oneStep(db: DB, geminiKey: string, openaiKey: string, geminiModel
      until the key is set, and no attempt is spent on a key that is simply absent. */
   const claimable = openaiKey ? CLAIMABLE : CLAIMABLE.filter((st) => st !== "qa_pending");
 
-  const { data: queue, error } = await db.schema("acc").from("transcription_queue")
-    .select("id, status").in("status", claimable)
-    .order("queue_seq", { ascending: true }).order("id", { ascending: true }).limit(1);
+  /* ONE LEAD FULLY FINISHED BEFORE THE NEXT ONE STARTS (2026-09-19). public.next_claimable_follow_up
+     prefers a lead that already has a completed/failed recording over the plain lowest queue_seq, so a
+     retry requeued to the back of the queue or a new day's snapshot landing mid-backlog cannot pull the
+     worker onto a different lead while the current one still has claimable recordings. See that
+     function's own comment (20260919130000_transcription_queue_one_lead_at_a_time.sql) for why this
+     could not just rely on crm_build_queue's own insertion order. */
+  const { data: queue, error } = await db.rpc("next_claimable_follow_up", { p_claimable: claimable });
   if (error) throw new Error(error.message);
   if (!queue || !queue.length) {
     if (!openaiKey) {

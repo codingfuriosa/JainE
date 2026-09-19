@@ -102,32 +102,58 @@ async function processEmails(db: any) {
   log.push(`Found ${ids.length} email(s)`);
   if (!ids.length) return { processed: 0, queued: 0, log };
 
+  // Dedup: skip emails already in the queue
+  const { data: existingQueue } = await db.schema("cust").from("import_queue").select("gmail_message_id").not("gmail_message_id", "is", null);
+  const alreadyQueued = new Set((existingQueue || []).map((r: any) => r.gmail_message_id));
+  const newIds = ids.filter((id: string) => !alreadyQueued.has(id));
+  log.push(`${newIds.length} new email(s) after dedup`);
+  if (!newIds.length) {
+    // All already queued — just label them so they stop appearing
+    const labelId = await getOrCreateLabel();
+    for (const id of ids) { try { await labelMsg(id, labelId); } catch {} }
+    return { processed: 0, queued: 0, log };
+  }
+
+  // Only queue the NEWEST email — older versions of the same report are stale.
+  // Gmail returns newest first, so take only the first new one.
+  const latestId = newIds[0];
+  log.push(`Processing only newest email: ${latestId}`);
+
   await db.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {});
   const labelId = await getOrCreateLabel();
-  let processed = 0, queued = 0;
+  let queued = 0;
 
-  for (const msgId of ids) {
-    try {
-      const meta = await emailMeta(msgId);
-      const parts = await xlsxParts(msgId);
-      log.push(`"${meta.subject}" — ${parts.length} xlsx`);
-      let ok = true;
-      for (const p of parts) {
-        try {
-          const data = await downloadAtt(msgId, p.attId);
-          const ts = new Date().toISOString().replace(/[:.]/g, "-");
-          const path = `${ts}/${p.name}`;
-          const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-          if (ue) { log.push(`Upload fail: ${ue.message}`); ok = false; continue; }
-          await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: msgId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
-          log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
-          queued++;
-        } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); ok = false; }
-      }
-      if (ok && parts.length) { await labelMsg(msgId, labelId); processed++; }
-    } catch (e) { log.push(`Error ${msgId}: ${(e as Error).message}`); }
-  }
-  return { processed, queued, log };
+  try {
+    const meta = await emailMeta(latestId);
+    const parts = await xlsxParts(latestId);
+    log.push(`"${meta.subject}" — ${parts.length} xlsx`);
+    for (const p of parts) {
+      try {
+        const data = await downloadAtt(latestId, p.attId);
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const path = `${ts}/${p.name}`;
+        const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        if (ue) { log.push(`Upload fail: ${ue.message}`); return { processed: 0, queued, log }; }
+        // Auto-dismiss older pending files of the same report type
+        // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
+        const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
+        if (baseType) {
+          const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
+          if (older && older.length) {
+            await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
+            log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
+          }
+        }
+        await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: latestId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
+        log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
+        queued++;
+      } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); }
+    }
+    // Label ALL emails (including older ones) so they don't reappear
+    for (const id of ids) { try { await labelMsg(id, labelId); } catch {} }
+  } catch (e) { log.push(`Error: ${(e as Error).message}`); }
+
+  return { processed: 1, queued, log };
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
