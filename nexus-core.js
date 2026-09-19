@@ -10059,10 +10059,11 @@ let REC_SEL=new Set();
 // Recruitment (New) -- retired recruitment.html's four tabs, ManPower Form/Referrals rebuilt on
 // talent's approval-workflow versions (tpManpower/tpReferrals) instead of v1's recManpower/
 // recReferrals, which are deleted. Tests are unchanged (recTests) -- both v1 and talent already
-// shared it. Descriptions and the new Pending Approvals tab are both restricted to the 3 named HR
-// approvers + Administrator (rtCanManage()'s own allowlist, not the wider recCanWrite()
-// HR-department group) -- the tabs simply don't exist in the array for anyone else, same posture
-// as hiding an individual control, just extended to a whole tab. See tpApprovalsQueue below.
+// shared it. Descriptions is restricted to the 3 named HR approvers + Administrator (rtCanManage()'s
+// own allowlist, not the wider recCanWrite() HR-department group) -- the tab simply doesn't exist
+// in the array for anyone else. No separate "Pending Approvals" tab: approving/rejecting a
+// requisition happens in ManPower Form's own row detail (tpMpShowDetail, unchanged), and the 3
+// approvers are notified via a real Task (see hrNotifyApproversTask) instead of a dedicated screen.
 VIEWS.recruitment_new=async function(v,seg){
   setCrumb(['People','Recruitment (New)']);
   const canApprove=rtCanManage();
@@ -10071,7 +10072,6 @@ VIEWS.recruitment_new=async function(v,seg){
     canApprove?{label:'Descriptions',run:()=>recLoadJDs(v)}:null,
     {label:'ManPower Form',run:tpManpower},
     {label:'Referrals',run:tpReferrals},
-    canApprove?{label:'Pending Approvals',run:tpApprovalsQueue}:null,
   ].filter(Boolean);
   const tabs=slots.map(s=>s.label);
   const ti=mTab(seg,tabs.length);
@@ -11936,51 +11936,36 @@ function tpApprovalTag(rec){
   return '<span class="tag t-amber"><i class="fa-solid fa-hourglass-half"></i> Pending Approval</span>';
 }
 
-/* ── Pending Approvals (Suchandra Das / Khushbu Singh / Uzma Ahmed / Administrator only) ──
-   A dedicated tab rather than the notification bell: there are exactly 3 named people, not a
-   role, and acc.my_pending_approvals() (the bell's own feed) is a different, unrelated
-   Accountability-module concept that was never meant to carry HR items. No email is sent here —
-   this tab IS the notification surface. Approve/Reject reuse tpMpApprove/tpMpReject/tpRefApprove/
-   tpRefReject unchanged; only the listing and the PDF download are new. */
-async function tpApprovalsQueue(){
-  const b=$('recBody'); if(!b)return;
-  if(!rtCanManage()){ b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-lock"></i><div style="margin-top:8px">Pending Approvals is limited to HR and Administrators.</div></div>'; return; }
-  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-  const [mpR,refR]=await Promise.all([
-    sb.schema('hr').from('manpower_requests').select('*').eq('approval_status','Pending').order('submitted_at',{ascending:false}),
-    sb.schema('hr').from('referrals').select('*').eq('approval_status','Pending').order('created_at',{ascending:false})
-  ]);
-  if(mpR.error||refR.error){ b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc((mpR.error||refR.error).message)+'</div>'; return; }
-  MP_RECORDS=MP_RECORDS||[]; // tpMpApprove/tpMpReject look candidates up here — make sure it exists
-  (mpR.data||[]).forEach(r=>{ const i=MP_RECORDS.findIndex(x=>x.id===r.id); if(i>-1)MP_RECORDS[i]=r; else MP_RECORDS.push(r); });
-  TP_REF_RECORDS=TP_REF_RECORDS||[];
-  (refR.data||[]).forEach(r=>{ const i=TP_REF_RECORDS.findIndex(x=>x.id===r.id); if(i>-1)TP_REF_RECORDS[i]=r; else TP_REF_RECORDS.push(r); });
-  const mp=mpR.data||[], ref=refR.data||[];
-  b.innerHTML=`
-  <div class="sec-title">ManPower Requisitions Pending <span class="tag t-amber" style="margin-left:4px">${mp.length}</span></div>
-  <div style="overflow-x:auto;margin-bottom:20px"><table class="tbl">
-    <thead><tr><th>Job Title</th><th>Department</th><th>Requested By</th><th>Date</th><th>Description</th><th>Action</th></tr></thead>
-    <tbody>${mp.length?mp.map(r=>`<tr>
-      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
-      <td>${esc(r.department||'—')}</td>
-      <td>${esc(r.raised_by||'—')}</td>
-      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td>${r.ai_job_description?`<button class="btn btn-sm" onclick="hrJdPdfDownload(${r.id})"><i class="fa-solid fa-file-pdf"></i> View PDF</button>`:'<span style="color:var(--slate);font-size:12px">Generating…</span>'}</td>
-      <td><button class="btn btn-sm btn-primary" onclick="tpMpApprove(${r.id})"><i class="fa-solid fa-check"></i></button> <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpReject(${r.id})"><i class="fa-solid fa-xmark"></i></button></td>
-    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--slate)">Nothing pending</td></tr>'}</tbody>
-  </table></div>
-  <div class="sec-title">Referrals Pending <span class="tag t-amber" style="margin-left:4px">${ref.length}</span></div>
-  <div style="overflow-x:auto"><table class="tbl">
-    <thead><tr><th>Candidate</th><th>Phone</th><th>Email</th><th>Position</th><th>Referred By</th><th>Action</th></tr></thead>
-    <tbody>${ref.length?ref.map(r=>`<tr>
-      <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
-      <td>${esc(r.referred_phone||'—')}</td>
-      <td>${esc(r.referred_email||'—')}</td>
-      <td>${esc(r.position||'—')}</td>
-      <td>${esc(r.referred_by||'—')}</td>
-      <td><button class="btn btn-sm btn-primary" onclick="tpRefApprove(${r.id})"><i class="fa-solid fa-check"></i></button> <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})"><i class="fa-solid fa-xmark"></i></button></td>
-    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--slate)">Nothing pending</td></tr>'}</tbody>
-  </table></div>`;
+/* ── Approval notification: a real Task, not a screen ──
+   Suchandra Das / Khushbu Singh / Uzma Ahmed get an actual acc.ptasks Task (the same Tasks system
+   as Accountability) whenever a Job Description is ready for their review -- no dedicated tab.
+   Approving or rejecting still happens where it already did, in ManPower Form's own row detail
+   (tpMpShowDetail, unchanged). manpower_requests.approval_task_id tracks the one open task per
+   requisition so it can be closed automatically the moment a decision is made. */
+const HR_APPROVERS=['mgr.hr@thejaingroup.com','hr@thejaingroup.com','career@thejaingroup.com']; // Suchandra Das, Khushbu Singh, Uzma Ahmed
+async function hrNotifyApproversTask(rec){
+  try{
+    const {data:t,error}=await sb.schema('acc').from('ptasks').insert({
+      title:'Approve Job Description: '+(rec.job_title||'Untitled Position'),
+      description:'A Job Description was generated for this ManPower requisition ('+(rec.department||'—')+', raised by '+(rec.raised_by||'—')+'). Open Recruitment (New) → ManPower Form, click the row, and Approve or Reject it there. Rejecting asks for a reason and regenerates the description automatically for another review.',
+      delegator:state.email||rec.raised_by||'system',order_index:0
+    }).select().single();
+    if(error||!t)return;
+    await sb.schema('acc').from('ptask_assignees').insert(HR_APPROVERS.map(e=>({task_id:t.id,email:e})));
+    for(const e of HR_APPROVERS){
+      try{
+        const {data:mx}=await sb.schema('acc').from('task_rank').select('rank').ilike('viewer_email',e).order('rank',{ascending:false}).limit(1);
+        const next=(mx&&mx.length?Number(mx[0].rank):0)+1;
+        await sb.schema('acc').from('task_rank').insert({task_id:t.id,viewer_email:e,rank:next});
+      }catch(_e){}
+    }
+    await sb.schema('hr').from('manpower_requests').update({approval_task_id:t.id}).eq('id',rec.id);
+    rec.approval_task_id=t.id;
+  }catch(_e){ /* the description still exists and can be approved even if the reminder failed */ }
+}
+async function hrCloseApprovalTask(rec){
+  if(!rec||!rec.approval_task_id)return;
+  try{ await sb.schema('acc').from('ptasks').update({status:'Done',completed_at:new Date().toISOString()}).eq('id',rec.approval_task_id); }catch(_e){}
 }
 /* Plain, professional one-column PDF of the AI-generated Job Description text (already the exact
    wording an approver is judging) -- reuses loadPdfLib(), the same lazy-loaded pdf-lib this app
@@ -12095,6 +12080,9 @@ window.tpMpSave=async function(){
     const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
     if(error||!gen||gen.error){rec.ai_status='failed';return;}
     rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
+    // A self-approved submission (HR/Management/Abhay Mati themselves) has nothing for the 3
+    // approvers to review -- only notify when it's actually sitting in their queue.
+    if((rec.approval_status||'Pending')==='Pending') hrNotifyApproversTask(rec);
   });
 };
 window.tpMpShowDetail=function(id){
@@ -12151,8 +12139,8 @@ window.tpMpShowDetail=function(id){
         </div>
         <div class="card" style="padding:12px">
           <div class="tp-lbl" style="margin-bottom:6px">Job Description Document</div>
-          ${rec.ai_jd_document_path?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><i class="fa-solid fa-file-lines" style="font-size:28px;color:${'#D21F3C'}"></i><span style="font-size:12.5px;color:var(--slate)">Formatted document, ready to share</span></div>
-            <div style="display:flex;gap:6px"><button class="btn btn-sm" style="flex:1" onclick="window.open('${esc(rec.ai_jd_document_path)}','_blank')"><i class="fa-solid fa-eye"></i> Preview</button><button class="btn btn-sm" style="flex:1" onclick="tpDownloadUrl('${esc(rec.ai_jd_document_path)}','${esc(rec.job_title||'job-description')}.html')"><i class="fa-solid fa-download"></i> Download</button></div>`
+          ${rec.ai_job_description?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><i class="fa-solid fa-file-pdf" style="font-size:28px;color:#D21F3C"></i><span style="font-size:12.5px;color:var(--slate)">Ready to view or share</span></div>
+            <button class="btn btn-sm" style="width:100%" onclick="hrJdPdfDownload(${rec.id})"><i class="fa-solid fa-file-pdf"></i> View as PDF</button>`
             :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
         </div>
         <div class="card" style="padding:12px"><div class="tp-lbl">Description (Post Text)</div><div style="margin-top:8px;font-size:12.5px;${rec.ai_platform_post_text?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_platform_post_text?esc(rec.ai_platform_post_text):'Not generated yet'}</div></div>
@@ -12183,6 +12171,7 @@ window.tpMpApprove=async function(id){if(!recGuard())return;
   const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
   if(error){toast(error.message,'err');return;}
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
+  hrCloseApprovalTask(data);
   toast('Approved');tpMpRender();tpMpShowDetail(id);
 };
 window.tpMpReject=function(id){if(!recGuard())return;
@@ -12195,6 +12184,7 @@ window.tpMpRejectConfirm=async function(id){
   const {data,error}=await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:reason}).eq('id',id).select().single();
   if(error){toast(error.message,'err');return;}
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)MP_RECORDS[idx]=data;
+  hrCloseApprovalTask(data); // the old review request is moot -- a fresh one is created once the regenerated draft is ready
   closeModal();toast('Rejected — regenerating the description with your reason');tpMpRender();tpMpShowDetail(id);
   // Reject implies the draft needs to change, not just be recorded as refused -- regenerate right
   // away with the reason folded in, then (on success) manpower-ai-generate itself flips the row
@@ -12206,7 +12196,7 @@ window.tpMpRejectConfirm=async function(id){
       if(error||!gen||gen.error){rec2.ai_status='failed';tpMpRender();return;}
       rec2.ai_status='ready';rec2.ai_job_description=gen.job_description;rec2.ai_job_description_json=gen.job_description_json;
       rec2.ai_platform_post_text=gen.platform_post_text;rec2.ai_creative_path=gen.creative_path;
-      if(gen.reset_to_pending){rec2.approval_status='Pending';rec2.rejection_reason=null;}
+      if(gen.reset_to_pending){rec2.approval_status='Pending';rec2.rejection_reason=null;rec2.approval_task_id=null;hrNotifyApproversTask(rec2);}
       tpMpRender();
     });
     if(rec)rec.ai_status='generating';
@@ -12214,8 +12204,10 @@ window.tpMpRejectConfirm=async function(id){
 };
 window.tpMpDeleteOne=async function(id){if(!recGuard())return;
   if(!await confirmDialog('Delete this requisition?'))return;
+  const rec=(MP_RECORDS||[]).find(r=>r.id===id);
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
+  if(rec)hrCloseApprovalTask(rec); // a deleted requisition has nothing left to approve
   MP_RECORDS=(MP_RECORDS||[]).filter(r=>r.id!==id);
   tpMpCloseDetail();toast('Deleted');tpMpRender();
 };
@@ -12311,7 +12303,9 @@ async function tpTracker(){
   const b=$('recBody'); if(!b)return;
   b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   try{
-    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates(tracker_row_id)').order('id',{ascending:false});
+    // interview_tracker<->candidates has two FKs (candidate_id, and candidates.tracker_id back the
+    // other way), so the embed shorthand is ambiguous without naming the constraint explicitly.
+    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id)').order('id',{ascending:false});
     if(error)throw error; TP_TR_RECORDS=data||[];
     const rowIds=[...new Set((TP_TR_RECORDS||[]).map(r=>r.candidates&&r.candidates.tracker_row_id).filter(Boolean))];
     TP_TR_COMPLETED_ROWS=new Set();
