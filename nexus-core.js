@@ -6371,7 +6371,9 @@ const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareA
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
   'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
   'tpRefApprove','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrDeleteSel',
-  'tpMuOpenMonth','tpMuDeleteRow'];
+  'tpMuOpenMonth','tpMuDeleteRow','tpMuCompleteRow','tpMuUncompleteRow',
+  'rtManageQuestions','rtqAddForm','rtqSaveMcq','rtqSaveDescriptive','rtqDelete',
+  'rtNativeSend','rtNativeSendGo','rtqRegrade','tpTrEmailSend'];
 function recStripWriteControls(root){
   if(recCanWrite()) return;
   const re=new RegExp('^\\s*(?:'+REC_WRITE_FNS.join('|')+')\\s*\\(');
@@ -10105,7 +10107,8 @@ function rtRender(){
       <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
       <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
       <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
-      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`
+      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>
+      <button class="btn" disabled style="opacity:.4;cursor:not-allowed" title="Coming soon — Email only for now"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>`
       : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
     </div>
   </div>
@@ -10115,15 +10118,21 @@ function rtRender(){
       <th style="width:36px;text-align:center"><input type="checkbox" id="rtChkAll" onchange="rtToggleAll(this)"></th>
       <th style="width:56px;text-align:center">Sl.</th>
       <th style="width:160px">Test Name</th>
-      <th>Form Link</th>
-      <th style="width:120px;text-align:center">Actions</th>
+      <th>Link / Engine</th>
+      <th style="width:190px;text-align:center">Actions</th>
     </tr></thead>
     <tbody>${rows.length?rows.map(t=>`<tr>
       <td style="text-align:center"><input type="checkbox" class="rt-chk" value="${t.id}" onchange="rtSyncToolbar()"></td>
       <td style="text-align:center;color:var(--slate);font-size:13px">${t.sl}</td>
       <td style="font-weight:500;overflow-wrap:anywhere">${esc(t.name)}</td>
-      <td style="overflow-wrap:anywhere">${t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>'}</td>
-      <td style="text-align:center"><button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button></td>
+      <td style="overflow-wrap:anywhere">${t.engine==='native'
+          ?`<span class="tag t-green"><i class="fa-solid fa-shield-halved"></i> JainE test${t.duration_seconds?' · '+Math.round(t.duration_seconds/60)+' min':''}</span>`
+          :(t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>')}</td>
+      <td style="text-align:center">${t.engine==='native'
+          ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtManageQuestions(${t.id})"><i class="fa-solid fa-list-check"></i> Questions</button>
+            <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtNativeSend(${t.id})"><i class="fa-solid fa-paper-plane"></i> Send</button>
+            <button class="btn btn-sm" style="font-size:12px" onclick="rtNativeResults(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>`
+          :`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button>`}</td>
     </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
     </tbody>
   </table>
@@ -10147,24 +10156,49 @@ window.rtAdd=function(){if(!recGuard()||!rtTestsGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Test Name *</label><input id="rtFName" class="inp" placeholder="e.g. Test for HR">
-    <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
-    <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
-    <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
+    <label>Engine *</label>
+    <select id="rtFEngine" class="inp" onchange="rtEngineToggle()">
+      <option value="native">JainE Test (built-in, tracked, timed)</option>
+      <option value="legacy">Google Form (external link)</option>
+    </select>
+    <div id="rtFNativeBox">
+      <label>Duration (minutes) <span style="font-size:11px;color:var(--slate)">(candidate is auto-submitted when time is up)</span></label>
+      <input id="rtFDuration" class="inp" type="number" min="1" max="600" value="30">
+    </div>
+    <div id="rtFLegacyBox" style="display:none">
+      <label>Form Link</label><input id="rtFLink" class="inp" placeholder="http://form-timer.com/start/...">
+      <label>Response Sheet URL <span style="font-size:11px;color:var(--slate)">(Google Sheets URL for Preview)</span></label>
+      <input id="rtFSheet" class="inp" placeholder="https://docs.google.com/spreadsheets/d/...">
+    </div>
   </div>
   <div class="modal-foot"><button class="btn btn-primary" onclick="rtSave()">Add Test</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
   setTimeout(()=>{const el=$('rtFName');if(el)el.focus();},100);
 };
+window.rtEngineToggle=function(){
+  const native=($('rtFEngine')||{}).value==='native';
+  if($('rtFNativeBox'))$('rtFNativeBox').style.display=native?'':'none';
+  if($('rtFLegacyBox'))$('rtFLegacyBox').style.display=native?'none':'';
+};
 window.rtSave=async function(){
   if(!rtTestsGuard())return;
   const name=($('rtFName')||{}).value?.trim();
-  const link=($('rtFLink')||{}).value?.trim()||'';
-  const sheet=($('rtFSheet')||{}).value?.trim()||'';
+  const engine=($('rtFEngine')||{}).value==='legacy'?'legacy':'native';
   if(!name){toast('Test name is required','err');return;}
   const maxSl=(RT_RECORDS||[]).reduce((m,r)=>Math.max(m,r.sl||0),0)+1;
-  const{data,error}=await sb.schema('recruit').from('tests').insert({sl:maxSl,name,link,response_sheet_url:sheet||null}).select().single();
+  let payload={sl:maxSl,name,engine};
+  if(engine==='legacy'){
+    payload.link=($('rtFLink')||{}).value?.trim()||'';
+    payload.response_sheet_url=($('rtFSheet')||{}).value?.trim()||null;
+  } else {
+    const mins=parseInt(($('rtFDuration')||{}).value)||30;
+    payload.duration_seconds=Math.max(60,mins*60);
+    payload.link=null;
+  }
+  const{data,error}=await sb.schema('recruit').from('tests').insert(payload).select().single();
   if(error){toast(error.message,'err');return;}
   RT_RECORDS=[...(RT_RECORDS||[]),data];
   closeModal();toast('Test added');rtRender();
+  if(engine==='native')rtManageQuestions(data.id);
 };
 window.rtRename=function(){if(!recGuard()||!rtTestsGuard())return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
@@ -10398,6 +10432,261 @@ window.rtPreview=async function(id){
   }catch(e){
     pb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
   }
+};
+
+/* ── Native Test Engine: question builder, link generation & results ──
+   Legacy tests (engine='legacy') keep the Google-Forms flow above untouched. A native test
+   (engine='native') owns its own questions in recruit.test_questions, and each candidate gets a
+   unique attempt (recruit.test_attempts) with its own unguessable link rather than one shared link —
+   see recruit-test-generate-link / recruit-test-start / recruit-test-submit for the actual security
+   boundary (this file only builds the UI around them). */
+window.rtManageQuestions=async function(testId){
+  if(!rtTestsGuard())return;
+  const rec=(RT_RECORDS||[]).find(r=>r.id===testId);if(!rec)return;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-list-check"></i> Questions — ${esc(rec.name)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm" style="max-width:640px">
+    <div id="rtqList"><div class="loader"><div class="spin"></div></div></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-sm" onclick="rtqAddForm(${testId},'mcq')"><i class="fa-solid fa-plus"></i> Add MCQ</button>
+      <button class="btn btn-sm" onclick="rtqAddForm(${testId},'descriptive')"><i class="fa-solid fa-plus"></i> Add Descriptive</button>
+    </div>
+    <div id="rtqFormBox" style="margin-top:12px"></div>
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  rtqRenderList(testId);
+};
+async function rtqRenderList(testId){
+  const box=$('rtqList');if(!box)return;
+  const{data,error}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',testId).order('seq');
+  if(error){box.innerHTML=`<div class="err">${esc(error.message)}</div>`;return;}
+  if(!data||!data.length){box.innerHTML='<div style="color:var(--slate);font-size:13px;padding:10px 0">No questions yet — add at least one below.</div>';return;}
+  box.innerHTML=data.map(q=>`<div class="card" style="padding:10px 12px;margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;gap:10px">
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;font-weight:700">${q.seq}. ${q.type==='mcq'?'MCQ':'Descriptive'} · ${q.max_marks} mark${q.max_marks==1?'':'s'}</div>
+        <div style="font-size:13.5px;margin-top:3px;white-space:pre-wrap">${esc(q.prompt)}</div>
+        ${q.type==='mcq'?`<div style="margin-top:6px">${(q.options||[]).map(o=>`<div style="font-size:12.5px;color:${o.key===q.correct_option?'#16855a':'var(--slate)'}">${o.key===q.correct_option?'<i class="fa-solid fa-circle-check"></i>':'<i class="fa-regular fa-circle"></i>'} ${esc(o.text)}</div>`).join('')}</div>`
+          :`<div style="font-size:12px;color:var(--slate);margin-top:4px"><i class="fa-solid fa-robot"></i> Graded by AI against a model answer</div>`}
+      </div>
+      <button class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none;height:fit-content" onclick="rtqDelete(${testId},${q.id})"><i class="fa-solid fa-trash"></i></button>
+    </div>
+  </div>`).join('');
+}
+window.rtqDelete=async function(testId,qid){
+  if(!await confirmDialog('Delete this question?'))return;
+  const{error}=await sb.schema('recruit').from('test_questions').delete().eq('id',qid);
+  if(error){toast(error.message,'err');return;}
+  rtqRenderList(testId);
+};
+window.rtqAddForm=function(testId,type){
+  const box=$('rtqFormBox');if(!box)return;
+  if(type==='mcq'){
+    box.innerHTML=`<div class="card" style="padding:12px">
+      <label>Question</label><textarea id="rtqPrompt" class="inp" rows="2"></textarea>
+      <label>Options</label>
+      <div id="rtqOpts">
+        ${['A','B','C','D'].map(k=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+          <input type="radio" name="rtqCorrect" value="${k}" ${k==='A'?'checked':''}>
+          <span style="width:16px;font-size:12px;color:var(--slate)">${k}</span>
+          <input class="inp rtq-opt" placeholder="Option ${k}" style="flex:1">
+        </div>`).join('')}
+      </div>
+      <label>Marks</label><input id="rtqMarks" class="inp" type="number" min="1" max="20" value="1" style="width:90px">
+      <div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="rtqSaveMcq(${testId})">Save Question</button></div>
+    </div>`;
+  } else {
+    box.innerHTML=`<div class="card" style="padding:12px">
+      <label>Question</label><textarea id="rtqPrompt" class="inp" rows="2"></textarea>
+      <label>Model Answer <span style="font-size:11px;color:var(--slate)">(used by AI to grade the candidate's written answer)</span></label>
+      <textarea id="rtqModel" class="inp" rows="3"></textarea>
+      <label>Max Marks</label><input id="rtqMarks" class="inp" type="number" min="1" max="20" value="5" style="width:90px">
+      <div style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="rtqSaveDescriptive(${testId})">Save Question</button></div>
+    </div>`;
+  }
+};
+async function rtqNextSeq(testId){
+  const{data}=await sb.schema('recruit').from('test_questions').select('seq').eq('test_id',testId).order('seq',{ascending:false}).limit(1);
+  return data&&data.length?data[0].seq+1:1;
+}
+window.rtqSaveMcq=async function(testId){
+  const prompt=($('rtqPrompt')||{}).value?.trim();
+  const marks=parseInt(($('rtqMarks')||{}).value)||1;
+  const correct=(document.querySelector('input[name="rtqCorrect"]:checked')||{}).value||'A';
+  const keys=['A','B','C','D'];
+  const opts=[...document.querySelectorAll('.rtq-opt')].map((el,i)=>({key:keys[i],text:(el.value||'').trim()})).filter(o=>o.text);
+  if(!prompt||opts.length<2){toast('Add a question and at least 2 options','err');return;}
+  if(!opts.some(o=>o.key===correct)){toast('The correct answer must be one of the filled options','err');return;}
+  const seq=await rtqNextSeq(testId);
+  const{error}=await sb.schema('recruit').from('test_questions').insert({test_id:testId,seq,type:'mcq',prompt,options:opts,correct_option:correct,max_marks:marks});
+  if(error){toast(error.message,'err');return;}
+  $('rtqFormBox').innerHTML='';toast('Question added');rtqRenderList(testId);
+};
+window.rtqSaveDescriptive=async function(testId){
+  const prompt=($('rtqPrompt')||{}).value?.trim();
+  const model=($('rtqModel')||{}).value?.trim();
+  const marks=parseInt(($('rtqMarks')||{}).value)||5;
+  if(!prompt||!model){toast('Add both the question and a model answer','err');return;}
+  const seq=await rtqNextSeq(testId);
+  const{error}=await sb.schema('recruit').from('test_questions').insert({test_id:testId,seq,type:'descriptive',prompt,model_answer:model,max_marks:marks});
+  if(error){toast(error.message,'err');return;}
+  $('rtqFormBox').innerHTML='';toast('Question added');rtqRenderList(testId);
+};
+
+/* Generate a unique attempt link per candidate and email it — a native test has no single shared
+   link the way a legacy Google Form does, so this cannot reuse rtShare's "one link, many recipients"
+   flow as-is; each recipient gets their own attempt row and their own link. */
+window.rtNativeSend=async function(testId){
+  if(!rtCanShare()){toast('You do not have permission to send tests','err');return;}
+  await rtShareCheckGmail();
+  const rec=(RT_RECORDS||[]).find(r=>r.id===testId);if(!rec)return;
+  const{count}=await sb.schema('recruit').from('test_questions').select('id',{count:'exact',head:true}).eq('test_id',testId);
+  if(!count){toast('Add at least one question before sending this test','err');return;}
+  const subject=`Assessment: ${rec.name} — The Jain Group`;
+  const body=`Dear Candidate,\n\nPlease complete this assessment at your earliest convenience. Once you press Start, you will have ${Math.round((rec.duration_seconds||1800)/60)} minutes to finish.\n\nBest,\nThe Jain Group`;
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-paper-plane"></i> Send Test — ${esc(rec.name)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    ${RT_CAN_SEND_AS_SELF
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b>.</div>`
+      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
+           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you. Connect your Google account to send from your own address instead.</div>
+           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
+         </div>`}
+    <label>Subject</label><input id="rtnSubj" class="inp" value="${esc(subject)}">
+    <label>Message</label><textarea id="rtnBody" class="inp" rows="4" style="resize:vertical">${esc(body)}</textarea>
+    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(one attempt link per candidate — blank ones are ignored)</span></label>
+    <div id="rtnEmailFields">${Array.from({length:3}).map(()=>rtShareFieldRow()).join('')}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <input id="rtnAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px">
+      <button type="button" class="btn btn-sm" onclick="(function(){const raw=parseInt(($('rtnAddN')||{}).value);const n=Math.max(1,Math.min(50,isNaN(raw)?1:raw));const c=$('rtnEmailFields');for(let i=0;i<n;i++)c.insertAdjacentHTML('beforeend',rtShareFieldRow());})()"><i class="fa-solid fa-plus"></i> Add Field(s)</button>
+    </div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="rtnSendBtn" onclick="rtNativeSendGo(${testId})"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.rtNativeSendGo=async function(testId){
+  const rec=(RT_RECORDS||[]).find(r=>r.id===testId);if(!rec)return;
+  const inps=[...document.querySelectorAll('#rtnEmailFields .rt-email-inp')];
+  const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emails=[];
+  for(const el of inps){
+    const v=(el.value||'').trim();el.style.borderColor='';
+    if(!v)continue;
+    if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
+    if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
+    emails.push(v.toLowerCase());
+  }
+  if(!emails.length){toast('Type at least one candidate email','err');return;}
+  const subject=($('rtnSubj')||{}).value?.trim()||rec.name;
+  const body=($('rtnBody')||{}).value?.trim()||'';
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const btn=$('rtnSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    let sent=0,failed=[];
+    for(const email of emails){
+      const linkRes=await fetch(SUPABASE_URL+'/functions/v1/recruit-test-generate-link',{
+        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify({test_id:testId,candidate_email:email,origin:location.origin})
+      });
+      const linkOut=await linkRes.json().catch(()=>({}));
+      if(!linkRes.ok||linkOut.error||!linkOut.link){failed.push(email);continue;}
+      const mailRes=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify({test_id:testId,test_name:rec.name,link:linkOut.link,subject,body,recipients:[email],sender_name:senderName,sender_email:state.email||''})
+      });
+      const mailOut=await mailRes.json().catch(()=>({}));
+      if(!mailRes.ok||mailOut.error)failed.push(email);else sent++;
+    }
+    closeModal();
+    if(sent)toast('Test sent to '+sent+' candidate'+(sent>1?'s':''),'ok');
+    if(failed.length)toast(failed.length+' address'+(failed.length>1?'es':'')+' could not be sent: '+failed.join(', '),'err');
+    try{usageQueue('recruitment.tests.send_native_test','update',{title:rec.name,recipients:sent});}catch(_e){}
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
+};
+
+window.rtNativeResults=async function(testId){
+  if(!rtCanManage()){toast('Test results can only be viewed by Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator','err');return;}
+  const rec=(RT_RECORDS||[]).find(r=>r.id===testId);if(!rec)return;
+  const panel=$('rtPreviewPanel');if(!panel)return;
+  panel.style.display='block';
+  panel.innerHTML=`<div class="card card-pad">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
+      <span style="font-weight:700;font-size:15px">${esc(rec.name)} — Results</span>
+      <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
+    </div>
+    <div id="rtnResBody"><div class="loader"><div class="spin"></div></div></div>
+  </div>`;
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  const pb=$('rtnResBody');
+  try{
+    const{data,error}=await sb.schema('recruit').from('test_attempts').select('*').eq('test_id',testId).order('created_at',{ascending:false});
+    if(error)throw new Error(error.message);
+    if(!data||!data.length){pb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)"><i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>No attempts sent yet for this test.</div>';return;}
+    const statusTag=a=>{
+      if(a.status==='submitted'){
+        if(a.pass_fail===true)return '<span class="tag t-green">Passed</span>';
+        if(a.pass_fail===false)return '<span class="tag t-red">Failed</span>';
+        return '<span class="tag t-amber">Grading…</span>';
+      }
+      if(a.status==='in_progress')return '<span class="tag t-amber">In Progress</span>';
+      if(a.status==='expired')return '<span class="tag t-red">Expired</span>';
+      return '<span class="tag">Not Started</span>';
+    };
+    pb.innerHTML=`<div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} attempt${data.length!==1?'s':''}</div>
+      <div style="overflow-x:auto"><table class="tbl" style="min-width:520px">
+        <thead><tr><th>Candidate</th><th style="text-align:center">Status</th><th style="text-align:center">Score</th><th style="text-align:center">AI Grading</th><th style="text-align:center">Submitted</th><th></th></tr></thead>
+        <tbody>${data.map(a=>`<tr>
+          <td style="font-weight:500">${esc(a.candidate_email)}</td>
+          <td style="text-align:center">${statusTag(a)}</td>
+          <td style="text-align:center">${a.final_pct!=null?`<b>${Math.round(a.final_pct)}%</b>`:'<span style="color:var(--slate)">—</span>'}</td>
+          <td style="text-align:center">${a.ai_status==='failed'?`<button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="rtqRegrade(${testId},'${a.id}')">Retry AI Grade</button>`:(a.ai_status==='graded'?'<span style="color:#16855a"><i class="fa-solid fa-check"></i> Graded</span>':(a.ai_status==='not_applicable'?'<span style="color:var(--slate)">N/A</span>':(a.ai_status||'—')))}</td>
+          <td style="text-align:center;font-size:12px;color:var(--slate)">${a.submitted_at?new Date(a.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+          <td style="text-align:center">${a.status==='submitted'?`<button class="btn btn-sm" onclick="rtqViewAnswers('${a.id}')"><i class="fa-solid fa-eye"></i></button>`:''}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      <div id="rtnAnswersBox" style="margin-top:14px"></div>`;
+  }catch(e){
+    pb.innerHTML=`<div class="empty" style="padding:30px;color:var(--err)"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+  }
+};
+window.rtqRegrade=async function(testId,attemptId){
+  toast('Re-grading…');
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    const res=await fetch(SUPABASE_URL+'/functions/v1/recruit-test-regrade',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify({attempt_id:attemptId})
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error)throw new Error(out.error||'Re-grade failed');
+    toast('Re-graded','ok');rtNativeResults(testId);
+  }catch(e){toast(e.message||'Re-grade failed','err');}
+};
+window.rtqViewAnswers=async function(attemptId){
+  const box=$('rtnAnswersBox');if(!box)return;
+  box.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  const{data,error}=await sb.schema('recruit').from('test_answers')
+    .select('*,test_questions(seq,prompt,type,max_marks,correct_option,options)').eq('attempt_id',attemptId).order('question_id');
+  if(error){box.innerHTML=`<div class="err">${esc(error.message)}</div>`;return;}
+  box.innerHTML=`<div class="card" style="padding:12px">${(data||[]).map(a=>{
+    const q=a.test_questions||{};
+    let shown=a.answer_text||'';
+    if(q.type==='mcq'&&Array.isArray(q.options)){
+      const opt=q.options.find(o=>o.key===a.answer_text);
+      shown=opt?(opt.key+'. '+opt.text):shown;
+    }
+    return `<div style="border-bottom:1px solid var(--line);padding:8px 0">
+      <div style="font-size:11px;color:var(--slate);text-transform:uppercase;font-weight:700">Q${q.seq} · ${a.marks_earned!=null?a.marks_earned:'—'} / ${q.max_marks} marks</div>
+      <div style="font-size:13px;margin:3px 0">${esc(q.prompt||'')}</div>
+      <div style="font-size:13px;color:${a.is_correct===false?'var(--err)':'var(--ink)'};white-space:pre-wrap">${esc(shown||'(no answer)')}</div>
+      ${a.ai_feedback?`<div style="font-size:12px;color:var(--slate);margin-top:4px"><i class="fa-solid fa-robot"></i> ${esc(a.ai_feedback)}</div>`:''}
+    </div>`;
+  }).join('')}</div>`;
 };
 
 /* ── ManPower Requisition Form ── */
@@ -12330,6 +12619,7 @@ function tpTrRender(){
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add Candidate</button>
       ${canAct?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email Selected</button>
+      <button class="btn" disabled style="opacity:.4;cursor:not-allowed" title="Coming soon — Email only for now"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
       <button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
     </div>
   </div>
@@ -12432,10 +12722,68 @@ window.tpTrSave=async function(){
   await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
   TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();toast('Candidate added');tpTrRender();
 };
-window.tpTrEmailSel=function(){
-  const emails=[...TP_TR_SEL].map(id=>{const r=(TP_TR_RECORDS||[]).find(x=>x.id===id);return r&&r.email;}).filter(Boolean);
-  if(!emails.length){toast('None of the selected candidates have an email on file','err');return;}
-  window.open('mailto:?bcc='+encodeURIComponent(emails.join(','))+'&subject='+encodeURIComponent('Regarding your application'),'_blank');
+window.tpTrEmailSel=async function(){
+  const cands=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(r=>r&&r.email);
+  if(!cands.length){toast('None of the selected candidates have an email on file','err');return;}
+  await rtShareCheckGmail();
+  if(!Array.isArray(RT_RECORDS)){
+    const{data}=await sb.schema('recruit').from('tests').select('*').order('sl');
+    RT_RECORDS=data||[];
+  }
+  const testOpts=(RT_RECORDS||[]).filter(t=>t.engine==='native'||t.link).map(t=>`<option value="${t.id}">${esc(t.name)}${t.engine==='native'?' (JainE test)':''}</option>`).join('');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email ${cands.length} Candidate${cands.length>1?'s':''}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    ${RT_CAN_SEND_AS_SELF
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b>.</div>`
+      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
+           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you. Connect your Google account to send from your own address instead.</div>
+           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
+         </div>`}
+    <label>Subject</label><input id="tpTrMailSubj" class="inp" value="Regarding your application">
+    <label>Message</label><textarea id="tpTrMailBody" class="inp" rows="4" style="resize:vertical">Dear Candidate,\n\nThank you for your interest. We will be in touch shortly.\n\nBest,\nThe Jain Group</textarea>
+    <label>Attach a Test <span style="font-size:11px;color:var(--slate)">(optional — a JainE test sends each candidate their own unique link)</span></label>
+    <select id="tpTrMailTest" class="sel"><option value="">— None —</option>${testOpts}</select>
+    <div style="font-size:12px;color:var(--slate);margin-top:8px">To: ${cands.map(c=>esc(c.email)).join(', ')}</div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-primary" id="tpTrMailSendBtn" onclick="tpTrEmailSend()"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+};
+window.tpTrEmailSend=async function(){
+  const cands=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(r=>r&&r.email);
+  const subject=($('tpTrMailSubj')||{}).value?.trim()||'Regarding your application';
+  const body=($('tpTrMailBody')||{}).value?.trim()||'';
+  const testId=parseInt(($('tpTrMailTest')||{}).value||'');
+  const test=testId?(RT_RECORDS||[]).find(t=>t.id===testId):null;
+  const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
+  const btn=$('tpTrMailSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    const token=session&&session.access_token;
+    let sent=0,failed=[];
+    for(const c of cands){
+      let link=test&&test.link||'';
+      if(test&&test.engine==='native'){
+        const linkRes=await fetch(SUPABASE_URL+'/functions/v1/recruit-test-generate-link',{
+          method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+          body:JSON.stringify({test_id:test.id,candidate_email:c.email,candidate_id:c.candidate_id||null,origin:location.origin})
+        });
+        const linkOut=await linkRes.json().catch(()=>({}));
+        if(!linkRes.ok||linkOut.error||!linkOut.link){failed.push(c.email);continue;}
+        link=linkOut.link;
+      }
+      const mailRes=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+        method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify({test_id:test?test.id:null,test_name:test?test.name:'',link,subject,body,recipients:[c.email],sender_name:senderName,sender_email:state.email||''})
+      });
+      const mailOut=await mailRes.json().catch(()=>({}));
+      if(!mailRes.ok||mailOut.error)failed.push(c.email);else sent++;
+    }
+    closeModal();
+    if(sent)toast('Emailed '+sent+' candidate'+(sent>1?'s':''),'ok');
+    if(failed.length)toast(failed.length+' address'+(failed.length>1?'es':'')+' could not be sent: '+failed.join(', '),'err');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+  }
 };
 window.tpTrDeleteSel=async function(){
   if(!recGuard())return;

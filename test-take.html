@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assessment · The Jain Group</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+  :root{--ink:#0b1220;--slate:#64748b;--line:#e6eaf1;--bg:#f5f7fb;--brand:#1d4ed8;--err:#c83232;--ok:#16855a}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px}
+  .wrap{width:100%;max-width:680px}
+  .head{background:#0f172a;color:#fff;padding:20px 28px;border-radius:12px 12px 0 0;border-bottom:3px solid #e0121c}
+  .head b{font-size:15px;letter-spacing:.5px}
+  .head div{color:#94a3b8;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-top:3px}
+  .card{background:#fff;border:1px solid var(--line);border-top:none;border-radius:0 0 12px 12px;padding:28px}
+  h1{font-size:19px;margin:0 0 8px}
+  p.sub{color:var(--slate);font-size:13.5px;margin:0 0 20px}
+  .timer{position:sticky;top:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;font-weight:700;z-index:5}
+  .timer.low{border-color:var(--err);color:var(--err)}
+  .q{border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+  .q .lbl{font-size:11px;font-weight:700;text-transform:uppercase;color:var(--slate);margin-bottom:8px}
+  .q .prompt{font-size:14.5px;line-height:1.5;margin-bottom:12px;white-space:pre-wrap}
+  .opt{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer}
+  .opt:hover{background:#f8fafc}
+  textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:inherit;font-size:13.5px;resize:vertical}
+  button.btn{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:12px 22px;font-size:14.5px;font-weight:700;cursor:pointer}
+  button.btn:disabled{opacity:.5;cursor:not-allowed}
+  .center{text-align:center;padding:20px 0}
+  .spin{border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;width:28px;height:28px;animation:sp 0.8s linear infinite;margin:0 auto}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .err{color:var(--err);font-size:13.5px}
+  .ok-msg{color:var(--ok);font-size:15px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head"><b>THE JAIN GROUP</b><div>Recruitment Assessment</div></div>
+  <div class="card" id="app"><div class="center"><div class="spin"></div></div></div>
+</div>
+<script src="test-take.js"></script>
+</body>
+</html>
