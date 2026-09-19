@@ -47,6 +47,9 @@ class Config:
     chrome_profile_dir: str
     browser_channel: str
     browser_headless: bool
+    agent_max_steps: int
+    agent_timeout_seconds: int
+    agent_use_vision: bool
 
     def describe(self) -> str:
         """Human-readable summary with secrets masked — safe to print/log."""
@@ -66,6 +69,9 @@ class Config:
             f"chrome_profile_dir     = {self.chrome_profile_dir}",
             f"browser_channel        = {self.browser_channel}",
             f"browser_headless       = {self.browser_headless}",
+            f"agent_max_steps        = {self.agent_max_steps}",
+            f"agent_timeout_seconds  = {self.agent_timeout_seconds}",
+            f"agent_use_vision       = {self.agent_use_vision}",
         ]
         return "\n".join(lines)
 
@@ -87,4 +93,10 @@ def load_config() -> Config:
         chrome_profile_dir=os.getenv("CHROME_PROFILE_DIR", str(AGENT_DIR / ".chrome-profile")).strip(),
         browser_channel=os.getenv("BROWSER_CHANNEL", "chrome").strip(),
         browser_headless=os.getenv("BROWSER_HEADLESS", "false").strip().lower() in ("1", "true", "yes"),
+        agent_max_steps=int(os.getenv("AGENT_MAX_STEPS", "15")),
+        agent_timeout_seconds=int(os.getenv("AGENT_TIMEOUT_SECONDS", "300")),
+        # Off by default: most small local Ollama text models (llama3.2, qwen2.5, ...) reject the
+        # screenshots Browser Use sends when this is on, with a hard 400 from Ollama itself. Only
+        # turn this on if OLLAMA_MODEL is actually a vision model (llama3.2-vision, qwen2.5vl, ...).
+        agent_use_vision=os.getenv("AGENT_USE_VISION", "false").strip().lower() in ("1", "true", "yes"),
     )

@@ -30,6 +30,7 @@ jaine-agent test               # self-check: prints config, machine id, what's m
 jaine-agent start              # runs the worker (Ctrl+C to stop)
 jaine-agent llm-test "prompt"  # send one prompt straight to the configured LLM, print the reply
 jaine-agent browser-test       # open the dedicated Chrome profile, browse to Google, screenshot it
+jaine-agent agent-test "task"  # run a natural-language task through Browser Use end to end
 ```
 
 (Or, without installing the console script: `python -m jaine_agent test|start`.)
@@ -68,11 +69,12 @@ phases give it real work to pick up.
 ## Build order (see project root's original spec for full detail)
 
 - [x] Phase 1 — local worker skeleton
-- [x] Phase 2 — `LLMProvider` abstraction + `OllamaProvider` (code proven; needs
-      Ollama actually installed on this machine to prove a live reply — see below)
+- [x] Phase 2 — `LLMProvider` abstraction + `OllamaProvider`, proven live against
+      a real Ollama server (`llama3.2`, installed via winget)
 - [x] Phase 3 — Playwright/Chrome connection, via a dedicated profile (see Section 7 below)
-- [ ] Phase 4 — Browser Use agent integration
-- [ ] Phase 5 — manual natural-language task execution
+- [x] Phase 4 — Browser Use agent integration (`ChatOllama` bridge + `run_browser_task`,
+      concise step status via `next_goal` only — `thinking` is never surfaced)
+- [ ] Phase 5 — manual natural-language task execution (CLI proven; a UI is still open)
 - [ ] Phase 6 — Supabase `agent_runs`
 - [ ] Phase 7 — Supabase `agent_jobs`
 - [ ] Phase 8 — JainE event trigger

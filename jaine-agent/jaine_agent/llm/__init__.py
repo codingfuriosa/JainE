@@ -6,7 +6,7 @@ from jaine_agent.llm.base import (
     ToolCall,
     ToolSpec,
 )
-from jaine_agent.llm.factory import create_provider
+from jaine_agent.llm.factory import create_browser_use_llm, create_provider
 
 __all__ = [
     "LLMProvider",
@@ -16,4 +16,5 @@ __all__ = [
     "ToolCall",
     "ToolSpec",
     "create_provider",
+    "create_browser_use_llm",
 ]

@@ -24,6 +24,14 @@
                                       No LLM involved yet — proves the browser
                                       layer on its own before Browser Use
                                       (Phase 4) drives it with reasoning.
+    python -m jaine_agent agent-test "task"
+                                    — Phase 4/5: the real thing. Runs a
+                                      natural-language task through a Browser
+                                      Use Agent, using the configured LLM
+                                      provider and the dedicated Chrome
+                                      profile. Prints concise step-by-step
+                                      status (never the model's raw
+                                      reasoning) and the final result.
 
 Also runnable as the `jaine-agent` console script once the package is
 installed (`pip install -e .`) — see pyproject.toml.
@@ -118,6 +126,36 @@ def cmd_browser_test() -> int:
         return 1
 
 
+def cmd_agent_test(task: str) -> int:
+    from jaine_agent.browser_agent import AgentTaskError, run_browser_task
+
+    cfg = load_config()
+    log = setup_logging(cfg.log_level)
+    log.info("Task: %s", task)
+    log.info(
+        "Provider: %s (%s), max_steps=%s, timeout=%ss",
+        cfg.llm_provider, cfg.ollama_model, cfg.agent_max_steps, cfg.agent_timeout_seconds,
+    )
+
+    def on_status(msg: str) -> None:
+        log.info(msg)
+
+    async def run() -> int:
+        try:
+            result = await run_browser_task(task, cfg, on_status=on_status)
+        except AgentTaskError as e:
+            log.error("Failed: %s", e)
+            return 1
+        log.info("Success: %s", result.success)
+        log.info("Steps taken: %s", result.steps_taken)
+        if result.errors:
+            log.info("Errors: %s", "; ".join(result.errors))
+        log.info("Final result: %s", result.final_result or "(none)")
+        return 0 if result.success else 1
+
+    return asyncio.run(run())
+
+
 def cmd_start() -> int:
     cfg = load_config()
     log = setup_logging(cfg.log_level)
@@ -145,6 +183,8 @@ def main() -> int:
     p_llm = sub.add_parser("llm-test", help="Send one prompt to the configured LLMProvider")
     p_llm.add_argument("prompt", help="The prompt to send")
     sub.add_parser("browser-test", help="Open the dedicated Chrome profile and browse to Google")
+    p_agent = sub.add_parser("agent-test", help="Run a natural-language task through Browser Use")
+    p_agent.add_argument("task", help="The task to perform")
     args = parser.parse_args()
 
     if args.command == "start":
@@ -155,6 +195,8 @@ def main() -> int:
         return cmd_llm_test(args.prompt)
     if args.command == "browser-test":
         return cmd_browser_test()
+    if args.command == "agent-test":
+        return cmd_agent_test(args.task)
     parser.print_help()
     return 1
 
