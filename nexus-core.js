@@ -17814,6 +17814,15 @@ function trcTrStatus(r){
   const st=String(r.transcription_status||'');
   return (st==='not_transcribed'&&!r.queue_status) ? 'out_of_scope' : st;
 }
+/* trcTrStatus alone misses a whole class of failure: a call whose TRANSCRIPT completed fine but whose
+   QA judge call then failed keeps transcription_status:'completed', so trcTrStatus reads it as a
+   plain success - the QA failure only shows up in r.queue_status (transcription_queue.status, set to
+   'failed' with fail_phase 'qa' either way, see crm-snapshot-qa/index.ts). Anything that needs "did
+   this recording actually finish clean" - the Failed filter/count and the retry button below - has to
+   check both, or a QA failure is invisible everywhere except the one lead's own detail card. */
+function trcProcFailed(r){
+  return !!(r && (trcTrStatus(r)==='failed' || r.queue_status==='failed'));
+}
 /* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
    included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
    nothing of its own worth putting in front of a reader: no CRM-vs-call comparison ran, so there is
@@ -18720,7 +18729,8 @@ function trcApply(rows,skipCards){
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
     if(!skipCards){
-      if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
+      if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
+      else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
       // verdict does not belong in either drill-down, only in the lead's own history.
       if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
@@ -18956,7 +18966,7 @@ function trcKpiHtml(rows){
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
     ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',fast?fast.transcription_failed:n('failed'),'fa-circle-exclamation']
+    ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
@@ -19212,6 +19222,15 @@ function trcLeadRowHtml(g,sl){
         +' · '+g.recordings+' recording'+(g.recordings===1?'':'s')+' · '+g.transcribed+' transcribed</div>'
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
+      /* Only rendered under the Failed card/chip - trcApply has already narrowed g.rows down to just
+         this lead's failed recordings there (see trcProcFailed), so every button below retries ONE
+         specific recording, never the lead as a whole. stopPropagation keeps the click off the row's
+         own onclick (which would otherwise navigate into the lead instead of retrying). */
+      +(TRC_F.proc==='failed'?'<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px" onclick="event.stopPropagation()">'
+        +g.rows.map(function(r){
+          return '<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')">'
+            +'<i class="fa-solid fa-rotate-right"></i> Retry '+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||('#'+r.follow_up_id))+'</button>';
+        }).join('')+'</div>':'')
     +'</td>'
     /* Danger and Status-regressed used to carry their full label alongside the CRM status tag - three
        badges' worth of text in a column sized for one, so the middle one clipped mid-word and the
@@ -20023,13 +20042,25 @@ window.trcRetry=async function(followUpId){
   }
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
-  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   trCacheClear('trc_fetch_cache');
   trCacheClear('trc_fetch_light_cache');
+  /* Retry can be clicked from either of two screens now - a lead's own detail page (the per-call
+     card's button) or the Failed list/table (the per-row buttons added alongside it) - and each has
+     to repaint ITSELF, not drag the other screen's reader somewhere they didn't ask to go. $('trcRows')
+     is the list view's own table body and only ever exists there, so its presence is what tells the
+     two apart. */
+  if($('trcRows')){
+    trcLeadCacheClearAll();
+    await Promise.all([trcFetch(true),trcKpiFastFetch(true)]);
+    trcRender(true,true);
+    trcAfterListRender();
+    return;
+  }
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
      about to change, so re-rendering the detail page off the 5h snapshot would show the reader the
      exact state they just asked to have redone. */
+  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   if(lead)trcLeadCacheDrop(lead);
   if(lead)await trcLeadDetail($('view'),lead);
 };
