@@ -13555,20 +13555,65 @@ VIEWS.custportal_admin=async function(v,seg){
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
+let CPA_UNIT_FILTER={proj:'',q:''};
 async function cpaRenderProjectsUnits(host){
-  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true)]);
-  const projRows=projects.map(p=>[esc(p.name),esc(p.farvision_project_code||'—'),String(units.filter(u=>u.project_id===p.id).length),
-    `<button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`]);
-  const unitRows=units.map(u=>[esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
-    `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
-    u.customer_id?'<span class="tag t-green">Assigned</span>':'<span class="tag t-gray">Unassigned</span>',
-    u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
-    `<button class="btn btn-sm" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
-    (u.floor_casting_completed_at?'':` <button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)]);
+  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true),cpaCustomers(true)]);
+  const projRows=projects.map(p=>{
+    const mine=units.filter(u=>u.project_id===p.id);
+    return [esc(p.name),esc(p.farvision_project_code||'—'),String(mine.length),
+      String(new Set(mine.map(u=>u.customer_id).filter(Boolean)).size),
+      `<button class="btn btn-sm" onclick="cpaUnitsFor(${p.id})"><i class="fa-solid fa-list"></i> Units</button>`+
+      ` <button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`];
+  });
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
-    cpaTable(['Project','Farvision code','Units',''],projRows.length?projRows:[['No projects yet','','','']])+
-    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>`+
-    cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],unitRows.length?unitRows:[['No units yet','','','','','','','','']]);
+    cpaTable(['Project','Farvision code','Units','Customers',''],projRows.length?projRows:[['No projects yet','','','','']])+
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <select id="cpaUnitProj" onchange="cpaUnitFilter()" style="max-width:300px"><option value="">All projects</option>${projOpts}</select>
+      <input id="cpaUnitQ" placeholder="Search unit code, tower or customer" oninput="cpaUnitFilter()" style="flex:1;min-width:240px">
+      <span id="cpaUnitCount" style="font-size:12.5px;color:var(--slate);white-space:nowrap"></span>
+    </div>
+    <div id="cpaUnitList"></div>`;
+  cpaUnitList();
+  if(CPA_UNIT_FILTER.proj)$('cpaUnitProj').value=CPA_UNIT_FILTER.proj;
+  if(CPA_UNIT_FILTER.q)$('cpaUnitQ').value=CPA_UNIT_FILTER.q;
+}
+window.cpaUnitFilter=function(){
+  CPA_UNIT_FILTER.proj=$('cpaUnitProj').value;
+  CPA_UNIT_FILTER.q=$('cpaUnitQ').value.trim().toLowerCase();
+  cpaUnitList();
+};
+// "Units" on a project row jumps the list below to that project rather than opening a second screen.
+window.cpaUnitsFor=function(pid){
+  CPA_UNIT_FILTER.proj=String(pid);
+  const sel=$('cpaUnitProj');if(sel)sel.value=String(pid);
+  cpaUnitList();
+  const list=$('cpaUnitList');if(list)list.scrollIntoView({behavior:'smooth',block:'center'});
+};
+function cpaUnitList(){
+  const units=CPA.units||[],{proj,q}=CPA_UNIT_FILTER;
+  const custById={};(CPA.customers||[]).forEach(c=>{custById[c.id]=c;});
+  const list=units.filter(u=>{
+    if(proj&&String(u.project_id)!==proj)return false;
+    if(q){
+      const c=custById[u.customer_id];
+      if(![u.unit_code,u.tower,c&&c.full_name,c&&c.email].join(' ').toLowerCase().includes(q))return false;
+    }
+    return true;
+  });
+  const rows=list.map(u=>{
+    const c=custById[u.customer_id];
+    return [esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
+      `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
+      c?esc(c.full_name):'<span class="tag t-gray">Unassigned</span>',
+      u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
+      `<button class="btn btn-sm" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
+      (u.floor_casting_completed_at?'':` <button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)];
+  });
+  const cnt=$('cpaUnitCount');if(cnt)cnt.textContent=list.length+' of '+units.length;
+  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
+    rows.length?rows:[['No units match this filter','','','','','','','','']]);
 }
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
@@ -13642,15 +13687,57 @@ window.cpaMarkCasting=async function(id){
 };
 
 /* ---------- Tab 2: Customers ---------- */
+// A customer's project is not a column on the customer - it comes from the unit(s) they hold, and a
+// customer can legitimately hold units in more than one project. So both are derived per row rather
+// than stored, and the project filter asks "does this customer hold a unit HERE".
+let CPA_CUST_FILTER={proj:'',q:''};
 async function cpaRenderCustomers(host){
-  const customers=await cpaCustomers(true);
-  const rows=customers.map(c=>[esc(c.full_name),esc(c.email),esc(c.phone||'—'),
-    c.auth_user_id?'<span class="tag t-green">Login active</span>':'<span class="tag t-gray">No login</span>',
-    `<button class="btn btn-sm" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
-    ` <button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i> View portal</button>`+
-    (c.auth_user_id?` <button class="btn btn-sm" onclick="cpaSetPasswordModal(${c.id},true)">Reset password</button>`:` <button class="btn btn-sm btn-primary" onclick="cpaSetPasswordModal(${c.id},false)">Create login</button>`)]);
-  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>`+
-    cpaTable(['Name','Email','Phone','Login','Actions'],rows.length?rows:[['No customers yet','','','','']]);
+  const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <select id="cpaCustProj" onchange="cpaCustFilter()" style="max-width:300px"><option value="">All projects</option>${projOpts}<option value="none">— Without a unit —</option></select>
+      <input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()" style="flex:1;min-width:240px">
+      <span id="cpaCustCount" style="font-size:12.5px;color:var(--slate);white-space:nowrap"></span>
+    </div>
+    <div id="cpaCustList"></div>`;
+  cpaCustList();
+  if(CPA_CUST_FILTER.proj)$('cpaCustProj').value=CPA_CUST_FILTER.proj;
+  if(CPA_CUST_FILTER.q)$('cpaCustQ').value=CPA_CUST_FILTER.q;
+}
+window.cpaCustFilter=function(){
+  CPA_CUST_FILTER.proj=$('cpaCustProj').value;
+  CPA_CUST_FILTER.q=$('cpaCustQ').value.trim().toLowerCase();
+  cpaCustList();
+};
+function cpaCustUnitsByCustomer(){
+  const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
+  return by;
+}
+function cpaCustList(){
+  const customers=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  const list=customers.filter(c=>{
+    const mine=byCustomer[c.id]||[];
+    if(proj==='none'){if(mine.length)return false;}
+    else if(proj&&!mine.some(u=>String(u.project_id)===proj))return false;
+    if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
+    return true;
+  });
+  const rows=list.map(c=>{
+    const mine=byCustomer[c.id]||[];
+    const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
+    return [esc(c.full_name),
+      projNames.length?esc(projNames.join(', ')):'<span class="tag t-amber">No unit</span>',
+      mine.length?mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', '):'—',
+      esc(c.email),esc(c.phone||'—'),
+      c.auth_user_id?'<span class="tag t-green">Login active</span>':'<span class="tag t-gray">No login</span>',
+      `<button class="btn btn-sm" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
+      ` <button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i> View portal</button>`+
+      (c.auth_user_id?` <button class="btn btn-sm" onclick="cpaSetPasswordModal(${c.id},true)">Reset password</button>`:` <button class="btn btn-sm btn-primary" onclick="cpaSetPasswordModal(${c.id},false)">Create login</button>`)];
+  });
+  const cnt=$('cpaCustCount');if(cnt)cnt.textContent=list.length+' of '+customers.length;
+  $('cpaCustList').innerHTML=cpaTable(['Name','Project','Unit','Email','Phone','Login','Actions'],
+    rows.length?rows:[['No customers match this filter','','','','','','']]);
 }
 window.cpaCustomerModal=function(id){
   const c=id?(CPA.customers||[]).find(x=>x.id===id):null;
