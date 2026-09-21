@@ -13569,10 +13569,10 @@ async function cpaRenderProjectsUnits(host){
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
     cpaTable(['Project','Farvision code','Units','Customers',''],projRows.length?projRows:[['No projects yet','','','','']])+
     `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-      <select id="cpaUnitProj" onchange="cpaUnitFilter()" style="max-width:300px"><option value="">All projects</option>${projOpts}</select>
-      <input id="cpaUnitQ" placeholder="Search unit code, tower or customer" oninput="cpaUnitFilter()" style="flex:1;min-width:240px">
-      <span id="cpaUnitCount" style="font-size:12.5px;color:var(--slate);white-space:nowrap"></span>
+    <div class="mu-filters">
+      <select id="cpaUnitProj" class="mu-sel" onchange="cpaUnitFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}</select>
+      <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaUnitQ" placeholder="Search unit code, tower or customer" oninput="cpaUnitFilter()"></span>
+      <span class="mu-count" id="cpaUnitCount"></span>
     </div>
     <div id="cpaUnitList"></div>`;
   cpaUnitList();
@@ -13697,10 +13697,10 @@ async function cpaRenderCustomers(host){
   const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-      <select id="cpaCustProj" onchange="cpaCustFilter()" style="max-width:300px"><option value="">All projects</option>${projOpts}<option value="none">— Without a unit —</option></select>
-      <input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()" style="flex:1;min-width:240px">
-      <span id="cpaCustCount" style="font-size:12.5px;color:var(--slate);white-space:nowrap"></span>
+    <div class="mu-filters">
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Without a unit —</option></select>
+      <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
+      <span class="mu-count" id="cpaCustCount"></span>
     </div>
     <div id="cpaCustList"></div>`;
   cpaCustList();
