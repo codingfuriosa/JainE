@@ -13747,7 +13747,7 @@ const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
+const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -14001,8 +14001,11 @@ window.cpaImportConfirm=async function(btn){
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
 };
 async function cpaImportConfirmXlsx(st){
+  // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
+  // one file can span several projects at once. project_names records the set it actually touched.
   const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
     import_type:st.type,file_name:st.fileName,imported_by:state.email,
+    project_names:[...new Set(st.matched.map(m=>m.project&&m.project.name).filter(Boolean))].sort(),
     row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
     unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
     raw_rows:st.matched.map(m=>m.rec)}).select('id').single();
@@ -14167,10 +14170,16 @@ async function cpaImportConfirmCsv(st){
   toast(st.matched.length+' row(s) imported','ok');
 }
 async function cpaRenderImportHistory(host,projects){
-  const {data}=await sb.schema('cust').from('import_batches').select('*').order('imported_at',{ascending:false}).limit(200);
+  // Named columns rather than '*': raw_rows carries every parsed row of every batch (86k rows and
+  // growing, most of this table's bulk) and nothing on this screen reads it.
+  const {data}=await sb.schema('cust').from('import_batches')
+    .select('id,import_type,project_id,project_names,file_name,imported_at,imported_by,matched_count,unmatched_count,status')
+    .order('imported_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(b=>{
     const proj=projects.find(p=>p.id===b.project_id);
-    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(proj?proj.name:'—'),esc(b.file_name||'—'),
+    // .xlsx batches span projects and carry project_names; the CSV imports pick one project up front.
+    const projLabel=(b.project_names&&b.project_names.length)?b.project_names.join(', '):(proj?proj.name:'—');
+    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(projLabel),esc(b.file_name||'—'),
       fmtDate(b.imported_at),esc(b.imported_by||'—'),
       b.matched_count+' matched'+(b.unmatched_count?', '+b.unmatched_count+' unmatched':''),
       b.status==='undone'?'<span class="tag t-gray">Undone</span>':'<span class="tag t-green">Completed</span>',
