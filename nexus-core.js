@@ -13604,12 +13604,14 @@ function cpaUnitList(){
   });
   const rows=list.map(u=>{
     const c=custById[u.customer_id];
-    return [esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
+    return [esc(u.unit_code),(u.projects&&u.projects.name)?cpaProjectChip(u.projects.name):'—',esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
       `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
-      c?esc(c.full_name):'<span class="tag t-gray">Unassigned</span>',
-      u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
-      `<button class="btn btn-sm" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
-      (u.floor_casting_completed_at?'':` <button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)];
+      c?`<span style="white-space:nowrap">${esc(c.full_name)}</span>`:'<span class="tag t-gray">Unassigned</span>',
+      u.floor_casting_completed_at?`<span class="tag t-green" style="white-space:nowrap">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
+      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
+      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
+      (u.floor_casting_completed_at?'':`<button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)+
+      `</span>`];
   });
   const cnt=$('cpaUnitCount');if(cnt)cnt.textContent=list.length+' of '+units.length;
   $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
@@ -13710,6 +13712,13 @@ window.cpaCustFilter=function(){
   CPA_CUST_FILTER.q=$('cpaCustQ').value.trim().toLowerCase();
   cpaCustList();
 };
+// Farvision project names carry a location suffix - "DREAM GURUKUL(DOLTALA MADHYAMGRAM)" - which
+// wrapped to three lines in a table cell and made every row triple height. Show the name itself and
+// keep the full string on hover, since the suffix is what distinguishes two same-named projects.
+function cpaProjectChip(name){
+  const full=String(name||''),i=full.indexOf('(');
+  return '<span title="'+esc(full)+'" style="white-space:nowrap">'+esc(i>0?full.slice(0,i).trim():full)+'</span>';
+}
 function cpaCustUnitsByCustomer(){
   const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
   return by;
@@ -13726,14 +13735,16 @@ function cpaCustList(){
   const rows=list.map(c=>{
     const mine=byCustomer[c.id]||[];
     const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
-    return [esc(c.full_name),
-      projNames.length?esc(projNames.join(', ')):'<span class="tag t-amber">No unit</span>',
-      mine.length?mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', '):'—',
-      esc(c.email),esc(c.phone||'—'),
-      c.auth_user_id?'<span class="tag t-green">Login active</span>':'<span class="tag t-gray">No login</span>',
-      `<button class="btn btn-sm" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
-      ` <button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i> View portal</button>`+
-      (c.auth_user_id?` <button class="btn btn-sm" onclick="cpaSetPasswordModal(${c.id},true)">Reset password</button>`:` <button class="btn btn-sm btn-primary" onclick="cpaSetPasswordModal(${c.id},false)">Create login</button>`)];
+    return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
+      projNames.length?projNames.map(cpaProjectChip).join(' '):'<span class="tag t-amber">No unit</span>',
+      mine.length?`<span style="white-space:nowrap">${mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', ')}</span>`:'—',
+      esc(c.email),`<span style="white-space:nowrap">${esc(c.phone||'—')}</span>`,
+      c.auth_user_id?'<span class="tag t-green">Active</span>':'<span class="tag t-gray">None</span>',
+      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
+      `<button class="btn btn-sm" title="Edit customer" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
+      `<button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i></button>`+
+      (c.auth_user_id?`<button class="btn btn-sm" title="Reset this customer's password" onclick="cpaSetPasswordModal(${c.id},true)">Reset</button>`:`<button class="btn btn-sm btn-primary" title="Create a portal login" onclick="cpaSetPasswordModal(${c.id},false)">Login</button>`)+
+      `</span>`];
   });
   const cnt=$('cpaCustCount');if(cnt)cnt.textContent=list.length+' of '+customers.length;
   $('cpaCustList').innerHTML=cpaTable(['Name','Project','Unit','Email','Phone','Login','Actions'],
