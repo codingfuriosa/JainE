@@ -134,6 +134,16 @@ async function processEmails(db: any) {
         const path = `${ts}/${p.name}`;
         const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
         if (ue) { log.push(`Upload fail: ${ue.message}`); return { processed: 0, queued, log }; }
+        // Auto-dismiss older pending files of the same report type
+        // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
+        const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
+        if (baseType) {
+          const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
+          if (older && older.length) {
+            await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
+            log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
+          }
+        }
         await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: latestId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
         log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
         queued++;
