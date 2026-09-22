@@ -18807,6 +18807,15 @@ async function trcEnsureQaFieldsMerged(){
    and drops its own answer if something else has already moved on - the same cancellation shape
    trcPrefetchCancel uses for the history prefetch below. */
 let TRC_ENRICH_GEN=0;
+
+/* A lead whose calls in the CURRENT date range never produced a verdict (no recording, out of scope,
+   no conversation) still has a last real judgement somewhere in its history - by requirement
+   (2026-09-22), the row should say what it was and on what date, not just read blank. Keyed by
+   lead_id (string): a followup_qa row (is_latest_assessed=true) once fetched, or null once confirmed
+   this lead has never been assessed at all - either way, never re-queried. Global and never reset by
+   a date-range change, because a lead's last judgement does not depend on which range is on screen. */
+let TRC_LAST_JUDGEMENT_CACHE={};
+let TRC_BACKFILL_GEN=0;
 /* THE LAZY HALF OF THE FAST PATH. Only the leads on the CURRENT PAGE get enriched - not the whole
    range, which is exactly the cost trcFetchLight exists to avoid paying up front. Merges straight
    into TRC_ROWS by follow_up_id (acc.crm_lead_detail returns full followup_timeline_v-shaped rows
@@ -18858,6 +18867,53 @@ async function trcEnrichVisiblePage(){
   }catch(e){
     /* Silent: the page still shows every CRM field correctly, just without a transcription/AI status
        yet - the next render of this same page (a re-sort, a page revisit) tries again. */
+  }
+}
+
+/* THE OTHER LAZY HALF, same shape as trcEnrichVisiblePage but a different question: not "what is
+   this call's own status" but "what did we last judge THIS LEAD as, on any date" - for exactly the
+   rows that came back with nothing to show (no recording, out of scope, no conversation) so the page
+   can say "Last AI Judge Status: Lost (15 Sep)" instead of a blank dash. By requirement (2026-09-22):
+   a lead not qualified today, or with no usable recording today, should still read as the lead it is.
+
+   Only the CURRENT PAGE's leads, only the ones trcLeads() just found nothing for, and only once ever
+   per lead (TRC_LAST_JUDGEMENT_CACHE, never reset by a date change) - a lead genuinely never assessed
+   stays cached as null rather than being re-asked on every page view. followup_qa alone, no join to
+   crm_followups/call_transcripts/transcription_queue: is_latest_assessed already marks the one row
+   that matters, and the existing lead_id index (20260831090000) makes lead_id IN (this page's ids)
+   cheap - nothing like the 3-8s cost the full followup_timeline_v join carries. */
+async function trcBackfillLastJudgement(){
+  // Mismatch view's TRC_PAGE_ROWS are raw call rows, not lead groups - no g.lastAssessed to check and
+  // nothing here renders a lastAssessedOutside cell for them, so there is nothing to backfill.
+  if(TRC_F.match==='MISMATCH')return;
+  const gen=++TRC_BACKFILL_GEN;
+  const ids=[],seen={};
+  (TRC_PAGE_ROWS||[]).forEach(function(g){
+    if(!g||g.lead_id==null||g.lastAssessed)return;
+    const k=String(g.lead_id);
+    if(seen[k]||Object.prototype.hasOwnProperty.call(TRC_LAST_JUDGEMENT_CACHE,k))return;
+    seen[k]=1;ids.push(g.lead_id);
+  });
+  if(!ids.length)return;
+  try{
+    const {data,error}=await sb.schema('acc').from('followup_qa')
+      .select('lead_id,follow_up_id,ai_assessed_status,visit_pending,status_match,mismatch_type,'
+        +'call_date,call_start_text')
+      .in('lead_id',ids).eq('is_latest_assessed',true);
+    if(error)throw error;
+    if(gen!==TRC_BACKFILL_GEN)return;
+    const byLead={};
+    (data||[]).forEach(function(r){byLead[String(r.lead_id)]=r;});
+    // Every requested id gets a cache entry, found or not - a miss is a real answer (never assessed)
+    // and must stick, or a lead with no history gets re-queried on every single page visit.
+    ids.forEach(function(id){
+      const k=String(id);
+      TRC_LAST_JUDGEMENT_CACHE[k]=byLead[k]||null;
+    });
+    if(gen===TRC_BACKFILL_GEN)trcRender(false,true);
+  }catch(e){
+    /* Silent, same as trcEnrichVisiblePage - the row just keeps showing a dash until a later render
+       (a re-sort, a page revisit) tries again; nothing is cached on failure so it does retry. */
   }
 }
 
@@ -19020,6 +19076,11 @@ function trcLeads(rows){
     for(let i=g.rows.length-1;i>=0&&!g.lastAssessed;i--){
       if(g.rows[i].ai_assessed_status)g.lastAssessed=g.rows[i];
     }
+    /* Nothing in the current range was assessed - fall back to this lead's actual last judgement,
+       wherever it happened, if trcBackfillLastJudgement has already fetched it (see that function).
+       Kept as a SEPARATE field from g.lastAssessed, never merged into it, so trcLeadRowHtml can tell
+       "this call, in this range" from "carried over from another date" and label it accordingly. */
+    g.lastAssessedOutside=g.lastAssessed?null:(TRC_LAST_JUDGEMENT_CACHE[k]||null);
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
@@ -19475,7 +19536,18 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
-    +trcClipCell(g.lastAssessed?trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)):'<span style="color:var(--slate)">—</span>')
+    /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
+       carried-over verdict from another date, not this range's own, so it is labelled with exactly
+       that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
+       Built as its own <td>, not trcClipCell (that helper's flex/nowrap box is for a single inline
+       tag and would clip a second, stacked line rather than show it). */
+    +(g.lastAssessed
+      ?trcClipCell(trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)))
+      :g.lastAssessedOutside
+        ?'<td style="text-align:center">'+trcTag(TRC_AI_TAG[g.lastAssessedOutside.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessedOutside))
+          +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Last judged '
+          +esc(trcWall(g.lastAssessedOutside.call_start_text)||trcWall(g.lastAssessedOutside.call_date)||'')+'</div></td>'
+        :trcClipCell('<span style="color:var(--slate)">—</span>'))
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
@@ -19744,13 +19816,15 @@ function trcPrefetchListedHistories(){
   (TRC_PAGE_ROWS||[]).forEach(function(r){if(r&&r.lead_id!=null)ids.push(r.lead_id);});
   if(ids.length)trcPrefetchHistories(ids);
 }
-/* The two background jobs every render of the list kicks off, never awaited: fill in this page's
+/* The three background jobs every render of the list kicks off, never awaited: fill in this page's
    own transcription/AI-status columns (trcEnrichVisiblePage, only when the fast fetch left them
-   blank) and warm the full history behind each of these same leads for an instant click-through
-   (trcPrefetchListedHistories). Independent of each other - one fills what's on screen, the other
-   fills what a click would open next - so there is no ordering to get right between them. */
+   blank), carry over a lead's last real judgement when this range has none of its own
+   (trcBackfillLastJudgement), and warm the full history behind each of these same leads for an
+   instant click-through (trcPrefetchListedHistories). Independent of each other - so there is no
+   ordering to get right between them. */
 function trcAfterListRender(){
   trcEnrichVisiblePage();
+  trcBackfillLastJudgement();
   trcPrefetchListedHistories();
 }
 

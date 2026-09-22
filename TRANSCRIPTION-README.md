@@ -418,6 +418,16 @@ such and shows that transcript.
 
 The lead list is newest-first. Inside a lead it is oldest-first: a history only reads forwards.
 
+**The AI Status column carries a lead's last judgement across date ranges** (2026-09-22). When none of
+a lead's calls in the *selected* range were ever assessed — no recording, out of scope, no
+conversation — the column no longer just reads blank. It shows that lead's actual last AI judgement,
+wherever it happened, labelled **"Last judged \<date\>"** so it reads as carried-over, not a verdict on
+today's call. Backed by `acc.followup_qa.is_latest_assessed`, fetched only for the leads on the current
+page (`trcBackfillLastJudgement`, mirroring `trcEnrichVisiblePage`'s page-scoped lazy-load) and cached
+for the rest of the session — a lead genuinely never assessed is cached that way too, so it is never
+re-queried. A lead's own detail page has always shown its full history regardless of range; this only
+brings the same fact forward onto the list.
+
 **Copy Response** puts the lead's stored CRM record on the clipboard. There is no download button
 anywhere on this page, by requirement. **Retry** appears on failed calls and resumes at the phase that
 failed.
