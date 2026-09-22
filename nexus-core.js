@@ -8551,9 +8551,24 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
      padded with dashes. */
   const col4=usbCol4(featureKey);
   const showCol4=!!col4.header, showDetails=!col4.hideDetails;
+  /* "Times used" — how many times this person had used this feature, counting this one. So the row
+     reads as a running tally: 1 on the day they found it, 12 by the time it is part of their week.
+     Named for what the number IS rather than "Use #", which made the reader work out whether it
+     was a total, a position or an id before it told them anything.
+
+     The one column on this table that can never be blank: Details renders from meta, which is
+     captured per feature and is null on 75 of the 157 features actually in use, and a promoted
+     column can only ever be as complete as the key behind it. This is the row's own position in
+     the person's history, so every row has one.
+
+     It is also the question a usability report exists to answer - a column that never leaves 1
+     means people try a feature once and never come back; one that climbs means it is part of
+     somebody's day. Counted over their whole history server-side, not over the rows on screen, so
+     narrowing the date range does not restart it at 1. */
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
     +(showDetails?('<th>'+esc(col4.detailsHeader||'Details')+'</th>'):'')
     +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
+    +'<th title="How many times this person had used this feature, counting this one — across their whole history, not just the dates shown">Times used</th>'
     +'</tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
@@ -8565,9 +8580,16 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
       // hid fields the column then had no room for - "Open a month" lost its month from Details to a
       // column that never showed it, which is how a working row ended up blank at both ends.
       const col=usbCol4Value(e.meta, col4.keys);
+      /* A first use is worth seeing at a glance - it is the row that says somebody found the
+         feature - so it is marked rather than left as a bare 1 among the 40s. */
+      const useN=(e.use_n==null)?'':String(e.use_n);
+      const firstUse=String(e.use_n)==='1';
+      const useLabel=firstUse?'1st time':useN;
       return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td>'
         +(showDetails?('<td>'+usbMetaHtml(e.meta,col.used)+'</td>'):'')
         +(showCol4?('<td style="color:var(--slate)">'+esc(col.text||'—')+'</td>'):'')
+        +'<td style="white-space:nowrap;font-variant-numeric:tabular-nums'+(firstUse?';color:#15803d;font-weight:600':';color:var(--slate)')+'">'
+          +esc(useLabel)+'</td>'
       +'</tr>';
     }).join('')
     +'</tbody></table></div></div>';
@@ -8694,6 +8716,15 @@ const USB_COL4={
      that is the number worth reading: 410 measurable steps, 45.9 hours average, 204 of them over a
      day. A "Step" column was the other candidate and is wrong - Details already prints the step. */
   'tasks.workflow':                               {header:'Waited',  keys:['waited']},
+  /* The payment QR is not a step, so it can never have a "Waited" - it was a dash on both of the
+     feature's events and would be a dash on every future one. It gets no promoted column at all.
+     Details instead carries HOW the payment destination was given - a QR image, or an id reused
+     off the remembered list - which is the one question this feature exists to settle. Named
+     "Given as" because the cell holds one specific thing and the reader should not have to work
+     that out. The file name was the first attempt and was dropped: eighteen of the twenty QR files
+     on record are WhatsApp camera-roll names or a bare UUID. */
+  'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id':
+                                                  {header:null, keys:[], detailsHeader:'Given as'},
   'tasks.workflow.forward_a_step':                {header:'Sent to', keys:['assignee']},
   'tasks.workflow.reject_send_a_step_back':       {header:'Sent to', keys:['assignee']},
   'tasks.workflow.revert_a_forwarded_step':       {header:'Sent to', keys:['assignee']},
@@ -21610,7 +21641,11 @@ const USAGE_MAP={
      a third reason - it both creates and edits an instance from one function, so mapped here every
      edit was counted as "Start a new instance". */
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
-  wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
+  /* wfUpiPick used to be mapped here and is not any more - it logs from accountability.js like the
+     rest of Workflow, so it can name the id that was reused instead of recording a bare click.
+     Mapped by function name it also only ever caught HALF the feature: the QR upload goes through
+     the shared attachment handler, which this map cannot see, so four real uploads last week
+     produced no events while the feature sat reading Inactive. */
   // Transcription
   /* An upload is the one action on this screen with no lead behind it yet - the call does not
      exist until it has been uploaded, so there is nothing to look up. 517 uses, and the column

@@ -5715,8 +5715,20 @@
   window.wfUpiPick=function(el){
     const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
     const inp=wrap.querySelector('.wf-evt-upi');
-    if(inp){ inp.value=el.getAttribute('data-v')||''; wfUpiTyped(inp); }
+    const picked=el.getAttribute('data-v')||'';
+    if(inp){ inp.value=picked; wfUpiTyped(inp); }
     wrap.classList.remove('open');
+    /* Logged here rather than through USAGE_MAP, which fired it by function name and so could only
+       ever record that a click happened - every one of this feature's events carried a null meta
+       and the row was dashes end to end. Same reason every other workflow feature logs from here:
+       the map can see that a function ran, not what it did.
+
+       This is the half that matters most. Reusing a remembered id is the ONLY event that proves
+       the auto-remembering is doing its job; an upload says nothing either way, since the person
+       may simply have re-attached the same QR out of habit. The id itself is deliberately not
+       recorded - it is a payment destination, and this is a usage report. */
+    try{ usageQueue('tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id','create',
+                    {via:'Saved UPI id'}); }catch(_e){}
   };
   function wfUpiFillPanel(wrap){
     const panel=wrap.querySelector('.wf-upi-panel'); if(!panel) return;
@@ -6367,7 +6379,15 @@
        of a Km on a bus journey. */
     const showWhen=f.showWhen?(' data-showwhen="'+esc2(JSON.stringify(f.showWhen))+'" data-hidden="1" style="display:none"'):'';
     const requires=f.requires?(' data-requires="'+esc2(f.requires)+'"'):'';
-    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
+    /* The payment-QR field carries a marker so the upload can be COUNTED as the thing it is.
+       Usability has a feature called "Upload and auto-remember a payment QR / UPI ID", and until
+       now the only thing wired to it was picking an id off the saved dropdown - so the four people
+       who actually uploaded a QR last week produced no events at all, and the feature read as
+       Inactive. The attachment handler is shared by every file field on every workflow, so it needs
+       to be told which one it is looking at; the template already knows (upiScannerMemory), and
+       this carries that answer into the DOM rather than making the handler re-derive it. */
+    const qrMark=f.upiScannerMemory?' data-upiqr="1"':'';
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+qrMark+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
   // One attached file on a multi-file field. The stored path is kept on the chip so the hidden
   // value can be rebuilt from whatever chips are left after a removal.
@@ -6442,6 +6462,29 @@
     try{ wfEvtSweepUploads([]); }catch(_e){}
     try{ closeModal(); }catch(_e){}
   };
+  /* Counting a payment-QR upload as one. Every file field on every workflow comes through
+     wfEvtAttPick, so the row says which field this is (data-upiqr, set from the template's
+     upiScannerMemory flag) and only that one is counted.
+
+     Logged on the UPLOAD ITSELF rather than on the save: the file reaches S3 the moment it is
+     chosen, and a claim abandoned before Create still had a QR uploaded. Counting it at save time
+     would miss exactly the people worth knowing about - the ones who started and gave up.
+
+     WHAT IT RECORDS, AND WHAT IT DELIBERATELY DOES NOT. The obvious thing to capture was the file
+     name, and it is worthless: of twenty distinct QR files filed since June, eighteen are
+     "WhatsApp_Image_2026-08-19_at_16.17.40.jpeg", "IMG-20260827-WA0014.jpg", a bare UUID, or
+     "qr_code.png" - which only says again what the field is called. The UPI id was the other
+     candidate and is a payment destination; a usage-analytics screen is not where those belong.
+
+     What is worth knowing is HOW the destination was given, because that is the one thing this
+     feature exists to settle: does the remembering actually save anybody the trouble, or does
+     everyone re-upload a QR every time? That reads straight off which path ran, so it is always
+     populated and never guessed. */
+  function wfQrUsage(rowEl){
+    if(!rowEl || rowEl.getAttribute('data-upiqr')!=='1') return;
+    try{ usageQueue('tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id','create',
+                    {via:'QR image'}); }catch(_e){}
+  }
   window.wfEvtAttPick=async function(input){
     const wrapM=input.closest('.wf-evt-att-multi');
     if(wrapM){
@@ -6470,6 +6513,7 @@
           const {data,error}=await uploadFileToS3(key,file);
           if(error) throw error;
           wfEvtTrackUpload(data.path);
+          wfQrUsage(wrapM.closest('.wf-evt-row'));
           // Swapped for the real chip, which carries data-path and so counts towards the value.
           if(slot) slot.outerHTML=wfAttChipHtml(data.path);
         }catch(e){
@@ -6498,6 +6542,7 @@
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
       wfEvtTrackUpload(data.path);
+      wfQrUsage(wrap.closest('.wf-evt-row'));
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(file.name)+'">'+esc2(file.name)+'</span> <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
