@@ -8771,6 +8771,26 @@ const USB_COL4={
      been live since 1684217 - yet "view" has never once been recorded on any of them. That is a
      real fault and worth chasing on its own; until it is chased, a header promising something the
      rows have never held is the thing to remove. */
+  /* "Assigned to" is the Accountability default and it is right on the actions that hand a task to
+     somebody - Create, Approve, Comment, Delegate all fill it 100%. These six are the ones it was
+     inherited by and cannot fit, measured rather than guessed: zero assignee on every event any of
+     them has ever produced.
+
+     What each does carry is already in Details, which is why none of them loses anything by
+     dropping the column - Search tasks has the query, the sub-task features have the item, and a
+     narrower table of two honest columns beats a wide one padded with dashes.
+
+     Edit task members/assignees is deliberately NOT in this list. It was, briefly - it is the
+     feature that changes who a task is assigned to, and it recorded only the change ("added Ravi;
+     removed Uma"), so Assigned to was empty on the one feature whose whole subject is assignment.
+     The honest fix there was the capture, not the column: accEditMembersSave now writes the
+     resulting member list as well, so it keeps the module's Assigned to and fills it. The single
+     event from before that change will read as a dash, which is true - nothing recorded it. */
+  'tasks.tasks.search_tasks':                                  {header:null, keys:[]},
+  'tasks.tasks.add_checklist_sub_task_item':                   {header:null, keys:[]},
+  'tasks.tasks.mark_sub_task_complete':                        {header:null, keys:[]},
+  'tasks.tasks.delete_sub_task':                               {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.mark_all_notifications_as_read':                {header:null, keys:[]},
   'tasks.tasks.view_tasks_grouped_by_workflow':                {header:null, keys:[], hideDetails:true},
   'tasks.tasks.view_tasks_grouped_by_person':                  {header:null, keys:[], hideDetails:true},
   'tasks.tasks.view_tasks_grouped_by_tag':                     {header:null, keys:[], hideDetails:true},
