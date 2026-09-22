@@ -15750,10 +15750,23 @@ window.custViewReceipt=async function(id){
   ]);
   if(re||!rcpt){openModal('<div class="modal-head"><h3>Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
     '<div class="modal-body"><div class="card card-pad empty">This receipt could not be loaded.</div></div>','lg');return;}
-  window._custReceiptCache={r:rcpt,items:its||[],unit:unit,contact:(cts&&cts[0])||null};
+  /* receipt_items.invoice_date exists but nothing fills it - the Receipt Register export gives the
+     invoice NUMBER a receipt was applied to, not its date, so the column printed "—" on every line.
+     The date is the document_date of that invoice, which we already hold: all 14,403 allocation
+     lines match an invoice we have, so this resolves for every line rather than most of them. */
+  const items=its||[];
+  const docNos=[...new Set(items.map(i=>i.against_demand_no).filter(Boolean))];
+  const dateByDoc={};
+  if(docNos.length){
+    const {data:invs}=await sb.schema('cust').from('invoices')
+      .select('document_no,document_date').eq('unit_id',unit.id).eq('is_current',true).in('document_no',docNos);
+    (invs||[]).forEach(v=>{dateByDoc[v.document_no]=v.document_date;});
+  }
+  const lines=items.map(i=>Object.assign({},i,{invoice_date:i.invoice_date||dateByDoc[i.against_demand_no]||null}));
+  window._custReceiptCache={r:rcpt,items:lines,unit:unit,contact:(cts&&cts[0])||null};
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
     '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
-      custReceiptDocHtml(rcpt,its||[],unit,(cts&&cts[0])||null,false)+'</div>'+
+      custReceiptDocHtml(rcpt,lines,unit,(cts&&cts[0])||null,false)+'</div>'+
     '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
     '<button class="btn btn-primary" onclick="custPrintReceipt()"><i class="fa-solid fa-download"></i> Download PDF</button></div>','lg');
 };
@@ -15819,8 +15832,20 @@ window.custDownloadSelectedDocs=async function(){
       sb.schema('cust').from('money_receipts').select('*').in('id',rcptIds).eq('unit_id',unit.id).eq('is_current',true),
       sb.schema('cust').from('receipt_items').select('*').in('receipt_id',rcptIds).order('sort_order')
     ]);
+    // Same invoice-date fill as the single-receipt view - a bulk download must not print "—" where
+    // opening the receipt on screen shows a date.
+    const bulkDocNos=[...new Set((rItems||[]).map(i=>i.against_demand_no).filter(Boolean))];
+    const bulkDateByDoc={};
+    if(bulkDocNos.length){
+      const {data:bInvs}=await sb.schema('cust').from('invoices')
+        .select('document_no,document_date').eq('unit_id',unit.id).eq('is_current',true).in('document_no',bulkDocNos);
+      (bInvs||[]).forEach(v=>{bulkDateByDoc[v.document_no]=v.document_date;});
+    }
     const byReceipt={};
-    (rItems||[]).forEach(it=>{(byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(it);});
+    (rItems||[]).forEach(it=>{
+      const line=Object.assign({},it,{invoice_date:it.invoice_date||bulkDateByDoc[it.against_demand_no]||null});
+      (byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(line);
+    });
     const rank={}; rcptIds.forEach((id,i)=>{rank[id]=i;});
     (rcpts||[]).slice().sort((a,b)=>rank[a.id]-rank[b.id]).forEach(r=>{
       pages.push(custReceiptDocHtml(r,byReceipt[r.id]||[],unit,contact,true));
