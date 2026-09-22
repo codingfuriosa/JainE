@@ -1276,7 +1276,7 @@ Deno.serve(async (req: Request) => {
       const followUpId = Number(body.follow_up_id || body.id);
       if (!followUpId) return j({ error: "missing follow_up_id" }, 400);
       const { data: row, error: readErr } = await db.schema("acc").from("transcription_queue")
-        .select("id, status, fail_phase, transcript_id, attempt_count, qa_attempt_count")
+        .select("id, status, fail_phase, transcript_id, attempt_count, qa_attempt_count, snapshot_date")
         .eq("follow_up_id", followUpId).maybeSingle();
       if (readErr) return j({ error: readErr.message }, 500);
       if (!row) return j({ error: "no queued recording for that follow-up" }, 404);
@@ -1289,9 +1289,16 @@ Deno.serve(async (req: Request) => {
       const resumeQa = !body.force_transcribe && (row.fail_phase === "qa" || !!row.transcript_id);
       /* To the BACK of the queue, so a call retried by hand cannot starve the day's own work. */
       const { data: seq } = await db.rpc("next_crm_queue_block", { n: 1 });
+      /* next_claimable_follow_up (20260922110000) only claims leads in TODAY's decision-day response -
+         a lead not in today's CRM feed is never picked up automatically. A hand-retried row must work
+         regardless, so it is stamped into today's scope here rather than made a special case in the
+         claim function: it becomes exactly as eligible as anything the day itself queued. */
+      const { data: latestRow } = await db.schema("acc").from("transcription_queue")
+        .select("snapshot_date").order("snapshot_date", { ascending: false }).limit(1).maybeSingle();
       const { data: updated, error } = await db.schema("acc").from("transcription_queue")
         .update({ status: resumeQa ? "qa_pending" : "pending",
                   queue_seq: Number(seq) || Date.now(),
+                  snapshot_date: latestRow?.snapshot_date || row.snapshot_date,
                   started_at: null, finished_at: null, updated_at: nowIso() })
         .eq("id", row.id).eq("status", row.status).select("id, status").maybeSingle();
       if (error) return j({ error: error.message }, 500);

@@ -377,19 +377,23 @@ category that no card ever shows.
    in flight. **Reclaiming counts as an attempt**, or a recording whose model call always overruns the
    worker limit would be reclaimed and re-billed for ever.
 3. **Refuses to start** if anything is genuinely in flight.
-4. Claims a row via `next_claimable_follow_up` — **newest `snapshot_date` first**, then a lead already
-   mid-way (a completed/failed recording of its own) over a fresh lead, then lowest `queue_seq`. That
-   predicate *is* the lock, so two overlapping ticks cannot both win and a recording is never paid for
-   twice.
+4. Claims a row via `next_claimable_follow_up` — restricted to leads in **today's decision-day CRM
+   response**, a lead already mid-way (a completed/failed recording of its own) over a fresh lead, then
+   lowest `queue_seq`. That predicate *is* the lock, so two overlapping ticks cannot both win and a
+   recording is never paid for twice.
 5. Advances it one phase, then stops.
 
 Nothing lives in memory between invocations: the queue *is* the table.
 
-**A new day's recordings never wait on old backlog** (2026-09-22). Sorting by `snapshot_date desc`
-first means a lead stuck retrying an old day's recording — a QA call failing on a billing or rate-limit
-error, say — can no longer win the claim over every later day's leads the way the plain lead-affinity
-rule (2026-09-19) allowed. Old backlog is never dropped or skipped; it simply drains only once nothing
-newer is waiting, which is the point: new recordings must be timely, old backlog does not need to be.
+**Automatic processing never scans the whole backlog — only today's decision-day leads** (2026-09-22,
+sharpened from the 2026-09-22 "newest day first" rule it replaces). `next_claimable_follow_up` restricts
+every automatic claim to `lead_id`s present among rows whose `snapshot_date` is the latest one in the
+queue - by construction, exactly the leads `crm_build_queue` queued today (their own call, and any of
+their own previously-unqueued history, both tagged with today's `snapshot_date`). A lead not in today's
+CRM response - Lead B, last touched days ago - is never picked up automatically no matter how idle the
+worker is, "waiting" or "failed" or not; only a human clicking **Retry** revives it, and Retry stamps
+the row's `snapshot_date` forward to today's so the hand-retried call is guaranteed to actually run
+rather than sit re-flagged and still out of scope.
 
 ---
 
