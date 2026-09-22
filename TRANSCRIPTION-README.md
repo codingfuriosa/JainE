@@ -377,11 +377,19 @@ category that no card ever shows.
    in flight. **Reclaiming counts as an attempt**, or a recording whose model call always overruns the
    worker limit would be reclaimed and re-billed for ever.
 3. **Refuses to start** if anything is genuinely in flight.
-4. Claims the lowest `queue_seq` row with a status predicate — that predicate *is* the lock, so two
-   overlapping ticks cannot both win and a recording is never paid for twice.
+4. Claims a row via `next_claimable_follow_up` — **newest `snapshot_date` first**, then a lead already
+   mid-way (a completed/failed recording of its own) over a fresh lead, then lowest `queue_seq`. That
+   predicate *is* the lock, so two overlapping ticks cannot both win and a recording is never paid for
+   twice.
 5. Advances it one phase, then stops.
 
 Nothing lives in memory between invocations: the queue *is* the table.
+
+**A new day's recordings never wait on old backlog** (2026-09-22). Sorting by `snapshot_date desc`
+first means a lead stuck retrying an old day's recording — a QA call failing on a billing or rate-limit
+error, say — can no longer win the claim over every later day's leads the way the plain lead-affinity
+rule (2026-09-19) allowed. Old backlog is never dropped or skipped; it simply drains only once nothing
+newer is waiting, which is the point: new recordings must be timely, old backlog does not need to be.
 
 ---
 
