@@ -15266,8 +15266,12 @@ async function custReconGate(unitId){
     const {data,error}=await sb.schema('cust').from('reconciliation')
       .select('status').eq('unit_id',unitId).maybeSingle();
     if(error||!data) return {ok:false,status:'unverified'};
-    // no_activity: nothing billed, received or reversed, so there is no figure to get wrong.
-    return {ok:data.status==='matched'||data.status==='no_activity',status:data.status};
+    /* The six Farvision reports are the source of truth, so the question is not "do our sums agree
+       with Farvision" but "do we HAVE Farvision's figures for this unit". A mismatch means our
+       arithmetic disagreed with Farvision's bookkeeping - Farvision wins, and the customer is shown
+       its numbers. Only 'unchecked' - no Outstanding snapshot at all - leaves us with nothing
+       authoritative to show. ('no_activity' has no snapshot either, but also nothing to state.) */
+    return {ok:data.status!=='unchecked',status:data.status};
   }catch(e){ return {ok:false,status:'unverified'}; }
 }
 const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-start;background:#fffbeb;'+
@@ -15310,7 +15314,11 @@ async function custTabOverview(data,unit){
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
   const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
   const propertyValue=snap?Number(snap.total_consideration||0):totalCostWithTax;
-  const totalReceivedFinal=useCostSheet?csiReceived:netReceived;
+  /* Farvision's own received figure (Sales Details -> cost_sheet_items.received_amount) in
+     preference to summing our receipt rows. Every other KPI here already reads from the Outstanding
+     snapshot, and mixing one locally-computed number in among them is what let "Paid to date" and
+     "Remaining" drift away from "Demand due" on the same card row. */
+  const totalReceivedFinal=costItems.length?csiReceived:netReceived;
   const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalBilled-netReceived));
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
   const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
@@ -15350,11 +15358,12 @@ async function custTabOverview(data,unit){
   });
   receiptRows.forEach(r=>{entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-Number(r.total_amount||0)});});
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let bal=0;
-  const withBalance=entries.map(e=>{bal+=e.amount;return Object.assign({},e,{balance:bal});});
-  const recent=withBalance.slice(-5).reverse();
+  // No running balance: the KPIs above are Farvision's position, and this list's own tally would be
+  // a second answer to the same question. It showed -51,62,707 on one unit whose Demand due, taken
+  // from Farvision, was nothing of the sort.
+  const recent=entries.slice(-5).reverse();
   const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
-    esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—',custInr(e.balance)]);
+    esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—']);
 
   // Until a real Invoice/Receipt Register import exists for this project, the cost sheet from
   // Sales Details is the only per-charge breakdown available - shown as its own section rather
@@ -15414,7 +15423,7 @@ async function custTabOverview(data,unit){
   const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
-    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
+    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
@@ -15465,11 +15474,6 @@ async function custTabLedger(unit){
     sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
   ]);
   const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
-  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
-  const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
-  const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
-  const netReceived=grossReceipts-grossReversals;
-  const balance=totalBilled-netReceived;
   const entries=[];
   invoices.forEach(inv=>{
     // Farvision's real Applicant Ledger shows one row per (Document No x Schedule) -
@@ -15503,12 +15507,6 @@ async function custTabLedger(unit){
     entries.push({date:rv.date,type:'CQRV',ref:rv.ref,desc:'Cheque return'+(rv.instrument?' · '+rv.instrument:''),debit:rv.total,credit:0});
   });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let runBal=0;
-  function balCell(b){
-    if(b>0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>';
-    if(b<0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>';
-    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
-  }
   const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
   const seenInvoice={};
   const pick=(kind,id)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'" onchange="custDocPickChanged()">';
@@ -15522,43 +15520,46 @@ async function custTabLedger(unit){
     }
     return esc(e.ref||'—');
   };
-  const rows=entries.map(e=>{runBal+=e.debit-e.credit;
-    return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
+  /* A LIST OF WHAT HAPPENED, NOT A POSITION.
+     The running balance and the billed/received/balance summary used to be computed here from our
+     own demand and receipt rows. They are gone on purpose: Farvision is the source of truth for
+     where an account stands, the Statement reads that straight from the Outstanding snapshot, and a
+     second figure derived a different way can only ever agree by luck. It disagreed for 21 units.
+     What this screen is for is the record of every demand raised and every payment taken, which the
+     registers state factually - so that is all it shows. The Debit and Credit totals are simply the
+     sum of the rows above them and claim nothing about what is owed. */
+  const rows=entries.map(e=>
+    [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—']);
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
-  const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
+  const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>']:null;
   /* The whole ledger is withheld when the unit does not reconcile, not just its balance column: a
      statement missing some of its receipts still reads as a complete account and under-credits the
      customer. Checked before the print globals are set, so custPrintLedger - which refuses without
      them - cannot produce a PDF of figures the page itself is withholding. */
   const gate=await custReconGate(unit.id);
   if(!gate.ok){ window._custLedgerUnit=null; window._custLedgerEntries=null; return CUST_FIGURES_NOTICE; }
-  window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
-  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
+  window._custLedgerUnit=unit; window._custLedgerEntries=entries;
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
-    '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
-    '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
-    '<span><b>Balance:</b> '+balLabel+'</span>'+
+    '<span style="color:var(--slate)">Every demand and payment on this unit. Your current balance is on the Statement.</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
     '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
-  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
+  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
-  const unit=window._custLedgerUnit,entries=window._custLedgerEntries,totalBilled=window._custLedgerTotalBilled||0,netReceived=window._custLedgerNetReceived||0;
+  const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
   if(!unit){toast('Nothing to print yet','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to print','err');return;}
-  let runBal=0;
-  const balance=totalBilled-netReceived;
-  function balText(b){return b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0';}
+  // No running balance or billed/received summary here either - see the note in custTabLedger. A
+  // printout outlives the page, so it is the last place a second, competing balance should survive.
   const totalDebit=(entries||[]).reduce((s,e)=>s+(e.debit||0),0);
   const totalCredit=(entries||[]).reduce((s,e)=>s+(e.credit||0),0);
-  const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
-    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
-  }).join('');
-  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'0.00';
+  const trs=(entries||[]).map(e=>
+    '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td></tr>'
+  ).join('');
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
@@ -15571,10 +15572,10 @@ window.custPrintLedger=function(){
     '</style></head><body>'+
     '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
-    '<div class="summary"><b>Total billed:</b> '+custInr(totalBilled)+' &nbsp;|&nbsp; <b>Net received:</b> '+custInr(netReceived)+' &nbsp;|&nbsp; <b>Balance:</b> '+balLabel+'</div>'+
-    '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
+    '<div class="summary">Every demand raised and payment received on this unit. For the current balance, see the Statement.</div>'+
+    '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th></tr></thead>'+
     '<tbody>'+trs+'</tbody>'+
-    '<tfoot><tr><td colspan="4">Periodic Ledger Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr></tfoot>'+
+    '<tfoot><tr><td colspan="4">Total of the entries above</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td></tr></tfoot>'+
     '</table></body></html>';
   try{w.document.open();w.document.write(html);w.document.close();}
   catch(_e){toast('Could not build the printout','err');return;}
