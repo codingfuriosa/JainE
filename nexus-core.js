@@ -16120,24 +16120,20 @@ window.custPrintInvoice=function(){
 
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:costItemRows},{data:invRows},{data:uploadedDocs},{data:rcptRows},{data:revRows}]=await Promise.all([
+  const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false}),
-    sb.schema('cust').from('money_receipts').select('total_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true)
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false})
   ]);
   const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
-  const receipts=rcptRows||[], reversals=revRows||[];
   if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
 
   let out='';
   if(items.length){
     // "Cost Summary" card - mirrors the Basic/Extra/Tax breakup and Due/Received/Balance/
-    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout,
-    // built entirely from our own cost_sheet_items + money_receipts + receipt_reversals (no
-    // guessed basic/tax split on the actuals - only the static per-component agreement figures
-    // carry that split reliably).
+    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout, taken
+    // from cost_sheet_items alone (no guessed basic/tax split on the actuals - only the static
+    // per-component agreement figures carry that split reliably).
     const unitCostItem=items.find(i=>/unit cost/i.test(i.component||''));
     const basicCost=Number(unitCostItem?.amount||0);
     // The standard, recurring per-unit charge types that make up every Dream project's cost
@@ -16150,12 +16146,14 @@ async function custTabCostSheet(data,unit){
     const totalTax=items.reduce((s,i)=>s+Number(i.tax_amount||0),0);
     const totalWithoutTax=basicCost+extraCharges+adhocCharges;
     const totalWithTax=totalWithoutTax+totalTax;
+    /* Every figure on this card is Farvision's own, per component, rather than our sums of
+       money_receipts and receipt_reversals. bill_amount - received_amount = balance_amount holds on
+       all 1,180 current rows, so this card now agrees with the Statement by construction instead of
+       offering a third answer to what the customer owes. */
     const totalBilled=items.reduce((s,i)=>s+Number(i.bill_amount||0),0);
     const onAccount=items.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-    const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
-    const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
-    const netReceived=grossReceipts-grossReversals;
-    const balance=totalBilled-netReceived;
+    const netReceived=items.reduce((s,i)=>s+Number(i.received_amount||0),0);
+    const balance=items.reduce((s,i)=>s+Number(i.balance_amount||0),0);
     const futureDue=Math.max(0,totalWithTax-netReceived);
     const duePct=totalWithTax?Math.round(totalBilled/totalWithTax*1000)/10:0;
     const recdPct=totalWithTax?Math.round(netReceived/totalWithTax*1000)/10:0;
@@ -16163,7 +16161,7 @@ async function custTabCostSheet(data,unit){
     const stat=(label,val,sub,color)=>'<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">'+label+'</div>'+
       '<div style="font-size:19px;font-weight:700;margin-top:3px'+(color?';color:'+color:'')+'">'+val+'</div>'+
       (sub?'<div style="font-size:11.5px;color:var(--slate);margin-top:1px">'+sub+'</div>':'')+'</div>';
-    out+='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
+    const costSummary='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
       '<div class="sec-title" style="margin:0 0 14px">Cost Summary</div>'+
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:16px">'+
         stat('Due as on '+fmtDate(new Date()),custInr(totalBilled),duePct+'% of agreement value')+
@@ -16179,6 +16177,11 @@ async function custTabCostSheet(data,unit){
         '<span><b>Total (excl. tax):</b> '+custInr(totalWithoutTax)+'</span>'+
         '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
       '</div></div>';
+    /* Same gate as the Statement. Without this a withheld customer could read their Due/Received/
+       Balance here instead - the Cost Breakup below stays either way, being the agreement's own
+       cost estimate rather than a payment position. */
+    const gate=await custReconGate(unit.id);
+    out+=gate.ok?costSummary:CUST_FIGURES_NOTICE;
 
     // Cost Breakup below shows the agreement's cost estimate itself (Amount/GST/Gross per
     // charge, grouped like Farvision's own "Estimated Offer Price" sheet into Unit Charges vs
