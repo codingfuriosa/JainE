@@ -15366,7 +15366,11 @@ async function custTabOverview(data,unit){
     '<div class="sec-title" style="margin:22px 0 8px">Charges &amp; payments</div>'+
     mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
 
-  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
+  // Only arm the printer when the figures are safe to show. custPrintStatement already refuses
+  // without these, so an unreconciled unit cannot be printed even if the button is reached some
+  // other way - a PDF is the one copy that outlives the page and its notice.
+  if(gate.ok){ window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c}; }
+  else { window._custStatementUnit=null; window._custStatementSnap=null; }
   const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
   const basicAmt=Number(unitCostItem?.amount||0);
   const sba=Number(unit.super_built_up_area_sqft||0);
@@ -15402,8 +15406,12 @@ async function custTabOverview(data,unit){
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
   // The due banner is a call to pay a specific amount - it must not survive a failed reconciliation.
-  return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
-    myUnitSection+
+  /* Everything money-related goes together when the unit does not reconcile. Masking the KPIs alone
+     left the transaction table showing a running balance, the cost sheet showing billed/received per
+     component, and - worst - the Print button still building its PDF from the unmasked figures, which
+     carries them out of the portal entirely. The unit details and profile stay: they are contractual,
+     not a payment position. */
+  const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
@@ -15411,7 +15419,10 @@ async function custTabOverview(data,unit){
     costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
-    '</div>'+
+    '</div>';
+  return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
+    myUnitSection+
+    (gate.ok?moneySections:'')+
     profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
@@ -15516,6 +15527,12 @@ async function custTabLedger(unit){
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
+  /* The whole ledger is withheld when the unit does not reconcile, not just its balance column: a
+     statement missing some of its receipts still reads as a complete account and under-credits the
+     customer. Checked before the print globals are set, so custPrintLedger - which refuses without
+     them - cannot produce a PDF of figures the page itself is withholding. */
+  const gate=await custReconGate(unit.id);
+  if(!gate.ok){ window._custLedgerUnit=null; window._custLedgerEntries=null; return CUST_FIGURES_NOTICE; }
   window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
   const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
@@ -15526,11 +15543,6 @@ async function custTabLedger(unit){
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
     '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
-  /* The whole ledger is withheld, not just its balance column. A statement missing some of its
-     receipts still reads as a complete account and under-credits the customer, which is worse than
-     showing nothing - and the printable PDF would carry that error out of the portal entirely. */
-  const gate=await custReconGate(unit.id);
-  if(!gate.ok) return CUST_FIGURES_NOTICE;
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
