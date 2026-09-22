@@ -15253,6 +15253,27 @@ const CUST_INVOICE_CANCELLED='Cancel';
 // "next demand due in N days" banner, and the 5 most recent transactions - with the exhaustive
 // list left to the separate Ledger tab. Pulls entirely from data already imported by Sales
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
+/* Does Farvision agree with what we are about to show this customer?
+   cust.reconciliation compares the two per unit. Anything other than a confirmed match - including
+   a unit Farvision sent no snapshot for, which is 40 of them - means nobody has verified the figure,
+   so the portal says it is being updated rather than showing a number on trust.
+
+   FAILS CLOSED on purpose. A query that errors, a row RLS hides, an unreadable view: all of them
+   hide the figures rather than show them. Someone seeing "being updated" when their account is
+   actually fine is an annoyance; someone paying against a wrong balance is not. */
+async function custReconGate(unitId){
+  try{
+    const {data,error}=await sb.schema('cust').from('reconciliation')
+      .select('status').eq('unit_id',unitId).maybeSingle();
+    if(error||!data) return {ok:false,status:'unverified'};
+    return {ok:data.status==='matched',status:data.status};
+  }catch(e){ return {ok:false,status:'unverified'}; }
+}
+const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-start;background:#fffbeb;'+
+  'border:1px solid #f0dfa8;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;color:#92400e">'+
+  '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
+  'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
+  'Please contact us before making any payment.</div></div>';
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
@@ -15309,12 +15330,16 @@ async function custTabOverview(data,unit){
     </div>`;
   }
 
+  const gate=await custReconGate(unit.id);
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
     ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
     ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
     ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
   ];
+  // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
+  // no subset of them that is safe to keep showing.
+  if(!gate.ok) kpis.forEach(k=>{k[1]='—';k[2]='being updated';k[3]=undefined;});
 
   const entries=[];
   invoices.forEach(inv=>{
@@ -15375,7 +15400,8 @@ async function custTabOverview(data,unit){
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
-  return dueBanner+mKpis(kpis)+
+  // The due banner is a call to pay a specific amount - it must not survive a failed reconciliation.
+  return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
     myUnitSection+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
     '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
@@ -15499,6 +15525,11 @@ async function custTabLedger(unit){
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
     '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
+  /* The whole ledger is withheld, not just its balance column. A statement missing some of its
+     receipts still reads as a complete account and under-credits the customer, which is worse than
+     showing nothing - and the printable PDF would carry that error out of the portal entirely. */
+  const gate=await custReconGate(unit.id);
+  if(!gate.ok) return CUST_FIGURES_NOTICE;
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
