@@ -14275,6 +14275,20 @@ window.cpaImportConfirm=async function(btn){
     navTo('custportal_admin/2/history');
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
 };
+/* raw_rows is an audit copy of what was parsed. It is INSPECTION ONLY - undo_import_batch does not
+   read it, it reverts via import_batch_id on the data tables - so capping it loses no ability to
+   undo and changes no imported figure.
+
+   Why it needs a cap: a Receipt Register carries ~14k matched rows, which is ~6MB of JSON in the
+   single INSERT that opens every import. That sat just under the 8s statement_timeout on the
+   `authenticated` role until Dream Ananta was added; the extra matched rows tipped it over and the
+   import began failing outright with "canceling statement due to statement timeout" - and it would
+   have failed for every project added after that too.
+
+   Above the cap the column is left empty rather than partially filled: a truncated array reads like
+   a complete one and would be worse than nothing for anyone auditing a figure. The .xlsx itself is
+   kept in the farvision-imports bucket and is a better record than a JSON copy of it. */
+const CPA_RAW_ROWS_MAX=2000;
 async function cpaImportConfirmXlsx(st){
   // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
   // one file can span several projects at once. project_names records the set it actually touched.
@@ -14283,7 +14297,7 @@ async function cpaImportConfirmXlsx(st){
     project_names:[...new Set(st.matched.map(m=>m.project&&m.project.name).filter(Boolean))].sort(),
     row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
     unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
-    raw_rows:st.matched.map(m=>m.rec)}).select('id').single();
+    raw_rows:st.matched.length<=CPA_RAW_ROWS_MAX?st.matched.map(m=>m.rec):[]}).select('id').single();
   if(beErr)throw beErr;
   const batchId=batch.id;
 
@@ -14358,13 +14372,6 @@ async function cpaImportConfirmXlsx(st){
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('invoice_items').insert(itemRows);if(error)throw error;}
     }
-    // Also write to old table for backwards compatibility
-    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,demand_no:m.rec.docNo,
-      milestone:m.rec.schedule,revenue_head:m.rec.revenueHead,demand_date:m.rec.docDate,due_date:m.rec.dueDate,
-      amount:m.rec.amount,gst_amount:m.rec.tax,total_amount:m.rec.netAmount,status:m.rec.status,import_batch_id:batchId}));
-    for(let i=0;i<oldRows.length;i+=500){
-      await sb.schema('cust').from('farvision_demand').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,demand_no'});
-    }
   }else if(st.type==='receipt_register'){
     // Write to NEW tables: cust.money_receipts (headers) + cust.receipt_items (lines)
     // Group by receipt_no → one receipt header per receipt, multiple item lines
@@ -14394,13 +14401,6 @@ async function cpaImportConfirmXlsx(st){
         revenue_head:r.revenueHead,amount:r.amount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
-    }
-    // Also write to old table
-    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,receipt_no:m.rec.receiptNo,
-      receipt_date:m.rec.receiptDate,amount:m.rec.amount,mode:m.rec.mode,against_demand_no:m.rec.invoiceNo,
-      revenue_head:m.rec.revenueHead,import_batch_id:batchId}));
-    for(let i=0;i<oldRows.length;i+=500){
-      await sb.schema('cust').from('farvision_receipts').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,receipt_no,against_demand_no'});
     }
   }else if(st.type==='receipt_reversal'){
     for(const m of st.matched){
