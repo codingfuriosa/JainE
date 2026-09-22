@@ -72,7 +72,9 @@ async function labelMsg(id: string, labelId: string) {
 
 async function findEmails(): Promise<string[]> {
   const q = `from:${GMAIL_SENDER} has:attachment filename:xlsx -label:${IMPORT_LABEL}`;
-  const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=5`);
+  // 25, not 5: six reports arrive each morning and a backlog day can carry more. Anything beyond
+  // this page is simply left unlabelled and picked up next run.
+  const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=25`);
   return (res.messages || []).map((m: any) => m.id);
 }
 
@@ -105,55 +107,63 @@ async function processEmails(db: any) {
   // Dedup: skip emails already in the queue
   const { data: existingQueue } = await db.schema("cust").from("import_queue").select("gmail_message_id").not("gmail_message_id", "is", null);
   const alreadyQueued = new Set((existingQueue || []).map((r: any) => r.gmail_message_id));
-  const newIds = ids.filter((id: string) => !alreadyQueued.has(id));
-  log.push(`${newIds.length} new email(s) after dedup`);
-  if (!newIds.length) {
-    // All already queued — just label them so they stop appearing
-    const labelId = await getOrCreateLabel();
-    for (const id of ids) { try { await labelMsg(id, labelId); } catch {} }
-    return { processed: 0, queued: 0, log };
+  const labelId = await getOrCreateLabel();
+
+  // Already queued means the work is done - labelling those is safe and stops them being re-found.
+  for (const id of ids.filter((i: string) => alreadyQueued.has(i))) {
+    try { await labelMsg(id, labelId); } catch {}
   }
 
-  // Only queue the NEWEST email — older versions of the same report are stale.
-  // Gmail returns newest first, so take only the first new one.
-  const latestId = newIds[0];
-  log.push(`Processing only newest email: ${latestId}`);
+  // EVERY new email, not just the newest. This used to take newIds[0] and then label all of them,
+  // which marked emails as imported that were never downloaded - and since the search excludes the
+  // label, those reports became permanently invisible rather than merely delayed.
+  //
+  // Oldest first (Gmail returns newest first) so that when one report type arrives twice in a
+  // batch, the newest is processed last and is the one the auto-dismiss below leaves pending.
+  const newIds = ids.filter((id: string) => !alreadyQueued.has(id)).reverse();
+  log.push(`${newIds.length} new email(s) after dedup`);
+  if (!newIds.length) return { processed: 0, queued: 0, log };
 
   await db.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {});
-  const labelId = await getOrCreateLabel();
-  let queued = 0;
+  let queued = 0, processed = 0;
 
-  try {
-    const meta = await emailMeta(latestId);
-    const parts = await xlsxParts(latestId);
-    log.push(`"${meta.subject}" — ${parts.length} xlsx`);
-    for (const p of parts) {
-      try {
-        const data = await downloadAtt(latestId, p.attId);
-        const ts = new Date().toISOString().replace(/[:.]/g, "-");
-        const path = `${ts}/${p.name}`;
-        const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-        if (ue) { log.push(`Upload fail: ${ue.message}`); return { processed: 0, queued, log }; }
-        // Auto-dismiss older pending files of the same report type
-        // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
-        const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
-        if (baseType) {
-          const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
-          if (older && older.length) {
-            await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
-            log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
+  for (const msgId of newIds) {
+    try {
+      const meta = await emailMeta(msgId);
+      const parts = await xlsxParts(msgId);
+      log.push(`"${meta.subject}" — ${parts.length} xlsx`);
+      let allOk = parts.length > 0;
+      for (const p of parts) {
+        try {
+          const data = await downloadAtt(msgId, p.attId);
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const path = `${ts}/${p.name}`;
+          const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+          if (ue) { log.push(`Upload fail ${p.name}: ${ue.message}`); allOk = false; continue; }
+          // Auto-dismiss older pending files of the same report type
+          // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
+          const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
+          if (baseType) {
+            const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
+            if (older && older.length) {
+              await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
+              log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
+            }
           }
-        }
-        await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: latestId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
-        log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
-        queued++;
-      } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); }
-    }
-    // Label ALL emails (including older ones) so they don't reappear
-    for (const id of ids) { try { await labelMsg(id, labelId); } catch {} }
-  } catch (e) { log.push(`Error: ${(e as Error).message}`); }
+          const { error: ie } = await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: msgId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
+          if (ie) { log.push(`Queue fail ${p.name}: ${ie.message}`); allOk = false; continue; }
+          log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
+          queued++;
+        } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); allOk = false; }
+      }
+      // Label ONLY once this email's attachments are safely stored and queued. The label is what
+      // removes an email from every future search, so it must never run ahead of the work.
+      if (allOk) { try { await labelMsg(msgId, labelId); processed++; } catch (e) { log.push(`Label fail ${msgId}: ${(e as Error).message}`); } }
+      else log.push(`Left unlabelled for retry: ${msgId}`);
+    } catch (e) { log.push(`Error on ${msgId}: ${(e as Error).message}`); }
+  }
 
-  return { processed: 1, queued, log };
+  return { processed, queued, log };
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
