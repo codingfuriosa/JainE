@@ -67,8 +67,14 @@ const MAX_ATTEMPTS = Number(Deno.env.get("MAX_ATTEMPTS") || 3);
 const RETRY_AFTER_MINUTES = Number(Deno.env.get("RETRY_AFTER_MINUTES") || 10);
 const STALE_MINUTES = 15;
 
-const MAX_STEPS_PER_TICK = Number(Deno.env.get("MAX_STEPS_PER_TICK") || 2);
-const SOFT_BUDGET_MS = Number(Deno.env.get("SOFT_BUDGET_MS") || 60000);
+/* Raised from 2/60000 (2026-09-22) to drain the queue faster on heavy days. Still one model call at a
+   time, in sequence, inside the same invocation - not parallelism - so this changes throughput, never
+   what gets transcribed, what a model is asked, or how its reply is judged. The cron job's own
+   timeout_milliseconds is 300000 (20260831090100_crm_snapshot_qa_schedule.sql); SOFT_BUDGET_MS stops
+   starting new steps well before that so the in-flight one always has room to finish and get recorded,
+   rather than being cut off and reclaimed as a stale invocation. */
+const MAX_STEPS_PER_TICK = Number(Deno.env.get("MAX_STEPS_PER_TICK") || 8);
+const SOFT_BUDGET_MS = Number(Deno.env.get("SOFT_BUDGET_MS") || 240000);
 
 const IN_FLIGHT = ["transcribing", "qa_running"];
 const CLAIMABLE = ["pending", "qa_pending"];

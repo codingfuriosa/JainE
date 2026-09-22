@@ -98,7 +98,8 @@ applying them to a database that already has the pipeline changes nothing.
 | `LOST_CALL_FEED` | the RealtyBucket URL | |
 | `MIN_DURATION_SECONDS` | `60` | A call at or above this is transcribed; strictly under it is skipped - a 60-second call transcribes, 59 seconds does not. Checked against the CRM's own duration before any audio is fetched, so a skipped call never even reaches a model - it lands as `non_transcribable`, with the recording_url still stored and shown on the row. `0` sends everything. |
 | `MAX_ATTEMPTS` | `3` | Retries per phase. |
-| `MAX_STEPS_PER_TICK` | `2` | Phases advanced per cron tick. Still strictly one recording at a time. |
+| `MAX_STEPS_PER_TICK` | `8` | Phases advanced per cron tick, one after another. Still strictly one recording at a time - raised (2026-09-22) from `2` to drain heavy days faster; a cron tick still starts nothing new past `SOFT_BUDGET_MS`. |
+| `SOFT_BUDGET_MS` | `240000` | How long into a tick's 300000ms budget ([schedule](supabase/migrations/20260831090100_crm_snapshot_qa_schedule.sql)) new steps may still start. Raised alongside `MAX_STEPS_PER_TICK` so the last step has room to finish instead of being cut off and reclaimed. |
 
 **3. Deploy the function.**
 
