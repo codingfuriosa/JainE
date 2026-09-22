@@ -377,11 +377,23 @@ category that no card ever shows.
    in flight. **Reclaiming counts as an attempt**, or a recording whose model call always overruns the
    worker limit would be reclaimed and re-billed for ever.
 3. **Refuses to start** if anything is genuinely in flight.
-4. Claims the lowest `queue_seq` row with a status predicate — that predicate *is* the lock, so two
-   overlapping ticks cannot both win and a recording is never paid for twice.
+4. Claims a row via `next_claimable_follow_up` — restricted to leads in **today's decision-day CRM
+   response**, a lead already mid-way (a completed/failed recording of its own) over a fresh lead, then
+   lowest `queue_seq`. That predicate *is* the lock, so two overlapping ticks cannot both win and a
+   recording is never paid for twice.
 5. Advances it one phase, then stops.
 
 Nothing lives in memory between invocations: the queue *is* the table.
+
+**Automatic processing never scans the whole backlog — only today's decision-day leads** (2026-09-22,
+sharpened from the 2026-09-22 "newest day first" rule it replaces). `next_claimable_follow_up` restricts
+every automatic claim to `lead_id`s present among rows whose `snapshot_date` is the latest one in the
+queue - by construction, exactly the leads `crm_build_queue` queued today (their own call, and any of
+their own previously-unqueued history, both tagged with today's `snapshot_date`). A lead not in today's
+CRM response - Lead B, last touched days ago - is never picked up automatically no matter how idle the
+worker is, "waiting" or "failed" or not; only a human clicking **Retry** revives it, and Retry stamps
+the row's `snapshot_date` forward to today's so the hand-retried call is guaranteed to actually run
+rather than sit re-flagged and still out of scope.
 
 ---
 
@@ -405,6 +417,16 @@ and speaker labels, and the six-point audit. A call that reused an existing tran
 such and shows that transcript.
 
 The lead list is newest-first. Inside a lead it is oldest-first: a history only reads forwards.
+
+**The AI Status column carries a lead's last judgement across date ranges** (2026-09-22). When none of
+a lead's calls in the *selected* range were ever assessed — no recording, out of scope, no
+conversation — the column no longer just reads blank. It shows that lead's actual last AI judgement,
+wherever it happened, labelled **"Last judged \<date\>"** so it reads as carried-over, not a verdict on
+today's call. Backed by `acc.followup_qa.is_latest_assessed`, fetched only for the leads on the current
+page (`trcBackfillLastJudgement`, mirroring `trcEnrichVisiblePage`'s page-scoped lazy-load) and cached
+for the rest of the session — a lead genuinely never assessed is cached that way too, so it is never
+re-queried. A lead's own detail page has always shown its full history regardless of range; this only
+brings the same fact forward onto the list.
 
 **Copy Response** puts the lead's stored CRM record on the clipboard. There is no download button
 anywhere on this page, by requirement. **Retry** appears on failed calls and resumes at the phase that
