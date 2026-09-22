@@ -15313,7 +15313,13 @@ async function custTabOverview(data,unit){
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
   const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
-  const propertyValue=snap?Number(snap.total_consideration||0):totalCostWithTax;
+  /* Farvision's total_consideration is the basic amount EXCLUDING GST - for 6N it is 92,72,740
+     against a cost sheet grand total of 98,09,442, the difference being exactly its 5,36,702 of tax.
+     Using it here put an ex-tax value beside a tax-inclusive "Paid to date", so Remaining understated
+     what the customer still owes by the whole tax component, and it disagreed with the Cost Sheet
+     tab's Grand Total. The cost sheet's own tax-inclusive total is the figure that compares like with
+     like, and is equally Farvision's. */
+  const propertyValue=costItems.length?totalCostWithTax:Number((snap&&snap.total_consideration)||0);
   /* Farvision's own received figure (Sales Details -> cost_sheet_items.received_amount) in
      preference to summing our receipt rows. Every other KPI here already reads from the Outstanding
      snapshot, and mixing one locally-computed number in among them is what let "Paid to date" and
@@ -15520,19 +15526,22 @@ async function custTabLedger(unit){
     }
     return esc(e.ref||'—');
   };
-  /* A LIST OF WHAT HAPPENED, NOT A POSITION.
-     The running balance and the billed/received/balance summary used to be computed here from our
-     own demand and receipt rows. They are gone on purpose: Farvision is the source of truth for
-     where an account stands, the Statement reads that straight from the Outstanding snapshot, and a
-     second figure derived a different way can only ever agree by luck. It disagreed for 21 units.
-     What this screen is for is the record of every demand raised and every payment taken, which the
-     registers state factually - so that is all it shows. The Debit and Credit totals are simply the
-     sum of the rows above them and claim nothing about what is owed. */
-  const rows=entries.map(e=>
-    [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—']);
+  /* Running balance over the rows listed, exactly as Farvision's own Applicant Ledger prints it -
+     each demand adds, each receipt subtracts, and the closing figure is where the account stands on
+     this list. What is NOT rebuilt here is the old "Total billed / Net received / Balance" summary,
+     which mixed cost_sheet totals with our receipt sums and so answered a different question from
+     the Statement's Farvision-sourced Demand due. */
+  let runBal=0;
+  const balCell=b=>b>0
+    ?'<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>'
+    :b<0
+    ?'<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>'
+    :'<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
+  const rows=entries.map(e=>{runBal+=e.debit-e.credit;
+    return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
-  const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>']:null;
+  const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
   /* The whole ledger is withheld when the unit does not reconcile, not just its balance column: a
      statement missing some of its receipts still reads as a complete account and under-credits the
      customer. Checked before the print globals are set, so custPrintLedger - which refuses without
@@ -15541,25 +15550,27 @@ async function custTabLedger(unit){
   if(!gate.ok){ window._custLedgerUnit=null; window._custLedgerEntries=null; return CUST_FIGURES_NOTICE; }
   window._custLedgerUnit=unit; window._custLedgerEntries=entries;
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
-    '<span style="color:var(--slate)">Every demand and payment on this unit. Your current balance is on the Statement.</span>'+
+    '<span style="color:var(--slate)">Every demand raised and payment received on this unit, in date order.</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
     '<button class="btn" onclick="custPrintLedger()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></span></div>';
-  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit'],totalRow?rows.concat([totalRow]):rows);
+  return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
   const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
   if(!unit){toast('Nothing to print yet','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to print','err');return;}
-  // No running balance or billed/received summary here either - see the note in custTabLedger. A
-  // printout outlives the page, so it is the last place a second, competing balance should survive.
+  // D / C suffixes rather than the screen's Due/Adv tags - this is the format Farvision's own
+  // Applicant Ledger printout uses, and a printed copy is the one people put side by side with it.
+  let runBal=0;
+  const balText=b=>b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0.00';
   const totalDebit=(entries||[]).reduce((s,e)=>s+(e.debit||0),0);
   const totalCredit=(entries||[]).reduce((s,e)=>s+(e.credit||0),0);
-  const trs=(entries||[]).map(e=>
-    '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td></tr>'
-  ).join('');
+  const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
+    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
+  }).join('');
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
@@ -15572,10 +15583,10 @@ window.custPrintLedger=function(){
     '</style></head><body>'+
     '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
-    '<div class="summary">Every demand raised and payment received on this unit. For the current balance, see the Statement.</div>'+
-    '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th></tr></thead>'+
+    '<div class="summary">Every demand raised and payment received on this unit, in date order.</div>'+
+    '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
     '<tbody>'+trs+'</tbody>'+
-    '<tfoot><tr><td colspan="4">Total of the entries above</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td></tr></tfoot>'+
+    '<tfoot><tr><td colspan="4">Periodic Ledger Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr></tfoot>'+
     '</table></body></html>';
   try{w.document.open();w.document.write(html);w.document.close();}
   catch(_e){toast('Could not build the printout','err');return;}
