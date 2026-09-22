@@ -8551,24 +8551,28 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
      padded with dashes. */
   const col4=usbCol4(featureKey);
   const showCol4=!!col4.header, showDetails=!col4.hideDetails;
+  /* Times used is asked for per feature (col4.timesUsed) rather than shown on all of them. It can
+     never be blank, but "never blank" is not the same as "worth a column": on a feature somebody
+     opens forty times a week it is just a fast-climbing number beside the row it belongs to. It
+     earns its place where the question is whether the thing gets RE-used - which is the whole
+     point of a payment destination the portal offers to remember for you. */
+  const showTimes=!!col4.timesUsed;
   /* "Times used" — how many times this person had used this feature, counting this one. So the row
      reads as a running tally: 1 on the day they found it, 12 by the time it is part of their week.
      Named for what the number IS rather than "Use #", which made the reader work out whether it
      was a total, a position or an id before it told them anything.
 
-     The one column on this table that can never be blank: Details renders from meta, which is
-     captured per feature and is null on 75 of the 157 features actually in use, and a promoted
-     column can only ever be as complete as the key behind it. This is the row's own position in
-     the person's history, so every row has one.
+     Unlike every other column here it can never be blank - it is the row's own position in the
+     person's history, not something a feature had to remember to capture, so it works even on the
+     rows the historical backfill left with no meta at all. That is what makes it available to any
+     feature that wants it; whether a feature wants it is a separate question, answered above.
 
-     It is also the question a usability report exists to answer - a column that never leaves 1
-     means people try a feature once and never come back; one that climbs means it is part of
-     somebody's day. Counted over their whole history server-side, not over the rows on screen, so
+     Counted over their whole history server-side, not over the rows on screen, so
      narrowing the date range does not restart it at 1. */
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
     +(showDetails?('<th>'+esc(col4.detailsHeader||'Details')+'</th>'):'')
     +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
-    +'<th title="How many times this person had used this feature, counting this one — across their whole history, not just the dates shown">Times used</th>'
+    +(showTimes?('<th title="How many times this person had used this feature, counting this one — across their whole history, not just the dates shown">Times used</th>'):'')
     +'</tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
@@ -8588,8 +8592,8 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
       return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td>'
         +(showDetails?('<td>'+usbMetaHtml(e.meta,col.used)+'</td>'):'')
         +(showCol4?('<td style="color:var(--slate)">'+esc(col.text||'—')+'</td>'):'')
-        +'<td style="white-space:nowrap;font-variant-numeric:tabular-nums'+(firstUse?';color:#15803d;font-weight:600':';color:var(--slate)')+'">'
-          +esc(useLabel)+'</td>'
+        +(showTimes?('<td style="white-space:nowrap;font-variant-numeric:tabular-nums'+(firstUse?';color:#15803d;font-weight:600':';color:var(--slate)')+'">'
+          +esc(useLabel)+'</td>'):'')
       +'</tr>';
     }).join('')
     +'</tbody></table></div></div>';
@@ -8724,7 +8728,8 @@ const USB_COL4={
      that out. The file name was the first attempt and was dropped: eighteen of the twenty QR files
      on record are WhatsApp camera-roll names or a bare UUID. */
   'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id':
-                                                  {header:null, keys:[], detailsHeader:'Given as'},
+                                                  {header:null, keys:[], detailsHeader:'Given as',
+                                                   timesUsed:true},
   'tasks.workflow.forward_a_step':                {header:'Sent to', keys:['assignee']},
   'tasks.workflow.reject_send_a_step_back':       {header:'Sent to', keys:['assignee']},
   'tasks.workflow.revert_a_forwarded_step':       {header:'Sent to', keys:['assignee']},
