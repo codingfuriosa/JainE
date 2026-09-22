@@ -14109,6 +14109,9 @@ window.cpaQueueImport=async function(queueId){
       if(type==='sales_details'){matched.push({project,rec});}
       else{
         const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+        // A cancelled booking keeps its unit row for audit but must not take financial rows - those
+        // would surface in that customer's portal. booking_register is exempt: cancelling is its job.
+        if(unit&&unit.status==='cancelled'&&type!=='booking_register') continue;
         if(unit) matched.push({project,unit,rec}); else unmatched.push(rec);
       }
     }
@@ -14205,6 +14208,9 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
       return;
     }
     const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+    // Cancelled bookings keep their unit row for audit but take no financial rows - see the note in
+    // the queue importer. booking_register is exempt, since cancelling is what it does.
+    if(unit&&unit.status==='cancelled'&&type!=='booking_register'){ outOfScope.push(rec); return; }
     if(!unit){ unmatched.push(rec); return; }
     matched.push({rec,project,unit});
   });
@@ -14289,6 +14295,28 @@ window.cpaImportConfirm=async function(btn){
    a complete one and would be worse than nothing for anyone auditing a figure. The .xlsx itself is
    kept in the farvision-imports bucket and is a better record than a JSON copy of it. */
 const CPA_RAW_ROWS_MAX=2000;
+
+/* The current rows for this batch's units, keyed `unit_id|<keyCol>` -> id.
+   Stands in for ON CONFLICT, which cannot infer these tables' PARTIAL unique indexes.
+   Paged explicitly: PostgREST caps a response at 1000 rows, and a row missed here would be inserted
+   as a duplicate instead of updated, leaving two "current" rows for one document and a ledger that
+   double-counts it. Silent wrong money is the one outcome worth being long-winded about. */
+async function cpaCurrentByKey(table,keyCol,matched){
+  const unitIds=[...new Set(matched.map(m=>m.unit&&m.unit.id).filter(Boolean))];
+  const map={},PAGE=1000;
+  for(let i=0;i<unitIds.length;i+=100){
+    const chunk=unitIds.slice(i,i+100);
+    for(let from=0;;from+=PAGE){
+      const {data,error}=await sb.schema('cust').from(table).select('id,unit_id,'+keyCol)
+        .in('unit_id',chunk).is('deleted_at',null).eq('is_current',true)
+        .order('id').range(from,from+PAGE-1);
+      if(error)throw error;
+      (data||[]).forEach(r=>{map[r.unit_id+'|'+r[keyCol]]=r.id;});
+      if(!data||data.length<PAGE)break;
+    }
+  }
+  return map;
+}
 async function cpaImportConfirmXlsx(st){
   // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
   // one file can span several projects at once. project_names records the set it actually touched.
@@ -14355,15 +14383,24 @@ async function cpaImportConfirmXlsx(st){
       if(!byDoc[key]) byDoc[key]={unit:m.unit,rec:r,items:[]};
       byDoc[key].items.push(r);
     }
+    /* invoices_uq is a PARTIAL unique index (WHERE deleted_at is null and is_current). Postgres
+       cannot infer a partial index from a bare column list, so .upsert({onConflict:'unit_id,
+       document_no'}) raised "no unique or exclusion constraint matching the ON CONFLICT
+       specification" on every run - which is why cust.invoices was last written on 11 Sep while
+       every import since reported success. Look the current rows up ourselves instead. */
+    const existingInv=await cpaCurrentByKey('invoices','document_no',st.matched);
     for(const key of Object.keys(byDoc)){
       const {unit,rec,items}=byDoc[key];
-      // Upsert invoice header
-      const {data:inv,error:ie}=await sb.schema('cust').from('invoices').upsert({
-        unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
+      const invRow={unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
         invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,
-        status:rec.status,is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,document_no'}).select('id').single();
-      if(ie)throw ie;
+        status:rec.status,is_current:true,import_batch_id:batchId};
+      let invId=existingInv[unit.id+'|'+rec.docNo];
+      if(invId){ const {error:ue}=await sb.schema('cust').from('invoices').update(invRow).eq('id',invId); if(ue)throw ue; }
+      else{
+        const {data:ins,error:ie}=await sb.schema('cust').from('invoices').insert(invRow).select('id').single();
+        if(ie)throw ie; invId=ins.id; existingInv[unit.id+'|'+rec.docNo]=invId;
+      }
+      const inv={id:invId};
       // Delete old items for this invoice, insert fresh
       await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',inv.id);
       const itemRows=items.map((r,i)=>({
@@ -14381,19 +14418,24 @@ async function cpaImportConfirmXlsx(st){
       if(!byReceipt[key]) byReceipt[key]={unit:m.unit,rec:r,items:[]};
       byReceipt[key].items.push(r);
     }
+    // money_receipts_uq is partial in the same way invoices_uq is - see the note above.
+    const existingRcpt=await cpaCurrentByKey('money_receipts','receipt_no',st.matched);
     for(const key of Object.keys(byReceipt)){
       const {unit,rec,items}=byReceipt[key];
       const totalAmt=items.reduce((s,r)=>s+Number(r.totalAmount||r.amount||0),0);
-      // Upsert receipt header
-      const {data:rcpt,error:re}=await sb.schema('cust').from('money_receipts').upsert({
-        unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
+      const rcptRow={unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
         payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
         drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
         narration:rec.narration,total_amount:totalAmt,
         is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
-        is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,receipt_no'}).select('id').single();
-      if(re)throw re;
+        is_current:true,import_batch_id:batchId};
+      let rcptId=existingRcpt[unit.id+'|'+rec.receiptNo];
+      if(rcptId){ const {error:ue}=await sb.schema('cust').from('money_receipts').update(rcptRow).eq('id',rcptId); if(ue)throw ue; }
+      else{
+        const {data:ins,error:re}=await sb.schema('cust').from('money_receipts').insert(rcptRow).select('id').single();
+        if(re)throw re; rcptId=ins.id; existingRcpt[unit.id+'|'+rec.receiptNo]=rcptId;
+      }
+      const rcpt={id:rcptId};
       // Delete old items, insert fresh
       await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcpt.id);
       const itemRows=items.map((r,i)=>({
