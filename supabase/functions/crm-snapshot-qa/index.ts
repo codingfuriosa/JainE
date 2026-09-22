@@ -730,15 +730,16 @@ carried forward as Qualified.`.replace(/\s+/g, " ")
     return done({ status_match: false, mismatch_type: "in_followup_should_have_been_lost",
       note: "The CRM still has this lead In Follow Up, but on the call the customer closed the door - the team is chasing a closed lead." });
   }
-  /* By requirement (2026-09-18): a lead that qualifies and wants to buy, but simply has not been
-     able to fix a site-visit date, is not a CRM ERROR to surface - "In Follow Up" is a reasonable
-     working label for exactly that state, not a downgrade. sa.visit_pending is what the model itself
-     names this as (see QA_OUTPUT_SHAPE); trusting it here, rather than re-deriving it from
-     qualification_check, is deliberate - the call, not this function, is what actually knows whether
-     the visit is the one open item. This does not touch the ratchet above: a lead already qualified
-     on an earlier call still carries forward as Qualified either way, visit-pending or not - this
-     only changes whether THAT combination then counts as a mismatch. */
-  if (a === "Qualified" && visitPending) {
+  /* By requirement (2026-09-18, narrowed 2026-09-21): a lead that qualifies and wants to buy, but
+     simply has not been able to fix a site-visit date, is not a CRM ERROR to surface - "In Follow Up"
+     is a reasonable working label for exactly that state, not a downgrade. But that carve-out only
+     holds for a lead that has ALREADY cleared the qualification bar on some earlier call (the same
+     ratchet history checked above) - a lead with no such history has not "gone back into follow-up",
+     it has never reached Qualified at all, so this call would be its first qualification and the CRM
+     genuinely needs to be told, not excused. Without this guard, a lead with zero Qualified history
+     was showing "Qualified (visit pending)" as if it were a settled match. */
+  const priorQualified = !!prior && prior.qualified && prior.sound;
+  if (a === "Qualified" && visitPending && priorQualified) {
     return done({ status_match: true, mismatch_type: null,
       note: "The lead qualifies and wants to buy, but the site visit itself has not been fixed yet - the CRM's In Follow Up is a fair working label for that, not an error to flag." });
   }

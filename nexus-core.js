@@ -13897,20 +13897,67 @@ VIEWS.custportal_admin=async function(v,seg){
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
+let CPA_UNIT_FILTER={proj:'',q:''};
 async function cpaRenderProjectsUnits(host){
-  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true)]);
-  const projRows=projects.map(p=>[esc(p.name),esc(p.farvision_project_code||'—'),String(units.filter(u=>u.project_id===p.id).length),
-    `<button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`]);
-  const unitRows=units.map(u=>[esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
-    `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
-    u.customer_id?'<span class="tag t-green">Assigned</span>':'<span class="tag t-gray">Unassigned</span>',
-    u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
-    `<button class="btn btn-sm" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
-    (u.floor_casting_completed_at?'':` <button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)]);
+  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true),cpaCustomers(true)]);
+  const projRows=projects.map(p=>{
+    const mine=units.filter(u=>u.project_id===p.id);
+    return [esc(p.name),esc(p.farvision_project_code||'—'),String(mine.length),
+      String(new Set(mine.map(u=>u.customer_id).filter(Boolean)).size),
+      `<button class="btn btn-sm" onclick="cpaUnitsFor(${p.id})"><i class="fa-solid fa-list"></i> Units</button>`+
+      ` <button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`];
+  });
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
-    cpaTable(['Project','Farvision code','Units',''],projRows.length?projRows:[['No projects yet','','','']])+
-    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>`+
-    cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],unitRows.length?unitRows:[['No units yet','','','','','','','','']]);
+    cpaTable(['Project','Farvision code','Units','Customers',''],projRows.length?projRows:[['No projects yet','','','','']])+
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>
+    <div class="mu-filters">
+      <select id="cpaUnitProj" class="mu-sel" onchange="cpaUnitFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}</select>
+      <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaUnitQ" placeholder="Search unit code, tower or customer" oninput="cpaUnitFilter()"></span>
+      <span class="mu-count" id="cpaUnitCount"></span>
+    </div>
+    <div id="cpaUnitList"></div>`;
+  cpaUnitList();
+  if(CPA_UNIT_FILTER.proj)$('cpaUnitProj').value=CPA_UNIT_FILTER.proj;
+  if(CPA_UNIT_FILTER.q)$('cpaUnitQ').value=CPA_UNIT_FILTER.q;
+}
+window.cpaUnitFilter=function(){
+  CPA_UNIT_FILTER.proj=$('cpaUnitProj').value;
+  CPA_UNIT_FILTER.q=$('cpaUnitQ').value.trim().toLowerCase();
+  cpaUnitList();
+};
+// "Units" on a project row jumps the list below to that project rather than opening a second screen.
+window.cpaUnitsFor=function(pid){
+  CPA_UNIT_FILTER.proj=String(pid);
+  const sel=$('cpaUnitProj');if(sel)sel.value=String(pid);
+  cpaUnitList();
+  const list=$('cpaUnitList');if(list)list.scrollIntoView({behavior:'smooth',block:'center'});
+};
+function cpaUnitList(){
+  const units=CPA.units||[],{proj,q}=CPA_UNIT_FILTER;
+  const custById={};(CPA.customers||[]).forEach(c=>{custById[c.id]=c;});
+  const list=units.filter(u=>{
+    if(proj&&String(u.project_id)!==proj)return false;
+    if(q){
+      const c=custById[u.customer_id];
+      if(![u.unit_code,u.tower,c&&c.full_name,c&&c.email].join(' ').toLowerCase().includes(q))return false;
+    }
+    return true;
+  });
+  const rows=list.map(u=>{
+    const c=custById[u.customer_id];
+    return [esc(u.unit_code),(u.projects&&u.projects.name)?cpaProjectChip(u.projects.name):'—',esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
+      `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
+      c?`<span style="white-space:nowrap">${esc(c.full_name)}</span>`:'<span class="tag t-gray">Unassigned</span>',
+      u.floor_casting_completed_at?`<span class="tag t-green" style="white-space:nowrap">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
+      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
+      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
+      (u.floor_casting_completed_at?'':`<button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)+
+      `</span>`];
+  });
+  const cnt=$('cpaUnitCount');if(cnt)cnt.textContent=list.length+' of '+units.length;
+  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
+    rows.length?rows:[['No units match this filter','','','','','','','','']]);
 }
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
@@ -13984,15 +14031,66 @@ window.cpaMarkCasting=async function(id){
 };
 
 /* ---------- Tab 2: Customers ---------- */
+// A customer's project is not a column on the customer - it comes from the unit(s) they hold, and a
+// customer can legitimately hold units in more than one project. So both are derived per row rather
+// than stored, and the project filter asks "does this customer hold a unit HERE".
+let CPA_CUST_FILTER={proj:'',q:''};
 async function cpaRenderCustomers(host){
-  const customers=await cpaCustomers(true);
-  const rows=customers.map(c=>[esc(c.full_name),esc(c.email),esc(c.phone||'—'),
-    c.auth_user_id?'<span class="tag t-green">Login active</span>':'<span class="tag t-gray">No login</span>',
-    `<button class="btn btn-sm" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
-    ` <button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i> View portal</button>`+
-    (c.auth_user_id?` <button class="btn btn-sm" onclick="cpaSetPasswordModal(${c.id},true)">Reset password</button>`:` <button class="btn btn-sm btn-primary" onclick="cpaSetPasswordModal(${c.id},false)">Create login</button>`)]);
-  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>`+
-    cpaTable(['Name','Email','Phone','Login','Actions'],rows.length?rows:[['No customers yet','','','','']]);
+  const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
+    <div class="mu-filters">
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Without a unit —</option></select>
+      <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
+      <span class="mu-count" id="cpaCustCount"></span>
+    </div>
+    <div id="cpaCustList"></div>`;
+  cpaCustList();
+  if(CPA_CUST_FILTER.proj)$('cpaCustProj').value=CPA_CUST_FILTER.proj;
+  if(CPA_CUST_FILTER.q)$('cpaCustQ').value=CPA_CUST_FILTER.q;
+}
+window.cpaCustFilter=function(){
+  CPA_CUST_FILTER.proj=$('cpaCustProj').value;
+  CPA_CUST_FILTER.q=$('cpaCustQ').value.trim().toLowerCase();
+  cpaCustList();
+};
+// Farvision project names carry a location suffix - "DREAM GURUKUL(DOLTALA MADHYAMGRAM)" - which
+// wrapped to three lines in a table cell and made every row triple height. Show the name itself and
+// keep the full string on hover, since the suffix is what distinguishes two same-named projects.
+function cpaProjectChip(name){
+  const full=String(name||''),i=full.indexOf('(');
+  return '<span title="'+esc(full)+'" style="white-space:nowrap">'+esc(i>0?full.slice(0,i).trim():full)+'</span>';
+}
+function cpaCustUnitsByCustomer(){
+  const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
+  return by;
+}
+function cpaCustList(){
+  const customers=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  const list=customers.filter(c=>{
+    const mine=byCustomer[c.id]||[];
+    if(proj==='none'){if(mine.length)return false;}
+    else if(proj&&!mine.some(u=>String(u.project_id)===proj))return false;
+    if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
+    return true;
+  });
+  const rows=list.map(c=>{
+    const mine=byCustomer[c.id]||[];
+    const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
+    return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
+      projNames.length?projNames.map(cpaProjectChip).join(' '):'<span class="tag t-amber">No unit</span>',
+      mine.length?`<span style="white-space:nowrap">${mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', ')}</span>`:'—',
+      esc(c.email),`<span style="white-space:nowrap">${esc(c.phone||'—')}</span>`,
+      c.auth_user_id?'<span class="tag t-green">Active</span>':'<span class="tag t-gray">None</span>',
+      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
+      `<button class="btn btn-sm" title="Edit customer" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
+      `<button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i></button>`+
+      (c.auth_user_id?`<button class="btn btn-sm" title="Reset this customer's password" onclick="cpaSetPasswordModal(${c.id},true)">Reset</button>`:`<button class="btn btn-sm btn-primary" title="Create a portal login" onclick="cpaSetPasswordModal(${c.id},false)">Login</button>`)+
+      `</span>`];
+  });
+  const cnt=$('cpaCustCount');if(cnt)cnt.textContent=list.length+' of '+customers.length;
+  $('cpaCustList').innerHTML=cpaTable(['Name','Project','Unit','Email','Phone','Login','Actions'],
+    rows.length?rows:[['No customers match this filter','','','','','','']]);
 }
 window.cpaCustomerModal=function(id){
   const c=id?(CPA.customers||[]).find(x=>x.id===id):null;
@@ -14210,7 +14308,7 @@ const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
+const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -14464,8 +14562,11 @@ window.cpaImportConfirm=async function(btn){
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
 };
 async function cpaImportConfirmXlsx(st){
+  // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
+  // one file can span several projects at once. project_names records the set it actually touched.
   const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
     import_type:st.type,file_name:st.fileName,imported_by:state.email,
+    project_names:[...new Set(st.matched.map(m=>m.project&&m.project.name).filter(Boolean))].sort(),
     row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
     unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
     raw_rows:st.matched.map(m=>m.rec)}).select('id').single();
@@ -14630,10 +14731,16 @@ async function cpaImportConfirmCsv(st){
   toast(st.matched.length+' row(s) imported','ok');
 }
 async function cpaRenderImportHistory(host,projects){
-  const {data}=await sb.schema('cust').from('import_batches').select('*').order('imported_at',{ascending:false}).limit(200);
+  // Named columns rather than '*': raw_rows carries every parsed row of every batch (86k rows and
+  // growing, most of this table's bulk) and nothing on this screen reads it.
+  const {data}=await sb.schema('cust').from('import_batches')
+    .select('id,import_type,project_id,project_names,file_name,imported_at,imported_by,matched_count,unmatched_count,status')
+    .order('imported_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(b=>{
     const proj=projects.find(p=>p.id===b.project_id);
-    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(proj?proj.name:'—'),esc(b.file_name||'—'),
+    // .xlsx batches span projects and carry project_names; the CSV imports pick one project up front.
+    const projLabel=(b.project_names&&b.project_names.length)?b.project_names.join(', '):(proj?proj.name:'—');
+    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(projLabel),esc(b.file_name||'—'),
       fmtDate(b.imported_at),esc(b.imported_by||'—'),
       b.matched_count+' matched'+(b.unmatched_count?', '+b.unmatched_count+' unmatched':''),
       b.status==='undone'?'<span class="tag t-gray">Undone</span>':'<span class="tag t-green">Completed</span>',
@@ -18284,6 +18391,15 @@ function trcTrStatus(r){
   const st=String(r.transcription_status||'');
   return (st==='not_transcribed'&&!r.queue_status) ? 'out_of_scope' : st;
 }
+/* trcTrStatus alone misses a whole class of failure: a call whose TRANSCRIPT completed fine but whose
+   QA judge call then failed keeps transcription_status:'completed', so trcTrStatus reads it as a
+   plain success - the QA failure only shows up in r.queue_status (transcription_queue.status, set to
+   'failed' with fail_phase 'qa' either way, see crm-snapshot-qa/index.ts). Anything that needs "did
+   this recording actually finish clean" - the Failed filter/count and the retry button below - has to
+   check both, or a QA failure is invisible everywhere except the one lead's own detail card. */
+function trcProcFailed(r){
+  return !!(r && (trcTrStatus(r)==='failed' || r.queue_status==='failed'));
+}
 /* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
    included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
    nothing of its own worth putting in front of a reader: no CRM-vs-call comparison ran, so there is
@@ -19190,7 +19306,8 @@ function trcApply(rows,skipCards){
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
     if(!skipCards){
-      if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
+      if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
+      else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
       // verdict does not belong in either drill-down, only in the lead's own history.
       if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
@@ -19426,7 +19543,7 @@ function trcKpiHtml(rows){
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
     ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',fast?fast.transcription_failed:n('failed'),'fa-circle-exclamation']
+    ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
@@ -19682,6 +19799,15 @@ function trcLeadRowHtml(g,sl){
         +' · '+g.recordings+' recording'+(g.recordings===1?'':'s')+' · '+g.transcribed+' transcribed</div>'
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
+      /* Only rendered under the Failed card/chip - trcApply has already narrowed g.rows down to just
+         this lead's failed recordings there (see trcProcFailed), so every button below retries ONE
+         specific recording, never the lead as a whole. stopPropagation keeps the click off the row's
+         own onclick (which would otherwise navigate into the lead instead of retrying). */
+      +(TRC_F.proc==='failed'?'<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px" onclick="event.stopPropagation()">'
+        +g.rows.map(function(r){
+          return '<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')">'
+            +'<i class="fa-solid fa-rotate-right"></i> Retry '+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||('#'+r.follow_up_id))+'</button>';
+        }).join('')+'</div>':'')
     +'</td>'
     /* Danger and Status-regressed used to carry their full label alongside the CRM status tag - three
        badges' worth of text in a column sized for one, so the middle one clipped mid-word and the
@@ -20493,13 +20619,25 @@ window.trcRetry=async function(followUpId){
   }
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
-  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   trCacheClear('trc_fetch_cache');
   trCacheClear('trc_fetch_light_cache');
+  /* Retry can be clicked from either of two screens now - a lead's own detail page (the per-call
+     card's button) or the Failed list/table (the per-row buttons added alongside it) - and each has
+     to repaint ITSELF, not drag the other screen's reader somewhere they didn't ask to go. $('trcRows')
+     is the list view's own table body and only ever exists there, so its presence is what tells the
+     two apart. */
+  if($('trcRows')){
+    trcLeadCacheClearAll();
+    await Promise.all([trcFetch(true),trcKpiFastFetch(true)]);
+    trcRender(true,true);
+    trcAfterListRender();
+    return;
+  }
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
      about to change, so re-rendering the detail page off the 5h snapshot would show the reader the
      exact state they just asked to have redone. */
+  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   if(lead)trcLeadCacheDrop(lead);
   if(lead)await trcLeadDetail($('view'),lead);
 };
