@@ -15266,7 +15266,8 @@ async function custReconGate(unitId){
     const {data,error}=await sb.schema('cust').from('reconciliation')
       .select('status').eq('unit_id',unitId).maybeSingle();
     if(error||!data) return {ok:false,status:'unverified'};
-    return {ok:data.status==='matched',status:data.status};
+    // no_activity: nothing billed, received or reversed, so there is no figure to get wrong.
+    return {ok:data.status==='matched'||data.status==='no_activity',status:data.status};
   }catch(e){ return {ok:false,status:'unverified'}; }
 }
 const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-start;background:#fffbeb;'+
