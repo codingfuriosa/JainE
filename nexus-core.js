@@ -15283,7 +15283,7 @@ async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
     sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
@@ -15362,7 +15362,16 @@ async function custTabOverview(data,unit){
     const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
     entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
   });
-  receiptRows.forEach(r=>{entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-Number(r.total_amount||0)});});
+  // Same rule as the Ledger: credit only what was applied to a demand this list shows, or money with
+  // no allocation at all. Otherwise this preview would show receipts the full ledger omits.
+  const ovLiveDocs=new Set(invoices.map(i=>i.document_no));
+  receiptRows.forEach(r=>{
+    const ri=r.receipt_items||[];
+    const amt=ri.length
+      ? ri.reduce((s,x)=>s+(x.against_demand_no==null||ovLiveDocs.has(x.against_demand_no)?Number(x.amount||0):0),0)
+      : Number(r.total_amount||0);
+    if(amt) entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-amt});
+  });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   // No running balance: the KPIs above are Farvision's position, and this list's own tally would be
   // a second answer to the same question. It showed -51,62,707 on one unit whose Demand due, taken
@@ -15474,7 +15483,7 @@ window.custPrintStatement=function(){
 };
 async function custTabLedger(unit){
   const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows}]=await Promise.all([
-    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
     sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
@@ -15499,8 +15508,20 @@ async function custTabLedger(unit){
       if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,iid:inv.id,desc:s,debit:amt,credit:0});
     });
   });
+  /* Credit only the part of a receipt that was applied to a demand this ledger actually shows.
+     Farvision's own Customer Ledger for 2D/BLOCK A2 totals 6,173,042 in credits; crediting whole
+     receipts gave 6,730,255, over by exactly the 557,213 paid against her cancelled demand
+     OHINV/0015524-25, which Farvision leaves out. Summing the receipt_items allocated to live
+     demands gives 5,963,042 - Farvision's figure once its 210,000 PTC transfer is set aside.
+     Money with no allocation at all is genuine on-account payment and is credited. */
+  const liveDocs=new Set(invoices.map(i=>i.document_no));
   receipts.forEach(r=>{
-    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
+    const items=r.receipt_items||[];
+    const credit=items.length
+      ? items.reduce((s,ri)=>s+(ri.against_demand_no==null||liveDocs.has(ri.against_demand_no)?Number(ri.amount||0):0),0)
+      : Number(r.total_amount||0);
+    if(!credit) return;
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:credit});
   });
   // Group reversals by reversal_no — one ledger row per cheque bounce, not per revenue-head line
   const revByNo={};
