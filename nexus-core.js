@@ -13771,9 +13771,12 @@ window.cpaCustFilter=function(){
 // Farvision project names carry a location suffix - "DREAM GURUKUL(DOLTALA MADHYAMGRAM)" - which
 // wrapped to three lines in a table cell and made every row triple height. Show the name itself and
 // keep the full string on hover, since the suffix is what distinguishes two same-named projects.
+function projShortName(name){
+  const s=String(name||''),i=s.indexOf('(');
+  return i>0?s.slice(0,i).trim():s;
+}
 function cpaProjectChip(name){
-  const full=String(name||''),i=full.indexOf('(');
-  return '<span title="'+esc(full)+'" style="white-space:nowrap">'+esc(i>0?full.slice(0,i).trim():full)+'</span>';
+  return '<span title="'+esc(name||'')+'" style="white-space:nowrap">'+esc(projShortName(name))+'</span>';
 }
 function cpaCustUnitsByCustomer(){
   const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
@@ -15244,8 +15247,13 @@ function custDeriveFloor(unitCode){
 }
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
-  return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
-    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
+  /* An <option> cannot carry a tooltip, so the project's location suffix is dropped here rather than
+     left to truncate mid-word against the dropdown arrow - the tower tells the units apart anyway. */
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+    '<span style="font-size:12.5px;font-weight:600;color:var(--slate)">Viewing</span>'+
+    `<select id="custUnitPicker" class="mu-sel" onchange="custSwitchUnit(this.value)" style="max-width:340px">`+
+    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)}${u.tower?' · '+esc(u.tower):''} · ${esc(projShortName((u.projects&&u.projects.name)||''))}</option>`).join('')+
+    '</select></div>';
 }
 // Farvision keeps cancelled demands in the Invoice Register with Status=Cancel (a quarter of the
 // rows), and the cost sheet carries an offsetting negative against them. Showing them to a
