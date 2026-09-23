@@ -18,7 +18,7 @@
 
 import { QA_RUBRIC } from "../_shared/qa-rubric.ts";
 
-export const QA_RULES_EFFECTIVE_FROM = "2026-09-24 00:00 IST";
+export const QA_RULES_EFFECTIVE_FROM = "2026-09-23 00:00 IST";
 
 export const CATALOGUE = `APPROVED PROJECT INFORMATION (Jain Group). This is the reference for
 judging whether what the agent said was correct. Do not treat anything absent from this list as

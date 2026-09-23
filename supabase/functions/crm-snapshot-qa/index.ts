@@ -53,7 +53,7 @@ const isReasoningModel = (m: string) => /^(o\d|gpt-5)/i.test(m.trim());
 
 const APP_TZ_OFFSET_MIN = Number(Deno.env.get("APP_TZ_OFFSET_MIN") || 330); // +05:30
 const APP_TZ_NAME = Deno.env.get("APP_TZ") || "Asia/Kolkata";
-const FORWARD_ONLY_EFFECTIVE_DATE = "2026-09-24";
+const FORWARD_ONLY_EFFECTIVE_DATE = "2026-09-23";
 
 const JOB_SECRET_NAME = "transcription_sync";
 
