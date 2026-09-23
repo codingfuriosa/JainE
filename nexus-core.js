@@ -15312,7 +15312,13 @@ async function custTabOverview(data,unit){
   const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-  const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
+  /* Farvision omits a unit from the Outstanding Summary when it has nothing outstanding - Mr
+     Aniruddha Mukherjee's 5D is billed 62,47,674 and received 62,47,674, so no row exists for him.
+     Its Sales Details cost sheet still carries billed/received/balance per component and is equally
+     Farvision's, so it stands in whenever the snapshot is absent. This used to require the unit to
+     have NO invoices and NO receipts, which is exactly the case it never applies to - any real
+     customer has both - so those 39 units fell through to our own arithmetic instead. */
+  const useCostSheet=costItems.length>0;
   /* Farvision's total_consideration is the basic amount EXCLUDING GST - for 6N it is 92,72,740
      against a cost sheet grand total of 98,09,442, the difference being exactly its 5,36,702 of tax.
      Using it here put an ex-tax value beside a tax-inclusive "Paid to date", so Remaining understated
