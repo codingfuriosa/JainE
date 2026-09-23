@@ -348,7 +348,7 @@ the CRM record is all there is at that point. The queue runs oldest-first, so it
 did* — asked, answered, confirmed, disclosed — so there is no project fact in it for a transcript to
 absorb.
 
-### The four mismatch counts
+### The five mismatch counts
 
 `status_match` and `mismatch_type` are **re-derived by the pipeline** from the CRM status and the
 assessed status after the reply arrives. The model is asked for them, because making it commit in
@@ -360,11 +360,11 @@ contradicts itself cannot corrupt the dashboard.
 | Lost | Qualified or In Follow Up | `lost_should_not_have_been_lost` |
 | Qualified | anything else | `qualified_should_not_have_been_qualified` — but never when the lead was already soundly qualified and the call merely set a new callback date; that is lifted to Qualified first and agrees |
 | In Follow Up | Lost | `in_followup_should_have_been_lost` |
-| In Follow Up | Qualified | `in_followup_should_have_been_qualified` — including a lead already qualified that the agent has logged back as In Follow Up |
-| anything | Unclear | **not counted** — an unclear call is not a disagreement |
-| Site Visited, OV, … | anything | not counted — outside the four categories |
+| In Follow Up | Qualified | `in_followup_should_have_been_qualified` — including a lead already qualified that the agent has logged back as In Follow Up. Also covers "Qualified, visit pending": the visit-not-yet-fixed carve-out (2026-09-18) only excuses that combination when the lead **already qualified on an earlier call** (narrowed 2026-09-21) — a lead qualifying for the first time, with only the site visit unsettled, is still counted here, not excused |
+| anything | Unclear | `ai_status_unclear` (2026-09-23) — an unclear call is now flagged as a mismatch (for review) rather than silently dropped from every total |
+| Site Visited, OV, … | anything | not counted — outside the three CRM statuses this scheme covers |
 
-A `check` constraint on `acc.followup_qa` refuses any other value, so a typo cannot become a fifth
+A `check` constraint on `acc.followup_qa` refuses any other value, so a typo cannot become a sixth
 category that no card ever shows.
 
 ### FIFO, and what survives a restart
