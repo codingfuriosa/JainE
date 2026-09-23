@@ -18215,7 +18215,14 @@ const TRC_MISMATCH = {
   in_followup_should_have_been_qualified: {
     label: 'In Follow Up that should have been Qualified', short: 'Should be Qualified',
     tag: 't-green', icon: 'fa-circle-up', colour: '#16a34a',
-    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' }
+    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' },
+  /* By requirement (2026-09-23): an Unclear call used to score status_match:null and vanish from every
+     total - neither a match nor a mismatch. It is now its own category, so a run full of unreviewable
+     calls shows up rather than quietly reading as a clean mismatch rate. See deriveStatusMatch. */
+  ai_status_unclear: {
+    label: 'AI could not assess the call', short: 'Unclear',
+    tag: 't-gray', icon: 'fa-circle-question', colour: '#64748b',
+    blurb: 'The conversation did not establish a clear outcome - flagged for review rather than silently excluded from the count.' }
 };
 const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
 
@@ -18619,6 +18626,16 @@ function trcDailyCell(date,kind,val,n,cls){
     +'<a href="javascript:void(0)" onclick="trcDailyDrill(\''+date+'\',\''+kind+'\',\''+esc(val)+'\')"'
     +(cls?' class="'+cls+'"':'')+' style="font-weight:600">'+shown+'</a></td>';
 }
+/* HISTORICAL, NOT DRILLABLE - unlike every other cell in this table, this number is not "of the
+   leads currently on screen, how many match this" (that's what trcCard's filters answer), it is
+   "how many calls were EVER judged a mismatch on this date, corrected or not" (2026-09-23). Nothing
+   in TRC_F/trcApply can reproduce that set - is_latest_assessed always narrows to a lead's current
+   state - so this renders as a plain number, never a link, rather than a click that would silently
+   show the wrong rows. */
+function trcDailyPlainCell(n){
+  const shown=n||0;
+  return '<td style="text-align:center'+(shown?'':';color:var(--slate)')+'">'+shown+'</td>';
+}
 function trcRenderDaily(){
   const el=$('trcDaily');if(!el)return;
   if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
@@ -18632,9 +18649,10 @@ function trcRenderDaily(){
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
       +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
+      +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(6+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(7+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -18648,10 +18666,16 @@ function trcRenderDaily(){
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
       +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
-        +'<th>Matched</th><th>Mismatched</th>'+mmHead+'</tr></thead>'
+        +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
+        +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
+        +'moment that later call is judged.">Mismatched</th>'
+        +'<th title="Every call actually judged a mismatch on this date, corrected or not since - '
+        +'this number never goes down. Not clickable: it is not a set of CURRENT leads, so nothing on '
+        +'this page can open it as one.">Mismatch events (historical)</th>'
+        +mmHead+'</tr></thead>'
       +'<tbody>'+body+'</tbody>'
     +'</table></div>'
-    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day.</div>'
+    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day. "Mismatched" is today\'s unresolved count; "Mismatch events (historical)" is how many were ever flagged on that date, including ones since resolved - see a lead\'s own history for exactly when.</div>'
   +'</div>';
 }
 
@@ -19148,14 +19172,16 @@ async function trcKpiFastFetch(force){
       remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
       status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
       qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,agent_qa_score_sum:0,agent_qa_score_n:0,
+      in_followup_should_have_been_qualified:0,ai_status_unclear:0,
+      agent_qa_score_sum:0,agent_qa_score_n:0,
       reused_transcription:0,
       /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
          (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
          contribution lands on exactly one day, ever. See 20260918110000. */
       status_match_leads:0,status_mismatch_leads:0,
       lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
+      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0,
+      ai_status_unclear_leads:0};
     (days||[]).forEach(function(d){
       Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
     });
@@ -19490,7 +19516,8 @@ function trcKpiHtml(rows){
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
-/* The four counts the specification asks for, by name. Only rendered when Mismatch is the active
+/* The mismatch counts the specification asks for, by name (five now - see ai_status_unclear,
+   2026-09-23). Only rendered when Mismatch is the active
    card, because that is the question they answer: of the calls where the CRM and the conversation
    disagree, WHICH WAY do they disagree. Each one filters the table under it. */
 function trcMismatchPanel(rows,fast){
@@ -19526,7 +19553,7 @@ function trcMismatchPanel(rows,fast){
     +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree'
     +'<span style="font-weight:400;color:var(--slate);font-size:13px;margin-left:8px">'+total+' total, in '+totalLeads+' lead'+(totalLeads===1?'':'s')+'</span></div>'
     +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Counted per follow-up, from the CRM status recorded against that call and what the conversation actually established.</div>'
-    +'<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px">'
+    +'<div class="grid" style="grid-template-columns:repeat('+TRC_MISMATCH_KEYS.length+',1fr);gap:12px">'
     +TRC_MISMATCH_KEYS.map(function(k){
       const m=TRC_MISMATCH[k],on=TRC_F.mismatch===k;
       return '<div class="card card-pad" style="margin:0;cursor:pointer'+(on?';box-shadow:inset 0 0 0 2px '+m.colour:'')+'" onclick="trcSet(\'mismatch\',\''+(on?'all':k)+'\')">'
@@ -20106,9 +20133,15 @@ function trcQaTableHtml(r,m){
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
+     /* Visit-pending only excuses the CRM's In Follow Up when this lead had ALREADY qualified on an
+        earlier call (2026-09-21 gate) - on a first-time qualification it's still flagged, so this note
+        only claims "not a disagreement" when the row's own status_match backs that up. Otherwise the
+        row genuinely disagrees and m (the actual mismatch entry) already says so. */
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(trcAiStatusLabel(r)||'—'),
-               (r.ai_assessed_status==='Qualified'&&r.visit_pending)
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match!==false)
                  ?'Qualified and wants to buy - the site visit itself is the one thing still open, which is why this is not counted as a disagreement with the CRM\'s In Follow Up.':null,
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
+                 ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
   ];
   if(Array.isArray(r.agent_qa)){
