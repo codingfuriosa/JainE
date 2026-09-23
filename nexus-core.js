@@ -13754,7 +13754,7 @@ async function cpaRenderCustomers(host){
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
     <div class="mu-filters">
-      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Without a unit —</option></select>
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
       <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
       <span class="mu-count" id="cpaCustCount"></span>
     </div>
@@ -13780,7 +13780,12 @@ function cpaCustUnitsByCustomer(){
   return by;
 }
 function cpaCustList(){
-  const customers=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  /* A customer with no unit holds no flat with us - a cancelled booking (Sales Details imports only
+     Active rows, so cancellation leaves the customer behind without one) or a duplicate record left
+     by an email that differed between exports. Neither belongs in the working list, so the default
+     view is customers who actually hold a unit. "Without a unit" still reaches them. */
+  const customers=proj==='none'?all:all.filter(c=>(byCustomer[c.id]||[]).length>0);
   const list=customers.filter(c=>{
     const mine=byCustomer[c.id]||[];
     if(proj==='none'){if(mine.length)return false;}
