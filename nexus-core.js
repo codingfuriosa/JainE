@@ -1385,11 +1385,21 @@ async function docAll(v,title){
 
 async function docRenderTable(host,dept){
   loader(host);
-  let legalFolderIds=null;
-  if(DOC.scope==='legal'&&DOC.cat){
+  let legalFolderIds=null, legalScopeRoots=null, legalScopeRootSel='';
+  if(DOC.scope==='legal'){
     const list=await legalFolderTree();
-    const {byId}=buildFolderTree(list);
-    legalFolderIds=collectDescendantIds(byId,Number(DOC.cat));
+    const {roots,byId}=buildFolderTree(list);
+    legalScopeRoots=roots; // top-level categories (Litigation, etc.) for the "Search inside" picker
+    if(DOC.cat){
+      legalFolderIds=collectDescendantIds(byId,Number(DOC.cat));
+      // Deep inside a subfolder (e.g. Litigation > Case ABC), the picker should still show
+      // "Litigation" selected, not fall back to "All Documents" just because the exact id doesn't
+      // match a top-level root — that mismatch is exactly the kind of thing that makes someone stop
+      // and wonder why they're not seeing everything.
+      let cur=byId[Number(DOC.cat)];
+      while(cur&&cur.parent_id)cur=byId[cur.parent_id];
+      legalScopeRootSel=cur?String(cur.id):'';
+    }
   }
   const rows=await docFetch({dept:DOC.scope==='legal'?'Legal':dept,cat:DOC.scope==='legal'?null:DOC.cat,folderIds:legalFolderIds,q:DOC.q});
   // toolbar
@@ -1398,6 +1408,9 @@ async function docRenderTable(host,dept){
      squeezed into a fraction of the row alongside five other controls. */
   const toolbar=`<style>
     .doc-toolbar{margin-bottom:14px}
+    .doc-scoperow{display:flex;align-items:center;gap:9px;margin-bottom:9px;font-size:12.5px}
+    .doc-scoperow label{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--slate);white-space:nowrap}
+    .doc-scoperow select{height:34px}
     .doc-searchrow{display:flex;align-items:center;position:relative;margin-bottom:9px}
     .doc-searchrow i.mag{position:absolute;left:13px;color:var(--slate);font-size:14px;pointer-events:none}
     .doc-searchrow input{width:100%;height:44px;padding:0 14px 0 38px;border:1px solid var(--line);border-radius:11px;
@@ -1405,6 +1418,9 @@ async function docRenderTable(host,dept){
     .doc-searchrow input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
     .doc-btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .doc-btnrow .sel{height:36px}
+    .doc-soft-disabled{opacity:.45}
+    tr.doc-row{cursor:pointer}
+    tr.doc-row:hover{background:var(--bg-hover,#f8fafc)}
     @media(max-width:760px){
       .doc-searchrow input{height:42px}
       .doc-btnrow{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -1412,6 +1428,11 @@ async function docRenderTable(host,dept){
     }
   </style>
   <div class="doc-toolbar">
+    ${DOC.scope==='legal'?`<div class="doc-scoperow"><label for="dtScope"><i class="fa-solid fa-filter"></i> Search inside</label>
+      <select class="sel" id="dtScope">
+        <option value="">All Documents</option>
+        ${(legalScopeRoots||[]).map(r=>`<option value="${r.id}" ${legalScopeRootSel===String(r.id)?'selected':''}>${esc(r.name)}</option>`).join('')}
+      </select></div>`:''}
     <div class="doc-searchrow"><i class="fa-solid fa-magnifying-glass mag"></i>
       <input id="dtSearch" placeholder="${DOC.scope==='legal'?'Search a file name, or any words written inside the documents…':'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
     <div class="doc-btnrow">
@@ -1422,8 +1443,8 @@ async function docRenderTable(host,dept){
         <option value="title.asc">Title A–Z</option><option value="title.desc">Title Z–A</option>
         <option value="file_size.desc">Largest</option></select>
       <select class="sel" id="dtStatus"><option value="">All status</option>${DOCSTATUS.map(s=>'<option>'+s+'</option>').join('')}</select>
-      <button class="btn" id="dtBulkDl" disabled><i class="fa-solid fa-download"></i> Download</button>
-      <button class="btn btn-danger" id="dtBulkDel" disabled><i class="fa-solid fa-trash"></i> Delete</button>
+      <button class="btn" id="dtBulkDl"><i class="fa-solid fa-download"></i> Download</button>
+      <button class="btn btn-danger" id="dtBulkDel"><i class="fa-solid fa-trash"></i> Delete</button>
     </div>
   </div>`;
   let filtered=rows;
@@ -1435,9 +1456,9 @@ async function docRenderTable(host,dept){
     const totalPages=Math.max(1,Math.ceil(list.length/DOC.per));
     const body=pageRows.length?pageRows.map(d=>{
       const sel=DOC.sel.has(d.id);
-      return `<tr>
-        <td><input type="checkbox" class="checkbox dtChk" data-id="${d.id}" ${sel?'checked':''}></td>
-        <td><div style="display:flex;align-items:center;gap:11px">${fileIcon(d.file_type)}<div style="min-width:0"><div style="font-weight:600;cursor:pointer" onclick="docPreview(${d.id})">${esc(d.title)} ${d.pinned?'<i class="fa-solid fa-thumbtack" style="color:#d97706;font-size:11px"></i>':''}</div><div style="color:var(--slate);font-size:11.5px">${esc(d.doc_no||'')} · ${esc(d.file_name||'')}</div></div></div></td>
+      return `<tr class="doc-row" onclick="docPreview(${d.id})" title="Click to open this document">
+        <td onclick="event.stopPropagation()"><input type="checkbox" class="checkbox dtChk" data-id="${d.id}" onclick="event.stopPropagation()" ${sel?'checked':''}></td>
+        <td><div style="display:flex;align-items:center;gap:11px">${fileIcon(d.file_type)}<div style="min-width:0"><div style="font-weight:600">${esc(d.title)} ${d.pinned?'<i class="fa-solid fa-thumbtack" style="color:#d97706;font-size:11px"></i>':''}</div><div style="color:var(--slate);font-size:11.5px">${esc(d.doc_no||'')} · ${esc(d.file_name||'')}</div></div></div></td>
         <td>${esc(d.category||'—')}</td>
         <td><span class="tag t-gray">${esc((d.file_type||'').toUpperCase())}</span></td>
         <td>${fmtBytes(d.file_size)}</td>
@@ -1445,10 +1466,10 @@ async function docRenderTable(host,dept){
         <td>v${esc((d.version||'1').replace('v',''))}</td>
         <td>${statusTag(d.status)}</td>
         <td>${fmtDate(d.created_at)}</td>
-        <td style="text-align:right"><button class="btn btn-sm btn-ghost" onclick="docMenu(event,${d.id})"><i class="fa-solid fa-ellipsis-vertical"></i></button></td>
-      </tr>`;}).join(''):`<tr><td colspan="10"><div class="empty"><i class="fa-regular fa-folder-open"></i><div>No documents found</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="docUploadModal('${dept?esc(dept):''}')"><i class="fa-solid fa-upload"></i> Upload a document</button></div></td></tr>`;
+        <td style="text-align:right" onclick="event.stopPropagation()"><button class="btn btn-sm btn-ghost" onclick="docMenu(event,${d.id})" title="More actions"><i class="fa-solid fa-ellipsis-vertical"></i></button></td>
+      </tr>`;}).join(''):`<tr><td colspan="10"><div class="empty"><i class="fa-regular fa-folder-open"></i><div>${DOC.q?`No documents match "${esc(DOC.q)}"${DOC.cat?' in this category':''}. Check the spelling, or try fewer words.`:(DOC.cat?'No documents in this category yet.':'No documents here yet.')}</div><button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="docUploadModal('${dept?esc(dept):''}')"><i class="fa-solid fa-upload"></i> Upload a document</button></div></td></tr>`;
     host.innerHTML=toolbar+`<div class="card"><table><thead><tr>
-      <th style="width:38px"><input type="checkbox" class="checkbox" id="dtAll"></th><th>Document</th><th>Category</th><th>Type</th><th>Size</th><th>Visibility</th><th>Ver</th><th>Status</th><th>Uploaded</th><th></th>
+      <th style="width:38px"><input type="checkbox" class="checkbox" id="dtAll" title="Select all on this page"></th><th>Document</th><th>Category</th><th>Type</th><th>Size</th><th>Visibility</th><th>Ver</th><th>Status</th><th>Uploaded</th><th></th>
     </tr></thead><tbody>${body}</tbody></table>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-top:1px solid var(--line)">
       <span style="color:var(--slate);font-size:12.5px">${list.length} document${list.length===1?'':'s'} · page ${DOC.page} of ${totalPages}</span>
@@ -1464,11 +1485,36 @@ async function docRenderTable(host,dept){
     const sb2=$('dtSearchBtn');if(sb2)sb2.onclick=()=>{DOC.q=($('dtSearch')?$('dtSearch').value.trim():'');DOC.page=1;usbDoc(DOC.q?{query:DOC.q}:null);docRenderTable(host,dept);};
     const so=$('dtSort');if(so){so.value=DOC.sort;so.onchange=e=>{DOC.sort=e.target.value;usbDoc({title:'Sorted by '+e.target.value});docRenderTable(host,dept);};}
     const stt=$('dtStatus');if(stt)stt.onchange=()=>{DOC.page=1;usbDoc({title:'Status: '+(stt.value||'all')});draw();};
+    // "Search inside" reuses the exact same navigation the left category tree uses, so the two stay
+    // in sync no matter which one you pick from — one piece of state, two ways to set it.
+    const sc=$('dtScope');if(sc)sc.onchange=()=>{const v=sc.value;location.hash=v?('#/legal/cat/'+v):'#/legal';};
     document.querySelectorAll('.dtChk').forEach(c=>c.onchange=e=>{const id=+e.target.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);updateBulk();});
     const all=$('dtAll');if(all)all.onchange=e=>{document.querySelectorAll('.dtChk').forEach(c=>{c.checked=e.target.checked;const id=+c.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);});updateBulk();};
     updateBulk();
   };
-  const updateBulk=()=>{const n=DOC.sel.size;const dl=$('dtBulkDl'),del=$('dtBulkDel');if(dl){dl.disabled=!n;dl.innerHTML='<i class="fa-solid fa-download"></i> Download'+(n?' ('+n+')':'');dl.onclick=()=>{try{usageQueue('legal.documents.bulk_download_delete','export',{title:'Bulk download ('+DOC.sel.size+' documents)'});}catch(_e){}DOC.sel.forEach(id=>docDownload(id));};}if(del){del.disabled=!n;del.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');del.onclick=()=>docBulkDelete();}};
+  // Download/Delete stay clickable even with nothing selected — a truly disabled button gives zero
+  // feedback when someone clicks it anyway, which just leaves them wondering if it's broken. Looking
+  // dimmed but explaining itself with a toast is more honest than looking dead.
+  const updateBulk=()=>{
+    const n=DOC.sel.size;const dl=$('dtBulkDl'),del=$('dtBulkDel');
+    if(dl){
+      dl.classList.toggle('doc-soft-disabled',!n);
+      dl.innerHTML='<i class="fa-solid fa-download"></i> Download'+(n?' ('+n+')':'');
+      dl.onclick=()=>{
+        if(!n){toast('Select at least one document first','err');return;}
+        try{usageQueue('legal.documents.bulk_download_delete','export',{title:'Bulk download ('+DOC.sel.size+' documents)'});}catch(_e){}
+        DOC.sel.forEach(id=>docDownload(id));
+      };
+    }
+    if(del){
+      del.classList.toggle('doc-soft-disabled',!n);
+      del.innerHTML='<i class="fa-solid fa-trash"></i> Delete'+(n?' ('+n+')':'');
+      del.onclick=()=>{
+        if(!n){toast('Select at least one document first','err');return;}
+        docBulkDelete();
+      };
+    }
+  };
   window.docPage=(d,tp)=>{DOC.page=Math.max(1,DOC.page+d);if(tp)DOC.page=Math.min(DOC.page,tp);draw();};
   draw();
 }
@@ -1957,45 +2003,34 @@ window.docUploadSave=async function(){
    disagree. Word and Excel files are left out of the total as well as the backlog - OCR reads PDFs
    and images, so counting files it will never open would leave this permanently short of 100% and
    looking stuck. */
+/* Was a permanent, always-open technical status card sitting above every document list -- most
+   people opening Legal to find a document don't need an OCR-pipeline progress report shoved in
+   their face before they can even see the search box. Now it's a single quiet line that only shows
+   up while there's something genuinely incomplete to report, with the detail behind an explicit
+   "Details" click -- and once indexing finishes, it disappears completely instead of sitting there
+   forever saying "100% complete". */
 async function legalOcrBarPaint(){
   const host=document.getElementById('legalOcrBar'); if(!host) return;
   let rows=[];
   try{ const {data}=await sb.schema('doc').rpc('legal_ocr_progress'); rows=data||[]; }catch(_e){ return; }
   const all=rows.filter(r=>r.section==='All Legal')[0];
-  if(!all||!all.total) { host.innerHTML=''; return; }
+  if(!all||!all.total||!all.remaining){ host.innerHTML=''; return; }
+  const pctAll=Math.round(100*all.done/all.total);
   const parts=rows.filter(r=>r.section!=='All Legal')
     .sort((a,b)=>a.section<b.section?-1:1)
     .map(r=>{
       const pct=r.total?Math.round(100*r.done/r.total):0;
-      return '<div style="flex:1;min-width:190px">'
-        +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">'
-          +'<span style="font-weight:600">'+esc(r.section)+'</span>'
-          +'<span style="color:var(--slate)">'+r.done+' of '+r.total+'</span></div>'
-        +'<div style="height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden">'
-          +'<div style="height:100%;width:'+pct+'%;background:'+(pct>=100?'#16a34a':'#2563eb')+'"></div></div>'
-        +'<div style="font-size:11px;color:var(--slate);margin-top:3px">'
-          +(r.remaining?(r.remaining+' still to read'):'all read')
-          +(r.unreadable?(' · '+r.unreadable+' could not be read'):'')+'</div>'
-      +'</div>';
+      return `<div style="flex:1;min-width:170px">
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px"><span style="font-weight:600">${esc(r.section)}</span><span style="color:var(--slate)">${r.done}/${r.total}</span></div>
+        <div style="height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${pct>=100?'#16a34a':'#2563eb'}"></div></div>
+      </div>`;
     }).join('');
-  const pctAll=Math.round(100*all.done/all.total);
-  host.innerHTML='<div style="border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:13px 15px;margin:14px 0;background:var(--bg-card,#fff)">'
-    +'<div style="display:flex;align-items:baseline;gap:9px;margin-bottom:11px;flex-wrap:wrap">'
-      +'<b style="font-size:13px"><i class="fa-solid fa-magnifying-glass-chart" style="color:#1e3a8a"></i> Searchable text</b>'
-      +'<span style="font-size:12px;color:var(--slate)">'
-        +all.done+' of '+all.total+' documents read ('+pctAll+'%)'
-        +(all.remaining?(' \u00b7 '+all.remaining+' still to go'):' \u00b7 complete')
-        /* A scan Gemini cannot get text out of is retired after three tries and counted here.
-           Left unsaid, the figure sits just short of complete for ever and reads as a stalled job. */
-        +(all.unreadable?(' \u00b7 '+all.unreadable+' unreadable'):'')+'</span>'
-      +'<button class="btn-sm" style="margin-left:auto" onclick="legalOcrBarPaint()">'
-        +'<i class="fa-solid fa-rotate"></i> Refresh</button>'
-    +'</div>'
-    +'<div style="display:flex;gap:18px;flex-wrap:wrap">'+parts+'</div>'
-    +(all.remaining?('<div style="font-size:11px;color:var(--slate);margin-top:9px">'
-        +'Reading runs in the background, a few documents at a time. Until a document is read you '
-        +'can find it by name, but not by what is written inside it.</div>'):'')
-  +'</div>';
+  host.innerHTML=`<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12px;color:var(--slate);padding:8px 2px;margin-bottom:4px">
+    <i class="fa-solid fa-magnifying-glass-chart" style="color:#1e3a8a"></i>
+    <span>${all.done} of ${all.total} documents are searchable by content so far (${pctAll}%)${all.unreadable?' \u00b7 '+all.unreadable+' could not be read':''} \u2014 the rest are read automatically in the background; you can still find them by name meanwhile.</span>
+    <button type="button" class="btn-sm" style="border:none;background:none;color:var(--brand);cursor:pointer;font-weight:600" onclick="var d=document.getElementById('legalIdxDetail');d.style.display=d.style.display==='none'?'flex':'none';">Details</button>
+  </div>
+  <div id="legalIdxDetail" style="display:none;gap:16px;flex-wrap:wrap;margin:2px 2px 10px;padding:10px;background:#f8fafc;border:1px solid var(--line);border-radius:10px">${parts}</div>`;
 }
 window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
