@@ -18163,14 +18163,176 @@ window.custSetSubmeterPaymentRefSave=async function(requestId){
   if(error){toast('Could not save: '+error.message,'err');return;}
   closeModal();toast('Payment reference saved','ok');route();
 };
-const CUST_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+/* Each stage gets its own colour, and the same colour everywhere it appears - the pill, the
+   progress rail, the stat tile. A referral's whole story is "how far along is it", so the stages
+   run cool-to-warm-to-green and a reader can tell where one has reached without reading a word.
+   Not-interested is deliberately the only grey: it is the one outcome that has stopped moving. */
+const CUST_REFERRAL_STAGES=[
+  {k:'submitted',     label:'Submitted',      ink:'#3730a3', bg:'#eef2ff', dot:'#6366f1', icon:'fa-paper-plane'},
+  {k:'contacted',     label:'Contacted',      ink:'#075985', bg:'#e0f2fe', dot:'#0284c7', icon:'fa-phone-volume'},
+  {k:'interested',    label:'Interested',     ink:'#92400e', bg:'#fef3c7', dot:'#d97706', icon:'fa-star'},
+  {k:'visited_site',  label:'Visited Site',   ink:'#6b21a8', bg:'#f5f3ff', dot:'#9333ea', icon:'fa-location-dot'},
+  {k:'booked',        label:'Booked',         ink:'#166534', bg:'#dcfce7', dot:'#16a34a', icon:'fa-circle-check'},
+  {k:'not_interested',label:'Not Interested', ink:'#475569', bg:'#f1f5f9', dot:'#94a3b8', icon:'fa-circle-minus'}
+];
+const CUST_REFERRAL_STATUSES=CUST_REFERRAL_STAGES.reduce(function(a,s){a[s.k]=s.label;return a;},{});
+function custRefStage(k){ return CUST_REFERRAL_STAGES.filter(function(s){return s.k===k;})[0]||CUST_REFERRAL_STAGES[0]; }
+
+/* The styles live here rather than in nexus.css because they are this one tab's and nothing else
+   reads them. Injected once; the id is the guard. */
+function custReferralCss(){
+  if(document.getElementById('custRefCss')) return;
+  const s=document.createElement('style'); s.id='custRefCss';
+  s.textContent=`
+  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:30px 32px;margin-bottom:18px;
+    background:linear-gradient(125deg,#0f1e3d 0%,#16294f 38%,#1d4ed8 100%);color:#fff;
+    box-shadow:0 14px 34px -14px rgba(15,30,61,.55)}
+  /* A slow sheen travelling across the banner. It is the only moving thing on the page, which is
+     what makes it read as "look here" rather than as decoration competing with the content. */
+  .cref-hero::after{content:'';position:absolute;top:-60%;left:-30%;width:40%;height:220%;
+    background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.16) 50%,rgba(255,255,255,0) 100%);
+    transform:rotate(18deg);animation:crefSheen 5.5s ease-in-out infinite}
+  @keyframes crefSheen{0%{left:-35%}55%{left:115%}100%{left:115%}}
+  .cref-hero-in{position:relative;z-index:1;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+  .cref-hero-txt{flex:1 1 320px;min-width:0}
+  .cref-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;
+    letter-spacing:.14em;text-transform:uppercase;color:#f0c964;margin-bottom:11px}
+  .cref-hero h2{font-size:26px;line-height:1.2;font-weight:800;margin:0 0 9px;letter-spacing:-.02em;text-wrap:balance}
+  .cref-hero p{font-size:14.5px;line-height:1.6;color:#c9d6f0;margin:0;max-width:52ch}
+  .cref-cta{display:inline-flex;align-items:center;gap:10px;border:0;cursor:pointer;
+    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#25324a;
+    padding:15px 28px;border-radius:999px;white-space:nowrap;
+    background:linear-gradient(135deg,#ffd97a 0%,#f0c964 45%,#dCA93a 100%);
+    box-shadow:0 8px 22px -6px rgba(240,201,100,.65);transition:transform .16s,box-shadow .16s}
+  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(240,201,100,.8)}
+  .cref-cta:active{transform:translateY(0)}
+  .cref-cta i{font-size:14px}
+  /* The pulse stops the moment there is anything in the list - it is there to get a first referral
+     out of somebody, not to keep nagging a customer who has already used the thing. */
+  .cref-cta.pulse{animation:crefPulse 2.4s ease-out infinite}
+  @keyframes crefPulse{
+    0%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,.55)}
+    70%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 16px rgba(240,201,100,0)}
+    100%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,0)}}
+
+  .cref-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  .cref-stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:13px;
+    padding:15px 17px;position:relative;overflow:hidden}
+  .cref-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--cref-c,#1d4ed8)}
+  .cref-stat b{display:block;font-size:27px;font-weight:800;line-height:1.1;color:var(--cref-c,#1d4ed8);
+    font-variant-numeric:tabular-nums}
+  .cref-stat span{display:block;font-size:12px;color:var(--slate);margin-top:3px;font-weight:600}
+
+  .cref-steps{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+  .cref-step{flex:1 1 200px;display:flex;gap:12px;align-items:flex-start;background:var(--card);
+    border:1px solid var(--line);border-radius:13px;padding:15px 16px}
+  .cref-step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+    background:var(--brand-50);color:var(--brand);font-weight:800;font-size:13px}
+  .cref-step b{display:block;font-size:13.5px;margin-bottom:2px}
+  .cref-step span{font-size:12.5px;color:var(--slate);line-height:1.5}
+
+  .cref-list{display:flex;flex-direction:column;gap:11px}
+  .cref-card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--cref-c,#6366f1);
+    border-radius:13px;padding:15px 17px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+    transition:box-shadow .16s,transform .16s}
+  .cref-card:hover{box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+  .cref-who{flex:1 1 220px;min-width:0}
+  .cref-name{font-size:15.5px;font-weight:700;letter-spacing:-.01em}
+  .cref-meta{font-size:12.5px;color:var(--slate);margin-top:3px;display:flex;gap:14px;flex-wrap:wrap}
+  .cref-meta i{width:12px;text-align:center;margin-right:4px;opacity:.75}
+  .cref-pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;
+    padding:7px 14px;border-radius:999px;white-space:nowrap}
+  .cref-pill i{font-size:11px}
+  /* The whole journey on every row, so a customer can see there are stages beyond the one they are
+     at - a referral sitting at "Contacted" reads as progress rather than as nothing happening. */
+  .cref-rail{display:flex;gap:5px;align-items:center;flex:1 1 150px;min-width:120px}
+  .cref-seg{height:5px;border-radius:99px;flex:1;background:var(--line)}
+  .cref-seg.on{background:var(--cref-c,#6366f1)}
+  .cref-when{font-size:12px;color:var(--slate);white-space:nowrap}
+
+  .cref-empty{text-align:center;padding:38px 24px;background:var(--card);border:1px dashed var(--line-2);
+    border-radius:14px}
+  .cref-empty i{font-size:30px;color:var(--brand);opacity:.35}
+  .cref-empty b{display:block;margin-top:12px;font-size:16px}
+  .cref-empty span{display:block;margin-top:5px;font-size:13px;color:var(--slate)}
+  @media(max-width:620px){
+    .cref-hero{padding:24px 20px}
+    .cref-hero h2{font-size:21px}
+    .cref-cta{width:100%;justify-content:center}
+  }
+  /* Somebody who has asked the operating system to stop animations gets a page that still works and
+     still looks like this - only the sheen and the pulse go. */
+  @media(prefers-reduced-motion:reduce){
+    .cref-hero::after{animation:none;display:none}
+    .cref-cta.pulse{animation:none}
+    .cref-card,.cref-cta{transition:none}
+  }`;
+  document.head.appendChild(s);
+}
+
 async function custTabReferrals(unit){
+  custReferralCss();
   const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
-  const rows=(referrals||[]).map(r=>[esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
-    `<select onchange="custReferralStatusChange(${r.id},this.value)">${Object.keys(CUST_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CUST_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
-    fmtDate(r.created_at)]);
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Referrals</div><button class="btn btn-primary" onclick="custNewReferralModal()"><i class="fa-solid fa-plus"></i> Refer someone</button></div>`+
-    (rows.length?cpaTable(['Name','Phone','Email','Status','Referred on'],rows):'<div class="card card-pad empty">You haven’t referred anyone yet.</div>');
+  const list=referrals||[];
+  const stageIndex=function(k){ const i=CUST_REFERRAL_STAGES.findIndex(function(s){return s.k===k;}); return i<0?0:i; };
+  const booked=list.filter(function(r){return r.status==='booked';}).length;
+  const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
+
+  const hero=`<div class="cref-hero"><div class="cref-hero-in">
+      <div class="cref-hero-txt">
+        <div class="cref-eyebrow"><i class="fa-solid fa-gift"></i> Refer &amp; earn</div>
+        <h2>Know someone looking for a home?</h2>
+        <p>Tell us who they are and our sales team takes it from there — you can watch every
+           referral move along right here, from first call to booking.</p>
+      </div>
+      <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
+        <i class="fa-solid fa-user-plus"></i> Refer someone
+      </button>
+    </div></div>`;
+
+  /* The counts only appear once there is something to count. On an empty tab they would be three
+     zeroes, which says "this is not worth using" at exactly the moment it needs to say the
+     opposite. */
+  const stats=list.length?`<div class="cref-stats">
+      <div class="cref-stat" style="--cref-c:#1d4ed8"><b>${list.length}</b><span>Referred by you</span></div>
+      <div class="cref-stat" style="--cref-c:#d97706"><b>${moving}</b><span>Being followed up</span></div>
+      <div class="cref-stat" style="--cref-c:#16a34a"><b>${booked}</b><span>Booked</span></div>
+    </div>`:'';
+
+  const steps=`<div class="cref-steps">
+      <div class="cref-step"><div class="cref-step-n">1</div><div><b>You refer</b>
+        <span>Their name and a phone number is all we need.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We reach out</b>
+        <span>Our sales team calls them and shows them around.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">3</div><div><b>You follow along</b>
+        <span>Every stage shows up on this page as it happens.</span></div></div>
+    </div>`;
+
+  const body=list.length
+    ? `<div class="cref-list">`+list.map(function(r){
+        const st=custRefStage(r.status), at=stageIndex(r.status);
+        // Not-interested fills nothing: the rail is about progress, and that outcome is not progress.
+        const done=(r.status==='not_interested')?0:at+1;
+        const rail=CUST_REFERRAL_STAGES.slice(0,5).map(function(_,i){
+          return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
+        const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
+        const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
+        return `<div class="cref-card" style="--cref-c:${st.dot}">
+            <div class="cref-who">
+              <div class="cref-name">${esc(r.prospect_name)}</div>
+              <div class="cref-meta">${phone}${mail}${(phone||mail)?'':'<span>No contact details given</span>'}</div>
+            </div>
+            <div class="cref-rail">${rail}</div>
+            <span class="cref-pill" style="background:${st.bg};color:${st.ink}">
+              <i class="fa-solid ${st.icon}"></i>${esc(st.label)}</span>
+            <span class="cref-when">${esc(fmtDate(r.created_at))}</span>
+          </div>`;
+      }).join('')+`</div>`
+    : `<div class="cref-empty"><i class="fa-solid fa-user-group"></i>
+         <b>No referrals yet</b>
+         <span>Be the first — it takes about ten seconds.</span></div>`;
+
+  return hero+stats+steps+body;
 }
 window.custNewReferralModal=function(){
   openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
