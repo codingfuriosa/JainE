@@ -14,9 +14,15 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const GMAIL_CLIENT_ID = Deno.env.get("GMAIL_CLIENT_ID")!;
-const GMAIL_CLIENT_SECRET = Deno.env.get("GMAIL_CLIENT_SECRET")!;
-const GMAIL_REFRESH_TOKEN = Deno.env.get("GMAIL_REFRESH_TOKEN")!;
+/* Read at call time, not module load. These were consts evaluated when the isolate booted, so a
+   rotated GMAIL_REFRESH_TOKEN was ignored by every warm instance until the function was redeployed -
+   which looked exactly like the new token being rejected. Gmail tokens get rotated; this makes that
+   take effect on the next request. */
+const gmailCreds = () => ({
+  clientId: Deno.env.get("GMAIL_CLIENT_ID") || "",
+  clientSecret: Deno.env.get("GMAIL_CLIENT_SECRET") || "",
+  refreshToken: Deno.env.get("GMAIL_REFRESH_TOKEN") || "",
+});
 const GMAIL_PUBSUB_TOPIC = Deno.env.get("GMAIL_PUBSUB_TOPIC")!;
 const GMAIL_SENDER = Deno.env.get("GMAIL_SENDER_EMAIL") || "customercare2@thejaingroup.com";
 const IMPORT_LABEL = "farvision-imported";
@@ -34,16 +40,20 @@ const json = (o: unknown, status = 200) =>
 
 let cachedToken: string | null = null;
 let tokenExp = 0;
+let cachedFor = "";
 
 async function gmailToken(): Promise<string> {
-  if (cachedToken && Date.now() < tokenExp - 30000) return cachedToken;
+  const { clientId, clientSecret, refreshToken } = gmailCreds();
+  // Cache is keyed on the refresh token, so rotating it invalidates the cached access token too.
+  if (cachedToken && cachedFor === refreshToken && Date.now() < tokenExp - 30000) return cachedToken;
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: GMAIL_CLIENT_ID, client_secret: GMAIL_CLIENT_SECRET, refresh_token: GMAIL_REFRESH_TOKEN, grant_type: "refresh_token" }),
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
   });
   if (!res.ok) throw new Error("Token refresh failed: " + (await res.text()));
   const d = await res.json();
   cachedToken = d.access_token; tokenExp = Date.now() + (d.expires_in || 3600) * 1000;
+  cachedFor = refreshToken;
   return cachedToken!;
 }
 

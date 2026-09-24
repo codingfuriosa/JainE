@@ -53,6 +53,7 @@ const isReasoningModel = (m: string) => /^(o\d|gpt-5)/i.test(m.trim());
 
 const APP_TZ_OFFSET_MIN = Number(Deno.env.get("APP_TZ_OFFSET_MIN") || 330); // +05:30
 const APP_TZ_NAME = Deno.env.get("APP_TZ") || "Asia/Kolkata";
+const FORWARD_ONLY_EFFECTIVE_DATE = "2026-09-23";
 
 const JOB_SECRET_NAME = "transcription_sync";
 
@@ -683,7 +684,7 @@ function priorQualificationFrom(prior: PriorCall[],
     source: null, note: "no earlier call took this lead past In Follow Up" } : null;
 }
 
-/* The four mismatch categories, derived HERE from the two statuses rather than trusted from the
+/* The five mismatch categories, derived HERE from the two statuses rather than trusted from the
    model's own field - and now with the ratchet applied to the model's verdict first. The prompt
    states the rule as well, but a prompt is a request and this is the guarantee: an "In Follow Up"
    verdict on a soundly qualified lead is lifted back to Qualified before anything is compared or
@@ -706,9 +707,18 @@ carried forward as Qualified.`.replace(/\s+/g, " ")
   const done = (r: { status_match: boolean | null; mismatch_type: string | null; note: string }) =>
     ({ ...r, note: r.note + ratchetNote, effective_status: a || null, ratcheted });
 
-  if (!a || a === "Unclear") {
+  if (!a) {
     return done({ status_match: null, mismatch_type: null,
       note: "The conversation did not establish an outcome, so it neither agrees nor disagrees with the CRM." });
+  }
+  /* By requirement (2026-09-23): an Unclear call is not a free pass. It used to count as neither a
+     match nor a mismatch - silently dropped from both totals - which let a run full of unreviewable
+     calls report a clean mismatch rate. It is now its own mismatch category: not a claim that the CRM
+     is wrong, but a flag that this call could not be judged and needs a human or a re-listen, and a
+     count that must show up rather than vanish. */
+  if (a === "Unclear") {
+    return done({ status_match: false, mismatch_type: "ai_status_unclear",
+      note: "The call did not establish a clear outcome - counted as a mismatch so an unreviewable call is flagged rather than silently dropped from the count." });
   }
   if (!["Lost", "Qualified", "In Follow Up"].includes(crm)) {
     return done({ status_match: null, mismatch_type: null,
@@ -1276,7 +1286,7 @@ Deno.serve(async (req: Request) => {
       const followUpId = Number(body.follow_up_id || body.id);
       if (!followUpId) return j({ error: "missing follow_up_id" }, 400);
       const { data: row, error: readErr } = await db.schema("acc").from("transcription_queue")
-        .select("id, status, fail_phase, transcript_id, attempt_count, qa_attempt_count, snapshot_date")
+        .select("id, status, fail_phase, transcript_id, attempt_count, qa_attempt_count, snapshot_date, call_date")
         .eq("follow_up_id", followUpId).maybeSingle();
       if (readErr) return j({ error: readErr.message }, 500);
       if (!row) return j({ error: "no queued recording for that follow-up" }, 404);
@@ -1287,6 +1297,15 @@ Deno.serve(async (req: Request) => {
         return j({ error: `that recording is already queued (${row.status})`, queue_status: row.status }, 409);
       }
       const resumeQa = !body.force_transcribe && (row.fail_phase === "qa" || !!row.transcript_id);
+      if (row.call_date && String(row.call_date) < FORWARD_ONLY_EFFECTIVE_DATE) {
+        const { data: existingQa, error: qaReadErr } = await db.schema("acc").from("followup_qa")
+          .select("id").eq("follow_up_id", followUpId).maybeSingle();
+        if (qaReadErr) return j({ error: qaReadErr.message }, 500);
+        if (existingQa) {
+          return j({ error: "historical QA result is immutable and cannot be replaced by retry",
+                     follow_up_id: followUpId, call_date: row.call_date }, 409);
+        }
+      }
       /* To the BACK of the queue, so a call retried by hand cannot starve the day's own work. */
       const { data: seq } = await db.rpc("next_crm_queue_block", { n: 1 });
       /* next_claimable_follow_up (20260922110000) only claims leads in TODAY's decision-day response -

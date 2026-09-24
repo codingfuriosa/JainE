@@ -18,82 +18,118 @@
 
 import { QA_RUBRIC } from "../_shared/qa-rubric.ts";
 
+export const QA_RULES_EFFECTIVE_FROM = "2026-09-23 00:00 IST";
+
 export const CATALOGUE = `APPROVED PROJECT INFORMATION (Jain Group). This is the reference for
 judging whether what the agent said was correct. Do not treat anything absent from this list as
 false - treat it as unverifiable. Synced against the sales team's own Reckoner spreadsheet
-(2026-09-17) - where this disagrees with an older figure you may recall, THIS is current.
+(2026-09-23) - where this disagrees with an older figure you may recall, THIS is current.
 Every price is the "onwards" figure and excludes GST, registration and parking unless stated.
 Carpet area runs roughly 25-30% below the super built-up areas given here.
 
 - Dream Ananta - the project customers hear pitched as "the new project near the Airport".
-  UNDER CONSTRUCTION. launching 2026, Doltala, Old Jessore Rd, Madhyamgram / near the Airport; landmark Fortune
-  City / Julien Day School. Base rate 5,950/sft.
+  UNDER CONSTRUCTION (soft launch, 2026), Doltala, Old Jessore Rd, Madhyamgram / near the Airport,
+  on a road-facing plot; landmark Fortune City / Julien Day School. Base rate 5,950/sft.
   2BHK 62 lakh (940-1015 sqft) - 3BHK 68 lakh (1075-1405 sqft) - 4BHK 1.14 crore (1780-1805 sqft).
-  Parking: covered 5 lakh, open 4 lakh. About 5.5 acres, 296 flats, G+8.
-  Possession date and RERA number are not yet announced - "not yet announced" is the correct
-  answer regardless of any rough internal estimate a caller may have heard.
+  Each price is inclusive of GST and EDC, excluding car parking. Parking: covered/basement 5 lakh,
+  open 4 lakh. About 5.5 acres, 296 flats, G+8; room sizes run roughly 12x13 ft.
+  the sheet references a soft-launch discount - treat a specific discount
+  figure an agent quotes as unverifiable unless the CRM record for that date confirms it.
+  Possession: an estimated ~5 years from launch is the correct rough answer. No fixed possession
+  date or RERA number is announced yet - a specific date beyond that rough estimate is not correct
+  to quote, regardless of any internal estimate a caller may have heard.
 - Dream Gurukul - a SEPARATE project from Dream Ananta, on the same Doltala / Madhyamgram side near
   the Airport (Jessore Road, Doltala Crossing, near Julien Day School, about 10 minutes from the
   Airport). Do not treat the two as one - but see the PROJECT-SPECIFIC RULE on redirecting a lead
-  from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres, 6 towers, G+7,
-  450+ flats. 2BHK 58 lakh onwards (860-875 sqft) - 3BHK 82-85 lakh (1225-1290 sqft).
-  Parking: covered 5 lakh, open 4 lakh.
+  from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres,  G+7 total towers,
+  450+ flats. Base rate 5,992/sft (box price, no pitching).
+  2BHK 58 lakh onwards (860-975 sqft), including  car parking.
+  3BHK 82-85 lakh onwards (1225-1290 sqft, price depends on optional features), including all with
+  covered parking,Excluding PLC, IF, EDC and GST. A further 3BHK reference in the sheet, 72 lakh onwards for
+  about 1075 sqft, is noted only under a separate "22 Acres" listing - treat that specific figure
+  as unconfirmed for this project until verified.
+  Parking: covered 5 lakh, open 4 lakh. A floor preference charge of 20/sft applies from the 2nd
+  floor onwards.
 - Dream Diamond - UNDER CONSTRUCTION, handover 2027 (first 36 of 100 bungalows). G+1, row house,
-  3 bed and 3 bath, GST applicable. Nepalgunge Rd, Daulatpur, Pailan; landmark near Joka Metro.
-  2006 sqft on 1.25 kattha 79 lakh - 2033 sqft on 1.30 kattha 82 lakh.
+  3 bed and 3 bath, GST applicable. Nepalgunge Rd, Daulatpur (Kailati), Pailan - PIN 700104, near
+  Pailan World School, about 5-10 minutes from Joka Metro; a resident shuttle from Joka Metro is
+  offered.
+  2006 sqft on 1.25 kattha 79 lakh onwards - 2033 sqft on 1.30 kattha 82 lakh onwards.
+  A ready-to-move option also exists - only 2 bungalows, handover within about 1 month; treat
+  "ready now" beyond those 2 units as incorrect.
   RERA WBRERA/P/SOU/2023/00729. Possession mid-2027.
-- Dream World City - READY TO MOVE (2018 launch, completion certificate in hand). Nepalgunge Rd,
-  Daulatpur, Pailan, about 5 minutes from Joka Metro. 1BHK 25 lakh (560-575 sqft) - 2BHK 29 lakh
-  (630-800 sqft) - 3BHK 36 lakh onwards (795-1390 sqft, price scales up with size within that
-  range - a larger 3BHK in this project costing well above 36 lakh is not itself an error).
-  Parking: open 2.75 lakh, covered 3.50 lakh. 20 acres, 450 flats, 6 towers, G+9, over 70% open
-  space.
-- Dream Valley - READY TO MOVE. Hill Cart Road, near Dagapur Tea Estate, Siliguri. PRIMARILY 3BHK -
-  there is no 1BHK or 2BHK here, and an agent offering either has given wrong product information.
-  A single 4BHK unit now also exists (1860 sqft, 2nd floor) - offering it is no longer an error,
-  though it should be described as the one remaining unit, not as a regular configuration.
+- Dream World City - READY TO MOVE (2018 launch, completion certificate in hand; families already
+  living there). Nepalgunge Rd, Daulatpur (Kaitala), Pailan - PIN 700104, about 5 minutes from Joka
+  Metro, near Pailan World School. Base rate 4,370/sft (box price).
+  1BHK 25 lakh onwards (560-575 sqft) - 2BHK 29 lakh onwards (630-800 sqft) - 3BHK 36 lakh onwards
+  (795-1390 sqft, price scales up with size within that range - a larger 3BHK in this project
+  costing well above 38 lakh is not itself an error).
+  Parking: open 2.75 lakh, covered 3.50 lakh.  20 acres, 450 flats, 6 towers,
+  G+9, over 70% open space.
+  The sheet also references a free open-parking / spot-booking promotion (not for 1BHK) - this is a
+  time-limited offer, not a standing catalogue fact. Treat an agent's mention of it as unverifiable
+  unless the CRM record for that date confirms the offer was live; never score it as a confirmed
+  permanent benefit either way.
+- Dream Valley - READY TO MOVE. Hill Cart Road, Dagapur, beside Viramma Resort and Savin Kingdom,
+  about 1.5 km from Darjeeling More, Siliguri. PRIMARILY 3BHK - there is no 1BHK or 2BHK here, and
+  an agent offering either has given wrong product information. A single 4BHK unit now also exists
+  (1860 sqft, 2nd floor) - offering it is no longer an error, though it should be described as the
+  one remaining unit, not as a regular configuration.
   3BHK 74-85 lakh (1540-1645 sqft) - 4BHK 86 lakh onwards (1860 sqft). Base rate 4,150/sft.
-  Parking: open 4.5 lakh, covered 6-6.5 lakh. 3.5 acres, 264 flats, 4 towers, G+10.
-- Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur, beside NH-2; landmark Kalpana Inn.
-  2BHK 36-39 lakh (880 sqft) - 2.5BHK (a 2BHK with an added study room) 41-43 lakh (1045 sqft) -
-  3BHK 54 lakh onwards (1285 sqft). Base rate 3,495/sft. Parking: open 4.5 lakh.
-  22 bighas, 200 flats, 3 towers, G+11 (only 17 units remain).
+  Parking: open 4.5 lakh, covered 6-6.5 lakh. FRC, floor-rising and PLC charges may also apply -
+  confirm the specific unit's charges before a final quotation.
+  Only about 20 units are currently reported available.
+- Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur - PIN 713212, beside NH-2; landmark
+  Kalpana Inn. 2BHK 36-39 lakh (880 sqft) - 2.5BHK (a 2BHK with an added study room) 41-43 lakh
+  (1045 sqft) - 3BHK 54 lakh onwards (1285 sqft). A 4BHK also exists (about 2 flats reported
+  remaining) with no separately confirmed price in this reckoner - treat any 4BHK price an agent
+  quotes as unverifiable. Base rate 3,495/sft. Parking: open 4.5 lakh. FRC, floor-rising and PLC
+  charges may also apply - confirm before a final quotation.
+  Booking amount 1.05 lakh, then 20% within one month. 22 bighas, 200 flats, 3 towers, G+11 (only
+  17 units remain).
 - Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowrasta, beside the
   West Bengal Electricity power house). Base rate 3,900/sft.
-  1BHK studio 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK 45 lakh
-  (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft).
-  2 acres, 154 flats, 7 towers, G+4.
+  1BHK studio 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK with terrace
+  45 lakh (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft), inclusive of
+  car parking (the 1BHK/studio price is not).
+  Booking amount 1 lakh token, then 20% within 15 days. 2 acres, 154 flats, 7 towers, G+4.
 - Dream One - READY TO MOVE. Kadampukur-Jhalgachhi Rd, Patharghata, New Town / Rajarhat, beside the
   Westin and opposite Eco Park Gate 1. Base rate 11,000/sft.
   2BHK 1.16-1.25 crore (945-1010 sqft) - 3BHK (ready to move) 2.02-2.55 crore (1650-2045 sqft) -
-  3BHK Pent House 3770 sqft from 4.72 crore (a second, 2395 sqft pent-house variant also exists
-  with no separately confirmed price - treat that unit's own price as unverifiable, not as
-  whatever the 3770 sqft figure works out to per sqft).
+  3BHK Pent House 3770 sqft from 4.72 crore (unit price + EDC + open parking; a second figure in
+  the sheet, about 2.89 crore + 50 lakh interior = 3.40 crore onwards "with interior, inclusive of
+  all", may apply to a different configuration - confirm which unit before quoting it).
+  A 2395 sqft unit on the 2nd floor is also referenced, described inconsistently in the sheet as
+  both a 3BHK pent-house variant and a fully-furnished 4BHK - treat both its configuration and its
+  price as unverifiable until confirmed, not as whatever the 3770 sqft figure works out to per sqft.
   Only 13 of 213 flats remain. Parking: open 7.25 lakh (no covered figure currently quoted -
   treat a covered-parking price for this project as unverifiable rather than assumed absent).
+  Booking: 1 lakh token, then 20% of the final cost-sheet price.
   3.2 acres, 4 towers (three G+14, one G+7 - note the G+7 tower carries 3BHK only, on its 1st and
   2nd floors).
 - Dream Residency Manor - a live project in its own right, separate from every project above.
   READY TO MOVE. Rajarhat, on Salwa Bazar Main Road (211 bus route). Base rate 4,900/sft.
-  Only one unit remains, a 2BHK, 1115 sqft, 63 lakh onwards inclusive of open parking, on the 6th
-  (top) floor. The project's 4BHK configuration is SOLD OUT - an agent offering one has given
-  wrong product information. 1 acre, 8 towers, G+6, 173 flats total.
+  Only one unit remains, a 2BHK, 1115 sqft, South-West facing, 63 lakh onwards inclusive of open
+  parking, on the 6th (top) floor - the sheet separately also lists open parking at 5.25 lakh, so
+  confirm the current cost sheet before quoting a final price. The project's 4BHK configuration is
+  SOLD OUT - an agent offering one has given wrong product information. Booking amount 1 lakh.
+  1 acre, 8 towers, G+6, 173 flats total.
 - Dream Palazzo - a live project in its own right, separate from every project above. On 100
-  katha of land in Rajarhat, Narayanpur, near Koikhali (opposite Sidha Town). READY TO MOVE. Base
-  rate 3,900/sft. Almost entirely SOLD OUT: only one unit remains, a 3BHK, 1385 sqft, 75 lakh all
-  inclusive, on the 1st floor. Its 2BHK configuration is SOLD OUT entirely - an agent offering one
-  has given wrong product information. 10 towers, G+6.
+  katha of land in Rajarhat, Narayanpur, near Koikhali (opposite Siddha Town), about 10 minutes
+  from the airport. READY TO MOVE, marked SOLD OUT overall in the sheet. Base rate 3,800/sft.
+  Almost entirely SOLD OUT: only one unit remains, a 3BHK, 1836 sqft, 76 lakh all inclusive, on the
+  1st floor - because the project is marked sold out overall, confirm live availability before
+  promising this unit. Its 2BHK configuration is SOLD OUT entirely - an agent offering one has
+  given wrong product information. Booking amount 1 lakh. 10 towers, G+6.
 - Ecocity Bungalows - a live project in its own right, and NOT another name for Dream Diamond or for
-  Dream Eco City. UNDER CONSTRUCTION, handover 2028. Row-house bungalows, G+1, 3BHK duplex, 3
-  toilets, 2 attached private gardens each. STANDARD tier: 1.5 kattha land, 2210 sqft usable
-  (1452 sqft built-up), 85.62 lakh all inclusive (no private swimming pool). A separate PREMIUM
-  tier also exists (3.5 cottah land) with no confirmed price - treat that tier's price as
-  unverifiable. 92 bungalows total across 13 blocks, on 1.33 acres (standard) plus premium plots.
-- Durbaar Banquets - a banquet venue, not a residential project. Run by Jain Group inside the
-  Holiday Inn Kolkata Airport, Bishwa Bangla Sarani, near City Center 2, New Town. A 12,000 sqft
-  pillar-less banquet hall and a 10,000 sqft lawn, 137 hotel rooms, 200+ car parks with valet,
-  outdoor catering permitted. Exact pricing is never quoted on a call - it is settled at the venue.`;
-
+  Dream Eco City. UNDER CONSTRUCTION, handover 2028. Row-house bungalows, G+1, 3BHK duplex, 2
+  private gardens each, extra ceiling height, roof interface. STANDARD tier: 1.5 kattha land, 2210
+  sqft usable (1452 sqft built-up, about 136 sqft of that is parking), 85.62 lakh all inclusive (no
+  personal swimming pool). A separate PREMIUM tier also exists (3.5 cottah land, 3BHK duplex) with
+  no confirmed price - treat that tier's price as unverifiable. The sheet also references 3 further
+  fully private bungalows with no separate specification given - treat any claim about that tier as
+  unverifiable too. 92 bungalows total across 13 blocks, on 1.33 acres (standard) plus premium
+  plots.`;
 /* The short forms the sales floor actually speaks. The unambiguous ones are already written out in
    the transcript before it reaches here; these four are not, because each is also an ordinary word
    and rewriting them would have corrupted the transcript. So they are resolved HERE, by a reader
@@ -264,8 +300,10 @@ Every key below must be present on every reply. Where you have nothing to say, u
                      because a visit has not come up, when nothing else qualifies the lead either.
                      This is read by the pipeline, not just for show: a CRM status of "In Follow Up"
                      against an effective "Qualified" verdict is not counted as a mismatch when this
-                     is true, because "In Follow Up" is a fair label for a lead that qualifies but has
-                     not yet visited - see the rule below.
+                     is true AND the lead was already qualified on an earlier call (see LEAD HISTORY) -
+                     "In Follow Up" is a fair label for a lead that qualifies but has not yet visited,
+                     provided it has qualified before. The first call that qualifies a lead is still a
+                     mismatch even with visit_pending true - see the rule below.
     "score": 0-100, or null when ai_assessed_status is "Unclear",
     "status_match": true | false | null,
     "mismatch_type": "lost_should_not_have_been_lost" | "qualified_should_not_have_been_qualified"
@@ -582,17 +620,28 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
                                                     the history says was already qualified and that
                                                     the agent has now logged back as In Follow Up.
                                                     That downgrade is a CRM error and belongs here.
-                                                    BY REQUIREMENT (2026-09-18), THIS EXCLUDES THE
-                                                    VISIT-PENDING CASE: a customer who has cleared the
-                                                    four gates (or already wants to buy) but simply
-                                                    cannot make the site visit work yet - busy,
-                                                    travelling, asks to be called after a date, sends
-                                                    someone else instead. Set "visit_pending": true on
-                                                    that call, and that combination is NOT this
+                                                    BY REQUIREMENT (2026-09-18, NARROWED 2026-09-21),
+                                                    THIS EXCLUDES THE VISIT-PENDING CASE ONLY WHEN THE
+                                                    LEAD WAS ALREADY QUALIFIED ON AN EARLIER CALL: a
+                                                    customer who has cleared the four gates (or already
+                                                    wants to buy) but simply cannot make the site visit
+                                                    work yet - busy, travelling, asks to be called after
+                                                    a date, sends someone else instead. Set
+                                                    "visit_pending": true on that call, and IF the LEAD
+                                                    HISTORY block below shows this lead was already
+                                                    qualified before today, that combination is NOT this
                                                     mismatch_type - it is not counted as a disagreement
                                                     at all (see status_match below). "In Follow Up" is
                                                     a fair working label for a lead that qualifies but
-                                                    has not yet visited, not a CRM error.
+                                                    has not yet visited, not a CRM error - PROVIDED the
+                                                    lead has qualified before. A lead being qualified for
+                                                    the FIRST time on THIS call, with the site visit the
+                                                    only open item, is still this mismatch_type: the CRM
+                                                    genuinely needs to be told this lead just qualified,
+                                                    not excused because a visit date is unsettled. Set
+                                                    "visit_pending": true either way (it describes the
+                                                    call, not the verdict) - the pipeline is what applies
+                                                    the prior-qualification gate deterministically.
                                                     THIS INCLUDES A LEAD ALREADY QUALIFIED ON AN
                                                     EARLIER CALL who, on THIS call, only reports the
                                                     same visit still postponed - "not this week, call
@@ -619,11 +668,16 @@ Then set "mismatch_type" to EXACTLY one of these, or null:
                                                     visit_pending is false there: nothing qualified this
                                                     lead in the first place, so there is no visit to be
                                                     "pending" on.
-- null                                              the two agree, the CRM status is one this scheme
-                                                    does not cover (Site Visited, OV, and similar),
-                                                    or your assessment is Unclear.
-"status_match" is true when your assessment agrees with the CRM, false when it does not, and null
-when your assessment is Unclear - an unclear call is not a disagreement.
+- null                                              the two agree, or the CRM status is one this
+                                                    scheme does not cover (Site Visited, OV, and
+                                                    similar).
+Leave "mismatch_type" null when your own ai_assessed_status is "Unclear" too - the pipeline derives
+its own category for that case (see below), so nothing you write here for an unclear call is read.
+"status_match" is true when your assessment agrees with the CRM, false when it does not. An Unclear
+assessment is NOT scored as null any more (by requirement, 2026-09-23): the pipeline treats it as its
+own mismatch, flagged for review rather than silently dropped from the count, regardless of what you
+write in "status_match" or "mismatch_type" for that call - both are re-derived deterministically from
+ai_assessed_status alone. Only the CRM-status-not-covered case above still gets a real null.
 
 ### 7. VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
@@ -750,6 +804,11 @@ CRM status for this follow-up: ${or(c.crm_status, "(none)")}${
 CRM remarks: ${or(c.crm_remarks)}
 CRM next_follow_up_date: ${or(c.next_follow_up_label ?? c.crm_next_follow_up, "(none set)")}
 CRM lost_reason for this follow-up: ${or(c.crm_lost_reason, "(none - this follow-up is not marked Lost)")}
+
+QA RULES EFFECTIVE DATE: ${QA_RULES_EFFECTIVE_FROM}
+Apply the revised catalogue and QA rules only to processing that begins on or after this date.
+Existing QA results and transcripts are historical records and must not be rewritten or reassessed by
+this prompt.
 
 WHEN THE CALL HAPPENED (all times are Indian Standard Time)
 Call started: ${or(c.call_started, "(not recorded)")}
