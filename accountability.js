@@ -9107,9 +9107,36 @@
   }
 
   /* ---------- SCOREBOARD ---------- */
-  async function scoreboardTab(){ const b=$('acBody'); let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){} const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+  /* Two different leaderboards, not one: acc.scoreboard() covers ordinary tasks with its original
+     flat +1 completed/+1 on-time/-1 late credit (computed here from the raw counts, same as always),
+     and acc.scoreboard_causelist() is a separate ranking that exists ONLY for tasks the Legal MIS
+     causelist action-review popup creates (acc.ptasks.source='causelist'), scored instead by how
+     many days ahead of the due date they were finished. SB_VIEW just picks which RPC gets called
+     and how the table renders — nothing about acc.scoreboard() itself changed. */
+  let SB_VIEW='all';
+  window.sbSetView=function(v){ if(SB_VIEW===v)return; SB_VIEW=v; scoreboardTab(); };
+  async function scoreboardTab(){
+    const b=$('acBody');
+    b.innerHTML=`<div class="tp-card" style="padding:0">`
+      +`<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center"><b style="margin-right:6px">Scoreboard</b>`
+      +`<button class="ac-btn${SB_VIEW==='all'?' primary':''}" onclick="sbSetView('all')">All Tasks</button>`
+      +`<button class="ac-btn${SB_VIEW==='causelist'?' primary':''}" onclick="sbSetView('causelist')">Causelist</button>`
+      +`</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>`;
+    if(SB_VIEW==='causelist') await sbRenderCauselist(); else await sbRenderAll();
+  }
+  async function sbRenderAll(){
+    let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){}
     rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)*1+(r.tasks_on_time||0)*1-(r.tasks_late||0)*1})).sort((a,b)=>b.score-a.score);
-    b.innerHTML=`<div class="tp-card" style="padding:0"><div style="padding:14px 16px;border-bottom:1px solid var(--line)"><b>Scoreboard</b><div style="font-size:12px;color:var(--slate)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div></div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div></div>`; }
+    const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+    const host=$('sbBody'); if(!host)return;
+    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div>`;
+  }
+  async function sbRenderCauselist(){
+    let rows=[]; try{const {data}=await ACC().rpc('scoreboard_causelist');rows=data||[];}catch(e){}
+    const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+    const host=$('sbBody'); if(!host)return;
+    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Legal MIS causelist tasks only — per task, by how far ahead of its due date it was finished: 7+ days early +2 · 3–6 days early +1 · 0–2 days early 0 · after the due date −1</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_assigned}</td><td>${r.tasks_completed}</td><td>${r.tasks_pending}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="6"><div class="ac-empty" style="cursor:default;border:0">No causelist tasks yet</div></td></tr>'}</tbody></table></div>`;
+  }
 
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';

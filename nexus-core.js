@@ -341,6 +341,10 @@ async function boot(){
   renderPage();
   startSessionGuard();
   promptSetPassword();
+  // Not tied to the page just rendered - only to whether this user can see Legal MIS at all
+  // (clrevCheckPending checks pageAllowed('legal') itself). Fire-and-forget: it puts its own
+  // modal up over whatever renderPage() just drew, it doesn't need to be awaited first.
+  try{ clrevCheckPending(); }catch(e){}
 }
 // The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
@@ -3459,20 +3463,19 @@ window.misExportCauselist=async function(){
   await clrevMaybeOpen(rows);
 };
 
-/* ---- Causelist export review: compulsory action-needed popup -----------------------------
-   Whoever just exported a causelist has to say, for every matter in it, whether it needs action
-   and — if it does — by when and who in Legal is doing it. That answer becomes a task delegated
-   from businessanalyst@thejaingroup.com, due the date picked here, assigned to the person picked
-   here. A case already answered (causelist_reviewed_at set) by an earlier export whose date range
-   overlapped this one is not asked again.
+/* ---- Causelist export review: action-needed popup -----------------------------------------
+   Whoever exported a causelist, or is just starting a new session with matters still unanswered,
+   gets asked to say, for each one, whether it needs action and — if it does — by when and who in
+   Legal is doing it. That answer becomes a task delegated from businessanalyst@thejaingroup.com,
+   due the date picked here, assigned to the person picked here. A case already answered
+   (causelist_reviewed_at set), or already carrying an open or executed action from the ordinary
+   per-case action tracker, is never asked about again.
 
-   This is made compulsory by omission rather than by force: openModal/closeModal have no backdrop
-   or Escape dismissal anywhere in this app, and a modal only closes when something inside it calls
-   closeModal(). The markup below never renders a close control, a Cancel button, or the "x" every
-   other modal has — clrevSubmit() is the only path to closeModal(), and it refuses to run it until
-   every row is answered. That is also why this is session-only: nothing here is written to the
-   database until Submit succeeds, so a closed tab or a refresh mid-review simply loses the popup
-   rather than resuming it — the matters just stay unreviewed for the next overlapping export. */
+   The popup itself can be closed with the X — but closing it decides nothing: nothing is written
+   to the database until Submit runs, so whatever was still unanswered stays unanswered, and
+   clrevCheckPending() (called once from boot(), i.e. once per page load — this app is multi-page,
+   so that is effectively "every new session") puts the same popup straight back up the next time
+   JainE is opened. Submit is still the only way to actually clear a matter off this list. */
 window._clrevRows=[]; window._clrevLegal=[];
 // A case where action has already been taken - an open action already logged (action_needed) or
 // one already carried out (action_executed_date) - has nothing left for this popup to ask about,
@@ -3481,14 +3484,36 @@ window._clrevRows=[]; window._clrevLegal=[];
 function clrevAlreadyActioned(r){
   return !!r.causelist_reviewed_at || !!String(r.action_needed||'').trim() || !!String(r.action_executed_date||'').trim();
 }
-async function clrevMaybeOpen(rows){
-  const pending=(rows||[]).filter(function(r){ return !clrevAlreadyActioned(r); });
-  if(!pending.length) return;
+function clrevPrepRows(rows){
+  return (rows||[]).map(function(r){ return {id:r.id, case_no:r.case_no, case_type:r.case_type,
+    cause_title:r.cause_title, court:r.court, hearing:misHearingIso(r), needed:null, due:'', person:''}; });
+}
+async function clrevLoadLegal(){
   const people=await getPeople();
   window._clrevLegal=people.filter(function(p){ return Array.isArray(p.depts)&&p.depts.indexOf('Legal')!==-1; })
     .sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
-  window._clrevRows=pending.map(function(r){ return {id:r.id, case_no:r.case_no, case_type:r.case_type,
-    cause_title:r.cause_title, court:r.court, hearing:misHearingIso(r), needed:null, due:'', person:''}; });
+}
+async function clrevMaybeOpen(rows){
+  const pending=(rows||[]).filter(function(r){ return !clrevAlreadyActioned(r); });
+  if(!pending.length) return;
+  await clrevLoadLegal();
+  window._clrevRows=clrevPrepRows(pending);
+  clrevRender();
+}
+// Called once from boot(), after auth resolves, for anyone who can see Legal MIS at all - not
+// tied to exporting anything. Only cases with a real hearing date are in scope (the same universe
+// a causelist ever draws from), so this never turns into "review every case in the system".
+async function clrevCheckPending(){
+  if(!(typeof pageAllowed==='function') || !pageAllowed('legal')) return;
+  let rows=[];
+  try{
+    const {data,error}=await sb.from('mis_cases').select('*');
+    if(error) throw error;
+    rows=(data||[]).filter(function(r){ return misHearingIso(r) && !clrevAlreadyActioned(r); });
+  }catch(e){ return; }
+  if(!rows.length) return;
+  await clrevLoadLegal();
+  window._clrevRows=clrevPrepRows(rows);
   clrevRender();
 }
 // Typed-in due-date/person values live only in the DOM between renders; a Yes/No toggle rebuilds
@@ -3511,33 +3536,60 @@ function clrevDmy(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
   return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
 function clrevRender(){
   const rows=window._clrevRows||[], legal=window._clrevLegal||[];
-  const answered=rows.filter(function(r){ return r.needed===false || (r.needed===true && r.due && r.person); }).length;
+  const isDone=function(r){ return r.needed===false || (r.needed===true && r.due && r.person); };
+  const answered=rows.filter(isDone).length;
+  const pct=rows.length?Math.round(100*answered/rows.length):0;
   const opts=legal.map(function(p){ return {v:esc(p.email), t:esc(p.name)}; });
   const body=rows.map(function(r,i){
     const yesOn=r.needed===true, noOn=r.needed===false;
     const personOpts='<option value="">— choose —</option>'+opts.map(function(o){
       return '<option value="'+o.v+'"'+(r.person===o.v?' selected':'')+'>'+o.t+'</option>'; }).join('');
-    return '<div style="border-bottom:1px solid var(--line);padding:12px 0">'
-      +'<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">'
-        +'<div><b>'+esc(r.case_no||('#'+(i+1)))+'</b> · '+esc(r.case_type||'—')+' · '+esc(r.court||'—')+' · Hearing '+esc(clrevDmy(r.hearing))
-          +'<div style="color:var(--slate);font-size:12.5px;margin-top:2px">'+esc(r.cause_title||'')+'</div></div>'
-        +'<div style="display:flex;gap:6px;flex:none">'
-          +'<button type="button" class="btn'+(yesOn?' btn-primary':'')+'" onclick="clrevSetNeeded('+r.id+',true)">Action needed</button>'
-          +'<button type="button" class="btn'+(noOn?' btn-primary':'')+'" onclick="clrevSetNeeded('+r.id+',false)">No action needed</button>'
+    return '<div class="clrev-card'+(isDone(r)?' clrev-done':'')+'">'
+      +'<div class="clrev-card-top">'
+        +'<div class="clrev-meta">'
+          +'<span class="clrev-badge">'+esc(r.case_no||('#'+(i+1)))+'</span>'
+          +'<span class="clrev-sub">'+esc(r.case_type||'—')+' · '+esc(r.court||'—')+' · Hearing '+esc(clrevDmy(r.hearing))+'</span>'
+          +'<div class="clrev-title">'+esc(r.cause_title||'—')+'</div>'
+        +'</div>'
+        +'<div class="clrev-toggle">'
+          +'<button type="button" class="clrev-seg'+(yesOn?' on':'')+'" onclick="clrevSetNeeded('+r.id+',true)"><i class="fa-solid fa-flag"></i> Action needed</button>'
+          +'<button type="button" class="clrev-seg'+(noOn?' on':'')+'" onclick="clrevSetNeeded('+r.id+',false)"><i class="fa-solid fa-check"></i> No action</button>'
         +'</div>'
       +'</div>'
       +(yesOn
-        ? '<div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">'
-            +'<label style="flex:1;min-width:160px">Due date<input type="date" id="clrevDue_'+r.id+'" value="'+esc(r.due||'')+'"></label>'
-            +'<label style="flex:1;min-width:200px">Responsible (Legal)<select id="clrevPerson_'+r.id+'">'+personOpts+'</select></label>'
+        ? '<div class="clrev-fields">'
+            +'<label>Due date<input type="date" id="clrevDue_'+r.id+'" value="'+esc(r.due||'')+'"></label>'
+            +'<label>Responsible (Legal)<select id="clrevPerson_'+r.id+'">'+personOpts+'</select></label>'
           +'</div>'
         : '')
       +'</div>';
   }).join('');
-  openModal('<div class="modal-head"><h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--brand)"></i> Causelist — action review</h3></div>'
-    +'<div class="modal-body frm" style="width:min(94vw,720px);max-height:70vh;overflow:auto">'
-      +'<div style="margin-bottom:8px;color:var(--slate)">Every matter just exported has to be marked before you can do anything else in JainE — '
-      +answered+' of '+rows.length+' answered.</div>'
+  openModal('<style>'
+    +'.clrev-body{width:min(94vw,760px);max-height:74vh;overflow:auto;padding:20px 22px}'
+    +'.clrev-progress-wrap{margin-bottom:16px}'
+    +'.clrev-progress-txt{display:flex;justify-content:space-between;font-size:13px;color:var(--slate);margin-bottom:6px}'
+    +'.clrev-progress-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}'
+    +'.clrev-progress-fill{height:100%;background:var(--brand);border-radius:99px;transition:width .2s}'
+    +'.clrev-card{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:var(--card);transition:border-color .15s}'
+    +'.clrev-card.clrev-done{border-left-color:var(--ok)}'
+    +'.clrev-card-top{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-start}'
+    +'.clrev-meta{min-width:0}'
+    +'.clrev-badge{display:inline-block;background:var(--brand-50);color:var(--brand);font-weight:700;font-size:12px;padding:2px 9px;border-radius:6px;margin-bottom:5px}'
+    +'.clrev-sub{display:block;color:var(--slate);font-size:12.5px;margin-bottom:3px}'
+    +'.clrev-title{font-weight:600;font-size:14px;line-height:1.35}'
+    +'.clrev-toggle{display:flex;gap:6px;flex:none;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px}'
+    +'.clrev-seg{border:none;background:transparent;color:var(--slate);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}'
+    +'.clrev-seg:hover{color:var(--ink)}'
+    +'.clrev-seg.on{background:var(--card);color:var(--brand);box-shadow:var(--shadow)}'
+    +'.clrev-fields{display:flex;gap:12px;margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;flex-wrap:wrap}'
+    +'.clrev-fields label{flex:1;min-width:170px;font-size:12.5px;color:var(--slate);font-weight:600}'
+    +'.clrev-fields input,.clrev-fields select{display:block;width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;color:var(--ink);background:var(--card)}'
+    +'</style>'
+    +'<div class="modal-head"><h3><i class="fa-solid fa-scale-balanced" style="color:var(--brand)"></i> Causelist — action review</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body clrev-body">'
+      +'<div class="clrev-progress-wrap"><div class="clrev-progress-txt"><span>Mark whether each matter needs action</span><span>'+answered+' of '+rows.length+'</span></div>'
+        +'<div class="clrev-progress-bar"><div class="clrev-progress-fill" style="width:'+pct+'%"></div></div></div>'
       +(body||'<div style="color:var(--slate)">Nothing left to answer.</div>')
     +'</div>'
     +'<div class="modal-foot"><button class="btn btn-primary" onclick="clrevSubmit()">Submit</button></div>','lg');
@@ -3560,7 +3612,7 @@ window.clrevSubmit=async function(){
           title:'Legal MIS — Case '+(r.case_no||r.id),
           description:(r.cause_title||'')+(r.court?' · '+r.court:'')+' · Hearing '+clrevDmy(r.hearing),
           delegator:'businessanalyst@thejaingroup.com', created_by:'businessanalyst@thejaingroup.com',
-          due_date:r.due, order_index:0
+          due_date:r.due, order_index:0, source:'causelist'
         }).select().single();
         if(error) throw error;
         const {error:ae}=await sb.schema('acc').from('ptask_assignees').insert({task_id:t.id, email:r.person});
