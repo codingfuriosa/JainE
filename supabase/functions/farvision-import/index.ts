@@ -14,9 +14,15 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const GMAIL_CLIENT_ID = Deno.env.get("GMAIL_CLIENT_ID")!;
-const GMAIL_CLIENT_SECRET = Deno.env.get("GMAIL_CLIENT_SECRET")!;
-const GMAIL_REFRESH_TOKEN = Deno.env.get("GMAIL_REFRESH_TOKEN")!;
+/* Read at call time, not module load. These were consts evaluated when the isolate booted, so a
+   rotated GMAIL_REFRESH_TOKEN was ignored by every warm instance until the function was redeployed -
+   which looked exactly like the new token being rejected. Gmail tokens get rotated; this makes that
+   take effect on the next request. */
+const gmailCreds = () => ({
+  clientId: Deno.env.get("GMAIL_CLIENT_ID") || "",
+  clientSecret: Deno.env.get("GMAIL_CLIENT_SECRET") || "",
+  refreshToken: Deno.env.get("GMAIL_REFRESH_TOKEN") || "",
+});
 const GMAIL_PUBSUB_TOPIC = Deno.env.get("GMAIL_PUBSUB_TOPIC")!;
 const GMAIL_SENDER = Deno.env.get("GMAIL_SENDER_EMAIL") || "customercare2@thejaingroup.com";
 const IMPORT_LABEL = "farvision-imported";
@@ -34,16 +40,20 @@ const json = (o: unknown, status = 200) =>
 
 let cachedToken: string | null = null;
 let tokenExp = 0;
+let cachedFor = "";
 
 async function gmailToken(): Promise<string> {
-  if (cachedToken && Date.now() < tokenExp - 30000) return cachedToken;
+  const { clientId, clientSecret, refreshToken } = gmailCreds();
+  // Cache is keyed on the refresh token, so rotating it invalidates the cached access token too.
+  if (cachedToken && cachedFor === refreshToken && Date.now() < tokenExp - 30000) return cachedToken;
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: GMAIL_CLIENT_ID, client_secret: GMAIL_CLIENT_SECRET, refresh_token: GMAIL_REFRESH_TOKEN, grant_type: "refresh_token" }),
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
   });
   if (!res.ok) throw new Error("Token refresh failed: " + (await res.text()));
   const d = await res.json();
   cachedToken = d.access_token; tokenExp = Date.now() + (d.expires_in || 3600) * 1000;
+  cachedFor = refreshToken;
   return cachedToken!;
 }
 
@@ -72,7 +82,9 @@ async function labelMsg(id: string, labelId: string) {
 
 async function findEmails(): Promise<string[]> {
   const q = `from:${GMAIL_SENDER} has:attachment filename:xlsx -label:${IMPORT_LABEL}`;
-  const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=5`);
+  // 25, not 5: six reports arrive each morning and a backlog day can carry more. Anything beyond
+  // this page is simply left unlabelled and picked up next run.
+  const res = await gmail(`messages?q=${encodeURIComponent(q)}&maxResults=25`);
   return (res.messages || []).map((m: any) => m.id);
 }
 
@@ -105,55 +117,63 @@ async function processEmails(db: any) {
   // Dedup: skip emails already in the queue
   const { data: existingQueue } = await db.schema("cust").from("import_queue").select("gmail_message_id").not("gmail_message_id", "is", null);
   const alreadyQueued = new Set((existingQueue || []).map((r: any) => r.gmail_message_id));
-  const newIds = ids.filter((id: string) => !alreadyQueued.has(id));
-  log.push(`${newIds.length} new email(s) after dedup`);
-  if (!newIds.length) {
-    // All already queued — just label them so they stop appearing
-    const labelId = await getOrCreateLabel();
-    for (const id of ids) { try { await labelMsg(id, labelId); } catch {} }
-    return { processed: 0, queued: 0, log };
+  const labelId = await getOrCreateLabel();
+
+  // Already queued means the work is done - labelling those is safe and stops them being re-found.
+  for (const id of ids.filter((i: string) => alreadyQueued.has(i))) {
+    try { await labelMsg(id, labelId); } catch {}
   }
 
-  // Only queue the NEWEST email — older versions of the same report are stale.
-  // Gmail returns newest first, so take only the first new one.
-  const latestId = newIds[0];
-  log.push(`Processing only newest email: ${latestId}`);
+  // EVERY new email, not just the newest. This used to take newIds[0] and then label all of them,
+  // which marked emails as imported that were never downloaded - and since the search excludes the
+  // label, those reports became permanently invisible rather than merely delayed.
+  //
+  // Oldest first (Gmail returns newest first) so that when one report type arrives twice in a
+  // batch, the newest is processed last and is the one the auto-dismiss below leaves pending.
+  const newIds = ids.filter((id: string) => !alreadyQueued.has(id)).reverse();
+  log.push(`${newIds.length} new email(s) after dedup`);
+  if (!newIds.length) return { processed: 0, queued: 0, log };
 
   await db.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {});
-  const labelId = await getOrCreateLabel();
-  let queued = 0;
+  let queued = 0, processed = 0;
 
-  try {
-    const meta = await emailMeta(latestId);
-    const parts = await xlsxParts(latestId);
-    log.push(`"${meta.subject}" — ${parts.length} xlsx`);
-    for (const p of parts) {
-      try {
-        const data = await downloadAtt(latestId, p.attId);
-        const ts = new Date().toISOString().replace(/[:.]/g, "-");
-        const path = `${ts}/${p.name}`;
-        const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-        if (ue) { log.push(`Upload fail: ${ue.message}`); return { processed: 0, queued, log }; }
-        // Auto-dismiss older pending files of the same report type
-        // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
-        const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
-        if (baseType) {
-          const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
-          if (older && older.length) {
-            await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
-            log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
+  for (const msgId of newIds) {
+    try {
+      const meta = await emailMeta(msgId);
+      const parts = await xlsxParts(msgId);
+      log.push(`"${meta.subject}" — ${parts.length} xlsx`);
+      let allOk = parts.length > 0;
+      for (const p of parts) {
+        try {
+          const data = await downloadAtt(msgId, p.attId);
+          const ts = new Date().toISOString().replace(/[:.]/g, "-");
+          const path = `${ts}/${p.name}`;
+          const { error: ue } = await db.storage.from(STORAGE_BUCKET).upload(path, data, { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+          if (ue) { log.push(`Upload fail ${p.name}: ${ue.message}`); allOk = false; continue; }
+          // Auto-dismiss older pending files of the same report type
+          // Report type is the filename prefix before the date stamp (e.g. "Invoice Register Details")
+          const baseType = p.name.replace(/_\d{14,}\.xlsx$/i, '').replace(/\.xlsx$/i, '').trim();
+          if (baseType) {
+            const { data: older } = await db.schema("cust").from("import_queue").select("id").eq("status", "pending").ilike("file_name", baseType + "%");
+            if (older && older.length) {
+              await db.schema("cust").from("import_queue").update({ status: "completed", processed_at: new Date().toISOString() }).in("id", older.map((r: any) => r.id));
+              log.push(`Auto-dismissed ${older.length} older ${baseType} file(s)`);
+            }
           }
-        }
-        await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: latestId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
-        log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
-        queued++;
-      } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); }
-    }
-    // Label ALL emails (including older ones) so they don't reappear
-    for (const id of ids) { try { await labelMsg(id, labelId); } catch {} }
-  } catch (e) { log.push(`Error: ${(e as Error).message}`); }
+          const { error: ie } = await db.schema("cust").from("import_queue").insert({ storage_path: path, file_name: p.name, file_size: data.length, gmail_message_id: msgId, email_subject: meta.subject, email_date: meta.date, status: "pending" });
+          if (ie) { log.push(`Queue fail ${p.name}: ${ie.message}`); allOk = false; continue; }
+          log.push(`Queued ${p.name} (${(data.length/1024).toFixed(0)}KB)`);
+          queued++;
+        } catch (e) { log.push(`Fail ${p.name}: ${(e as Error).message}`); allOk = false; }
+      }
+      // Label ONLY once this email's attachments are safely stored and queued. The label is what
+      // removes an email from every future search, so it must never run ahead of the work.
+      if (allOk) { try { await labelMsg(msgId, labelId); processed++; } catch (e) { log.push(`Label fail ${msgId}: ${(e as Error).message}`); } }
+      else log.push(`Left unlabelled for retry: ${msgId}`);
+    } catch (e) { log.push(`Error on ${msgId}: ${(e as Error).message}`); }
+  }
 
-  return { processed: 1, queued, log };
+  return { processed, queued, log };
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

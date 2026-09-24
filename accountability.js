@@ -5991,8 +5991,20 @@
   window.wfUpiPick=function(el){
     const wrap=el&&el.closest('.wf-upi-wrap'); if(!wrap) return;
     const inp=wrap.querySelector('.wf-evt-upi');
-    if(inp){ inp.value=el.getAttribute('data-v')||''; wfUpiTyped(inp); }
+    const picked=el.getAttribute('data-v')||'';
+    if(inp){ inp.value=picked; wfUpiTyped(inp); }
     wrap.classList.remove('open');
+    /* Logged here rather than through USAGE_MAP, which fired it by function name and so could only
+       ever record that a click happened - every one of this feature's events carried a null meta
+       and the row was dashes end to end. Same reason every other workflow feature logs from here:
+       the map can see that a function ran, not what it did.
+
+       This is the half that matters most. Reusing a remembered id is the ONLY event that proves
+       the auto-remembering is doing its job; an upload says nothing either way, since the person
+       may simply have re-attached the same QR out of habit. The id itself is deliberately not
+       recorded - it is a payment destination, and this is a usage report. */
+    try{ usageQueue('tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id','create',
+                    {via:'Saved UPI id'}); }catch(_e){}
   };
   function wfUpiFillPanel(wrap){
     const panel=wrap.querySelector('.wf-upi-panel'); if(!panel) return;
@@ -6643,7 +6655,15 @@
        of a Km on a bus journey. */
     const showWhen=f.showWhen?(' data-showwhen="'+esc2(JSON.stringify(f.showWhen))+'" data-hidden="1" style="display:none"'):'';
     const requires=f.requires?(' data-requires="'+esc2(f.requires)+'"'):'';
-    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
+    /* The payment-QR field carries a marker so the upload can be COUNTED as the thing it is.
+       Usability has a feature called "Upload and auto-remember a payment QR / UPI ID", and until
+       now the only thing wired to it was picking an id off the saved dropdown - so the four people
+       who actually uploaded a QR last week produced no events at all, and the feature read as
+       Inactive. The attachment handler is shared by every file field on every workflow, so it needs
+       to be told which one it is looking at; the template already knows (upiScannerMemory), and
+       this carries that answer into the DOM rather than making the handler re-derive it. */
+    const qrMark=f.upiScannerMemory?' data-upiqr="1"':'';
+    return '<div class="wf-evt-row" data-type="'+esc2(type)+'" data-optional="'+(f.optional?'1':'0')+'"'+showWhen+requires+qrMark+' data-orig="'+esc2(value||'')+'">'+labelHtml+valueHtml+removeBtn+'</div>';
   }
   // One attached file on a multi-file field. The stored path is kept on the chip so the hidden
   // value can be rebuilt from whatever chips are left after a removal.
@@ -6718,6 +6738,29 @@
     try{ wfEvtSweepUploads([]); }catch(_e){}
     try{ closeModal(); }catch(_e){}
   };
+  /* Counting a payment-QR upload as one. Every file field on every workflow comes through
+     wfEvtAttPick, so the row says which field this is (data-upiqr, set from the template's
+     upiScannerMemory flag) and only that one is counted.
+
+     Logged on the UPLOAD ITSELF rather than on the save: the file reaches S3 the moment it is
+     chosen, and a claim abandoned before Create still had a QR uploaded. Counting it at save time
+     would miss exactly the people worth knowing about - the ones who started and gave up.
+
+     WHAT IT RECORDS, AND WHAT IT DELIBERATELY DOES NOT. The obvious thing to capture was the file
+     name, and it is worthless: of twenty distinct QR files filed since June, eighteen are
+     "WhatsApp_Image_2026-08-19_at_16.17.40.jpeg", "IMG-20260827-WA0014.jpg", a bare UUID, or
+     "qr_code.png" - which only says again what the field is called. The UPI id was the other
+     candidate and is a payment destination; a usage-analytics screen is not where those belong.
+
+     What is worth knowing is HOW the destination was given, because that is the one thing this
+     feature exists to settle: does the remembering actually save anybody the trouble, or does
+     everyone re-upload a QR every time? That reads straight off which path ran, so it is always
+     populated and never guessed. */
+  function wfQrUsage(rowEl){
+    if(!rowEl || rowEl.getAttribute('data-upiqr')!=='1') return;
+    try{ usageQueue('tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id','create',
+                    {via:'QR image'}); }catch(_e){}
+  }
   window.wfEvtAttPick=async function(input){
     const wrapM=input.closest('.wf-evt-att-multi');
     if(wrapM){
@@ -6746,6 +6789,7 @@
           const {data,error}=await uploadFileToS3(key,file);
           if(error) throw error;
           wfEvtTrackUpload(data.path);
+          wfQrUsage(wrapM.closest('.wf-evt-row'));
           // Swapped for the real chip, which carries data-path and so counts towards the value.
           if(slot) slot.outerHTML=wfAttChipHtml(data.path);
         }catch(e){
@@ -6774,6 +6818,7 @@
       const {data,error}=await uploadFileToS3(key,file);
       if(error) throw error;
       wfEvtTrackUpload(data.path);
+      wfQrUsage(wrap.closest('.wf-evt-row'));
       wrap.innerHTML='<span class="wf-evt-att-name"><i class="fa-solid fa-paperclip"></i> <span class="wf-evt-att-fname" title="'+esc2(file.name)+'">'+esc2(file.name)+'</span> <button type="button" class="ac-btn ic" onclick="wfEvtAttClear(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button></span><input type="hidden" class="wf-evt-value" value="'+esc2(data.path)+'">';
     }catch(e){ toast('Upload failed: '+((e&&e.message)||e),'err'); wfEvtAttReset(wrap); }
   };
@@ -12418,7 +12463,11 @@
     openModal(`<div class="modal-head"><h3>Members <span style="font-size:12px;color:#94a3b8;font-weight:400">(owner cannot be a member)</span></h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden">${msWidget('emMembers',others,cur)}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accEditMembersSave(${tid})"><i class="fa-solid fa-check"></i> Save</button></div>`,'md'); };
   // usageQueue logged only when parts is non-empty (a real add/remove happened), after the actual
   // change, rather than through USAGE_MAP - captures who was added/removed, not just a click.
-  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
+  window.accEditMembersSave=async function(tid){ const sel=msGet('emMembers'); if(!sel.length){toast('At least one member required','err');return;} try{ const [oR,list]=await Promise.all([ACC().from('ptask_assignees').select('email').eq('task_id',tid),people()]); const oldE=(oR.data||[]).map(r=>r.email); const added=sel.filter(e=>!oldE.some(o=>eq(o,e))); const removed=oldE.filter(e=>!sel.some(x=>eq(x,e))); if(removed.length)await ACC().from('ptask_assignees').delete().eq('task_id',tid).in('email',removed); if(added.length)await ACC().from('ptask_assignees').insert(added.map(e=>({task_id:tid,email:e}))); const parts=[]; if(added.length)parts.push('added '+added.map(e=>nameOf(list,e)).join(', ')); if(removed.length)parts.push('removed '+removed.map(e=>nameOf(list,e)).join(', ')); if(parts.length){await sysMsg(tid,parts.join('; ')+' as member'+((added.length+removed.length)>1?'s':'')); /* Both halves: what changed, and who the task actually ended up with. It recorded only the change
+   ("added Ravi; removed Uma"), which left the Assigned to column empty on the one feature whose
+   whole subject is assignment - so the column had to be taken off it. `sel` is already the final
+   member list, so the answer was in hand and simply never written down. */
+try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; '), assignee:sel.map(e=>nameOf(list,e)).join(', ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
   window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));

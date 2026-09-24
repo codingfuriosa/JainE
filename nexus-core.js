@@ -346,8 +346,10 @@ async function boot(){
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
 // now, one item per section; .sb-nav is already flex:1+overflow-y:auto (same as the staff nav with
 // its own long lists), so this scrolls for free with no CSS changes.
-const CUST_TABS=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
-const CUST_TAB_ICONS=['fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+// 'Home' is the landing page and must stay at index 0 - the tab index IS the route (customer/<i>),
+// so anything hard-coding a number moves with it.
+const CUST_TABS=['Home','Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
@@ -8608,9 +8610,28 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
      padded with dashes. */
   const col4=usbCol4(featureKey);
   const showCol4=!!col4.header, showDetails=!col4.hideDetails;
+  /* Times used is asked for per feature (col4.timesUsed) rather than shown on all of them. It can
+     never be blank, but "never blank" is not the same as "worth a column": on a feature somebody
+     opens forty times a week it is just a fast-climbing number beside the row it belongs to. It
+     earns its place where the question is whether the thing gets RE-used - which is the whole
+     point of a payment destination the portal offers to remember for you. */
+  const showTimes=!!col4.timesUsed;
+  /* "Times used" — how many times this person had used this feature, counting this one. So the row
+     reads as a running tally: 1 on the day they found it, 12 by the time it is part of their week.
+     Named for what the number IS rather than "Use #", which made the reader work out whether it
+     was a total, a position or an id before it told them anything.
+
+     Unlike every other column here it can never be blank - it is the row's own position in the
+     person's history, not something a feature had to remember to capture, so it works even on the
+     rows the historical backfill left with no meta at all. That is what makes it available to any
+     feature that wants it; whether a feature wants it is a separate question, answered above.
+
+     Counted over their whole history server-side, not over the rows on screen, so
+     narrowing the date range does not restart it at 1. */
   const body='<div class="card qc-table-card" style="padding:0"><div style="overflow-x:auto;max-height:440px"><table class="tbl"><thead><tr><th>When</th><th>Action</th>'
     +(showDetails?('<th>'+esc(col4.detailsHeader||'Details')+'</th>'):'')
     +(showCol4?('<th>'+esc(col4.header)+'</th>'):'')
+    +(showTimes?('<th title="How many times this person had used this feature, counting this one — across their whole history, not just the dates shown">Times used</th>'):'')
     +'</tr></thead><tbody>'
     +rows.map(function(e){
       const dt=new Date(e.occurred_at);
@@ -8622,9 +8643,16 @@ window.usbOpenUserEvents=async function(featureKey,email,featureLabel){
       // hid fields the column then had no room for - "Open a month" lost its month from Details to a
       // column that never showed it, which is how a working row ended up blank at both ends.
       const col=usbCol4Value(e.meta, col4.keys);
+      /* A first use is worth seeing at a glance - it is the row that says somebody found the
+         feature - so it is marked rather than left as a bare 1 among the 40s. */
+      const useN=(e.use_n==null)?'':String(e.use_n);
+      const firstUse=String(e.use_n)==='1';
+      const useLabel=firstUse?'1st time':useN;
       return '<tr><td>'+esc(when)+'</td><td style="text-transform:capitalize">'+esc(e.action||'')+'</td>'
         +(showDetails?('<td>'+usbMetaHtml(e.meta,col.used)+'</td>'):'')
         +(showCol4?('<td style="color:var(--slate)">'+esc(col.text||'—')+'</td>'):'')
+        +(showTimes?('<td style="white-space:nowrap;font-variant-numeric:tabular-nums'+(firstUse?';color:#15803d;font-weight:600':';color:var(--slate)')+'">'
+          +esc(useLabel)+'</td>'):'')
       +'</tr>';
     }).join('')
     +'</tbody></table></div></div>';
@@ -8751,6 +8779,16 @@ const USB_COL4={
      that is the number worth reading: 410 measurable steps, 45.9 hours average, 204 of them over a
      day. A "Step" column was the other candidate and is wrong - Details already prints the step. */
   'tasks.workflow':                               {header:'Waited',  keys:['waited']},
+  /* The payment QR is not a step, so it can never have a "Waited" - it was a dash on both of the
+     feature's events and would be a dash on every future one. It gets no promoted column at all.
+     Details instead carries HOW the payment destination was given - a QR image, or an id reused
+     off the remembered list - which is the one question this feature exists to settle. Named
+     "Given as" because the cell holds one specific thing and the reader should not have to work
+     that out. The file name was the first attempt and was dropped: eighteen of the twenty QR files
+     on record are WhatsApp camera-roll names or a bare UUID. */
+  'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id':
+                                                  {header:null, keys:[], detailsHeader:'Given as',
+                                                   timesUsed:true},
   'tasks.workflow.forward_a_step':                {header:'Sent to', keys:['assignee']},
   'tasks.workflow.reject_send_a_step_back':       {header:'Sent to', keys:['assignee']},
   'tasks.workflow.revert_a_forwarded_step':       {header:'Sent to', keys:['assignee']},
@@ -8792,6 +8830,26 @@ const USB_COL4={
      been live since 1684217 - yet "view" has never once been recorded on any of them. That is a
      real fault and worth chasing on its own; until it is chased, a header promising something the
      rows have never held is the thing to remove. */
+  /* "Assigned to" is the Accountability default and it is right on the actions that hand a task to
+     somebody - Create, Approve, Comment, Delegate all fill it 100%. These six are the ones it was
+     inherited by and cannot fit, measured rather than guessed: zero assignee on every event any of
+     them has ever produced.
+
+     What each does carry is already in Details, which is why none of them loses anything by
+     dropping the column - Search tasks has the query, the sub-task features have the item, and a
+     narrower table of two honest columns beats a wide one padded with dashes.
+
+     Edit task members/assignees is deliberately NOT in this list. It was, briefly - it is the
+     feature that changes who a task is assigned to, and it recorded only the change ("added Ravi;
+     removed Uma"), so Assigned to was empty on the one feature whose whole subject is assignment.
+     The honest fix there was the capture, not the column: accEditMembersSave now writes the
+     resulting member list as well, so it keeps the module's Assigned to and fills it. The single
+     event from before that change will read as a dash, which is true - nothing recorded it. */
+  'tasks.tasks.search_tasks':                                  {header:null, keys:[]},
+  'tasks.tasks.add_checklist_sub_task_item':                   {header:null, keys:[]},
+  'tasks.tasks.mark_sub_task_complete':                        {header:null, keys:[]},
+  'tasks.tasks.delete_sub_task':                               {header:null, keys:[], hideDetails:true},
+  'tasks.tasks.mark_all_notifications_as_read':                {header:null, keys:[]},
   'tasks.tasks.view_tasks_grouped_by_workflow':                {header:null, keys:[], hideDetails:true},
   'tasks.tasks.view_tasks_grouped_by_person':                  {header:null, keys:[], hideDetails:true},
   'tasks.tasks.view_tasks_grouped_by_tag':                     {header:null, keys:[], hideDetails:true},
@@ -14633,20 +14691,67 @@ VIEWS.custportal_admin=async function(v,seg){
 };
 
 /* ---------- Tab 1: Projects & Units ---------- */
+let CPA_UNIT_FILTER={proj:'',q:''};
 async function cpaRenderProjectsUnits(host){
-  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true)]);
-  const projRows=projects.map(p=>[esc(p.name),esc(p.farvision_project_code||'—'),String(units.filter(u=>u.project_id===p.id).length),
-    `<button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`]);
-  const unitRows=units.map(u=>[esc(u.unit_code),esc((u.projects&&u.projects.name)||'—'),esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
-    `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
-    u.customer_id?'<span class="tag t-green">Assigned</span>':'<span class="tag t-gray">Unassigned</span>',
-    u.floor_casting_completed_at?`<span class="tag t-green">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
-    `<button class="btn btn-sm" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
-    (u.floor_casting_completed_at?'':` <button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)]);
+  const [projects,units]=await Promise.all([cpaProjects(true),cpaUnits(true),cpaCustomers(true)]);
+  const projRows=projects.map(p=>{
+    const mine=units.filter(u=>u.project_id===p.id);
+    return [esc(p.name),esc(p.farvision_project_code||'—'),String(mine.length),
+      String(new Set(mine.map(u=>u.customer_id).filter(Boolean)).size),
+      `<button class="btn btn-sm" onclick="cpaUnitsFor(${p.id})"><i class="fa-solid fa-list"></i> Units</button>`+
+      ` <button class="btn btn-sm" onclick="cpaProjectModal(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>`];
+  });
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Projects</div><button class="btn btn-primary" onclick="cpaProjectModal()"><i class="fa-solid fa-plus"></i> New project</button></div>`+
-    cpaTable(['Project','Farvision code','Units',''],projRows.length?projRows:[['No projects yet','','','']])+
-    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>`+
-    cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],unitRows.length?unitRows:[['No units yet','','','','','','','','']]);
+    cpaTable(['Project','Farvision code','Units','Customers',''],projRows.length?projRows:[['No projects yet','','','','']])+
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><div class="sec-title" style="margin:0">Units</div><button class="btn btn-primary" onclick="cpaUnitModal()"><i class="fa-solid fa-plus"></i> New unit</button></div>
+    <div class="mu-filters">
+      <select id="cpaUnitProj" class="mu-sel" onchange="cpaUnitFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}</select>
+      <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaUnitQ" placeholder="Search unit code, tower or customer" oninput="cpaUnitFilter()"></span>
+      <span class="mu-count" id="cpaUnitCount"></span>
+    </div>
+    <div id="cpaUnitList"></div>`;
+  cpaUnitList();
+  if(CPA_UNIT_FILTER.proj)$('cpaUnitProj').value=CPA_UNIT_FILTER.proj;
+  if(CPA_UNIT_FILTER.q)$('cpaUnitQ').value=CPA_UNIT_FILTER.q;
+}
+window.cpaUnitFilter=function(){
+  CPA_UNIT_FILTER.proj=$('cpaUnitProj').value;
+  CPA_UNIT_FILTER.q=$('cpaUnitQ').value.trim().toLowerCase();
+  cpaUnitList();
+};
+// "Units" on a project row jumps the list below to that project rather than opening a second screen.
+window.cpaUnitsFor=function(pid){
+  CPA_UNIT_FILTER.proj=String(pid);
+  const sel=$('cpaUnitProj');if(sel)sel.value=String(pid);
+  cpaUnitList();
+  const list=$('cpaUnitList');if(list)list.scrollIntoView({behavior:'smooth',block:'center'});
+};
+function cpaUnitList(){
+  const units=CPA.units||[],{proj,q}=CPA_UNIT_FILTER;
+  const custById={};(CPA.customers||[]).forEach(c=>{custById[c.id]=c;});
+  const list=units.filter(u=>{
+    if(proj&&String(u.project_id)!==proj)return false;
+    if(q){
+      const c=custById[u.customer_id];
+      if(![u.unit_code,u.tower,c&&c.full_name,c&&c.email].join(' ').toLowerCase().includes(q))return false;
+    }
+    return true;
+  });
+  const rows=list.map(u=>{
+    const c=custById[u.customer_id];
+    return [esc(u.unit_code),(u.projects&&u.projects.name)?cpaProjectChip(u.projects.name):'—',esc(u.tower||'—'),esc(u.unit_category||'—'),esc(u.unit_type||'—'),
+      `<span class="tag t-blue">${esc(u.status||'—')}</span>`,
+      c?`<span style="white-space:nowrap">${esc(c.full_name)}</span>`:'<span class="tag t-gray">Unassigned</span>',
+      u.floor_casting_completed_at?`<span class="tag t-green" style="white-space:nowrap">Cast ${fmtDateShort(u.floor_casting_completed_at)}</span>`:'<span class="tag t-amber">Pending</span>',
+      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
+      `<button class="btn btn-sm" title="Edit unit" onclick="cpaUnitModal(${u.id})"><i class="fa-solid fa-pen"></i></button>`+
+      (u.floor_casting_completed_at?'':`<button class="btn btn-sm btn-primary" onclick="cpaMarkCasting(${u.id})">Mark cast</button>`)+
+      `</span>`];
+  });
+  const cnt=$('cpaUnitCount');if(cnt)cnt.textContent=list.length+' of '+units.length;
+  $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
+    rows.length?rows:[['No units match this filter','','','','','','','','']]);
 }
 window.cpaProjectModal=function(id){
   const p=id?(CPA.projects||[]).find(x=>x.id===id):null;
@@ -14720,15 +14825,74 @@ window.cpaMarkCasting=async function(id){
 };
 
 /* ---------- Tab 2: Customers ---------- */
+// A customer's project is not a column on the customer - it comes from the unit(s) they hold, and a
+// customer can legitimately hold units in more than one project. So both are derived per row rather
+// than stored, and the project filter asks "does this customer hold a unit HERE".
+let CPA_CUST_FILTER={proj:'',q:''};
 async function cpaRenderCustomers(host){
-  const customers=await cpaCustomers(true);
-  const rows=customers.map(c=>[esc(c.full_name),esc(c.email),esc(c.phone||'—'),
-    c.auth_user_id?'<span class="tag t-green">Login active</span>':'<span class="tag t-gray">No login</span>',
-    `<button class="btn btn-sm" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
-    ` <button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i> View portal</button>`+
-    (c.auth_user_id?` <button class="btn btn-sm" onclick="cpaSetPasswordModal(${c.id},true)">Reset password</button>`:` <button class="btn btn-sm btn-primary" onclick="cpaSetPasswordModal(${c.id},false)">Create login</button>`)]);
-  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>`+
-    cpaTable(['Name','Email','Phone','Login','Actions'],rows.length?rows:[['No customers yet','','','','']]);
+  const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
+  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
+    <div class="mu-filters">
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
+      <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
+      <span class="mu-count" id="cpaCustCount"></span>
+    </div>
+    <div id="cpaCustList"></div>`;
+  cpaCustList();
+  if(CPA_CUST_FILTER.proj)$('cpaCustProj').value=CPA_CUST_FILTER.proj;
+  if(CPA_CUST_FILTER.q)$('cpaCustQ').value=CPA_CUST_FILTER.q;
+}
+window.cpaCustFilter=function(){
+  CPA_CUST_FILTER.proj=$('cpaCustProj').value;
+  CPA_CUST_FILTER.q=$('cpaCustQ').value.trim().toLowerCase();
+  cpaCustList();
+};
+// Farvision project names carry a location suffix - "DREAM GURUKUL(DOLTALA MADHYAMGRAM)" - which
+// wrapped to three lines in a table cell and made every row triple height. Show the name itself and
+// keep the full string on hover, since the suffix is what distinguishes two same-named projects.
+function projShortName(name){
+  const s=String(name||''),i=s.indexOf('(');
+  return i>0?s.slice(0,i).trim():s;
+}
+function cpaProjectChip(name){
+  return '<span title="'+esc(name||'')+'" style="white-space:nowrap">'+esc(projShortName(name))+'</span>';
+}
+function cpaCustUnitsByCustomer(){
+  const by={};(CPA.units||[]).forEach(u=>{if(u.customer_id)(by[u.customer_id]=by[u.customer_id]||[]).push(u);});
+  return by;
+}
+function cpaCustList(){
+  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  /* A customer with no unit holds no flat with us - a cancelled booking (Sales Details imports only
+     Active rows, so cancellation leaves the customer behind without one) or a duplicate record left
+     by an email that differed between exports. Neither belongs in the working list, so the default
+     view is customers who actually hold a unit. "Without a unit" still reaches them. */
+  const customers=proj==='none'?all:all.filter(c=>(byCustomer[c.id]||[]).length>0);
+  const list=customers.filter(c=>{
+    const mine=byCustomer[c.id]||[];
+    if(proj==='none'){if(mine.length)return false;}
+    else if(proj&&!mine.some(u=>String(u.project_id)===proj))return false;
+    if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
+    return true;
+  });
+  const rows=list.map(c=>{
+    const mine=byCustomer[c.id]||[];
+    const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
+    return [`<span style="white-space:nowrap">${esc(c.full_name)}</span>`,
+      projNames.length?projNames.map(cpaProjectChip).join(' '):'<span class="tag t-amber">No unit</span>',
+      mine.length?`<span style="white-space:nowrap">${mine.map(u=>esc(u.unit_code)+(u.tower?' <span style="color:var(--slate)">('+esc(u.tower)+')</span>':'')).join(', ')}</span>`:'—',
+      esc(c.email),`<span style="white-space:nowrap">${esc(c.phone||'—')}</span>`,
+      c.auth_user_id?'<span class="tag t-green">Active</span>':'<span class="tag t-gray">None</span>',
+      `<span style="display:inline-flex;gap:6px;white-space:nowrap">`+
+      `<button class="btn btn-sm" title="Edit customer" onclick="cpaCustomerModal(${c.id})"><i class="fa-solid fa-pen"></i></button>`+
+      `<button class="btn btn-sm" onclick="window.open('customer.html?as=${c.id}','_blank')" title="See exactly what this customer sees, without needing a customer login"><i class="fa-solid fa-eye"></i></button>`+
+      (c.auth_user_id?`<button class="btn btn-sm" title="Reset this customer's password" onclick="cpaSetPasswordModal(${c.id},true)">Reset</button>`:`<button class="btn btn-sm btn-primary" title="Create a portal login" onclick="cpaSetPasswordModal(${c.id},false)">Login</button>`)+
+      `</span>`];
+  });
+  const cnt=$('cpaCustCount');if(cnt)cnt.textContent=list.length+' of '+customers.length;
+  $('cpaCustList').innerHTML=cpaTable(['Name','Project','Unit','Email','Phone','Login','Actions'],
+    rows.length?rows:[['No customers match this filter','','','','','','']]);
 }
 window.cpaCustomerModal=function(id){
   const c=id?(CPA.customers||[]).find(x=>x.id===id):null;
@@ -14921,6 +15085,21 @@ function cpaParseBookingRegister(wb){
     bookingDate:xlsxExcelDate(get('Booking Date')),
   }));
 }
+// Farvision's PTC (Payment To Customer) register - booking transfers and refunds. Filed under the
+// SOURCE booking; a transfer additionally names "Booking No. of Transferee", the unit the money
+// actually lands on. A refund is just a row with no transferee - the money left the business rather
+// than another unit. No narration parsing needed: both cases resolve the same way at import time
+// (debit source if it resolves, credit transferee if it resolves).
+function cpaParsePTC(wb){
+  return cpaParseFlatSheet(wb,'PTC Created By',['Document No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),documentNo:String(get('Document No')),
+    documentDate:xlsxExcelDate(get('Document Date')),
+    sourceBookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    transfereeBookingNo:get('Booking No. of Transferee')!=null?String(get('Booking No. of Transferee')):null,
+    amount:Number(get('Amount')||0),narration:get('Narration'),
+    isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
+  }));
+}
 // Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
 // (project, tower, unit code) only for the rare pre-Booking-No-convention record.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
@@ -14941,12 +15120,12 @@ function cpaResolveProject(projects,businessUnit){
     ||projects.find(p=>norm(p.name)===bu)||null;
 }
 
-const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register']);
+const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register','ptc_transfer']);
 const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
+const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',ptc_transfer:'Payment To Customer (Transfers & Refunds)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -14974,7 +15153,9 @@ async function cpaRenderImport(host,seg){
   }
 
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register'])
+  // All six .xlsx reports, not four. Manual upload is the fallback whenever the Gmail fetcher is
+  // down - it was missing exactly the two types that could not then be imported by any route.
+  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
     ${queueHtml}
@@ -15011,6 +15192,7 @@ window.cpaQueueImport=async function(queueId){
       if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
       if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
       if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
+      if(vals.includes('PTC Created By')){type='ptc_transfer';break;}
       if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
     }
     if(!type) throw new Error('Could not detect report type');
@@ -15022,6 +15204,7 @@ window.cpaQueueImport=async function(queueId){
     else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
     else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
     else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
+    else if(type==='ptc_transfer') parsed=cpaParsePTC(wb);
     else throw new Error('Type '+type+' not yet supported for auto-import');
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
@@ -15031,8 +15214,18 @@ window.cpaQueueImport=async function(queueId){
       const project=cpaResolveProject(projects,rec.businessUnit);
       if(!project){unmatched.push(rec);continue;}
       if(type==='sales_details'){matched.push({project,rec});}
+      else if(type==='ptc_transfer'){
+        // See the note in cpaImportPreviewXlsx: neither side is required alone, only that at least
+        // one resolves to a unit we can attach the money to.
+        const sourceUnit=cpaResolveUnit(units,project.id,rec.sourceBookingNo,null,null);
+        const transfereeUnit=rec.transfereeBookingNo?cpaResolveUnit(units,project.id,rec.transfereeBookingNo,null,null):null;
+        if(sourceUnit||transfereeUnit) matched.push({project,sourceUnit,transfereeUnit,rec}); else unmatched.push(rec);
+      }
       else{
         const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+        // A cancelled booking keeps its unit row for audit but must not take financial rows - those
+        // would surface in that customer's portal. booking_register is exempt: cancelling is its job.
+        if(unit&&unit.status==='cancelled'&&type!=='booking_register') continue;
         if(unit) matched.push({project,unit,rec}); else unmatched.push(rec);
       }
     }
@@ -15092,6 +15285,9 @@ window.cpaImportTypeChange=function(){
       outstanding:'Real "Customer Outstanding Summary" export — an as-on-date balance snapshot, one row per booking.',
       invoice_register:'Real "Invoice Register Details" export — dated demand, one row per invoice line.',
       receipt_register:'Real "Receipt Register Details" export — dated receipts, one row per receipt-to-invoice allocation.',
+      receipt_reversal:'Real "Receipt Reversal Register Details" export — cheque returns, one row per reversal revenue-head line.',
+      booking_register:'Real "Booking Register Summary" export — booking status per unit; marks cancelled bookings cancelled.',
+      ptc_transfer:'Real "Payment To Customer Register" export — booking transfers and refunds, one row per PTC document.',
     }[type]||'';
   }else{
     const c=CPA_IMPORT_COLUMNS[type];
@@ -15115,6 +15311,9 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
     parsed=type==='sales_details'?cpaParseSalesDetails(wb)
       :type==='outstanding'?cpaParseOutstanding(wb)
       :type==='invoice_register'?cpaParseInvoiceRegister(wb)
+      :type==='receipt_reversal'?cpaParseReceiptReversal(wb)
+      :type==='booking_register'?cpaParseBookingRegister(wb)
+      :type==='ptc_transfer'?cpaParsePTC(wb)
       :cpaParseReceiptRegister(wb);
   }catch(e){toast(e.message,'err');return;}
   if(!parsed.length){toast('No data rows found in that file','err');return;}
@@ -15128,7 +15327,22 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
       matched.push({rec,project});
       return;
     }
+    if(type==='ptc_transfer'){
+      // Both sides are looked up independently, and neither is required alone: the source booking is
+      // very often a cancelled booking that was never Active (so Sales Details never created a unit
+      // for it, per the same rule above) - that's expected, not a failure, since the whole point of
+      // the transferee side is to land the money on a unit that DOES exist. Only genuinely unmatched
+      // if NEITHER side resolves to anything we can attach money to.
+      const sourceUnit=cpaResolveUnit(units,project.id,rec.sourceBookingNo,null,null);
+      const transfereeUnit=rec.transfereeBookingNo?cpaResolveUnit(units,project.id,rec.transfereeBookingNo,null,null):null;
+      if(!sourceUnit&&!transfereeUnit){ unmatched.push(rec); return; }
+      matched.push({rec,project,sourceUnit,transfereeUnit});
+      return;
+    }
     const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
+    // Cancelled bookings keep their unit row for audit but take no financial rows - see the note in
+    // the queue importer. booking_register is exempt, since cancelling is what it does.
+    if(unit&&unit.status==='cancelled'&&type!=='booking_register'){ outOfScope.push(rec); return; }
     if(!unit){ unmatched.push(rec); return; }
     matched.push({rec,project,unit});
   });
@@ -15136,12 +15350,15 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
   const sampleCols=type==='sales_details'?['Booking No','Customer','Unit','Tower','Project','Cost items']
     :type==='outstanding'?['Booking No','Customer','Unit','Net Outstanding','On Account']
     :type==='invoice_register'?['Doc No','Date','Booking No','Customer','Unit','Schedule','Amount']
+    :type==='ptc_transfer'?['Doc No','Date','Amount','Debit unit','Credit unit','Narration']
     :['Receipt No','Date','Booking No','Customer','Invoice No','Amount'];
   const sampleRows=matched.slice(0,10).map(m=>{
     const r=m.rec;
     if(type==='sales_details') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.tower),esc(m.project.name),r.costItems.length];
     if(type==='outstanding') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),custInr(r.netOutstanding),custInr(r.onAccount)];
     if(type==='invoice_register') return [esc(r.docNo),fmtDate(r.docDate),esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.schedule),custInr(r.netAmount)];
+    if(type==='ptc_transfer') return [esc(r.documentNo),fmtDate(r.documentDate),custInr(r.amount),
+      m.sourceUnit?esc(m.sourceUnit.unit_code):'—',m.transfereeUnit?esc(m.transfereeUnit.unit_code):'—',esc(r.narration||'—')];
     return [esc(r.receiptNo),fmtDate(r.receiptDate),esc(r.bookingNo),esc(r.customerName),esc(r.invoiceNo||'—'),custInr(r.amount)];
   });
   $('cpaImpPreview').innerHTML=`<div class="card card-pad">
@@ -15199,12 +15416,51 @@ window.cpaImportConfirm=async function(btn){
     navTo('custportal_admin/2/history');
   }catch(e){toast('Import failed: '+e.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm import';}}
 };
+/* raw_rows is an audit copy of what was parsed. It is INSPECTION ONLY - undo_import_batch does not
+   read it, it reverts via import_batch_id on the data tables - so capping it loses no ability to
+   undo and changes no imported figure.
+
+   Why it needs a cap: a Receipt Register carries ~14k matched rows, which is ~6MB of JSON in the
+   single INSERT that opens every import. That sat just under the 8s statement_timeout on the
+   `authenticated` role until Dream Ananta was added; the extra matched rows tipped it over and the
+   import began failing outright with "canceling statement due to statement timeout" - and it would
+   have failed for every project added after that too.
+
+   Above the cap the column is left empty rather than partially filled: a truncated array reads like
+   a complete one and would be worse than nothing for anyone auditing a figure. The .xlsx itself is
+   kept in the farvision-imports bucket and is a better record than a JSON copy of it. */
+const CPA_RAW_ROWS_MAX=2000;
+
+/* The current rows for this batch's units, keyed `unit_id|<keyCol>` -> id.
+   Stands in for ON CONFLICT, which cannot infer these tables' PARTIAL unique indexes.
+   Paged explicitly: PostgREST caps a response at 1000 rows, and a row missed here would be inserted
+   as a duplicate instead of updated, leaving two "current" rows for one document and a ledger that
+   double-counts it. Silent wrong money is the one outcome worth being long-winded about. */
+async function cpaCurrentByKey(table,keyCol,matched){
+  const unitIds=[...new Set(matched.map(m=>m.unit&&m.unit.id).filter(Boolean))];
+  const map={},PAGE=1000;
+  for(let i=0;i<unitIds.length;i+=100){
+    const chunk=unitIds.slice(i,i+100);
+    for(let from=0;;from+=PAGE){
+      const {data,error}=await sb.schema('cust').from(table).select('id,unit_id,'+keyCol)
+        .in('unit_id',chunk).is('deleted_at',null).eq('is_current',true)
+        .order('id').range(from,from+PAGE-1);
+      if(error)throw error;
+      (data||[]).forEach(r=>{map[r.unit_id+'|'+r[keyCol]]=r.id;});
+      if(!data||data.length<PAGE)break;
+    }
+  }
+  return map;
+}
 async function cpaImportConfirmXlsx(st){
+  // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
+  // one file can span several projects at once. project_names records the set it actually touched.
   const {data:batch,error:beErr}=await sb.schema('cust').from('import_batches').insert({
     import_type:st.type,file_name:st.fileName,imported_by:state.email,
+    project_names:[...new Set(st.matched.map(m=>m.project&&m.project.name).filter(Boolean))].sort(),
     row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
-    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
-    raw_rows:st.matched.map(m=>m.rec)}).select('id').single();
+    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||r.documentNo||'').filter(Boolean),
+    raw_rows:st.matched.length<=CPA_RAW_ROWS_MAX?st.matched.map(m=>m.rec):[]}).select('id').single();
   if(beErr)throw beErr;
   const batchId=batch.id;
 
@@ -15262,15 +15518,24 @@ async function cpaImportConfirmXlsx(st){
       if(!byDoc[key]) byDoc[key]={unit:m.unit,rec:r,items:[]};
       byDoc[key].items.push(r);
     }
+    /* invoices_uq is a PARTIAL unique index (WHERE deleted_at is null and is_current). Postgres
+       cannot infer a partial index from a bare column list, so .upsert({onConflict:'unit_id,
+       document_no'}) raised "no unique or exclusion constraint matching the ON CONFLICT
+       specification" on every run - which is why cust.invoices was last written on 11 Sep while
+       every import since reported success. Look the current rows up ourselves instead. */
+    const existingInv=await cpaCurrentByKey('invoices','document_no',st.matched);
     for(const key of Object.keys(byDoc)){
       const {unit,rec,items}=byDoc[key];
-      // Upsert invoice header
-      const {data:inv,error:ie}=await sb.schema('cust').from('invoices').upsert({
-        unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
+      const invRow={unit_id:unit.id,document_no:rec.docNo,document_date:rec.docDate,
         invoice_type:rec.invoiceType||'Payment Plan',due_date:rec.dueDate,gstin:rec.gstin,
-        status:rec.status,is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,document_no'}).select('id').single();
-      if(ie)throw ie;
+        status:rec.status,is_current:true,import_batch_id:batchId};
+      let invId=existingInv[unit.id+'|'+rec.docNo];
+      if(invId){ const {error:ue}=await sb.schema('cust').from('invoices').update(invRow).eq('id',invId); if(ue)throw ue; }
+      else{
+        const {data:ins,error:ie}=await sb.schema('cust').from('invoices').insert(invRow).select('id').single();
+        if(ie)throw ie; invId=ins.id; existingInv[unit.id+'|'+rec.docNo]=invId;
+      }
+      const inv={id:invId};
       // Delete old items for this invoice, insert fresh
       await sb.schema('cust').from('invoice_items').delete().eq('invoice_id',inv.id);
       const itemRows=items.map((r,i)=>({
@@ -15278,13 +15543,6 @@ async function cpaImportConfirmXlsx(st){
         amount:r.amount,tax:r.tax,net_amount:r.netAmount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('invoice_items').insert(itemRows);if(error)throw error;}
-    }
-    // Also write to old table for backwards compatibility
-    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,demand_no:m.rec.docNo,
-      milestone:m.rec.schedule,revenue_head:m.rec.revenueHead,demand_date:m.rec.docDate,due_date:m.rec.dueDate,
-      amount:m.rec.amount,gst_amount:m.rec.tax,total_amount:m.rec.netAmount,status:m.rec.status,import_batch_id:batchId}));
-    for(let i=0;i<oldRows.length;i+=500){
-      await sb.schema('cust').from('farvision_demand').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,demand_no'});
     }
   }else if(st.type==='receipt_register'){
     // Write to NEW tables: cust.money_receipts (headers) + cust.receipt_items (lines)
@@ -15295,19 +15553,24 @@ async function cpaImportConfirmXlsx(st){
       if(!byReceipt[key]) byReceipt[key]={unit:m.unit,rec:r,items:[]};
       byReceipt[key].items.push(r);
     }
+    // money_receipts_uq is partial in the same way invoices_uq is - see the note above.
+    const existingRcpt=await cpaCurrentByKey('money_receipts','receipt_no',st.matched);
     for(const key of Object.keys(byReceipt)){
       const {unit,rec,items}=byReceipt[key];
       const totalAmt=items.reduce((s,r)=>s+Number(r.totalAmount||r.amount||0),0);
-      // Upsert receipt header
-      const {data:rcpt,error:re}=await sb.schema('cust').from('money_receipts').upsert({
-        unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
+      const rcptRow={unit_id:unit.id,receipt_no:rec.receiptNo,receipt_date:rec.receiptDate,
         payment_mode:rec.mode,instrument_no:rec.instrumentNo,instrument_date:rec.instrumentDate,
         drawn_on:rec.drawnOn,drawn_on_branch:rec.drawnOnBranch,deposit_bank:rec.depositBank,
         narration:rec.narration,total_amount:totalAmt,
         is_reversed:rec.isReversed==='Yes',unit_status_at_receipt:rec.unitStatus,
-        is_current:true,import_batch_id:batchId
-      },{onConflict:'unit_id,receipt_no'}).select('id').single();
-      if(re)throw re;
+        is_current:true,import_batch_id:batchId};
+      let rcptId=existingRcpt[unit.id+'|'+rec.receiptNo];
+      if(rcptId){ const {error:ue}=await sb.schema('cust').from('money_receipts').update(rcptRow).eq('id',rcptId); if(ue)throw ue; }
+      else{
+        const {data:ins,error:re}=await sb.schema('cust').from('money_receipts').insert(rcptRow).select('id').single();
+        if(re)throw re; rcptId=ins.id; existingRcpt[unit.id+'|'+rec.receiptNo]=rcptId;
+      }
+      const rcpt={id:rcptId};
       // Delete old items, insert fresh
       await sb.schema('cust').from('receipt_items').delete().eq('receipt_id',rcpt.id);
       const itemRows=items.map((r,i)=>({
@@ -15315,13 +15578,6 @@ async function cpaImportConfirmXlsx(st){
         revenue_head:r.revenueHead,amount:r.amount,sort_order:i
       }));
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
-    }
-    // Also write to old table
-    const oldRows=st.matched.map(m=>({unit_id:m.unit.id,unit_code:m.unit.unit_code,booking_no:m.rec.bookingNo,receipt_no:m.rec.receiptNo,
-      receipt_date:m.rec.receiptDate,amount:m.rec.amount,mode:m.rec.mode,against_demand_no:m.rec.invoiceNo,
-      revenue_head:m.rec.revenueHead,import_batch_id:batchId}));
-    for(let i=0;i<oldRows.length;i+=500){
-      await sb.schema('cust').from('farvision_receipts').upsert(oldRows.slice(i,i+500),{onConflict:'unit_id,receipt_no,against_demand_no'});
     }
   }else if(st.type==='receipt_reversal'){
     for(const m of st.matched){
@@ -15343,6 +15599,27 @@ async function cpaImportConfirmXlsx(st){
       const r=m.rec;
       const newStatus=r.status==='Cancel'?'cancelled':'booked';
       await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+    }
+  }else if(st.type==='ptc_transfer'){
+    // ptc_transfers_doc_uq is a PARTIAL unique index (WHERE deleted_at is null) - same reason
+    // .upsert({onConflict:...}) silently broke cust.invoices/cust.money_receipts for eleven days.
+    // Look the row up ourselves instead of trusting Postgres to infer the index.
+    const docNos=st.matched.map(m=>m.rec.documentNo);
+    const existingByDoc={};
+    for(let i=0;i<docNos.length;i+=100){
+      const {data}=await sb.schema('cust').from('ptc_transfers').select('id,document_no')
+        .in('document_no',docNos.slice(i,i+100)).is('deleted_at',null);
+      (data||[]).forEach(r=>{existingByDoc[r.document_no]=r.id;});
+    }
+    for(const m of st.matched){
+      const r=m.rec;
+      const row={document_no:r.documentNo,document_date:r.documentDate,amount:r.amount,narration:r.narration,
+        source_booking_no:r.sourceBookingNo,source_unit_id:(m.sourceUnit&&m.sourceUnit.id)||null,
+        transferee_booking_no:r.transfereeBookingNo,transferee_unit_id:(m.transfereeUnit&&m.transfereeUnit.id)||null,
+        is_reversed:r.isReversed,is_current:true,import_batch_id:batchId};
+      const existingId=existingByDoc[r.documentNo];
+      if(existingId){ const {error}=await sb.schema('cust').from('ptc_transfers').update(row).eq('id',existingId); if(error)throw error; }
+      else{ const {error}=await sb.schema('cust').from('ptc_transfers').insert(row); if(error)throw error; }
     }
   }
   toast(st.matched.length+' row(s) imported','ok');
@@ -15366,10 +15643,16 @@ async function cpaImportConfirmCsv(st){
   toast(st.matched.length+' row(s) imported','ok');
 }
 async function cpaRenderImportHistory(host,projects){
-  const {data}=await sb.schema('cust').from('import_batches').select('*').order('imported_at',{ascending:false}).limit(200);
+  // Named columns rather than '*': raw_rows carries every parsed row of every batch (86k rows and
+  // growing, most of this table's bulk) and nothing on this screen reads it.
+  const {data}=await sb.schema('cust').from('import_batches')
+    .select('id,import_type,project_id,project_names,file_name,imported_at,imported_by,matched_count,unmatched_count,status')
+    .order('imported_at',{ascending:false}).limit(200);
   const rows=(data||[]).map(b=>{
     const proj=projects.find(p=>p.id===b.project_id);
-    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(proj?proj.name:'—'),esc(b.file_name||'—'),
+    // .xlsx batches span projects and carry project_names; the CSV imports pick one project up front.
+    const projLabel=(b.project_names&&b.project_names.length)?b.project_names.join(', '):(proj?proj.name:'—');
+    return [CPA_IMPORT_LABELS[b.import_type]||b.import_type,esc(projLabel),esc(b.file_name||'—'),
       fmtDate(b.imported_at),esc(b.imported_by||'—'),
       b.matched_count+' matched'+(b.unmatched_count?', '+b.unmatched_count+' unmatched':''),
       b.status==='undone'?'<span class="tag t-gray">Undone</span>':'<span class="tag t-green">Completed</span>',
@@ -16110,10 +16393,51 @@ function custDeriveFloor(unitCode){
   const m=String(unitCode||'').match(/^\d+/);
   return m?m[0]:null;
 }
+/* Farvision stores names as "Mr. AKSHAY DEBNATH" - shouted back at a customer that reads like a
+   demand letter, so the greeting uses just the given name, title-cased. */
+function custFirstName(fullName){
+  // Md./Mohd. are honorifics here, not given names - without them "Md. MONAZIR HUSSAIN ARSHI" is
+  // greeted as "Md". Stripped repeatedly, since "Mr. Md. ..." occurs.
+  let bare=String(fullName||'').trim(),prev;
+  do{prev=bare;bare=bare.replace(/^(mr|mrs|ms|m\/s|md|mohd|dr|prof|smt|shri|sri)\.?\s+/i,'').trim();}while(bare!==prev);
+  const first=(bare.split(/\s+/)[0]||'').replace(/[^A-Za-z'-]/g,'');
+  return first?first.charAt(0).toUpperCase()+first.slice(1).toLowerCase():'';
+}
+function custGreeting(fullName,unit){
+  const h=new Date().getHours();
+  const hi=h<12?'Good morning':h<17?'Good afternoon':'Good evening';
+  const name=custFirstName(fullName);
+  const proj=projShortName((unit&&unit.projects&&unit.projects.name)||'');
+  const where=[unit&&unit.unit_code,unit&&unit.tower].filter(Boolean).join(' · ');
+  return '<div class="cust-greet">'+
+    '<div class="cust-greet-hi">'+hi+(name?', '+esc(name):'')+'</div>'+
+    '<div class="cust-greet-sub">Welcome back'+
+      (proj?' — your home at <b>'+esc(proj)+'</b>'+(where?', '+esc(where):''):'')+'.</div>'+
+  '</div>';
+}
+/* The landing page: a greeting over the animated construction scene, and nothing else. It is the
+   first thing a customer sees, before they choose Statement or anything else from the sidebar. */
+function custLanding(fullName,unit){
+  return '<div class="cust-landing">'+
+    '<div class="cust-bg-scene cust-bg-scene--hero">'+
+      '<div class="cbg-b cbg-b1"></div><div class="cbg-b cbg-b2"></div><div class="cbg-b cbg-b3"></div><div class="cbg-b cbg-b4"></div>'+
+      '<div class="cbg-b cbg-b5"></div><div class="cbg-b cbg-b6"></div><div class="cbg-b cbg-b7"></div><div class="cbg-b cbg-b8"></div>'+
+      '<div class="cbg-crane cbg-crane1"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
+      '<div class="cbg-crane cbg-crane2"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
+      '<div class="cbg-ground"></div>'+
+    '</div>'+
+    '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
+  '</div>';
+}
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
-  return `<select id="custUnitPicker" onchange="custSwitchUnit(this.value)" style="margin-bottom:14px;max-width:320px">`+
-    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)} · ${esc((u.projects&&u.projects.name)||'')}</option>`).join('')+'</select>';
+  /* An <option> cannot carry a tooltip, so the project's location suffix is dropped here rather than
+     left to truncate mid-word against the dropdown arrow - the tower tells the units apart anyway. */
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+    '<span style="font-size:12.5px;font-weight:600;color:var(--slate)">Viewing</span>'+
+    `<select id="custUnitPicker" class="mu-sel" onchange="custSwitchUnit(this.value)" style="max-width:340px">`+
+    units.map(u=>`<option value="${u.id}" ${u.id===selUnitId?'selected':''}>${esc(u.unit_code)}${u.tower?' · '+esc(u.tower):''} · ${esc(projShortName((u.projects&&u.projects.name)||''))}</option>`).join('')+
+    '</select></div>';
 }
 // Farvision keeps cancelled demands in the Invoice Register with Status=Cancel (a quarter of the
 // rows), and the cost sheet carries an offsetting negative against them. Showing them to a
@@ -16126,11 +16450,37 @@ const CUST_INVOICE_CANCELLED='Cancel';
 // "next demand due in N days" banner, and the 5 most recent transactions - with the exhaustive
 // list left to the separate Ledger tab. Pulls entirely from data already imported by Sales
 // Details / Outstanding / Invoice & Receipt Register - no new data source.
+/* Does Farvision agree with what we are about to show this customer?
+   cust.reconciliation compares the two per unit. Anything other than a confirmed match - including
+   a unit Farvision sent no snapshot for, which is 40 of them - means nobody has verified the figure,
+   so the portal says it is being updated rather than showing a number on trust.
+
+   FAILS CLOSED on purpose. A query that errors, a row RLS hides, an unreadable view: all of them
+   hide the figures rather than show them. Someone seeing "being updated" when their account is
+   actually fine is an annoyance; someone paying against a wrong balance is not. */
+async function custReconGate(unitId){
+  try{
+    const {data,error}=await sb.schema('cust').from('reconciliation')
+      .select('status').eq('unit_id',unitId).maybeSingle();
+    if(error||!data) return {ok:false,status:'unverified'};
+    /* The six Farvision reports are the source of truth, so the question is not "do our sums agree
+       with Farvision" but "do we HAVE Farvision's figures for this unit". A mismatch means our
+       arithmetic disagreed with Farvision's bookkeeping - Farvision wins, and the customer is shown
+       its numbers. Only 'unchecked' - no Outstanding snapshot at all - leaves us with nothing
+       authoritative to show. ('no_activity' has no snapshot either, but also nothing to state.) */
+    return {ok:data.status!=='unchecked',status:data.status};
+  }catch(e){ return {ok:false,status:'unverified'}; }
+}
+const CUST_FIGURES_NOTICE='<div style="display:flex;gap:10px;align-items:flex-start;background:#fffbeb;'+
+  'border:1px solid #f0dfa8;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;color:#92400e">'+
+  '<i class="fa-solid fa-circle-info" style="margin-top:2px"></i><div><b>Your figures are being updated.</b> '+
+  'We are reconciling this account against our accounting system, so the amounts are not being shown right now. '+
+  'Please contact us before making any payment.</div></div>';
 async function custTabOverview(data,unit){
   const c=data.contactByUnit[unit.id];
   const [{data:invRows},{data:rcptRows},{data:revRows},{data:snapRows},{data:costItemRows},{data:osRows}]=await Promise.all([
     sb.schema('cust').from('invoices').select('id,document_no,document_date,due_date,invoice_type').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+    sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true),
     sb.schema('cust').from('outstanding_snapshot').select('*').eq('unit_id',unit.id).eq('is_current',true).maybeSingle(),
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
@@ -16159,9 +16509,25 @@ async function custTabOverview(data,unit){
   const csiReceived=costItems.reduce((s,i)=>s+Number(i.received_amount||0),0);
   const csiBalance=costItems.reduce((s,i)=>s+Number(i.balance_amount||0),0);
   const csiOnaccount=costItems.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-  const useCostSheet=!invoices.length&&!receiptRows.length&&costItems.length>0;
-  const propertyValue=snap?Number(snap.total_consideration||0):totalCostWithTax;
-  const totalReceivedFinal=useCostSheet?csiReceived:netReceived;
+  /* Farvision omits a unit from the Outstanding Summary when it has nothing outstanding - Mr
+     Aniruddha Mukherjee's 5D is billed 62,47,674 and received 62,47,674, so no row exists for him.
+     Its Sales Details cost sheet still carries billed/received/balance per component and is equally
+     Farvision's, so it stands in whenever the snapshot is absent. This used to require the unit to
+     have NO invoices and NO receipts, which is exactly the case it never applies to - any real
+     customer has both - so those 39 units fell through to our own arithmetic instead. */
+  const useCostSheet=costItems.length>0;
+  /* Farvision's total_consideration is the basic amount EXCLUDING GST - for 6N it is 92,72,740
+     against a cost sheet grand total of 98,09,442, the difference being exactly its 5,36,702 of tax.
+     Using it here put an ex-tax value beside a tax-inclusive "Paid to date", so Remaining understated
+     what the customer still owes by the whole tax component, and it disagreed with the Cost Sheet
+     tab's Grand Total. The cost sheet's own tax-inclusive total is the figure that compares like with
+     like, and is equally Farvision's. */
+  const propertyValue=costItems.length?totalCostWithTax:Number((snap&&snap.total_consideration)||0);
+  /* Farvision's own received figure (Sales Details -> cost_sheet_items.received_amount) in
+     preference to summing our receipt rows. Every other KPI here already reads from the Outstanding
+     snapshot, and mixing one locally-computed number in among them is what let "Paid to date" and
+     "Remaining" drift away from "Demand due" on the same card row. */
+  const totalReceivedFinal=costItems.length?csiReceived:netReceived;
   const billOutstanding=snap?Number(snap.bill_outstanding||0):(useCostSheet?csiBalance:Math.max(0,totalBilled-netReceived));
   const lateFee=snap?Number(snap.late_fee_accrued||0):0;
   const onAccount=snap?Number(snap.on_account||0):(useCostSheet?csiOnaccount:0);
@@ -16182,12 +16548,16 @@ async function custTabOverview(data,unit){
     </div>`;
   }
 
+  const gate=await custReconGate(unit.id);
   const kpis=[
     ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
     ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
     ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
     ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
   ];
+  // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
+  // no subset of them that is safe to keep showing.
+  if(!gate.ok) kpis.forEach(k=>{k[1]='—';k[2]='being updated';k[3]=undefined;});
 
   const entries=[];
   invoices.forEach(inv=>{
@@ -16195,13 +16565,32 @@ async function custTabOverview(data,unit){
     const osScheds2=osItems.filter(o=>o.document_no===inv.document_no&&o.schedule).map(o=>o.schedule);
     entries.push({date:inv.document_date,type:'Demand',desc:[...new Set(osScheds2)].join(', ')||inv.document_no,amount:total});
   });
-  receiptRows.forEach(r=>{entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-Number(r.total_amount||0)});});
+  // Same rule as the Ledger: credit only what was applied to a demand this list shows, or money with
+  // no allocation at all. Otherwise this preview would show receipts the full ledger omits.
+  const ovLiveDocs=new Set(invoices.map(i=>i.document_no));
+  receiptRows.forEach(r=>{
+    const ri=r.receipt_items||[];
+    const amt=ri.length
+      ? ri.reduce((s,x)=>s+(x.against_demand_no==null||ovLiveDocs.has(x.against_demand_no)?Number(x.amount||0):0),0)
+      : Number(r.total_amount||0);
+    if(amt) entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-amt});
+  });
+  // PTC (transfer/refund) - see the fuller note in custTabLedger. Included here too so this preview
+  // cannot omit an entry the full Ledger shows for the same unit.
+  const [{data:ovPtcOut},{data:ovPtcIn}]=await Promise.all([
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount,narration').eq('source_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount,narration').eq('transferee_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null)
+  ]);
+  (ovPtcOut||[]).forEach(p=>entries.push({date:p.document_date,type:'PTC',desc:p.narration||'Transfer / refund',amount:Number(p.amount||0)}));
+  (ovPtcIn||[]).forEach(p=>entries.push({date:p.document_date,type:'PTC',desc:p.narration||'Transfer in',amount:-Number(p.amount||0)}));
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let bal=0;
-  const withBalance=entries.map(e=>{bal+=e.amount;return Object.assign({},e,{balance:bal});});
-  const recent=withBalance.slice(-5).reverse();
-  const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
-    esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—',custInr(e.balance)]);
+  // No running balance: the KPIs above are Farvision's position, and this list's own tally would be
+  // a second answer to the same question. It showed -51,62,707 on one unit whose Demand due, taken
+  // from Farvision, was nothing of the sort.
+  const recent=entries.slice(-5).reverse();
+  const typeTag={Demand:'<span class="tag t-amber">Demand</span>',Receipt:'<span class="tag t-green">Receipt</span>',PTC:'<span class="tag t-blue">Transfer</span>'};
+  const recentRows=recent.map(e=>[fmtDate(e.date),typeTag[e.type]||esc(e.type),
+    esc(e.desc||'—'),e.amount>0?custInr(e.amount):'—',e.amount<0?custInr(-e.amount):'—']);
 
   // Until a real Invoice/Receipt Register import exists for this project, the cost sheet from
   // Sales Details is the only per-charge breakdown available - shown as its own section rather
@@ -16209,11 +16598,15 @@ async function custTabOverview(data,unit){
   const costSheetRows=costItems.map(i=>[esc(i.component),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
     custInr(i.bill_amount||0),custInr(i.received_amount||0),
     Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
-  const costSheetSection=costItems.length?
-    '<div class="sec-title" style="margin:22px 0 8px">Charges &amp; payments</div>'+
-    mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
+  // The per-charge breakdown is the Cost Sheet tab's whole job; repeating it here made the Statement
+  // scroll past its own summary into a second copy of another page.
+  const costSheetSection='';
 
-  window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c};
+  // Only arm the printer when the figures are safe to show. custPrintStatement already refuses
+  // without these, so an unreconciled unit cannot be printed even if the button is reached some
+  // other way - a PDF is the one copy that outlives the page and its notice.
+  if(gate.ok){ window._custStatementUnit=unit; window._custStatementSnap={propertyValue,totalReceived:totalReceivedFinal,billOutstanding,remaining,paidPct,c}; }
+  else { window._custStatementUnit=null; window._custStatementSnap=null; }
   const unitCostItem=costItems.find(i=>/unit cost/i.test(i.component||''));
   const basicAmt=Number(unitCostItem?.amount||0);
   const sba=Number(unit.super_built_up_area_sqft||0);
@@ -16248,16 +16641,24 @@ async function custTabOverview(data,unit){
       '</div>'+
     '</div>'
     :'<div class="card card-pad empty">Profile not yet available — this updates after our next records sync.</div>';
-  return dueBanner+mKpis(kpis)+
-    myUnitSection+
+  // The due banner is a call to pay a specific amount - it must not survive a failed reconciliation.
+  /* Everything money-related goes together when the unit does not reconcile. Masking the KPIs alone
+     left the transaction table showing a running balance, the cost sheet showing billed/received per
+     component, and - worst - the Print button still building its PDF from the unmasked figures, which
+     carries them out of the portal entirely. The unit details and profile stay: they are contractual,
+     not a payment position. */
+  const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
-    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit','Balance'],recentRows):
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/2\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
-    '</div>'+
+    '</div>';
+  return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
+    myUnitSection+
+    (gate.ok?moneySections:'')+
     profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
@@ -16293,18 +16694,16 @@ window.custPrintStatement=function(){
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
 async function custTabLedger(unit){
-  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows}]=await Promise.all([
-    sb.schema('cust').from('money_receipts').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
+  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows},{data:ptcOutRows},{data:ptcInRows}]=await Promise.all([
+    sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
     sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('ptc_transfers').select('*').eq('source_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('*').eq('transferee_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null)
   ]);
   const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
-  const totalBilled=costItems.reduce((s,i)=>s+Number(i.bill_amount||0),0);
-  const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
-  const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
-  const netReceived=grossReceipts-grossReversals;
-  const balance=totalBilled-netReceived;
+  const ptcOut=ptcOutRows||[], ptcIn=ptcInRows||[];
   const entries=[];
   invoices.forEach(inv=>{
     // Farvision's real Applicant Ledger shows one row per (Document No x Schedule) -
@@ -16324,8 +16723,20 @@ async function custTabLedger(unit){
       if(amt>0) entries.push({date:inv.document_date,type:'INV',ref:inv.document_no,iid:inv.id,desc:s,debit:amt,credit:0});
     });
   });
+  /* Credit only the part of a receipt that was applied to a demand this ledger actually shows.
+     Farvision's own Customer Ledger for 2D/BLOCK A2 totals 6,173,042 in credits; crediting whole
+     receipts gave 6,730,255, over by exactly the 557,213 paid against her cancelled demand
+     OHINV/0015524-25, which Farvision leaves out. Summing the receipt_items allocated to live
+     demands gives 5,963,042 - Farvision's figure once its 210,000 PTC transfer is set aside.
+     Money with no allocation at all is genuine on-account payment and is credited. */
+  const liveDocs=new Set(invoices.map(i=>i.document_no));
   receipts.forEach(r=>{
-    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:Number(r.total_amount||0)});
+    const items=r.receipt_items||[];
+    const credit=items.length
+      ? items.reduce((s,ri)=>s+(ri.against_demand_no==null||liveDocs.has(ri.against_demand_no)?Number(ri.amount||0):0),0)
+      : Number(r.total_amount||0);
+    if(!credit) return;
+    entries.push({date:r.receipt_date,type:'RECEIPT',ref:r.receipt_no,rid:r.id,desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:'')+(r.drawn_on?' · '+r.drawn_on:''),debit:0,credit:credit});
   });
   // Group reversals by reversal_no — one ledger row per cheque bounce, not per revenue-head line
   const revByNo={};
@@ -16337,14 +16748,19 @@ async function custTabLedger(unit){
   Object.values(revByNo).forEach(rv=>{
     entries.push({date:rv.date,type:'CQRV',ref:rv.ref,desc:'Cheque return'+(rv.instrument?' · '+rv.instrument:''),debit:rv.total,credit:0});
   });
+  /* PTC (Payment To Customer) - Farvision's transfer/refund document, the fourth type on its own
+     Customer Ledger and the one report of the seven that arrives filed under the SOURCE booking
+     rather than the unit the money actually affects. A transfer debits this unit when it is the
+     source (money leaving) and credits it when it is the transferee (money arriving) - a refund is
+     just the same debit with no transferee, so no separate handling is needed here. */
+  ptcOut.forEach(p=>{
+    entries.push({date:p.document_date,type:'PTC',ref:p.document_no,desc:p.narration||'Transfer / refund',debit:Number(p.amount||0),credit:0});
+  });
+  ptcIn.forEach(p=>{
+    entries.push({date:p.document_date,type:'PTC',ref:p.document_no,desc:p.narration||'Transfer in',debit:0,credit:Number(p.amount||0)});
+  });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  let runBal=0;
-  function balCell(b){
-    if(b>0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>';
-    if(b<0)return '<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>';
-    return '<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
-  }
-  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
+  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>',PTC:'<span class="tag t-blue">Transfer</span>'};
   const seenInvoice={};
   const pick=(kind,id)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'" onchange="custDocPickChanged()">';
   const refCell=e=>{
@@ -16357,17 +16773,31 @@ async function custTabLedger(unit){
     }
     return esc(e.ref||'—');
   };
+  /* Running balance over the rows listed, exactly as Farvision's own Applicant Ledger prints it -
+     each demand adds, each receipt subtracts, and the closing figure is where the account stands on
+     this list. What is NOT rebuilt here is the old "Total billed / Net received / Balance" summary,
+     which mixed cost_sheet totals with our receipt sums and so answered a different question from
+     the Statement's Farvision-sourced Demand due. */
+  let runBal=0;
+  const balCell=b=>b>0
+    ?'<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#e08600">'+custInr(b)+'</b><span class="tag t-amber" style="padding:1px 8px;font-size:10px">Due</span></span>'
+    :b<0
+    ?'<span style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px"><b style="color:#16855a">'+custInr(Math.abs(b))+'</b><span class="tag t-green" style="padding:1px 8px;font-size:10px">Adv</span></span>'
+    :'<span style="white-space:nowrap;color:#16855a;font-weight:600">0.00</span>';
   const rows=entries.map(e=>{runBal+=e.debit-e.credit;
     return [fmtDate(e.date),tags[e.type]||esc(e.type),refCell(e),esc(e.desc||'—'),e.debit?custInr(e.debit):'—',e.credit?custInr(e.credit):'—',balCell(runBal)];});
   if(!receipts.length&&!costItems.length) return '<div class="card card-pad empty">No financial records yet for this unit.</div>';
   const totalDebit=entries.reduce((s,e)=>s+e.debit,0), totalCredit=entries.reduce((s,e)=>s+e.credit,0);
   const totalRow=entries.length?['<b>Total</b>','—','—','—','<b>'+custInr(totalDebit)+'</b>','<b>'+custInr(totalCredit)+'</b>','<b>'+balCell(runBal)+'</b>']:null;
-  window._custLedgerUnit=unit; window._custLedgerEntries=entries; window._custLedgerTotalBilled=totalBilled; window._custLedgerNetReceived=netReceived;
-  const balLabel=balance>0?'<b style="color:#e08600">'+custInr(balance)+' due</b>':balance<0?'<b style="color:#16855a">'+custInr(Math.abs(balance))+' advance</b>':'<b style="color:#16855a">0.00</b>';
+  /* The whole ledger is withheld when the unit does not reconcile, not just its balance column: a
+     statement missing some of its receipts still reads as a complete account and under-credits the
+     customer. Checked before the print globals are set, so custPrintLedger - which refuses without
+     them - cannot produce a PDF of figures the page itself is withholding. */
+  const gate=await custReconGate(unit.id);
+  if(!gate.ok){ window._custLedgerUnit=null; window._custLedgerEntries=null; return CUST_FIGURES_NOTICE; }
+  window._custLedgerUnit=unit; window._custLedgerEntries=entries;
   const summary='<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:13.5px">'+
-    '<span><b>Total billed:</b> '+custInr(totalBilled)+'</span>'+
-    '<span><b>Net received:</b> '+custInr(netReceived)+'</span>'+
-    '<span><b>Balance:</b> '+balLabel+'</span>'+
+    '<span style="color:var(--slate)">Every demand raised and payment received on this unit, in date order.</span>'+
     '<span style="color:var(--slate)">'+entries.length+' entries</span>'+
     '<span style="margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center">'+
     '<button class="btn" id="custBulkDlBtn" style="display:none" onclick="custDownloadSelectedDocs()"><i class="fa-solid fa-file-arrow-down"></i> <span id="custBulkDlLabel">Download</span></button>'+
@@ -16375,19 +16805,19 @@ async function custTabLedger(unit){
   return summary+mTable(['Date','Type','Reference','Details','Debit','Credit','Balance'],totalRow?rows.concat([totalRow]):rows);
 }
 window.custPrintLedger=function(){
-  const unit=window._custLedgerUnit,entries=window._custLedgerEntries,totalBilled=window._custLedgerTotalBilled||0,netReceived=window._custLedgerNetReceived||0;
+  const unit=window._custLedgerUnit,entries=window._custLedgerEntries;
   if(!unit){toast('Nothing to print yet','err');return;}
   const w=window.open('','_blank');
   if(!w){toast('Please allow popups to print','err');return;}
+  // D / C suffixes rather than the screen's Due/Adv tags - this is the format Farvision's own
+  // Applicant Ledger printout uses, and a printed copy is the one people put side by side with it.
   let runBal=0;
-  const balance=totalBilled-netReceived;
-  function balText(b){return b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0';}
+  const balText=b=>b>0?custInr(b)+' D':b<0?custInr(Math.abs(b))+' C':'0.00';
   const totalDebit=(entries||[]).reduce((s,e)=>s+(e.debit||0),0);
   const totalCredit=(entries||[]).reduce((s,e)=>s+(e.credit||0),0);
   const trs=(entries||[]).map(e=>{runBal+=e.debit-e.credit;
     return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.type)+'</td><td>'+esc(e.ref||'—')+'</td><td>'+esc(e.desc||'—')+'</td><td style="text-align:right">'+(e.debit?custInr(e.debit):'')+'</td><td style="text-align:right">'+(e.credit?custInr(e.credit):'')+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr>';
   }).join('');
-  const balLabel=balance>0?custInr(balance)+' due':balance<0?custInr(Math.abs(balance))+' advance':'0.00';
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Applicant Ledger — '+esc(unit.unit_code)+'</title><style>'+
     'body{margin:32px;font-family:Inter,system-ui,sans-serif;color:#0f172a}'+
     'h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#64748b;font-weight:500;margin:0 0 16px}'+
@@ -16400,7 +16830,7 @@ window.custPrintLedger=function(){
     '</style></head><body>'+
     '<h1>Applicant Ledger — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · Generated on '+fmtDate(new Date())+'</h2>'+
-    '<div class="summary"><b>Total billed:</b> '+custInr(totalBilled)+' &nbsp;|&nbsp; <b>Net received:</b> '+custInr(netReceived)+' &nbsp;|&nbsp; <b>Balance:</b> '+balLabel+'</div>'+
+    '<div class="summary">Every demand raised and payment received on this unit, in date order.</div>'+
     '<table><thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Details</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>'+
     '<tbody>'+trs+'</tbody>'+
     '<tfoot><tr><td colspan="4">Periodic Ledger Total</td><td style="text-align:right">'+custInr(totalDebit)+'</td><td style="text-align:right">'+custInr(totalCredit)+'</td><td style="text-align:right">'+balText(runBal)+'</td></tr></tfoot>'+
@@ -16546,10 +16976,23 @@ window.custViewReceipt=async function(id){
   ]);
   if(re||!rcpt){openModal('<div class="modal-head"><h3>Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
     '<div class="modal-body"><div class="card card-pad empty">This receipt could not be loaded.</div></div>','lg');return;}
-  window._custReceiptCache={r:rcpt,items:its||[],unit:unit,contact:(cts&&cts[0])||null};
+  /* receipt_items.invoice_date exists but nothing fills it - the Receipt Register export gives the
+     invoice NUMBER a receipt was applied to, not its date, so the column printed "—" on every line.
+     The date is the document_date of that invoice, which we already hold: all 14,403 allocation
+     lines match an invoice we have, so this resolves for every line rather than most of them. */
+  const items=its||[];
+  const docNos=[...new Set(items.map(i=>i.against_demand_no).filter(Boolean))];
+  const dateByDoc={};
+  if(docNos.length){
+    const {data:invs}=await sb.schema('cust').from('invoices')
+      .select('document_no,document_date').eq('unit_id',unit.id).eq('is_current',true).in('document_no',docNos);
+    (invs||[]).forEach(v=>{dateByDoc[v.document_no]=v.document_date;});
+  }
+  const lines=items.map(i=>Object.assign({},i,{invoice_date:i.invoice_date||dateByDoc[i.against_demand_no]||null}));
+  window._custReceiptCache={r:rcpt,items:lines,unit:unit,contact:(cts&&cts[0])||null};
   openModal('<div class="modal-head"><h3><i class="fa-solid fa-receipt"></i> Money Receipt</h3><span class="x" onclick="closeModal()">&times;</span></div>'+
     '<div class="modal-body"><style>'+CUST_RECEIPT_CSS+'</style>'+
-      custReceiptDocHtml(rcpt,its||[],unit,(cts&&cts[0])||null,false)+'</div>'+
+      custReceiptDocHtml(rcpt,lines,unit,(cts&&cts[0])||null,false)+'</div>'+
     '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'+
     '<button class="btn btn-primary" onclick="custPrintReceipt()"><i class="fa-solid fa-download"></i> Download PDF</button></div>','lg');
 };
@@ -16615,8 +17058,20 @@ window.custDownloadSelectedDocs=async function(){
       sb.schema('cust').from('money_receipts').select('*').in('id',rcptIds).eq('unit_id',unit.id).eq('is_current',true),
       sb.schema('cust').from('receipt_items').select('*').in('receipt_id',rcptIds).order('sort_order')
     ]);
+    // Same invoice-date fill as the single-receipt view - a bulk download must not print "—" where
+    // opening the receipt on screen shows a date.
+    const bulkDocNos=[...new Set((rItems||[]).map(i=>i.against_demand_no).filter(Boolean))];
+    const bulkDateByDoc={};
+    if(bulkDocNos.length){
+      const {data:bInvs}=await sb.schema('cust').from('invoices')
+        .select('document_no,document_date').eq('unit_id',unit.id).eq('is_current',true).in('document_no',bulkDocNos);
+      (bInvs||[]).forEach(v=>{bulkDateByDoc[v.document_no]=v.document_date;});
+    }
     const byReceipt={};
-    (rItems||[]).forEach(it=>{(byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(it);});
+    (rItems||[]).forEach(it=>{
+      const line=Object.assign({},it,{invoice_date:it.invoice_date||bulkDateByDoc[it.against_demand_no]||null});
+      (byReceipt[it.receipt_id]=byReceipt[it.receipt_id]||[]).push(line);
+    });
     const rank={}; rcptIds.forEach((id,i)=>{rank[id]=i;});
     (rcpts||[]).slice().sort((a,b)=>rank[a.id]-rank[b.id]).forEach(r=>{
       pages.push(custReceiptDocHtml(r,byReceipt[r.id]||[],unit,contact,true));
@@ -16948,24 +17403,20 @@ window.custPrintInvoice=function(){
 
 async function custTabCostSheet(data,unit){
   const c=data.contactByUnit[unit.id];
-  const [{data:costItemRows},{data:invRows},{data:uploadedDocs},{data:rcptRows},{data:revRows}]=await Promise.all([
+  const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false}),
-    sb.schema('cust').from('money_receipts').select('total_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('receipt_reversals').select('reversal_amount').eq('unit_id',unit.id).eq('is_current',true)
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false})
   ]);
   const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
-  const receipts=rcptRows||[], reversals=revRows||[];
   if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
 
   let out='';
   if(items.length){
     // "Cost Summary" card - mirrors the Basic/Extra/Tax breakup and Due/Received/Balance/
-    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout,
-    // built entirely from our own cost_sheet_items + money_receipts + receipt_reversals (no
-    // guessed basic/tax split on the actuals - only the static per-component agreement figures
-    // carry that split reliably).
+    // Future-dues figures a customer would see on Farvision's own Customer Ledger printout, taken
+    // from cost_sheet_items alone (no guessed basic/tax split on the actuals - only the static
+    // per-component agreement figures carry that split reliably).
     const unitCostItem=items.find(i=>/unit cost/i.test(i.component||''));
     const basicCost=Number(unitCostItem?.amount||0);
     // The standard, recurring per-unit charge types that make up every Dream project's cost
@@ -16978,12 +17429,14 @@ async function custTabCostSheet(data,unit){
     const totalTax=items.reduce((s,i)=>s+Number(i.tax_amount||0),0);
     const totalWithoutTax=basicCost+extraCharges+adhocCharges;
     const totalWithTax=totalWithoutTax+totalTax;
+    /* Every figure on this card is Farvision's own, per component, rather than our sums of
+       money_receipts and receipt_reversals. bill_amount - received_amount = balance_amount holds on
+       all 1,180 current rows, so this card now agrees with the Statement by construction instead of
+       offering a third answer to what the customer owes. */
     const totalBilled=items.reduce((s,i)=>s+Number(i.bill_amount||0),0);
     const onAccount=items.reduce((s,i)=>s+Number(i.onaccount_amount||0),0);
-    const grossReceipts=receipts.reduce((s,r)=>s+Number(r.total_amount||0),0);
-    const grossReversals=reversals.reduce((s,rv)=>s+Number(rv.reversal_amount||0),0);
-    const netReceived=grossReceipts-grossReversals;
-    const balance=totalBilled-netReceived;
+    const netReceived=items.reduce((s,i)=>s+Number(i.received_amount||0),0);
+    const balance=items.reduce((s,i)=>s+Number(i.balance_amount||0),0);
     const futureDue=Math.max(0,totalWithTax-netReceived);
     const duePct=totalWithTax?Math.round(totalBilled/totalWithTax*1000)/10:0;
     const recdPct=totalWithTax?Math.round(netReceived/totalWithTax*1000)/10:0;
@@ -16991,7 +17444,7 @@ async function custTabCostSheet(data,unit){
     const stat=(label,val,sub,color)=>'<div><div style="font-size:11px;color:var(--slate);text-transform:uppercase;letter-spacing:.03em">'+label+'</div>'+
       '<div style="font-size:19px;font-weight:700;margin-top:3px'+(color?';color:'+color:'')+'">'+val+'</div>'+
       (sub?'<div style="font-size:11.5px;color:var(--slate);margin-top:1px">'+sub+'</div>':'')+'</div>';
-    out+='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
+    const costSummary='<div class="card card-pad" style="margin-bottom:18px;background:#f8fafc">'+
       '<div class="sec-title" style="margin:0 0 14px">Cost Summary</div>'+
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:16px">'+
         stat('Due as on '+fmtDate(new Date()),custInr(totalBilled),duePct+'% of agreement value')+
@@ -17007,6 +17460,11 @@ async function custTabCostSheet(data,unit){
         '<span><b>Total (excl. tax):</b> '+custInr(totalWithoutTax)+'</span>'+
         '<span style="margin-left:auto"><b>Total (incl. tax):</b> '+custInr(totalWithTax)+'</span>'+
       '</div></div>';
+    /* Same gate as the Statement. Without this a withheld customer could read their Due/Received/
+       Balance here instead - the Cost Breakup below stays either way, being the agreement's own
+       cost estimate rather than a payment position. */
+    const gate=await custReconGate(unit.id);
+    out+=gate.ok?costSummary:CUST_FIGURES_NOTICE;
 
     // Cost Breakup below shows the agreement's cost estimate itself (Amount/GST/Gross per
     // charge, grouped like Farvision's own "Estimated Offer Price" sheet into Unit Charges vs
@@ -17553,25 +18011,30 @@ VIEWS.customer=async function(v,seg){
   if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
   const unit=data.units.find(u=>u.id===CUST_SELECTED_UNIT);
   let body;
-  if(ti===0)body=await custTabOverview(data,unit);
-  else if(ti===1)body=await custTabLedger(unit);
-  else if(ti===2)body=await custTabCostSheet(data,unit);
-  else if(ti===3)body=await custTabProgress(unit);
-  else if(ti===4)body=await custTabInspection(unit);
-  else if(ti===5)body=await custTabDocuments(unit);
-  else if(ti===6)body=await custTabVideos();
-  else if(ti===7)body=await custTabSupport(unit);
-  else if(ti===8)body=await custTabAmenities(unit);
-  else if(ti===9)body=await custTabSubmeter(unit);
-  else if(ti===10)body=await custTabReferrals(unit);
-  else if(ti===11)body=await custTabMaintenance(unit);
+  if(ti===0)body='';
+  else if(ti===1)body=await custTabOverview(data,unit);
+  else if(ti===2)body=await custTabLedger(unit);
+  else if(ti===3)body=await custTabCostSheet(data,unit);
+  else if(ti===4)body=await custTabProgress(unit);
+  else if(ti===5)body=await custTabInspection(unit);
+  else if(ti===6)body=await custTabDocuments(unit);
+  else if(ti===7)body=await custTabVideos();
+  else if(ti===8)body=await custTabSupport(unit);
+  else if(ti===9)body=await custTabAmenities(unit);
+  else if(ti===10)body=await custTabSubmeter(unit);
+  else if(ti===11)body=await custTabReferrals(unit);
+  else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
-    banner+
-    custUnitPicker(data.units,unit.id)+
-    '<div style="margin-top:14px">'+body+'</div></div>';
+  /* The landing page is the greeting over the construction scene and nothing else - no page head, no
+     unit picker, no body. Every other tab keeps the normal chrome. */
+  v.innerHTML=ti===0
+    ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
+    : '<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+      banner+
+      custUnitPicker(data.units,unit.id)+
+      '<div style="margin-top:14px">'+body+'</div></div>';
   // Animated count-up on KPI values (Statement tab only)
-  if(ti===0){requestAnimationFrame(function(){
+  if(ti===1){requestAnimationFrame(function(){
     v.querySelectorAll('.cust-view-fade .kpi .val').forEach(function(el){
       var raw=el.textContent.trim();
       var m=raw.match(/[\d,.]+/);
@@ -18983,7 +19446,14 @@ const TRC_MISMATCH = {
   in_followup_should_have_been_qualified: {
     label: 'In Follow Up that should have been Qualified', short: 'Should be Qualified',
     tag: 't-green', icon: 'fa-circle-up', colour: '#16a34a',
-    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' }
+    blurb: 'The CRM has this lead in follow-up, but the call already meets the qualification test. Move it on.' },
+  /* By requirement (2026-09-23): an Unclear call used to score status_match:null and vanish from every
+     total - neither a match nor a mismatch. It is now its own category, so a run full of unreviewable
+     calls shows up rather than quietly reading as a clean mismatch rate. See deriveStatusMatch. */
+  ai_status_unclear: {
+    label: 'AI could not assess the call', short: 'Unclear',
+    tag: 't-gray', icon: 'fa-circle-question', colour: '#64748b',
+    blurb: 'The conversation did not establish a clear outcome - flagged for review rather than silently excluded from the count.' }
 };
 const TRC_MISMATCH_KEYS = Object.keys(TRC_MISMATCH);
 
@@ -19019,6 +19489,15 @@ function trcTrStatus(r){
   if(!r)return '';
   const st=String(r.transcription_status||'');
   return (st==='not_transcribed'&&!r.queue_status) ? 'out_of_scope' : st;
+}
+/* trcTrStatus alone misses a whole class of failure: a call whose TRANSCRIPT completed fine but whose
+   QA judge call then failed keeps transcription_status:'completed', so trcTrStatus reads it as a
+   plain success - the QA failure only shows up in r.queue_status (transcription_queue.status, set to
+   'failed' with fail_phase 'qa' either way, see crm-snapshot-qa/index.ts). Anything that needs "did
+   this recording actually finish clean" - the Failed filter/count and the retry button below - has to
+   check both, or a QA failure is invisible everywhere except the one lead's own detail card. */
+function trcProcFailed(r){
+  return !!(r && (trcTrStatus(r)==='failed' || r.queue_status==='failed'));
 }
 /* A Sales call still queues and is still attempted (a lead qualifies a whole day, Sales calls
    included - see TRANSCRIPTION-README.md), but one that never actually finished transcribing has
@@ -19378,6 +19857,16 @@ function trcDailyCell(date,kind,val,n,cls){
     +'<a href="javascript:void(0)" onclick="trcDailyDrill(\''+date+'\',\''+kind+'\',\''+esc(val)+'\')"'
     +(cls?' class="'+cls+'"':'')+' style="font-weight:600">'+shown+'</a></td>';
 }
+/* HISTORICAL, NOT DRILLABLE - unlike every other cell in this table, this number is not "of the
+   leads currently on screen, how many match this" (that's what trcCard's filters answer), it is
+   "how many calls were EVER judged a mismatch on this date, corrected or not" (2026-09-23). Nothing
+   in TRC_F/trcApply can reproduce that set - is_latest_assessed always narrows to a lead's current
+   state - so this renders as a plain number, never a link, rather than a click that would silently
+   show the wrong rows. */
+function trcDailyPlainCell(n){
+  const shown=n||0;
+  return '<td style="text-align:center'+(shown?'':';color:var(--slate)')+'">'+shown+'</td>';
+}
 function trcRenderDaily(){
   const el=$('trcDaily');if(!el)return;
   if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
@@ -19391,9 +19880,10 @@ function trcRenderDaily(){
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
       +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
+      +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(6+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(7+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -19407,10 +19897,16 @@ function trcRenderDaily(){
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
       +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
-        +'<th>Matched</th><th>Mismatched</th>'+mmHead+'</tr></thead>'
+        +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
+        +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
+        +'moment that later call is judged.">Mismatched</th>'
+        +'<th title="Every call actually judged a mismatch on this date, corrected or not since - '
+        +'this number never goes down. Not clickable: it is not a set of CURRENT leads, so nothing on '
+        +'this page can open it as one.">Mismatch events (historical)</th>'
+        +mmHead+'</tr></thead>'
       +'<tbody>'+body+'</tbody>'
     +'</table></div>'
-    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day.</div>'
+    +'<div style="font-size:11.5px;color:var(--slate);margin-top:8px">Click any number to open those leads for that day. "Mismatched" is today\'s unresolved count; "Mismatch events (historical)" is how many were ever flagged on that date, including ones since resolved - see a lead\'s own history for exactly when.</div>'
   +'</div>';
 }
 
@@ -19769,6 +20265,15 @@ async function trcEnsureQaFieldsMerged(){
    and drops its own answer if something else has already moved on - the same cancellation shape
    trcPrefetchCancel uses for the history prefetch below. */
 let TRC_ENRICH_GEN=0;
+
+/* A lead whose calls in the CURRENT date range never produced a verdict (no recording, out of scope,
+   no conversation) still has a last real judgement somewhere in its history - by requirement
+   (2026-09-22), the row should say what it was and on what date, not just read blank. Keyed by
+   lead_id (string): a followup_qa row (is_latest_assessed=true) once fetched, or null once confirmed
+   this lead has never been assessed at all - either way, never re-queried. Global and never reset by
+   a date-range change, because a lead's last judgement does not depend on which range is on screen. */
+let TRC_LAST_JUDGEMENT_CACHE={};
+let TRC_BACKFILL_GEN=0;
 /* THE LAZY HALF OF THE FAST PATH. Only the leads on the CURRENT PAGE get enriched - not the whole
    range, which is exactly the cost trcFetchLight exists to avoid paying up front. Merges straight
    into TRC_ROWS by follow_up_id (acc.crm_lead_detail returns full followup_timeline_v-shaped rows
@@ -19823,6 +20328,53 @@ async function trcEnrichVisiblePage(){
   }
 }
 
+/* THE OTHER LAZY HALF, same shape as trcEnrichVisiblePage but a different question: not "what is
+   this call's own status" but "what did we last judge THIS LEAD as, on any date" - for exactly the
+   rows that came back with nothing to show (no recording, out of scope, no conversation) so the page
+   can say "Last AI Judge Status: Lost (15 Sep)" instead of a blank dash. By requirement (2026-09-22):
+   a lead not qualified today, or with no usable recording today, should still read as the lead it is.
+
+   Only the CURRENT PAGE's leads, only the ones trcLeads() just found nothing for, and only once ever
+   per lead (TRC_LAST_JUDGEMENT_CACHE, never reset by a date change) - a lead genuinely never assessed
+   stays cached as null rather than being re-asked on every page view. followup_qa alone, no join to
+   crm_followups/call_transcripts/transcription_queue: is_latest_assessed already marks the one row
+   that matters, and the existing lead_id index (20260831090000) makes lead_id IN (this page's ids)
+   cheap - nothing like the 3-8s cost the full followup_timeline_v join carries. */
+async function trcBackfillLastJudgement(){
+  // Mismatch view's TRC_PAGE_ROWS are raw call rows, not lead groups - no g.lastAssessed to check and
+  // nothing here renders a lastAssessedOutside cell for them, so there is nothing to backfill.
+  if(TRC_F.match==='MISMATCH')return;
+  const gen=++TRC_BACKFILL_GEN;
+  const ids=[],seen={};
+  (TRC_PAGE_ROWS||[]).forEach(function(g){
+    if(!g||g.lead_id==null||g.lastAssessed)return;
+    const k=String(g.lead_id);
+    if(seen[k]||Object.prototype.hasOwnProperty.call(TRC_LAST_JUDGEMENT_CACHE,k))return;
+    seen[k]=1;ids.push(g.lead_id);
+  });
+  if(!ids.length)return;
+  try{
+    const {data,error}=await sb.schema('acc').from('followup_qa')
+      .select('lead_id,follow_up_id,ai_assessed_status,visit_pending,status_match,mismatch_type,'
+        +'call_date,call_start_text')
+      .in('lead_id',ids).eq('is_latest_assessed',true);
+    if(error)throw error;
+    if(gen!==TRC_BACKFILL_GEN)return;
+    const byLead={};
+    (data||[]).forEach(function(r){byLead[String(r.lead_id)]=r;});
+    // Every requested id gets a cache entry, found or not - a miss is a real answer (never assessed)
+    // and must stick, or a lead with no history gets re-queried on every single page visit.
+    ids.forEach(function(id){
+      const k=String(id);
+      TRC_LAST_JUDGEMENT_CACHE[k]=byLead[k]||null;
+    });
+    if(gen===TRC_BACKFILL_GEN)trcRender(false,true);
+  }catch(e){
+    /* Silent, same as trcEnrichVisiblePage - the row just keeps showing a dash until a later render
+       (a re-sort, a page revisit) tries again; nothing is cached on failure so it does retry. */
+  }
+}
+
 function trcRowDate(r){
   return r.call_date || (r.communication_time?String(r.communication_time).slice(0,10):null);
 }
@@ -19851,14 +20403,16 @@ async function trcKpiFastFetch(force){
       remarks_accurate:0,remarks_partially_accurate:0,remarks_inaccurate:0,remarks_not_verifiable:0,
       status_match:0,status_mismatch:0,lost_should_not_have_been_lost:0,
       qualified_should_not_have_been_qualified:0,in_followup_should_have_been_lost:0,
-      in_followup_should_have_been_qualified:0,agent_qa_score_sum:0,agent_qa_score_n:0,
+      in_followup_should_have_been_qualified:0,ai_status_unclear:0,
+      agent_qa_score_sum:0,agent_qa_score_n:0,
       reused_transcription:0,
       /* Safe to sum day-by-day and add across a range, unlike total_leads - is_latest_assessed
          (20260918100000) is unique per lead across the WHOLE table, so a lead's match/mismatch
          contribution lands on exactly one day, ever. See 20260918110000. */
       status_match_leads:0,status_mismatch_leads:0,
       lost_should_not_have_been_lost_leads:0,qualified_should_not_have_been_qualified_leads:0,
-      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0};
+      in_followup_should_have_been_lost_leads:0,in_followup_should_have_been_qualified_leads:0,
+      ai_status_unclear_leads:0};
     (days||[]).forEach(function(d){
       Object.keys(sum).forEach(function(k){sum[k]+=Number(d[k]||0);});
     });
@@ -19926,7 +20480,8 @@ function trcApply(rows,skipCards){
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
     if(!skipCards){
-      if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
+      if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
+      else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
       // MATCH/MISMATCH mean "currently" (see trcCountsMatch/trcCountsMismatch) - a superseded old
       // verdict does not belong in either drill-down, only in the lead's own history.
       if(TRC_F.match==='MATCH'&&!trcCountsMatch(r))return false;
@@ -19981,6 +20536,11 @@ function trcLeads(rows){
     for(let i=g.rows.length-1;i>=0&&!g.lastAssessed;i--){
       if(g.rows[i].ai_assessed_status)g.lastAssessed=g.rows[i];
     }
+    /* Nothing in the current range was assessed - fall back to this lead's actual last judgement,
+       wherever it happened, if trcBackfillLastJudgement has already fetched it (see that function).
+       Kept as a SEPARATE field from g.lastAssessed, never merged into it, so trcLeadRowHtml can tell
+       "this call, in this range" from "carried over from another date" and label it accordingly. */
+    g.lastAssessedOutside=g.lastAssessed?null:(TRC_LAST_JUDGEMENT_CACHE[k]||null);
     g.recordings=g.rows.filter(function(r){return r.has_recording;}).length;
     g.transcribed=g.rows.filter(function(r){return r.transcription_status==='completed';}).length;
     g.assessed=g.rows.filter(function(r){return r.qa_id;}).length;
@@ -20162,7 +20722,7 @@ function trcKpiHtml(rows){
     ['Waiting','not_transcribed',fast?fast.pending:n('not_transcribed'),'fa-clock'],
     ['No recording','no_recording',fast?(fast.total_followups-fast.recordings_available):n('no_recording'),'fa-phone-slash'],
     ['No conversation','non_transcribable',fast?fast.non_transcribable:n('non_transcribable'),'fa-volume-xmark'],
-    ['Failed','failed',fast?fast.transcription_failed:n('failed'),'fa-circle-exclamation']
+    ['Failed','failed',fast?fast.transcription_failed:rows.filter(trcProcFailed).length,'fa-circle-exclamation']
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
@@ -20187,7 +20747,8 @@ function trcKpiHtml(rows){
     +(TRC_F.match==='MISMATCH'?trcMismatchPanel(rows,fast):'');
 }
 
-/* The four counts the specification asks for, by name. Only rendered when Mismatch is the active
+/* The mismatch counts the specification asks for, by name (five now - see ai_status_unclear,
+   2026-09-23). Only rendered when Mismatch is the active
    card, because that is the question they answer: of the calls where the CRM and the conversation
    disagree, WHICH WAY do they disagree. Each one filters the table under it. */
 function trcMismatchPanel(rows,fast){
@@ -20223,7 +20784,7 @@ function trcMismatchPanel(rows,fast){
     +'<div class="sec-title" style="margin:0 0 4px"><i class="fa-solid fa-scale-unbalanced" style="color:#dc2626"></i> Where the CRM and the call disagree'
     +'<span style="font-weight:400;color:var(--slate);font-size:13px;margin-left:8px">'+total+' total, in '+totalLeads+' lead'+(totalLeads===1?'':'s')+'</span></div>'
     +'<div style="font-size:12.5px;color:var(--slate);margin-bottom:12px">Counted per follow-up, from the CRM status recorded against that call and what the conversation actually established.</div>'
-    +'<div class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px">'
+    +'<div class="grid" style="grid-template-columns:repeat('+TRC_MISMATCH_KEYS.length+',1fr);gap:12px">'
     +TRC_MISMATCH_KEYS.map(function(k){
       const m=TRC_MISMATCH[k],on=TRC_F.mismatch===k;
       return '<div class="card card-pad" style="margin:0;cursor:pointer'+(on?';box-shadow:inset 0 0 0 2px '+m.colour:'')+'" onclick="trcSet(\'mismatch\',\''+(on?'all':k)+'\')">'
@@ -20418,6 +20979,15 @@ function trcLeadRowHtml(g,sl){
         +' · '+g.recordings+' recording'+(g.recordings===1?'':'s')+' · '+g.transcribed+' transcribed</div>'
       +(g.trail.length>1?'<div style="font-size:11.5px;color:var(--slate);margin-top:3px">'
         +g.trail.map(esc).join(' <i class="fa-solid fa-arrow-right" style="font-size:9px"></i> ')+'</div>':'')
+      /* Only rendered under the Failed card/chip - trcApply has already narrowed g.rows down to just
+         this lead's failed recordings there (see trcProcFailed), so every button below retries ONE
+         specific recording, never the lead as a whole. stopPropagation keeps the click off the row's
+         own onclick (which would otherwise navigate into the lead instead of retrying). */
+      +(TRC_F.proc==='failed'?'<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px" onclick="event.stopPropagation()">'
+        +g.rows.map(function(r){
+          return '<button class="btn btn-sm btn-primary" onclick="trcRetry('+r.follow_up_id+')">'
+            +'<i class="fa-solid fa-rotate-right"></i> Retry '+esc(trcWall(r.call_start_text,true)||trcWall(trcRowDate(r))||('#'+r.follow_up_id))+'</button>';
+        }).join('')+'</div>':'')
     +'</td>'
     /* Danger and Status-regressed used to carry their full label alongside the CRM status tag - three
        badges' worth of text in a column sized for one, so the middle one clipped mid-word and the
@@ -20427,7 +20997,18 @@ function trcLeadRowHtml(g,sl){
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
           (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
-    +trcClipCell(g.lastAssessed?trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)):'<span style="color:var(--slate)">—</span>')
+    /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
+       carried-over verdict from another date, not this range's own, so it is labelled with exactly
+       that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
+       Built as its own <td>, not trcClipCell (that helper's flex/nowrap box is for a single inline
+       tag and would clip a second, stacked line rather than show it). */
+    +(g.lastAssessed
+      ?trcClipCell(trcTag(TRC_AI_TAG[g.lastAssessed.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessed)))
+      :g.lastAssessedOutside
+        ?'<td style="text-align:center">'+trcTag(TRC_AI_TAG[g.lastAssessedOutside.ai_assessed_status]||'t-gray','',trcAiStatusLabel(g.lastAssessedOutside))
+          +'<div style="font-size:11px;color:var(--slate);margin-top:2px">Last judged '
+          +esc(trcWall(g.lastAssessedOutside.call_start_text)||trcWall(g.lastAssessedOutside.call_date)||'')+'</div></td>'
+        :trcClipCell('<span style="color:var(--slate)">—</span>'))
     +trcClipCell(g.mismatches
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
@@ -20696,13 +21277,15 @@ function trcPrefetchListedHistories(){
   (TRC_PAGE_ROWS||[]).forEach(function(r){if(r&&r.lead_id!=null)ids.push(r.lead_id);});
   if(ids.length)trcPrefetchHistories(ids);
 }
-/* The two background jobs every render of the list kicks off, never awaited: fill in this page's
+/* The three background jobs every render of the list kicks off, never awaited: fill in this page's
    own transcription/AI-status columns (trcEnrichVisiblePage, only when the fast fetch left them
-   blank) and warm the full history behind each of these same leads for an instant click-through
-   (trcPrefetchListedHistories). Independent of each other - one fills what's on screen, the other
-   fills what a click would open next - so there is no ordering to get right between them. */
+   blank), carry over a lead's last real judgement when this range has none of its own
+   (trcBackfillLastJudgement), and warm the full history behind each of these same leads for an
+   instant click-through (trcPrefetchListedHistories). Independent of each other - so there is no
+   ordering to get right between them. */
 function trcAfterListRender(){
   trcEnrichVisiblePage();
+  trcBackfillLastJudgement();
   trcPrefetchListedHistories();
 }
 
@@ -20781,9 +21364,15 @@ function trcQaTableHtml(r,m){
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
+     /* Visit-pending only excuses the CRM's In Follow Up when this lead had ALREADY qualified on an
+        earlier call (2026-09-21 gate) - on a first-time qualification it's still flagged, so this note
+        only claims "not a disagreement" when the row's own status_match backs that up. Otherwise the
+        row genuinely disagrees and m (the actual mismatch entry) already says so. */
      why:join(['CRM: '+(r.crm_status||'—')+' → the call reads as: '+(trcAiStatusLabel(r)||'—'),
-               (r.ai_assessed_status==='Qualified'&&r.visit_pending)
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match!==false)
                  ?'Qualified and wants to buy - the site visit itself is the one thing still open, which is why this is not counted as a disagreement with the CRM\'s In Follow Up.':null,
+               (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
+                 ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
   ];
   if(Array.isArray(r.agent_qa)){
@@ -21229,13 +21818,25 @@ window.trcRetry=async function(followUpId){
   }
   /* The repaint is what puts the button back, so it has to happen even when the refetch fails -
      otherwise a dropped connection leaves a dead spinner where the Retry button used to be. */
-  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   TRC_ROWS=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   trCacheClear('trc_fetch_cache');
   trCacheClear('trc_fetch_light_cache');
+  /* Retry can be clicked from either of two screens now - a lead's own detail page (the per-call
+     card's button) or the Failed list/table (the per-row buttons added alongside it) - and each has
+     to repaint ITSELF, not drag the other screen's reader somewhere they didn't ask to go. $('trcRows')
+     is the list view's own table body and only ever exists there, so its presence is what tells the
+     two apart. */
+  if($('trcRows')){
+    trcLeadCacheClearAll();
+    await Promise.all([trcFetch(true),trcKpiFastFetch(true)]);
+    trcRender(true,true);
+    trcAfterListRender();
+    return;
+  }
   /* And this lead's own cached history - the whole point of the retry is that the call's rows are
      about to change, so re-rendering the detail page off the 5h snapshot would show the reader the
      exact state they just asked to have redone. */
+  const lead=TRC_LEAD&&TRC_LEAD.lead?TRC_LEAD.lead.lead_id:(TRC_LEAD&&TRC_LEAD.rows[0]&&TRC_LEAD.rows[0].lead_id);
   if(lead)trcLeadCacheDrop(lead);
   if(lead)await trcLeadDetail($('view'),lead);
 };
@@ -22550,7 +23151,11 @@ const USAGE_MAP={
      a third reason - it both creates and edits an instance from one function, so mapped here every
      edit was counted as "Start a new instance". */
   wfUpdFilePicked:'tasks.workflow.attach_a_file_to_an_update',
-  wfUpiPick:'tasks.workflow.upload_and_auto_remember_a_payment_qr_upi_id',
+  /* wfUpiPick used to be mapped here and is not any more - it logs from accountability.js like the
+     rest of Workflow, so it can name the id that was reused instead of recording a bare click.
+     Mapped by function name it also only ever caught HALF the feature: the QR upload goes through
+     the shared attachment handler, which this map cannot see, so four real uploads last week
+     produced no events while the feature sat reading Inactive. */
   // Transcription
   /* An upload is the one action on this screen with no lead behind it yet - the call does not
      exist until it has been uploaded, so there is nothing to look up. 517 uses, and the column
