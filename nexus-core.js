@@ -531,7 +531,29 @@ const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
 const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
 function navIcon(id){return ICONS[id]||'fa-square';}
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return new Set(DEFAULT_MODULES);if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return ss;}const ss=new Set(['dashboard','settings','network']);return ss;}
+/* THE PAGES WERE RENAMED AND NOBODY'S PERMISSIONS FOLLOWED.
+
+   Recruitment and Human Resources became recruitment_new and hr_new. The menu is filtered by the
+   ids in a person's modules, nothing mapped the old names onto the new ones, and not one of the 84
+   accounts carries the new ids - so the two entries were invisible to everybody except the two
+   super admins, who bypass the filter. 71 people hold 'recruitment' and 10 hold 'hr', and all of
+   them had silently lost pages they used to be able to open.
+
+   Rather than rewrite 71 rows, the old id grants the page it was renamed to. That restores what
+   people had before the rename and nothing more.
+
+   THIS GRANTS NO EDITING RIGHTS. modules decides only whether a menu entry is drawn. What anybody
+   may change once inside is decided separately and is untouched - recCanWrite() by department,
+   app.can_write('hr') by role, recruit.can_manage_tests() by its own list, each re-checked in the
+   database on every write. Somebody who could only look before can still only look. */
+const MODULE_RENAMES={recruitment:'recruitment_new', hr:'hr_new'};
+function applyModuleRenames(ss){
+  Object.keys(MODULE_RENAMES).forEach(function(oldId){
+    if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
+  });
+  return ss;
+}
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return applyModuleRenames(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return applyModuleRenames(ss);}const ss=new Set(['dashboard','settings','network']);return ss;}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
    superadmins. So it is granted the ordinary way — 'usability' in a person's modules — and the
@@ -545,7 +567,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return m.includes(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return applyModuleRenames(new Set(m)).has(id);return id==='dashboard'||id==='settings';}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -6370,13 +6392,45 @@ const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareA
   'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
   'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
-  'tpRefApprove','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrDeleteSel',
+  'tpRefConnect','tpRefConnectGo','tpRefReject','tpTrAdd','tpTrSave','tpTrEmailSel','tpTrEmailSelSend','tpTrDeleteSel',
   'tpMuOpenMonth','tpMuDeleteRow'];
+/* CONTROLS ARE DISABLED AND EXPLAINED, NOT DELETED.
+
+   This used to call el.remove(), and that one decision cost more time today than any bug in the
+   features themselves. A button that is simply gone tells you nothing: Preview, Get Link and Send
+   each vanished in turn, and every time it looked like the feature was broken, or the account was
+   wrong, or the file was stale - when the real answer was "you do not have permission" or "your
+   roles are three minutes out of date". Hours went into questions one sentence on the screen would
+   have answered.
+
+   So the control stays, greyed, and says why when pressed. That is no less safe: removal only ever
+   hid the control, it never stopped anything - every one of these actions re-checks permission
+   itself, and the database checks again on the write. Hiding was never the protection; it only
+   made the failure silent.
+
+   Anything that cannot be disabled - a link, a div - has its onclick taken away instead, so it can
+   still be seen and still cannot act. */
 function recStripWriteControls(root){
   if(recCanWrite()) return;
   const re=new RegExp('^\\s*(?:'+REC_WRITE_FNS.join('|')+')\\s*\\(');
+  const why='Read-only — only HR, Abhay Mati and Administrators can change Recruitment records.';
   (root||document).querySelectorAll('[onclick]').forEach(function(el){
-    if(re.test(el.getAttribute('onclick')||'')) el.remove();
+    if(!re.test(el.getAttribute('onclick')||'')) return;
+    if(el.dataset && el.dataset.recLocked==='1') return;   // the observer re-runs; do this once
+    if(el.dataset) el.dataset.recLocked='1';
+    el.removeAttribute('onclick');
+    el.setAttribute('title',why);
+    /* NOT el.disabled. A disabled button swallows the click, so the very sentence this exists to
+       show would never appear - the control would look dead for no stated reason, which is the
+       failure being fixed. It is marked disabled to assistive tech, greyed to the eye, and its
+       action already removed above; the listener below is what answers the press. */
+    el.setAttribute('aria-disabled','true');
+    el.style.opacity='.55';
+    el.style.cursor='not-allowed';
+    el.addEventListener('click',function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      try{ toast(why,'err'); }catch(_e){}
+    },true);
   });
 }
 // Several Recruitment bars are re-rendered on the fly, so watch the view and re-strip.
@@ -6420,7 +6474,10 @@ VIEWS.hr_new=async function(v,seg){
    The first four columns are cumulative ("how many got at least this far") and read the candidate's
    high-water mark, not their current stage — otherwise anybody who dropped out after their test
    would still be counted as having been interviewed. The last five are exact outcomes. That split
-   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change. */
+   lives in hr.tracker_stages.counts_as, so adding a stage is a database change, not a code change.
+   A candidate begins BELOW all nine, at 'Applied' (seq 0), so filling in the careers-page form no
+   longer reports a test as having been sent to them. Nothing counts them until something really
+   happens; how many applied is candidate_total, which hr.monthly_view returns separately. */
 let MU_MONTHS_CACHE=null, MU_CUR=null, MU_ROWS=null, MU_SEL=new Set();
 const MU_MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
 /* The nine column names come from the database (hr.tracker_stages) so the screen cannot disagree
@@ -8752,9 +8809,9 @@ const USB_COL4={
   'dashboard':            {header:'Time spent', keys:['time_spent'], hideDetails:true},
   'projects':             {header:'Time spent', keys:['time_spent']},
   'video':                {header:'Time spent', keys:['time_spent']},
-  /* All 8 CRM & Sales features are named "View ..." and every one of them is exactly that - a tab
-     that opens a list. Nothing is ever chosen, filtered or changed, so the only things the events
-     ever carried were the row count and how long the tab stayed open, neither of which answers a
+  /* CRM & Sales is one read-only screen - Daily Updates, which shows one day's rollup and lets a
+     past day be reopened. Nothing is chosen, filtered or changed, so the only things an event
+     could carry are the row count and how long the screen stayed open, neither of which answers a
      question anybody asks. When and Action say the whole truth here. */
   'crm':                  {header:null, keys:[], hideDetails:true},
   'scaling':              {header:'Time spent', keys:['time_spent']},
@@ -8943,24 +9000,78 @@ VIEWS.gtd=function(v,seg){
   v.innerHTML=mHead('fa-brain','#7c3aed','GTD')+mKpis(kpis)+mTabs('gtd',tabs,ti)+'<div style="margin-top:14px">'+body+'</div>';
 };
 
+/* CRM & SALES IS DAILY UPDATES, AND NOTHING ELSE.
+
+   There used to be nine tabs. Eight of them were a demonstration: Pipeline & funnel drew a
+   conversion chart out of invented numbers, Leads and Comm history listed two people who do not
+   exist, Bookings and Demands one each, Brokers a firm called Skyline Realty, and the remaining
+   two said they were being built. None of them read anything. Somebody looking at "428 leads,
+   61 bookings" had no way of telling it was a mock-up, which is worse than an empty screen -
+   an empty screen at least tells the truth.
+
+   Daily Updates is the one that is real: the Qualified / Site Visits / Agent Visits rollup the
+   daily-crm-updates task pulls out of RealtyBucket every morning. With it alone there is nothing
+   to tab between, so the tab strip is gone too and the page opens straight onto it. The Open
+   button still goes to RealtyBucket, which is where the actual CRM work happens. */
 VIEWS.crm=function(v,seg){
   setCrumb(['Sales','CRM & Sales']);
-  const tabs=['Pipeline & funnel','Leads','Bookings','Directory & hierarchy','Comm history','Demands & collections','Brokers','Post-sale'];const ti=mTab(seg,tabs.length);
-  let body;
-  if(ti===0){
-    const funnel=mCard('Conversion funnel (this quarter)',mFunnel([['Leads',428],['Contacted',286],['Site visit',171],['Negotiation',98],['Booking',61],['Agreement',47],['Registered',38]]));
-    const ageing=mCard('Stage ageing','<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Stage</th><th>Avg days in stage</th><th>Oldest</th></tr></thead><tbody>'+[['Contacted','3.1 d','11 d'],['Site visit','6.4 d','19 d'],['Negotiation','9.8 d','27 d'],['Booking','4.2 d','14 d']].map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>').join('')+'</tbody></table></div>');
-    body='<div class="m2grid">'+funnel+ageing+'</div>';
-  } else if(ti===1){ body=mTable(['Lead','Project','Stage','Owner','Value'],[['Rahul Mehta','Dream Valley','Site visit','You','₹85L'],['Priya Shah','Dream One','Negotiation','You','₹1.1Cr']]); }
-  else if(ti===2){ body=mTable(['Customer','Unit','Date','Value','Status'],[['Amit Patel','DV A-905','24 Jun','₹92L','Confirmed']]); }
-  else if(ti===4){ body=mTable(['Lead','Channel','Last contact','Note'],[['Rahul Mehta','Call','Today','Site visit booked']]); }
-  else if(ti===5){ body=mTable(['Customer','Demand','Due','Amount','Status'],[['Rahul Mehta','On RCC F10','30 Jun','₹4.2L','Pending']]); }
-  else if(ti===6){ body=mTable(['Broker','Deals','Commission','Status'],[['Skyline Realty','12','₹6.2L','Active']]); }
-  else { body=mSoon(tabs[ti]); }
   v.innerHTML=mHead('fa-handshake','#7c3aed','CRM & Sales')
     +'<div style="margin:-8px 0 12px"><button class="btn btn-primary" onclick="window.open(\'https://www.realtybucket.com/\',\'_blank\')"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open</button></div>'
-    +mTabs('crm',tabs,ti)+'<div style="margin-top:16px">'+body+'</div>';
+    +'<div style="margin-top:16px"><div id="crmDuWrap"><div class="loader"><div class="spin"></div></div></div></div>';
+  crmDuLoad();
 };
+/* ============================ CRM & SALES — DAILY UPDATES TAB ============================
+   Read-only viewer over acc.crm_daily_updates: the Qualified / Site Visits / Agent Visits rollup
+   that the daily-crm-updates scheduled task extracts from RealtyBucket and writes to Supabase
+   each morning (replacing the old "CRM Updates" Google Sheet). Nothing on this tab writes data —
+   it only ever selects from the table, one report_date at a time, most recent first by default,
+   with a date picker so any past day can be reopened. */
+let CRM_DU_DATE=null; // yyyy-mm-dd string picked by the user; null = "most recent available"
+async function crmDuLoad(){
+  const wrap=$('crmDuWrap'); if(!wrap)return;
+  loader(wrap);
+  try{
+    let dateStr=CRM_DU_DATE;
+    if(!dateStr){
+      const {data:latest,error:e1}=await sb.schema('acc').from('crm_daily_updates').select('report_date').order('report_date',{ascending:false}).limit(1).maybeSingle();
+      if(e1)throw e1;
+      dateStr=latest?latest.report_date:null;
+    }
+    if(!dateStr){
+      wrap.innerHTML=crmDuDatePicker(null)+'<div class="card card-pad empty" style="padding:36px;text-align:center"><i class="fa-regular fa-chart-bar"></i><div>No CRM Updates recorded yet</div><p style="max-width:380px;margin:6px auto 0;color:var(--slate)">The daily-crm-updates task writes here every morning once it runs.</p></div>';
+      return;
+    }
+    const {data,error}=await sb.schema('acc').from('crm_daily_updates').select('*').eq('report_date',dateStr).order('sort_order',{ascending:true});
+    if(error)throw error;
+    crmDuRender(dateStr,data||[]);
+  }catch(e){
+    wrap.innerHTML=crmDuDatePicker(CRM_DU_DATE)+'<div class="card card-pad empty" style="padding:32px"><i class="fa-solid fa-triangle-exclamation"></i><div>Could not load CRM Updates</div><p>'+esc((e&&e.message)||String(e))+'</p></div>';
+  }
+}
+function crmDuDatePicker(dateStr){
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    +'<label style="font-size:13px;color:var(--slate)">Report date</label>'
+    +'<input type="date" class="sel" id="crmDuDate" value="'+esc(dateStr||'')+'" onchange="crmDuOnDateChange(this.value)" style="max-width:170px;height:38px">'
+    +'<span style="font-size:12px;color:var(--slate)">Month = 1st of the month through this date &middot; Yesterday = this date only</span>'
+    +'</div>';
+}
+function crmDuRender(dateStr,rows){
+  const wrap=$('crmDuWrap'); if(!wrap)return;
+  const props=rows.filter(function(r){return !r.is_total;});
+  const total=rows.find(function(r){return r.is_total;});
+  const rowsHtml=props.map(function(r){
+    return [r.property_label,r.month_qualified+' / '+r.yesterday_qualified,r.month_visits+' / '+r.yesterday_visits,r.agent_month_visits+' / '+r.agent_yesterday_visits];
+  });
+  if(total){
+    rowsHtml.push(['<b>Total</b>','<b>'+total.month_qualified+' / '+total.yesterday_qualified+'</b>','<b>'+total.month_visits+' / '+total.yesterday_visits+'</b>','<b>'+total.agent_month_visits+' / '+total.agent_yesterday_visits+'</b>']);
+  }
+  const tableHtml=rowsHtml.length
+    ? mTable(['Property','Qualified (Month / Yesterday)','Site Visits (Month / Yesterday)','Agent Visits (Month / Yesterday)'],rowsHtml)
+    : '<div class="card card-pad empty" style="padding:32px;text-align:center">No rows recorded for '+esc(fmtDate(dateStr))+'</div>';
+  const runAt=props.length&&props[0].run_at?('<div style="font-size:12px;color:var(--slate);margin-top:10px">Last extracted '+esc(fmtDate(props[0].run_at))+'</div>'):'';
+  wrap.innerHTML=crmDuDatePicker(dateStr)+tableHtml+runAt;
+}
+window.crmDuOnDateChange=function(v){ CRM_DU_DATE=v||null; crmDuLoad(); };
 
 /* ============================ POST SALES — ADHOC bulk replace ============================
    Converted output files upload to S3 (postsales/adhoc/...) and the conversion record (file
@@ -10059,10 +10170,11 @@ let REC_SEL=new Set();
 // Recruitment (New) -- retired recruitment.html's four tabs, ManPower Form/Referrals rebuilt on
 // talent's approval-workflow versions (tpManpower/tpReferrals) instead of v1's recManpower/
 // recReferrals, which are deleted. Tests are unchanged (recTests) -- both v1 and talent already
-// shared it. Descriptions and the new Pending Approvals tab are both restricted to the 3 named HR
-// approvers + Administrator (rtCanManage()'s own allowlist, not the wider recCanWrite()
-// HR-department group) -- the tabs simply don't exist in the array for anyone else, same posture
-// as hiding an individual control, just extended to a whole tab. See tpApprovalsQueue below.
+// shared it. Descriptions stays restricted to the 3 named HR approvers + Administrator
+// (rtCanManage()'s own allowlist, not the wider recCanWrite() HR-department group).
+// Pending Approvals is NOT a tab here any more -- a ManPower JD ready for review or a Referral just
+// submitted creates a real task in Accountability's own Pending Approval card instead (see
+// acc.hr_approval_task_upsert, called from manpower-ai-generate and hr.referral_approval_task_trg).
 VIEWS.recruitment_new=async function(v,seg){
   setCrumb(['People','Recruitment (New)']);
   const canApprove=rtCanManage();
@@ -10071,7 +10183,6 @@ VIEWS.recruitment_new=async function(v,seg){
     canApprove?{label:'Descriptions',run:()=>recLoadJDs(v)}:null,
     {label:'ManPower Form',run:tpManpower},
     {label:'Referrals',run:tpReferrals},
-    canApprove?{label:'Pending Approvals',run:tpApprovalsQueue}:null,
   ].filter(Boolean);
   const tabs=slots.map(s=>s.label);
   const ti=mTab(seg,tabs.length);
@@ -10109,15 +10220,19 @@ function rtRender(){
       : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
     </div>
   </div>
+  <!-- NO SIDEWAYS SCROLL. The Form Link column was the widest thing here and, now that every test
+       is built in JainE rather than being a Google Form, it held nothing but the words "Built in
+       JainE - no external link" on every row. Taking it out is what lets the remaining five
+       columns fit, so the table no longer runs past its own edge and needs no scrollbar to reach
+       the buttons at the end of a row. The Test Name takes the freed space. -->
   <div class="card" style="overflow:hidden">
   <table class="tbl" id="rtTbl" style="table-layout:fixed;width:100%">
     <thead><tr>
       <th style="width:36px;text-align:center"><input type="checkbox" id="rtChkAll" onchange="rtToggleAll(this)"></th>
-      <th style="width:56px;text-align:center">Sl.</th>
-      <th style="width:64px;text-align:center">Type</th>
-      <th style="width:160px">Test Name</th>
-      <th>Form Link</th>
-      <th style="width:190px;text-align:center">Actions</th>
+      <th style="width:52px;text-align:center">Sl.</th>
+      <th style="width:60px;text-align:center">Type</th>
+      <th>Test Name</th>
+      <th style="width:250px;text-align:center">Actions</th>
     </tr></thead>
     <tbody>${rows.length?rows.map(t=>{
       const native=t.engine==='native';
@@ -10126,14 +10241,13 @@ function rtRender(){
       <td style="text-align:center;color:var(--slate);font-size:13px">${t.sl}</td>
       <td style="text-align:center"><span class="tag ${native?'t-green':'t-gray'}" style="font-size:11px">${native?'Native':'Legacy'}</span></td>
       <td style="font-weight:500;overflow-wrap:anywhere">${esc(t.name)}${native&&t.duration_seconds?`<div style="font-size:11px;color:var(--slate);font-weight:400">${Math.round(t.duration_seconds/60)} min</div>`:''}</td>
-      <td style="overflow-wrap:anywhere">${native?'<span style="color:var(--slate);font-size:12px">Built in JainE — no external link</span>':(t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" style="color:#0369a1;display:inline-flex;align-items:flex-start;gap:5px;font-size:13px;text-decoration:none;white-space:normal;overflow-wrap:anywhere;word-break:break-all"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:11px;margin-top:2px;flex:none"></i><span>${esc(t.link)}</span></a>`:'<span style="color:var(--slate)">—</span>')}</td>
       <td style="text-align:center;white-space:nowrap">${native
         ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtManageQuestions(${t.id})"><i class="fa-solid fa-list-check"></i> Questions</button>
            <button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>
-           ${rtCanManage()?`<button class="btn btn-sm" style="font-size:12px" onclick="rtPreviewNative(${t.id})"><i class="fa-solid fa-eye"></i> Preview</button>
-           <button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtGetLink(${t.id})"><i class="fa-solid fa-link"></i> Get Link</button>`:''}`
+           <button class="btn btn-sm" style="font-size:12px" onclick="rtPreviewNative(${t.id})" title="Sit this paper yourself"><i class="fa-solid fa-eye"></i> Preview</button>
+           ${rtCanManage()?`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtGetLink(${t.id})"><i class="fa-solid fa-link"></i> Get Link</button>`:''}`
         :`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button>`}</td>
-    </tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
+    </tr>`;}).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
     </tbody>
   </table>
   </div>
@@ -10245,6 +10359,17 @@ function rtQuestionsRender(){
   </div>`;
 }
 window.rtQuestionsClose=function(){RT_QUESTIONS=null;RT_QUESTIONS_TEST=null;const p=$('rtQuestionsPanel');if(p){p.style.display='none';p.innerHTML='';}};
+/* The correct-answer picker sits RIGHT NEXT TO each option's own text box (a radio you click as you
+   type it), instead of a separate dropdown that only ever said "Option 1/2/3/4" — that dropdown
+   never showed what you'd actually typed, so picking the correct answer meant trusting a position
+   number rather than seeing the real text, and it was easy to mark the wrong one correct without
+   any way to notice. This can't have that failure mode: the radio is beside the text it marks. */
+function rtQOptRow(i,placeholder){
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <input type="radio" name="rtQFCorrectRadio" value="${i}" id="rtQFCorrectR${i}" style="flex:none" title="Mark this the correct answer">
+    <input id="rtQFOpt${i}" class="inp" placeholder="${esc(placeholder)}" style="flex:1">
+  </div>`;
+}
 window.rtQAdd=function(){if(!rtTestsGuard()||!RT_QUESTIONS_TEST)return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-plus"></i> Add Question</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
@@ -10255,13 +10380,8 @@ window.rtQAdd=function(){if(!rtTestsGuard()||!RT_QUESTIONS_TEST)return;
     </select>
     <label>Question *</label><textarea id="rtQFPrompt" class="inp" rows="2" placeholder="Type the question..."></textarea>
     <div id="rtQFMcq">
-      <label>Options *</label>
-      <input id="rtQFOpt0" class="inp" placeholder="Option 1" style="margin-bottom:6px">
-      <input id="rtQFOpt1" class="inp" placeholder="Option 2" style="margin-bottom:6px">
-      <input id="rtQFOpt2" class="inp" placeholder="Option 3 (optional)" style="margin-bottom:6px">
-      <input id="rtQFOpt3" class="inp" placeholder="Option 4 (optional)" style="margin-bottom:6px">
-      <label>Correct Option *</label>
-      <select id="rtQFCorrect" class="inp"><option value="0">Option 1</option><option value="1">Option 2</option><option value="2">Option 3</option><option value="3">Option 4</option></select>
+      <label>Options — click the radio beside the correct one *</label>
+      ${rtQOptRow(0,'Option 1')}${rtQOptRow(1,'Option 2')}${rtQOptRow(2,'Option 3 (optional)')}${rtQOptRow(3,'Option 4 (optional)')}${rtQOptRow(4,'Option 5 (optional)')}${rtQOptRow(5,'Option 6 (optional)')}
     </div>
     <div id="rtQFDescriptive" style="display:none">
       <label>Model Answer <span style="font-size:11px;color:var(--slate)">(what ChatGPT grades against — not shown to the candidate)</span></label>
@@ -10286,11 +10406,15 @@ window.rtQSave=async function(){
   const seq=((RT_QUESTIONS||[]).reduce((m,q)=>Math.max(m,q.seq||0),0))+1;
   const row={test_id:RT_QUESTIONS_TEST.id,seq,type,max_marks:marks};
   if(type==='mcq'){
-    const opts=[0,1,2,3].map(i=>($('rtQFOpt'+i)||{}).value?.trim()).filter(Boolean);
-    if(opts.length<2){toast('Add at least 2 options','err');return;}
-    const correctIdx=parseInt(($('rtQFCorrect')||{}).value||'0',10);
-    const correct=opts[correctIdx]||opts[0];
-    row.options=opts; row.correct_option=correct;
+    // Keyed by original slot (0..5), not compacted first — so a correct-answer radio always points
+    // at the text actually beside it, even when an earlier slot was left blank.
+    const slots=[0,1,2,3,4,5].map(i=>({i,v:(($('rtQFOpt'+i)||{}).value||'').trim()})).filter(s=>s.v);
+    if(slots.length<2){toast('Add at least 2 options','err');return;}
+    const checked=document.querySelector('input[name="rtQFCorrectRadio"]:checked');
+    if(!checked){toast('Click the radio beside the correct option','err');return;}
+    const correctSlot=slots.find(s=>s.i===parseInt(checked.value,10));
+    if(!correctSlot){toast('The option you marked correct is empty — fill it in or pick another','err');return;}
+    row.options=slots.map(s=>s.v); row.correct_option=correctSlot.v;
   }else{
     row.model_answer=($('rtQFModel')||{}).value?.trim()||'';
   }
@@ -10316,13 +10440,48 @@ window.rtQDelete=async function(qId){
    immediately in a new tab, so "does this test actually work" is answered by trying it, not by
    reading a link out of a modal. Uses the exact same recruit-test-generate-link function a real
    candidate's link comes from — this is not a fake/simulated preview, it is the real thing. */
+/* THE BUTTON IS DRAWN FOR EVERYONE, AND THE SERVER DECIDES.
+
+   It used to be hidden unless rtCanManage() said so, and when somebody who ought to have had it
+   could not see it there was nothing on the screen to explain why - a control that is simply
+   absent tells you nothing. Now it is always there, and a refusal comes back as a sentence naming
+   the reason. Nothing is loosened: recruit-test-generate-link still asks the database whether this
+   caller may do it, and a visible button does not make the request succeed.
+
+   THE TAB IS OPENED BEFORE THE AWAIT, NOT AFTER. A window.open that runs after an await has lost
+   the click that caused it, and browsers block it as a pop-up - so the old version could do
+   everything correctly, mint the attempt, and then appear to do nothing whatsoever. Opening the
+   tab while the click is still live and pointing it at the paper when the link arrives is what
+   makes Preview work from the page. If the tab is blocked anyway, the address is handed over
+   rather than the attempt being lost. */
 window.rtPreviewNative=async function(testId){
-  if(!rtTestsGuard())return;
   const test=(RT_RECORDS||[]).find(t=>t.id===testId);
-  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',{body:{test_id:testId,candidate_email:state.email||'preview@thejaingroup.com',origin:location.origin}});
-  if(error||data?.error){toast((data&&data.error)||error.message,'err');return;}
-  window.open(data.link,'_blank','noopener');
-  toast('Preview opened in a new tab');
+  const tab=window.open('', '_blank');          // on the click, before anything is awaited
+  if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
+    +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the test…</body>'); }catch(_e){} }
+  /* preview:true is what keeps a rehearsal out of Results. The attempt is still real - the paper
+     opens and grades exactly as a candidate's would - it simply is not counted as somebody having
+     sat the test, and carries no candidate, so it can never mark anybody 'Tests Sent'. */
+  const{data,error}=await sb.functions.invoke('recruit-test-generate-link',
+    {body:{test_id:testId,candidate_email:state.email||'preview@thejaingroup.com',
+           origin:location.origin,preview:true}});
+  if(error||data?.error){
+    if(tab) try{ tab.close(); }catch(_e){}
+    toast((data&&data.error)||(error&&error.message)||'Could not open the test','err');
+    return;
+  }
+  if(tab){ try{ tab.location.href=data.link; }catch(_e){ try{ tab.close(); }catch(_x){} } }
+  if(!tab||tab.closed){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye"></i> '+esc((test&&test.name)||'Test')+'</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><p style="margin:0 0 10px;color:var(--slate);font-size:13px">'
+      +'Your browser blocked the new tab. Open this instead — it is your preview, ready to sit.</p>'
+      +'<input class="inp" readonly value="'+esc(data.link)+'" onclick="this.select()"></div>'
+      +'<div class="modal-foot"><a class="btn btn-primary" href="'+esc(data.link)+'" target="_blank" rel="noopener">Open the test</a>'
+      +'<button class="btn" onclick="closeModal()">Close</button></div>');
+    return;
+  }
+  toast('Preview opened in a new tab — it will not appear in Results');
 };
 window.rtGetLink=function(testId){if(!rtTestsGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Get Test Link</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -10427,7 +10586,10 @@ const RT_TESTS_ALLOWED=[
   'mgr.hr@thejaingroup.com',   // Shuchandra Das
   'hr@thejaingroup.com',       // Khusbu Singh
   'career@thejaingroup.com',   // Uzma Ahmed
-  'ayushruia1@gmail.com'       // Administrator
+  'ayushruia1@gmail.com',      // Administrator
+  'ai@thejaingroup.com'        // TEMPORARY, added on request - remove here AND from
+                               // recruit.can_manage_tests() in the database, which is what
+                               // actually enforces this; this list only decides what is drawn.
 ];
 function rtCanManage(){
   return RT_TESTS_ALLOWED.includes(String(state.email||'').trim().toLowerCase());
@@ -10435,6 +10597,17 @@ function rtCanManage(){
 function rtTestsGuard(){
   if(rtCanManage()) return true;
   toast('Assessment Tests can only be changed by Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator','err');
+  return false;
+}
+/* Connecting a referral to a position is HR's decision: HR, the Administrator, or Abhay Mati -
+   the same group that can act anywhere else in Recruitment, and deliberately NOT the tighter
+   four-person list that owns the test bank and may email candidates. Connecting is judging who
+   fits a role, which is the job of whoever is running the hiring, not of whoever owns the tests.
+   Somebody outside that group may still REFER a person; they simply cannot decide where that
+   person goes. */
+function rtRefConnectGuard(){
+  if(recCanWrite()) return true;
+  toast('Only HR, Abhay Mati and Administrators can approve or connect a referral','err');
   return false;
 }
 /* Whether this person has granted the app permission to send mail from their own Gmail. Read from
@@ -10492,7 +10665,9 @@ window.rtShare=async function(){
     <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
     <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
     <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
-    ${rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>'}
+    ${rec.engine==='native'
+      ? `<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Each person gets their OWN link to this paper, so their answers and their time are recorded against them.</div>`
+      : (rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>')}
     <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(fill in as many as you need &mdash; blank ones are ignored)</span></label>
     <div id="rtEmailFields">${fields}</div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
@@ -10526,6 +10701,40 @@ window.rtShareSend=async function(id){
   const body=($('rtShareBody')||{}).value?.trim()||'';
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
   const btn=$('rtShareSendBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending…';}
+
+  /* A NATIVE TEST HAS NO ONE LINK TO SHARE, which is why Share used to refuse with "this test has
+     no form link". A Google Form is one address everybody opens; a paper built in JainE is minted
+     per person, and that is the whole point - it is what ties the answers, the time taken and the
+     pass to a named candidate instead of to an anonymous form response.
+
+     So each recipient gets their own, one at a time. Generating a link is also what records
+     'Tests Sent' against a candidate, which a shared form address could never do. One address
+     failing does not stop the rest: the others still go, and the failures are named afterwards. */
+  if(rec.engine==='native'){
+    let sent=0; const failed=[];
+    for(const to of emails){
+      try{
+        const {data:gen,error:genErr}=await sb.functions.invoke('recruit-test-generate-link',
+          {body:{test_id:id,candidate_email:to,origin:location.origin}});
+        if(genErr||gen?.error) throw new Error((gen&&gen.error)||genErr.message);
+        const {data:sd,error:se}=await sb.functions.invoke('send-test-email',
+          {body:{test_id:id,test_name:rec.name,link:gen.link,subject,body,recipients:[to],
+                 sender_name:senderName,sender_email:state.email||''}});
+        if(se||sd?.error) throw new Error((sd&&sd.error)||se.message);
+        sent++;
+      }catch(e){ failed.push(to+' ('+((e&&e.message)||e)+')'); }
+    }
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    if(sent){
+      try{usageQueue('recruitment.tests.share_test_via_email','update',{title:rec.name,recipients:sent});}catch(_e){}
+      closeModal();
+      toast('Sent to '+sent+' candidate'+(sent===1?'':'s')+' — each has their own link, and is now at Tests Sent','ok');
+    }
+    if(failed.length) toast('Could not send to: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+    if(!sent&&!failed.length) toast('Nothing was sent','err');
+    return;
+  }
+
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
@@ -10555,14 +10764,21 @@ window.rtShareSend=async function(id){
 /* Native tests' own results view — same shape as the Google-Forms one above (Score, Timestamps,
    one row per person), except the row is real and clicking it opens that person's actual answers,
    since native tests grade themselves instead of needing a response sheet imported by hand. */
-window.rtResultsNative=async function(testId){
+/* SHOWPREVIEWS decides which of the two lists this is. Hiding rehearsals from the candidate
+   results was right - HR checking a paper is not a result - but hiding them from EVERYWHERE was
+   not: you could sit a test from JainE to check the grading and then have nowhere to see how it
+   was marked, which is the one thing a preview is for. So they are a second list rather than no
+   list, reached by a button, and never mixed into the first. */
+window.rtResultsNative=async function(testId,showPreviews){
   const test=(RT_RECORDS||[]).find(t=>t.id===testId);if(!test)return;
   const panel=$('rtPreviewPanel');if(!panel)return;
   panel.style.display='block';
   panel.innerHTML=`<div class="card card-pad">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <i class="fa-solid fa-chart-simple" style="color:#0369a1;font-size:16px"></i>
-      <span style="font-weight:700;font-size:15px">${esc(test.name)} — Results</span>
+      <span style="font-weight:700;font-size:15px">${esc(test.name)} — ${showPreviews?'My Previews':'Results'}</span>
+      <button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${testId},${showPreviews?'false':'true'})">
+        <i class="fa-solid fa-${showPreviews?'users':'eye'}"></i> ${showPreviews?'Show candidates':'Show previews'}</button>
       <button style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--slate)" onclick="document.getElementById('rtPreviewPanel').style.display='none'">&times;</button>
     </div>
     <div id="rtResultsBody"><div class="loader"><div class="spin"></div></div></div>
@@ -10570,16 +10786,37 @@ window.rtResultsNative=async function(testId){
   panel.scrollIntoView({behavior:'smooth',block:'start'});
   const rb=$('rtResultsBody');
   try{
+    // Rehearsals are excluded: HR checking the paper is not a result, and before this they piled
+    // up in here beside the candidates - 18 of them under one address before a single real
+    // candidate had sat anything.
     const{data,error}=await sb.schema('recruit').from('test_attempts')
       .select('id,candidate_email,status,started_at,submitted_at,mcq_score,mcq_max,ai_score,ai_max,ai_status,final_pct,pass_fail')
-      .eq('test_id',testId).order('submitted_at',{ascending:false,nullsFirst:false});
+      .eq('test_id',testId).eq('is_preview',!!showPreviews).order('submitted_at',{ascending:false,nullsFirst:false});
     if(error)throw new Error(error.message);
     if(!data||!data.length){
-      rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)"><i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>Nobody has taken this test yet.</div>';
+      rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)">'
+        +'<i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>'
+        +(showPreviews
+          ? 'You have not previewed this test yet. Press Preview on its row to sit it \u2014 the marking will show up here.'
+          : 'No candidate has taken this test yet.')
+        +'</div>';
       return;
     }
     window._rtResultsCache=data;
     const fmt=ts=>{if(!ts)return '—';try{return new Date(ts).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch{return ts;}};
+    /* HOW LONG IT TOOK, from the two timestamps the server already stamps - started_at when Start
+       is pressed and submitted_at when it is handed in. Both are written by the server from its
+       own clock, so neither can be dressed up from the candidate's machine. An attempt that was
+       started and never submitted shows as still open rather than as a time, because it has not
+       finished and any figure would be a guess. */
+    const took=r=>{
+      if(!r.started_at) return '—';
+      if(!r.submitted_at) return '<span style="color:var(--slate)">still open</span>';
+      const ms=new Date(r.submitted_at)-new Date(r.started_at);
+      if(!isFinite(ms)||ms<0) return '—';
+      const m=Math.floor(ms/60000), sec=Math.round((ms%60000)/1000);
+      return m?(m+' min '+sec+' s'):(sec+' s');
+    };
     const scoreTag=r=>{
       if(r.status!=='submitted')return '<span style="color:var(--slate)">In progress</span>';
       if(r.final_pct==null)return '<span style="color:#c08000">Grading '+(r.ai_status==='failed'?'failed — click to retry':'pending')+'</span>';
@@ -10587,7 +10824,7 @@ window.rtResultsNative=async function(testId){
       return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
     };
     rb.innerHTML=`
-      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} response${data.length!==1?'s':''} · click a row to see answers</div>
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} ${showPreviews?('preview'+(data.length!==1?'s':'')+' · not counted anywhere'):('response'+(data.length!==1?'s':''))} · click a row to see answers</div>
       <div style="overflow-x:auto">
       <table class="tbl" style="min-width:500px">
         <thead><tr>
@@ -10596,6 +10833,7 @@ window.rtResultsNative=async function(testId){
           <th style="white-space:nowrap">Score</th>
           <th style="white-space:nowrap">Started</th>
           <th style="white-space:nowrap">Submitted</th>
+          <th style="white-space:nowrap">Time taken</th>
         </tr></thead>
         <tbody>${data.map((r,i)=>`<tr style="cursor:pointer" onclick="rtResultsAttemptDetail('${r.id}')">
           <td style="text-align:center;color:var(--slate);font-size:12px">${i+1}</td>
@@ -10603,6 +10841,7 @@ window.rtResultsNative=async function(testId){
           <td style="white-space:nowrap">${scoreTag(r)}</td>
           <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmt(r.started_at)}</td>
           <td style="font-size:12px;color:var(--slate);white-space:nowrap">${fmt(r.submitted_at)}</td>
+          <td style="font-size:12px;white-space:nowrap">${took(r)}</td>
         </tr>`).join('')}
         </tbody>
       </table></div>`;
@@ -10619,21 +10858,29 @@ window.rtResultsAttemptDetail=async function(attemptId){
     const{data:qs}=await sb.schema('recruit').from('test_questions').select('*').eq('test_id',full.test_id).order('seq',{ascending:true});
     const{data:answers}=await sb.schema('recruit').from('test_answers').select('*').eq('attempt_id',attemptId);
     const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
-    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to Results</button>
+    rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
       <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
         ${full.ai_status==='failed'?`<button class="btn btn-sm" style="margin-left:8px" onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> Retry AI Grading</button>`:''}
       </div>
       ${(qs||[]).map((q,i)=>{
         const a=byQ[q.id]||{};
-        const given=a.answer_text||'(no answer)';
+        const given=a.answer_text||'';
         const isMcq=q.type==='mcq';
+        const marksTag=`<span class="tag ${a.marks_earned>=q.max_marks?'t-green':(a.marks_earned>0?'t-amber':'t-gray')}" style="font-size:12px;font-weight:700;flex:none">${a.marks_earned!=null?a.marks_earned:0} / ${q.max_marks} marks</span>`;
         return `<div class="card" style="padding:12px;margin-bottom:8px;background:var(--bg2)">
-          <div style="font-weight:500">${i+1}. ${esc(q.prompt)}</div>
-          <div style="font-size:12.5px;margin-top:6px;${isMcq?(a.is_correct?'color:var(--ok)':'color:var(--err)'):''}">
-            ${isMcq?(a.is_correct?'✓ ':'✗ '):''}${esc(given)}
+          <div style="display:flex;align-items:flex-start;gap:10px;justify-content:space-between">
+            <div style="font-weight:500;flex:1">${i+1}. ${esc(q.prompt)}</div>
+            ${marksTag}
           </div>
-          ${!isMcq&&a.ai_feedback?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px;font-style:italic">${esc(a.ai_feedback)}</div>`:''}
-          <div style="font-size:11px;color:var(--slate);margin-top:4px">${a.marks_earned!=null?a.marks_earned:'—'} / ${q.max_marks} marks</div>
+          ${isMcq
+            ?`<div style="margin-top:8px">${(q.options||[]).map(o=>{
+                const chosen=o===given, correct=o===q.correct_option;
+                const style=correct?'color:var(--ok);font-weight:600':(chosen?'color:var(--err);font-weight:600':'color:var(--ink)');
+                const tag=correct?' <span style="font-size:10.5px;color:var(--ok)">(correct answer)</span>':(chosen?' <span style="font-size:10.5px;color:var(--err)">(their answer)</span>':'');
+                return `<div style="font-size:12.5px;padding:3px 0;${style}">${chosen||correct?(chosen?'●':'○'):'○'} ${esc(o)}${tag}</div>`;
+              }).join('')}${!given?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">(no answer given)</div>':''}</div>`
+            :`<div style="font-size:12.5px;margin-top:8px;white-space:pre-wrap;color:var(--ink)">${esc(given||'(no answer given)')}</div>
+              ${a.ai_feedback?`<div style="font-size:11.5px;color:var(--slate);margin-top:6px;font-style:italic">AI feedback: ${esc(a.ai_feedback)}</div>`:''}`}
         </div>`;
       }).join('')}`;
   }catch(e){
@@ -10726,9 +10973,91 @@ function mpFmtDate(s){
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return day+' '+months[parseInt(mo)-1]+' '+y;
 }
+/* THE DATE OF REQUEST IS TODAY, AND IT STAYS TODAY.
+   It used to be an ordinary date box, which meant a requisition could be back-dated - and one
+   back-dated by a week is a requisition that looks overdue for approval the moment it arrives,
+   or one quietly aged to jump the queue. The date a request was raised is a fact about when it
+   was raised, not a preference, so the form fills it in and greys it out. An existing
+   requisition keeps the date it was actually raised on; it just can't be edited either. */
+function mpTodayInput(){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+}
+
+/* THE JOB TITLE FILLS IN THE DEPARTMENT AND THE QUALIFICATION.
+   Plain keyword matching, deliberately - no AI. Nothing here should depend on a model being
+   reachable, costing money, or answering differently on a Tuesday; somebody typing "Site
+   Engineer" wants the Department box to say Operations before their finger leaves the key.
+   Both are only ever SUGGESTIONS: the moment anyone touches either box by hand it is theirs,
+   and the title can then change as much as it likes without overwriting the choice.
+
+   ORDER MATTERS in this list, because the first match wins and the titles overlap. "Pre Sales
+   Executive" contains the word "sales", so Pre Sales has to be asked before Sales. "Site
+   Engineer" contains "engineer", so Operations has to be asked before IT. Anything genuinely
+   unrecognised leaves the boxes alone rather than guessing - a wrong department that looks
+   deliberate is worse than an empty one. */
+const MP_TITLE_DEPT=[
+  ['Pre Sales',            ['pre sales','pre-sales','presales','telecaller','tele caller','tele-caller','inside sales','call centre','call center','lead qualification']],
+  ['Channel Partner',      ['channel partner','channel sales','broker','cp manager']],
+  ['HR',                   ['hr ','hr-','human resource','recruit','talent acquisition','payroll']],
+  ['Legal',                ['legal','lawyer','advocate','litigation','compliance','company secretary']],
+  ['Finance',              ['finance','financial','treasury','chartered accountant','taxation','gst','audit','cfo']],
+  ['Accounts',             ['account','bookkeep','book keeping','billing','tally','invoice']],
+  ['Procurement',          ['procure','purchase','vendor','supply chain','store keeper','storekeeper','inventory','material']],
+  ['Facility & Maintenance',['facility','maintenance','housekeep','electrician','plumber','carpenter','security guard','gardener','caretaker','lift operator']],
+  ['Operations',           ['site engineer','civil engineer','structural','project manager','project engineer','planning engineer','quantity surveyor','execution','site supervisor','architect','safety officer','qa/qc','quality control','operations']],
+  ['Marketing',            ['marketing','digital','seo','social media','brand','content writer','copywriter','graphic','designer','creative','advertis','campaign','video editor','photographer','media buyer']],
+  ['IT',                   ['software','developer','programmer','it executive','it manager','it support','system admin','network','database','devops','data analyst','tech support','hardware']],
+  ['Sales',                ['sales','business development','relationship manager','closing manager']],
+  ['Admin',                ['admin','receptionist','front desk','front office','office assistant','peon','driver','clerk','secretary','personal assistant']],
+];
+/* Qualification is a looser suggestion again - the usual entry requirement for that kind of
+   role here, not a rule. Left blank when nothing obvious fits. */
+const MP_TITLE_QUAL=[
+  [['site engineer','civil engineer','structural','planning engineer','project engineer','quantity surveyor','execution'], 'B.E. / B.Tech (Civil)'],
+  [['architect'],                                          'B.Arch'],
+  [['software','developer','programmer','devops','database','network','data analyst','it executive','it manager','it support','tech support'], 'B.Tech / BCA / MCA'],
+  [['chartered accountant',' ca ','taxation','gst','audit'],'CA / CA Inter'],
+  [['account','finance','bookkeep','billing','tally'],      'B.Com (Hons) / M.Com'],
+  [['hr ','human resource','recruit','talent acquisition','payroll'], 'MBA (HR) / MSW'],
+  [['legal','lawyer','advocate','litigation'],              'LL.B'],
+  [['company secretary'],                                   'CS'],
+  [['marketing','digital','seo','social media','brand','campaign','media buyer'], 'MBA (Marketing) / Graduate'],
+  [['graphic','designer','creative','video editor','photographer','content writer','copywriter'], 'Graduate / Diploma in Design'],
+  [['electrician','plumber','carpenter','technician','lift operator'], 'ITI / Diploma'],
+  [['driver'],                                              'Valid commercial driving licence'],
+  [['security guard','housekeep','peon','gardener','caretaker'], 'Class VIII pass or above'],
+  [['sales','business development','relationship manager','telecaller','tele caller','presales','pre sales','channel partner'], 'Graduate'],
+  [['receptionist','front desk','front office','office assistant','admin','clerk','secretary'], 'Graduate'],
+  [['purchase','procure','store keeper','storekeeper','inventory','project manager','safety officer'], 'Graduate / Diploma'],
+];
+function mpDeptFromTitle(title){
+  const t=' '+String(title||'').toLowerCase().trim()+' ';
+  if(t.trim().length<3) return '';
+  for(const [dept,words] of MP_TITLE_DEPT){ if(words.some(w=>t.includes(w))) return dept; }
+  return '';
+}
+function mpQualFromTitle(title){
+  const t=' '+String(title||'').toLowerCase().trim()+' ';
+  if(t.trim().length<3) return '';
+  for(const [words,qual] of MP_TITLE_QUAL){ if(words.some(w=>t.includes(w))) return qual; }
+  return '';
+}
+// Anything typed or chosen by hand is the person's own - never overwritten by a later title edit.
+window.mpMarkTouched=function(el){ if(el) el._mpTouched=true; };
+window.mpTitleSuggest=function(){
+  const title=($('mpFTitle')||{}).value||'';
+  const sel=$('mpFDeptSel');
+  if(sel&&!sel._mpTouched){
+    const dept=mpDeptFromTitle(title);
+    if(dept&&MP_DEPTS.includes(dept)){ sel.value=dept; mpSelChange('mpFDept'); }
+  }
+  const qual=$('mpFQual');
+  if(qual&&!qual._mpTouched){ qual.value=mpQualFromTitle(title); }
+};
 function mpSelOpt(id,opts,val){
   const known=opts.includes(val);
-  let h=`<select id="${id}Sel" class="sel" onchange="mpSelChange('${id}')">`;
+  let h=`<select id="${id}Sel" class="sel" onchange="mpMarkTouched(this);mpSelChange('${id}')">`;
   h+=opts.map(o=>`<option${o===val?' selected':''}>${esc(o)}</option>`).join('');
   h+=`<option value="__other"${!known&&val?' selected':''}>Other (type below)</option></select>`;
   h+=`<input id="${id}Custom" class="inp" style="margin-top:6px;display:${known||!val?'none':'block'}" value="${esc(!known?val:'')}">`;
@@ -10854,20 +11183,22 @@ function mpModal(title,vals,saveBtn){
   const locs=['HO','Site/Project Name','Durgapur','Siliguri'];
   const selLocs=vals&&vals.location?vals.location.split(',').map(s=>s.trim()):[];
   const locChk=locs.map(l=>`<label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;margin-bottom:4px"><input type="checkbox" class="mp-loc" value="${l}"${selLocs.includes(l)?' checked':''}> ${l}</label>`).join('');
-  const dateVal=mpToDateInput(vals&&vals.date_of_request||'');
+  // A new form opens on today; an existing one shows the day it was actually raised. Neither
+  // can be typed over - see mpTodayInput above.
+  const dateVal=mpToDateInput(vals&&vals.date_of_request||'')||mpTodayInput();
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pen"></i> ${title}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm" style="max-height:72vh;overflow-y:auto">
     <div class="two">
-      <div><label>Job Title *</label><input id="mpFTitle" class="inp" value="${esc(vals&&vals.job_title||'')}" placeholder="e.g. Sales Executive"></div>
-      <div><label>Date of Request *</label><input id="mpFDate" type="date" class="inp" value="${dateVal}"></div>
+      <div><label>Job Title *</label><input id="mpFTitle" class="inp" value="${esc(vals&&vals.job_title||'')}" placeholder="e.g. Sales Executive" oninput="mpTitleSuggest()"></div>
+      <div><label>Date of Request</label><input id="mpFDate" type="date" class="inp" value="${dateVal}" disabled style="background:#f1f5f9;color:var(--slate);cursor:not-allowed"><div style="font-size:11px;color:var(--slate);margin-top:4px">Set automatically — the day the request is raised.</div></div>
     </div>
     <div class="two">
-      <div><label>Department *</label>${mpSelOpt('mpFDept',MP_DEPTS,vals&&vals.department||'')}</div>
+      <div><label>Department *</label>${mpSelOpt('mpFDept',MP_DEPTS,vals&&vals.department||'')}<div style="font-size:11px;color:var(--slate);margin-top:4px">Suggested from the Job Title — change it if it is wrong.</div></div>
       <div><label>No. of Vacancy *</label><input id="mpFVac" class="inp" value="${esc(vals&&vals.no_of_vacancy||'')}" placeholder="e.g. 2"></div>
     </div>
     <div class="two">
       <div><label>Reporting Person / HOD *</label><input id="mpFHOD" class="inp" value="${esc(vals&&vals.reporting_person||'')}" placeholder="Name"></div>
-      <div><label>Required Qualification</label><input id="mpFQual" class="inp" value="${esc(vals&&vals.qualification||'')}" placeholder="e.g. Graduate, B.Tech"></div>
+      <div><label>Required Qualification</label><input id="mpFQual" class="inp" value="${esc(vals&&vals.qualification||'')}" placeholder="e.g. Graduate, B.Tech" oninput="mpMarkTouched(this)"></div>
     </div>
     <div class="two">
       <div><label>Experience</label>${mpSelOpt('mpFExp',MP_EXP,vals&&vals.experience||'')}</div>
@@ -10887,7 +11218,9 @@ function mpModal(title,vals,saveBtn){
 function mpCollect(){
   const locs=[...document.querySelectorAll('.mp-loc:checked')].map(el=>el.value).join(', ');
   const pri=(document.querySelector('input[name="mpPri"]:checked')||{}).value||'Not Urgent';
-  const rawDate=$('mpFDate')&&$('mpFDate').value?$('mpFDate').value:'';
+  // Disabled inputs still hand their value to JavaScript, so this reads the locked box; the
+  // fallback only matters if the field ever goes missing, and today is the right answer then.
+  const rawDate=$('mpFDate')&&$('mpFDate').value?$('mpFDate').value:mpTodayInput();
   let fmtDate=rawDate;
   if(rawDate&&/^\d{4}-\d{2}-\d{2}$/.test(rawDate)){const[y,mo,d]=rawDate.split('-');fmtDate=d+'/'+mo+'/'+y;}
   return {
@@ -11382,10 +11715,15 @@ async function recLoadJDs(v){
 window.recJdOpen=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
   if(jd.source==='ai_generated'){
-    if(jd.jd_document_path){window.open(jd.jd_document_path,'_blank');return;}
-    // Older AI-generated rows made before the document file existed — fall back to a plain-text view.
-    const blob=new Blob([jd.content_text||''],{type:'text/plain'});
-    window.open(URL.createObjectURL(blob),'_blank');
+    /* Opened as a PDF on the Jain Group letterhead, in its own tab - not as the raw HTML document
+       and not as a wall of plain text. A job description is something that gets forwarded to a
+       candidate or printed for an interview panel, so what is on screen is the same thing that
+       comes out of Download, built from the same bytes. */
+    if(!String(jd.content_text||'').trim()){ toast('This description has no text to print yet','err'); return; }
+    try{
+      const bytes=await jdBuildPdfBytes(jd.name||'Job Description',jd.content_text||'');
+      jdPdfOpen(bytes,((jd.name||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',false);
+    }catch(e){ toast('Could not build the PDF: '+((e&&e.message)||e),'err'); }
     return;
   }
   if(jd.isDefault){window.open(jd.url,'_blank');return;}
@@ -11398,11 +11736,12 @@ window.recJdOpen=async function(id){
 window.recJdDownload=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
   if(jd.source==='ai_generated'){
-    if(jd.jd_document_path){await tpDownloadUrl(jd.jd_document_path,(jd.name||'job-description')+'.html');return;}
-    const blob=new Blob([jd.content_text||''],{type:'text/plain'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=(jd.name||'job-description')+'.txt';a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    // The same PDF the Preview shows - it used to come down as .html or .txt.
+    if(!String(jd.content_text||'').trim()){ toast('This description has no text to print yet','err'); return; }
+    try{
+      const bytes=await jdBuildPdfBytes(jd.name||'Job Description',jd.content_text||'');
+      jdPdfOpen(bytes,((jd.name||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',true);
+    }catch(e){ toast('Could not build the PDF: '+((e&&e.message)||e),'err'); }
     return;
   }
   if(jd.isDefault){const a=document.createElement('a');a.href=jd.url;a.download=jd.name+'.pdf';a.click();return;}
@@ -12273,86 +12612,112 @@ function tpApprovalTag(rec){
   return '<span class="tag t-amber"><i class="fa-solid fa-hourglass-half"></i> Pending Approval</span>';
 }
 
-/* ── Pending Approvals (Suchandra Das / Khushbu Singh / Uzma Ahmed / Administrator only) ──
-   A dedicated tab rather than the notification bell: there are exactly 3 named people, not a
-   role, and acc.my_pending_approvals() (the bell's own feed) is a different, unrelated
-   Accountability-module concept that was never meant to carry HR items. No email is sent here —
-   this tab IS the notification surface. Approve/Reject reuse tpMpApprove/tpMpReject/tpRefApprove/
-   tpRefReject unchanged; only the listing and the PDF download are new. */
-async function tpApprovalsQueue(){
-  const b=$('recBody'); if(!b)return;
-  if(!rtCanManage()){ b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-lock"></i><div style="margin-top:8px">Pending Approvals is limited to HR and Administrators.</div></div>'; return; }
-  b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-  const [mpR,refR]=await Promise.all([
-    sb.schema('hr').from('manpower_requests').select('*').eq('approval_status','Pending').order('submitted_at',{ascending:false}),
-    sb.schema('hr').from('referrals').select('*').eq('approval_status','Pending').order('created_at',{ascending:false})
-  ]);
-  if(mpR.error||refR.error){ b.innerHTML='<div class="empty" style="padding:40px;color:var(--err)">'+esc((mpR.error||refR.error).message)+'</div>'; return; }
-  MP_RECORDS=MP_RECORDS||[]; // tpMpApprove/tpMpReject look candidates up here — make sure it exists
-  (mpR.data||[]).forEach(r=>{ const i=MP_RECORDS.findIndex(x=>x.id===r.id); if(i>-1)MP_RECORDS[i]=r; else MP_RECORDS.push(r); });
-  TP_REF_RECORDS=TP_REF_RECORDS||[];
-  (refR.data||[]).forEach(r=>{ const i=TP_REF_RECORDS.findIndex(x=>x.id===r.id); if(i>-1)TP_REF_RECORDS[i]=r; else TP_REF_RECORDS.push(r); });
-  const mp=mpR.data||[], ref=refR.data||[];
-  b.innerHTML=`
-  <div class="sec-title">ManPower Requisitions Pending <span class="tag t-amber" style="margin-left:4px">${mp.length}</span></div>
-  <div style="overflow-x:auto;margin-bottom:20px"><table class="tbl">
-    <thead><tr><th>Job Title</th><th>Department</th><th>Requested By</th><th>Date</th><th>Description</th><th>Action</th></tr></thead>
-    <tbody>${mp.length?mp.map(r=>`<tr>
-      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
-      <td>${esc(r.department||'—')}</td>
-      <td>${esc(r.raised_by||'—')}</td>
-      <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td>${r.ai_job_description?`<button class="btn btn-sm" onclick="hrJdPdfDownload(${r.id})"><i class="fa-solid fa-file-pdf"></i> View PDF</button>`:'<span style="color:var(--slate);font-size:12px">Generating…</span>'}</td>
-      <td><button class="btn btn-sm btn-primary" onclick="tpMpApprove(${r.id})"><i class="fa-solid fa-check"></i></button> <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpReject(${r.id})"><i class="fa-solid fa-xmark"></i></button></td>
-    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--slate)">Nothing pending</td></tr>'}</tbody>
-  </table></div>
-  <div class="sec-title">Referrals Pending <span class="tag t-amber" style="margin-left:4px">${ref.length}</span></div>
-  <div style="overflow-x:auto"><table class="tbl">
-    <thead><tr><th>Candidate</th><th>Phone</th><th>Email</th><th>Position</th><th>Referred By</th><th>Action</th></tr></thead>
-    <tbody>${ref.length?ref.map(r=>`<tr>
-      <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
-      <td>${esc(r.referred_phone||'—')}</td>
-      <td>${esc(r.referred_email||'—')}</td>
-      <td>${esc(r.position||'—')}</td>
-      <td>${esc(r.referred_by||'—')}</td>
-      <td><button class="btn btn-sm btn-primary" onclick="tpRefApprove(${r.id})"><i class="fa-solid fa-check"></i></button> <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})"><i class="fa-solid fa-xmark"></i></button></td>
-    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--slate)">Nothing pending</td></tr>'}</tbody>
-  </table></div>`;
-}
+/* Pending Approvals is no longer a Recruitment tab — a ManPower JD ready for review, or a Referral
+   just submitted, now creates a real task in Accountability's own Pending Approval card instead
+   (acc.hr_approval_task_upsert; the domain-specific Approve/Reject there live in accountability.js
+   as hrTaskApproveManpower/hrTaskRejectManpower/hrTaskConnectReferral/hrTaskRejectReferral). */
 /* Plain, professional one-column PDF of the AI-generated Job Description text (already the exact
    wording an approver is judging) -- reuses loadPdfLib(), the same lazy-loaded pdf-lib this app
    already uses for the Booking Form checklist / Welcome Letter / Allotment Letter, rather than
    adding new PDF infrastructure. Paginates plainly; this is an internal approval attachment, not a
    branded document, so no logo/letterhead. */
-window.hrJdPdfDownload=async function(manpowerId){
+/* THE JAIN GROUP LETTERHEAD, for anything printed out of Recruitment.
+
+   The logo ships as a .webp, which is right for a web page and no use to pdf-lib - it can embed
+   PNG and JPEG and nothing else. Rather than commit a second copy of the same picture in a second
+   format (two files to keep in step, and the one nobody remembers to replace is the one that goes
+   out to candidates), the browser converts it: it can already decode webp to draw it on screen, so
+   it is drawn onto a canvas and read back as PNG. Done once and kept, because the same logo goes on
+   every page of every description.
+
+   Returns null if anything goes wrong. A job description with no logo is a small disappointment; a
+   job description that would not open at all because of the logo is a real problem. */
+let JG_LOGO_PNG=null;
+async function jgLogoPngBytes(){
+  if(JG_LOGO_PNG!==null) return JG_LOGO_PNG||null;
+  try{
+    const img=new Image();
+    img.crossOrigin='anonymous';
+    await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; img.src='assets/jain-group-logo.webp'; });
+    const c=document.createElement('canvas');
+    c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
+    c.getContext('2d').drawImage(img,0,0);
+    const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+    if(!blob) throw new Error('the logo could not be converted');
+    JG_LOGO_PNG=new Uint8Array(await blob.arrayBuffer());
+    return JG_LOGO_PNG;
+  }catch(_e){ JG_LOGO_PNG=false; return null; }
+}
+
+/* Builds a job description as a real PDF: letterhead, title, then the text laid out so it breaks
+   across pages properly. Returns the bytes; what the caller does with them - open a tab, save a
+   file - is the caller's business, so preview and download cannot drift into showing two different
+   documents. */
+async function jdBuildPdfBytes(title,bodyText){
+  const L=await loadPdfLib(); if(!L)throw new Error('the PDF library could not be loaded');
+  const doc=await L.PDFDocument.create();
+  const reg=await doc.embedFont(L.StandardFonts.Helvetica);
+  const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+  const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD=15,MAXW=W-2*M;
+
+  let logo=null,logoDims=null;
+  const png=await jgLogoPngBytes();
+  if(png){ try{ logo=await doc.embedPng(png); logoDims=logo.scale(150/logo.width); }catch(_e){ logo=null; } }
+
+  function wrapLine(text,font,size){
+    const words=String(text||'').split(' ');const out=[];let cur='';
+    words.forEach(w=>{const t=cur?cur+' '+w:w; if(font.widthOfTextAtSize(t,size)<=MAXW){cur=t;}else{if(cur)out.push(cur);cur=w;}});
+    if(cur)out.push(cur); return out.length?out:[''];
+  }
+  // Every page carries the letterhead, because a description is often read one page at a time.
+  function newPage(){
+    const pg=doc.addPage([W,Hh]);
+    let top=Hh-M;
+    if(logo&&logoDims){
+      pg.drawImage(logo,{x:M,y:top-logoDims.height,width:logoDims.width,height:logoDims.height});
+      top-=logoDims.height+10;
+    }
+    pg.drawLine({start:{x:M,y:top},end:{x:W-M,y:top},thickness:1.2,
+                 color:L.rgb(0.88,0.07,0.11)});
+    return {pg,y:top-24};
+  }
+  let {pg:page,y}=newPage();
+  wrapLine(title||'Job Description',bold,15).forEach(function(l){
+    page.drawText(l,{x:M,y,size:15,font:bold}); y-=21;
+  });
+  y-=8;
+  String(bodyText||'').split('\n').forEach(function(line){
+    const isHead=/:$/.test(line.trim())&&line.trim().length<40;
+    wrapLine(line,isHead?bold:reg,SIZE).forEach(function(l){
+      if(y<M+24){ const np=newPage(); page=np.pg; y=np.y; }
+      page.drawText(l,{x:M,y,size:SIZE,font:isHead?bold:reg}); y-=LEAD;
+    });
+    if(!line.trim())y-=4;
+  });
+  return await doc.save();
+}
+
+// Opens bytes in a new tab, or saves them, from one place so both behave the same.
+function jdPdfOpen(bytes,filename,download){
+  const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+  if(download){
+    const a=document.createElement('a');a.href=url;a.download=filename;
+    document.body.appendChild(a);a.click();a.remove();
+  } else {
+    // Some browsers block a tab opened after an await; fall back to saving rather than doing nothing.
+    const w=window.open(url,'_blank');
+    if(!w){ const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+            toast('Your browser blocked the preview tab, so it was downloaded instead',''); }
+  }
+  setTimeout(function(){URL.revokeObjectURL(url);},60000);
+}
+
+window.hrJdPdfDownload=async function(manpowerId,download){
   const rec=(MP_RECORDS||[]).find(r=>r.id===manpowerId);
   if(!rec||!rec.ai_job_description){toast('No description to show yet','err');return;}
   try{
-    const L=await loadPdfLib(); if(!L)throw new Error('the PDF library could not be loaded');
-    const doc=await L.PDFDocument.create();
-    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
-    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD=15,MAXW=W-2*M;
-    function wrapLine(text,font,size){
-      const words=String(text||'').split(' ');const out=[];let cur='';
-      words.forEach(w=>{const t=cur?cur+' '+w:w; if(font.widthOfTextAtSize(t,size)<=MAXW){cur=t;}else{if(cur)out.push(cur);cur=w;}});
-      if(cur)out.push(cur); return out.length?out:[''];
-    }
-    let page=doc.addPage([W,Hh]),y=Hh-M;
-    page.drawText('Job Description — '+(rec.job_title||''),{x:M,y,size:14,font:bold});y-=26;
-    (rec.ai_job_description.split('\n')).forEach(line=>{
-      const isHead=/:$/.test(line.trim())&&line.trim().length<40;
-      wrapLine(line,isHead?bold:reg,SIZE).forEach(l=>{
-        if(y<M+20){page=doc.addPage([W,Hh]);y=Hh-M;}
-        page.drawText(l,{x:M,y,size:SIZE,font:isHead?bold:reg});y-=LEAD;
-      });
-      if(!line.trim())y-=4;
-    });
-    const bytes=await doc.save();
-    const blob=new Blob([bytes],{type:'application/pdf'});
-    const url=URL.createObjectURL(blob);
-    window.open(url,'_blank');
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    const bytes=await jdBuildPdfBytes('Job Description \u2014 '+(rec.job_title||''),rec.ai_job_description);
+    jdPdfOpen(bytes,((rec.job_title||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',!!download);
   }catch(e){toast('Could not build the PDF: '+((e&&e.message)||e),'err');}
 };
 
@@ -12369,19 +12734,19 @@ async function tpManpower(){
 function tpMpRender(){
   const b=$('recBody'); if(!b)return;
   const rows=MP_RECORDS||[];
+  const canOpen=recCanWrite();
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">ManPower Requisitions <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px">
-      <button class="btn" onclick="tpMpPreviewCreative()"><i class="fa-solid fa-image"></i> Preview Creative Design</button>
       <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
     </div>
   </div>
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Click a row for its status, the AI-generated Job Description / Description / Creative, and to Approve or Reject it.</div>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">${canOpen?'Click a row for its status, the AI-generated Job Description / Description / Creative, and to Approve or Reject it.':'Anyone can raise a requisition here. Opening one to read its Job Description, its approval and its Careers Page link is limited to HR, Abhay Mati and Administrators.'}</div>
   <div style="overflow-x:auto">
   <table class="tbl" id="tpMpTbl">
     <thead><tr><th>Job Title</th><th>Department</th><th>Date</th><th style="text-align:center">Vacancy</th><th>Priority</th><th>Approval</th></tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row" data-id="${r.id}" style="cursor:pointer" onclick="tpMpShowDetail(${r.id})">
+    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row" data-id="${r.id}"${canOpen?` style="cursor:pointer" onclick="tpMpShowDetail(${r.id})"`:''}>
       <td style="font-weight:600">${esc(r.job_title||'—')}</td>
       <td>${esc(r.department||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
@@ -12394,24 +12759,6 @@ function tpMpRender(){
   </div>
   <div id="tpMpDetail" style="display:none"></div>`;
 }
-window.tpMpPreviewCreative=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-image"></i> Preview Creative Design</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="two"><div><label>Sample Job Title</label><input id="tpPvTitle" class="inp" value="Sales Manager"></div><div><label>Sample Department</label><input id="tpPvDept" class="inp" value="Sales"></div></div>
-    <div id="tpPvResult" style="margin-top:14px;text-align:center;color:var(--slate)"><i class="fa-solid fa-spinner fa-spin"></i> Generating preview…</div>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="tpMpPreviewCreativeRun()"><i class="fa-solid fa-rotate"></i> Regenerate Preview</button></div>`);
-  tpMpPreviewCreativeRun();
-};
-window.tpMpPreviewCreativeRun=async function(){
-  const box=$('tpPvResult');if(!box)return;
-  box.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Generating preview…';
-  const job_title=($('tpPvTitle')||{}).value?.trim()||'Sample Position';
-  const department=($('tpPvDept')||{}).value?.trim()||'';
-  const {data,error}=await sb.functions.invoke('manpower-ai-generate',{body:{sample:true,job_title,department}});
-  if(error||!data||data.error){box.innerHTML='<span style="color:var(--err)">'+((error&&error.message)||(data&&data.error)||'Failed')+'</span>';return;}
-  box.innerHTML=data.creative_path?`<img src="${esc(data.creative_path)}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">`:'<span style="color:var(--err)">No creative returned</span>';
-};
 window.tpMpFillForm=function(){
   // Open to everyone — this is the "raise a need" side of the approval workflow, not a write-guarded action.
   mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="tpMpSave()"><i class="fa-solid fa-check"></i> Submit</button>');
@@ -12434,8 +12781,24 @@ window.tpMpSave=async function(){
     rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
   });
 };
+/* thejaingroup.com does NOT serve this repo (confirmed live: career-position.html there falls back
+   to the homepage) — but GitHub Pages does, confirmed live at this exact URL, serving the exact
+   file just pushed. Swap this one constant if/when a custom domain is actually wired up to it. */
+const CAREERS_BASE_URL='https://codingfuriosa.github.io/JainGroup';
+function tpCareersLink(slug){ return CAREERS_BASE_URL+'/career-position.html?slug='+encodeURIComponent(slug||''); }
 window.tpMpShowDetail=function(id){
  try{
+  /* OPENING A ROW IS NOT FOR EVERYONE. Anyone may raise a requisition, and anyone may see the
+     list of what has been raised - that is the point of a shared form. What sits behind the row
+     is a different matter: the AI-written job description, the approval and rejection reasons,
+     and the live Careers Page link, which is a public URL that puts the position on the
+     internet the moment it is shared. That belongs to HR, Abhay Mati and Administrators. The
+     rows are also drawn without a pointer for everyone else, so it does not merely fail on a
+     click - it never looks clickable. */
+  if(!recCanWrite()){
+    toast('Only HR, Abhay Mati and Administrators can open a requisition','err');
+    return;
+  }
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);
   if(!rec){toast('Could not find requisition #'+id+' — try refreshing the page','err');console.error('tpMpShowDetail: no record with id',id,'in MP_RECORDS',MP_RECORDS);return;}
   const panel=$('tpMpDetail');
@@ -12479,27 +12842,18 @@ window.tpMpShowDetail=function(id){
         ${rec.ai_status==='failed'?'<span class="tag t-red">Generation failed</span>':''}
         ${canAct&&rec.ai_status!=='generating'?`<button class="btn btn-sm" style="margin-left:auto" onclick="tpMpGenerate(${rec.id})"><i class="fa-solid fa-wand-magic-sparkles"></i> ${rec.ai_status==='ready'?'Regenerate':'Generate with AI'}</button>`:''}
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-        <div class="card" style="padding:12px">
-          <div class="tp-lbl" style="margin-bottom:6px">Creative</div>
-          ${rec.ai_creative_path?`<img src="${esc(rec.ai_creative_path)}" style="width:100%;border-radius:8px;display:block;margin-bottom:8px;border:1px solid var(--line)">
-            <div style="display:flex;gap:6px"><button class="btn btn-sm" style="flex:1" onclick="window.open('${esc(rec.ai_creative_path)}','_blank')"><i class="fa-solid fa-eye"></i> Preview</button><button class="btn btn-sm" style="flex:1" onclick="tpDownloadUrl('${esc(rec.ai_creative_path)}','${esc(rec.job_title||'creative')}.svg')"><i class="fa-solid fa-download"></i> Download</button></div>`
-            :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
+      <div class="card" style="padding:12px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:8px"><div class="tp-lbl">Description</div>
+          ${rec.ai_job_description?`<button class="btn btn-sm" style="margin-left:auto" onclick="hrJdPdfDownload(${rec.id})"><i class="fa-solid fa-file-pdf"></i> View as PDF</button><button class="btn btn-sm" style="margin-left:6px" onclick="hrJdPdfDownload(${rec.id},true)"><i class="fa-solid fa-download"></i> Download PDF</button>`:''}
         </div>
-        <div class="card" style="padding:12px">
-          <div class="tp-lbl" style="margin-bottom:6px">Job Description Document</div>
-          ${rec.ai_jd_document_path?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><i class="fa-solid fa-file-lines" style="font-size:28px;color:${'#D21F3C'}"></i><span style="font-size:12.5px;color:var(--slate)">Formatted document, ready to share</span></div>
-            <div style="display:flex;gap:6px"><button class="btn btn-sm" style="flex:1" onclick="window.open('${esc(rec.ai_jd_document_path)}','_blank')"><i class="fa-solid fa-eye"></i> Preview</button><button class="btn btn-sm" style="flex:1" onclick="tpDownloadUrl('${esc(rec.ai_jd_document_path)}','${esc(rec.job_title||'job-description')}.html')"><i class="fa-solid fa-download"></i> Download</button></div>`
-            :'<div style="font-size:12.5px;color:var(--slate)">Not generated yet</div>'}
-        </div>
-        <div class="card" style="padding:12px"><div class="tp-lbl">Description (Post Text)</div><div style="margin-top:8px;font-size:12.5px;${rec.ai_platform_post_text?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_platform_post_text?esc(rec.ai_platform_post_text):'Not generated yet'}</div></div>
+        <div style="margin-top:8px;font-size:12.5px;max-height:260px;overflow-y:auto;${rec.ai_job_description?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_job_description?esc(rec.ai_job_description):'Not generated yet'}</div>
       </div>
       ${(rec.approval_status==='Approved')?`<div class="card" style="padding:12px;margin-top:12px">
         <div class="tp-lbl" style="margin-bottom:6px">JainGroup Careers Page</div>
         ${rec.status==='Open'?`
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input class="ac-in" readonly style="flex:1;min-width:220px;font-size:12.5px" value="https://thejaingroup.com/career-position.html?slug=${esc(rec.slug||'')}" onclick="this.select()">
-            <button class="btn btn-sm" onclick="navigator.clipboard.writeText('https://thejaingroup.com/career-position.html?slug=${esc(rec.slug||'')}');toast('Link copied')"><i class="fa-solid fa-copy"></i> Copy</button>
+            <input class="ac-in" readonly style="flex:1;min-width:220px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:#0369a1" value="${esc(tpCareersLink(rec.slug))}" onclick="this.select()">
+            <button class="btn btn-sm" onclick="navigator.clipboard.writeText('${esc(tpCareersLink(rec.slug))}');toast('Link copied')"><i class="fa-solid fa-copy"></i> Copy</button>
             <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpCloseHiring(${rec.id})"><i class="fa-solid fa-lock"></i> Close Hiring</button>
           </div>
           <div style="font-size:11px;color:var(--slate);margin-top:6px">Live now — anyone with this link can apply. Closing hiring takes the page down.</div>`
@@ -12603,32 +12957,51 @@ function tpRefRender(){
     <div style="margin-left:auto"><button class="btn btn-primary" onclick="tpRefAdd()"><i class="fa-solid fa-user-plus"></i> Refer Someone</button></div>
   </div>
   <div style="overflow-x:auto"><table class="tbl">
-    <thead><tr><th>Candidate</th><th>Position</th><th>Phone</th><th>Email</th><th>Referred By</th><th>Date</th><th>Approval</th></tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="tp-ref-row">
+    <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Note</th><th>CV</th><th>Referred By</th><th>Date</th><th>Status</th></tr></thead>
+    <tbody>${rows.length?rows.map(r=>{
+      const connected=!!r.tracker_id;
+      /* Connect sits on every row that has not already gone through, whatever its status - a
+         referral turned down for one role can be the right person for another later, so a
+         Rejected row is not a dead end. Once it IS in the Tracker the button goes: pressing it
+         again would make a second candidate out of the same person. */
+      const acts=canAct&&!connected
+        ? ` <button class="btn btn-sm btn-primary" style="margin-left:6px;padding:3px 8px" onclick="tpRefConnect(${r.id})" title="Connect to an open position"><i class="fa-solid fa-link"></i> Connect</button>`
+          +((r.approval_status||'Pending')==='Pending'?` <button class="btn btn-sm" style="margin-left:4px;padding:3px 8px;color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})" title="Reject"><i class="fa-solid fa-xmark"></i></button>`:'')
+        : (connected?' <span class="tag t-gray" style="margin-left:6px">In Interview Tracker</span>':'');
+      return `<tr class="tp-ref-row">
       <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
-      <td>${esc(r.position||'—')}</td>
+      <td>${r.referred_email?`<a href="mailto:${esc(r.referred_email)}" style="color:var(--brand)">${esc(r.referred_email)}</a>`:'—'}</td>
       <td>${esc(r.referred_phone||'—')}</td>
-      <td>${esc(r.referred_email||'—')}</td>
-      <td>${esc(r.referred_by||'—')}</td>
+      <td style="font-size:12px;color:var(--slate);max-width:220px" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
+      <td>${r.resume_id?`<button class="btn btn-sm" style="padding:3px 8px" onclick="tpRefCv(${r.resume_id},${JSON.stringify(r.referred_name||'CV')})" title="Open the CV"><i class="fa-solid fa-file-arrow-down"></i> CV</button>`:'<span style="color:var(--slate)">—</span>'}</td>
+      <td style="font-size:12px">${esc(r.referred_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${new Date(r.created_at).toLocaleDateString()}</td>
-      <td>${tpApprovalTag(r)}${canAct&&(r.approval_status||'Pending')==='Pending'?` <button class="btn btn-sm btn-primary" style="margin-left:6px;padding:3px 8px" onclick="tpRefApprove(${r.id})"><i class="fa-solid fa-check"></i></button><button class="btn btn-sm" style="margin-left:4px;padding:3px 8px;color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})"><i class="fa-solid fa-xmark"></i></button>`:''}</td>
-    </tr>`).join(''):'<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--slate)">No referrals yet — click <b>Refer Someone</b></td></tr>'}
+      <td style="white-space:nowrap">${tpApprovalTag(r)}${acts}</td>
+    </tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--slate)">No referrals yet — click <b>Refer Someone</b></td></tr>'}
     </tbody>
   </table></div>`;
 }
+/* Opens the CV behind a referral. The file keeps the candidate's own name rather than the stamped
+   storage name, the same as the Resumes tab does. */
+window.tpRefCv=async function(resumeId,who){
+  const {data,error}=await sb.schema('hr').from('resumes').select('storage_path,file_name').eq('id',resumeId).maybeSingle();
+  if(error||!data||!data.storage_path){toast('That CV is no longer on file','err');return;}
+  const base=String(who||'CV').replace(/[^A-Za-z0-9 .()-]/g,'').trim()||'CV';
+  const ext=String(data.file_name||'').split('.').pop().toLowerCase();
+  s3OpenSigned(data.storage_path, base+(ext&&ext.length<=5?'.'+ext:''));
+};
 window.tpRefAdd=function(){
   // Open to everyone — referring a candidate is the "raise" side of the approval workflow.
-  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
+  // No Position field here on purpose: a referral names a PERSON, not a role they're pre-committed
+  // to — which position (if any, yet) fits them is a judgment call HR makes later, via Connect.
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer Someone</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>Candidate Name *</label><input id="tpRfName" class="inp">
-    <div class="two"><div><label>Phone</label><input id="tpRfPhone" class="inp"></div><div><label>Email</label><input id="tpRfEmail" class="inp"></div></div>
-    <label>Position *</label><select id="tpRfPosition" class="sel">
-      <option value="">— Select an open requisition —</option>
-      ${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}${r.department?' · '+esc(r.department):''}</option>`).join('')}
-    </select>
-    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet — ask HR to approve a ManPower Form first, or refer against a future opening once one exists.</div>':''}
-    <label>Notes</label><textarea id="tpRfNotes" class="inp" rows="2"></textarea>
+    <div class="two"><div><label>Email</label><input id="tpRfEmail" class="inp"></div><div><label>Phone</label><input id="tpRfPhone" class="inp"></div></div>
+    <label>Note</label><textarea id="tpRfNotes" class="inp" rows="2" placeholder="How you know them, what they do now, why they'd be a good fit"></textarea>
+    <label style="margin-top:8px">CV</label>
+    <div class="dropzone" onclick="document.getElementById('tpRfCv').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="tpRfCvName">Click to choose a PDF, Word doc, or image</div></div>
+    <input type="file" id="tpRfCv" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="document.getElementById('tpRfCvName').textContent=this.files[0]?this.files[0].name:'Click to choose a PDF, Word doc, or image'">
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfSaveBtn" onclick="tpRefSave()"><i class="fa-solid fa-check"></i> Submit Referral</button></div>`);
   setTimeout(()=>{const el=$('tpRfName');if(el)el.focus();},100);
@@ -12636,47 +13009,124 @@ window.tpRefAdd=function(){
 window.tpRefSave=async function(){
   const name=($('tpRfName')||{}).value?.trim();
   if(!name){toast('Candidate name is required','err');return;}
-  const reqId=parseInt(($('tpRfPosition')||{}).value||'');
-  if(!reqId){toast('Please pick a position','err');return;}
-  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
-  const d={referred_name:name,referred_phone:($('tpRfPhone')||{}).value?.trim()||null,referred_email:($('tpRfEmail')||{}).value?.trim()||null,
-    manpower_request_id:reqId,position:req&&req.job_title||null,notes:($('tpRfNotes')||{}).value?.trim()||null,referred_by:state.email||''};
+  const phone=($('tpRfPhone')||{}).value?.trim()||null, email=($('tpRfEmail')||{}).value?.trim()||null;
+  if(!phone&&!email){toast('Give a phone number or an email — otherwise nobody can reach them','err');return;}
+  const d={notes:($('tpRfNotes')||{}).value?.trim()||null};
   const btn=$('tpRfSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
-  const {data,error}=await sb.schema('hr').from('referrals').insert(d).select().single();
+  /* The CV is uploaded first, then the referral and its Resumes record are written TOGETHER by
+     hr.referral_submit.
+
+     They have to go together because anybody signed in may refer somebody, but writing to Resumes
+     needs HR access - so an ordinary employee attaching a CV would have had the referral accepted
+     and the CV refused, leaving a referral claiming a file that was not there. The function does
+     both as one, and only ever creates a CV row as part of creating a referral.
+
+     It also takes "referred by" from the caller's own sign-in rather than from this page. A
+     referral scheme is exactly the thing somebody has a reason to credit to the wrong person.
+
+     The upload happens before either, so a failed upload leaves nothing behind at all. A referral
+     with no CV still goes through; the file is optional. */
+  const cvEl=$('tpRfCv'), cv=cvEl&&cvEl.files&&cvEl.files[0];
+  let up=null;
+  if(cv){
+    const r=await uploadFileToS3(s3KeyForResume(cv.name),cv);
+    if(r.error){
+      toast('The CV could not be uploaded: '+r.error.message+' — nothing was saved','err');
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}
+      return;
+    }
+    up=r.data;
+  }
+  const {data:out,error}=await sb.schema('hr').rpc('referral_submit',{
+    p_name:name, p_email:email, p_phone:phone, p_notes:d.notes,
+    p_file_name:cv?cv.name:null, p_storage_path:up?up.path:null,
+    p_file_size:cv?cv.size:null, p_file_type:cv?(cv.name.split('.').pop()||'').toLowerCase():null
+  });
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}return;}
+  // referral_submit returns one hr.referrals row, not a set, so it arrives as a plain object -
+  // but take the first element too, so this keeps working if it is ever made set-returning.
+  const data=Array.isArray(out)?out[0]:out;
+  if(!data){toast('The referral was not saved','err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit Referral';}return;}
   TP_REF_RECORDS=[data,...(TP_REF_RECORDS||[])];closeModal();
-  toast(data.approval_status==='Approved'?'Referral submitted and auto-approved':'Referral submitted — pending HR approval');
+  toast('Referral submitted — HR will connect it to a position');
   tpRefRender();
 };
-window.tpRefApprove=async function(id){if(!recGuard())return;
-  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,approved_at:new Date().toISOString(),rejection_reason:null}).eq('id',id).select().single();
-  if(error){toast(error.message,'err');return;}
-  // Connecting a referral to the position it names — Interview Tracker is where an approved
-  // candidate lives, same destination as a manually-added one (tpTrSave) or a careers-page
-  // application. Guarded by candidate_id so re-approving (or a slow double-click) never doubles it.
-  if(!data.candidate_id && data.manpower_request_id){
-    try{
-      const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:data.manpower_request_id,p_month:null});
-      const req=(MP_RECORDS||[]).find(r=>r.id===data.manpower_request_id);
-      const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:data.manpower_request_id,
-        name:data.referred_name,email:data.referred_email,phone:data.referred_phone,position:(req&&req.job_title)||data.position,
-        source:'Referral',stage:'Tests Sent',created_by:state.email,applied_at:new Date().toISOString()}).select().single();
-      if(cand){
-        const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:data.referred_name,
-          position:(req&&req.job_title)||data.position,source:'Referral',number:data.referred_phone,email:data.referred_email,
-          notes:'Referred by '+(data.referred_by||'someone')+(data.notes?(' — '+data.notes):''),candidate_id:cand.id}).select().single();
-        if(tr){
-          await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
-          await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',id);
-          data.candidate_id=cand.id; data.tracker_id=tr.id;
-        }
-      }
-    }catch(e){ toast('Approved, but could not connect it to Interview Tracker: '+((e&&e.message)||e),'err'); }
-  }
-  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
-  toast('Approved and connected to Interview Tracker');tpRefRender();
+/* Connect: pick which open position this referral fits, right now, at connect time — not locked in
+   at submission. Only HR/Administrator (rtRefConnectGuard). Approving and connecting are the same
+   action: a referral isn't really "approved" in the abstract, it's approved FOR a specific role. */
+/* The signed-in person's name as the Tracker's Entity column wants it. hr.entities is a short
+   list of recruiters; matched case-insensitively so a stored "Khushbu Singh" still answers for a
+   profile reading "Khusbu Singh" - the same mismatch that once silently cost somebody their
+   Share button. Falls back to their own full name. */
+async function tpEntityForMe(){
+  const mine=((state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||'').trim();
+  try{
+    if(!window._tpEntities){
+      const {data}=await sb.schema('hr').from('entities').select('name').eq('active',true).order('sort');
+      window._tpEntities=data||[];
+    }
+    const hit=(window._tpEntities||[]).find(function(e){
+      return String(e.name||'').trim().toLowerCase()===mine.toLowerCase(); });
+    if(hit) return hit.name;
+  }catch(_e){ /* the profile name will do */ }
+  return mine||(state.email||'').split('@')[0]||null;
+}
+window.tpRefConnect=function(id){if(!rtRefConnectGuard())return;
+  const rec=(TP_REF_RECORDS||[]).find(r=>r.id===id); if(!rec)return;
+  const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm">
+    <label>${esc(rec.referred_name)} — connect to which open position?</label>
+    <select id="tpRfConnectPos" class="sel">
+      <option value="">— Select an open requisition —</option>
+      ${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}${r.department?' · '+esc(r.department):''}</option>`).join('')}
+    </select>
+    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet — approve a ManPower Form first.</div>':''}
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfConnectBtn" onclick="tpRefConnectGo(${id})"><i class="fa-solid fa-check"></i> Connect</button></div>`);
 };
-window.tpRefReject=async function(id){if(!recGuard())return;
+window.tpRefConnectGo=async function(id){
+  const reqId=parseInt(($('tpRfConnectPos')||{}).value||'');
+  if(!reqId){toast('Pick a position','err');return;}
+  const req=(MP_RECORDS||[]).find(r=>r.id===reqId);
+  const btn=$('tpRfConnectBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,
+    approved_at:new Date().toISOString(),rejection_reason:null,manpower_request_id:reqId,position:req&&req.job_title||null}).eq('id',id).select().single();
+  if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}return;}
+  try{
+    const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+    /* ENTITY is whoever made the decision - here, whoever pressed Connect. hr.entities is the list
+       of recruiters the Tracker offers, so their name is matched against it and used when it is
+       there; when it is not, their own name is used rather than leaving the column empty, because
+       "who owns this candidate" is the question the column exists to answer. */
+    const entity=await tpEntityForMe();
+    const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
+      name:data.referred_name,email:data.referred_email,phone:data.referred_phone,position:(req&&req.job_title)||null,
+      // No stage: hr.candidates starts everyone at 'Applied'. Connecting a referral to a
+      // position is not sending that person a test, and "Tests Sent" on the Monthly Update is
+      // supposed to mean a test was actually sent.
+      source:'Referral',entity:entity,resume_id:data.resume_id||null,
+      created_by:state.email,applied_at:new Date().toISOString()}).select().single();
+    if(cand){
+      /* Date is when the connection was made, not when the referral was submitted - the Tracker is
+         a record of people being worked on, and this person starts being worked on now.
+         Feedback is deliberately left empty: nothing has happened to them yet. */
+      const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:data.referred_name,
+        position:(req&&req.job_title)||null,source:'Referral',entity:entity,
+        number:data.referred_phone,email:data.referred_email,created_at:new Date().toISOString(),
+        notes:'Referred by '+(data.referred_by||'someone')+(data.notes?(' — '+data.notes):''),candidate_id:cand.id}).select().single();
+      if(tr){
+        await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+        await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',id);
+        data.candidate_id=cand.id; data.tracker_id=tr.id;
+      }
+    }
+  }catch(e){ toast('Connected, but could not create the Interview Tracker row: '+((e&&e.message)||e),'err'); }
+  const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
+  closeModal();
+  toast('Connected to '+(req&&req.job_title||'position')+' and added to Interview Tracker');tpRefRender();
+};
+window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
   if(!await confirmDialog('Reject this referral?'))return;
   const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:state.email,approved_at:new Date().toISOString()}).eq('id',id).select().single();
   if(error){toast(error.message,'err');return;}
@@ -12699,7 +13149,10 @@ async function tpTracker(){
   const b=$('recBody'); if(!b)return;
   b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
   try{
-    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates(tracker_row_id)').order('id',{ascending:false});
+    // Two FKs exist between these tables now (candidates.tracker_id -> interview_tracker, and
+    // interview_tracker.candidate_id -> candidates), so PostgREST can no longer guess which one an
+    // unqualified embed means - named explicitly by the FK that actually points the way we want.
+    const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id)').order('id',{ascending:false});
     if(error)throw error; TP_TR_RECORDS=data||[];
     const rowIds=[...new Set((TP_TR_RECORDS||[]).map(r=>r.candidates&&r.candidates.tracker_row_id).filter(Boolean))];
     TP_TR_COMPLETED_ROWS=new Set();
@@ -12719,12 +13172,18 @@ function tpTrRender(){
   const b=$('recBody'); if(!b)return;
   const rows=TP_TR_RECORDS||[];
   const canAct=recCanWrite();
+  /* Writing to a candidate is NOT ordinary Recruitment write access. It is the same four people who
+     own the test bank - Shuchandra Das, Khusbu Singh, Uzma Ahmed, the Administrator - and the
+     database says so too (recruit.can_email_candidates, which send-test-email asks with the
+     caller's own token). Checked here as well so the rest of HR never gets a button that would
+     refuse them only after they had written the message. */
+  const canMail=rtCanManage();
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Interview Tracker <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add Candidate</button>
-      ${canAct?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email Selected</button>
-      <button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+      ${canMail?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email Selected</button>`:''}
+      ${canAct?`<button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
     </div>
   </div>
   <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Only Hold candidates from before today, plus fresh ones from Approved Referrals or added directly here.</div>
@@ -12751,6 +13210,11 @@ function tpTrRender(){
           // link is sent / graded a pass. If a candidate is already at one of those two (set
           // automatically), it shows as a read-only tag instead of a dropdown that can't represent it.
           if(r.feedback==='Tests Sent'||r.feedback==='Test Passed')return tpTrFbTag(r.feedback);
+          /* The per-row "Send Test" button used to live here. Sending a test is now one of the
+             things the Email Selected window can do, so it is done the same way as any other mail
+             to a candidate - tick the rows, write the message, optionally attach a test - instead
+             of through a second button with its own separate window. Attaching a test there still
+             generates each candidate their own link and still moves them to Tests Sent. */
           return `<select class="sel" style="font-size:12px;padding:4px 6px" onchange="tpTrFeedback(${r.id},this.value)">
             <option value="">— Select —</option>
             ${TP_STAGES_SELECTABLE.map(s=>`<option${r.feedback===s?' selected':''}>${s}</option>`).join('')}
@@ -12818,7 +13282,9 @@ window.tpTrSave=async function(){
   const source=($('tpTrSrc')||{}).value||null, entity=($('tpTrEntity')||{}).value||(req?req.approved_by:null)||null;
   const phone=($('tpTrPhone')||{}).value?.trim()||null, email=($('tpTrEmail')||{}).value?.trim()||null;
   const {data:cand,error:cErr}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,name,email,phone,
-    position:req&&req.job_title,source,entity,stage:'Tests Sent',created_by:state.email,applied_at:new Date().toISOString()}).select().single();
+    // Same again - added to the Tracker, not yet tested. The Send Test button on the row is what
+    // moves them on, via candidate_set_stage.
+    position:req&&req.job_title,source,entity,created_by:state.email,applied_at:new Date().toISOString()}).select().single();
   if(cErr){toast(cErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
   const notes=($('tpTrNotes')||{}).value?.trim()||null;
   const {data:tr,error:tErr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:name,position:req&&req.job_title,source,entity,number:phone,email,notes,candidate_id:cand.id}).select().single();
@@ -12826,10 +13292,135 @@ window.tpTrSave=async function(){
   await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
   TP_TR_RECORDS=[tr,...(TP_TR_RECORDS||[])];closeModal();toast('Candidate added');tpTrRender();
 };
-window.tpTrEmailSel=function(){
-  const emails=[...TP_TR_SEL].map(id=>{const r=(TP_TR_RECORDS||[]).find(x=>x.id===id);return r&&r.email;}).filter(Boolean);
-  if(!emails.length){toast('None of the selected candidates have an email on file','err');return;}
-  window.open('mailto:?bcc='+encodeURIComponent(emails.join(','))+'&subject='+encodeURIComponent('Regarding your application'),'_blank');
+/* EMAIL SELECTED - one window for writing to candidates, which can also carry a test.
+
+   It used to hand the addresses to the computer's own mail program through a mailto: link. That
+   is where the truncated and code-looking mail came from: a mailto: is a URL, everything in it is
+   percent-encoded, and browsers and mail programs cut it off at a length nobody agrees on - so a
+   message either arrived half-written or arrived full of %20 and %0A. It also meant the mail was
+   never really sent by JAIN-E at all, so nothing could be recorded and nobody could be sure it
+   went. Now it goes through send-test-email, the same path the Tests tab has always used: proper
+   HTML with a plain-text alternative, base64-encoded so a long line or an accented character
+   cannot corrupt it, one message per candidate so nobody sees anybody else's address, and sent
+   from the writer's own Gmail when they have connected it.
+
+   NOTHING IS PRE-FILLED. Subject and message start empty and are the writer's own words - the
+   old version put "Regarding your application" in for them, which is how every candidate got an
+   identical subject line nobody had chosen.
+
+   Attaching a test is optional, and is what replaced the per-row Send Test button. When one is
+   attached each candidate gets their OWN link, generated against their candidate record, which is
+   what moves them to Tests Sent on the Monthly Update - the same mechanism as before, just reached
+   from here. Anyone with no candidate record behind their row still gets the message; they simply
+   cannot be given a personal link, and the window says so plainly rather than silently leaving
+   them out. */
+window.tpTrEmailSel=async function(){
+  if(!rtCanManage()){toast('Only Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator can email candidates','err');return;}
+  const rows=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(Boolean);
+  const withEmail=rows.filter(r=>r.email);
+  if(!withEmail.length){toast('None of the selected candidates have an email on file','err');return;}
+  const noEmail=rows.length-withEmail.length;
+  await rtShareCheckGmail();
+  // Native tests only: a personal, trackable link can only be made for one of ours.
+  let tests=(RT_RECORDS||[]).filter(t=>t.engine==='native');
+  if(!tests.length){
+    try{const {data}=await sb.schema('recruit').from('tests').select('*').eq('engine','native').order('sl');
+      tests=data||[];}catch(_e){ tests=[]; }
+  }
+  const noCand=withEmail.filter(r=>!r.candidate_id).length;
+  const list=withEmail.map(r=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--line-2)">'
+      +'<span style="font-weight:600">'+esc(r.candidate_name||'\u2014')+'</span>'
+      +'<span style="color:var(--slate);font-size:12px">'+esc(r.email)+'</span></div>').join('');
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email Selected</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <div class="modal-body frm" style="max-height:72vh;overflow-y:auto">
+    ${RT_CAN_SEND_AS_SELF
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b> \u2014 it will be in your own Sent folder, and replies come straight to you.</div>`
+      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
+           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you, with replies pointed at <b>${esc(state.email||'')}</b>. Connect your Google account to send it from your own address instead.</div>
+           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
+         </div>`}
+    <label>To <span style="font-size:11px;color:var(--slate)">(${withEmail.length} candidate${withEmail.length>1?'s':''} \u2014 each gets their own copy)</span></label>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;max-height:132px;overflow-y:auto">${list}</div>
+    ${noEmail?`<div style="font-size:11.5px;color:#92400e;margin-top:4px"><i class="fa-solid fa-triangle-exclamation"></i> ${noEmail} selected row${noEmail>1?'s have':' has'} no email on file and will be skipped.</div>`:''}
+    <label style="margin-top:10px">Subject *</label><input id="tpTrMailSubj" class="inp" placeholder="Write the subject">
+    <label>Message *</label><textarea id="tpTrMailBody" class="inp" rows="6" style="resize:vertical" placeholder="Write your message"></textarea>
+    <label style="margin-top:10px">Attach a Test <span style="font-size:11px;color:var(--slate)">(optional)</span></label>
+    <select id="tpTrMailTest" class="sel">
+      <option value="">\u2014 No test \u2014</option>
+      ${tests.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+    </select>
+    ${tests.length?`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Each candidate gets their own link, and moves to <b>Tests Sent</b> on the Monthly Update.${noCand?` ${noCand} of them ${noCand>1?'have':'has'} no candidate record, so ${noCand>1?'they':'it'} cannot be given one \u2014 ${noCand>1?'they':'it'} will still receive the message.`:''}</div>`
+      :`<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No tests exist yet \u2014 create one in the Tests tab to be able to attach it here.</div>`}
+  </div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrMailBtn" onclick="tpTrEmailSelSend()"><i class="fa-solid fa-paper-plane"></i> Send</button></div>`);
+  setTimeout(()=>{const el=$('tpTrMailSubj');if(el)el.focus();},100);
+};
+
+window.tpTrEmailSelSend=async function(){
+  if(!rtCanManage()){toast('Only Shuchandra Das, Khusbu Singh, Uzma Ahmed or the Administrator can email candidates','err');return;}
+  const subject=(($('tpTrMailSubj')||{}).value||'').trim();
+  const body=(($('tpTrMailBody')||{}).value||'').trim();
+  // An empty subject or an empty message is a slip, not a choice - the window starts blank on
+  // purpose, so there is nothing to fall back on if they are left that way.
+  if(!subject){toast('Write a subject','err');const el=$('tpTrMailSubj');if(el)el.focus();return;}
+  if(!body){toast('Write a message','err');const el=$('tpTrMailBody');if(el)el.focus();return;}
+  const testId=parseInt((($('tpTrMailTest')||{}).value)||'')||null;
+  const rows=[...TP_TR_SEL].map(id=>(TP_TR_RECORDS||[]).find(x=>x.id===id)).filter(r=>r&&r.email);
+  if(!rows.length){toast('Nobody selected has an email on file','err');return;}
+  const testName=testId?((RT_RECORDS||[]).find(t=>t.id===testId)||{}).name||'Assessment':'';
+  const btn=$('tpTrMailBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Sending\u2026';}
+  const {data:{session}}=await sb.auth.getSession();
+  const token=session&&session.access_token;
+  const post=async (payload)=>{
+    const res=await fetch(SUPABASE_URL+'/functions/v1/send-test-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(payload)
+    });
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.error)throw new Error(out.error||('send-test-email HTTP '+res.status));
+    return out;
+  };
+  let sent=0, tested=0; const failed=[];
+  try{
+    if(!testId){
+      /* No test: one call, and the function still writes one message per candidate so nobody sees
+         anybody else's address. */
+      const out=await post({test_name:'',link:'',subject,body,recipients:rows.map(r=>r.email.toLowerCase())});
+      sent=Number(out.sent||rows.length);
+      (out.failed||[]).forEach(f=>failed.push((f&&f.to)||'someone'));
+    } else {
+      /* A test: each candidate needs their OWN link, so this goes one at a time.
+         recruit-test-generate-link is what calls candidate_set_stage(...,'Tests Sent'), and it
+         only does so when a real candidate_id is passed - which is why somebody with no candidate
+         record gets the message but not a link, rather than being quietly dropped. */
+      for(const r of rows){
+        let link='';
+        if(r.candidate_id){
+          try{
+            const {data,error}=await sb.functions.invoke('recruit-test-generate-link',
+              {body:{test_id:testId,candidate_id:r.candidate_id,candidate_email:r.email,origin:location.origin}});
+            if(error||data?.error)throw new Error((data&&data.error)||error.message);
+            link=data.link||'';
+          }catch(e){ failed.push((r.candidate_name||r.email)+' (test link: '+((e&&e.message)||e)+')'); continue; }
+        }
+        try{
+          await post({test_id:testId,test_name:link?testName:'',link,subject,body,recipients:[r.email.toLowerCase()]});
+          sent++; if(link)tested++;
+        }catch(e){ failed.push((r.candidate_name||r.email)+' ('+((e&&e.message)||e)+')'); }
+      }
+    }
+  }catch(e){
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
+    toast('Send failed: '+((e&&e.message)||'unknown error'),'err');
+    return;
+  }
+  closeModal();
+  if(sent)toast('Emailed '+sent+' candidate'+(sent===1?'':'s')+(tested?(' \u2014 '+tested+' now at Tests Sent'):''),'ok');
+  // One address failing among several must not read as a clean success.
+  if(failed.length)toast('Could not reach: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+  try{usageQueue('recruitment.interview_tracker.email_selected','update',{recipients:sent,test:testName||null});}catch(_e){}
+  if(tested)tpTracker();
 };
 window.tpTrDeleteSel=async function(){
   if(!recGuard())return;
@@ -13568,8 +14159,17 @@ function compPaint(){
   const wl=window._compWl||[];
   if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
-  // Ads appear only once a fetch has been made for this selection during this visit.
-  const fetched=!!window._compFetched[String(COMP_F.wl)];
+  /* ADS THAT ARE ALREADY STORED ARE SHOWN, rather than hidden until somebody presses Fetch.
+     The original rule was that nothing appears until it has been fetched IN THIS VISIT, so that
+     what you see always matches the filters you just asked for. That was reasonable when the only
+     way ads arrived was pressing the button - but they now also arrive on their own, nightly,
+     from the Proxy sync. With the old rule a table holding 384 ads across 19 competitors showed
+     an empty page every morning, and the only way to see anything was to re-fetch it by hand.
+     So: if there are stored ads for this selection, show them. Pressing Fetch still does exactly
+     what it did, and the filters still apply to what is displayed. */
+  const storedFor=(window._compAdsAll||[]).some(function(a){
+    return COMP_F.wl==='all' || String(a.watchlist_id)===String(COMP_F.wl); });
+  const fetched=!!window._compFetched[String(COMP_F.wl)] || storedFor;
   host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
     +(fetched
       ?('<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
@@ -22269,14 +22869,9 @@ const USAGE_VIEWS={
   'gtd/3':               'gtd.waiting_for.view_items_waiting_on_others',
   'gtd/4':               'gtd.someday_maybe.view_someday_maybe_ideas_list',
   'gtd/5':               'gtd.weekly_review.view_weekly_review_checklist',
-  'crm/0':               'crm.pipeline_funnel.view_conversion_funnel_stage_ageing',
-  'crm/1':               'crm.leads.view_leads_pipeline_list',
-  'crm/2':               'crm.bookings.view_bookings_list',
-  'crm/3':               'crm.directory_hierarchy.view_directory_hierarchy_tab',
-  'crm/4':               'crm.comm_history.view_communication_history',
-  'crm/5':               'crm.demands_collections.view_demands_collections_list',
-  'crm/6':               'crm.brokers.view_brokers_list',
-  'crm/7':               'crm.post_sale.view_post_sale_tab'
+  // CRM & Sales is a single screen now - the eight demonstration tabs that used to be listed here
+  // are gone, and with them the eight keys that recorded somebody opening a mock-up.
+  'crm/0':               'crm.daily_updates.view_daily_crm_updates'
 };
 let USAGE_LAST_VIEW='', USAGE_LAST_VIEW_AT=0;
 function usageViewTick(){

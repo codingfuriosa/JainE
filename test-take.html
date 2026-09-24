@@ -55,11 +55,43 @@ function renderError(msg){
   app.innerHTML = '<div class="msg err">' + esc(msg) + '</div>';
 }
 
-function renderIntro(){
+/* WHO THE PAPER IS FOR IS SHOWN, NOT ASKED.
+
+   The candidate never types their address. Asking for it proved nothing - it is printed in the
+   invitation they are holding, so it only re-proved they have the link - and storing what they
+   typed would have put a second, possibly different address on the attempt, leaving two answers
+   to "whose result is this". The result belongs to the candidate the attempt was minted for, and
+   to nobody else.
+
+   So it is fetched and displayed. Somebody opening a forwarded link sees immediately that the
+   paper is addressed to someone else, which is the honest way to handle it: the link is the
+   credential, and a person who has been given it can sit the test - but they can see, and we
+   record, whose test it was. */
+function renderIntro(who){
+  /* A preview says so. Opened from JainE the attempt is minted under the previewer's own address,
+     so the candidate box would have read "this test is for you" at somebody checking their own
+     paper - true, but it reads as though they were the applicant. Worse, it gives no hint that the
+     run will not be counted, which is the one thing the person checking needs to know. */
+  const forLine = (who && who.is_preview)
+    ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin:16px 0">'
+      + '<div style="font-size:11.5px;color:#92400e;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Preview</div>'
+      + '<div style="font-size:13.5px;color:#78350f;margin-top:4px">You are sitting this yourself to check it. It is marked exactly the way a candidate paper is marked, and the marking appears under <b>Show previews</b> in Results — but it is not counted as anybody having taken the test.</div>'
+      + '</div>'
+    : (who && who.candidate_email)
+    ? '<div style="background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:16px 0">'
+      + '<div style="font-size:11.5px;color:var(--slate);text-transform:uppercase;letter-spacing:.5px;font-weight:700">This test is for</div>'
+      + '<div style="font-size:14.5px;font-weight:600;margin-top:3px">' + esc(who.candidate_email) + '</div>'
+      + '<div style="font-size:12px;color:var(--slate);margin-top:6px">Your result is recorded against this address. If it is not yours, please do not continue.</div>'
+      + '</div>'
+    : '';
+  const count = (who && who.question_count)
+    ? '<div style="font-size:13px;color:var(--slate);margin-bottom:4px">' + who.question_count + ' questions</div>' : '';
   app.innerHTML =
-    '<h1>Assessment</h1>' +
+    '<h1>' + esc((who && who.test_name) || 'Assessment') + '</h1>' +
     '<div class="sub">Jain Group</div>' +
-    '<p style="color:var(--slate);font-size:14px;line-height:1.6">This is a timed assessment. Nothing is recorded until you press Start — once you do, the questions will appear below. Answer every question you can, then press Submit. You will not be able to change your answers after submitting.</p>' +
+    count +
+    forLine +
+    '<p style="color:var(--slate);font-size:14px;line-height:1.6">Nothing is recorded until you press Start — once you do, the questions appear and the clock begins. Answer every question you can, then press Submit. You cannot change your answers after submitting.</p>' +
     '<button onclick="startTest()">Start Test</button>';
 }
 
@@ -113,11 +145,17 @@ window.submitTest = async function(){
   app.innerHTML = '<div class="msg ok">' + esc(data.message || 'Your test has been submitted. Thank you.') + '</div>';
 };
 
-(function init(){
+(async function init(){
   if (!attemptId) { renderError('This test link is missing information and cannot be opened.'); return; }
-  // Deliberately no API call here — recruit-test-start is what marks the attempt "in_progress"
-  // and stamps started_at, so it must not fire until the candidate actually presses Start.
-  renderIntro();
+  /* peek:true asks who the paper is for WITHOUT starting it - no status change, no clock. That is
+     what lets this screen name the candidate before Start is pressed, while keeping the rule that
+     started_at is stamped only when they actually begin. */
+  const { ok, data } = await call('recruit-test-start', { attempt_id: attemptId, peek: true });
+  if (!ok || (data && data.error)) { renderError((data && data.error) || 'This test link is not valid.'); return; }
+  if (data && data.status === 'submitted') {
+    app.innerHTML = '<div class="msg ok">You have already submitted this test. Thank you.</div>'; return;
+  }
+  renderIntro(data);
 })();
 </script>
 </body>
