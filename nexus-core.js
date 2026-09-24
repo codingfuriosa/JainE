@@ -1373,8 +1373,6 @@ window.docNewFolderSave=async function(dept,parentId){
 window.docPickCat=function(c){DOC.cat=c;DOC.page=1;document.querySelectorAll('#catNav .sn-item').forEach(x=>x.classList.remove('active'));docRenderTable($('docTableHost'),DOC.dept);
   // re-highlight
   const items=[...document.querySelectorAll('#catNav .sn-item')];items.forEach(it=>{const t=it.querySelector('span').textContent.trim();if((c===null&&t==='All')||(c&&t.replace(/^.*?\s/,'')===c)) it.classList.add('active');});};
-// The "Search in "X"" picker on the Legal search bar — same navigation the left category tree uses.
-window.docScopeSet=function(id){ location.hash=id?('#/legal/cat/'+id):'#/legal'; };
 
 async function docAll(v,title){
   setCrumb(['Documents',title]);
@@ -1387,16 +1385,13 @@ async function docAll(v,title){
 
 async function docRenderTable(host,dept){
   loader(host);
-  let legalFolderIds=null, legalFlatOptions=null, legalScopeLabel='All Documents';
-  if(DOC.scope==='legal'){
+  let legalFolderIds=null, legalScopeLabel='All Documents';
+  if(DOC.scope==='legal'&&DOC.cat){
     const list=await legalFolderTree();
-    const {roots,byId}=buildFolderTree(list);
-    legalFlatOptions=flattenTreeOptions(roots,0); // every folder at any depth, indented — Litigation, a case inside it, etc.
-    if(DOC.cat){
-      legalFolderIds=collectDescendantIds(byId,Number(DOC.cat));
-      const cur=byId[Number(DOC.cat)];
-      if(cur)legalScopeLabel=cur.name;
-    }
+    const {byId}=buildFolderTree(list);
+    legalFolderIds=collectDescendantIds(byId,Number(DOC.cat));
+    const cur=byId[Number(DOC.cat)];
+    if(cur)legalScopeLabel=cur.name;
   }
   const rows=await docFetch({dept:DOC.scope==='legal'?'Legal':dept,cat:DOC.scope==='legal'?null:DOC.cat,folderIds:legalFolderIds,q:DOC.q});
   // toolbar
@@ -1405,13 +1400,6 @@ async function docRenderTable(host,dept){
      squeezed into a fraction of the row alongside five other controls. */
   const toolbar=`<style>
     .doc-toolbar{margin-bottom:14px}
-    .doc-scoperow{margin-bottom:9px;font-size:13px;position:relative;display:inline-block}
-    .doc-scope-btn{display:inline-flex;align-items:center;gap:7px;background:none;border:none;padding:2px 0;
-      font-family:inherit;font-size:13px;color:var(--slate);cursor:pointer}
-    .doc-scope-btn b{color:var(--ink);font-weight:700}
-    .doc-scope-btn:hover b{color:var(--brand)}
-    .doc-scope-menu{position:absolute;left:0;right:auto;top:auto;margin-top:6px;width:280px;max-height:320px;overflow-y:auto}
-    .doc-scope-menu .dd-item.active{background:var(--brand-a10);color:var(--brand);font-weight:600}
     .doc-searchrow{display:flex;align-items:center;position:relative;margin-bottom:9px}
     .doc-searchrow i.mag{position:absolute;left:13px;color:var(--slate);font-size:14px;pointer-events:none}
     .doc-searchrow input{width:100%;height:44px;padding:0 14px 0 38px;border:1px solid var(--line);border-radius:11px;
@@ -1429,15 +1417,8 @@ async function docRenderTable(host,dept){
     }
   </style>
   <div class="doc-toolbar">
-    ${DOC.scope==='legal'?`<div class="doc-scoperow">
-      <button type="button" id="dtScopeBtn" class="doc-scope-btn">Search in <b>"${esc(legalScopeLabel)}"</b> <i class="fa-solid fa-chevron-down" style="font-size:9px"></i></button>
-      <div id="dtScopeMenu" class="dropdown doc-scope-menu">
-        <div class="dd-item ${!DOC.cat?'active':''}" onclick="docScopeSet('')"><i class="fa-solid fa-layer-group"></i> All Documents</div>
-        ${(legalFlatOptions||[]).map(o=>`<div class="dd-item ${String(DOC.cat)===String(o.id)?'active':''}" onclick="docScopeSet(${o.id})"><i class="fa-regular fa-folder"></i> ${esc(o.label)}</div>`).join('')}
-      </div>
-    </div>`:''}
     <div class="doc-searchrow"><i class="fa-solid fa-magnifying-glass mag"></i>
-      <input id="dtSearch" placeholder="${DOC.scope==='legal'?'Search a file name, or any words written inside the documents…':'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
+      <input id="dtSearch" placeholder="${DOC.scope==='legal'?('Search in &quot;'+esc(legalScopeLabel)+'&quot;'):'Search by file name or title…'}" value="${esc(DOC.q)}"></div>
     <div class="doc-btnrow">
       <button class="btn btn-primary" id="dtSearchBtn"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
       ${DOC.q?`<button class="btn" id="dtClear" onclick="DOC.q='';docRenderTable(document.getElementById('docTableHost'),${dept?("'"+esc(dept)+"'"):'null'})"><i class="fa-solid fa-xmark"></i> Clear</button>`:''}
@@ -1488,20 +1469,6 @@ async function docRenderTable(host,dept){
     const sb2=$('dtSearchBtn');if(sb2)sb2.onclick=()=>{DOC.q=($('dtSearch')?$('dtSearch').value.trim():'');DOC.page=1;usbDoc(DOC.q?{query:DOC.q}:null);docRenderTable(host,dept);};
     const so=$('dtSort');if(so){so.value=DOC.sort;so.onchange=e=>{DOC.sort=e.target.value;usbDoc({title:'Sorted by '+e.target.value});docRenderTable(host,dept);};}
     const stt=$('dtStatus');if(stt)stt.onchange=()=>{DOC.page=1;usbDoc({title:'Status: '+(stt.value||'all')});draw();};
-    // "Search in \"X\"" opens a plain click-to-pick list (every folder at any depth, indented) rather
-    // than a native <select> — it reuses the exact same navigation the left category tree uses, so
-    // the two stay in sync no matter which one you pick from.
-    const scBtn=$('dtScopeBtn'),scMenu=$('dtScopeMenu');
-    if(scBtn&&scMenu){
-      scBtn.onclick=e=>{
-        e.stopPropagation();
-        const opening=!scMenu.classList.contains('show');
-        scMenu.classList.toggle('show');
-        if(opening)setTimeout(()=>{document.addEventListener('click',function h(e2){
-          if(!scMenu.contains(e2.target)&&e2.target!==scBtn){scMenu.classList.remove('show');document.removeEventListener('click',h);}
-        });},0);
-      };
-    }
     document.querySelectorAll('.dtChk').forEach(c=>c.onchange=e=>{const id=+e.target.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);updateBulk();});
     const all=$('dtAll');if(all)all.onchange=e=>{document.querySelectorAll('.dtChk').forEach(c=>{c.checked=e.target.checked;const id=+c.dataset.id;e.target.checked?DOC.sel.add(id):DOC.sel.delete(id);});updateBulk();};
     updateBulk();
