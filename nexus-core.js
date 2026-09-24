@@ -16660,10 +16660,34 @@ function custGreeting(fullName,unit){
 const CUST_PROJECT_HERO_IMG={
   'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://thejaingroup.com/dreamgurukul/assets/images/elevation/Dream%20Gurukul%20elevation%20vertical%201.webp'
 };
-/* The landing page: a greeting standing on the project's own hero photo, and nothing else. It is
+/* A looping site/elevation video, Home page only - not the rest of the portal, which stays plain
+   white so ledgers, statements and cost sheets keep the readability a moving video behind them
+   would cost. Hosted in this project's own public `branding` bucket rather than hotlinked, since
+   it did not already live on a public URL the way the hero photos above do - it is a one-off file,
+   not an asset already published on Jain Group's own site.
+   Used as the `poster` too: the still frame shown before the video can play, and what renders for
+   anyone with prefers-reduced-motion set (see custLanding below - reduced motion falls back to the
+   plain photo card entirely, not a paused video frame in a full-viewport layout it was never using). */
+const CUST_PROJECT_HERO_VIDEO={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/branding/project-hero/dream-gurukul.mp4'
+};
+/* The landing page: a greeting standing on the project's own hero media, and nothing else. It is
    the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
 function custLanding(fullName,unit){
-  const heroImg=CUST_PROJECT_HERO_IMG[(unit&&unit.projects&&unit.projects.name)||''];
+  const projName=(unit&&unit.projects&&unit.projects.name)||'';
+  const heroImg=CUST_PROJECT_HERO_IMG[projName];
+  const heroVideo=CUST_PROJECT_HERO_VIDEO[projName];
+  const reducedMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(heroVideo&&!reducedMotion){
+    return '<div class="cust-landing cust-landing--video">'+
+      '<video class="cust-landing-video" autoplay muted loop playsinline preload="auto"'+
+        (heroImg?' poster="'+esc(heroImg)+'"':'')+'>'+
+        '<source src="'+esc(heroVideo)+'" type="video/mp4">'+
+      '</video>'+
+      '<div class="cust-landing-scrim"></div>'+
+      '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
+    '</div>';
+  }
   // A dark scrim under the greeting text, fading to nearly nothing toward the top so the render
   // itself stays the star of the panel rather than being blanketed. Gives white/gold text on the
   // photo the same contrast a solid card would, without needing one.
