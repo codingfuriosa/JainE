@@ -348,8 +348,12 @@ async function boot(){
 // its own long lists), so this scrolls for free with no CSS changes.
 // 'Home' is the landing page and must stay at index 0 - the tab index IS the route (customer/<i>),
 // so anything hard-coding a number moves with it.
-const CUST_TABS=['Home','Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
-const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+// Construction Progress sits right after Statement (was after Cost Sheet) - a homebuyer mid-build
+// wants to see the site before the accounting. CUST_TAB_ICONS stays a parallel array in the same
+// order; the render switch below and the one hardcoded navTo('customer/N') deep link (the
+// Statement tab's "View full ledger" jump) were renumbered to match.
+const CUST_TABS=['Home','Statement','Construction Progress','Ledger','Cost Sheet','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
@@ -16739,7 +16743,7 @@ async function custTabOverview(data,unit){
      not a payment position. */
   const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/2\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
@@ -18083,7 +18087,8 @@ VIEWS.customer=async function(v,seg){
   const ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
   // whichever section is actually showing, including a same-page link like the Statement tab's
-  // "View full ledger" jumping straight to navTo('customer/1').
+  // "View full ledger" jumping straight to navTo('customer/3') (was already stale here at '1'
+  // before this comment was corrected - the literal itself is what actually runs, not this note).
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
@@ -18103,9 +18108,9 @@ VIEWS.customer=async function(v,seg){
   let body;
   if(ti===0)body='';
   else if(ti===1)body=await custTabOverview(data,unit);
-  else if(ti===2)body=await custTabLedger(unit);
-  else if(ti===3)body=await custTabCostSheet(data,unit);
-  else if(ti===4)body=await custTabProgress(unit);
+  else if(ti===2)body=await custTabProgress(unit);
+  else if(ti===3)body=await custTabLedger(unit);
+  else if(ti===4)body=await custTabCostSheet(data,unit);
   else if(ti===5)body=await custTabInspection(unit);
   else if(ti===6)body=await custTabDocuments(unit);
   else if(ti===7)body=await custTabVideos();
@@ -18115,8 +18120,8 @@ VIEWS.customer=async function(v,seg){
   else if(ti===11)body=await custTabReferrals(unit);
   else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  /* The landing page is the greeting over the construction scene and nothing else - no page head, no
-     unit picker, no body. Every other tab keeps the normal chrome. */
+  /* The landing page is the greeting over the project's hero photo and nothing else - no page head,
+     no unit picker, no body. Every other tab keeps the normal chrome. */
   v.innerHTML=ti===0
     ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
     : '<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
