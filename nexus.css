@@ -1261,3 +1261,33 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
   .cust-greet-hi{font-size:19px}
   .cust-greet-sub{font-size:13px}
 }
+
+/* ---------- Customer portal landing page ----------
+   The greeting standing on the construction scene. The scene itself is the same markup the portal
+   used as a faint page background, re-anchored inside this panel and brought up to full strength:
+   as a backdrop it had to stay out of the way at .055 opacity, but here it IS the page. */
+.cust-landing{
+  position:relative;overflow:hidden;border-radius:16px;
+  min-height:clamp(340px,58vh,520px);
+  display:flex;align-items:center;
+  background:linear-gradient(160deg,#f8fafc 0%,#eef2f8 55%,#e6ecf5 100%);
+  border:1px solid var(--line);
+}
+.cust-landing .cust-bg-scene--hero{
+  position:absolute;left:0;right:0;bottom:0;height:62%;
+  animation:custHeroSceneIn 1.8s ease both;
+}
+@keyframes custHeroSceneIn{0%{opacity:0}100%{opacity:.5}}
+.cust-landing-inner{position:relative;z-index:1;width:100%;padding:0 clamp(18px,4vw,42px)}
+.cust-landing .cust-greet{margin-bottom:0;max-width:640px}
+@media(max-width:640px){
+  .cust-landing{min-height:300px;border-radius:14px}
+  .cust-landing .cust-bg-scene--hero{height:52%}
+}
+/* The scene animates in once. Anyone who prefers less motion gets the skyline, held still. */
+@media(prefers-reduced-motion:reduce){
+  .cust-landing .cust-bg-scene--hero,
+  .cust-landing .cbg-b,.cust-landing .cbg-cm,.cust-landing .cbg-cj,
+  .cust-landing .cbg-cc,.cust-landing .cbg-ch{animation:none;opacity:1}
+  .cust-landing .cust-bg-scene--hero{opacity:.5}
+}

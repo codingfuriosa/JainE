@@ -346,8 +346,10 @@ async function boot(){
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
 // now, one item per section; .sb-nav is already flex:1+overflow-y:auto (same as the staff nav with
 // its own long lists), so this scrolls for free with no CSS changes.
-const CUST_TABS=['Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
-const CUST_TAB_ICONS=['fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+// 'Home' is the landing page and must stay at index 0 - the tab index IS the route (customer/<i>),
+// so anything hard-coding a number moves with it.
+const CUST_TABS=['Home','Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
@@ -15267,17 +15269,19 @@ function custGreeting(fullName,unit){
       (proj?' — your home at <b>'+esc(proj)+'</b>'+(where?', '+esc(where):''):'')+'.</div>'+
   '</div>';
 }
-/* A short construction update below the statement. After "what do I owe", the next thing a
-   homebuyer wants is "how is my building coming along" - but the full gallery is four sections deep
-   and would bury the statement, so this is the three latest project photos and a way through. */
-async function custProgressPreview(unit){
-  const {data:photos}=await sb.schema('cust').from('project_photos')
-    .select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}).limit(3);
-  if(!photos||!photos.length)return '';
-  return '<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px">'+
-    '<div class="sec-title" style="margin:0">Construction progress</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View all updates →</a></div>'+
-    await custMediaGrid(photos);
+/* The landing page: a greeting over the animated construction scene, and nothing else. It is the
+   first thing a customer sees, before they choose Statement or anything else from the sidebar. */
+function custLanding(fullName,unit){
+  return '<div class="cust-landing">'+
+    '<div class="cust-bg-scene cust-bg-scene--hero">'+
+      '<div class="cbg-b cbg-b1"></div><div class="cbg-b cbg-b2"></div><div class="cbg-b cbg-b3"></div><div class="cbg-b cbg-b4"></div>'+
+      '<div class="cbg-b cbg-b5"></div><div class="cbg-b cbg-b6"></div><div class="cbg-b cbg-b7"></div><div class="cbg-b cbg-b8"></div>'+
+      '<div class="cbg-crane cbg-crane1"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
+      '<div class="cbg-crane cbg-crane2"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
+      '<div class="cbg-ground"></div>'+
+    '</div>'+
+    '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
+  '</div>';
 }
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
@@ -15439,9 +15443,9 @@ async function custTabOverview(data,unit){
   const costSheetRows=costItems.map(i=>[esc(i.component),custInr(Number(i.amount||0)+Number(i.tax_amount||0)),
     custInr(i.bill_amount||0),custInr(i.received_amount||0),
     Number(i.balance_amount||0)>0?'<b style="color:#e08600">'+custInr(i.balance_amount)+'</b>':custInr(i.balance_amount||0)]);
-  const costSheetSection=costItems.length?
-    '<div class="sec-title" style="margin:22px 0 8px">Charges &amp; payments</div>'+
-    mTable(['Charge','Amount (incl. tax)','Billed','Received','Balance'],costSheetRows):'';
+  // The per-charge breakdown is the Cost Sheet tab's whole job; repeating it here made the Statement
+  // scroll past its own summary into a second copy of another page.
+  const costSheetSection='';
 
   // Only arm the printer when the figures are safe to show. custPrintStatement already refuses
   // without these, so an unreconciled unit cannot be printed even if the button is reached some
@@ -15490,20 +15494,16 @@ async function custTabOverview(data,unit){
      not a payment position. */
   const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/1\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/2\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>';
-  // Construction progress sits outside the gate - it is not a figure, so a customer whose account is
-  // being reconciled should still see how their building is coming along.
-  const progressSection=await custProgressPreview(unit);
   return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
     myUnitSection+
     (gate.ok?moneySections:'')+
-    progressSection+
     profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
@@ -16842,29 +16842,30 @@ VIEWS.customer=async function(v,seg){
   if(!CUST_SELECTED_UNIT||!data.units.some(u=>u.id===CUST_SELECTED_UNIT))CUST_SELECTED_UNIT=data.units[0].id;
   const unit=data.units.find(u=>u.id===CUST_SELECTED_UNIT);
   let body;
-  if(ti===0)body=await custTabOverview(data,unit);
-  else if(ti===1)body=await custTabLedger(unit);
-  else if(ti===2)body=await custTabCostSheet(data,unit);
-  else if(ti===3)body=await custTabProgress(unit);
-  else if(ti===4)body=await custTabInspection(unit);
-  else if(ti===5)body=await custTabDocuments(unit);
-  else if(ti===6)body=await custTabVideos();
-  else if(ti===7)body=await custTabSupport(unit);
-  else if(ti===8)body=await custTabAmenities(unit);
-  else if(ti===9)body=await custTabSubmeter(unit);
-  else if(ti===10)body=await custTabReferrals(unit);
-  else if(ti===11)body=await custTabMaintenance(unit);
+  if(ti===0)body='';
+  else if(ti===1)body=await custTabOverview(data,unit);
+  else if(ti===2)body=await custTabLedger(unit);
+  else if(ti===3)body=await custTabCostSheet(data,unit);
+  else if(ti===4)body=await custTabProgress(unit);
+  else if(ti===5)body=await custTabInspection(unit);
+  else if(ti===6)body=await custTabDocuments(unit);
+  else if(ti===7)body=await custTabVideos();
+  else if(ti===8)body=await custTabSupport(unit);
+  else if(ti===9)body=await custTabAmenities(unit);
+  else if(ti===10)body=await custTabSubmeter(unit);
+  else if(ti===11)body=await custTabReferrals(unit);
+  else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  // The greeting replaces the page head on the landing tab only - it is a welcome, and repeating it
-  // above the Ledger or the Cost Sheet would read as filler rather than warmth.
-  v.innerHTML='<div class="cust-view-fade">'+
-    (ti===0?custGreeting((state.customer&&state.customer.full_name)||'',unit)
-           :mHead('fa-user-tie','#1d4ed8','Customer Portal'))+
-    banner+
-    custUnitPicker(data.units,unit.id)+
-    '<div style="margin-top:14px">'+body+'</div></div>';
+  /* The landing page is the greeting over the construction scene and nothing else - no page head, no
+     unit picker, no body. Every other tab keeps the normal chrome. */
+  v.innerHTML=ti===0
+    ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
+    : '<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+      banner+
+      custUnitPicker(data.units,unit.id)+
+      '<div style="margin-top:14px">'+body+'</div></div>';
   // Animated count-up on KPI values (Statement tab only)
-  if(ti===0){requestAnimationFrame(function(){
+  if(ti===1){requestAnimationFrame(function(){
     v.querySelectorAll('.cust-view-fade .kpi .val').forEach(function(el){
       var raw=el.textContent.trim();
       var m=raw.match(/[\d,.]+/);
