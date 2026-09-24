@@ -1243,7 +1243,8 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
   animation:custHeroPhotoIn 1.4s cubic-bezier(.22,1,.36,1) both;
 }
 @keyframes custHeroPhotoIn{0%{opacity:0;transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
-.cust-landing--photo .cust-greet{
+.cust-landing--photo .cust-greet,
+.cust-landing--video .cust-greet{
   background:none;border-top:none;box-shadow:none;padding:0 0 8px;
 }
 .cust-landing-inner{position:relative;z-index:1;width:100%;padding:clamp(24px,5vw,48px) clamp(18px,4vw,42px)}
