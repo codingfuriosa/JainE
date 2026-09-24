@@ -353,14 +353,22 @@ async function boot(){
 // order; the render switch below and the one hardcoded navTo('customer/N') deep link (the
 // Statement tab's "View full ledger" jump) were renumbered to match.
 const CUST_TABS=['Home','Statement','Construction Progress','Ledger','Cost Sheet','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
-const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-gift','fa-screwdriver-wrench','fa-pen-to-square'];
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
   nav.innerHTML='';
   nav.appendChild(el('div','sb-group','Customer Portal'));
+  /* "Earn" badge on Referrals - only while this customer has never submitted one. Reads CUST_DATA
+     directly rather than taking a parameter: the sidebar paints once at boot (renderCustomerShell,
+     before any data exists - CUST_DATA is null, badge stays off rather than flash on) and again from
+     VIEWS.customer once custLoadData resolves, so it appears a beat after first paint rather than
+     ever having to be taken back. custNewReferralSave flips CUST_DATA.hasReferred straight to true on
+     a successful submit, so the badge is gone on the very next sidebar rebuild - no stale cache read. */
+  const showReferralBadge=CUST_DATA&&CUST_DATA.hasReferred===false;
   CUST_TABS.forEach(function(t,i){
-    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> '+t);
+    const badge=(t==='Referrals'&&showReferralBadge)?' <span class="sb-badge-gold">Earn</span>':'';
+    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> <span class="sb-item-label">'+t+'</span>'+badge);
     a.href='javascript:void(0)';
     a.onclick=function(){navTo('customer/'+i);};
     nav.appendChild(a);
@@ -16457,7 +16465,16 @@ async function custLoadData(customerId,force){
     contacts=data||[];
   }
   const contactByUnit={};contacts.forEach(c=>{contactByUnit[c.unit_id]=c;});
-  CUST_DATA={customerId,units:list,contactByUnit};
+  // Whether this customer has ever submitted a referral, across all their units (the sidebar is
+  // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
+  // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
+  // any data has loaded) never flashes a badge it might have to immediately take back.
+  let hasReferred;
+  if(unitIds.length){
+    const {data:ref}=await sb.schema('cust').from('referrals').select('id').in('unit_id',unitIds).limit(1);
+    hasReferred=!!(ref&&ref.length);
+  }else hasReferred=false;
+  CUST_DATA={customerId,units:list,contactByUnit,hasReferred};
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
@@ -17957,6 +17974,10 @@ window.custNewReferralSave=async function(){
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
   const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
   if(error){toast('Could not submit: '+error.message,'err');return;}
+  // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
+  // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
+  // the very referral that should have removed it.
+  if(CUST_DATA)CUST_DATA.hasReferred=true;
   closeModal();toast('Referral submitted — thank you!','ok');route();
 };
 window.custReferralStatusChange=async function(id,status){
@@ -18092,6 +18113,10 @@ VIEWS.customer=async function(v,seg){
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
+  // Rebuilt again now that CUST_DATA.hasReferred is known, so the Referrals "Earn" badge can appear
+  // (it stays off on the call above rather than risk flashing on for a customer who's already
+  // referred someone). A no-op redraw for every tab except Referrals.
+  custSidebarTabs(ti);
   // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
   // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
   // customer's own real session said nothing they don't already know from the profile menu, so it's
