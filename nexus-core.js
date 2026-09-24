@@ -8824,7 +8824,89 @@ const USB_COL4={
   'maintenance':          {header:null, keys:[], hideDetails:true},
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
-  'finance':              {header:'Time spent', keys:['time_spent']}
+  'finance':              {header:'Time spent', keys:['time_spent']},
+
+  /* ---- features that inherit a column they cannot fill -------------------------------------
+     Each of these resolves, by module or by tab, to a column that is a dash on every single event
+     it has ever produced - 66 features, 801 events, measured rather than assumed. They are the
+     same shape of mistake in every case: the default is right for the module and wrong for the
+     one feature, because what the module does and what the feature does are not the same thing.
+     Inspection's Unit fits an inspection of a flat but not the console you filter it from; Legal's
+     Case · Court fits editing a case but not searching for one; Workflow's Waited fits a step
+     somebody received but not printing, editing or deleting an instance.
+
+     The line is almost always the same: a feature that DOES something carries a subject, and a
+     feature you only LOOK AT does not. Create task has an assignee, Search tasks never will.
+
+     hideDetails is set only where Details is empty too, so what is left is never a row of two
+     dashes - on the rest Details already carries the query, the item, the case number or the
+     check, which is why none of them loses anything by giving up the column. */
+  'tasks.meetings.join_a_meeting':                                     {header:null, keys:[]},
+  'tasks.meetings.filter_meetings_by_group':                           {header:null, keys:[], hideDetails:true},
+  'tasks.meetings.schedule_a_meeting_one_time_or_recurring':           {header:null, keys:[]},
+  'tasks.meetings.start_stop_recording':                               {header:null, keys:[]},
+  'tasks.meetings.save_meeting_wrap_up_summary':                       {header:null, keys:[]},
+  'legal.mis.search_cases_incl_ai_semantic_search':                    {header:null, keys:[]},
+  'legal.mis.filter_cases_by_hearing_date_range':                      {header:null, keys:[]},
+  'legal.actions.view_search_filter_case_actions':                     {header:null, keys:[], hideDetails:true},
+  'legal.advocates.search_advocates':                                  {header:null, keys:[], hideDetails:true},
+  'legal.documents.search_sort_filter_documents':                      {header:null, keys:[]},
+  'legal.documents.replace_document_version':                          {header:null, keys:[], hideDetails:true},
+  'legal.documents.delete_document_s':                                 {header:null, keys:[], hideDetails:true},
+  'competitors.overview.fetch_ads_from_meta_ad_library':               {header:null, keys:[], hideDetails:true},
+  'competitors.overview.view_competitor_watchlist_and_stored_ads':     {header:null, keys:[], hideDetails:true},
+  'competitors.overview.view_ad_detail':                               {header:null, keys:[]},
+  'competitors.overview.add_competitor':                               {header:null, keys:[], hideDetails:true},
+  'competitors.overview.rebuild_ad_media_previews':                    {header:null, keys:[], hideDetails:true},
+  'competitors.overview.toggle_auto_sync_for_a_competitor':            {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.close_reopen_hiring':                             {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.edit_tracking_values':                            {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.create_new_month_record':                         {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.open_a_month':                                    {header:null, keys:[]},
+  'hr.interview_tracker.search_filter_interviews':                     {header:null, keys:[], hideDetails:true},
+  'hr.interview_qs.generate_ai_interview_guide':                       {header:null, keys:[]},
+  'hr.h_s_candidates.search_filter_candidates':                        {header:null, keys:[], hideDetails:true},
+  'hr.resumes.preview_download_resume':                                {header:null, keys:[], hideDetails:true},
+  'hr.resumes.delete_resume_s':                                        {header:null, keys:[], hideDetails:true},
+  'recruitment.descriptions.preview_download_job_description':         {header:null, keys:[]},
+  'recruitment.descriptions.upload_job_description':                   {header:null, keys:[]},
+  'recruitment.manpower_form.generate_jd_post_text_creative':          {header:null, keys:[], hideDetails:true},
+  'recruitment.manpower_form.submit_requisition':                      {header:null, keys:[]},
+  'recruitment.tests.preview_test_responses_scores':                   {header:null, keys:[]},
+  'recruitment.tests.share_test_via_email':                            {header:null, keys:[]},
+  'transcription.call_detail.switch_transcript_language':              {header:null, keys:[], hideDetails:true},
+  'transcription.call_detail.add_delete_a_remark':                     {header:null, keys:[]},
+  'transcription.deleted.restore_a_deleted_call_single_or_all':        {header:null, keys:[], hideDetails:true},
+  'transcription.all_calls.download_call_report_or_copy_link':         {header:null, keys:[], hideDetails:true},
+  'network.overview.filter_chart_by_date_range':                       {header:null, keys:[], hideDetails:true},
+  'network.all_readings.filter_readings_by_date_range':                {header:null, keys:[]},
+  'organic.overview.view_engagement_overview_by_type_and_page':        {header:null, keys:[], hideDetails:true},
+  'campaigns.overview.drill_into_a_project_s_campaigns':               {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.upload_document_for_adhoc_replacement':             {header:null, keys:[]},
+  'postsales.adhoc.preview_a_document':                                {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.download_all_documents_as_zip':                     {header:null, keys:[], hideDetails:true},
+  'scaling.priorities_rocks.view_quarterly_rocks_progress':            {header:null, keys:[], hideDetails:true},
+  'scaling.learning_hub.view_learning_resources_list':                 {header:null, keys:[], hideDetails:true},
+  'scaling.meeting_rhythm.view_meeting_cadence_schedule':              {header:null, keys:[], hideDetails:true},
+  'scaling.kpi_scoreboard.view_kpi_targets_vs_actuals':                {header:null, keys:[], hideDetails:true},
+  'inspection.new_inspection.mark_item_ok_not_ok_n_a':                 {header:null, keys:[]},
+  'inspection.new_inspection.submit_inspection':                       {header:null, keys:[]},
+  'inspection.console.view_inspection_kpis_and_breakdowns':            {header:null, keys:[], hideDetails:true},
+  'inspection.console.start_new_inspection':                           {header:null, keys:[], hideDetails:true},
+  'inspection.console.filter_by_project_block_floor_flat_work_type':   {header:null, keys:[], hideDetails:true},
+  'inspection.responses.open_and_edit_a_submission':                   {header:null, keys:[], hideDetails:true},
+  'procurement.vendor_trends.view_spend_kpis_trend_charts':            {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.search_calendar_items':                              {header:null, keys:[]},
+  'tasks.workflow.print_an_instance':                                  {header:null, keys:[]},
+  'tasks.workflow.search_filter_the_tracker':                          {header:null, keys:[]},
+  'tasks.workflow.post_an_update_comment_on_an_instance':              {header:null, keys:[]},
+  'tasks.workflow.delete_an_instance':                                 {header:null, keys:[]},
+  'tasks.workflow.edit_an_instance':                                   {header:null, keys:[]},
+  'tasks.workflow.attach_a_file_to_an_update':                         {header:null, keys:[]},
+  'tasks.workflow.create_a_new_workflow':                              {header:null, keys:[]},
+  'tasks.workflow.edit_workflow_steps_owners':                         {header:null, keys:[]},
+  'tasks.workflow.reopen_a_completed_instance':                        {header:null, keys:[], hideDetails:true},
+  'tasks.workflow.delete_a_workflow':                                  {header:null, keys:[], hideDetails:true},
 };
 const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
 /* Most specific wins: the feature itself, then its tab, then its module.
