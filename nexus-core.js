@@ -15332,22 +15332,30 @@ function custGreeting(fullName,unit){
   const proj=projShortName((unit&&unit.projects&&unit.projects.name)||'');
   const where=[unit&&unit.unit_code,unit&&unit.tower].filter(Boolean).join(' · ');
   return '<div class="cust-greet">'+
+    (proj?'<div class="cust-greet-kicker">The Jain Group · '+esc(proj)+'</div>':'')+
     '<div class="cust-greet-hi">'+hi+(name?', '+esc(name):'')+'</div>'+
     '<div class="cust-greet-sub">Welcome back'+
       (proj?' — your home at <b>'+esc(proj)+'</b>'+(where?', '+esc(where):''):'')+'.</div>'+
   '</div>';
 }
-/* The landing page: a greeting over the animated construction scene, and nothing else. It is the
-   first thing a customer sees, before they choose Statement or anything else from the sidebar. */
+/* Jain Group's own official renders, hotlinked from each project's own marketing microsite - not a
+   generic stock photo, the actual building the customer bought into. Same company, same asset,
+   reused on its own customer portal: no licensing question the way an arbitrary web image would
+   raise. Keyed on cust.projects.name exactly as Farvision sends it, same as everywhere else in this
+   file that reads a project by name. A project with no entry here (Dream Ananta has no dedicated
+   microsite yet) falls back to the plain navy card - never another project's building. */
+const CUST_PROJECT_HERO_IMG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://thejaingroup.com/dreamgurukul/assets/images/elevation/Dream%20Gurukul%20elevation%20vertical%201.webp'
+};
+/* The landing page: a greeting standing on the project's own hero photo, and nothing else. It is
+   the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
 function custLanding(fullName,unit){
-  return '<div class="cust-landing">'+
-    '<div class="cust-bg-scene cust-bg-scene--hero">'+
-      '<div class="cbg-b cbg-b1"></div><div class="cbg-b cbg-b2"></div><div class="cbg-b cbg-b3"></div><div class="cbg-b cbg-b4"></div>'+
-      '<div class="cbg-b cbg-b5"></div><div class="cbg-b cbg-b6"></div><div class="cbg-b cbg-b7"></div><div class="cbg-b cbg-b8"></div>'+
-      '<div class="cbg-crane cbg-crane1"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
-      '<div class="cbg-crane cbg-crane2"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
-      '<div class="cbg-ground"></div>'+
-    '</div>'+
+  const heroImg=CUST_PROJECT_HERO_IMG[(unit&&unit.projects&&unit.projects.name)||''];
+  // A dark scrim under the greeting text, fading to nearly nothing toward the top so the render
+  // itself stays the star of the panel rather than being blanketed. Gives white/gold text on the
+  // photo the same contrast a solid card would, without needing one.
+  const style=heroImg?' style="background-image:linear-gradient(180deg,rgba(9,15,30,.05) 0%,rgba(9,15,30,.35) 45%,rgba(7,12,25,.92) 100%),url(\''+heroImg+'\')"':'';
+  return '<div class="cust-landing'+(heroImg?' cust-landing--photo':'')+'"'+style+'>'+
     '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
   '</div>';
 }
