@@ -15,7 +15,12 @@
    other small type) render noticeably bigger than their actual font-size on a phone than the
    same CSS produces on desktop. */
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
+/* overflow-x:hidden lives here, not on .main - setting only one axis of overflow on an element makes
+   the browser force the OTHER axis to 'auto' too (CSS Overflow spec), which silently turns that element
+   into position:sticky's scroll container. .main was doing exactly that: it never actually needed to
+   scroll internally (the page itself scrolls), so its sticky .topbar was anchoring to a box that never
+   received a scroll offset and just scrolled away with the page instead of sticking. */
+body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cdd5e1;border-radius:8px}::-webkit-scrollbar-track{background:transparent}
 .hidden{display:none!important}
@@ -44,7 +49,7 @@ a{color:inherit;text-decoration:none}
 @keyframes sbItemActivate{0%{transform:translateX(-6px);opacity:.5;box-shadow:0 0 0 0 rgba(224,18,28,.45)}60%{transform:translateX(0);opacity:1}100%{box-shadow:0 0 0 7px rgba(224,18,28,0)}}
 .sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#7a7a7f}
 /* topbar */
-.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease;overflow-x:hidden}
+.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease}
 .topbar{position:sticky;top:0;height:var(--topbar);background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 24px;z-index:30}
 .crumb{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--slate);font-weight:500}
 .crumb .cur{color:var(--ink);font-weight:600}
