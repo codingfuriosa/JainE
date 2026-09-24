@@ -7691,23 +7691,91 @@ const VIDEOS=[
    feedback-fill.html page (no login) which talks to the single feedback-get-form edge function
    (action:'get'|'submit' -- folded into one function because this project is at its edge-function
    slot cap). Records shows what came back. Module visibility is already gated by NAV + roles.modules
-   like every other module, so anyone who can see this page can manage forms and read responses. */
-async function loadQRLib(){
+   like every other module, so anyone who can see this page can manage forms and read responses.
+
+   UI follows "Don't Make Me Think": a form is a row of cards, not a cramped table; adding a question
+   means picking a self-labelled tile (icon + one-line description of what it does), not guessing from
+   a bare button; every action is an icon WITH a word next to it, never an icon alone. */
+const FH_QTYPE_INFO={
+  rating:{icon:'fa-star',label:'Rating',desc:'A star scale, e.g. 1 to 5',color:'#f59e0b'},
+  mcq:{icon:'fa-list-check',label:'Multiple Choice',desc:'Pick one option',color:'#0369a1'},
+  short_text:{icon:'fa-i-cursor',label:'Short Text',desc:'A single line of text',color:'#7c3aed'},
+  long_text:{icon:'fa-align-left',label:'Long Text',desc:'A paragraph of text',color:'#0f766e'}
+};
+const FH_CSS=`<style id="fhCss">
+.fh-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.fh-head h2{font-size:16px;font-weight:700;margin:0}
+.fh-head p{font-size:12.5px;color:var(--slate);margin:3px 0 0}
+.fh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.fh-form-card{padding:16px}
+.fh-form-card-top{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px}
+.fh-form-icon{width:40px;height:40px;flex:none;border-radius:10px;background:#f5f3ff;color:#7c3aed;display:flex;align-items:center;justify-content:center;font-size:16px}
+.fh-form-title{font-weight:700;font-size:14.5px;line-height:1.3;word-break:break-word}
+.fh-form-meta{font-size:12px;color:var(--slate);margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fh-form-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px}
+.fh-form-actions .btn{flex:1;min-width:0;white-space:nowrap}
+.fh-danger{color:var(--err)!important;border-color:var(--err)!important}
+.fh-empty{text-align:center;padding:60px 20px;color:var(--slate)}
+.fh-empty i{font-size:34px;opacity:.35;display:block;margin-bottom:14px}
+.fh-empty-title{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px}
+.fh-empty-sub{font-size:13px;margin-bottom:18px}
+.fh-type-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.fh-type-tile{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:14px;border:1.5px dashed var(--line);border-radius:12px;background:#fff;cursor:pointer;text-align:left;font-family:inherit}
+.fh-type-tile:hover{border-color:#7c3aed;background:#faf8ff}
+.fh-type-tile i{font-size:17px;color:#7c3aed}
+.fh-type-tile-label{font-weight:700;font-size:13px;color:var(--ink)}
+.fh-type-tile-desc{font-size:11.5px;color:var(--slate)}
+.fh-q-card{border-left:4px solid #94a3b8;border-radius:10px;background:#fff;border:1px solid var(--line);border-left-width:4px;padding:14px;margin-bottom:12px}
+.fh-q-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.fh-q-type{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--slate)}
+.fh-q-toolbar{display:flex;gap:4px}
+.fh-icon-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:#fff;color:var(--slate);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11.5px}
+.fh-icon-btn:hover{background:#f8fafc}
+.fh-q-prompt{font-weight:600;font-size:14px;margin-bottom:10px}
+.fh-rating-config{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.fh-rating-config label{font-size:12px;color:var(--slate);margin:0}
+.fh-star-preview{color:#f59e0b;font-size:15px;letter-spacing:2px}
+.fh-opts{margin-bottom:8px}
+.fh-opt-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.fh-opt-letter{width:24px;height:24px;flex:none;border-radius:6px;background:#eff4ff;color:#0369a1;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.fh-required-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--slate);margin:0;cursor:pointer}
+.fh-contact-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:14px 0;padding:14px;background:#f8fafc;border:1px solid var(--line);border-radius:12px}
+.fh-contact-field label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink);margin-bottom:6px}
+.fh-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.fh-stat-card{padding:14px 18px;min-width:150px}
+.fh-stat-num{font-size:24px;font-weight:800;line-height:1}
+.fh-stat-label{font-size:11.5px;color:var(--slate);margin-top:6px;display:flex;align-items:center;gap:6px}
+.fh-warn{display:flex;align-items:flex-start;gap:9px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:14px}
+@media(max-width:520px){.fh-form-actions .btn span{display:none}}
+</style>`;
+async function loadQRLib(forceRetry){
   if(window.QRCode)return window.QRCode;
-  await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
-  return window.QRCode||null;
+  if(forceRetry)window._fhQRLoading=null;
+  if(!window._fhQRLoading){
+    window._fhQRLoading=new Promise((res)=>{
+      const sc=document.createElement('script');
+      sc.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+      const t=setTimeout(()=>res(null),7000);
+      sc.onload=()=>{clearTimeout(t);res(window.QRCode||null);};
+      sc.onerror=()=>{clearTimeout(t);res(null);};
+      document.head.appendChild(sc);
+    });
+  }
+  const lib=await window._fhQRLoading;
+  if(!lib)window._fhQRLoading=null; // let a later call actually retry instead of replaying a dead promise
+  return lib;
 }
-let FH_FORMS=null, FH_EDIT=null, FH_REC_FORM=null, FH_REC_ROWS=null;
-const FH_QTYPES={rating:'Rating',mcq:'Multiple Choice',short_text:'Short Text',long_text:'Long Text'};
-function fhFillUrl(token){
-  const origin=location.origin;
-  return origin+'/feedback-fill.html?f='+token;
+let FH_FORMS=null, FH_EDIT=null, FH_REC_FORM=null, FH_REC_ROWS=null, FH_QR_CUR=null;
+function fhOriginBroken(){
+  return !/^https?:$/.test(location.protocol) || !location.origin || location.origin==='null';
 }
+function fhFillUrl(token){ return location.origin+'/feedback-fill.html?f='+token; }
 VIEWS.feedback_hub=async function(v,seg){
   setCrumb(['Feedback','Feedback Hub']);
   const tabs=['Design','Records'];
   const ti=mTab(seg,tabs.length);
-  v.innerHTML=mHead('fa-qrcode','#7c3aed','Feedback Hub')+mTabs('feedback_hub',tabs,ti)+'<div id="fhBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  v.innerHTML=FH_CSS+mHead('fa-qrcode','#7c3aed','Feedback Hub')+mTabs('feedback_hub',tabs,ti)+'<div id="fhBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
+  loadQRLib(); // fire-and-forget preload, so the QR modal feels instant instead of loading on first click
   if(ti===0){await fhDesign();return;}
   await fhRecords();
 };
@@ -7728,32 +7796,35 @@ async function fhDesign(){
 function fhDesignRender(){
   const b=$('fhBody');if(!b)return;
   const rows=FH_FORMS||[];
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Forms <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
-    <div style="margin-left:auto"><button class="btn btn-primary" onclick="fhNewForm()"><i class="fa-solid fa-plus"></i> New Form</button></div>
+  b.innerHTML=`<div class="fh-head">
+    <div><h2>Your Forms</h2><p>Build a form, share its QR code or link, and watch responses come in below.</p></div>
+    <button class="btn btn-primary" onclick="fhNewForm()"><i class="fa-solid fa-plus"></i> New Form</button>
   </div>
-  <div class="card" style="overflow:hidden">
-  <table class="tbl" style="table-layout:fixed;width:100%">
-    <thead><tr><th style="width:56px;text-align:center">Sl.</th><th>Title</th><th style="width:100px;text-align:center">Questions</th><th style="width:110px;text-align:center">Status</th><th style="width:220px;text-align:center">Actions</th></tr></thead>
-    <tbody>${rows.length?rows.map((f,i)=>`<tr>
-      <td style="text-align:center;color:var(--slate);font-size:13px">${i+1}</td>
-      <td style="font-weight:500">${esc(f.title)}</td>
-      <td style="text-align:center" id="fhQCount_${f.id}">—</td>
-      <td style="text-align:center">${f.is_active?'<span class="tag t-green">Active</span>':'<span class="tag t-red">Closed</span>'}</td>
-      <td style="text-align:center">
-        <button class="btn btn-sm" onclick="fhEditForm(${f.id})"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn btn-sm" onclick="fhShowQR(${f.id})"><i class="fa-solid fa-qrcode"></i> QR</button>
-        <button class="btn btn-sm" onclick="fhToggleActive(${f.id},${!f.is_active})">${f.is_active?'<i class="fa-solid fa-lock"></i> Close':'<i class="fa-solid fa-lock-open"></i> Reopen'}</button>
-        <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="fhDeleteForm(${f.id})"><i class="fa-solid fa-trash"></i></button>
-      </td>
-    </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No forms yet — click <b>New Form</b></td></tr>'}
-    </tbody>
-  </table>
-  </div>
+  ${rows.length?`<div class="fh-grid">${rows.map(f=>`
+    <div class="card fh-form-card">
+      <div class="fh-form-card-top">
+        <div class="fh-form-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+        <div style="flex:1;min-width:0">
+          <div class="fh-form-title">${esc(f.title)}</div>
+          <div class="fh-form-meta"><span id="fhQCount_${f.id}">…</span>${f.is_active?'<span class="tag t-green">Active</span>':'<span class="tag t-red">Closed</span>'}</div>
+        </div>
+      </div>
+      <div class="fh-form-actions">
+        <button class="btn btn-sm" onclick="fhEditForm(${f.id})"><i class="fa-solid fa-pen"></i> <span>Edit</span></button>
+        <button class="btn btn-sm" onclick="fhShowQR(${f.id})"><i class="fa-solid fa-qrcode"></i> <span>QR Code</span></button>
+        <button class="btn btn-sm" onclick="fhToggleActive(${f.id},${!f.is_active})">${f.is_active?'<i class="fa-solid fa-lock"></i> <span>Close</span>':'<i class="fa-solid fa-lock-open"></i> <span>Reopen</span>'}</button>
+        <button class="btn btn-sm fh-danger" title="Delete" onclick="fhDeleteForm(${f.id})"><i class="fa-solid fa-trash"></i></button>
+      </div>
+    </div>`).join('')}</div>`
+    :`<div class="card fh-empty"><i class="fa-solid fa-qrcode"></i>
+        <div class="fh-empty-title">No feedback forms yet</div>
+        <div class="fh-empty-sub">Create one, and anyone who scans its QR code can leave feedback in seconds — no login needed.</div>
+        <button class="btn btn-primary" onclick="fhNewForm()"><i class="fa-solid fa-plus"></i> Create your first form</button>
+      </div>`}
   <div id="fhBuilderPanel" style="margin-top:16px"></div>`;
   rows.forEach(async f=>{
     const{count}=await sb.schema('feedback').from('form_questions').select('id',{count:'exact',head:true}).eq('form_id',f.id);
-    const el=$('fhQCount_'+f.id);if(el)el.textContent=count==null?'—':count;
+    const el=$('fhQCount_'+f.id);if(el)el.textContent=(count==null?'—':count)+' question'+(count===1?'':'s')+' · ';
   });
 }
 window.fhToggleActive=async function(id,newVal){
@@ -7773,34 +7844,43 @@ window.fhDeleteForm=async function(id){
 window.fhShowQR=async function(id){
   const f=(FH_FORMS||[]).find(x=>x.id===id);if(!f)return;
   const url=fhFillUrl(f.qr_token);
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-qrcode"></i> QR — ${esc(f.title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  FH_QR_CUR={f,url};
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-qrcode"></i> ${esc(f.title)}</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body" style="text-align:center">
-    <div id="fhQrCanvasBox" style="display:flex;justify-content:center;padding:10px"><div class="loader"><div class="spin"></div></div></div>
-    <div style="font-size:12px;color:var(--slate);margin:10px 0;word-break:break-all">${esc(url)}</div>
+    ${fhOriginBroken()?'<div class="fh-warn" style="text-align:left"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px"></i><div>This page is not open at a real web address right now, so this link/QR will not work for anyone else yet. Once Feedback Hub is live on your real site, reopen this to get a working QR.</div></div>':''}
+    <div id="fhQrBox" style="display:flex;justify-content:center;align-items:center;min-height:240px"></div>
+    <div style="font-size:12px;color:var(--slate);margin:12px 0;word-break:break-all">${esc(url)}</div>
     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="fhCopyLink('${url}')"><i class="fa-solid fa-copy"></i> Copy Link</button>
       <button class="btn btn-sm btn-primary" id="fhQrDlBtn" disabled><i class="fa-solid fa-download"></i> Download PNG</button>
     </div>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>`);
-  const lib=await loadQRLib();
-  const box=$('fhQrCanvasBox');if(!box)return;
-  if(!lib){box.innerHTML='<div class="err">Could not load the QR generator.</div>';return;}
-  box.innerHTML='<canvas id="fhQrCanvas"></canvas>';
-  const canvas=$('fhQrCanvas');
-  try{
-    await lib.toCanvas(canvas,url,{width:240,margin:2});
-    const dlBtn=$('fhQrDlBtn');
-    if(dlBtn){
-      dlBtn.disabled=false;
-      dlBtn.onclick=function(){
-        const a=document.createElement('a');
-        a.download=(f.title||'feedback-form').replace(/[^a-z0-9]+/gi,'-')+'-qr.png';
-        a.href=canvas.toDataURL('image/png');
-        a.click();
-      };
-    }
-  }catch(e){box.innerHTML='<div class="err">'+esc(e.message||'Could not render the QR code')+'</div>';}
+  await fhRenderQR();
+};
+window.fhRenderQR=async function(retry){
+  const box=$('fhQrBox');if(!box||!FH_QR_CUR)return;
+  box.innerHTML='<div class="loader"><div class="spin"></div></div>';
+  const lib=await loadQRLib(retry);
+  if(!lib){
+    box.innerHTML=`<div style="max-width:260px"><div style="color:var(--err);font-size:13px;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't load the QR generator. Check your connection.</div><button class="btn btn-sm" onclick="fhRenderQR(true)"><i class="fa-solid fa-rotate"></i> Retry</button></div>`;
+    return;
+  }
+  box.innerHTML='';
+  const holder=document.createElement('div');
+  box.appendChild(holder);
+  new lib(holder,{text:FH_QR_CUR.url,width:220,height:220,correctLevel:lib.CorrectLevel.M});
+  const canvas=holder.querySelector('canvas');
+  const dlBtn=$('fhQrDlBtn');
+  if(dlBtn&&canvas){
+    dlBtn.disabled=false;
+    dlBtn.onclick=function(){
+      const a=document.createElement('a');
+      a.download=(FH_QR_CUR.f.title||'feedback-form').replace(/[^a-z0-9]+/gi,'-')+'-qr.png';
+      a.href=canvas.toDataURL('image/png');
+      a.click();
+    };
+  }
 };
 window.fhCopyLink=function(url){
   navigator.clipboard.writeText(url).then(()=>toast('Link copied')).catch(()=>toast('Could not copy — select and copy manually','err'));
@@ -7819,12 +7899,13 @@ window.fhEditForm=async function(id){
   fhBuilderRender();
   setTimeout(()=>{const p=$('fhBuilderPanel');if(p)p.scrollIntoView({behavior:'smooth',block:'start'});},50);
 };
-function fhContactSelect(field,val){
-  return `<select id="fhCF_${field}" class="sel" style="width:auto">
-    <option value="off"${val==='off'?' selected':''}>Off</option>
+function fhContactSelect(field,val,icon,label){
+  return `<div class="fh-contact-field"><label><i class="fa-solid ${icon}"></i> ${label}</label>
+  <select id="fhCF_${field}" class="sel">
+    <option value="off"${val==='off'?' selected':''}>Off — don't ask</option>
     <option value="optional"${val==='optional'?' selected':''}>Optional</option>
     <option value="required"${val==='required'?' selected':''}>Required</option>
-  </select>`;
+  </select></div>`;
 }
 function fhBuilderRender(){
   const panel=$('fhBuilderPanel');if(!panel)return;
@@ -7837,51 +7918,57 @@ function fhBuilderRender(){
       <textarea id="fhDesc" class="inp" rows="2">${esc(ed.description)}</textarea>
       <label>Thank You Message</label>
       <input id="fhThanks" class="inp" value="${esc(ed.thank_you_message)}" placeholder="Thank you for your feedback!">
-      <div style="display:flex;gap:24px;flex-wrap:wrap;margin:14px 0;padding:12px;background:#f8fafc;border:1px solid var(--line);border-radius:10px">
-        <div><label style="margin-bottom:4px">Collect Name</label>${fhContactSelect('name',ed.collect_name)}</div>
-        <div><label style="margin-bottom:4px">Collect Phone</label>${fhContactSelect('phone',ed.collect_phone)}</div>
-        <div><label style="margin-bottom:4px">Collect Email</label>${fhContactSelect('email',ed.collect_email)}</div>
-      </div>
     </div>
-    <div class="sec-title" style="margin:18px 0 10px;font-size:14px">Questions</div>
-    <div id="fhQList">${ed.questions.map((q,i)=>fhQRowHtml(q,i)).join('')||'<div style="color:var(--slate);font-size:13px;padding:8px 0">No questions yet — add one below.</div>'}</div>
-    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-      <button class="btn btn-sm" onclick="fhQAdd('rating')"><i class="fa-solid fa-plus"></i> Rating</button>
-      <button class="btn btn-sm" onclick="fhQAdd('mcq')"><i class="fa-solid fa-plus"></i> Multiple Choice</button>
-      <button class="btn btn-sm" onclick="fhQAdd('short_text')"><i class="fa-solid fa-plus"></i> Short Text</button>
-      <button class="btn btn-sm" onclick="fhQAdd('long_text')"><i class="fa-solid fa-plus"></i> Long Text</button>
+    <div class="fh-contact-grid">
+      ${fhContactSelect('name',ed.collect_name,'fa-user','Name')}
+      ${fhContactSelect('phone',ed.collect_phone,'fa-phone','Phone')}
+      ${fhContactSelect('email',ed.collect_email,'fa-envelope','Email')}
     </div>
-    <div style="margin-top:18px;display:flex;gap:8px">
+    <div class="sec-title" style="margin:20px 0 12px;font-size:14px">Questions</div>
+    <div id="fhQList">${ed.questions.map((q,i)=>fhQRowHtml(q,i)).join('')||'<div style="color:var(--slate);font-size:13px;padding:4px 0 14px">No questions yet — pick a type below to add one.</div>'}</div>
+    <div class="fh-type-picker">
+      ${Object.keys(FH_QTYPE_INFO).map(t=>{const info=FH_QTYPE_INFO[t];return `
+      <button type="button" class="fh-type-tile" onclick="fhQAdd('${t}')">
+        <i class="fa-solid ${info.icon}"></i>
+        <div class="fh-type-tile-label">${info.label}</div>
+        <div class="fh-type-tile-desc">${info.desc}</div>
+      </button>`;}).join('')}
+    </div>
+    <div style="margin-top:20px;display:flex;gap:8px">
       <button class="btn btn-primary" id="fhSaveBtn" onclick="fhSaveForm()"><i class="fa-solid fa-check"></i> Save Form</button>
       <button class="btn" onclick="fhCancelEdit()">Cancel</button>
     </div>
   </div>`;
 }
 function fhQRowHtml(q,i){
+  const info=FH_QTYPE_INFO[q.type]||{icon:'fa-question',label:q.type,color:'#94a3b8'};
   const opts=(q.options||[]);
-  return `<div class="card" style="padding:12px;margin-bottom:8px" data-qidx="${i}">
-    <div style="display:flex;gap:8px;align-items:flex-start">
-      <div style="flex:1">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <span class="tag t-gray">${esc(FH_QTYPES[q.type]||q.type)}</span>
-          <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--slate);margin:0"><input type="checkbox" ${q.required?'checked':''} onchange="fhQSet(${i},'required',this.checked)"> Required</label>
-        </div>
-        <input class="inp" value="${esc(q.prompt)}" placeholder="Question text" oninput="fhQSet(${i},'prompt',this.value)">
-        ${q.type==='rating'?`<div style="margin-top:8px"><label style="font-size:12px;color:var(--slate)">Max stars</label>
-          <input type="number" class="inp" style="width:80px" min="3" max="10" value="${q.rating_max||5}" oninput="fhQSet(${i},'rating_max',parseInt(this.value)||5)"></div>`:''}
-        ${q.type==='mcq'?`<div style="margin-top:8px" id="fhOpts_${i}">
-          ${opts.map((o,oi)=>`<div style="display:flex;gap:6px;margin-bottom:5px"><input class="inp" value="${esc(o)}" placeholder="Option" oninput="fhOptSet(${i},${oi},this.value)"><button type="button" class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="fhOptRemove(${i},${oi})"><i class="fa-solid fa-xmark"></i></button></div>`).join('')}
-          <button type="button" class="btn btn-sm" onclick="fhOptAdd(${i})"><i class="fa-solid fa-plus"></i> Add Option</button>
-        </div>`:''}
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        <button class="btn btn-sm" title="Move up" onclick="fhQMove(${i},-1)"><i class="fa-solid fa-arrow-up"></i></button>
-        <button class="btn btn-sm" title="Move down" onclick="fhQMove(${i},1)"><i class="fa-solid fa-arrow-down"></i></button>
-        <button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" title="Remove" onclick="fhQRemove(${i})"><i class="fa-solid fa-trash"></i></button>
+  return `<div class="fh-q-card" data-qidx="${i}" style="border-left-color:${info.color}">
+    <div class="fh-q-head">
+      <div class="fh-q-type"><i class="fa-solid ${info.icon}"></i> ${info.label}</div>
+      <div class="fh-q-toolbar">
+        <button class="fh-icon-btn" title="Move up" onclick="fhQMove(${i},-1)"><i class="fa-solid fa-arrow-up"></i></button>
+        <button class="fh-icon-btn" title="Move down" onclick="fhQMove(${i},1)"><i class="fa-solid fa-arrow-down"></i></button>
+        <button class="fh-icon-btn fh-danger" title="Remove question" onclick="fhQRemove(${i})"><i class="fa-solid fa-trash"></i></button>
       </div>
     </div>
+    <input class="inp fh-q-prompt" value="${esc(q.prompt)}" placeholder="Type your question…" oninput="fhQSet(${i},'prompt',this.value)">
+    ${q.type==='rating'?`<div class="fh-rating-config">
+        <label>Number of stars</label>
+        <input type="number" class="inp" style="width:70px" min="3" max="10" value="${q.rating_max||5}" oninput="fhQSet(${i},'rating_max',parseInt(this.value)||5);fhRatingPreview(${i})">
+        <div class="fh-star-preview" id="fhStarPrev_${i}">${'<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5)}</div>
+      </div>`:''}
+    ${q.type==='mcq'?`<div class="fh-opts" id="fhOpts_${i}">
+        ${opts.map((o,oi)=>`<div class="fh-opt-row"><span class="fh-opt-letter">${String.fromCharCode(65+oi)}</span><input class="inp" value="${esc(o)}" placeholder="Option text" oninput="fhOptSet(${i},${oi},this.value)"><button type="button" class="fh-icon-btn fh-danger" title="Remove option" onclick="fhOptRemove(${i},${oi})"><i class="fa-solid fa-xmark"></i></button></div>`).join('')}
+        <button type="button" class="btn btn-sm" onclick="fhOptAdd(${i})"><i class="fa-solid fa-plus"></i> Add Option</button>
+      </div>`:''}
+    <label class="fh-required-toggle"><input type="checkbox" ${q.required?'checked':''} onchange="fhQSet(${i},'required',this.checked)"> Required to submit</label>
   </div>`;
 }
+window.fhRatingPreview=function(i){
+  const q=FH_EDIT&&FH_EDIT.questions[i];if(!q)return;
+  const el=$('fhStarPrev_'+i);if(el)el.innerHTML='<i class="fa-solid fa-star"></i>'.repeat(q.rating_max||5);
+};
 function fhSyncEditFields(){
   if(!FH_EDIT)return;
   FH_EDIT.title=($('fhTitle')||{}).value||'';
@@ -7909,6 +7996,7 @@ window.fhQAdd=function(type){
   fhSyncEditFields();
   FH_EDIT.questions.push({id:null,type,prompt:'',options:type==='mcq'?['',''] :[],rating_max:5,required:true});
   fhBuilderRender();
+  setTimeout(()=>{const l=$('fhQList');if(l)l.lastElementChild&&l.lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});},50);
 };
 window.fhQRemove=function(i){
   fhSyncEditFields();
@@ -7927,6 +8015,7 @@ window.fhSaveForm=async function(){
   fhSyncEditFields();
   const ed=FH_EDIT;
   if(!ed.title.trim()){toast('Title is required','err');return;}
+  if(!ed.questions.length){toast('Add at least one question','err');return;}
   for(const q of ed.questions){
     if(!q.prompt||!q.prompt.trim()){toast('Every question needs its text filled in','err');return;}
     if(q.type==='mcq'&&(q.options||[]).filter(o=>o&&o.trim()).length<2){toast('Multiple choice questions need at least 2 options','err');return;}
@@ -7985,10 +8074,10 @@ async function fhRecords(){
     <label style="font-size:12px;color:var(--slate);margin-bottom:6px;display:block">Select a form</label>
     <select id="fhRecSel" class="sel" onchange="fhRecordsSelect(parseInt(this.value)||0)">
       <option value="">— Select a form —</option>
-      ${rows.map(f=>`<option value="${f.id}">${esc(f.title)}</option>`).join('')}
+      ${rows.map(f=>`<option value="${f.id}">${esc(f.title)}${f.is_active?'':' (Closed)'}</option>`).join('')}
     </select>
   </div>
-  <div id="fhRecBody"></div>`;
+  <div id="fhRecBody">${rows.length?'':'<div class="card fh-empty"><i class="fa-solid fa-inbox"></i><div class="fh-empty-title">No forms yet</div><div class="fh-empty-sub">Create a form in the Design tab first.</div></div>'}</div>`;
   if(rows.length===1){$('fhRecSel').value=rows[0].id;fhRecordsSelect(rows[0].id);}
 }
 window.fhRecordsSelect=async function(formId){
@@ -8001,29 +8090,33 @@ window.fhRecordsSelect=async function(formId){
   if(error){box.innerHTML=`<div class="err">${esc(error.message)}</div>`;return;}
   FH_REC_FORM=f;FH_REC_ROWS=responses||[];
   const ratingQs=(questions||[]).filter(q=>q.type==='rating');
-  let avgHtml='';
+  let ratingCards='';
   if(ratingQs.length&&FH_REC_ROWS.length){
     const{data:answers}=await sb.schema('feedback').from('response_answers').select('question_id,answer_text').in('response_id',FH_REC_ROWS.map(r=>r.id));
-    avgHtml='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'+ratingQs.map(q=>{
+    ratingCards=ratingQs.map(q=>{
       const vals=(answers||[]).filter(a=>a.question_id===q.id).map(a=>Number(a.answer_text)).filter(n=>!isNaN(n)&&n>0);
       const avg=vals.length?(vals.reduce((s,n)=>s+n,0)/vals.length).toFixed(1):'—';
-      return `<div class="card" style="padding:12px 16px;min-width:160px"><div style="font-size:11px;color:var(--slate);text-transform:uppercase;font-weight:700">${esc(q.prompt)}</div><div style="font-size:22px;font-weight:700;margin-top:4px"><i class="fa-solid fa-star" style="color:#f5a524;font-size:16px"></i> ${avg}${vals.length?' / '+(q.rating_max||5):''}</div></div>`;
-    }).join('')+'</div>';
+      return `<div class="card fh-stat-card"><div class="fh-stat-num">${avg}<span style="font-size:13px;color:var(--slate);font-weight:500">${vals.length?'/'+(q.rating_max||5):''}</span></div><div class="fh-stat-label"><i class="fa-solid fa-star" style="color:#f59e0b"></i> ${esc(q.prompt)}</div></div>`;
+    }).join('');
   }
   const showName=f&&f.collect_name!=='off', showPhone=f&&f.collect_phone!=='off', showEmail=f&&f.collect_email!=='off';
-  box.innerHTML=avgHtml+`<div class="card" style="overflow:hidden">
+  box.innerHTML=`<div class="fh-stats">
+    <div class="card fh-stat-card"><div class="fh-stat-num">${FH_REC_ROWS.length}</div><div class="fh-stat-label"><i class="fa-solid fa-inbox"></i> Total Responses</div></div>
+    ${ratingCards}
+  </div>
+  <div class="card" style="overflow:hidden">
   <table class="tbl" style="table-layout:fixed;width:100%">
     <thead><tr>
       ${showName?'<th>Name</th>':''}${showPhone?'<th style="width:130px">Phone</th>':''}${showEmail?'<th>Email</th>':''}
-      <th style="width:160px">Submitted</th><th style="width:90px;text-align:center">Answers</th>
+      <th style="width:160px">Submitted</th><th style="width:100px;text-align:center">Answers</th>
     </tr></thead>
     <tbody>${FH_REC_ROWS.length?FH_REC_ROWS.map(r=>`<tr>
       ${showName?`<td>${esc(r.respondent_name||'—')}</td>`:''}
       ${showPhone?`<td style="font-family:monospace;font-size:12px">${esc(r.respondent_phone||'—')}</td>`:''}
       ${showEmail?`<td style="font-size:12px">${esc(r.respondent_email||'—')}</td>`:''}
       <td style="font-size:12px;color:var(--slate)">${r.submitted_at?new Date(r.submitted_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td>
-      <td style="text-align:center"><button class="btn btn-sm" onclick="fhViewResponse('${r.id}')"><i class="fa-solid fa-eye"></i></button></td>
-    </tr>`).join(''):`<tr><td colspan="${(showName?1:0)+(showPhone?1:0)+(showEmail?1:0)+2}" style="text-align:center;padding:40px;color:var(--slate)">No responses yet.</td></tr>`}
+      <td style="text-align:center"><button class="btn btn-sm" onclick="fhViewResponse('${r.id}')"><i class="fa-solid fa-eye"></i> <span>View</span></button></td>
+    </tr>`).join(''):`<tr><td colspan="${(showName?1:0)+(showPhone?1:0)+(showEmail?1:0)+2}" style="text-align:center;padding:40px;color:var(--slate)">No responses yet — share the QR code to start collecting feedback.</td></tr>`}
     </tbody>
   </table>
   </div>
@@ -8035,15 +8128,19 @@ window.fhViewResponse=async function(responseId){
   const{data,error}=await sb.schema('feedback').from('response_answers')
     .select('*,form_questions(seq,prompt,type,rating_max)').eq('response_id',responseId).order('question_id');
   if(error){box.innerHTML=`<div class="err">${esc(error.message)}</div>`;return;}
-  box.innerHTML=`<div class="card" style="padding:12px">${(data||[]).map(a=>{
-    const q=a.form_questions||{};
-    const shown=q.type==='rating'?(a.answer_text?a.answer_text+' / '+(q.rating_max||5)+' stars':'—'):a.answer_text;
-    return `<div style="border-bottom:1px solid var(--line);padding:8px 0">
-      <div style="font-size:11px;color:var(--slate);text-transform:uppercase;font-weight:700">Q${q.seq}</div>
-      <div style="font-size:13px;margin:3px 0">${esc(q.prompt||'')}</div>
-      <div style="font-size:13px;white-space:pre-wrap">${esc(shown||'(no answer)')}</div>
-    </div>`;
-  }).join('')}</div>`;
+  box.innerHTML=`<div class="card card-pad">
+    <div class="sec-title" style="margin:0 0 12px;font-size:13.5px"><i class="fa-solid fa-eye"></i> Full Answers <button style="float:right;background:none;border:none;cursor:pointer;font-size:18px;color:var(--slate)" onclick="document.getElementById('fhAnswersBox').innerHTML=''">&times;</button></div>
+    ${(data||[]).map(a=>{
+      const q=a.form_questions||{};
+      const shown=q.type==='rating'?(a.answer_text?a.answer_text+' / '+(q.rating_max||5)+' stars':'—'):a.answer_text;
+      return `<div style="border-bottom:1px solid var(--line);padding:9px 0">
+        <div style="font-size:11px;color:var(--slate);text-transform:uppercase;font-weight:700">Q${q.seq}</div>
+        <div style="font-size:13px;margin:3px 0">${esc(q.prompt||'')}</div>
+        <div style="font-size:13px;font-weight:500;white-space:pre-wrap">${esc(shown||'(no answer)')}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
 };
 
 VIEWS.video=function(v,seg){
