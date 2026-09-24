@@ -16662,14 +16662,17 @@ const CUST_PROJECT_HERO_IMG={
 };
 /* A looping site/elevation video, Home page only - not the rest of the portal, which stays plain
    white so ledgers, statements and cost sheets keep the readability a moving video behind them
-   would cost. Hosted in this project's own public `branding` bucket rather than hotlinked, since
+   would cost. Hosted in its own public `project-hero` Storage bucket rather than hotlinked, since
    it did not already live on a public URL the way the hero photos above do - it is a one-off file,
-   not an asset already published on Jain Group's own site.
+   not an asset already published on Jain Group's own site. (Landed in its own bucket rather than a
+   folder inside `branding` as first set up - Storage's "Create folder" in the dashboard can create
+   a sibling bucket instead depending on which button is used; verified with a live curl against the
+   public URL before treating either the path or the bucket's public flag as correct.)
    Used as the `poster` too: the still frame shown before the video can play, and what renders for
    anyone with prefers-reduced-motion set (see custLanding below - reduced motion falls back to the
    plain photo card entirely, not a paused video frame in a full-viewport layout it was never using). */
 const CUST_PROJECT_HERO_VIDEO={
-  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/branding/project-hero/dream-gurukul.mp4'
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/project-hero/dream-gurukul.mp4'
 };
 /* The landing page: a greeting standing on the project's own hero media, and nothing else. It is
    the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
