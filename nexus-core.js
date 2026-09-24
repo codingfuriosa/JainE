@@ -16726,6 +16726,14 @@ const CUST_PROJECT_HERO_IMG={
 const CUST_PROJECT_HERO_VIDEO={
   'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/project-hero/dream-gurukul.mp4'
 };
+/* A faint (see .cust-tab-bg's opacity in nexus.css) version of the project's own render sits behind
+   every non-Home tab - Statement, Ledger, Cost Sheet etc. - so the portal doesn't go flat and blank
+   the moment a customer leaves the hero. Deliberately its own map, not a reuse of CUST_PROJECT_HERO_IMG:
+   the Home hero and this backdrop are different renders of the same project (dusk elevation vs. a
+   daytime shot with the playground/garden), so a project could in principle only have one of the two. */
+const CUST_PROJECT_TAB_BG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/branding/dream%20gurukul%20statement.webp'
+};
 /* The landing page: a greeting standing on the project's own hero media, and nothing else. It is
    the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
 function custLanding(fullName,unit){
@@ -18519,10 +18527,13 @@ VIEWS.customer=async function(v,seg){
   else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
   /* The landing page is the greeting over the project's hero photo and nothing else - no page head,
-     no unit picker, no body. Every other tab keeps the normal chrome. */
+     no unit picker, no body. Every other tab keeps the normal chrome, plus a faint backdrop of the
+     same project's render (CUST_PROJECT_TAB_BG) so it isn't flat once the hero is behind them. */
+  const tabBg=CUST_PROJECT_TAB_BG[(unit.projects&&unit.projects.name)||''];
   v.innerHTML=ti===0
     ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
-    : '<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+    : '<div class="cust-view-fade">'+(tabBg?'<div class="cust-tab-bg" style="background-image:url(\''+esc(tabBg)+'\')"></div>':'')+
+      mHead('fa-user-tie','#1d4ed8','Customer Portal')+
       banner+
       custUnitPicker(data.units,unit.id)+
       '<div style="margin-top:14px">'+body+'</div></div>';

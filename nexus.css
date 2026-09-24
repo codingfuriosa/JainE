@@ -1275,3 +1275,16 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 .cust-landing-scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,15,30,.10) 0%,rgba(9,15,30,.30) 45%,rgba(7,12,25,.88) 100%)}
 .cust-landing--video .cust-landing-inner{position:absolute;left:0;right:0;bottom:0;padding:clamp(24px,5vw,56px) clamp(18px,4vw,48px)}
 @media(max-width:1024px){.cust-landing--video{left:0}}
+
+/* ---------- Faint project backdrop on every non-Home tab ----------
+   Same fixed-to-viewport technique as .cust-landing--video above (and the same !important rationale:
+   overriding .cust-view-fade>*{position:relative;z-index:1}), but kept nearly invisible - this sits
+   behind live financial tables (Statement, Ledger, Cost Sheet), so it must never compete with them for
+   attention or contrast. .055 matches the opacity the old app-wide construction-scene illustration used
+   before it was removed as dead code. */
+.cust-tab-bg{
+  position:fixed!important;top:var(--topbar);left:var(--sidebar);right:0;bottom:0;
+  z-index:0!important;background-size:cover;background-position:center;
+  opacity:.055;pointer-events:none;transition:left .22s ease;
+}
+@media(max-width:1024px){.cust-tab-bg{left:0}}
