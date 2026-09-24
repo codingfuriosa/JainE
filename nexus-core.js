@@ -15245,6 +15245,40 @@ function custDeriveFloor(unitCode){
   const m=String(unitCode||'').match(/^\d+/);
   return m?m[0]:null;
 }
+/* Farvision stores names as "Mr. AKSHAY DEBNATH" - shouted back at a customer that reads like a
+   demand letter, so the greeting uses just the given name, title-cased. */
+function custFirstName(fullName){
+  // Md./Mohd. are honorifics here, not given names - without them "Md. MONAZIR HUSSAIN ARSHI" is
+  // greeted as "Md". Stripped repeatedly, since "Mr. Md. ..." occurs.
+  let bare=String(fullName||'').trim(),prev;
+  do{prev=bare;bare=bare.replace(/^(mr|mrs|ms|m\/s|md|mohd|dr|prof|smt|shri|sri)\.?\s+/i,'').trim();}while(bare!==prev);
+  const first=(bare.split(/\s+/)[0]||'').replace(/[^A-Za-z'-]/g,'');
+  return first?first.charAt(0).toUpperCase()+first.slice(1).toLowerCase():'';
+}
+function custGreeting(fullName,unit){
+  const h=new Date().getHours();
+  const hi=h<12?'Good morning':h<17?'Good afternoon':'Good evening';
+  const name=custFirstName(fullName);
+  const proj=projShortName((unit&&unit.projects&&unit.projects.name)||'');
+  const where=[unit&&unit.unit_code,unit&&unit.tower].filter(Boolean).join(' · ');
+  return '<div class="cust-greet">'+
+    '<div class="cust-greet-hi">'+hi+(name?', '+esc(name):'')+'</div>'+
+    '<div class="cust-greet-sub">Welcome back'+
+      (proj?' — your home at <b>'+esc(proj)+'</b>'+(where?', '+esc(where):''):'')+'.</div>'+
+  '</div>';
+}
+/* A short construction update below the statement. After "what do I owe", the next thing a
+   homebuyer wants is "how is my building coming along" - but the full gallery is four sections deep
+   and would bury the statement, so this is the three latest project photos and a way through. */
+async function custProgressPreview(unit){
+  const {data:photos}=await sb.schema('cust').from('project_photos')
+    .select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}).limit(3);
+  if(!photos||!photos.length)return '';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px">'+
+    '<div class="sec-title" style="margin:0">Construction progress</div>'+
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View all updates →</a></div>'+
+    await custMediaGrid(photos);
+}
 function custUnitPicker(units,selUnitId){
   if(units.length<2)return '';
   /* An <option> cannot carry a tooltip, so the project's location suffix is dropped here rather than
@@ -15463,9 +15497,13 @@ async function custTabOverview(data,unit){
     '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">'+
     '<button class="btn" onclick="custPrintStatement()"><i class="fa-solid fa-print"></i> Print / Download PDF</button>'+
     '</div>';
+  // Construction progress sits outside the gate - it is not a figure, so a customer whose account is
+  // being reconciled should still see how their building is coming along.
+  const progressSection=await custProgressPreview(unit);
   return (gate.ok?dueBanner:CUST_FIGURES_NOTICE)+mKpis(kpis)+
     myUnitSection+
     (gate.ok?moneySections:'')+
+    progressSection+
     profileSection;
 }
 // Opens a print-friendly statement in a new tab, reusing the wfPrintCase pattern (open the tab
@@ -16817,7 +16855,11 @@ VIEWS.customer=async function(v,seg){
   else if(ti===10)body=await custTabReferrals(unit);
   else if(ti===11)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  v.innerHTML='<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+  // The greeting replaces the page head on the landing tab only - it is a welcome, and repeating it
+  // above the Ledger or the Cost Sheet would read as filler rather than warmth.
+  v.innerHTML='<div class="cust-view-fade">'+
+    (ti===0?custGreeting((state.customer&&state.customer.full_name)||'',unit)
+           :mHead('fa-user-tie','#1d4ed8','Customer Portal'))+
     banner+
     custUnitPicker(data.units,unit.id)+
     '<div style="margin-top:14px">'+body+'</div></div>';
