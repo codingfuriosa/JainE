@@ -32,6 +32,12 @@ a{color:inherit;text-decoration:none}
 .sb-item:hover i{color:var(--sb-red)}
 .sb-item.active{background:var(--sb-red);color:#fff;animation:sbItemActivate .35s ease}
 .sb-item.active i{color:#fff}
+/* Referral "Earn" badge - a static gold pill, not a pulsing dot, so it reads as premium rather than
+   a nag. Shown only while custSidebarTabs finds the customer has never submitted a referral. On the
+   red active-state fill the plain gold-on-transparent pill loses contrast, so it inverts to dark-on-
+   gold there instead of disappearing. */
+.sb-badge-gold{margin-left:auto;flex-shrink:0;background:var(--gold);color:#241a08;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;letter-spacing:.02em}
+.sb-item.active .sb-badge-gold{background:#241a08;color:#e8c987}
 /* .sb-nav is rebuilt from scratch on every render (see custSidebarTabs in nexus-core.js), so the
    newly-active item is always a freshly-inserted node - an `animation` (unlike a `transition`)
    plays on insertion, no extra JS needed to "restart" it. */
@@ -1249,3 +1255,22 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 @media(prefers-reduced-motion:reduce){
   .cust-landing--photo{animation:none;opacity:1;transform:none}
 }
+
+/* ---------- Home page video background ----------
+   Home only, not the rest of the portal - see the note at CUST_PROJECT_HERO_VIDEO in nexus-core.js
+   for why. Fixed to the viewport (same technique the old app-wide construction-scene background
+   used, scoped correctly this time) rather than sized to the content column, so it genuinely fills
+   the screen behind the greeting instead of sitting in a bounded card. left/right leave the sidebar
+   and its collapsed-on-mobile state alone - .main already handles that split, this just matches it. */
+.cust-landing--video{
+  /* !important on position/z-index: .cust-view-fade>* (this element's own parent rule) forces
+     position:relative;z-index:1 on every direct child at equal specificity - an explicit override
+     here is more robust than depending on which rule happens to come later in this file. */
+  position:fixed!important;top:var(--topbar);left:var(--sidebar);right:0;bottom:0;
+  min-height:0;border-radius:0;border:none;box-shadow:none;background:#0a0a0c;
+  z-index:0!important;transition:left .22s ease;
+}
+.cust-landing-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 30%}
+.cust-landing-scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,15,30,.10) 0%,rgba(9,15,30,.30) 45%,rgba(7,12,25,.88) 100%)}
+.cust-landing--video .cust-landing-inner{position:absolute;left:0;right:0;bottom:0;padding:clamp(24px,5vw,56px) clamp(18px,4vw,48px)}
+@media(max-width:1024px){.cust-landing--video{left:0}}
