@@ -14007,6 +14007,21 @@ function cpaParseBookingRegister(wb){
     bookingDate:xlsxExcelDate(get('Booking Date')),
   }));
 }
+// Farvision's PTC (Payment To Customer) register - booking transfers and refunds. Filed under the
+// SOURCE booking; a transfer additionally names "Booking No. of Transferee", the unit the money
+// actually lands on. A refund is just a row with no transferee - the money left the business rather
+// than another unit. No narration parsing needed: both cases resolve the same way at import time
+// (debit source if it resolves, credit transferee if it resolves).
+function cpaParsePTC(wb){
+  return cpaParseFlatSheet(wb,'PTC Created By',['Document No','Booking No','Business Unit']).map(get=>({
+    businessUnit:get('Business Unit'),documentNo:String(get('Document No')),
+    documentDate:xlsxExcelDate(get('Document Date')),
+    sourceBookingNo:get('Booking No')!=null?String(get('Booking No')):null,
+    transfereeBookingNo:get('Booking No. of Transferee')!=null?String(get('Booking No. of Transferee')):null,
+    amount:Number(get('Amount')||0),narration:get('Narration'),
+    isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
+  }));
+}
 // Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
 // (project, tower, unit code) only for the rare pre-Booking-No-convention record.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
@@ -14027,12 +14042,12 @@ function cpaResolveProject(projects,businessUnit){
     ||projects.find(p=>norm(p.name)===bu)||null;
 }
 
-const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register']);
+const CPA_XLSX_IMPORT_TYPES=new Set(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register','ptc_transfer']);
 const CPA_IMPORT_COLUMNS={
   maintenance_bills:{required:['unit_code','bill_no','bill_date','amount'],optional:['bill_period','due_date','gst_amount','total_amount','status']},
   maintenance_receipts:{required:['unit_code','receipt_no','receipt_date','amount'],optional:['mode','against_bill_no']}
 };
-const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
+const CPA_IMPORT_LABELS={sales_details:'Sales Details',outstanding:'Outstanding',invoice_register:'Invoice Register (Demand)',receipt_register:'Receipt Register (Receipts)',receipt_reversal:'Receipt Reversal (Cheque Return)',booking_register:'Booking Register',ptc_transfer:'Payment To Customer (Transfers & Refunds)',maintenance_bills:'Maintenance Bills',maintenance_receipts:'Maintenance Receipts',demand:'Demand',receipts:'Money Receipts',contacts:'Contacts & Dates'};
 let CPA_IMPORT_STATE=null;
 async function cpaRenderImport(host,seg){
   const projects=await cpaProjects();
@@ -14099,6 +14114,7 @@ window.cpaQueueImport=async function(queueId){
       if(vals.includes('Schedule Description')&&vals.includes('RevenueHead Description')){type='invoice_register';break;}
       if(vals.includes('Net Outstanding')&&vals.includes('Bill Outstanding')){type='outstanding';break;}
       if(vals.includes('Booking Id')&&!vals.includes('Total Basic')){type='booking_register';break;}
+      if(vals.includes('PTC Created By')){type='ptc_transfer';break;}
       if(vals.includes('Payment Plan')&&vals.includes('Total Basic')){type='sales_details';break;}
     }
     if(!type) throw new Error('Could not detect report type');
@@ -14110,6 +14126,7 @@ window.cpaQueueImport=async function(queueId){
     else if(type==='receipt_register') parsed=cpaParseReceiptRegister(wb);
     else if(type==='receipt_reversal') parsed=cpaParseReceiptReversal(wb);
     else if(type==='booking_register') parsed=cpaParseBookingRegister(wb);
+    else if(type==='ptc_transfer') parsed=cpaParsePTC(wb);
     else throw new Error('Type '+type+' not yet supported for auto-import');
     // Match to projects/units (only registered projects pass through)
     const projects=await cpaProjects();
@@ -14119,6 +14136,13 @@ window.cpaQueueImport=async function(queueId){
       const project=cpaResolveProject(projects,rec.businessUnit);
       if(!project){unmatched.push(rec);continue;}
       if(type==='sales_details'){matched.push({project,rec});}
+      else if(type==='ptc_transfer'){
+        // See the note in cpaImportPreviewXlsx: neither side is required alone, only that at least
+        // one resolves to a unit we can attach the money to.
+        const sourceUnit=cpaResolveUnit(units,project.id,rec.sourceBookingNo,null,null);
+        const transfereeUnit=rec.transfereeBookingNo?cpaResolveUnit(units,project.id,rec.transfereeBookingNo,null,null):null;
+        if(sourceUnit||transfereeUnit) matched.push({project,sourceUnit,transfereeUnit,rec}); else unmatched.push(rec);
+      }
       else{
         const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
         // A cancelled booking keeps its unit row for audit but must not take financial rows - those
@@ -14185,6 +14209,7 @@ window.cpaImportTypeChange=function(){
       receipt_register:'Real "Receipt Register Details" export — dated receipts, one row per receipt-to-invoice allocation.',
       receipt_reversal:'Real "Receipt Reversal Register Details" export — cheque returns, one row per reversal revenue-head line.',
       booking_register:'Real "Booking Register Summary" export — booking status per unit; marks cancelled bookings cancelled.',
+      ptc_transfer:'Real "Payment To Customer Register" export — booking transfers and refunds, one row per PTC document.',
     }[type]||'';
   }else{
     const c=CPA_IMPORT_COLUMNS[type];
@@ -14210,6 +14235,7 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
       :type==='invoice_register'?cpaParseInvoiceRegister(wb)
       :type==='receipt_reversal'?cpaParseReceiptReversal(wb)
       :type==='booking_register'?cpaParseBookingRegister(wb)
+      :type==='ptc_transfer'?cpaParsePTC(wb)
       :cpaParseReceiptRegister(wb);
   }catch(e){toast(e.message,'err');return;}
   if(!parsed.length){toast('No data rows found in that file','err');return;}
@@ -14223,6 +14249,18 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
       matched.push({rec,project});
       return;
     }
+    if(type==='ptc_transfer'){
+      // Both sides are looked up independently, and neither is required alone: the source booking is
+      // very often a cancelled booking that was never Active (so Sales Details never created a unit
+      // for it, per the same rule above) - that's expected, not a failure, since the whole point of
+      // the transferee side is to land the money on a unit that DOES exist. Only genuinely unmatched
+      // if NEITHER side resolves to anything we can attach money to.
+      const sourceUnit=cpaResolveUnit(units,project.id,rec.sourceBookingNo,null,null);
+      const transfereeUnit=rec.transfereeBookingNo?cpaResolveUnit(units,project.id,rec.transfereeBookingNo,null,null):null;
+      if(!sourceUnit&&!transfereeUnit){ unmatched.push(rec); return; }
+      matched.push({rec,project,sourceUnit,transfereeUnit});
+      return;
+    }
     const unit=cpaResolveUnit(units,project.id,rec.bookingNo,rec.tower,rec.unitCode);
     // Cancelled bookings keep their unit row for audit but take no financial rows - see the note in
     // the queue importer. booking_register is exempt, since cancelling is what it does.
@@ -14234,12 +14272,15 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
   const sampleCols=type==='sales_details'?['Booking No','Customer','Unit','Tower','Project','Cost items']
     :type==='outstanding'?['Booking No','Customer','Unit','Net Outstanding','On Account']
     :type==='invoice_register'?['Doc No','Date','Booking No','Customer','Unit','Schedule','Amount']
+    :type==='ptc_transfer'?['Doc No','Date','Amount','Debit unit','Credit unit','Narration']
     :['Receipt No','Date','Booking No','Customer','Invoice No','Amount'];
   const sampleRows=matched.slice(0,10).map(m=>{
     const r=m.rec;
     if(type==='sales_details') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.tower),esc(m.project.name),r.costItems.length];
     if(type==='outstanding') return [esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),custInr(r.netOutstanding),custInr(r.onAccount)];
     if(type==='invoice_register') return [esc(r.docNo),fmtDate(r.docDate),esc(r.bookingNo),esc(r.customerName),esc(r.unitCode),esc(r.schedule),custInr(r.netAmount)];
+    if(type==='ptc_transfer') return [esc(r.documentNo),fmtDate(r.documentDate),custInr(r.amount),
+      m.sourceUnit?esc(m.sourceUnit.unit_code):'—',m.transfereeUnit?esc(m.transfereeUnit.unit_code):'—',esc(r.narration||'—')];
     return [esc(r.receiptNo),fmtDate(r.receiptDate),esc(r.bookingNo),esc(r.customerName),esc(r.invoiceNo||'—'),custInr(r.amount)];
   });
   $('cpaImpPreview').innerHTML=`<div class="card card-pad">
@@ -14340,7 +14381,7 @@ async function cpaImportConfirmXlsx(st){
     import_type:st.type,file_name:st.fileName,imported_by:state.email,
     project_names:[...new Set(st.matched.map(m=>m.project&&m.project.name).filter(Boolean))].sort(),
     row_count:st.parsedCount,matched_count:st.matched.length,unmatched_count:st.unmatched.length,
-    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||'').filter(Boolean),
+    unmatched_codes:st.unmatched.map(r=>r.bookingNo||r.unitCode||r.documentNo||'').filter(Boolean),
     raw_rows:st.matched.length<=CPA_RAW_ROWS_MAX?st.matched.map(m=>m.rec):[]}).select('id').single();
   if(beErr)throw beErr;
   const batchId=batch.id;
@@ -14480,6 +14521,27 @@ async function cpaImportConfirmXlsx(st){
       const r=m.rec;
       const newStatus=r.status==='Cancel'?'cancelled':'booked';
       await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+    }
+  }else if(st.type==='ptc_transfer'){
+    // ptc_transfers_doc_uq is a PARTIAL unique index (WHERE deleted_at is null) - same reason
+    // .upsert({onConflict:...}) silently broke cust.invoices/cust.money_receipts for eleven days.
+    // Look the row up ourselves instead of trusting Postgres to infer the index.
+    const docNos=st.matched.map(m=>m.rec.documentNo);
+    const existingByDoc={};
+    for(let i=0;i<docNos.length;i+=100){
+      const {data}=await sb.schema('cust').from('ptc_transfers').select('id,document_no')
+        .in('document_no',docNos.slice(i,i+100)).is('deleted_at',null);
+      (data||[]).forEach(r=>{existingByDoc[r.document_no]=r.id;});
+    }
+    for(const m of st.matched){
+      const r=m.rec;
+      const row={document_no:r.documentNo,document_date:r.documentDate,amount:r.amount,narration:r.narration,
+        source_booking_no:r.sourceBookingNo,source_unit_id:(m.sourceUnit&&m.sourceUnit.id)||null,
+        transferee_booking_no:r.transfereeBookingNo,transferee_unit_id:(m.transfereeUnit&&m.transfereeUnit.id)||null,
+        is_reversed:r.isReversed,is_current:true,import_batch_id:batchId};
+      const existingId=existingByDoc[r.documentNo];
+      if(existingId){ const {error}=await sb.schema('cust').from('ptc_transfers').update(row).eq('id',existingId); if(error)throw error; }
+      else{ const {error}=await sb.schema('cust').from('ptc_transfers').insert(row); if(error)throw error; }
     }
   }
   toast(st.matched.length+' row(s) imported','ok');
@@ -15435,13 +15497,22 @@ async function custTabOverview(data,unit){
       : Number(r.total_amount||0);
     if(amt) entries.push({date:r.receipt_date,type:'Receipt',desc:(r.payment_mode||'')+(r.instrument_no?' · '+r.instrument_no:''),amount:-amt});
   });
+  // PTC (transfer/refund) - see the fuller note in custTabLedger. Included here too so this preview
+  // cannot omit an entry the full Ledger shows for the same unit.
+  const [{data:ovPtcOut},{data:ovPtcIn}]=await Promise.all([
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount,narration').eq('source_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('document_date,amount,narration').eq('transferee_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null)
+  ]);
+  (ovPtcOut||[]).forEach(p=>entries.push({date:p.document_date,type:'PTC',desc:p.narration||'Transfer / refund',amount:Number(p.amount||0)}));
+  (ovPtcIn||[]).forEach(p=>entries.push({date:p.document_date,type:'PTC',desc:p.narration||'Transfer in',amount:-Number(p.amount||0)}));
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   // No running balance: the KPIs above are Farvision's position, and this list's own tally would be
   // a second answer to the same question. It showed -51,62,707 on one unit whose Demand due, taken
   // from Farvision, was nothing of the sort.
   const recent=entries.slice(-5).reverse();
-  const recentRows=recent.map(e=>[fmtDate(e.date),e.type==='Demand'?'<span class="tag t-amber">Demand</span>':'<span class="tag t-green">Receipt</span>',
-    esc(e.desc||'—'),e.type==='Demand'?custInr(e.amount):'—',e.type==='Receipt'?custInr(-e.amount):'—']);
+  const typeTag={Demand:'<span class="tag t-amber">Demand</span>',Receipt:'<span class="tag t-green">Receipt</span>',PTC:'<span class="tag t-blue">Transfer</span>'};
+  const recentRows=recent.map(e=>[fmtDate(e.date),typeTag[e.type]||esc(e.type),
+    esc(e.desc||'—'),e.amount>0?custInr(e.amount):'—',e.amount<0?custInr(-e.amount):'—']);
 
   // Until a real Invoice/Receipt Register import exists for this project, the cost sheet from
   // Sales Details is the only per-charge breakdown available - shown as its own section rather
@@ -15545,13 +15616,16 @@ window.custPrintStatement=function(){
   setTimeout(function(){ try{w.focus();w.print();}catch(_e){} },350);
 };
 async function custTabLedger(unit){
-  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows}]=await Promise.all([
+  const [{data:rcptRows},{data:revRows},{data:csiRows},{data:invRows},{data:ptcOutRows},{data:ptcInRows}]=await Promise.all([
     sb.schema('cust').from('money_receipts').select('*,receipt_items(against_demand_no,amount)').eq('unit_id',unit.id).eq('is_current',true).order('receipt_date'),
     sb.schema('cust').from('receipt_reversals').select('*').eq('unit_id',unit.id).eq('is_current',true).order('receipt_reversal_date'),
     sb.schema('cust').from('cost_sheet_items').select('component,bill_amount').eq('unit_id',unit.id).eq('is_current',true),
-    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date')
+    sb.schema('cust').from('invoices').select('id,document_no,document_date,invoice_type,due_date,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
+    sb.schema('cust').from('ptc_transfers').select('*').eq('source_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null),
+    sb.schema('cust').from('ptc_transfers').select('*').eq('transferee_unit_id',unit.id).eq('is_reversed',false).is('deleted_at',null)
   ]);
   const receipts=rcptRows||[], reversals=revRows||[], costItems=csiRows||[], invoices=invRows||[];
+  const ptcOut=ptcOutRows||[], ptcIn=ptcInRows||[];
   const entries=[];
   invoices.forEach(inv=>{
     // Farvision's real Applicant Ledger shows one row per (Document No x Schedule) -
@@ -15596,8 +15670,19 @@ async function custTabLedger(unit){
   Object.values(revByNo).forEach(rv=>{
     entries.push({date:rv.date,type:'CQRV',ref:rv.ref,desc:'Cheque return'+(rv.instrument?' · '+rv.instrument:''),debit:rv.total,credit:0});
   });
+  /* PTC (Payment To Customer) - Farvision's transfer/refund document, the fourth type on its own
+     Customer Ledger and the one report of the seven that arrives filed under the SOURCE booking
+     rather than the unit the money actually affects. A transfer debits this unit when it is the
+     source (money leaving) and credits it when it is the transferee (money arriving) - a refund is
+     just the same debit with no transferee, so no separate handling is needed here. */
+  ptcOut.forEach(p=>{
+    entries.push({date:p.document_date,type:'PTC',ref:p.document_no,desc:p.narration||'Transfer / refund',debit:Number(p.amount||0),credit:0});
+  });
+  ptcIn.forEach(p=>{
+    entries.push({date:p.document_date,type:'PTC',ref:p.document_no,desc:p.narration||'Transfer in',debit:0,credit:Number(p.amount||0)});
+  });
   entries.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>'};
+  const tags={INV:'<span class="tag t-amber">Invoice</span>',RECEIPT:'<span class="tag t-green">Receipt</span>',CQRV:'<span class="tag t-red">Reversal</span>',PTC:'<span class="tag t-blue">Transfer</span>'};
   const seenInvoice={};
   const pick=(kind,id)=>'<input type="checkbox" class="rcpt-pick" data-kind="'+kind+'" value="'+id+'" onchange="custDocPickChanged()">';
   const refCell=e=>{
