@@ -14060,7 +14060,9 @@ async function cpaRenderImport(host,seg){
   }
 
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register'])
+  // All six .xlsx reports, not four. Manual upload is the fallback whenever the Gmail fetcher is
+  // down - it was missing exactly the two types that could not then be imported by any route.
+  const typeOpts=Object.keys(CPA_IMPORT_COLUMNS).concat(['sales_details','outstanding','invoice_register','receipt_register','receipt_reversal','booking_register'])
     .map(k=>`<option value="${k}">${esc(CPA_IMPORT_LABELS[k]||k)}</option>`).join('');
   host.innerHTML=`<div class="tabs" style="margin-bottom:14px"><div class="tab active">Import</div><div class="tab" onclick="navTo('custportal_admin/2/history')">Import History</div></div>
     ${queueHtml}
@@ -14181,6 +14183,8 @@ window.cpaImportTypeChange=function(){
       outstanding:'Real "Customer Outstanding Summary" export — an as-on-date balance snapshot, one row per booking.',
       invoice_register:'Real "Invoice Register Details" export — dated demand, one row per invoice line.',
       receipt_register:'Real "Receipt Register Details" export — dated receipts, one row per receipt-to-invoice allocation.',
+      receipt_reversal:'Real "Receipt Reversal Register Details" export — cheque returns, one row per reversal revenue-head line.',
+      booking_register:'Real "Booking Register Summary" export — booking status per unit; marks cancelled bookings cancelled.',
     }[type]||'';
   }else{
     const c=CPA_IMPORT_COLUMNS[type];
@@ -14204,6 +14208,8 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
     parsed=type==='sales_details'?cpaParseSalesDetails(wb)
       :type==='outstanding'?cpaParseOutstanding(wb)
       :type==='invoice_register'?cpaParseInvoiceRegister(wb)
+      :type==='receipt_reversal'?cpaParseReceiptReversal(wb)
+      :type==='booking_register'?cpaParseBookingRegister(wb)
       :cpaParseReceiptRegister(wb);
   }catch(e){toast(e.message,'err');return;}
   if(!parsed.length){toast('No data rows found in that file','err');return;}
