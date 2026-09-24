@@ -509,7 +509,6 @@ const NAV=[
   {group:'Knowledge',items:[
     {id:'documents',label:'Document Library',icon:'fa-folder-open'},
     {id:'video',label:'Video Library',icon:'fa-clapperboard'},
-    {id:'helpdesk',label:'AI Help Desk',icon:'fa-headset'},
     {id:'reports',label:'Reports',icon:'fa-chart-pie'},
   ]},
   {group:'Stakeholder Portals',items:[
@@ -904,7 +903,7 @@ VIEWS.dashboard=async function(v){
   }catch(e){$('wAct').innerHTML='<div class="empty" style="padding:22px">No recent activity</div>';}
 
   // quick actions
-  const q=[{l:'Upload Document',i:'fa-upload',h:'documents'},{l:'New Task',i:'fa-list-check',h:'tasks'},{l:'Legal Vault',i:'fa-scale-balanced',h:'legal'},{l:'Add Lead',i:'fa-handshake',h:'crm'},{l:'View Reports',i:'fa-chart-pie',h:'reports'},{l:'Help Desk',i:'fa-headset',h:'helpdesk'},{l:'New Inspection',i:'fa-clipboard-check',h:'inspection/new'},{l:'Projects',i:'fa-building',h:'projects'},{l:'Finance Vault',i:'fa-indian-rupee-sign',h:'finance'},{l:'Renewals',i:'fa-calendar-check',h:'compliance'}];
+  const q=[{l:'Upload Document',i:'fa-upload',h:'documents'},{l:'New Task',i:'fa-list-check',h:'tasks'},{l:'Legal Vault',i:'fa-scale-balanced',h:'legal'},{l:'Add Lead',i:'fa-handshake',h:'crm'},{l:'View Reports',i:'fa-chart-pie',h:'reports'},{l:'New Inspection',i:'fa-clipboard-check',h:'inspection/new'},{l:'Projects',i:'fa-building',h:'projects'},{l:'Finance Vault',i:'fa-indian-rupee-sign',h:'finance'},{l:'Renewals',i:'fa-calendar-check',h:'compliance'}];
   $('wQuick').innerHTML='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">'+q.map(x=>'<div class="lib-card" style="padding:14px;display:flex;align-items:center;gap:10px" onclick="navTo(\''+x.h+'\')"><div class="ic" style="width:36px;height:36px;margin:0;background:var(--brand-50);color:var(--brand)"><i class="fa-solid '+x.i+'"></i></div><div style="font-weight:600;font-size:13px">'+x.l+'</div></div>').join('')+'</div>';
 
 
@@ -5977,364 +5976,6 @@ window.setProfileSave=async function(){
 };
 
 
-/* ============================ HELP DESK ============================ */
-const UNDER_CONSTRUCTION='This module is currently <b>under construction</b> — no further details can be provided at this time. Please raise a ticket if you need help.';
-const HD_KB=[
- // ── Documents ──────────────────────────────────────────────────────────────
- {k:['upload document','upload file','add document','add file','put file','upload a doc'],a:`To upload a document: open <b>Document Library</b> from the sidebar, pick a department tab, then click <b>Upload</b>. Select your file, choose or type a <b>Category/Folder</b>, and save. Large files (up to 5 GB) are supported via resumable upload.`},
- {k:['folder','category','new folder','create folder','add category'],a:`To create a folder/category: inside any Document Library click <b>+ New Folder</b>. In <b>Legal</b>, every folder and category in the tree has a small <b>+</b> icon — click it to add a category inside that exact spot (Litigation, Projects, a project, or a category), or use <b>+ Add main folder</b> at the bottom for a brand-new top-level folder.`},
- {k:['search document','find document','document search','search file','search by name'],a:`Use the <b>Find a Document</b> tab here to search by file name, title or document number. In the Document Library you can filter by status and date. Word-inside-file search has been replaced with name-based search for speed.`},
- {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`Indexing is now <b>automatic</b> — when you upload a scanned PDF or image it is read by AI (Gemini OCR) in the background, so the words inside it become searchable within moments. There's nothing to click: just type in the search box in a Document Library or the Legal module and matching files appear by name and by text inside them.`},
- {k:['download file','download document','get file','open file','preview file'],a:`To download or preview: find the file in <b>Document Library</b>, click the file row to open its detail panel, then click <b>Open</b> or <b>Download</b>. Files open in a new tab.`},
- {k:['delete document','remove file','delete file'],a:`To delete a document: open the file in <b>Document Library</b>, then click <b>Delete</b> in the detail panel. This removes both the database record and the stored file.`},
- {k:['legal','vault','title deed','deed','rera','agreement','noc','sanction','land record','court'],a:`The <b>Legal Vault</b> is organised as a tree: two main folders, <b>Litigation</b> and <b>Projects</b>. Under <b>Projects</b> sit the individual projects (Dream Gurukul, Dream World City, Dream One, Dream Eco City, Dream Valley, Dream Exotica, Dream Ananta), and each project has <b>History of Land / Chain</b>, <b>Title Papers</b>, <b>Permissions & Sanctions</b>, <b>RERA & Compliance</b> and <b>Project Manual</b>. Click the <b>+</b> next to any folder to add a category inside it, and <b>Upload</b> to add files to a category.`},
- // ── Accountability ─────────────────────────────────────────────────────────
- {k:['task','new task','create task','to-do','todo','make task'],a:`To create a task: go to <b>Accountability → Tasks</b> and click <b>New Task</b>. Add title, description, owner, members, priority, due date and progress. Tasks with members added appear in the <b>Tasks</b> tab for all members. Solo tasks (no members) appear only in your <b>Home → My Tasks</b>.`},
- {k:['team task','shared task','task member','add member to task'],a:`Tasks with members are called <b>Team Tasks</b>. Add members in the New Task form. They appear in the <b>Tasks</b> tab for every member and the creator. Personal tasks with no members only appear in your <b>Home → My Tasks</b>.`},
- {k:['delegate','delegation','assign','give work','assign task'],a:`To delegate: go to <b>Accountability → Delegation</b> and click <b>Delegate a task</b>. Choose the person from your delegation list, fill in details and due date. It shows under <b>I've Assigned</b> in your Home, and under <b>I've Been Assigned</b> for the recipient. Delegation requires the <b>can delegate</b> setting to be enabled in your profile.`},
- {k:['goal','objective','target','personal goal','team goal','company goal'],a:`Goals are in <b>Accountability → Goals</b>. Choose scope — <b>Personal</b> (yours only, visible in Home → My Goals), <b>Team</b> (shared with added members, visible in Team Goals tab), or <b>Company</b> (visible to everyone). Click <b>New Goal</b> and fill in name, dates and description.`},
- {k:['home','my tasks','accountability home','my goals','assigned to me'],a:`<b>Accountability Home</b> shows: <b>My Tasks</b> (your solo tasks), <b>Assigned To Me</b> (delegations from others), <b>I've Assigned</b> (delegations you sent), plus <b>My Goals</b>, an Activity Feed, and productivity/workload charts.`},
- {k:['profile','designation','department','reporting manager','edit profile'],a:`Your profile (name, designation, department, reporting manager, delegation settings) is set when you first open Accountability, and editable anytime from <b>Settings → Edit profile</b>.`},
- // ── Procurement ────────────────────────────────────────────────────────────
- {k:['procurement','indent','quote','po','grn','purchase order','quotation'],a:`The <b>Procurement</b> module has four tabs: <b>Indent</b> (purchase requests), <b>Quote Comp</b> (quotation comparison sheets — upload, preview, download, select and delete), <b>PO</b> (purchase orders), and <b>GRN</b> (goods received notes).`},
- {k:['quote comp','quotation comparison','sheet upload','procurement upload'],a:`In <b>Procurement → Quote Comp</b>: click <b>Upload</b> to add a sheet (PDF, Excel etc.), enter a name, and save. Cards appear for each sheet. Click to select (blue border), double-click to preview in a new tab. With one selected you can <b>Edit</b> (rename/replace file), <b>Download</b>, or <b>Delete</b>. Multiple selections allow Download and Delete but not Edit.`},
- // ── Recruitment ────────────────────────────────────────────────────────────
- {k:['recruitment','test','assessment','aptitude test','hiring test','job test'],a:`<b>Recruitment → Tests</b> lists all assessment links (Common Attitude, Accounts, Legal, Post Sales Admin, HR, Sales, Tele Sales, Legal New). Click any link to open the test form in a new tab. This table is read-only.`},
- {k:['job description','jd','description','position description'],a:`<b>Recruitment → Descriptions</b> shows job description PDFs for all positions. Click a card to select it, double-click or press <b>Preview</b> to open the PDF, or <b>Download</b> to save it. Admins can add new JDs via <b>Upload JD</b>, and remove any of them from there too.`},
- // ── Control Panel ──────────────────────────────────────────────────────────
- {k:['control panel','admin','administrator','user access','module access','tab access','permissions'],a:`The <b>Control Panel</b> is visible only to administrators. It lists all users — new signups show an amber <b>New · needs setup</b> badge with 0 tabs until configured. Click a user to set their department, level (Manager/Employee etc.) and which modules they can access using the grouped checkbox panel.`},
- {k:['new user','signup','onboarding','approve user','set up user'],a:`When someone signs up, they fill an onboarding form (name, designation, reporting manager). They then appear in the <b>Control Panel</b> with 0 tabs and a pending badge. An admin must open their profile and assign department, level and module access, then click <b>Save access</b>.`},
- // ── Projects / Dashboard ───────────────────────────────────────────────────
- {k:['projects','active projects','dashboard','kpi','project count'],a:`The <b>Dashboard</b> shows KPIs including Active Projects (currently 6 — Dream Valley Ph-2, Jain Heights, Green Acres, Royal Enclave, Trade Centre, Siliguri). The Projects panel lists all ongoing construction projects with their site and status.`},
- // ── Help Desk ──────────────────────────────────────────────────────────────
- {k:['ticket','raise ticket','support ticket','help ticket','complaint','problem'],a:`To raise a support ticket: open <b>Help Desk → My Tickets</b>, fill in the subject, department and description, then click <b>Submit ticket</b>. You can track all your tickets in the same tab.`},
- {k:['password','reset password','forgot password','sign in','login','log in'],a:`To reset your password: use <b>Forgot password?</b> on the sign-in page. You'll receive an email link to set a new one. Alternatively, contact your administrator.`},
- {k:['navigate','menu','sidebar','module','how to use','get around'],a:`Use the left sidebar to navigate: <b>Dashboard</b> (overview KPIs), <b>Accountability</b> (tasks, goals, delegation), <b>Document Library</b> & <b>Legal</b> (files), <b>Procurement</b>, <b>Recruitment</b>, <b>Help Desk</b>, and <b>Control Panel</b> (admins only). The <b>JAIN-E</b> logo always brings you Home.`},
- // ── Construction module ───────────────────────────────────────────────────
- {k:['construction','construction module','site','rcc','work order','contractor','tower','plinth','finishing','stage','construction stage'],a:`The <b>Construction</b> module shows live site data across all active projects. It has three tabs: <b>Towers & Units</b> (project tower breakdown, units sold, current stage), <b>Construction Stages</b> (% complete, target date, on-track/delayed status per project), and <b>Work Orders</b> (WO number, contractor, scope, amount, status).`},
- // ── Sign out ───────────────────────────────────────────────────────────────
- {k:['sign out','signout','log out','logout','exit','how to sign out','how to log out'],a:`To sign out: click your <b>avatar / name</b> in the top-right corner of the screen, then click <b>Sign out</b> from the dropdown menu.`},
- // ── Recruitment PDFs ───────────────────────────────────────────────────────
- {k:['find jd','search jd','find job description','search job description','general manager','executive pr','gm sales','human resource','litigation officer','accountant','compliance officer','executive sales','recruitment pdf'],a:`Job Description PDFs are in <b>Recruitment → Descriptions</b>. Eight positions are available by default: General Manager Commercial, Executive PR, GM Sales & Marketing, Human Resource, Executive Sales, Litigation Officer, Accountant, and Compliance Officer. Click any card to select it, then <b>Preview</b> to open or <b>Download</b> to save.`},
- // ── Under construction catch-all ───────────────────────────────────────────
- {k:['gtd','get things done','crm','sales pipeline','maintenance','asset','inspection','finance','financial','compliance','renewal','video library','scaling','playbook','customer portal','supplier portal','whatsapp bot','mail','naren'],a:`${UNDER_CONSTRUCTION}`},
-];
-function hdAnswer(q){
-  const ql=' '+q.toLowerCase()+' ';
-  let best=null,score=0;
-  const UNDER=['gtd','crm','maintenance','asset','inspection','finance','compliance','renewal','video','scaling','playbook','customer portal','supplier portal','whatsapp','naren'];/* construction, campaign analytics are live */
-  const isUnder=UNDER.some(k=>ql.includes(k));
-  HD_KB.forEach(e=>{let sc=0;e.k.forEach(k=>{if(ql.includes(k))sc+=k.length*2;});if(sc>score){score=sc;best=e;}});
-  if(score>0)return best.a;
-  if(isUnder)return 'This module is currently <b>under construction</b> — no further details can be provided at this time. Please <a style="color:var(--brand);font-weight:600;cursor:pointer" onclick="navTo(`helpdesk/tickets`)">raise a ticket</a> if you need help.';
-  return null;
-}
-
-let HD_MSGS=[];
-VIEWS.helpdesk=function(v,seg){
-  setCrumb(['Home','Help Desk']);
-  // "Find a Document" has been removed: document searching belongs in the Legal module (and the
-  // Document Library), where the folders, filters and permissions live. A second search box here
-  // only split the habit in two. Anyone landing on the old /helpdesk/docs address is sent there.
-  let tab=(seg[0]||'assistant');
-  if(tab==='docs'){ navTo('legal'); return; }
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-headset" style="color:#0f766e"></i> Help Desk</h1><p>Ask a question or get help using the portal</p></div></div>
-  <div class="tabs">
-    <div class="tab ${tab==='assistant'?'active':''}" onclick="navTo('helpdesk/assistant')"><i class="fa-solid fa-robot"></i> Assistant</div>
-    <div class="tab ${tab==='tickets'?'active':''}" onclick="navTo('helpdesk/tickets')"><i class="fa-solid fa-ticket"></i> My Tickets</div>
-  </div><div id="hdBody"></div>`;
-  if(tab==='tickets')hdTickets(); else hdAssistant();
-};
-/* The assistant answers in markdown — bold, bullets, and small tables when it lists things — so it
-   needs rendering rather than dumping. Deliberately a small, closed renderer over escaped text:
-   the reply travels through ChatGPT and can quote case titles and document contents, so nothing is
-   ever treated as HTML. Only the handful of shapes the assistant is asked to produce are turned
-   back into tags. */
-function hdMd(src){
-  let s=esc(String(src==null?'':src));
-  // tables first, while the pipe rows are still on their own lines
-  s=s.replace(/(?:^\|.*\|[ \t]*\n)+/gm,function(block){
-    const lines=block.trim().split('\n').map(l=>l.trim()).filter(Boolean);
-    const cells=l=>l.replace(/^\|/,'').replace(/\|$/,'').split('|').map(c=>c.trim());
-    if(lines.length<2||!/^\|[\s:|-]+\|$/.test(lines[1])) return block;
-    const head=cells(lines[0]), body=lines.slice(2).map(cells);
-    return '<table class="hd-tbl"><thead><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'
-      +body.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table>\n';
-  });
-  s=s.replace(/```([\s\S]*?)```/g,(_m,c)=>'<pre class="hd-pre">'+c.replace(/^\n/,'')+'</pre>');
-  s=s.replace(/`([^`\n]+)`/g,'<code class="hd-code">$1</code>');
-  s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
-  s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g,'$1<i>$2</i>');
-  s=s.replace(/^#{1,4}\s+(.+)$/gm,'<div class="hd-h">$1</div>');
-  // bullet and numbered runs
-  s=s.replace(/(?:^[-*]\s+.+\n?)+/gm,function(b){
-    return '<ul class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^[-*]\s+/,'')+'</li>').join('')+'</ul>';
-  });
-  s=s.replace(/(?:^\d+\.\s+.+\n?)+/gm,function(b){
-    return '<ol class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^\d+\.\s+/,'')+'</li>').join('')+'</ol>';
-  });
-  s=s.replace(/\n{2,}/g,'<br><br>').replace(/\n/g,'<br>');
-  s=s.replace(/<br>\s*(<(?:ul|ol|table|pre|div class="hd-h")\b)/g,'$1');
-  s=s.replace(/(<\/(?:ul|ol|table|pre)>)\s*<br>/g,'$1');
-  return s;
-}
-const HD_SUGGEST=[
-  {g:'My work',   q:['Where do I stand right now?','What have I got overdue?','What am I waiting to approve?','What are my goals at?']},
-  {g:'Legal',     q:['Which hearings are in the next 10 days?','Show me the High priority cases','Any case at the High Court?']},
-  {g:'Workflow',  q:['How many invoices are still in progress?','Which step is each pending invoice sitting at?']},
-  {g:'Around me', q:['Who is in the Legal department?','Who does Ankita report to?','What meetings are coming up?','What did the last meeting cover?']},
-  {g:'How do I',  q:['How do I delegate a task?','How do I upload a document?','How do I record an online meeting?','How do I export a causelist?']},
-  {g:'Modules',   q:['Which modules are actually live?','Is CRM ready yet?','Is the Finance Vault real data?','Can I see competitor ads?']},
-  {g:'Account',   q:['How do I sign in or get an account?','I forgot my password','Why is a module missing from my sidebar?','Where do I change my profile?']},
-  {g:'Problems',  q:['Why am I not getting emails?','The page is showing an error','My transcript is stuck on Transcribing','Which outside services does the portal use?']}
-];
-function hdAssistant(){
-  const b=$('hdBody');
-  b.innerHTML=`<style>
-    .hd-wrap{max-width:900px;margin:0 auto}
-    .hd-shell{border:1px solid var(--line);border-radius:16px;background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(15,23,42,.05)}
-    .hd-top{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f766e,#0d5f59)}
-    .hd-top .ava{width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;flex:none}
-    .hd-top .who{color:#fff;font-size:14px;font-weight:700;line-height:1.25}
-    .hd-top .sub{color:rgba(255,255,255,.72);font-size:11.5px}
-    .hd-top .live{margin-left:auto;display:flex;align-items:center;gap:6px;color:rgba(255,255,255,.85);font-size:11px;font-weight:600}
-    .hd-top .live i{font-size:7px;color:#4ade80}
-    .hd-new{border:1px solid rgba(255,255,255,.28);background:transparent;color:#fff;height:28px;padding:0 10px;border-radius:8px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
-    .hd-new:hover{background:rgba(255,255,255,.14)}
-    .hd-scroll{padding:18px 16px;height:52vh;min-height:320px;overflow-y:auto;background:var(--bg-subtle,#fafbfd)}
-    .hd-msg{display:flex;gap:11px;margin-bottom:16px;align-items:flex-start}
-    .hd-msg.me{flex-direction:row-reverse}
-    .hd-ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
-    .hd-ic.bot{background:#0f766e}
-    .hd-bub{max-width:78%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.62;overflow-wrap:anywhere}
-    .hd-msg.bot .hd-bub{background:var(--bg-card);border:1px solid var(--line);border-top-left-radius:4px;color:var(--ink)}
-    .hd-msg.me  .hd-bub{background:var(--brand);color:#fff;border-top-right-radius:4px}
-    .hd-bub b{font-weight:700}
-    .hd-h{font-weight:700;font-size:13.5px;margin:10px 0 4px}
-    .hd-ul{margin:6px 0 6px 18px;padding:0}
-    .hd-ul li{margin:3px 0}
-    .hd-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin:9px 0;display:block;overflow-x:auto}
-    .hd-tbl th,.hd-tbl td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
-    .hd-tbl th{background:var(--bg-subtle,#f8fafc);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap}
-    .hd-pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:8px 0}
-    .hd-code{background:var(--bg-subtle,#f1f5f9);padding:1px 5px;border-radius:4px;font-size:12.5px}
-    .hd-tools{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);color:var(--slate);font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-    .hd-tools .tp{background:var(--bg-subtle,#f1f5f9);border-radius:5px;padding:1px 6px;font-weight:600}
-    .hd-foot{color:var(--slate);font-size:11.5px;margin-top:8px}
-    .hd-foot a{color:var(--brand);font-weight:600;cursor:pointer}
-    .hd-sug{padding:12px 16px;border-top:1px solid var(--line);background:var(--bg-card)}
-    .hd-sug-g{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
-    .hd-sug-g:last-child{margin-bottom:0}
-    .hd-sug-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);flex:0 0 76px}
-    .hd-chip{border:1px solid var(--line);background:var(--bg-card);color:var(--ink);border-radius:20px;padding:5px 12px;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:border-color .12s,color .12s,background .12s}
-    .hd-chip:hover{border-color:#0f766e;color:#0f766e;background:#f0fdfa}
-    .hd-bar{display:flex;gap:9px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end;background:var(--bg-card)}
-    .hd-in{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:13.5px;font-family:inherit;line-height:1.5;max-height:132px;background:var(--bg-card);color:var(--ink)}
-    .hd-in:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.12)}
-    .hd-send{height:42px;width:42px;flex:none;border:0;border-radius:12px;background:#0f766e;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:filter .12s}
-    .hd-send:hover:not(:disabled){filter:brightness(1.12)}
-    .hd-send:disabled{opacity:.5;cursor:not-allowed}
-    .hd-dots span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:var(--slate);animation:hdb 1s infinite}
-    .hd-dots span:nth-child(2){animation-delay:.15s}
-    .hd-dots span:nth-child(3){animation-delay:.3s}
-    @keyframes hdb{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
-    .hd-hint{text-align:center;color:var(--slate);font-size:11px;padding:0 16px 11px;background:var(--bg-card)}
-    @media(max-width:760px){
-      .hd-scroll{height:56vh;padding:14px 12px}
-      .hd-bub{max-width:88%}
-      .hd-sug-lbl{flex:1 1 100%}
-      .hd-sug{max-height:132px;overflow-y:auto}
-    }
-  </style>
-  <div class="hd-wrap"><div class="hd-shell">
-    <div class="hd-top">
-      <div class="ava"><i class="fa-solid fa-robot"></i></div>
-      <div><div class="who">JAIN-E Assistant</div><div class="sub">Reads your live portal data · never changes anything</div></div>
-      <span class="live"><i class="fa-solid fa-circle"></i> Online</span>
-      <button class="hd-new" onclick="hdReset()"><i class="fa-solid fa-rotate-left"></i> New chat</button>
-    </div>
-    <div class="hd-scroll" id="hdChat"></div>
-    <div class="hd-sug" id="hdChips"></div>
-    <div class="hd-bar">
-      <textarea id="hdQ" class="hd-in" rows="1" placeholder="Ask anything — your tasks, a hearing date, where an invoice is stuck, how to do something…"
-        oninput="hdGrow(this)" onkeydown="hdKey(event)"></textarea>
-      <button class="hd-send" id="hdSendBtn" onclick="hdSend()" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
-    </div>
-    <div class="hd-hint">Enter to send · Shift+Enter for a new line. Answers come from live data — double-check anything you act on.</div>
-  </div></div>`;
-  $('hdChips').innerHTML=HD_SUGGEST.map(g=>'<div class="hd-sug-g"><span class="hd-sug-lbl">'+esc(g.g)+'</span>'
-    +g.q.map(q=>'<button class="hd-chip" onclick="hdAsk(this.textContent)">'+esc(q)+'</button>').join('')+'</div>').join('');
-  if(!HD_MSGS.length) HD_MSGS=[{who:'bot',md:"Ask me anything about your work here — I can read the live data.\n\n- **Your plate** — what's open, overdue, or waiting on you\n- **Legal** — hearings coming up, a case, a court, a priority\n- **Workflow** — where an invoice has got to, and what's still moving\n- **People** — who is in which department, who reports to whom\n- **Meetings, documents, calls, ad spend** — figures and summaries\n- **Any module** — whether it's live yet, and what it does\n- **Signing in, email, settings, errors** — and which outside services we use\n\nI only read — I can't change anything, and I'll tell you plainly when a module hasn't started yet rather than quote its sample figures."}];
-  hdRenderChat();
-  setTimeout(()=>{const i=$('hdQ'); if(i)try{i.focus();}catch(_e){}},60);
-}
-window.hdGrow=function(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,132)+'px'; };
-window.hdKey=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); hdSend(); } };
-window.hdReset=function(){ HD_MSGS=[]; hdAssistant(); };
-/* A message carries EITHER .md (markdown from the assistant, rendered through hdMd) or .html (a
-   fixed bit of our own markup, e.g. the typing dots). A person's own message is escaped text. */
-function hdRenderChat(){
-  const c=$('hdChat');if(!c)return;
-  const mine=esc(initials((state.profile&&state.profile.full_name)||state.email).toUpperCase());
-  c.innerHTML=HD_MSGS.map(function(m){
-    if(m.who!=='bot'){
-      return '<div class="hd-msg me"><div class="hd-ic" style="background:'+colorFor(state.email)+'">'+mine+'</div>'
-        +'<div class="hd-bub">'+esc(m.text||'')+'</div></div>';
-    }
-    let body=m.html||hdMd(m.md||'');
-    if(m.tools&&m.tools.length){
-      const seen=[]; m.tools.forEach(function(t){ if(t&&seen.indexOf(t)===-1) seen.push(t); });
-      body+='<div class="hd-tools"><i class="fa-solid fa-database"></i> read '
-        +seen.map(function(t){ return '<span class="tp">'+esc(String(t).replace(/_/g,' '))+'</span>'; }).join(' ')+'</div>';
-    }
-    if(m.offerTicket) body+='<div class="hd-foot">Not what you needed? <a onclick="navTo(\'helpdesk/tickets\')">Raise a ticket</a>.</div>';
-    return '<div class="hd-msg bot"><div class="hd-ic bot"><i class="fa-solid fa-robot"></i></div>'
-      +'<div class="hd-bub">'+body+'</div></div>';
-  }).join('');
-  c.scrollTop=c.scrollHeight;
-}
-window.hdAsk=function(q){const i=$('hdQ');if(i){i.value=q;hdGrow(i);}hdSend();};
-window.hdSend=async function(){
-  const inp=$('hdQ'), btn=$('hdSendBtn');
-  const q=((inp&&inp.value)||'').trim(); if(!q)return;
-  inp.value=''; hdGrow(inp); inp.disabled=true; if(btn)btn.disabled=true;
-  HD_MSGS.push({who:'me',text:q});
-  HD_MSGS.push({who:'bot',html:'<span class="hd-dots"><span></span><span></span><span></span></span>',isLoading:true});
-  hdRenderChat();
-  // The last few turns go with the question so follow-ups ("and the one after that?") make sense.
-  const history=HD_MSGS.filter(function(m){ return !m.isLoading && (m.text||m.md); })
-    .slice(-9,-1)
-    .map(function(m){ return {role:(m.who==='bot'?'assistant':'user'), content:(m.md||m.text||'')}; });
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/helpdesk-ai',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({question:q, history:history})
-    });
-    const d=await res.json();
-    HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    // hdAnswer() is the old hard-coded answer sheet — still the fallback if the key is missing.
-    const notSetUp=d.answer&&/not configured/i.test(d.answer);
-    const md=notSetUp?(hdAnswer(q)||d.answer):(d.answer||'I could not work that out.');
-    HD_MSGS.push({who:'bot', md:md, tools:d.tools_used||[], offerTicket:true});
-    // Logged directly, after the assistant actually answered, rather than through USAGE_MAP - a
-    // click here can genuinely fail (network error reaching helpdesk-ai), so the generic wrapper
-    // would have counted a failed round-trip as a real answer.
-    try{usageQueue('helpdesk.assistant.ask_a_question','search',{query:q});}catch(_e){}
-  }catch(e){
-    HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    HD_MSGS.push({who:'bot', md:hdAnswer(q)||'I could not reach the assistant just now. Please try again in a moment.', offerTicket:true});
-    try{usageQueue('helpdesk.assistant.ask_a_question','error');}catch(_e){}
-  }
-  inp.disabled=false; if(btn)btn.disabled=false;
-  try{inp.focus();}catch(_e){}
-  hdRenderChat();
-};
-function hdDocs(){
-  $('hdBody').innerHTML=`<div class="card card-pad" style="max-width:880px;margin:0 auto">
-   <div class="sec-title">Find a document</div><div class="sec-sub">Search all uploaded documents and job descriptions by file name</div>
-   <div class="toolbar"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input id="hdDocQ" placeholder="Type a word and press Enter…" onkeydown="if(event.key==='Enter')hdDocSearch()"></div><button class="btn btn-primary" onclick="hdDocSearch()"><i class="fa-solid fa-magnifying-glass"></i> Search</button></div>
-   <div id="hdDocRes"><div class="empty" style="padding:30px"><i class="fa-regular fa-folder-open"></i><div>Search to find documents you can open or download</div></div></div></div>`;
-}
-window.hdDocSearch=async function(){
-  const q=($('hdDocQ').value||'').trim();const host=$('hdDocRes');if(!q)return;
-  host.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const ql=q.toLowerCase();
-  // 1. Search document library
-  let docs=[];
-  try{const {data}=await sb.schema('doc').from('documents').select('id,title,file_name,category,department,storage_path,doc_no,created_at').or('file_name.ilike.%'+q+'%,title.ilike.%'+q+'%,doc_no.ilike.%'+q+'%').order('created_at',{ascending:false}).limit(40);docs=data||[];}catch(e){}
-  // 2. Search uploaded JDs
-  let jdUploaded=[];
-  try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jdUploaded=data||[];}catch(e){}
-  // 3. Include default JDs matching query
-  const defaultMatches=(typeof DEFAULT_JDS!=='undefined'?DEFAULT_JDS:[]).filter(j=>j.name.toLowerCase().includes(ql));
-  const uploadedJdMatches=jdUploaded.filter(j=>j.name.toLowerCase().includes(ql)||(j.file_name||'').toLowerCase().includes(ql));
-  // Build combined rows
-  const docRows=docs.map(r=>({file:r.file_name||r.title||'—',title:r.title||'—',cat:r.category||'—',dept:r.department||'—',date:r.created_at,url:r.storage_path?SUPABASE_URL+'/storage/v1/object/public/documents/'+encodeURIComponent(r.storage_path).replace(/%2F/g,'/'):null}));
-  const jdRows=[...defaultMatches,...uploadedJdMatches].map(j=>({file:j.name+'.pdf',title:j.name,cat:'Job Description',dept:'Recruitment',date:j.created_at||null,url:j.url||(j.storage_path?SUPABASE_URL+'/storage/v1/object/public/recruitment/'+encodeURIComponent(j.storage_path).replace(/%2F/g,'/'):null)}));
-  const all=[...docRows,...jdRows];
-  if(!all.length){host.innerHTML='<div class="empty" style="padding:30px"><i class="fa-regular fa-folder-open"></i><div>No documents found for <b>'+esc(q)+'</b></div></div>';return;}
-  host.innerHTML='<div style="margin-top:6px;font-size:12.5px;color:var(--slate);margin-bottom:10px">'+all.length+' result(s) for <b>'+esc(q)+'</b></div>'+
-    '<table class="tbl"><thead><tr><th>File Name</th><th>Category</th><th>Department</th><th>Date</th><th></th></tr></thead><tbody>'+
-    all.map(r=>'<tr><td style="font-weight:500">'+esc(r.file)+'</td><td>'+esc(r.cat)+'</td><td>'+esc(r.dept)+'</td><td style="color:var(--slate);font-size:12px">'+(r.date?fmtDate(r.date):'—')+'</td><td>'+(r.url?'<a href="'+r.url+'" target="_blank" class="btn btn-sm"><i class="fa-solid fa-eye"></i> Open</a>':'—')+'</td></tr>').join('')+
-    '</tbody></table>';
-}
-window.hdTicketSave=async function(){
-  // Logged directly, after the ticket actually exists, rather than through USAGE_MAP - real
-  // validation (empty subject/description) and a DB insert that can genuinely error both silently
-  // stop this, which a generic wrapper would have counted as a raised ticket either way.
-  const subject=$('hdSub').value.trim(),category=$('hdDept').value,message=$('hdMsg').value.trim();
-  if(!subject||!message){toast('Add a subject and a description','err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}return;}
-  const btn=$('hdSubmitBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';}
-  const {error}=await sb.schema('acc').from('helpdesk_tickets').insert({subject,category,message,status:'Open',raised_by:state.email,assigned_dept:category});
-  if(error){toast(error.message,'err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}return;}
-  try{usageQueue('helpdesk.tickets.raise_a_ticket','create',{subject:subject,category:category});}catch(_e){}
-  // email the support inbox via Web3Forms (no backend needed)
-  try{
-    await fetch('https://api.web3forms.com/submit',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({access_key:'9fa7700f-b082-46a4-8b70-e1861c554bb4',subject:'New Help Desk Ticket: '+subject,from_name:'JAIN-E Help Desk',Ticket_Subject:subject,Category:category,Description:message,Raised_by:state.email,Submitted_at:new Date().toLocaleString()})});
-  }catch(e){console.warn('email relay failed',e);}
-  toast('Ticket submitted & emailed to support','ok');
-  $('hdSub').value='';$('hdMsg').value='';
-  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}
-  hdLoadTickets();
-};
-
-function hdTickets(){
-  const b=$('hdBody');
-  const depts=['IT','HR','Finance','Operations','Legal','Admin','Other'];
-  b.innerHTML=`
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1000px;margin:0 auto" class="hdTicketLayout">
-    <div class="card card-pad">
-      <div class="sec-title" style="margin:0 0 14px"><i class="fa-solid fa-ticket" style="color:#0f766e"></i> Raise a Ticket</div>
-      <div class="frm">
-        <label>Subject</label>
-        <input id="hdSub" class="sel" placeholder="e.g. Can't access Legal Vault">
-        <label>Department</label>
-        <select id="hdDept" class="sel">
-          ${depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('')}
-        </select>
-        <label>Description</label>
-        <textarea id="hdMsg" class="sel" rows="5" placeholder="Describe your issue in detail…" style="resize:vertical"></textarea>
-      </div>
-      <button class="btn btn-primary" id="hdSubmitBtn" style="margin-top:14px;width:100%" onclick="hdTicketSave()">
-        <i class="fa-solid fa-paper-plane"></i> Submit ticket
-      </button>
-    </div>
-    <div>
-      <div class="card card-pad" style="margin-bottom:0">
-        <div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-list-check" style="color:#0f766e"></i> My Tickets</div>
-        <div id="hdTicketList"><div class="loader"><div class="spin"></div></div></div>
-      </div>
-    </div>
-  </div>`;
-  // Responsive: stack on mobile
-  const style=document.createElement('style');
-  style.textContent='@media(max-width:700px){.hdTicketLayout{grid-template-columns:1fr!important}}';
-  document.head.appendChild(style);
-  hdLoadTickets();
-}
-async function hdLoadTickets(){
-  const el=$('hdTicketList');if(!el)return;
-  el.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  let rows=[];
-  try{const {data}=await sb.schema('acc').from('helpdesk_tickets').select('*').eq('raised_by',state.email).order('created_at',{ascending:false}).limit(30);rows=data||[];}catch(e){}
-  if(!rows.length){el.innerHTML='<div style="color:var(--slate);font-size:13px;padding:8px 0">No tickets yet.</div>';return;}
-  const badge=s=>{const m={'Open':'t-amber','In Progress':'t-blue','Resolved':'t-green','Closed':'t-gray'};return`<span class="tag ${m[s]||'t-gray'}">${esc(s)}</span>`;};
-  el.innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(r=>`
-    <div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-        <div style="font-weight:600;font-size:13.5px">${esc(r.subject||'—')}</div>
-        ${badge(r.status||'Open')}
-      </div>
-      <div style="font-size:12px;color:var(--slate);margin-top:4px">${esc(r.assigned_dept||r.category||'—')} · ${r.created_at?new Date(r.created_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'}):'—'}</div>
-      ${r.message?`<div style="font-size:12.5px;color:var(--body);margin-top:6px;line-height:1.5">${esc(r.message.slice(0,140))}${r.message.length>140?'…':''}</div>`:''}
-    </div>`).join('')+'</div>';
-}
-
-
 /* ============================ HUMAN RESOURCES ============================ */
 let HR_EMP=null, HR_DIR_Q='', HR_DIR_DEPT='', HR_ATT_DATE=null;
 async function hrEmployees(force){
@@ -8671,15 +8312,6 @@ const USB_COL4={
   'recruitment.tests':    {header:'Time spent', keys:['time_spent']},
   'procurement.quote_comp':{header:'Category',         keys:['category','replacements']},
   // Asking the assistant carries the question; raising a ticket carries its category.
-  /* Help Desk, feature by feature. Asking the assistant carries the question - but the question is
-     already the Details, printed bare as the thing the row is about, so a Question column beside it
-     said the same words twice. Opening the chat and opening My Tickets are screen-opens with no
-     question and no ticket behind them. Raising a ticket is the one action here with two facts to
-     its name: the subject in Details, the department it went to in the column. */
-  'helpdesk.tickets':                       {header:'Topic', keys:['category']},
-  'helpdesk.assistant.ask_a_question':      {header:null, keys:[]},
-  'helpdesk.assistant.view_ai_assistant_chat':{header:null, keys:[], hideDetails:true},
-  'helpdesk.tickets.view_my_tickets':       {header:null, keys:[], hideDetails:true},
 
   /* --- single features whose subject is unlike anything else in their tab -------------------- */
   /* Monthly Update is the case that proved per-tab was not enough. Approve/reject and close/reopen
@@ -13247,6 +12879,7 @@ window.compShowOnly=function(id){
   compSyncFiltered();
 };
 window.compSetFilter=function(k,val){
+  const wlChanged=(k==='wl' && val!==COMP_F.wl);
   COMP_F[k]=val;
   if(k==='range'&&val==='custom'&&(!COMP_F.from||!COMP_F.to)){
     const w=compRangeDates()||{}; const d=new Date();
@@ -13254,7 +12887,13 @@ window.compSetFilter=function(k,val){
     const b=new Date(); b.setDate(b.getDate()-30);
     COMP_F.from=w.from||(b.getFullYear()+'-'+String(b.getMonth()+1).padStart(2,'0')+'-'+String(b.getDate()).padStart(2,'0'));
   }
-  compPaint();
+  // Switching to one specific competitor re-queries scoped to just them, instead of relying on the
+  // combined "All competitors" load - Supabase's API caps a single request at 1000 rows regardless
+  // of the limit() asked for, so a competitor whose own ad count is well under that could still lose
+  // rows once the total across ALL competitors passes it (confirmed directly: Eden Group has 183
+  // ads, comfortably under 1000, but only showed 137 once the combined total exceeded the cap).
+  // Querying one competitor alone never approaches that ceiling.
+  if(wlChanged && val!=='all') compRender(); else compPaint();
 };
 window.compSetDate=function(which,val){
   COMP_F[which]=val;
@@ -13266,19 +12905,75 @@ window.compSetDate=function(which,val){
 };
 window.compSearch=function(val){ COMP_F.q=val; const g=$('compGrid'); if(g) compPaintGrid(); usageQueueDebounced('competitors.overview.search_ad_text_headline_or_page', val); };
 
+// Which top-level view is showing - competitor benchmarking and your own brand's ad activity are
+// different jobs (one tracks rivals, the other tracks you), so they get kept on fully separate
+// screens instead of stacked on one page - switching one never renders the other's markup at all.
+let COMP_VIEW='competitors';
+window.compSetView=function(view){
+  COMP_VIEW=view;
+  const a=$('compViewCompetitors'), b=$('compViewOwn');
+  if(a) a.style.display=(view==='competitors')?'':'none';
+  if(b) b.style.display=(view==='own')?'':'none';
+  const tc=$('compViewTabCompetitors'), to=$('compViewTabOwn');
+  if(tc) tc.className='comp-viewtab'+(view==='competitors'?' active':'');
+  if(to) to.className='comp-viewtab'+(view==='own'?' active':'');
+  const actions=$('compTopActions'); if(actions) actions.style.display=(view==='competitors')?'':'none';
+};
 VIEWS.competitors=async function(v,seg){
   setCrumb(['Growth & Strategy','Competitor Ads']);
   v.innerHTML=mHead('fa-magnifying-glass-chart','#0369a1','Competitor Ads')
-    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 16px">'
+    +'<style>'
+      +'.comp-viewtabs{display:inline-flex;gap:3px;padding:4px;background:var(--bg);border:1px solid var(--line);border-radius:11px;margin-bottom:16px}'
+      +'.comp-viewtab{border:0;background:transparent;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:700;font-family:inherit;color:var(--slate);cursor:pointer;transition:background .15s,color .15s}'
+      +'.comp-viewtab:hover{color:var(--ink)}'
+      +'.comp-viewtab.active{background:var(--bg-card);color:#0369a1;box-shadow:0 1px 3px rgba(0,0,0,.08)}'
+    +'</style>'
+    +'<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:-8px 0 6px">'
       +'<p style="color:var(--slate);margin:0;flex:1;min-width:240px;font-size:13px">Public ad creative from Meta\'s Ad Library — the creative itself, when it started and where it ran. Meta never publishes spend or reach for ordinary commercial ads.</p>'
-      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+      +'<div id="compTopActions" style="display:flex;gap:10px;flex-wrap:wrap">'
         +'<button class="btn" onclick="compAddModal()"><i class="fa-solid fa-plus"></i> Add Competitor</button>'
         +'<button class="btn btn-primary" id="compSyncBtn" onclick="compSyncFiltered()"><i class="fa-solid fa-rotate"></i> Fetch from Meta</button>'
       +'</div>'
     +'</div>'
-    +'<div id="compToolbar"></div>'
-    +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>';
+    +'<div class="comp-viewtabs">'
+      +'<button class="comp-viewtab active" id="compViewTabCompetitors" onclick="compSetView(\'competitors\')"><i class="fa-solid fa-chart-line"></i> Competitors</button>'
+      +'<button class="comp-viewtab" id="compViewTabOwn" onclick="compSetView(\'own\')"><i class="fa-solid fa-building"></i> Your Brand</button>'
+    +'</div>'
+    +'<div id="compViewCompetitors">'
+      +'<div id="compToolbar"></div>'
+      +'<div id="compBody"><div class="loader"><div class="spin"></div></div></div>'
+    +'</div>'
+    +'<div id="compViewOwn" style="display:none"><div id="compOwnBrand"></div></div>';
+  COMP_VIEW='competitors';
   await compRender();
+};
+// Your own company's ad activity, kept visibly separate from the competitor list/totals below -
+// same page-ID mechanism as any competitor, just never folded into "All competitors" or its count
+// (the sync edge function excludes is_own_brand rows from its own default bulk-sync query too).
+function compOwnBrandCardHtml(w){
+  const counts=window._compAdCounts||{};
+  const n=counts[String(w.id)]||0;
+  const ads=(window._compOwnAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;})
+    .sort(function(x,y){return String(y.ad_delivery_start_time||'').localeCompare(String(x.ad_delivery_start_time||''));});
+  return '<div style="border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;background:var(--bg-card);box-shadow:0 1px 2px rgba(0,0,0,.04)">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      +'<div style="font-weight:700;font-size:14.5px">'+esc(w.name)+'</div>'
+      +'<span class="tag t-blue">'+n+' ad'+(n===1?'':'s')+'</span>'
+      +'<a class="btn btn-sm" href="'+esc(compAdLibUrl(w))+'" target="_blank" rel="noopener" title="Open in Meta Ad Library"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>'
+      +'<button class="btn btn-sm btn-primary" id="compOwnSync'+w.id+'" onclick="compOwnBrandSync('+w.id+',this)" style="margin-left:auto"><i class="fa-solid fa-rotate"></i> Fetch</button>'
+    +'</div>'
+    +(ads.length
+      ?('<div class="comp-grid">'+ads.slice(0,60).map(compAdCard).join('')+'</div>')
+      :'<div style="font-size:12.5px;color:var(--slate);padding:8px 0">Not fetched yet — press Fetch to pull ad activity from the Ad Library.</div>')
+  +'</div>';
+}
+function compOwnBrandSectionHtml(ownWl){
+  if(!ownWl.length) return '<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No brand pages added yet.</div></div>';
+  return '<p style="color:var(--slate);margin:0 0 16px;font-size:13px">Your own pages\' ad activity - kept separate from competitor benchmarking, tracked with the same mechanism.</p>'
+    +ownWl.map(compOwnBrandCardHtml).join('');
+}
+window.compOwnBrandSync=async function(id,btn){
+  await compRunSync({watchlist_id:id},btn,'','Fetch','competitors.overview.fetch_ads_from_meta_ad_library');
 };
 function compSelHtml(id,list,cur,onchange){
   return '<select class="comp-sel" id="'+id+'" onchange="'+onchange+'">'
@@ -13287,26 +12982,31 @@ function compSelHtml(id,list,cur,onchange){
 }
 function compToolbarHtml(wl){
   const win=compRangeDates();
+  const counts=window._compAdCounts||{};
   const opts=[['all','All competitors ('+wl.length+')']].concat(wl.map(function(w){
-    const n=(window._compAdsAll||[]).filter(function(a){return a.watchlist_id===w.id;}).length;
+    const n=counts[String(w.id)]||0;
     return [String(w.id), w.name+' ('+n+')'];
   }));
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
   return '<style>'
-    +'.comp-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-card);margin-bottom:14px}'
-    +'.comp-sel{height:36px;padding:0 32px 0 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;'
-      +'background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%230369a1\' stroke-width=\'2\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;background-size:11px 8px}'
-    +'.comp-sel:hover{border-color:var(--slate)}'
-    +'.comp-sel:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
-    +'.comp-date{height:36px;border:1px solid var(--line);border-radius:9px;padding:0 9px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
-    +'.comp-date:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
-    +'.comp-search{position:relative;display:flex;align-items:center;flex:1;min-width:150px}'
-    +'.comp-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}'
-    +'.comp-search input{width:100%;height:36px;padding:0 11px 0 31px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}'
-    +'.comp-search input:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.13)}'
+    +'.comp-bar{display:flex;gap:11px;flex-wrap:wrap;align-items:center;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--bg-card);margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}'
+    +'.comp-sel{height:38px;padding:0 34px 0 13px;border:1.5px solid var(--line);border-radius:10px;font-size:13px;font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;appearance:none;-webkit-appearance:none;'
+      +'transition:border-color .15s,box-shadow .15s;'
+      +'background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 12 8\'%3E%3Cpath d=\'M1 1l5 5 5-5\' stroke=\'%230369a1\' stroke-width=\'2\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center;background-size:11px 8px}'
+    +'.comp-sel:hover{border-color:#0369a1}'
+    +'.comp-sel:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.15)}'
+    +'#compWl{min-width:220px;font-weight:700}'
+    +'.comp-date{height:38px;border:1.5px solid var(--line);border-radius:10px;padding:0 10px;font-size:12.5px;font-family:inherit;background:var(--bg-card);color:var(--ink);transition:border-color .15s,box-shadow .15s}'
+    +'.comp-date:hover{border-color:#0369a1}'
+    +'.comp-date:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.15)}'
+    +'.comp-search{position:relative;display:flex;align-items:center;flex:1;min-width:170px}'
+    +'.comp-search i{position:absolute;left:12px;color:var(--slate);font-size:12.5px;pointer-events:none}'
+    +'.comp-search input{width:100%;height:38px;padding:0 12px 0 33px;border:1.5px solid var(--line);border-radius:10px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink);transition:border-color .15s,box-shadow .15s}'
+    +'.comp-search input:hover{border-color:#0369a1}'
+    +'.comp-search input:focus{outline:none;border-color:#0369a1;box-shadow:0 0 0 3px rgba(3,105,161,.15)}'
     +'.comp-note{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--slate);padding:0 2px;margin:-6px 0 14px}'
     +'.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:13px}'
-    +'@media(max-width:760px){.comp-bar{gap:8px}.comp-sel,.comp-search{flex:1 1 100%}.comp-search{min-width:0}}'
+    +'@media(max-width:760px){.comp-bar{gap:8px}.comp-sel,.comp-search{flex:1 1 100%}.comp-search{min-width:0}#compWl{min-width:0}}'
   +'</style>'
   +'<div class="comp-bar">'
     +compSelHtml('compWl',opts,COMP_F.wl,'compSetFilter(\'wl\',this.value)')
@@ -13432,10 +13132,15 @@ function compPaint(){
   const wl=window._compWl||[];
   if(!wl.length){ host.innerHTML='<div class="empty" style="padding:40px"><i class="fa-regular fa-folder-open"></i><div>No competitors added yet.</div></div>'; return; }
   const cur=(COMP_F.wl!=='all')?wl.filter(function(w){return String(w.id)===String(COMP_F.wl);})[0]:null;
-  // Ads appear only once a fetch has been made for this selection during this visit.
-  const fetched=!!window._compFetched[String(COMP_F.wl)];
+  // Show whatever is already stored, for this selection, right away - switching the competitor or
+  // range dropdown must never hide real data that's sitting in the database. A "not fetched yet"
+  // gate here used to hide already-synced ads any time you navigated away and back (or picked "All
+  // competitors" after only ever fetching individual ones), which looked like the data had vanished
+  // even though nothing was lost. Fetching is still how you pull NEW data from Meta; viewing what's
+  // already stored no longer depends on having fetched that exact selection in this browser visit.
+  const everFetchedAnything=(window._compAdsAll||[]).length>0;
   host.innerHTML=(cur?compWlCardHtml(cur):compWlTableHtml(wl))
-    +(fetched
+    +(everFetchedAnything
       ?('<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
           +'<div id="compCount" style="font-size:12.5px;color:var(--slate);font-weight:600"></div>'
         +'</div>'
@@ -13450,14 +13155,57 @@ function compPaint(){
             +'Set the date range, status and media above, then press <b>Fetch from Meta</b> — or use the filter button beside a competitor to fetch just that one. '
             +'Nothing is shown until it has actually been fetched, so what you see always matches the filters you asked for.</div>'
         +'</div>'));
-  if(fetched) compPaintGrid();
+  if(everFetchedAnything) compPaintGrid();
 }
 async function compRender(){
   const host=$('compBody'); if(!host)return;
   let wl=[],ads=[];
   try{ const {data}=await sb.schema('camp').from('competitor_watchlist').select('*').order('name',{ascending:true}); wl=data||[]; }catch(e){}
-  try{ const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('ad_delivery_start_time',{ascending:false}).limit(1000); ads=data||[]; }catch(e){}
-  window._compWl=wl; window._compAdsAll=ads;
+  // The dropdown needs every competitor's count at once, but the ads query right below this is
+  // deliberately scoped to ONE competitor at a time (to dodge the API's 1000-row cap - see its own
+  // comment). Those two needs conflict, so counts come from a separate, already-aggregated RPC
+  // instead of being computed by filtering the (now single-competitor) ads array - using the ads
+  // array for this again would make every OTHER competitor's dropdown count read as 0 the moment you
+  // select one (confirmed directly: that's exactly what switching between competitors did before
+  // this was split out).
+  try{ const {data}=await sb.schema('camp').rpc('competitor_ad_counts'); const m={}; (data||[]).forEach(function(r){ m[String(r.watchlist_id)]=r.cnt; }); window._compAdCounts=m; }catch(e){}
+  try{
+    // A single global cap here (there used to be one, at 1000) silently drops whichever ads are
+    // oldest ACROSS EVERY COMPETITOR COMBINED once the total crosses that number - even a competitor
+    // whose own ad count is well under the cap could lose rows just because other competitors' ads
+    // are newer (confirmed directly: Eden Group has 183 stored but only 137 were visible once the
+    // combined total passed 1000). Querying the selected competitor on its own removes that ceiling
+    // for the thing actually being looked at; "All competitors" still needs *a* bound, so it gets a
+    // much higher one instead of no bound, since unlimited would risk pulling in everyone's media
+    // JSON at once.
+    if(COMP_F.wl!=='all'){
+      const {data}=await sb.schema('camp').from('competitor_ads').select('*').eq('watchlist_id',Number(COMP_F.wl)).order('ad_delivery_start_time',{ascending:false});
+      ads=data||[];
+    } else {
+      // Supabase's API hard-caps a single request at 1000 rows no matter what limit() asks for, so
+      // asking for 20000 in one call silently came back as 1000 anyway (confirmed directly) - the
+      // "All competitors" total undercounted once the real total crossed 1000. Paging through with
+      // range() instead - 1000 rows per page, keep going until a page comes back short - actually
+      // retrieves everything regardless of how large the combined total grows.
+      const PAGE=1000; let from=0, page;
+      do {
+        const {data}=await sb.schema('camp').from('competitor_ads').select('*').order('ad_delivery_start_time',{ascending:false}).range(from,from+PAGE-1);
+        page=data||[]; ads=ads.concat(page); from+=PAGE;
+      } while(page.length===PAGE);
+    }
+  }catch(e){}
+  // Your own company's entries live in the same table (so they reuse the exact same scrape/S3/DB
+  // mechanism as any competitor) but must never be folded into the competitor dropdown, table, or
+  // "All competitors" total - split them out here once, rather than filtering is_own_brand in every
+  // place that reads _compWl/_compAdsAll.
+  const ownIds=new Set(wl.filter(function(w){return w.is_own_brand;}).map(function(w){return w.id;}));
+  const mainWl=wl.filter(function(w){return !w.is_own_brand;});
+  const ownWl=wl.filter(function(w){return w.is_own_brand;});
+  const ownAds=ads.filter(function(a){return ownIds.has(a.watchlist_id);});
+  const mainAds=ads.filter(function(a){return !ownIds.has(a.watchlist_id);});
+  window._compWl=mainWl; window._compAdsAll=mainAds;
+  window._compOwnWl=ownWl; window._compOwnAdsAll=ownAds;
+  const ownHost=$('compOwnBrand'); if(ownHost){ ownHost.innerHTML=compOwnBrandSectionHtml(ownWl); compHydrateThumbs(); }
   compPaint();
 }
 function compFirstMedia(a){
@@ -13648,24 +13396,48 @@ window.compRemove=async function(id){
 // featureKey is logged directly here, at the point the fetch actually succeeds or fails, rather
 // than through USAGE_MAP - a click here can genuinely fail (network error, Meta error, wrong-page
 // rows skipped), so the generic wrapper would have counted a failed sync as a real one.
+// A big advertiser's ad-and-media volume can take longer to fully save than one edge-function call
+// gets to run for (confirmed directly: a 180-ad competitor needed several separate calls before the
+// count stopped climbing). Rather than make the person click Sync repeatedly to get there, one click
+// now keeps calling the same sync automatically - same request, run again - stopping only once a
+// pass adds nothing new (genuinely done) or genuinely errors, so "click once" actually means once.
+const COMP_SYNC_MAX_PASSES=8;
 async function compRunSync(payload,btn,busyLabel,idleLabel,featureKey){
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'');}
+  let totalNew=0, lastSynced=0, totalReplaced=0, totalSkipped=0, lastErr=null, passes=0;
   try{
     const {data:{session}}=await sb.auth.getSession();
     const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify(payload)});
-    const jr=await res.json().catch(function(){return {};});
-    if(jr.error){toast(jr.error,'err'); try{usageQueue(featureKey,'error');}catch(_e){}}
-    else if(jr.skipped){toast(jr.message||'Sync skipped','err'); try{usageQueue(featureKey,'error');}catch(_e){}}
-    else {
-      // Mark this selection as fetched so the grid is allowed to appear.
+    for(passes=1; passes<=COMP_SYNC_MAX_PASSES; passes++){
+      if(btn && passes>1) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'+(busyLabel?' '+busyLabel:'')+' ('+passes+')';
+      const res=await fetch(SUPABASE_URL+'/functions/v1/competitor-ads-sync',{method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
+        body:JSON.stringify(payload)});
+      const jr=await res.json().catch(function(){return {};});
+      if(jr.error){ lastErr=jr.error; break; }
+      if(jr.skipped){ lastErr=jr.message||'Sync skipped'; break; }
+      const passNew=jr.newAds||0, passSynced=jr.synced||0;
+      // totalNew sums correctly across passes - once an ad is inserted, later passes see it as
+      // existing and never re-count it as new. "synced" doesn't work the same way: it's however many
+      // rows that single pass touched, and a fully-synced competitor touches ~all of them on every
+      // pass, so summing it across passes inflated the number into something meaningless. Report the
+      // last pass's figure instead - the real, final count of ads matched for this selection.
+      totalNew+=passNew; lastSynced=passSynced; totalReplaced+=(jr.replaced||0); totalSkipped+=(jr.skippedWrongPage||0);
+      // Mark this selection as fetched so the grid is allowed to appear (do this on the first pass
+      // so the screen can start showing results while later passes still run).
       window._compFetched[String(payload.watchlist_id!=null?payload.watchlist_id:'all')]=true;
       if(payload.watchlist_id==null) window._compFetched['all']=true;
-      const bits=[(jr.newAds||0)+' new', (jr.synced||0)+' seen'];
-      if(jr.replaced) bits.push(jr.replaced+' replaced');
-      if(jr.skippedWrongPage) bits.push(jr.skippedWrongPage+' from other pages ignored');
+      if(passes>1) await compRender();
+      // Only newly-added ads mean there's more to do - a fully-synced competitor reports passSynced>0
+      // on every pass (each existing ad's timestamp gets touched again), so checking synced here would
+      // loop the full COMP_SYNC_MAX_PASSES times even when nothing is actually missing.
+      if(passNew===0) break;
+    }
+    if(lastErr){toast(lastErr,'err'); try{usageQueue(featureKey,'error');}catch(_e){}}
+    else {
+      const bits=[totalNew+' new', lastSynced+' seen'];
+      if(totalReplaced) bits.push(totalReplaced+' replaced');
+      if(totalSkipped) bits.push(totalSkipped+' from other pages ignored');
       toast('Fetched — '+bits.join(' · '),'ok');
       try{usageQueue(featureKey,'update');}catch(_e){}
     }
@@ -22238,14 +22010,7 @@ const USAGE_VIEWS={
   'playbook/0':          'playbook.all_plays.view_process_playbook_list',
   'playbook/1':          'playbook.featured_play.view_featured_play_steps',
   'playbook/2':          'playbook.roles_raci.view_raci_roles_by_step',
-  // Helpdesk / Reports / Inventory / Maintenance — previously untracked
-  // Assistant is Help Desk's default landing tab, reached with NO segment in the hash at all
-  // (the sidebar link is a bare navTo('helpdesk')) - usageViewTick's own fallback for "no segment"
-  // is the string '0', not the tab's name, so '0' has to be listed too for that landing to ever
-  // match; clicking the Assistant tab explicitly (from Tickets) sets the hash to 'assistant' instead.
-  'helpdesk/0':          'helpdesk.assistant.view_ai_assistant_chat',
-  'helpdesk/assistant':  'helpdesk.assistant.view_ai_assistant_chat',
-  'helpdesk/tickets':    'helpdesk.tickets.view_my_tickets',
+  // Reports / Inventory / Maintenance — previously untracked
   'inventory/0':         'inventory.indents_rfq.view_indent_rfq_pipeline',
   'inventory/1':         'inventory.quote_comparison.view_quote_comparison',
   'inventory/2':         'inventory.purchase_orders.view_purchase_orders',
