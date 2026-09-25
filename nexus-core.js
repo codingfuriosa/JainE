@@ -638,7 +638,22 @@ function renderShell(){
   const _gsDrop=document.createElement('div');
   _gsDrop.id='gsDrop';_gsDrop.style.cssText='position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:9999;max-height:340px;overflow-y:auto;display:none';
   _gs.parentElement.style.position='relative';_gs.parentElement.appendChild(_gsDrop);
-  _gs.addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.trim();_gsDrop.style.display='none';if(q)navTo('documents/search/'+encodeURIComponent(q));}});
+  _gs.addEventListener('keydown',async e=>{
+    if(e.key!=='Enter')return;
+    const q=e.target.value.trim();_gsDrop.style.display='none';
+    if(!q)return;
+    // Same exact-id lookup gsLiveSearch does for the dropdown, so pressing Enter before the debounced
+    // dropdown appears (or with it dismissed) still lands on the lead instead of a text search for it.
+    if(/^\d+$/.test(q)){
+      try{
+        const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+        if(error)throw error;
+        const hit=(data||[])[0];
+        if(hit&&hit.lead){navTo('transcription/lead/'+hit.lead.lead_id);return;}
+      }catch(e){}
+    }
+    navTo('documents/search/'+encodeURIComponent(q));
+  });
   _gs.addEventListener('input',e=>{
     clearTimeout(_gsTimer);const q=e.target.value.trim();
     if(!q){_gsDrop.style.display='none';return;}
@@ -660,6 +675,32 @@ async function gsLiveSearch(q){
   drop.style.display='block';
   drop.innerHTML='<div style="padding:10px 14px;color:var(--slate);font-size:13px">Searching…</div>';
   const ql=q.toLowerCase();
+  // A bare number is treated as a lead id lookup rather than a text search: acc.crm_lead_detail takes
+  // a bigint id and does an EXACT match, so this is "find this one lead", not "find leads like this".
+  // It returns the lead row plus its whole follow-up history (recordings included) in one round trip,
+  // the same RPC the Transcription lead page itself uses (see trcLeadFetchByIds) - so a hit here always
+  // opens straight into that same detail page, never a partial or reconstructed view of it.
+  let leadRow='';
+  if(/^\d+$/.test(q)){
+    try{
+      const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+      if(error)throw error;
+      const hit=(data||[])[0];
+      if(hit&&hit.lead){
+        const lead=hit.lead;
+        const followups=Array.isArray(hit.followups)?hit.followups:[];
+        const calls=followups.filter(f=>f&&(f.has_recording||f.recording_url)).length;
+        const sub='Lead · '+followups.length+' follow-up'+(followups.length===1?'':'s')
+          +(calls?' · '+calls+' call recording'+(calls===1?'':'s'):'')
+          +(lead.status?' · '+lead.status:'');
+        leadRow='<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line-2);background:#f0fdfa" '
+          +'onmousedown="event.preventDefault();navTo(\'transcription/lead/'+esc(String(lead.lead_id))+'\');document.getElementById(\'gsDrop\').style.display=\'none\'">'
+          +'<i class="fa-solid fa-user-clock" style="color:#0d9488;width:14px;font-size:13px"></i>'
+          +'<div><div style="font-size:13px;font-weight:500">'+esc(lead.lead_name||('Lead '+lead.lead_id))+'</div>'
+          +'<div style="font-size:11px;color:var(--slate)">'+esc(sub)+'</div></div></div>';
+      }
+    }catch(e){}
+  }
   // Search documents
   let docs=[];
   try{const {data}=await sb.schema('doc').from('documents').select('id,title,file_name,category,department,storage_path').or('file_name.ilike.%'+q+'%,title.ilike.%'+q+'%,doc_no.ilike.%'+q+'%').limit(6);docs=data||[];}catch(e){}
@@ -667,7 +708,7 @@ async function gsLiveSearch(q){
   let jds=[];
   try{const {data}=await sb.schema('recruit').from('job_descriptions').select('id,name,storage_path').limit(6);jds=(data||[]).filter(j=>j.name.toLowerCase().includes(ql));}catch(e){}
   const defJds=(typeof DEFAULT_JDS!=='undefined'?DEFAULT_JDS:[]).filter(j=>j.name.toLowerCase().includes(ql));
-  if(!docs.length&&!jds.length&&!defJds.length){drop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No documents found</div>';return;}
+  if(!leadRow&&!docs.length&&!jds.length&&!defJds.length){drop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No results found</div>';return;}
   const row=(icon,name,sub,url)=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line-2)" onmousedown="event.preventDefault();window.open('${url}','_blank');document.getElementById('gsDrop').style.display='none'">
     <i class="fa-solid ${icon}" style="color:#64748b;width:14px;font-size:13px"></i>
     <div><div style="font-size:13px;font-weight:500">${esc(name)}</div><div style="font-size:11px;color:var(--slate)">${esc(sub)}</div></div>
@@ -675,7 +716,7 @@ async function gsLiveSearch(q){
   const docRows=docs.map(r=>{const url=r.storage_path?SUPABASE_URL+'/storage/v1/object/public/documents/'+encodeURIComponent(r.storage_path).replace(/%2F/g,'/'):'#';const sub=[r.department,r.category].filter(Boolean).join(' · ')||'Document Library';return row('fa-file',r.title||r.file_name,sub,url);});
   const jdDbRows=jds.map(j=>{const url=j.storage_path?SUPABASE_URL+'/storage/v1/object/public/recruitment/'+encodeURIComponent(j.storage_path).replace(/%2F/g,'/'):'#';return row('fa-file-pdf',j.name,'Job Description · Recruitment',url);});
   const jdDefRows=defJds.map(j=>row('fa-file-pdf',j.name,'Job Description · Recruitment',j.url));
-  drop.innerHTML=docRows.join('')+jdDbRows.join('')+jdDefRows.join('')+
+  drop.innerHTML=leadRow+docRows.join('')+jdDbRows.join('')+jdDefRows.join('')+
     `<div style="padding:8px 14px;font-size:12px;color:var(--brand);font-weight:600;cursor:pointer;text-align:center" onmousedown="event.preventDefault();navTo('documents/search/'+encodeURIComponent('${q}'));document.getElementById('gsDrop').style.display='none'">See all results →</div>`;
 }
 
@@ -16739,6 +16780,14 @@ const CUST_PROJECT_HERO_IMG={
 const CUST_PROJECT_HERO_VIDEO={
   'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/project-hero/dream-gurukul.mp4'
 };
+/* A faint (see .cust-tab-bg's opacity in nexus.css) version of the project's own render sits behind
+   every non-Home tab - Statement, Ledger, Cost Sheet etc. - so the portal doesn't go flat and blank
+   the moment a customer leaves the hero. Deliberately its own map, not a reuse of CUST_PROJECT_HERO_IMG:
+   the Home hero and this backdrop are different renders of the same project (dusk elevation vs. a
+   daytime shot with the playground/garden), so a project could in principle only have one of the two. */
+const CUST_PROJECT_TAB_BG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/branding/dream%20gurukul%20statement.webp'
+};
 /* The landing page: a greeting standing on the project's own hero media, and nothing else. It is
    the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
 function custLanding(fullName,unit){
@@ -18532,10 +18581,13 @@ VIEWS.customer=async function(v,seg){
   else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
   /* The landing page is the greeting over the project's hero photo and nothing else - no page head,
-     no unit picker, no body. Every other tab keeps the normal chrome. */
+     no unit picker, no body. Every other tab keeps the normal chrome, plus a faint backdrop of the
+     same project's render (CUST_PROJECT_TAB_BG) so it isn't flat once the hero is behind them. */
+  const tabBg=CUST_PROJECT_TAB_BG[(unit.projects&&unit.projects.name)||''];
   v.innerHTML=ti===0
     ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
-    : '<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+    : '<div class="cust-view-fade">'+(tabBg?'<div class="cust-tab-bg" style="background-image:url(\''+esc(tabBg)+'\')"></div>':'')+
+      mHead('fa-user-tie','#1d4ed8','Customer Portal')+
       banner+
       custUnitPicker(data.units,unit.id)+
       '<div style="margin-top:14px">'+body+'</div></div>';
@@ -21340,12 +21392,18 @@ function trcDateBar(){
      either box does the same thing a click on the button would.
      No preset buttons any more - the boxes already open on Previous day (see TRC_F's own initial
      state), so a one-click shortcut back to it would only ever restate what's already showing. */
+  const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
+  const personnelValues=trcPersonnelOptionsList(TRC_ROWS);
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
     +'<label style="font-size:12px;color:var(--slate)">To</label>'
     +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
-    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply range</button>'
+    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>'
+    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
+      +opt('all','All personnel',TRC_F.personnel)
+      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'</select>'
   +'</div>';
 }
 window.trcApplyRange=function(){
@@ -21365,19 +21423,14 @@ window.trcSetRange=async function(f,t){
   trcAfterListRender();
 };
 
-function trcFilterBar(all){
-  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
-    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
-     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
-     offering to filter down to a project this pipeline no longer transcribes. */
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
-    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
-  /* The whole team first, in the roster's own order (the manager, then the callers), so every
-     pre-sales caller is selectable whether or not they have a call in this date range. Anyone
-     pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
-     dropped: that combination means the CRM sent a caller the roster has not caught up with, and
-     hiding their calls behind a filter that cannot name them is the worse of the two failures. */
+/* The whole team first, in the roster's own order (the manager, then the callers), so every
+   pre-sales caller is selectable whether or not they have a call in this date range. Anyone
+   pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
+   dropped: that combination means the CRM sent a caller the roster has not caught up with, and
+   hiding their calls behind a filter that cannot name them is the worse of the two failures.
+   Shared by the date bar's quick filter and the full filter row below it, so picking a caller in
+   either one offers the exact same names in the exact same order. */
+function trcPersonnelOptionsList(all){
   const seenP={};
   const personnelValues=(TRC_PERSONNEL||[]).map(function(p){
     seenP[p.email]=1;return {email:p.email,name:p.name};
@@ -21388,6 +21441,16 @@ function trcFilterBar(all){
     seenP[email]=1;
     personnelValues.push({email:email,name:(r.personnel_name||email)+' (not on the roster)'});
   });
+  return personnelValues;
+}
+function trcFilterBar(all){
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
+    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
+  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
+     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
+     offering to filter down to a project this pipeline no longer transcribes. */
+  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -21403,10 +21466,6 @@ function trcFilterBar(all){
     +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
       +opt('all','All business units',TRC_F.bu)
       +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
-    +'</select>'
-    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
-      +opt('all','All personnel',TRC_F.personnel)
-      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
     +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
@@ -21464,7 +21523,7 @@ function trcClipCell(inner){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
+const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
 
 /* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
    so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
@@ -21519,6 +21578,11 @@ function trcLeadRowHtml(g,sl){
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
+    /* Whoever was on the phone for the LATEST call, not the lead as a whole - a lead's calls can move
+       between Pre-Sales and Sales (or between people on the same team), so the personnel column is
+       g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
+       g.lastAssessed). */
+    +trcTextCell(last.personnel_name,140)
     +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
@@ -21562,7 +21626,7 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
+      +'<th>Business Unit</th><th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
 }
 /* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
    on the table itself (see trcView), this is what actually stops one long value (a badge holding an
@@ -21573,9 +21637,9 @@ function trcColsHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
       +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
-    : '<col style="width:4%"><col style="width:7%"><col style="width:16%"><col style="width:10%">'
-      +'<col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:8%">'
-      +'<col style="width:10%"><col style="width:13%">';
+    : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:9%">'
+      +'<col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%">'
+      +'<col style="width:7%"><col style="width:9%"><col style="width:11%">';
 }
 
 /* keepPage: true for a plain page-turn (Prev/Next), which must not reset back to page 1 or fight the

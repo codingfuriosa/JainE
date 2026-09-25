@@ -15,7 +15,12 @@
    other small type) render noticeably bigger than their actual font-size on a phone than the
    same CSS produces on desktop. */
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
+/* overflow-x:hidden lives here, not on .main - setting only one axis of overflow on an element makes
+   the browser force the OTHER axis to 'auto' too (CSS Overflow spec), which silently turns that element
+   into position:sticky's scroll container. .main was doing exactly that: it never actually needed to
+   scroll internally (the page itself scrolls), so its sticky .topbar was anchoring to a box that never
+   received a scroll offset and just scrolled away with the page instead of sticking. */
+body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cdd5e1;border-radius:8px}::-webkit-scrollbar-track{background:transparent}
 .hidden{display:none!important}
@@ -44,7 +49,7 @@ a{color:inherit;text-decoration:none}
 @keyframes sbItemActivate{0%{transform:translateX(-6px);opacity:.5;box-shadow:0 0 0 0 rgba(224,18,28,.45)}60%{transform:translateX(0);opacity:1}100%{box-shadow:0 0 0 7px rgba(224,18,28,0)}}
 .sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#7a7a7f}
 /* topbar */
-.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease;overflow-x:hidden}
+.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease}
 .topbar{position:sticky;top:0;height:var(--topbar);background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 24px;z-index:30}
 .crumb{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--slate);font-weight:500}
 .crumb .cur{color:var(--ink);font-weight:600}
@@ -1243,7 +1248,8 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
   animation:custHeroPhotoIn 1.4s cubic-bezier(.22,1,.36,1) both;
 }
 @keyframes custHeroPhotoIn{0%{opacity:0;transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
-.cust-landing--photo .cust-greet{
+.cust-landing--photo .cust-greet,
+.cust-landing--video .cust-greet{
   background:none;border-top:none;box-shadow:none;padding:0 0 8px;
 }
 .cust-landing-inner{position:relative;z-index:1;width:100%;padding:clamp(24px,5vw,48px) clamp(18px,4vw,42px)}
@@ -1274,3 +1280,16 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
 .cust-landing-scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,15,30,.10) 0%,rgba(9,15,30,.30) 45%,rgba(7,12,25,.88) 100%)}
 .cust-landing--video .cust-landing-inner{position:absolute;left:0;right:0;bottom:0;padding:clamp(24px,5vw,56px) clamp(18px,4vw,48px)}
 @media(max-width:1024px){.cust-landing--video{left:0}}
+
+/* ---------- Faint project backdrop on every non-Home tab ----------
+   Same fixed-to-viewport technique as .cust-landing--video above (and the same !important rationale:
+   overriding .cust-view-fade>*{position:relative;z-index:1}), but kept subtle - this sits behind live
+   financial tables (Statement, Ledger, Cost Sheet), so it must never compete with them for attention
+   or contrast. Raised from the old construction-scene illustration's .055 to .11 per feedback that the
+   image should read as a little more visible. */
+.cust-tab-bg{
+  position:fixed!important;top:var(--topbar);left:var(--sidebar);right:0;bottom:0;
+  z-index:0!important;background-size:cover;background-position:center;
+  opacity:.11;pointer-events:none;transition:left .22s ease;
+}
+@media(max-width:1024px){.cust-tab-bg{left:0}}
