@@ -29,7 +29,7 @@ Carpet area runs roughly 25-30% below the super built-up areas given here.
 
 - Dream Ananta - the project customers hear pitched as "the new project near the Airport".
   UNDER CONSTRUCTION (soft launch, 2026), Doltala, Old Jessore Rd, Madhyamgram / near the Airport,
-  on a road-facing plot; landmark Fortune City / Julien Day School. Base rate 5,950/sft.
+  on a road-facing plot; landmark Fortune City / Julien Day School. 
   2BHK 62 lakh (940-1015 sqft) - 3BHK 68 lakh (1075-1405 sqft) - 4BHK 1.14 crore (1780-1805 sqft).
   Each price is inclusive of GST and EDC, excluding car parking. Parking: covered/basement 5 lakh,
   open 4 lakh. About 5.5 acres, 296 flats, G+8; room sizes run roughly 12x13 ft.
@@ -42,13 +42,11 @@ Carpet area runs roughly 25-30% below the super built-up areas given here.
   the Airport (Jessore Road, Doltala Crossing, near Julien Day School, about 10 minutes from the
   Airport). Do not treat the two as one - but see the PROJECT-SPECIFIC RULE on redirecting a lead
   from one to the other. UNDER CONSTRUCTION, possession 2028 (October). 5 acres,  G+7 total towers,
-  450+ flats. Base rate 5,992/sft (box price, no pitching).
+  450+ flats. 
   2BHK 58 lakh onwards (860-975 sqft), including  car parking.
-  3BHK 82-85 lakh onwards (1225-1290 sqft, price depends on optional features), including all with
-  covered parking,Excluding PLC, IF, EDC and GST. A further 3BHK reference in the sheet, 72 lakh onwards for
-  about 1075 sqft, is noted only under a separate "22 Acres" listing - treat that specific figure
-  as unconfirmed for this project until verified.
-  Parking: covered 5 lakh, open 4 lakh. A floor preference charge of 20/sft applies from the 2nd
+  3BHK 82-85 lakh onwards (1225-1290 sqft, price depends on optional features), including 
+  covered parking and GST,Excluding PLC, FRC, EDC . 
+  Parking: covered 5 lakh, open 4 lakh. A floor preference charge of 50/sft applies from the 2nd
   floor onwards.
 - Dream Diamond - UNDER CONSTRUCTION, handover 2027 (first 36 of 100 bungalows). G+1, row house,
   3 bed and 3 bath, GST applicable. Nepalgunge Rd, Daulatpur (Kailati), Pailan - PIN 700104, near
@@ -59,11 +57,10 @@ Carpet area runs roughly 25-30% below the super built-up areas given here.
   "ready now" beyond those 2 units as incorrect.
   RERA WBRERA/P/SOU/2023/00729. Possession mid-2027.
 - Dream World City - READY TO MOVE (2018 launch, completion certificate in hand; families already
-  living there). Nepalgunge Rd, Daulatpur (Kaitala), Pailan - PIN 700104, about 5 minutes from Joka
-  Metro, near Pailan World School. Base rate 4,370/sft (box price).
+  living there). Nepalgunge Rd, Daulatpur (Kaitala), Pailan - PIN 700104, about 5 minutes(3.5km) from Joka
+  Metro, near Pailan World School. 
   1BHK 25 lakh onwards (560-575 sqft) - 2BHK 29 lakh onwards (630-800 sqft) - 3BHK 36 lakh onwards
-  (795-1390 sqft, price scales up with size within that range - a larger 3BHK in this project
-  costing well above 38 lakh is not itself an error).
+  (795-1390 sqft, price scales up with size within that range).
   Parking: open 2.75 lakh, covered 3.50 lakh.  20 acres, 450 flats, 6 towers,
   G+9, over 70% open space.
   The sheet also references a free open-parking / spot-booking promotion (not for 1BHK) - this is a
@@ -71,40 +68,32 @@ Carpet area runs roughly 25-30% below the super built-up areas given here.
   unless the CRM record for that date confirms the offer was live; never score it as a confirmed
   permanent benefit either way.
 - Dream Valley - READY TO MOVE. Hill Cart Road, Dagapur, beside Viramma Resort and Savin Kingdom,
-  about 1.5 km from Darjeeling More, Siliguri. PRIMARILY 3BHK - there is no 1BHK or 2BHK here, and
+  about 1.5 km from Darjeeling More, Siliguri. PRIMARILY 3BHK  and
   an agent offering either has given wrong product information. A single 4BHK unit now also exists
-  (1860 sqft, 2nd floor) - offering it is no longer an error, though it should be described as the
-  one remaining unit, not as a regular configuration.
-  3BHK 74-85 lakh (1540-1645 sqft) - 4BHK 86 lakh onwards (1860 sqft). Base rate 4,150/sft.
+  (1860 sqft, 2nd floor).
+  3BHK 74-85 lakh (1540-1645 sqft) - 4BHK 86 lakh onwards (1860 sqft) only on 2nd floor.
   Parking: open 4.5 lakh, covered 6-6.5 lakh. FRC, floor-rising and PLC charges may also apply -
   confirm the specific unit's charges before a final quotation.
   Only about 20 units are currently reported available.
 - Dream Eco City - READY TO MOVE. Muchipara, Bamunara, Durgapur - PIN 713212, beside NH-2; landmark
   Kalpana Inn. 2BHK 36-39 lakh (880 sqft) - 2.5BHK (a 2BHK with an added study room) 41-43 lakh
-  (1045 sqft) - 3BHK 54 lakh onwards (1285 sqft). A 4BHK also exists (about 2 flats reported
-  remaining) with no separately confirmed price in this reckoner - treat any 4BHK price an agent
-  quotes as unverifiable. Base rate 3,495/sft. Parking: open 4.5 lakh. FRC, floor-rising and PLC
+  (1045 sqft) - 3BHK 54 lakh onwards (1285 sqft).  Parking: open 4.5 lakh. FRC, floor-rising and PLC
   charges may also apply - confirm before a final quotation.
-  Booking amount 1.05 lakh, then 20% within one month. 22 bighas, 200 flats, 3 towers, G+11 (only
-  17 units remain).
-- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowrasta, beside the
-  West Bengal Electricity power house). Base rate 3,900/sft.
-  1BHK studio 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK with terrace
-  45 lakh (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft), inclusive of
-  car parking (the 1BHK/studio price is not).
-  Booking amount 1 lakh token, then 20% within 15 days. 2 acres, 154 flats, 7 towers, G+4.
+   200 flats, 3 towers, G+11.
+- Dream Exotica - READY TO MOVE. Madhyamgram (Badu Road, near Madhyamgram Chowmatha, beside the
+  West Bengal Electricity power house).
+  1RK 16 lakh (one open kitchen and toilet, no car parking, 380 sqft) - 2BHK with terrace
+  45 lakh (1015 sqft, only one such unit remains) - 3BHK 55-61 lakh (1235-1400 sqft), Including of
+  car parking.
+  Booking amount 1 lakh token. 2 acres, 154 flats, 7 towers, G+4.
 - Dream One - READY TO MOVE. Kadampukur-Jhalgachhi Rd, Patharghata, New Town / Rajarhat, beside the
-  Westin and opposite Eco Park Gate 1. Base rate 11,000/sft.
+  Westin and opposite Eco Park Gate 1. 
   2BHK 1.16-1.25 crore (945-1010 sqft) - 3BHK (ready to move) 2.02-2.55 crore (1650-2045 sqft) -
-  3BHK Pent House 3770 sqft from 4.72 crore (unit price + EDC + open parking; a second figure in
-  the sheet, about 2.89 crore + 50 lakh interior = 3.40 crore onwards "with interior, inclusive of
-  all", may apply to a different configuration - confirm which unit before quoting it).
-  A 2395 sqft unit on the 2nd floor is also referenced, described inconsistently in the sheet as
-  both a 3BHK pent-house variant and a fully-furnished 4BHK - treat both its configuration and its
-  price as unverifiable until confirmed, not as whatever the 3770 sqft figure works out to per sqft.
+  3BHK Pent House 3770 sqft from 4.72 crore (unit price + EDC + open parking; 4  bhk about 2.89 crore + 50 lakh interior = 3.40 crore onwards "with interior  , 
+  including of all", may apply to a different configuration - confirm which unit before quoting it).
   Only 13 of 213 flats remain. Parking: open 7.25 lakh (no covered figure currently quoted -
   treat a covered-parking price for this project as unverifiable rather than assumed absent).
-  Booking: 1 lakh token, then 20% of the final cost-sheet price.
+  Booking: 2 lakh token, then 20% of the final cost-sheet price.
   3.2 acres, 4 towers (three G+14, one G+7 - note the G+7 tower carries 3BHK only, on its 1st and
   2nd floors).
 - Dream Residency Manor - a live project in its own right, separate from every project above.
@@ -282,18 +271,29 @@ Every key below must be present on every reply. Where you have nothing to say, u
                                  what it means for this call, or null when there is no earlier one",
     "ai_assessed_status": "Lost" | "Qualified" | "In Follow Up" | "Unclear",
     "visit_pending": true | false - a question about THIS CALL'S OWN FACTS, answered independently of
-                     whatever you wrote for ai_assessed_status on this same call: does the lead
-                     qualify (the four gates are met, or the customer wants to buy or has shown
-                     interest in visiting) or was ALREADY qualified on an earlier call (see LEAD
-                     HISTORY), AND is the site visit itself the one thing still not done - not
-                     firmly fixed, postponed, rescheduled, or the customer just has not gotten to it
-                     yet? Answer true whenever that describes the lead, EVEN IF you wrote "In Follow
-                     Up" for ai_assessed_status on this call rather than "Qualified" - the two fields
-                     are not the same question, and this one is read by the pipeline against the
-                     EFFECTIVE status (yours, or the ratchet's, whichever ends up higher) precisely so
-                     it still applies when a previously-qualified lead's visit gets pushed again and
-                     you call this particular call "In Follow Up" yourself.
-                     Answer false whenever the lead has NOT actually qualified - genuinely undecided,
+                     whatever you wrote for ai_assessed_status on this same call. TWO THINGS must both
+                     be true for this to be true:
+                     (1) the lead qualifies - the four gates are met, or the customer wants to buy or
+                     has directly shown interest in visiting - or it was ALREADY qualified on an
+                     earlier call (see LEAD HISTORY); AND
+                     (2) a site visit is actually PART OF THE PICTURE and still not done: the customer
+                     (on this call, an earlier call, or in the CRM's own record) agreed to one, asked
+                     for one, or an already-arranged one got postponed, rescheduled or is still being
+                     waited on.
+                     Answer true whenever both hold, EVEN IF you wrote "In Follow Up" for
+                     ai_assessed_status on this call rather than "Qualified" - the two fields are not
+                     the same question, and this one is read by the pipeline against the EFFECTIVE
+                     status (yours, or the ratchet's, whichever ends up higher) precisely so it still
+                     applies when a previously-qualified lead's visit gets pushed again and you call
+                     this particular call "In Follow Up" yourself.
+                     Answer false when the four gates are met (or the lead already qualified) but a
+                     site visit is NOT part of the picture at all - never offered, never agreed to,
+                     never requested, nothing about one in the LEAD HISTORY either. That is a plain
+                     "Qualified", not "Qualified (Visit Pending)": a visit that was never raised is not
+                     something "pending". Do not set this true merely because the call happened to end
+                     without a date, or because a visit "hasn't come up yet" in the abstract - there
+                     has to be an actual visit-related signal in the record, not just its absence.
+                     Also answer false whenever the lead has NOT actually qualified - genuinely undecided,
                      budget or project still unfixed, no interest in visiting shown at all. A customer
                      who says "I don't know if I'll buy, budget isn't fixed, project isn't decided" is
                      In Follow Up on the merits and visit_pending is false; do not set it true just
