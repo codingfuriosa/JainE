@@ -1,0 +1,18 @@
+[project]
+name = "jaine-agent"
+version = "0.1.0"
+description = "JainE Agent: local Windows worker that turns JainE/Supabase events into browser automation, via a local LLM (Ollama) and Playwright/Browser Use."
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Added in later phases, kept separate so Phase 1 has no heavy deps to install yet.
+llm = ["ollama>=0.4"]
+browser = ["browser-use>=0.13", "playwright>=1.48"]
+supabase = ["supabase>=2.9"]
+server = ["fastapi>=0.115", "uvicorn>=0.32"]
+
+[project.scripts]
+jaine-agent = "jaine_agent.__main__:main"

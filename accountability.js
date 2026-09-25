@@ -487,6 +487,35 @@
     .tp-sub-item.drag{opacity:.4}
     .ac-in{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
     .ac-in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    /* THE CHECK LIST PREVIEW IS THE DOCUMENT. An A4 sheet on the viewer's grey, typed into
+       directly - so what is corrected here is what the Word file contains. Sized in points
+       against a 96dpi screen (1pt = 1.333px) so the preview and the .docx agree on where things
+       sit rather than only roughly resembling each other. */
+    .wfd-page{width:794px;min-height:1123px;margin:0 auto;background:#fff;color:#121214;
+      padding:77px;box-sizing:border-box;font-family:Calibri,Segoe UI,Arial,sans-serif;
+      font-size:14px;line-height:1.55;box-shadow:0 2px 14px rgba(0,0,0,.35);outline:none}
+    .wfd-page p{margin:0 0 6px}
+    .wfd-page .wfd-h{font-weight:700;margin:16px 0 10px}
+    .wfd-page .wfd-right{text-align:right}
+    .wfd-page .wfd-gap{margin-bottom:18px}
+    .wfd-page .wfd-soft{color:#6b7280}
+    .wfd-page .wfd-small{font-size:11.5px}
+    .wfd-page table{width:100%;border-collapse:collapse;margin:0 0 8px}
+    .wfd-page td{vertical-align:bottom;padding:3px 6px 3px 0;border:0}
+    .wfd-page td.wfd-rule{border-bottom:1px solid #8c9096}
+    .wfd-page .wfd-cl td{padding-top:9px}
+    .wfd-page .wfd-sign{margin-top:26px}
+    .wfd-page .wfd-logo{margin:0 0 14px}
+    .wfd-page .wfd-logo img{width:146px;height:175px;display:block}
+    /* A caret has to be visible on a page somebody is meant to correct. */
+    .wfd-page:focus-within{box-shadow:0 2px 14px rgba(0,0,0,.35),0 0 0 2px var(--brand)}
+    /* THE TASKS SEARCH BAR IS OUTLINED BEFORE IT IS CLICKED. Every other box on the page is a
+       field you fill in, and they all share the same grey outline until focused - so the one
+       control that is there to FIND something looked identical to the ones that are there to
+       record something, and people scrolled past it. Carrying the brand colour from the start
+       makes it the first thing the eye lands on. Focus still adds the glow, so it is still
+       obvious which box the keyboard is in. */
+    #acTaskSearch{border-color:var(--brand)}
     textarea.ac-in{min-height:150px;resize:vertical}
     .ac-lbl{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:12px 0 6px}
     .ac-msrow{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:150px;overflow:auto}
@@ -984,22 +1013,80 @@
     return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" onclick="navTo('tasks/task/${t.id}${opt.ro?'/ro':''}')"><div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon}${titleHtml}</div></div><div class="rt">${meta}${dueBadge(t.due_date,t.completed_at)}${ownerVis}</div></div>`;
   }
   function summaryCard(title,icon,color,count,inner){ return `<div class="ac-card sm"><div class="hd"><i class="fa-solid ${icon}" style="color:${color}"></i> ${title}<span class="cnt">${count}</span></div><div class="bd" style="height:180px;max-height:180px;min-height:0">${inner}</div></div>`; }
+  /* WHAT YOU SEARCHED FOR COMES TO THE TOP.
+     Filtering alone was not enough. The rows keep their priority order, so a task that matched
+     stayed exactly where it sat - often three groups down, below a run of headings whose own
+     tasks had all just been hidden - and you still had to scroll the page hunting for the thing
+     you had just typed the name of. Now the matches are lifted to the top of whatever list they
+     belong to, groups with a match come before groups without, and groups with nothing left in
+     them step out of the way. Nothing is renumbered: this is purely how the page is laid out
+     while a search is running, and clearing the box puts every row back exactly where it was.
+     That is what ACC_SEARCH_MOVED is for - each container it touches keeps a copy of its own
+     original child order, which is replayed on the way out. */
+  let ACC_SEARCH_MOVED=[];
+  function accSearchSnapshot(el){
+    if(el._accOrigOrder) return;
+    el._accOrigOrder=Array.prototype.slice.call(el.children);
+    ACC_SEARCH_MOVED.push(el);
+  }
+  function accSearchRestoreOrder(){
+    ACC_SEARCH_MOVED.forEach(function(el){
+      if(!el._accOrigOrder) return;
+      // Re-appending in the remembered order puts them back; anything since removed is skipped.
+      el._accOrigOrder.forEach(function(c){ if(c.parentElement===el) el.appendChild(c); });
+      el._accOrigOrder=null;
+    });
+    ACC_SEARCH_MOVED=[];
+  }
+  function accSearchHasMatch(sec){
+    return Array.prototype.some.call(sec.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
+  }
+  function accSearchHoist(body){
+    // Matching rows to the head of their own list, keeping the order they had between themselves.
+    const byParent=new Map();
+    body.querySelectorAll('.ac-row').forEach(function(r){
+      if(r.style.display==='none') return;
+      const p=r.parentElement; if(!p) return;
+      if(!byParent.has(p)) byParent.set(p,[]);
+      byParent.get(p).push(r);
+    });
+    byParent.forEach(function(rows,p){
+      accSearchSnapshot(p);
+      rows.slice().reverse().forEach(function(r){ p.insertBefore(r,p.firstChild); });
+    });
+    // Then the groups themselves: the ones holding a match first, the empty ones out of sight.
+    body.querySelectorAll('.ac-grpbox').forEach(function(box){
+      accSearchSnapshot(box);
+      const secs=Array.prototype.slice.call(box.children).filter(function(c){
+        return c.classList && c.classList.contains('ac-secwrap'); });
+      secs.forEach(function(sec){ sec.style.display=accSearchHasMatch(sec)?'':'none'; });
+      secs.filter(accSearchHasMatch).reverse().forEach(function(sec){ box.insertBefore(sec,box.firstChild); });
+    });
+  }
+
   // Client-side title filter for every task row currently on screen (Tasks tab) — no re-fetch.
   window.accTaskSearch=function(val){
     const q=(val||'').trim().toLowerCase();
     const body=document.getElementById('acBody'); if(!body)return;
+    // Always work from the real order, so the result of the fifth keystroke is the same as it
+    // would have been had it been the first.
+    accSearchRestoreOrder();
     body.querySelectorAll('.ac-row').forEach(function(row){
       const el=row.querySelector('.ti .t');
       const txt=el?el.textContent.toLowerCase():'';
       row.style.display=(!q||txt.includes(q))?'':'none';
     });
-    // While searching, hide the "Add task" dotted rows unless their group still has a visible task.
+    /* The "Add task" dotted rows go away for the duration of a search. They used to stay on if
+       their group still had a visible task, which was fine while the rows sat in their real
+       order - but each one means "put a new task BETWEEN these two", and once the matches have
+       been lifted to the top the two rows either side of a gap are no longer neighbours. Adding
+       there would have filed the new task at the wrong priority. */
     body.querySelectorAll('.ac-addrow-ghost, .ac-ins, .ac-addrow').forEach(function(g){
-      if(!q){ g.style.display=''; return; }
-      const parent=g.parentElement;
-      const hasVisible=parent && Array.prototype.some.call(parent.querySelectorAll('.ac-row'), function(r){ return r.style.display!=='none'; });
-      g.style.display=hasVisible?'':'none';
+      g.style.display=q?'none':'';
     });
+    window._accSearching=!!q;
+    if(q){ accSearchHoist(body); }
+    else { body.querySelectorAll('.ac-secwrap').forEach(function(s){ s.style.display=''; }); }
     // Logged directly, debounced to the settled query, rather than through USAGE_MAP - this fires
     // on every keystroke for instant filtering, and logging every keystroke turned one real search
     // into a burst of single/two-character fragments milliseconds apart (typing "182" logged "1",
@@ -3416,6 +3503,15 @@
        itself needs no change here: the generic "already started" block below (data-first-received)
        already covers every workflow, this one included. */
     const wfPastStep1Locked=function(c){ return id===39 && (c&&c.current_step>1) && !(c&&c.returned_at); };
+    /* Reimbursement only: the case number of an existing claim of mine that is already in process
+       (past its first step, not Done/Cancelled, not sent back for correction) — mirrors the block
+       acc.wf_create_instance now enforces server-side (one open claim at a time), so "New
+       Reimbursement" reads as unavailable up front instead of only failing once the form is filled
+       in and submitted. */
+    const wfMyOpenReimbursement=id===39 ? (function(){
+      const c=cases.find(function(x){ return eq(x&&x.created_by, mySelf) && x.current_step>1 && !x.returned_at && x.status!=='Done' && x.status!=='Cancelled'; });
+      return c ? wfCaseNoText(c) : null;
+    })() : null;
     const wfBookingStarted=function(c){
       if(id!==41 || !c) return false;
       const firstSeqHere = steps.length ? steps.reduce(function(m,s){return s.seq<m?s.seq:m;}, steps[0].seq) : null;
@@ -3547,7 +3643,10 @@
       +'</span>'):'')
       +(canManageEdit?'<button class="ac-btn" onclick="wfEdit('+id+')"><i class="fa-solid fa-pen"></i><span class="wf-btxt"> Edit</span></button>':'')
       +(canManage?'<button class="ac-btn danger" title="Delete (Del key)" onclick="wfDelete('+id+')"><i class="fa-solid fa-trash"></i><span class="wf-btxt"> Delete</span></button>':'')
-      +(canEvent?'<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>':'')
+      +(canEvent?(wfMyOpenReimbursement
+          ? '<button class="ac-btn primary" disabled title="Your '+esc2(N.lc)+' #'+esc2(wfMyOpenReimbursement)+' is still in process — raise a new one only after that is Done"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
+          : '<button class="ac-btn primary" title="Start a new '+esc2(N.lc)+'" onclick="wfNewInstance('+id+')"><i class="fa-solid fa-bolt"></i><span class="wf-btxt"> New '+esc2(N.one)+'</span></button>'
+        ):'')
       +'</div>';
 
     // Reimbursement only, and only these two named accounts (Accounts' own lookup tool — not a
@@ -3909,7 +4008,7 @@
        the Administrator, Post Sales dept, or the named viewing exemption above get to see the
        buttons at all, regardless of who created the instance. */
     const auditBtn=(c.flow_id===41&&wfBookingCanView)
-      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Download the Booking Form Check List"><i class="fa-solid fa-list-check"></i></button>'
+      ? '<button class="wf-tlhead-x" onclick="wfChecklistDownload('+c.id+')" title="Open the Booking Form Check List \u2014 editable, downloads as Word"><i class="fa-solid fa-list-check"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfWelcomeLetter('+c.id+')" title="Download the customer\'s Welcome Letter"><i class="fa-solid fa-envelope-open-text"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAllotmentLetter('+c.id+')" title="Download the Allotment Letter"><i class="fa-solid fa-file-signature"></i></button>'
         +'<button class="wf-tlhead-x" onclick="wfAgreement('+c.id+')" title="Download the Agreement for Sale — a draft to be checked and completed, not a final deed"><i class="fa-solid fa-file-contract"></i></button>'
@@ -4157,6 +4256,252 @@
      PDF carrying a customer's Aadhaar and KYC that somebody is about to hand over or file. Every
      one of them now opens a preview of the finished PDF first - the file only reaches disk once a
      person has looked at it and presses Download themselves. */
+  /* ══════════════════════════════════════════════════════════════════════════════════════════
+     WORD DOCUMENTS, WRITTEN FROM WHAT IS ON THE SCREEN.
+
+     The check list used to be a PDF: typeset, exact, and impossible to correct. In practice a
+     sheet often needs a word changed before it is filed - a name spelt as the customer spells it,
+     a note added beside a failed check - and with a PDF the only way to do that was to go back to
+     the documents, fix them, and re-read. So the sheet is now a Word file, and the preview it is
+     downloaded from is itself editable: what you see, including anything you type into it, is
+     what the file contains.
+
+     IT IS A REAL .docx, not HTML saved under a .doc name. That trick is easier, but Word opens
+     such a file with "the file format and extension don't match" and a Protected View bar, which
+     is not a thing to hand somebody every time they file a booking. A .docx is a zip of a few XML
+     parts; the ones Word actually needs are written below.
+
+     The writer walks the preview's own DOM rather than a fixed model, so an edit that adds a
+     line, or makes something bold, survives into the document the same as a changed word does. */
+
+  async function loadJsZip(){
+    if(window.JSZip) return window.JSZip;
+    await new Promise(function(res,rej){
+      const sc=document.createElement('script');
+      sc.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      sc.onload=res;
+      sc.onerror=function(){ rej(new Error('the Word library could not be loaded')); };
+      document.head.appendChild(sc);
+    });
+    if(!window.JSZip) throw new Error('the Word library loaded but was empty');
+    return window.JSZip;
+  }
+
+  const wfXml=function(t){ return String(t==null?'':t)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+
+  /* One run of text, carrying whatever the element it came from was wearing. Half-point sizes and
+     hex colours are what Word wants; 10.5pt is sz 21. */
+  function wfRun(text,st){
+    if(text==='') return '';
+    /* ORDER IS PART OF THE SCHEMA. w:rPr's children are a sequence, not a set: rFonts, b, i,
+       colour, then size. Word is usually forgiving about it and then one day is not, which shows
+       up as "the file cannot be opened because there are problems with the contents" rather than
+       anything that names the cause - so it is written in the order the schema states. */
+    const pr=['<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>'];
+    if(st.b) pr.push('<w:b/>');
+    if(st.i) pr.push('<w:i/>');
+    if(st.color) pr.push('<w:color w:val="'+st.color+'"/>');
+    pr.push('<w:sz w:val="'+(st.sz||21)+'"/>');
+    return '<w:r><w:rPr>'+pr.join('')+'</w:rPr>'
+      +'<w:t xml:space="preserve">'+wfXml(text)+'</w:t></w:r>';
+  }
+
+  // Inline walk: text nodes become runs, <b>/<strong> and a bold font-weight turn bold on, <br>
+  // becomes a line break inside the same paragraph.
+  function wfRunsOf(node,st){
+    let out='';
+    [].slice.call(node.childNodes).forEach(function(n){
+      if(n.nodeType===3){ out+=wfRun(n.nodeValue.replace(/ /g,' '),st); return; }
+      if(n.nodeType!==1) return;
+      const tag=n.tagName.toLowerCase();
+      if(tag==='br'){ out+='<w:r><w:br/></w:r>'; return; }
+      const s={b:st.b,i:st.i,sz:st.sz,color:st.color};
+      if(tag==='b'||tag==='strong') s.b=true;
+      if(tag==='i'||tag==='em') s.i=true;
+      const inline=n.getAttribute&&n.getAttribute('style')||'';
+      if(/font-weight\s*:\s*(bold|[6-9]00)/i.test(inline)) s.b=true;
+      if(n.classList&&n.classList.contains('wfd-soft')) s.color='6B7280';
+      if(n.classList&&n.classList.contains('wfd-small')) s.sz=17;
+      out+=wfRunsOf(n,s);
+    });
+    return out;
+  }
+
+  function wfPara(el,st,opt){
+    opt=opt||{};
+    const runs=wfRunsOf(el,st||{});
+    // Same sequence rule as w:rPr above: pBdr, then spacing, then jc.
+    const pr=[];
+    if(opt.border) pr.push('<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="8C9096"/></w:pBdr>');
+    pr.push('<w:spacing w:after="'+(opt.after==null?80:opt.after)+'" w:line="240" w:lineRule="auto"/>');
+    if(opt.align) pr.push('<w:jc w:val="'+opt.align+'"/>');
+    return '<w:p><w:pPr>'+pr.join('')+'</w:pPr>'+(runs||'<w:r><w:t xml:space="preserve"></w:t></w:r>')+'</w:p>';
+  }
+
+  /* A table cell's bottom border is how the sheet draws the rule a value sits on, so it is read
+     off the cell's own class rather than guessed from where it sits. */
+  function wfCell(td,widthPct){
+    const ruled=td.classList&&td.classList.contains('wfd-rule');
+    const borders=ruled
+      ? '<w:tcBorders><w:bottom w:val="single" w:sz="6" w:space="0" w:color="8C9096"/></w:tcBorders>'
+      : '<w:tcBorders><w:bottom w:val="nil"/></w:tcBorders>';
+    return '<w:tc><w:tcPr><w:tcW w:w="'+widthPct+'" w:type="pct"/>'+borders
+      +'<w:vAlign w:val="bottom"/></w:tcPr>'
+      + wfPara(td,{},{after:20}) + '</w:tc>';
+  }
+
+  function wfTable(tbl){
+    const rows=[].slice.call(tbl.querySelectorAll('tr'));
+    if(!rows.length) return '';
+    let x='<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
+      +'<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/>'
+      +'<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>'
+      +'<w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar>'
+      +'</w:tblPr>';
+    rows.forEach(function(tr){
+      const tds=[].slice.call(tr.children).filter(function(c){ return c.tagName==='TD'||c.tagName==='TH'; });
+      if(!tds.length) return;
+      x+='<w:tr>';
+      tds.forEach(function(td){
+        // an explicit width wins; otherwise the row is shared out evenly
+        const w=td.getAttribute('data-w');
+        x+=wfCell(td, w?Number(w)*50:Math.round(5000/tds.length));
+      });
+      x+='</w:tr>';
+    });
+    return x+'</w:tbl>';
+  }
+
+  // 12700 EMU to the point - the logo keeps the size the printed blank gave it.
+  function wfImagePara(wPt,hPt){
+    const cx=Math.round(wPt*12700), cy=Math.round(hPt*12700);
+    return '<w:p><w:pPr><w:spacing w:after="140"/></w:pPr><w:r><w:drawing>'
+      +'<wp:inline distT="0" distB="0" distL="0" distR="0">'
+      +'<wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:docPr id="1" name="Logo"/>'
+      +'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+      +'<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="Logo"/><pic:cNvPicPr/></pic:nvPicPr>'
+      +'<pic:blipFill><a:blip r:embed="rId5"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+      +'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm>'
+      +'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
+      +'</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+  }
+
+  /* Walks the edited page and returns the body XML. Anything that is not a table is a paragraph,
+     which is what keeps a line somebody typed themselves from being dropped. */
+  function wfBodyXml(root,hasLogo){
+    let body='';
+    [].slice.call(root.children).forEach(function(el){
+      const tag=el.tagName.toLowerCase();
+      if(tag==='table'){ body+=wfTable(el); return; }
+      if(el.classList&&el.classList.contains('wfd-logo')){
+        /* Only when the image part was actually written. A drawing pointing at a relationship
+           that is not in the package is exactly the kind of thing Word refuses to open, and it
+           would be introduced by nothing more than calling this without a logo. */
+        const img=el.querySelector('img');
+        if(img&&hasLogo) body+=wfImagePara(Number(img.dataset.wpt)||109.5,Number(img.dataset.hpt)||131.25);
+        return;
+      }
+      const opt={};
+      if(el.classList&&el.classList.contains('wfd-right')) opt.align='right';
+      if(el.classList&&el.classList.contains('wfd-gap')) opt.after=320;
+      const st={};
+      if(tag==='h1'||tag==='h2'||(el.classList&&el.classList.contains('wfd-h'))) st.b=true;
+      body+=wfPara(el,st,opt);
+    });
+    return body;
+  }
+
+  async function wfBuildDocx(root,logoBytes){
+    const JSZipC=await loadJsZip();
+    const zip=new JSZipC();
+
+    zip.file('[Content_Types].xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      +'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      +'<Default Extension="xml" ContentType="application/xml"/>'
+      +'<Default Extension="jpeg" ContentType="image/jpeg"/>'
+      +'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+      +'</Types>');
+
+    zip.folder('_rels').file('.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      +'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      +'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+      +'</Relationships>');
+
+    const wordRels=['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'];
+    if(logoBytes){
+      wordRels.push('<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpeg"/>');
+      zip.folder('word').folder('media').file('logo.jpeg',logoBytes);
+    }
+    wordRels.push('</Relationships>');
+    zip.folder('word').folder('_rels').file('document.xml.rels',wordRels.join(''));
+
+    /* A4 with the same margins the sheet was typeset at - 58pt all round, in twentieths of a
+       point, so the Word version lines up with the printed blank rather than drifting wider. */
+    const M=Math.round(58*20);
+    const doc='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      +'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+      +' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+      +' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+      +' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+      +' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+      +'<w:body>'+wfBodyXml(root,!!logoBytes)
+      +'<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+      +'<w:pgMar w:top="'+M+'" w:right="'+M+'" w:bottom="'+M+'" w:left="'+M+'"'
+      +' w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>'
+      +'</w:body></w:document>';
+    zip.folder('word').file('document.xml',doc);
+
+    return await zip.generateAsync({type:'uint8array',
+      mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  }
+
+  /* The preview, which is the document. Editable in place; Download writes whatever it now says.
+     The logo is marked contenteditable="false" so it cannot be typed over or deleted by accident,
+     while everything around it stays editable. */
+  function wfPreviewDoc(html,filename,toastMsg,logoBytes){
+    openModal('<div class="modal-head"><h3>'+esc2(filename)+'</h3><span class="x" data-wfx>&times;</span></div>'
+      +'<div class="modal-body" style="padding:0;background:#525659">'
+        +'<div style="max-height:70vh;overflow:auto;padding:22px 0">'
+        +'<div id="wfdRoot" class="wfd-page" contenteditable="true" spellcheck="false">'+html+'</div>'
+        +'</div>'
+      +'</div>'
+      +'<div class="modal-foot">'
+        +'<span style="margin-right:auto;font-size:12px;color:var(--slate)">'
+        +'<i class="fa-solid fa-pen"></i> Click anywhere on the sheet to correct it before downloading.</span>'
+        +'<button class="ac-btn" id="wfPvClose">Close Preview</button>'
+        +'<button class="ac-btn primary" id="wfPvGo"><i class="fa-solid fa-file-word"></i> Download Word</button>'
+      +'</div>','lg');
+    setTimeout(function(){
+      const go=$('wfPvGo');
+      if(go) go.onclick=async function(){
+        const root=$('wfdRoot'); if(!root) return;
+        go.disabled=true; const was=go.innerHTML;
+        go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Building…';
+        try{
+          const bytes=await wfBuildDocx(root,logoBytes);
+          const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement('a');
+          a.href=url; a.download=filename;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_e){} },60000);
+          if(toastMsg) toast(toastMsg,'ok');
+        }catch(e){
+          toast('Could not build the Word file: '+((e&&e.message)||e),'err');
+        }
+        go.disabled=false; go.innerHTML=was;
+      };
+      const close=$('wfPvClose');
+      if(close) close.onclick=function(){ closeModal(); };
+      [].slice.call(document.querySelectorAll('[data-wfx]')).forEach(function(x){ x.onclick=function(){ closeModal(); }; });
+    },30);
+  }
+
   function wfPreviewPdf(bytes,filename,toastMsg){
     const blob=new Blob([bytes],{type:'application/pdf'});
     const url=URL.createObjectURL(blob);
@@ -4996,7 +5341,7 @@
     let res=null;
     try{ res=await wfBookingReading(caseId); }
     catch(e){ toast((e&&e.message)||'The reading is not ready','warn'); return; }
-    try{ await wfChecklistPdf(res); }
+    try{ await wfChecklistDoc(res); }
     catch(e){ toast('Could not build the check list: '+((e&&e.message)||e),'err'); }
   };
 
@@ -5012,18 +5357,18 @@
 
      The wording, the items and their order are the form's own and are not to be improved on;
      assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
-  async function wfChecklistPdf(res){
-    const L=await loadPdfLib();
-    if(!L) throw new Error('the PDF library could not be loaded');
+  /* The Booking Form check list, as an editable Word sheet.
 
-    const doc=await L.PDFDocument.create();
-    const page=doc.addPage([595.28,841.89]);
-    const W=595.28, H=841.89, M=58, R=W-M;
-    const reg=await doc.embedFont(L.StandardFonts.Helvetica);
-    const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
-    /* One ink, as on any form - a check list is not a dashboard, and it gets photocopied. Grey is
-       for a value nobody has filled in yet, never for a warning. */
-    const ink=L.rgb(0.07,0.07,0.08), soft=L.rgb(0.42,0.44,0.47), rule=L.rgb(0.55,0.57,0.60);
+     Every value still comes from the stored reading; nothing here is written by a model. What has
+     changed is the medium: this builds the sheet as HTML, shows it in a preview you can type into,
+     and writes a .docx from whatever it says when you press Download. It was a PDF, which was
+     exact and unfixable - a misspelt name meant going back to the documents and re-reading.
+
+     The wording, the items and their order are the form's own and are not to be improved on;
+     assets/forms/booking-check-list-blank.pdf stays in the repo as the reference for them. */
+  async function wfChecklistDoc(res){
+    const logoBytes=await jgLogo('classic');
+    let b64=''; { let s=''; for(let i=0;i<logoBytes.length;i++) s+=String.fromCharCode(logoBytes[i]); b64=btoa(s); }
 
     const f=res.fields||{}, cl=res.checklist||{};
     const v=function(k){ const x=f[k]; const t=x?String(x.value==null?'':x.value).trim():'';
@@ -5037,121 +5382,62 @@
     };
     const said=function(t){ const x=String(t==null?'':t).trim();
       return (x && x!=='NIL' && !/^--.*--$/.test(x)) ? x : ''; };
+    const E=esc2;
 
-    /* The mark the form itself carries, top left, at the size and place the printed blank put it:
-       109.5 x 131.25 points against the left margin. This one is an internal sheet, so it prints
-       its own letterhead rather than assuming company paper the way the letters do. */
-    const logo=await doc.embedJpg(await jgLogo('classic'));
-    const lw=109.5, lh=131.25, logoTop=H-52;
-    page.drawImage(logo,{x:M,y:logoTop-lh,width:lw,height:lh});
-    let y=logoTop-lh-26;
-
-    (function(){
-      const lab='Date  :  ', val=dots((res.header&&res.header.date)||'')||'\u2014';
-      const lw=reg.widthOfTextAtSize(lab,10.5), w=lw+bold.widthOfTextAtSize(val,10.5);
-      page.drawText(lab,{x:R-w,y:y,size:10.5,font:reg,color:ink});
-      page.drawText(val,{x:R-w+lw,y:y,size:10.5,font:bold,color:ink});
-    })();
-    y-=30;
-
-    page.drawText('Booking form check list :-',{x:M,y:y,size:11.5,font:bold,color:ink});
-    y-=26;
-
-    // The two header lines, colons in one column so each pair reads as a pair.
-    const mLab=['Name of Post sales in-charge Responsible','Name of the customer'];
-    const mVal=[(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH',
-                allotteeNames(res).join('  &  ')||'\u2014'];
-    const colonX=M+Math.max.apply(null,mLab.map(function(t){
-      return reg.widthOfTextAtSize(t,10.5); }))+12;
-    mLab.forEach(function(lab,i){
-      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(':',{x:colonX,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(String(mVal[i]),{x:colonX+12,y:y,size:10.5,font:bold,color:ink});
-      y-=17;
-    });
-    y-=11;
-
-    /* Label : Value, comma separated, with real space around the colon. Drawn as a run of chunks
-       so the labels can stay light and the values bold on the one line. */
-    const runLine=function(pairs){
-      let x=M;
-      pairs.forEach(function(p,i){
-        /* An explicit NIL is an answer and prints as one - the form's own way of saying there is
-           no discount, no parking. Only a genuinely empty value becomes a dash. */
-        const lab=p[0]+' : ';
-        const val=(p[1]==null||String(p[1]).trim()==='') ? '\u2014' : String(p[1]).trim();
-        page.drawText(lab,{x:x,y:y,size:10.5,font:reg,color:soft});
-        x+=reg.widthOfTextAtSize(lab,10.5);
-        page.drawText(val,{x:x,y:y,size:10.5,font:bold,color:ink});
-        x+=bold.widthOfTextAtSize(val,10.5);
-        if(i<pairs.length-1){
-          page.drawText(',    ',{x:x,y:y,size:10.5,font:reg,color:ink});
-          x+=reg.widthOfTextAtSize(',    ',10.5);
-        }
+    /* Label : Value, comma separated - the labels light, the values bold, exactly as the sheet
+       reads. An explicit NIL is an answer and prints as one; only a genuinely empty value becomes
+       a dash. */
+    const runLine=function(pairs,cls){
+      const bits=pairs.map(function(p){
+        const val=(p[1]==null||String(p[1]).trim()==='') ? '—' : String(p[1]).trim();
+        return '<span class="wfd-soft">'+E(p[0])+' : </span><b>'+E(val)+'</b>';
       });
-      y-=17;
+      return '<p class="'+(cls||'')+'">'+bits.join(',&nbsp;&nbsp;&nbsp; ')+'</p>';
     };
-    // The floor is the number the booking form gives - not "3rd FLOOR" clipped to "3rd FL".
+
     const floorNo=(String(v('floor')).match(/\d+/)||[v('floor')])[0]||'';
-    runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
-             ['Floor',floorNo],
-             ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
-    /* WHICH parking belongs in the label, not the value. The reading gives "COVERED 5,00,000",
-       which printed as "Parking : COVERED 5,00,000" - reading as though COVERED were part of the
-       amount. What was ticked is the name of the thing being charged for, so it goes with the
-       word: "COVERED Parking : 5,00,000". Nothing ticked stays plain "Parking". */
+
+    /* WHICH parking belongs in the label, not the value: "COVERED Parking : 5,00,000", never
+       "Parking : COVERED 5,00,000", which reads as though COVERED were part of the amount. */
     const pv=String(res.parking_value||v('covered_parking')||'').trim();
     const pk=pv.match(/^(COVERED|OPEN)\s*(.*)$/i);
     const parkLabel=pk?(pk[1].toUpperCase()+' Parking'):'Parking';
     const parkValue=pk?((pk[2]||'').trim()||'NIL'):(pv||'NIL');
-    // Base Rate and Discount are read straight off the baserate check's own fields rather than
-    // parsed back out of a sentence - see booking-audit's baseRateCheck for the three cases:
-    //   document rate = approved     Base Rate is that rate, Discount is Nil.
-    //   document rate < approved     Base Rate is the APPROVED (cross-check) rate, not the
-    //                                 document's own lower one, and Discount is the shortfall x the
-    //                                 area, as a plain figure: 61,750/-.
-    //   document rate > approved     Base Rate is the document's own (higher) rate, Discount Nil.
+
+    // Base Rate and Discount come off the baserate check's own fields rather than being parsed
+    // back out of a sentence - see booking-audit's baseRateCheck for the three cases.
     const baseRateArith=(res.arithmetic||[]).filter(function(c){ return c.kind==='baserate'; })[0];
-    const baseRateVal=(baseRateArith&&baseRateArith.display_rate)
-      ? baseRateArith.display_rate+'/-' : (v('base_rate')?(grp(v('base_rate'))+'/-'):'');
-    // Just the resulting amount, not the "X - Y = Z X area = amount/-" working - the arithmetic
-    // that got there lives in the reading for anyone who wants it; the check list only needs the
-    // figure itself, the same way every other money field on this row is a bare figure.
+    /* A SHEET THAT PRINTS NO RATE STILL HAS ONE. Several cost sheets quote a lump sum and never
+       state the per-square-foot rate; the line then came out blank, which reads as "no rate"
+       rather than "not written on this sheet". The approved rate is known either way, and is
+       marked as approved so nobody mistakes it for something read off the document. */
+    const WF_APPROVED_RATE={'Dream Valley':3900,'Dream Exotica':3550,'Dream Eco City':3500,
+      'Dream Eco City Bungalow':5160,'Dream One':9000,'Dream World City':4370,
+      'Dream Gurukul':5399,'Dream Ananta':5600};
+    const approvedRateFor=function(){
+      const proj=String(v('project_name')||'').trim();
+      if(!proj) return null;
+      if(WF_APPROVED_RATE[proj]!=null) return WF_APPROVED_RATE[proj];
+      if(/ECO\s*CITY/i.test(proj) && /BUNGALOW/i.test(JSON.stringify(res.fields||{})))
+        return WF_APPROVED_RATE['Dream Eco City Bungalow'];
+      return null;
+    };
+    const baseRateVal=(function(){
+      if(baseRateArith&&baseRateArith.display_rate) return baseRateArith.display_rate+'/-';
+      if(v('base_rate')) return grp(v('base_rate'))+'/-';
+      const ap=approvedRateFor();
+      return (ap!=null) ? (grp(ap)+'/- (approved)') : '';
+    })();
     const discountVal=(baseRateArith&&baseRateArith.discount&&baseRateArith.discount.amount)
       ? baseRateArith.discount.amount+'/-' : 'Nil';
-    // Base Rate back on the same row as PLC/FLC/Parking - now that it and Discount are both short
-    // figures rather than a spelled-out sum, there is no more risk of running past the printable
-    // width, so this is the plain grouping every other cost-sheet figure on the sheet uses. Each
-    // field is still measured and placed by its own actual width (see runLine), so nothing overlaps
-    // even when Parking carries a kind ("OPEN Parking : 4,00,000") rather than a bare figure.
-    runLine([['Base Rate',baseRateVal],['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
-             [parkLabel,parkValue]]);
-    runLine([['Discount',discountVal]]);
-    y-=13;
 
-    page.drawText('Check List :',{x:M,y:y,size:11,font:bold,color:ink});
-    y-=23;
-
-    /* A dash between the label and the rule, and the value written ON the rule - which is what a
-       filled form looks like. Every value starts in the same column, so they read straight down
-       instead of being hunted for. */
-    const LBL=152, VX=M+LBL+18;
-
-    /* WHY IT FAILED, IN A FEW WORDS, ON THE SAME LINE.
-       A column of NOT OKs tells whoever picks the file up that something is wrong but not what,
-       and they then have to open the reading to find out. So each failed row carries its own
-       reason in brackets beside it.
-       These are WRITTEN SHORT rather than trimmed from the long reason the reader gives: a
-       sentence cut off mid-word reads worse than no sentence at all. Each is built from what was
-       actually decided, so it can never disagree with the verdict beside it. The full wording is
-       still in the reading for anyone who wants it. */
+    /* WHY IT FAILED, IN A FEW WORDS, BESIDE THE VERDICT.
+       A column of NOT OKs says something is wrong but not what, and whoever picks the file up then
+       has to open the reading to find out. Each reason is written short rather than trimmed from
+       the reader's long one - a sentence cut off mid-word reads worse than no sentence - and is
+       built from what was actually decided, so it can never disagree with the verdict beside it. */
     const clWhy=function(key){
       if(key==='Cost Sheet'){
-        // NOT a list of which parts failed - "car parking, base rate" says WHERE to look, not
-        // WHAT is wrong, and reads as though those were the reasons rather than just the labels.
-        // Each one is instead built from the same structured evidence the verdict itself came
-        // from, the same way KYC's reason below points at the actual card rather than just
-        // saying "KYC" failed.
         const parts=((res.cost_sheet_verdict||{}).parts)||[];
         const bad=parts.filter(function(p){ return !p.ok; }).map(function(p){ return p.what; });
         const bits=[];
@@ -5167,16 +5453,13 @@
         }
         if(bad.indexOf('the unit')>=0){
           const uc=Array.isArray(res.unit&&res.unit.comparison)?res.unit.comparison:[];
-          const diff=uc.filter(function(f){ return f.matches===false; })[0];
+          const diff=uc.filter(function(f2){ return f2.matches===false; })[0];
           bits.push(diff?(diff.field+' differs'):'unit details differ');
         }
-        // Kept for safety even though the base rate no longer fails the cost sheet on its own -
-        // see booking-audit's baseRateCheck, which is now informational only.
         if(bad.indexOf('the base rate')>=0) bits.push('base rate below approved');
         return bits.join('; ');
       }
       if(key==='KYC of Customer'){
-        // a card that is plainly the applicant's, spelt differently - the commonest failure
         const nf=res.name_faults||[];
         if(nf.length){
           const m=String(nf[0]).match(/^The ([A-Z]+) card/);
@@ -5212,96 +5495,89 @@
       return '';
     };
 
-    const row=function(label,value,dim,edge){
-      page.drawText(label,{x:M,y:y,size:10.5,font:reg,color:ink});
-      page.drawText('\u2013',{x:M+LBL,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(String(value),{x:VX,y:y,size:10.5,font:dim?reg:bold,color:dim?soft:ink});
-      /* IT MUST NOT WRAP. The row is one line and a second one would push the whole sheet out of
-         shape, so the reason has to fit in whatever space is actually left on this line.
-         SHRINK THE FONT BEFORE SHORTENING THE WORDS - the full reason a size or two smaller reads
-         better, and is more useful, than a cut-down one at full size, and either way it stays on
-         this line rather than wrapping. Cutting the words is the last resort, only once the font
-         has already shrunk as far as it can still be read, and even then from the END - a
-         reason that starts making sense and trails off beats one sliced from the front. A
-         reason that still will not fit at the smallest size is left off; a missing note costs
-         nothing, a broken sheet costs a reprint. */
-      if(String(value)==='NOT OK'){
-        const why=clWhy(label);
-        if(why){
-          const vw=bold.widthOfTextAtSize(String(value),10.5);
-          const sx=VX+vw+7, room=(edge||R)-6-sx;
-          const full='('+why+')';
-          let size=8.5;
-          while(size>6.5 && reg.widthOfTextAtSize(full,size)>room) size-=0.25;
-          if(reg.widthOfTextAtSize(full,size)<=room){
-            page.drawText(full,{x:sx,y:y,size:size,font:reg,color:soft});
-          }else{
-            let s=why;
-            while(s.length>6 && reg.widthOfTextAtSize('('+s+'…)',size)>room) s=s.slice(0,-1);
-            const cut='('+s+'…)';
-            if(reg.widthOfTextAtSize(cut,size)<=room)
-              page.drawText(cut,{x:sx,y:y,size:size,font:reg,color:soft});
-          }
-        }
-      }
-      page.drawLine({start:{x:VX,y:y-4},end:{x:edge||R,y:y-4},thickness:0.6,color:rule});
-    };
     // Nothing prints as UNKNOWN: a check that could not be settled reads NOT OK. See the reader.
     const verdict=function(key){
       const t=String(cl[key]==null?'':cl[key]).trim();
       if(t==='Ok')     return ['OK',false];
       if(t==='Not Ok') return ['NOT OK',false];
-      if(!t||/^--.*--$/.test(t)) return ['\u2014',true];
+      if(!t||/^--.*--$/.test(t)) return ['—',true];
       return [t,false];
     };
+    /* In Word a line can wrap, so the reason no longer has to be shrunk or cut to fit - the whole
+       thing is printed. The PDF had to measure and trim it; this does not. */
+    const clRow=function(label,value,dim){
+      const why=(String(value)==='NOT OK') ? clWhy(label) : '';
+      return '<tr><td data-w="30">'+E(label)+'</td>'
+        +'<td data-w="70" class="wfd-rule">'
+        +(dim?'<span class="wfd-soft">'+E(value)+'</span>':'<b>'+E(value)+'</b>')
+        +(why?' <span class="wfd-small wfd-soft">('+E(why)+')</span>':'')
+        +'</td></tr>';
+    };
+
+    const names=allotteeNames(res).join('  &  ')||'—';
+    const incharge=(res.header&&res.header.post_sales_incharge)||'MS. PALLABITA GHOSH';
+    const dateVal=dots((res.header&&res.header.date)||'')||'—';
+
+    let h='';
+    h+='<div class="wfd-logo" contenteditable="false"><img alt="The Jain Group" '
+      +'data-wpt="109.5" data-hpt="131.25" src="data:image/jpeg;base64,'+b64+'"></div>';
+    h+='<p class="wfd-right"><span class="wfd-soft">Date&nbsp;:&nbsp;</span><b>'+E(dateVal)+'</b></p>';
+    h+='<p class="wfd-h">Booking form check list :-</p>';
+    h+='<table class="wfd-meta">'
+      +'<tr><td data-w="44">Name of Post sales in-charge Responsible</td><td data-w="3">:</td>'
+        +'<td data-w="53"><b>'+E(incharge)+'</b></td></tr>'
+      +'<tr><td data-w="44">Name of the customer</td><td data-w="3">:</td>'
+        +'<td data-w="53"><b>'+E(names)+'</b></td></tr>'
+      +'</table>';
+
+    h+=runLine([['Project Name',v('project_name')],['Block Name',v('block')],['Flat',v('flat')],
+                ['Floor',floorNo],
+                ['Area',v('area_sqft')?(grp(v('area_sqft'))+' sq.ft.'):'']]);
+    h+=runLine([['Base Rate',baseRateVal],['PLC',grp(v('plc'))],['FLC',grp(v('flc'))],
+                [parkLabel,parkValue]]);
+    h+=runLine([['Discount',discountVal]],'wfd-gap');
+
+    h+='<p class="wfd-h">Check List :</p>';
+    h+='<table class="wfd-cl">';
     ['Cost Sheet','Market valuation Sheet','KYC of Customer','Mobile Number','Email ID',
      'Pan Card No.'].forEach(function(k){
-      const d=verdict(k); row(k,d[0],d[1]); y-=22;
+      const d=verdict(k); h+=clRow(k,d[0],d[1]);
     });
-    (function(){ const src=said(cl['Source']); row('Source',src||'\u2014',!src); y-=22; })();
+    (function(){ const src=said(cl['Source']); h+=clRow('Source',src||'—',!src); })();
 
     // The one row the form itself puts two pairs on.
     (function(){
-      const lead=said(cl['Booked in CRM - Lead ID']), mid=VX+112;
-      row('Booked in CRM \u2013 Lead ID', lead||'awaiting the CRM', !lead, mid);
-      const bx=mid+26, blab='Booking Date';
-      page.drawText(blab,{x:bx,y:y,size:10.5,font:reg,color:ink});
-      const bvx=bx+reg.widthOfTextAtSize(blab,10.5)+12;
-      page.drawText('\u2013',{x:bvx,y:y,size:10.5,font:reg,color:soft});
+      const lead=said(cl['Booked in CRM - Lead ID']);
       const bd=said(cl['Booking Date']) ? dots(cl['Booking Date']) : '';
-      page.drawText(bd||'\u2014',{x:bvx+14,y:y,size:10.5,font:bd?bold:reg,color:bd?ink:soft});
-      page.drawLine({start:{x:bvx+14,y:y-4},end:{x:R,y:y-4},thickness:0.6,color:rule});
-      y-=22;
+      h+='<tr><td data-w="30">Booked in CRM – Lead ID</td>'
+        +'<td data-w="26" class="wfd-rule">'
+          +(lead?('<b>'+E(lead)+'</b>'):'<span class="wfd-soft">awaiting the CRM</span>')+'</td>'
+        +'<td data-w="18">Booking Date</td>'
+        +'<td data-w="26" class="wfd-rule">'
+          +(bd?('<b>'+E(bd)+'</b>'):'<span class="wfd-soft">—</span>')+'</td></tr>';
     })();
-    (function(){ const d=verdict('Signatures'); row('Signatures',d[0],d[1]); y-=32; })();
+    (function(){ const d=verdict('Signatures'); h+=clRow('Signatures',d[0],d[1]); })();
+    h+='</table>';
 
-    (function(){
-      /* The form prints a small arrow here that the standard PDF fonts cannot encode; a colon
-         says the same thing and matches every other label on the sheet. */
-      const lab='Payment Plan   :   ';
-      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:soft});
-      page.drawText(String(cl['Payment Plan']||'AS PER COST SHEET /'),
-        {x:M+reg.widthOfTextAtSize(lab,10.5),y:y,size:10.5,font:bold,color:ink});
-      y-=42;
-    })();
+    /* The form prints a small arrow here that the standard fonts cannot encode; a colon says the
+       same thing and matches every other label on the sheet. */
+    h+='<p class="wfd-gap"><span class="wfd-soft">Payment Plan&nbsp;&nbsp;:&nbsp;&nbsp;</span><b>'
+      +E(String(cl['Payment Plan']||'AS PER COST SHEET /'))+'</b></p>';
 
     /* Discount Approved is a line for VC / HD to sign, not a value to fill - so it stays a line,
        with whoever the documents named written on it when they named anybody. */
     (function(){
-      const lab='Discount Approved', vchd='(VC / HD)';
-      page.drawText(lab,{x:M,y:y,size:10.5,font:reg,color:ink});
-      const x1=M+reg.widthOfTextAtSize(lab,10.5)+18;
-      const x2=R-reg.widthOfTextAtSize(vchd,10.5)-16;
       const who=said(cl['Discount Approved']);
-      if(who) page.drawText(who,{x:x1+8,y:y,size:10.5,font:bold,color:ink});
-      page.drawLine({start:{x:x1,y:y-4},end:{x:x2,y:y-4},thickness:0.6,color:rule});
-      page.drawText(vchd,{x:x2+16,y:y,size:10.5,font:reg,color:soft});
+      h+='<table class="wfd-sign"><tr>'
+        +'<td data-w="26">Discount Approved</td>'
+        +'<td data-w="56" class="wfd-rule">'+(who?('<b>'+E(who)+'</b>'):'&nbsp;')+'</td>'
+        +'<td data-w="18"><span class="wfd-soft">(VC / HD)</span></td>'
+        +'</tr></table>';
     })();
 
-    const bytes=await doc.save();
     const nm=(allotteeNames(res)[0]||v('customer_name')||'booking')
       .replace(/[^\w \-]/g,'').trim()||'booking';
-    wfPreviewPdf(bytes,'Booking Form Check List - '+nm+'.pdf','Check list downloaded');
+    wfPreviewDoc(h,'Booking Form Check List - '+nm+'.docx','Check list downloaded',logoBytes);
   }
   /* ----- Print an instance --------------------------------------------------------------------
      Reuses wfCaseSummaryHtml exactly as shown on screen (the day-wise table for an entry-wise
@@ -8831,9 +9107,36 @@
   }
 
   /* ---------- SCOREBOARD ---------- */
-  async function scoreboardTab(){ const b=$('acBody'); let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){} const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+  /* Two different leaderboards, not one: acc.scoreboard() covers ordinary tasks with its original
+     flat +1 completed/+1 on-time/-1 late credit (computed here from the raw counts, same as always),
+     and acc.scoreboard_causelist() is a separate ranking that exists ONLY for tasks the Legal MIS
+     causelist action-review popup creates (acc.ptasks.source='causelist'), scored instead by how
+     many days ahead of the due date they were finished. SB_VIEW just picks which RPC gets called
+     and how the table renders — nothing about acc.scoreboard() itself changed. */
+  let SB_VIEW='all';
+  window.sbSetView=function(v){ if(SB_VIEW===v)return; SB_VIEW=v; scoreboardTab(); };
+  async function scoreboardTab(){
+    const b=$('acBody');
+    b.innerHTML=`<div class="tp-card" style="padding:0">`
+      +`<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center"><b style="margin-right:6px">Scoreboard</b>`
+      +`<button class="ac-btn${SB_VIEW==='all'?' primary':''}" onclick="sbSetView('all')">All Tasks</button>`
+      +`<button class="ac-btn${SB_VIEW==='causelist'?' primary':''}" onclick="sbSetView('causelist')">Causelist</button>`
+      +`</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>`;
+    if(SB_VIEW==='causelist') await sbRenderCauselist(); else await sbRenderAll();
+  }
+  async function sbRenderAll(){
+    let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){}
     rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)*1+(r.tasks_on_time||0)*1-(r.tasks_late||0)*1})).sort((a,b)=>b.score-a.score);
-    b.innerHTML=`<div class="tp-card" style="padding:0"><div style="padding:14px 16px;border-bottom:1px solid var(--line)"><b>Scoreboard</b><div style="font-size:12px;color:var(--slate)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div></div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div></div>`; }
+    const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+    const host=$('sbBody'); if(!host)return;
+    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div>`;
+  }
+  async function sbRenderCauselist(){
+    let rows=[]; try{const {data}=await ACC().rpc('scoreboard_causelist');rows=data||[];}catch(e){}
+    const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+    const host=$('sbBody'); if(!host)return;
+    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Legal MIS causelist tasks only — per task, by how far ahead of its due date it was finished: 7+ days early +2 · 3–6 days early +1 · 0–2 days early 0 · after the due date −1</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_assigned}</td><td>${r.tasks_completed}</td><td>${r.tasks_pending}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="6"><div class="ac-empty" style="cursor:default;border:0">No causelist tasks yet</div></td></tr>'}</tbody></table></div>`;
+  }
 
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
@@ -11667,7 +11970,16 @@
   function taskRow(t,asg,list,opt){
     opt=opt||{};
     const emails=(opt.ownerAvatar&&!opt.owner)?[t.delegator].filter(Boolean):(asg[t.id]||[]);
-    const approve=opt.approve?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`:'';
+    // ManPower/Referral approval tasks (see hrApprovalTaskSync in nexus-core.js) reuse this same
+    // Pending Approval card - it's exactly what Recruitment's own tab used to be - but Approve/
+    // Decline here must run the actual domain action (approve a JD, connect a referral) rather than
+    // the generic subtree-completion bookkeeping accApprove/accDecline do for an ordinary task.
+    const approve=opt.approve?(t.manpower_request_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve" onclick="hrTaskApproveManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      :t.referral_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Connect to a position" onclick="hrTaskConnectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-link"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      :`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      ):'';
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
     const wfReceived=wfInfo&&!!wfInfo.received_at;
     const wfNeedsReceive=wfInfo&&!wfReceived;
@@ -11810,8 +12122,16 @@
             if(lastDx<-44){ const gap=row.nextElementSibling; if(gap&&(gap.classList.contains('ac-ins')||gap.classList.contains('ac-addrow-ghost')))gap.click(); }
           } else if(hoverTgt){
             hoverTgt.classList.remove('swap-tgt');
-            const orderIds=fullOrderIds||[...col.querySelectorAll('.ac-row')].map(r=>Number(r.dataset.id));
-            crystallizeAndSwap(Number(row.dataset.id),Number(hoverTgt.dataset.id),orderIds);
+            /* Not while a search is on. The rows on screen are in match order, not priority
+               order, and where there is no stored order to fall back on the swap reads the
+               order off the screen - which would write the search layout back as the real
+               priority for everybody. */
+            if(window._accSearching){
+              toast('Clear the search box first \u2014 tasks cannot be re-ordered while filtered','err');
+            } else {
+              const orderIds=fullOrderIds||[...col.querySelectorAll('.ac-row')].map(r=>Number(r.dataset.id));
+              crystallizeAndSwap(Number(row.dataset.id),Number(hoverTgt.dataset.id),orderIds);
+            }
           }
           document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up);
         }
@@ -12203,6 +12523,90 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
   };
   window.accConfirm=function(msg,cb,onCancel){ openModal(`<div class="modal-head"><h3><i class="fa-solid fa-triangle-exclamation" style="color:#d97706"></i> Please confirm</h3><span class="x" id="acConfX">&times;</span></div><div class="modal-body" style="min-width:min(90vw,420px)"><p style="font-size:13.5px;color:var(--body);line-height:1.5">${esc2(msg)}</p></div><div class="modal-foot"><button class="ac-btn" id="acConfNo">Cancel</button><button class="ac-btn danger" id="acConfYes"><i class="fa-solid fa-check"></i> Yes</button></div>`,'md'); const cancel=function(){ closeModal(); if(onCancel)onCancel(); }; const y=$('acConfYes'); if(y)y.onclick=function(){ closeModal(); cb(); }; const n=$('acConfNo'); if(n)n.onclick=cancel; const x=$('acConfX'); if(x)x.onclick=cancel; };
   window.accDecline=function(tid,notifId){ accConfirm('Decline this task? It will be sent back and restored to the assignee.', function(){ accApprove(tid,false,notifId); }); };
+
+  /* ── ManPower/Referral approval tasks: these ptasks rows are the ONLY approval surface now (no
+     Recruitment tab). Approve/Reject here perform the real domain action, then resolve every
+     sibling task (the other 3 approvers' own copies of this same decision) via
+     acc.hr_approval_task_resolve_all - so it disappears from everyone's Pending Approval at once,
+     not just the person who acted. ── */
+  function hrAfterApprovalAction(){ if(location.hash.includes('/task/'))renderPage(); else if(PAGE==='tasks')tasksScreen(); }
+  window.hrTaskApproveManpower=async function(tid,mpId){
+    try{
+      await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',mpId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
+      toast('Job Description approved','ok'); hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+  window.hrTaskRejectManpower=function(tid,mpId){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>Reason (folded into the AI rewrite)</label><textarea id="hrRejReason" class="inp" rows="3" placeholder="What needs to change?"></textarea></div>'
+      +'<div class="modal-foot"><button class="btn btn-primary" id="hrRejGoBtn" onclick="hrTaskRejectManpowerGo('+tid+','+mpId+')"><i class="fa-solid fa-rotate-left"></i> Reject &amp; Regenerate</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
+    setTimeout(function(){ const el=$('hrRejReason'); if(el)el.focus(); },100);
+  };
+  window.hrTaskRejectManpowerGo=async function(tid,mpId){
+    const reason=(($('hrRejReason')||{}).value||'').trim();
+    const btn=$('hrRejGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      await sb.schema('hr').from('manpower_requests').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',mpId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
+      if(reason) sb.functions.invoke('manpower-ai-generate',{body:{request_id:mpId,requested_by:me(),rejection_reason:reason}});
+      closeModal();
+      toast(reason?'Rejected — regenerating the description with your reason':'Rejected','ok');
+      hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-rotate-left"></i> Reject &amp; Regenerate';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
+  };
+  window.hrTaskConnectReferral=async function(tid,refId){
+    const {data:rec}=await sb.schema('hr').from('referrals').select('*').eq('id',refId).single();
+    if(!rec){toast('Referral not found','err');return;}
+    const {data:openReqs}=await sb.schema('hr').from('manpower_requests').select('id,job_title,department').eq('approval_status','Approved').eq('status','Open');
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>'+esc2(rec.referred_name||'')+' — connect to which open position?</label>'
+      +'<select id="hrConnPos" class="sel"><option value="">— Select an open requisition —</option>'
+      +(openReqs||[]).map(function(r){return '<option value="'+r.id+'">'+esc2(r.job_title||'—')+(r.department?' · '+esc2(r.department):'')+'</option>';}).join('')
+      +'</select>'+(!(openReqs||[]).length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet.</div>':'')
+      +'</div><div class="modal-foot"><button class="btn btn-primary" id="hrConnGoBtn" onclick="hrTaskConnectReferralGo('+tid+','+refId+')"><i class="fa-solid fa-check"></i> Connect</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
+  };
+  window.hrTaskConnectReferralGo=async function(tid,refId){
+    const reqId=parseInt((($('hrConnPos')||{}).value)||'');
+    if(!reqId){toast('Pick a position','err');return;}
+    const btn=$('hrConnGoBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      const {data:req}=await sb.schema('hr').from('manpower_requests').select('job_title').eq('id',reqId).single();
+      const {data:rec}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),
+        rejection_reason:null,manpower_request_id:reqId,position:(req&&req.job_title)||null}).eq('id',refId).select().single();
+      const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
+      const {data:cand}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,
+        name:rec.referred_name,email:rec.referred_email,phone:rec.referred_phone,position:(req&&req.job_title)||null,
+        source:'Referral',stage:'Tests Sent',created_by:me(),applied_at:nowISO()}).select().single();
+      if(cand){
+        const {data:tr}=await sb.schema('hr').from('interview_tracker').insert({candidate_name:rec.referred_name,
+          position:(req&&req.job_title)||null,source:'Referral',number:rec.referred_phone,email:rec.referred_email,
+          notes:'Referred by '+(rec.referred_by||'someone')+(rec.notes?(' — '+rec.notes):''),candidate_id:cand.id}).select().single();
+        if(tr){
+          await sb.schema('hr').from('candidates').update({tracker_id:tr.id}).eq('id',cand.id);
+          await sb.schema('hr').from('referrals').update({candidate_id:cand.id,tracker_id:tr.id}).eq('id',refId);
+        }
+      }
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      closeModal();
+      toast('Connected to '+(req&&req.job_title||'position')+' and added to Interview Tracker','ok');
+      hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
+  };
+  window.hrTaskRejectReferral=async function(tid,refId){
+    if(!await confirmDialog('Reject this referral?'))return;
+    try{
+      await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO()}).eq('id',refId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      toast('Referral rejected','ok'); hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
   function accPoll(fn){ clearInterval(window._accPoll); window._accPoll=setInterval(function(){ const ov=$('overlay'); if(ov&&ov.classList.contains('show'))return; if(window._dragging)return; const a=document.activeElement; if(a&&/INPUT|TEXTAREA/.test(a.tagName))return; fn(); },13000); }
   /* ---------- keyboard shortcuts (Accountability only) ---------- */
   document.addEventListener('keydown', function(e){

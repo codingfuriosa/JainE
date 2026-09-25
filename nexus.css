@@ -15,7 +15,12 @@
    other small type) render noticeably bigger than their actual font-size on a phone than the
    same CSS produces on desktop. */
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased}
+/* overflow-x:hidden lives here, not on .main - setting only one axis of overflow on an element makes
+   the browser force the OTHER axis to 'auto' too (CSS Overflow spec), which silently turns that element
+   into position:sticky's scroll container. .main was doing exactly that: it never actually needed to
+   scroll internally (the page itself scrolls), so its sticky .topbar was anchoring to a box that never
+   received a scroll offset and just scrolled away with the page instead of sticking. */
+body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);font-size:14px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#cdd5e1;border-radius:8px}::-webkit-scrollbar-track{background:transparent}
 .hidden{display:none!important}
@@ -32,13 +37,19 @@ a{color:inherit;text-decoration:none}
 .sb-item:hover i{color:var(--sb-red)}
 .sb-item.active{background:var(--sb-red);color:#fff;animation:sbItemActivate .35s ease}
 .sb-item.active i{color:#fff}
+/* Referral "Earn" badge - a static gold pill, not a pulsing dot, so it reads as premium rather than
+   a nag. Shown only while custSidebarTabs finds the customer has never submitted a referral. On the
+   red active-state fill the plain gold-on-transparent pill loses contrast, so it inverts to dark-on-
+   gold there instead of disappearing. */
+.sb-badge-gold{margin-left:auto;flex-shrink:0;background:var(--gold);color:#241a08;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;letter-spacing:.02em}
+.sb-item.active .sb-badge-gold{background:#241a08;color:#e8c987}
 /* .sb-nav is rebuilt from scratch on every render (see custSidebarTabs in nexus-core.js), so the
    newly-active item is always a freshly-inserted node - an `animation` (unlike a `transition`)
    plays on insertion, no extra JS needed to "restart" it. */
 @keyframes sbItemActivate{0%{transform:translateX(-6px);opacity:.5;box-shadow:0 0 0 0 rgba(224,18,28,.45)}60%{transform:translateX(0);opacity:1}100%{box-shadow:0 0 0 7px rgba(224,18,28,0)}}
 .sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#7a7a7f}
 /* topbar */
-.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease;overflow-x:hidden}
+.main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;transition:margin-left .22s ease}
 .topbar{position:sticky;top:0;height:var(--topbar);background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 24px;z-index:30}
 .crumb{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--slate);font-weight:500}
 .crumb .cur{color:var(--ink);font-weight:600}
@@ -207,59 +218,8 @@ tr.pin-drag.drop-below{box-shadow:inset 0 -2px 0 var(--brand)}
 @keyframes custViewFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .cust-view-fade{animation:custViewFade .28s ease;position:relative}
 
-/* --- Background animated construction scene --- */
-.cust-bg-scene{
-  position:fixed;bottom:0;left:var(--sidebar);right:0;height:260px;
-  pointer-events:none;z-index:0;
-  animation:custBgSceneIn 2s ease both
-}
-@keyframes custBgSceneIn{0%{opacity:0}40%{opacity:.12}100%{opacity:.055}}
-
-/* BG Ground */
-.cbg-ground{position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent 2%,#94a3b8 20%,#64748b 50%,#94a3b8 80%,transparent 98%);border-radius:2px}
-
-/* BG Buildings */
-.cbg-b{position:absolute;bottom:3px;border-radius:3px 3px 0 0;opacity:0;animation:cbgBuildUp .7s cubic-bezier(.22,1,.36,1) forwards}
-.cbg-b::after{content:'';position:absolute;inset:5px 4px 4px;
-  background:repeating-linear-gradient(0deg,transparent 0px,transparent 10px,rgba(255,255,255,.3) 10px,rgba(255,255,255,.3) 11.5px),
-    repeating-linear-gradient(90deg,transparent 0px,transparent 8px,rgba(255,255,255,.22) 8px,rgba(255,255,255,.22) 9.5px)}
-@keyframes cbgBuildUp{from{height:0;opacity:0}to{opacity:1}}
-.cbg-b1{left:4%;width:48px;height:140px;background:linear-gradient(180deg,#1e40af,#1d4ed8);animation-delay:.2s}
-.cbg-b2{left:14%;width:40px;height:100px;background:linear-gradient(180deg,#2563eb,#3b82f6);animation-delay:.5s}
-.cbg-b3{left:26%;width:56px;height:170px;background:linear-gradient(180deg,#1d4ed8,#1e40af);animation-delay:.3s}
-.cbg-b4{left:38%;width:44px;height:120px;background:linear-gradient(180deg,#3b82f6,#2563eb);animation-delay:.7s}
-.cbg-b5{left:52%;width:38px;height:195px;background:linear-gradient(180deg,#1e40af,#1d4ed8);animation-delay:.15s}
-.cbg-b6{left:62%;width:52px;height:135px;background:linear-gradient(180deg,#2563eb,#3b82f6);animation-delay:.55s}
-.cbg-b7{left:75%;width:42px;height:160px;background:linear-gradient(180deg,#1d4ed8,#2563eb);animation-delay:.4s}
-.cbg-b8{left:87%;width:36px;height:90px;background:linear-gradient(180deg,#3b82f6,#60a5fa);animation-delay:.8s}
-
-/* BG Crane 1 (left-center) */
-.cbg-crane{position:absolute;bottom:3px}
-.cbg-crane1{left:32%}
-.cbg-crane2{left:68%}
-.cbg-cm{width:3px;background:linear-gradient(180deg,#f59e0b,#d97706);border-radius:1px;position:absolute;bottom:0;
-  animation:cbgMast .8s cubic-bezier(.22,1,.36,1) both}
-.cbg-crane1 .cbg-cm{height:200px;animation-delay:.3s}
-.cbg-crane2 .cbg-cm{height:175px;animation-delay:.6s}
-@keyframes cbgMast{from{height:0}to{}}
-.cbg-cj{position:absolute;height:2.5px;background:linear-gradient(90deg,#d97706,#f59e0b,#d97706);border-radius:1px;
-  animation:cbgJib .5s ease both}
-.cbg-crane1 .cbg-cj{top:0;left:-50px;width:100px;animation-delay:1.1s}
-.cbg-crane2 .cbg-cj{top:0;left:-40px;width:80px;animation-delay:1.4s}
-@keyframes cbgJib{from{width:0;opacity:0}to{opacity:1}}
-.cbg-cc{position:absolute;width:1px;background:#94a3b8;animation:cbgCable 3s ease-in-out infinite alternate}
-.cbg-crane1 .cbg-cc{left:-35px;top:2px;animation-delay:1.6s}
-.cbg-crane2 .cbg-cc{left:-28px;top:2px;animation-delay:2s}
-@keyframes cbgCable{0%{height:20px}100%{height:70px}}
-.cbg-ch{position:absolute;width:8px;height:6px;border:1.5px solid #f59e0b;border-top:0;border-radius:0 0 3px 3px;
-  animation:cbgHook 3s ease-in-out infinite alternate}
-.cbg-crane1 .cbg-ch{left:-39px;top:22px;animation-delay:1.6s}
-.cbg-crane2 .cbg-ch{left:-32px;top:22px;animation-delay:2s}
-@keyframes cbgHook{0%{top:22px}100%{top:72px}}
-
 /* Content stays above */
 .cust-view-fade>*{position:relative;z-index:1}
-@media(max-width:1024px){.cbg-scene,.cust-bg-scene{left:0}}
 /* Premium profile card */
 @keyframes custProfileSlideIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes custProfileItemIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
@@ -1243,3 +1203,93 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
   .cust-view-fade .kpis{grid-template-columns:1fr !important;gap:12px}
   .cust-view-fade .kpi{padding:18px 16px}
 }
+
+/* ---------- Customer portal greeting ----------
+   The first thing a customer sees. Used two ways: standing alone (navy card, e.g. if a project has
+   no hero photo) or laid over .cust-landing--photo, where its own background steps aside and the
+   photo's dark gradient carries the contrast instead. Either way it's the one panel a homebuyer
+   reads as the developer speaking to them, and it keeps the gold hairline used elsewhere for the
+   brand. */
+.cust-greet{
+  background:linear-gradient(135deg,var(--navy) 0%,var(--navy-2) 60%,#21386b 100%);
+  color:#fff;border-radius:14px;padding:26px 30px;margin-bottom:18px;
+  border-top:3px solid var(--gold);box-shadow:0 8px 26px rgba(15,30,61,.18);
+}
+.cust-greet-kicker{
+  display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:10px;
+}
+.cust-greet-kicker::before{content:'';width:22px;height:1px;background:var(--gold)}
+.cust-greet-hi{font-size:28px;font-weight:800;letter-spacing:-.01em;line-height:1.2;text-shadow:0 2px 18px rgba(0,0,0,.25)}
+.cust-greet-sub{font-size:14.5px;margin-top:9px;line-height:1.6;color:rgba(255,255,255,.88);max-width:46ch}
+.cust-greet-sub b{font-weight:700;color:#fff}
+@media(max-width:640px){
+  .cust-greet{padding:20px 20px;border-radius:12px}
+  .cust-greet-hi{font-size:22px}
+  .cust-greet-sub{font-size:13.5px}
+}
+
+/* ---------- Customer portal landing page ----------
+   A real photo of the customer's own project (Jain Group's own official render, hotlinked from
+   their own marketing microsite - see CUST_PROJECT_HERO_IMG in nexus-core.js) standing in for the
+   plain gradient card. A project with no dedicated microsite yet (Dream Ananta, at the time this
+   was written) gets the gradient alone rather than another project's building - showing the wrong
+   tower to a customer is worse than showing none. */
+.cust-landing{
+  position:relative;overflow:hidden;border-radius:18px;
+  min-height:clamp(360px,60vh,560px);
+  display:flex;align-items:flex-end;
+  background:linear-gradient(160deg,#f8fafc 0%,#eef2f8 55%,#e6ecf5 100%);
+  border:1px solid var(--line);
+  box-shadow:0 14px 40px rgba(15,30,61,.12);
+}
+.cust-landing--photo{
+  background-size:cover;background-position:center 22%;background-repeat:no-repeat;
+  animation:custHeroPhotoIn 1.4s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes custHeroPhotoIn{0%{opacity:0;transform:scale(1.04)}100%{opacity:1;transform:scale(1)}}
+.cust-landing--photo .cust-greet,
+.cust-landing--video .cust-greet{
+  background:none;border-top:none;box-shadow:none;padding:0 0 8px;
+}
+.cust-landing-inner{position:relative;z-index:1;width:100%;padding:clamp(24px,5vw,48px) clamp(18px,4vw,42px)}
+.cust-landing .cust-greet{margin-bottom:0;max-width:640px}
+@media(max-width:640px){
+  .cust-landing{min-height:320px;border-radius:14px;align-items:flex-end}
+  .cust-landing--photo{background-position:center 15%}
+}
+@media(prefers-reduced-motion:reduce){
+  .cust-landing--photo{animation:none;opacity:1;transform:none}
+}
+
+/* ---------- Home page video background ----------
+   Home only, not the rest of the portal - see the note at CUST_PROJECT_HERO_VIDEO in nexus-core.js
+   for why. Fixed to the viewport (same technique the old app-wide construction-scene background
+   used, scoped correctly this time) rather than sized to the content column, so it genuinely fills
+   the screen behind the greeting instead of sitting in a bounded card. left/right leave the sidebar
+   and its collapsed-on-mobile state alone - .main already handles that split, this just matches it. */
+.cust-landing--video{
+  /* !important on position/z-index: .cust-view-fade>* (this element's own parent rule) forces
+     position:relative;z-index:1 on every direct child at equal specificity - an explicit override
+     here is more robust than depending on which rule happens to come later in this file. */
+  position:fixed!important;top:var(--topbar);left:var(--sidebar);right:0;bottom:0;
+  min-height:0;border-radius:0;border:none;box-shadow:none;background:#0a0a0c;
+  z-index:0!important;transition:left .22s ease;
+}
+.cust-landing-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 30%}
+.cust-landing-scrim{position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,15,30,.10) 0%,rgba(9,15,30,.30) 45%,rgba(7,12,25,.88) 100%)}
+.cust-landing--video .cust-landing-inner{position:absolute;left:0;right:0;bottom:0;padding:clamp(24px,5vw,56px) clamp(18px,4vw,48px)}
+@media(max-width:1024px){.cust-landing--video{left:0}}
+
+/* ---------- Faint project backdrop on every non-Home tab ----------
+   Same fixed-to-viewport technique as .cust-landing--video above (and the same !important rationale:
+   overriding .cust-view-fade>*{position:relative;z-index:1}), but kept subtle - this sits behind live
+   financial tables (Statement, Ledger, Cost Sheet), so it must never compete with them for attention
+   or contrast. Raised from the old construction-scene illustration's .055 to .11 per feedback that the
+   image should read as a little more visible. */
+.cust-tab-bg{
+  position:fixed!important;top:var(--topbar);left:var(--sidebar);right:0;bottom:0;
+  z-index:0!important;background-size:cover;background-position:center;
+  opacity:.11;pointer-events:none;transition:left .22s ease;
+}
+@media(max-width:1024px){.cust-tab-bg{left:0}}
