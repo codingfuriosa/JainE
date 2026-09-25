@@ -9891,6 +9891,9 @@
 
   /* ---------- MEETINGS ---------- */
   let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
+  // Attendees from outside the company directory (msWidget's picker only ever lists directory
+  // people) — typed in by email rather than picked, reset each time the Schedule/Edit modal opens.
+  let MTG_EXTRA=[];
   /* How many people a meeting action actually serves, for the Usability report.
      "Scheduled a meeting" is the same row whether two people spoke for ten minutes or fifteen sat
      through a review, and those are not the same fact about the feature. The attendee list is
@@ -10071,13 +10074,11 @@
   }
   function mtgGoogleStatusHtml(){
     if(GOOGLE_CONNECTED===true) return '<span class="mtg-gstatus connected"><i class="fa-brands fa-google"></i> Connected to Google</span>';
-    if(GOOGLE_CONNECTED===false){
-      // A non-thejaingroup.com account can't connect Google Meet at all, so don't offer a
-      // Connect button that would only ever fail — the offline banner explains what they CAN do.
-      const offDomain=!/@thejaingroup\.com$/i.test(me()||'');
-      if(offDomain) return '';
-      return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
-    }
+    // Any JAIN-E account can offer to connect now, not just thejaingroup.com ones — the OAuth flow
+    // itself (google-oauth-start/callback) never checked domain, it only ever confirmed the Google
+    // account authorizing matches the JAIN-E email that started the flow, which works the same for
+    // a personal Gmail login as it does for a company one.
+    if(GOOGLE_CONNECTED===false) return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
     return '';
   }
   window.googleConnect=function(){
@@ -10316,6 +10317,15 @@
     const pickable = (GOOGLE_CONNECTED===true)
       ? list.filter(function(p){ const e=String(p.email||'').toLowerCase(); return !eq(p.email,my) && (connected.has(e) || selSet.has(e)); })
       : list.filter(function(p){ return !eq(p.email,my); });
+    // The picker above only ever lists people already in the company directory. Anyone outside it —
+    // a client, a vendor, anyone without a JainE account — has to be typed in by email instead; the
+    // Google Calendar invite goes out to them exactly the same way (google-calendar-sync sends the
+    // whole meeting_attendees list to Google, with no directory check on that side at all). An
+    // attendee already saved on this meeting who isn't in `pickable` (i.e. wasn't picked from the
+    // directory) is assumed to be one of these and is restored here, or editing would silently drop
+    // them the moment the picker re-renders without a matching row for their email.
+    const pickableSet = new Set(pickable.map(function(p){ return String(p.email||'').toLowerCase(); }));
+    MTG_EXTRA = editing ? selAtt.filter(function(e){ return !pickableSet.has(String(e||'').toLowerCase()); }) : [];
     const recurVal = m ? (m.recur_type||'none') : 'none';
     // New meetings default to Offline when Google isn't connected (Online needs a real Meet link).
     const modeVal = m ? (m.mode||'online') : (GOOGLE_CONNECTED===true ? 'online' : 'offline');
@@ -10330,12 +10340,38 @@
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">('+(GOOGLE_CONNECTED===true?'optional — only people who\'ve connected Google can be added':'optional')+')</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +((GOOGLE_CONNECTED===true&&!pickable.length)?'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>':'')
+      +'<label style="margin-top:10px">Add someone outside the company <span style="color:var(--slate);font-weight:400">(optional — any email, e.g. a client or vendor)</span></label>'
+      +'<div style="display:flex;gap:8px"><input type="email" id="mtgExtraEmail" placeholder="name@example.com" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();mtgAddExtraAttendee();}"><button type="button" class="ac-btn" onclick="mtgAddExtraAttendee()">Add</button></div>'
+      +'<div id="mtgExtraChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+mtgExtraChipsHtml()+'</div>'
       +'<div id="mtgConflictBox"></div>'
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" id="mtgSaveBtn" onclick="mtgFormSave('+(editing?id:'null')+')"><i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule')+'</button></div>');
     MTG_CONFLICT_EDIT_ID = editing ? id : null;
     mtgWireConflictCheckOnce();
     mtgRefreshConflicts();
+  };
+  function mtgExtraChipsHtml(){
+    return (MTG_EXTRA||[]).map(function(e){
+      return '<span class="chip active" style="cursor:default">'+esc2(e)
+        +'<i class="fa-solid fa-xmark" style="cursor:pointer;margin-left:2px" onclick="mtgRemoveExtraAttendee(\''+escJs(e)+'\')"></i></span>';
+    }).join('');
+  }
+  window.mtgAddExtraAttendee=function(){
+    const inp=$('mtgExtraEmail'); if(!inp) return;
+    const v=(inp.value||'').trim().toLowerCase();
+    if(!v) return;
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){ toast('Enter a valid email address','err'); return; }
+    if(eq(v,me())){ toast('That\'s you — no need to add yourself','warn'); return; }
+    if(MTG_EXTRA.some(function(e){return eq(e,v);})){ toast('Already added','warn'); inp.value=''; return; }
+    MTG_EXTRA.push(v);
+    inp.value='';
+    const host=$('mtgExtraChips'); if(host) host.innerHTML=mtgExtraChipsHtml();
+    try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_e){}
+  };
+  window.mtgRemoveExtraAttendee=function(email){
+    MTG_EXTRA=MTG_EXTRA.filter(function(e){return !eq(e,email);});
+    const host=$('mtgExtraChips'); if(host) host.innerHTML=mtgExtraChipsHtml();
+    try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_e){}
   };
   window.mtgFormSave=async function(id){
     const editing = id!=null;
@@ -10401,7 +10437,11 @@
         }
       }
     }
-    const attendees=(typeof msGet==='function'?msGet('mtgAttBox'):[]).filter(function(e){return !eq(e,me());});
+    // Directory picks plus whatever was typed in under "Add someone outside the company" — the
+    // Google side treats them identically (google-calendar-sync just mails the whole list an
+    // invite), so there's no reason to keep them in separate arrays past this point.
+    const pickedAtt=(typeof msGet==='function'?msGet('mtgAttBox'):[]);
+    const attendees=[...new Set(pickedAtt.concat(MTG_EXTRA||[]))].filter(function(e){return !eq(e,me());});
     const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
     const row={title:title,mode:mode,recur_type:recur,meeting_date:meeting_date,recur_day:recur_day,recur_date:recur_date,start_time:start,end_time:end};
     if(mode==='offline') row.meet_link=null; // real Meet links only ever exist for online meetings — clear any stale one if switched away from online
@@ -10945,18 +10985,15 @@
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
     // Meetings are open to everyone: anyone can create and run OFFLINE meetings without Google.
-    // Online (Google Meet) meetings still need a connected thejaingroup.com Google account — that's
-    // enforced in the Schedule form below, instead of locking the whole section for everyone.
+    // Online (Google Meet) meetings need a connected Google account — any JAIN-E user's, on any
+    // email domain, not just thejaingroup.com — that's enforced in the Schedule form below, instead
+    // of locking the whole section for everyone.
     let mtgBanner='';
     if(GOOGLE_CONNECTED!==true){
-      const myEmail=me();
-      const offDomain=!/@thejaingroup\.com$/i.test(myEmail||'');
       mtgBanner='<div class="mtg-connect-banner"><i class="fa-brands fa-google mcb-ico"></i><div class="mcb-txt">'
-        +(offDomain
-            ? 'You\'re signed in as <b>'+esc2(myEmail)+'</b>. Online (Google Meet) meetings need a thejaingroup.com Google account — but you can create and run <b>Offline meetings</b> right here.'
-            : 'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.')
+        +'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.'
         +'</div>'
-        +(offDomain?'':'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>')
+        +'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
         +'</div>';
     }
     const groups=mtgGroupedSections(MTG_GROUP);
