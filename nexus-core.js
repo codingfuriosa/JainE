@@ -3504,18 +3504,30 @@ async function clrevLoadLegal(){
 async function clrevMaybeOpen(rows){
   const pending=(rows||[]).filter(function(r){ return !clrevAlreadyActioned(r); });
   if(!pending.length) return;
+  // Claim these cases as this exporter's to review, written immediately (not left until Submit) so
+  // it survives a closed tab or a later session — clrevCheckPending() only ever shows a case to
+  // whoever holds this claim. Re-exporting an overlapping range later just re-claims it for
+  // whoever ran that export, which is the point: it should nag the person who most recently
+  // downloaded it, not whoever exported it first.
+  const ids=pending.map(function(r){return r.id;});
+  try{
+    await sb.from('mis_cases').update({causelist_pending_by:state.email}).in('id',ids);
+    pending.forEach(function(r){ r.causelist_pending_by=state.email; });
+  }catch(e){}
   await clrevLoadLegal();
   window._clrevRows=clrevPrepRows(pending);
   clrevRender();
 }
-// Called once from boot(), after auth resolves, for anyone who can see Legal MIS at all - not
-// tied to exporting anything. Only cases with a real hearing date are in scope (the same universe
-// a causelist ever draws from), so this never turns into "review every case in the system".
+// Called once from boot(), after auth resolves - only for the person who actually exported a
+// causelist and left it unanswered (causelist_pending_by = them), never for anyone else with Legal
+// MIS access. Only cases with a real hearing date are in scope (the same universe a causelist ever
+// draws from), so this never turns into "review every case in the system".
 async function clrevCheckPending(){
   if(!(typeof pageAllowed==='function') || !pageAllowed('legal')) return;
+  if(!state.email) return;
   let rows=[];
   try{
-    const {data,error}=await sb.from('mis_cases').select('*');
+    const {data,error}=await sb.from('mis_cases').select('*').eq('causelist_pending_by',state.email);
     if(error) throw error;
     rows=(data||[]).filter(function(r){ return misHearingIso(r) && !clrevAlreadyActioned(r); });
   }catch(e){ return; }
@@ -3629,13 +3641,14 @@ window.clrevSubmit=async function(){
       const {error:ue}=await sb.from('mis_cases').update({
         causelist_reviewed_at:new Date().toISOString(),
         causelist_action_needed:r.needed,
-        causelist_reviewed_by:state.email
+        causelist_reviewed_by:state.email,
+        causelist_pending_by:null
       }).eq('id',r.id);
       if(ue) throw ue;
       // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in
       // this same session doesn't ask about this case again without a full reload.
       const src=(window._misRows||[]).find(function(x){return x.id===r.id;});
-      if(src){ src.causelist_reviewed_at=new Date().toISOString(); src.causelist_action_needed=r.needed; src.causelist_reviewed_by=state.email; }
+      if(src){ src.causelist_reviewed_at=new Date().toISOString(); src.causelist_action_needed=r.needed; src.causelist_reviewed_by=state.email; src.causelist_pending_by=null; }
     }
   }catch(e){
     toast('Could not save: '+((e&&e.message)||e),'err');
