@@ -2078,7 +2078,7 @@ async function legalOcrBarPaint(){
 }
 window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
-  const known={mis:1,scoreboard:1,actions:1,advocates:1};
+  const known={mis:1,scoreboard:1,actions:1,advocates:1,causelist:1};
   const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
@@ -2086,6 +2086,7 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
       <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
+      <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
@@ -2095,6 +2096,7 @@ VIEWS.legal=async function(v,seg){
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
+  else if(tab==='causelist') legalCauselistReviews();
   else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
@@ -2748,6 +2750,17 @@ async function legalMIS(){
   try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
+  // Anything this account exported and never finished answering nudges right here, not only
+  // silently again at the next login (clrevCheckPending covers that separately) — same claim,
+  // just checked on demand instead of only once at boot.
+  try{
+    const myPending=rows.filter(function(r){ return r.causelist_pending_by===state.email && !clrevAlreadyActioned(r); });
+    if(hAct && myPending.length){
+      hAct.innerHTML='<button class="btn" style="background:var(--warn-50);border-color:var(--warn);color:#b45309" '
+        +'onclick="clrevCheckPending()" title="Reopen the causelist action-review popup"><i class="fa-solid fa-triangle-exclamation"></i> '
+        +myPending.length+' matter'+(myPending.length===1?'':'s')+' awaiting your review</button>';
+    }
+  }catch(e){}
   /* How many papers are filed against each case, so the Documents button knows whether it has
      anything to open and the row can say so at a glance. One small query for the whole table. */
   window._misDocCounts={}; window._misDocFolders={};
@@ -3198,6 +3211,140 @@ window.legalActionsFilter=function(){
   usageQueueDebounced('legal.actions.view_search_filter_case_actions', q);
 };
 
+/* ---------- Causelist Reviews -----------------------------------------------------------------
+   Where the causelist action-review popup's decisions actually live once made - not just today's
+   snapshot on mis_cases (pending/answered/who), but the full history from
+   mis_causelist_review_log: every export claim, every answer, every time someone closed the popup
+   without answering. Also the on-demand way back into it: the toolbar nudge in legalMIS() covers
+   "I have some to answer"; this covers "let me see all of them, and who else does too". Sourced
+   from the log table itself (a case appears here iff it has at least one log row) rather than a
+   field-presence filter on mis_cases, so this and the log agree by construction. */
+function clrevDT(iso){ if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return String(iso);
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()
+    +', '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+async function legalCauselistReviews(){
+  setCrumb(['Legal','Causelist Reviews']);
+  const hAct=$('legalHeadActions'); if(hAct)hAct.innerHTML='';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  try{ await getPeople(); }catch(e){}
+  let logs=[], cases=[];
+  try{ const {data}=await sb.from('mis_causelist_review_log').select('*').order('created_at',{ascending:true}); logs=data||[]; }catch(e){}
+  const ids=Array.from(new Set(logs.map(function(l){return l.case_id;})));
+  if(ids.length){
+    try{
+      const {data}=await sb.from('mis_cases').select('id,case_no,case_type,cause_title,court,causelist_pending_by,causelist_reviewed_at,causelist_action_needed,causelist_reviewed_by').in('id',ids);
+      cases=data||[];
+    }catch(e){}
+  }
+  const byCase={};
+  logs.forEach(function(l){ (byCase[l.case_id]=byCase[l.case_id]||[]).push(l); });
+  const rows=cases.map(function(c){
+    const hist=byCase[c.id]||[];
+    const answered=hist.filter(function(l){return l.event==='answered';});
+    const closes=hist.filter(function(l){return l.event==='closed_without_answering';}).length;
+    return Object.assign({}, c, {_hist:hist, _lastAnswered:answered[answered.length-1]||null,
+      _closes:closes, _pending:!!c.causelist_pending_by && !c.causelist_reviewed_at});
+  }).sort(function(a,b){
+    // Pending first (soonest claimed first among those), then most recently answered.
+    if(a._pending!==b._pending) return a._pending?-1:1;
+    return String((b.causelist_reviewed_at||b._hist[0]&&b._hist[0].created_at)||'').localeCompare(String((a.causelist_reviewed_at||a._hist[0]&&a._hist[0].created_at)||''));
+  });
+  window._clrevReviewRows=rows;
+  const pendingCount=rows.filter(function(r){return r._pending;}).length;
+  body.innerHTML=`<style>
+    .crv-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+    .crv-search{position:relative;flex:1;min-width:180px;display:flex;align-items:center}
+    .crv-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
+    .crv-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .crv-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .crv-sel{height:38px;padding:0 34px 0 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;
+      font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;
+      appearance:none;-webkit-appearance:none;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231e3a8a' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px}
+    @media(max-width:760px){.crv-search,.crv-sel{flex:1 1 100%}}
+    #crvTbl{width:100%;border-collapse:collapse;font-size:13px}
+    #crvTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #crvTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    #crvTbl tbody tr{cursor:pointer}
+    #crvTbl tbody tr:hover td{background:var(--bg-subtle,#f8fafc)}
+    @media(max-width:760px){#crvTbl{min-width:760px}}
+  </style>
+  <div class="crv-bar">
+    <div class="crv-search"><i class="fa-solid fa-magnifying-glass"></i><input id="crvQ" placeholder="Search case, exporter or reviewer…" oninput="legalCauselistFilter()"></div>
+    <select class="crv-sel" id="crvState" onchange="legalCauselistFilter()">
+      <option value="all">All (${rows.length})</option>
+      <option value="pending">Pending review (${pendingCount})</option>
+      <option value="needed">Action needed (${rows.filter(function(r){return r.causelist_action_needed===true;}).length})</option>
+      <option value="noaction">No action needed (${rows.filter(function(r){return r.causelist_action_needed===false;}).length})</option>
+    </select>
+  </div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="crvTbl"><thead><tr>
+      <th>Case</th><th>Status</th><th>Pending with</th><th>Answered by</th><th>Due / Assigned</th><th style="text-align:center">Closed w/o answering</th>
+    </tr></thead><tbody id="crvBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="crvEmpty" style="padding:34px;display:none"><i class="fa-regular fa-square-check"></i><div>Nothing here yet.</div>
+    <div style="font-size:12.5px;color:var(--slate);margin-top:6px">This fills in as causelists get exported from the MIS tab.</div></div>`;
+  legalCauselistFilter();
+}
+function legalCauselistStatusPill(r){
+  if(r._pending) return '<span class="mis-ptag mis-ptag--amber">Pending</span>';
+  if(r.causelist_action_needed===true) return '<span class="mis-ptag mis-ptag--green">Action needed</span>';
+  if(r.causelist_action_needed===false) return '<span class="mis-ptag">No action needed</span>';
+  return '—';
+}
+window.legalCauselistFilter=function(){
+  const rows=window._clrevReviewRows||[];
+  const q=(($('crvQ')||{}).value||'').trim().toLowerCase();
+  const st=(($('crvState')||{}).value)||'all';
+  const list=rows.filter(function(r){
+    if(st==='pending'&&!r._pending) return false;
+    if(st==='needed'&&r.causelist_action_needed!==true) return false;
+    if(st==='noaction'&&r.causelist_action_needed!==false) return false;
+    if(!q) return true;
+    return [r.case_no,r.cause_title,r.causelist_pending_by,r.causelist_reviewed_by].filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1;
+  });
+  const tb=$('crvBody'); if(!tb)return;
+  tb.innerHTML=list.map(function(r){
+    const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+    const dueAssigned=(r.causelist_action_needed===true)
+      ? (esc(detail.due?clrevDmy(detail.due):'—')+(detail.person?(' · '+esc(nameOf(detail.person))):''))
+      : '—';
+    return '<tr onclick="legalCauselistOpenHistory('+r.id+')">'
+      +'<td><b class="lg-clamp" title="'+esc(r.cause_title||'')+'">'+esc(r.case_no||('#'+r.id))+'</b>'
+        +'<div style="color:var(--slate);font-size:12px" class="lg-clamp">'+esc(r.cause_title||'')+'</div></td>'
+      +'<td>'+legalCauselistStatusPill(r)+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_pending_by?esc(nameOf(r.causelist_pending_by)):'—')+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_reviewed_by?(esc(nameOf(r.causelist_reviewed_by))+' · '+esc(clrevDmy(String(r.causelist_reviewed_at||'').slice(0,10)))):'—')+'</td>'
+      +'<td>'+dueAssigned+'</td>'
+      +'<td style="text-align:center">'+(r._closes||'—')+'</td>'
+    +'</tr>';
+  }).join('');
+  const em=$('crvEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+window.legalCauselistOpenHistory=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const hist=r._hist||[];
+  const rowsHtml=hist.length ? hist.map(function(l){
+    let what='';
+    if(l.event==='exported') what='Exported / claimed by '+esc(nameOf(l.actor));
+    else if(l.event==='closed_without_answering') what='Closed the popup without answering — '+esc(nameOf(l.actor));
+    else if(l.event==='answered'){
+      const d=l.detail||{};
+      what=d.needed
+        ? 'Marked <b>action needed</b> by '+esc(nameOf(l.actor))+' — due '+esc(d.due?clrevDmy(d.due):'—')+', assigned to '+esc(d.person?nameOf(d.person):'—')
+        : 'Marked <b>no action needed</b> by '+esc(nameOf(l.actor));
+    }
+    return '<div style="padding:9px 0;border-bottom:1px solid var(--line-2)"><div style="font-size:12px;color:var(--slate)">'+esc(clrevDT(l.created_at))+'</div><div>'+what+'</div></div>';
+  }).join('') : '<div style="color:var(--slate);padding:14px 0">No history recorded.</div>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> '+esc(r.case_no||('Case '+r.id))+' — review history</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,560px);max-height:70vh;overflow:auto">'+rowsHtml+'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+};
+
 /* ---------- Advocates ----------------------------------------------------------------------- */
 async function legalAdvocates(){
   setCrumb(['Legal','Advocates']);
@@ -3554,6 +3701,9 @@ async function clrevMaybeOpen(rows){
   try{
     await sb.from('mis_cases').update({causelist_pending_by:state.email}).in('id',ids);
     pending.forEach(function(r){ r.causelist_pending_by=state.email; });
+    await sb.from('mis_causelist_review_log').insert(ids.map(function(id){
+      return {case_id:id, event:'exported', actor:state.email};
+    }));
   }catch(e){}
   await clrevLoadLegal();
   window._clrevRows=clrevPrepRows(pending);
@@ -3647,7 +3797,7 @@ function clrevRender(){
     +'.clrev-fields input,.clrev-fields select{display:block;width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;color:var(--ink);background:var(--card)}'
     +'</style>'
     +'<div class="modal-head"><h3><i class="fa-solid fa-scale-balanced" style="color:var(--brand)"></i> Causelist — action review</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<span class="x" onclick="clrevClose()">&times;</span></div>'
     +'<div class="modal-body clrev-body">'
       +'<div class="clrev-progress-wrap"><div class="clrev-progress-txt"><span>Mark whether each matter needs action</span><span>'+answered+' of '+rows.length+'</span></div>'
         +'<div class="clrev-progress-bar"><div class="clrev-progress-fill" style="width:'+pct+'%"></div></div></div>'
@@ -3655,6 +3805,22 @@ function clrevRender(){
     +'</div>'
     +'<div class="modal-foot"><button class="btn btn-primary" onclick="clrevSubmit()">Submit</button></div>','lg');
 }
+// The X closes the popup without deciding anything (causelist_pending_by is untouched, so
+// clrevCheckPending() puts the same rows back up next session) - logged here so the review log
+// shows it was seen and skipped, not just silently missing between the export and whenever it's
+// finally answered.
+window.clrevClose=function(){
+  clrevSync();
+  const unanswered=(window._clrevRows||[]).filter(function(r){
+    return !(r.needed===false || (r.needed===true && r.due && r.person));
+  });
+  if(unanswered.length){
+    sb.from('mis_causelist_review_log').insert(unanswered.map(function(r){
+      return {case_id:r.id, event:'closed_without_answering', actor:state.email};
+    })).then(function(){},function(){});
+  }
+  closeModal();
+};
 window.clrevSubmit=async function(){
   clrevSync();
   const rows=window._clrevRows||[];
@@ -3686,6 +3852,8 @@ window.clrevSubmit=async function(){
         causelist_pending_by:null
       }).eq('id',r.id);
       if(ue) throw ue;
+      try{ await sb.from('mis_causelist_review_log').insert({case_id:r.id, event:'answered', actor:state.email,
+        detail:{needed:r.needed, due:r.needed?(r.due||null):null, person:r.needed?(r.person||null):null}}); }catch(_le){}
       // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in
       // this same session doesn't ask about this case again without a full reload.
       const src=(window._misRows||[]).find(function(x){return x.id===r.id;});
