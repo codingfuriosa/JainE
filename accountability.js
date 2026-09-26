@@ -9142,8 +9142,10 @@
   }
 
   /* ---------- SCOREBOARD ---------- */
-  /* Two different leaderboards, not one: acc.scoreboard() covers ordinary tasks with its original
-     flat +1 completed/+1 on-time/-1 late credit (computed here from the raw counts, same as always),
+  /* Two different leaderboards, not one: acc.scoreboard() covers ordinary tasks with its flat
+     +1 completed/+1 on-time/-1 late credit (computed here from the raw counts, same as always —
+     what changed is WHICH tasks reach those counts: self-assigned ones no longer do, and a task
+     with no due date no longer counts as having met one, so it earns +1 rather than +2),
      and acc.scoreboard_causelist() is a separate ranking that exists ONLY for tasks the Legal MIS
      causelist action-review popup creates (acc.ptasks.source='causelist'), scored instead by how
      many days ahead of the due date they were finished. SB_VIEW just picks which RPC gets called
@@ -9164,7 +9166,7 @@
     rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)*1+(r.tasks_on_time||0)*1-(r.tasks_late||0)*1})).sort((a,b)=>b.score-a.score);
     const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
     const host=$('sbBody'); if(!host)return;
-    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div>`;
+    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Counts tasks someone else assigned you. Completed <b>+1</b> · finished by its due date <b>+1 more</b> · missed the due date <b>−1</b>. A task with no due date still earns the completion point but cannot earn the on-time point. Tasks you assigned to yourself are listed under <b>Self</b> and do not score. Declines automatically reverse the credit.</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th title="Tasks this person created for themselves — shown for completeness, not scored">Self</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="color:var(--slate)">${r.tasks_self||0}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="8"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div>`;
   }
   async function sbRenderCauselist(){
     let rows=[]; try{const {data}=await ACC().rpc('scoreboard_causelist');rows=data||[];}catch(e){}
