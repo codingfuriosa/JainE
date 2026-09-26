@@ -16284,18 +16284,23 @@ async function cpaImportConfirmXlsx(st){
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
     }
   }else if(st.type==='receipt_reversal'){
-    for(const m of st.matched){
-      const r=m.rec;
-      // Skip if already exists
-      const {data:existing}=await sb.schema('cust').from('receipt_reversals').select('id').eq('unit_id',m.unit.id).eq('receipt_reversal_no',r.reversalNo).limit(1);
-      if(existing&&existing.length) continue;
-      const {error}=await sb.schema('cust').from('receipt_reversals').insert({
-        unit_id:m.unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
+    // One report row per revenue-head line, and every consumer (Ledger, reconciliation) sums
+    // reversal_amount across a reversal's rows - so all lines must land. Skipping a reversal number
+    // once its first line existed kept Rs 3,201 of a Rs 10,00,000 bounced cheque.
+    const byRev={};
+    for(const m of st.matched){ const k=m.unit.id+'|'+m.rec.reversalNo; (byRev[k]=byRev[k]||{unit:m.unit,lines:[]}).lines.push(m.rec); }
+    for(const k of Object.keys(byRev)){
+      const {unit,lines}=byRev[k];
+      const {error:ue}=await sb.schema('cust').from('receipt_reversals').update({is_current:false})
+        .eq('unit_id',unit.id).eq('receipt_reversal_no',lines[0].reversalNo).eq('is_current',true);
+      if(ue)throw ue;
+      const {error}=await sb.schema('cust').from('receipt_reversals').insert(lines.map(r=>({
+        unit_id:unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
         receipt_no:r.receiptNo,receipt_date:r.receiptDate,
         instrument_no:r.instrumentNo,instrument_date:r.instrumentDate,
         reversal_amount:r.reversalAmount,total_reversal_amount:r.totalReversalAmount,
         narration:r.narration,bank_description:r.bankDescription,reason:r.reason,
-        is_current:true,import_batch_id:batchId});
+        is_current:true,import_batch_id:batchId})));
       if(error)throw error;
     }
   }else if(st.type==='booking_register'){
