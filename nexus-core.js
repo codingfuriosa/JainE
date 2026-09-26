@@ -491,9 +491,6 @@ const NAV=[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
   ]},
-  {group:'IT & Support',items:[
-    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
-  ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
     {id:'crm',label:'CRM & Sales',icon:'fa-handshake'},
@@ -541,6 +538,13 @@ const NAV=[
   ]},
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
+  ]},
+  // Last on purpose. Internet Speed is a thing you go and look at when something feels slow, not
+  // something you work in, so it sat oddly as the second group in the sidebar — above Sales,
+  // Operations and everything people actually open all day. It keeps its own group rather than
+  // being folded into System, so the sidebar still says what it is.
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
   ]},
 ];
 const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
@@ -2078,7 +2082,7 @@ async function legalOcrBarPaint(){
 }
 window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
-  const known={mis:1,scoreboard:1,actions:1,advocates:1};
+  const known={mis:1,scoreboard:1,actions:1,advocates:1,causelist:1};
   const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
@@ -2086,6 +2090,7 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
       <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
+      <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
@@ -2095,6 +2100,7 @@ VIEWS.legal=async function(v,seg){
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
+  else if(tab==='causelist') legalCauselistReviews();
   else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
@@ -2748,6 +2754,17 @@ async function legalMIS(){
   try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
+  // Anything this account exported and never finished answering nudges right here, not only
+  // silently again at the next login (clrevCheckPending covers that separately) — same claim,
+  // just checked on demand instead of only once at boot.
+  try{
+    const myPending=rows.filter(function(r){ return r.causelist_pending_by===state.email && !clrevAlreadyActioned(r); });
+    if(hAct && myPending.length){
+      hAct.innerHTML='<button class="btn" style="background:var(--warn-50);border-color:var(--warn);color:#b45309" '
+        +'onclick="clrevCheckPending()" title="Reopen the causelist action-review popup"><i class="fa-solid fa-triangle-exclamation"></i> '
+        +myPending.length+' matter'+(myPending.length===1?'':'s')+' awaiting your review</button>';
+    }
+  }catch(e){}
   /* How many papers are filed against each case, so the Documents button knows whether it has
      anything to open and the row can say so at a glance. One small query for the whole table. */
   window._misDocCounts={}; window._misDocFolders={};
@@ -3198,6 +3215,270 @@ window.legalActionsFilter=function(){
   usageQueueDebounced('legal.actions.view_search_filter_case_actions', q);
 };
 
+/* ---------- Causelist Reviews -----------------------------------------------------------------
+   Where the causelist action-review popup's decisions actually live once made - not just today's
+   snapshot on mis_cases (pending/answered/who), but the full history from
+   mis_causelist_review_log: every export claim, every answer, every time someone closed the popup
+   without answering. Also the on-demand way back into it: the toolbar nudge in legalMIS() covers
+   "I have some to answer"; this covers "let me see all of them, and who else does too". Sourced
+   from the log table itself (a case appears here iff it has at least one log row) rather than a
+   field-presence filter on mis_cases, so this and the log agree by construction. */
+function clrevDT(iso){ if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return String(iso);
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()
+    +', '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+async function legalCauselistReviews(){
+  setCrumb(['Legal','Causelist Reviews']);
+  const hAct=$('legalHeadActions'); if(hAct)hAct.innerHTML='';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  try{ await getPeople(); }catch(e){}
+  try{ await clrevLoadLegal(); }catch(e){}   // populates window._clrevLegal for the inline person picker below
+  let logs=[], cases=[];
+  try{ const {data}=await sb.from('mis_causelist_review_log').select('*').order('created_at',{ascending:true}); logs=data||[]; }catch(e){}
+  const ids=Array.from(new Set(logs.map(function(l){return l.case_id;})));
+  if(ids.length){
+    try{
+      // The date fields are needed for misHearingIso() when an inline answer creates a task -
+      // the narrower column set used before was fine for display but left the task description's
+      // hearing date blank.
+      const {data}=await sb.from('mis_cases').select('id,case_no,case_type,cause_title,court,'
+        +'causelist_pending_by,causelist_reviewed_at,causelist_action_needed,causelist_reviewed_by,'
+        +'case_next_date_iso,case_next_date,next_date_iso,next_date').in('id',ids);
+      cases=data||[];
+    }catch(e){}
+  }
+  const byCase={};
+  logs.forEach(function(l){ (byCase[l.case_id]=byCase[l.case_id]||[]).push(l); });
+  const rows=cases.map(function(c){
+    const hist=byCase[c.id]||[];
+    // The most recent DECISION (first answer or any later edit of it) - this is what the Due /
+    // Responsible cells show, and where an edit reads the previous task id from.
+    const decisions=hist.filter(function(l){return l.event==='answered'||l.event==='edited';});
+    const closes=hist.filter(function(l){return l.event==='closed_without_answering';}).length;
+    return Object.assign({}, c, {_hist:hist, _lastAnswered:decisions[decisions.length-1]||null,
+      _closes:closes, _pending:!!c.causelist_pending_by && !c.causelist_reviewed_at});
+  }).sort(function(a,b){
+    // Pending first (soonest claimed first among those), then most recently answered.
+    if(a._pending!==b._pending) return a._pending?-1:1;
+    return String((b.causelist_reviewed_at||b._hist[0]&&b._hist[0].created_at)||'').localeCompare(String((a.causelist_reviewed_at||a._hist[0]&&a._hist[0].created_at)||''));
+  });
+  window._clrevReviewRows=rows;
+  const pendingCount=rows.filter(function(r){return r._pending;}).length;
+  body.innerHTML=`<style>
+    .crv-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+    .crv-search{position:relative;flex:1;min-width:180px;display:flex;align-items:center}
+    .crv-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
+    .crv-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .crv-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .crv-sel{height:38px;padding:0 34px 0 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;
+      font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;
+      appearance:none;-webkit-appearance:none;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231e3a8a' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px}
+    @media(max-width:760px){.crv-search,.crv-sel{flex:1 1 100%}}
+    #crvTbl{width:100%;border-collapse:collapse;font-size:13px}
+    #crvTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #crvTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    /* Pending rows answer inline, right on the line item - no click-through, no popup. */
+    .crv-seg{display:inline-flex;gap:4px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px;margin-left:6px;vertical-align:middle}
+    .crv-seg-btn{border:none;background:transparent;color:var(--slate);font-size:11.5px;font-weight:600;padding:4px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+    .crv-seg-btn:hover{color:var(--ink)}
+    .crv-seg-btn.on{background:var(--card);color:var(--brand);box-shadow:var(--shadow)}
+    .crv-inline-fields{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .crv-inline-fields input,.crv-inline-fields select{padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;color:var(--ink);background:var(--card)}
+    @media(max-width:760px){#crvTbl{min-width:820px}}
+  </style>
+  <div class="crv-bar">
+    <div class="crv-search"><i class="fa-solid fa-magnifying-glass"></i><input id="crvQ" placeholder="Search case, exporter or reviewer…" oninput="legalCauselistFilter()"></div>
+    <select class="crv-sel" id="crvState" onchange="legalCauselistFilter()">
+      <option value="all">All (${rows.length})</option>
+      <option value="pending">Pending review (${pendingCount})</option>
+      <option value="needed">Action needed (${rows.filter(function(r){return r.causelist_action_needed===true;}).length})</option>
+      <option value="noaction">No action needed (${rows.filter(function(r){return r.causelist_action_needed===false;}).length})</option>
+    </select>
+  </div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="crvTbl"><thead><tr>
+      <th>Case</th><th>Status</th><th>Pending with</th><th>Answered by</th><th>Due</th><th>Responsible</th>
+    </tr></thead><tbody id="crvBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="crvEmpty" style="padding:34px;display:none"><i class="fa-regular fa-square-check"></i><div>Nothing here yet.</div>
+    <div style="font-size:12.5px;color:var(--slate);margin-top:6px">This fills in as causelists get exported from the MIS tab.</div></div>`;
+  legalCauselistFilter();
+}
+// Answering a pending row - or EDITING an already-answered one - happens right on the line item: a
+// segmented control in the Status cell, and (once "Action needed" is picked) a date input +
+// Legal-person select in the Due cell, both live in window._crvEdit until Save. No popup, no
+// click-through: every control needed is always visible on its own row.
+//
+// A row is "editable" either because it's genuinely still pending, or because Edit was explicitly
+// clicked on an already-answered one (window._crvEditingIds). The two look the same but behave
+// slightly differently: a fresh pending row's "No action" saves in one click since there's nothing
+// to lose; an explicit edit always needs a deliberate Save, even for "No action", since that can
+// delete an existing task.
+window._crvEdit={};
+window._crvEditingIds=new Set();
+function crvGetEdit(id){ return window._crvEdit[id] || (window._crvEdit[id]={needed:null,due:'',person:''}); }
+function crvEditable(r){ return r._pending || window._crvEditingIds.has(r.id); }
+function crvIsExplicitEdit(r){ return !r._pending && window._crvEditingIds.has(r.id); }
+function legalCauselistStatusPill(r){
+  if(!crvEditable(r)){
+    if(r.causelist_action_needed===true) return '<span class="mis-ptag mis-ptag--green">Action needed</span> '
+      +'<a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>'
+      +' · <a href="javascript:void(0)" onclick="legalCauselistEditStart('+r.id+')" style="font-size:12px">Edit</a>';
+    if(r.causelist_action_needed===false) return '<span class="mis-ptag">No action needed</span> '
+      +'<a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>'
+      +' · <a href="javascript:void(0)" onclick="legalCauselistEditStart('+r.id+')" style="font-size:12px">Edit</a>';
+    return '—';
+  }
+  const e=crvGetEdit(r.id);
+  return '<span class="mis-ptag mis-ptag--amber">'+(r._pending?'Pending':'Editing')+'</span>'
+    +'<span class="crv-seg">'
+      +'<button type="button" class="crv-seg-btn'+(e.needed===true?' on':'')+'" onclick="crvSetNeeded('+r.id+',true)"><i class="fa-solid fa-flag"></i> Action needed</button>'
+      +'<button type="button" class="crv-seg-btn'+(e.needed===false?' on':'')+'" onclick="crvSetNeeded('+r.id+',false)"><i class="fa-solid fa-check"></i> No action</button>'
+    +'</span>'
+    +((r._hist||[]).length?' <a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>':'')
+    +(crvIsExplicitEdit(r)?' <a href="javascript:void(0)" onclick="legalCauselistEditCancel('+r.id+')" style="font-size:12px;color:var(--slate)">Cancel</a>':'');
+}
+function crvDueCellHtml(r){
+  if(!crvEditable(r)){
+    // Assigned person lives in its own Responsible column now (crvResponsibleName) - just the date here.
+    const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+    return (r.causelist_action_needed===true) ? esc(detail.due?clrevDmy(detail.due):'—') : '—';
+  }
+  const e=crvGetEdit(r.id);
+  if(e.needed===null) return '—';
+  if(e.needed!==true){
+    // Explicit edit landing on "No action" still needs a deliberate Save - a fresh pending row
+    // never reaches this branch, since crvSetNeeded already saved it and left edit mode.
+    return crvIsExplicitEdit(r)
+      ? '<div class="crv-inline-fields">—&nbsp;<button type="button" class="btn btn-primary" id="crvSaveBtn_'+r.id+'" style="padding:5px 10px;font-size:12px" onclick="crvSaveInline('+r.id+')">Save</button></div>'
+      : '—';
+  }
+  const legal=window._clrevLegal||[];
+  const opts='<option value="">— choose —</option>'+legal.map(function(p){
+    return '<option value="'+esc(p.email)+'"'+(e.person===p.email?' selected':'')+'>'+esc(p.name)+'</option>'; }).join('');
+  const hearing=misHearingIso(r);
+  return '<div class="crv-inline-fields">'
+    +'<input type="date" id="crvDue_'+r.id+'" value="'+esc(e.due||'')+'"'+(hearing?' max="'+esc(hearing)+'"':'')+' title="'+(hearing?'On or before the '+esc(clrevDmy(hearing))+' hearing':'')+'" onchange="crvFieldChange('+r.id+')">'
+    +'<select id="crvPerson_'+r.id+'" onchange="crvFieldChange('+r.id+')">'+opts+'</select>'
+    +'<button type="button" class="btn btn-primary" id="crvSaveBtn_'+r.id+'" style="padding:5px 10px;font-size:12px" onclick="crvSaveInline('+r.id+')" title="Save"><i class="fa-solid fa-check"></i></button>'
+  +'</div>';
+}
+// Who's actually doing it, once a matter has been marked action-needed and saved. Blank for
+// anything still pending (nobody's assigned yet) or answered as no-action (nobody needs to be).
+function crvResponsibleName(r){
+  const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+  return (r.causelist_action_needed===true && detail.person) ? esc(nameOf(detail.person)) : '—';
+}
+function crvRepaintRow(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  const st=$('crvStat_'+id); if(st) st.innerHTML=legalCauselistStatusPill(r);
+  const da=$('crvDA_'+id); if(da) da.innerHTML=crvDueCellHtml(r);
+}
+window.legalCauselistEditStart=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  window._crvEditingIds.add(id);
+  const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+  window._crvEdit[id]={needed:r.causelist_action_needed, due:detail.due||'', person:detail.person||''};
+  crvRepaintRow(id);
+};
+window.legalCauselistEditCancel=function(id){
+  window._crvEditingIds.delete(id);
+  delete window._crvEdit[id];
+  crvRepaintRow(id);
+};
+window.crvSetNeeded=function(id,val){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  const e=crvGetEdit(id);
+  e.needed=val;
+  // Fresh (not-yet-answered) "No action" still saves in one click - nothing at stake to lose.
+  if(val===false && r._pending && !crvIsExplicitEdit(r)){ crvSaveInline(id); return; }
+  crvRepaintRow(id);
+};
+window.crvFieldChange=function(id){
+  const e=crvGetEdit(id), d=$('crvDue_'+id), p=$('crvPerson_'+id);
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  const hearing=r?misHearingIso(r):null;
+  if(d && clrevDueTooLate(d.value,hearing)){
+    toast('Due date can\'t be after the '+clrevDmy(hearing)+' hearing — reset to that date','warn');
+    d.value=hearing;
+  }
+  if(d) e.due=d.value||''; if(p) e.person=p.value||'';
+};
+window.crvSaveInline=async function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const e=crvGetEdit(id);
+  if(e.needed===null) return;
+  if(e.needed===true){
+    crvFieldChange(id);
+    if(!e.due||!e.person){ toast('Pick a due date and a responsible person first','warn'); return; }
+    if(clrevDueTooLate(e.due,misHearingIso(r))){ toast('Due date can\'t be after the '+clrevDmy(misHearingIso(r))+' hearing','warn'); return; }
+  }
+  const isEdit=!r._pending;
+  const prevTaskId=(r._lastAnswered&&r._lastAnswered.detail&&r._lastAnswered.detail.task_id)||null;
+  const btn=$('crvSaveBtn_'+id);
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try{
+    await clrevSaveOneRow({id:r.id, case_no:r.case_no, cause_title:r.cause_title, court:r.court,
+      hearing:misHearingIso(r), needed:e.needed, due:e.due, person:e.person}, {prevTaskId:prevTaskId, isEdit:isEdit});
+  }catch(err){
+    toast('Could not save: '+((err&&err.message)||err),'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i>'; }
+    return;
+  }
+  window._crvEditingIds.delete(id);
+  delete window._crvEdit[id];
+  toast(isEdit?'Updated':'Saved','ok');
+  legalCauselistReviews();
+};
+window.legalCauselistFilter=function(){
+  const rows=window._clrevReviewRows||[];
+  const q=(($('crvQ')||{}).value||'').trim().toLowerCase();
+  const st=(($('crvState')||{}).value)||'all';
+  const list=rows.filter(function(r){
+    if(st==='pending'&&!r._pending) return false;
+    if(st==='needed'&&r.causelist_action_needed!==true) return false;
+    if(st==='noaction'&&r.causelist_action_needed!==false) return false;
+    if(!q) return true;
+    return [r.case_no,r.cause_title,r.causelist_pending_by,r.causelist_reviewed_by].filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1;
+  });
+  const tb=$('crvBody'); if(!tb)return;
+  tb.innerHTML=list.map(function(r){
+    return '<tr>'
+      +'<td><b class="lg-clamp" title="'+esc(r.cause_title||'')+'">'+esc(r.case_no||('#'+r.id))+'</b>'
+        +'<div style="color:var(--slate);font-size:12px" class="lg-clamp">'+esc(r.cause_title||'')+'</div></td>'
+      +'<td id="crvStat_'+r.id+'">'+legalCauselistStatusPill(r)+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_pending_by?esc(nameOf(r.causelist_pending_by)):'—')+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_reviewed_by?(esc(nameOf(r.causelist_reviewed_by))+' · '+esc(clrevDmy(String(r.causelist_reviewed_at||'').slice(0,10)))):'—')+'</td>'
+      +'<td id="crvDA_'+r.id+'">'+crvDueCellHtml(r)+'</td>'
+      +'<td>'+crvResponsibleName(r)+'</td>'
+    +'</tr>';
+  }).join('');
+  const em=$('crvEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+window.legalCauselistOpenHistory=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const hist=r._hist||[];
+  const rowsHtml=hist.length ? hist.map(function(l){
+    let what='';
+    if(l.event==='exported') what='Exported / claimed by '+esc(nameOf(l.actor));
+    else if(l.event==='closed_without_answering') what='Closed the popup without answering — '+esc(nameOf(l.actor));
+    else if(l.event==='answered'||l.event==='edited'){
+      const d=l.detail||{}, verb=(l.event==='edited')?'Edited to':'Marked';
+      what=d.needed
+        ? verb+' <b>action needed</b> by '+esc(nameOf(l.actor))+' — due '+esc(d.due?clrevDmy(d.due):'—')+', assigned to '+esc(d.person?nameOf(d.person):'—')
+        : verb+' <b>no action needed</b> by '+esc(nameOf(l.actor));
+    }
+    return '<div style="padding:9px 0;border-bottom:1px solid var(--line-2)"><div style="font-size:12px;color:var(--slate)">'+esc(clrevDT(l.created_at))+'</div><div>'+what+'</div></div>';
+  }).join('') : '<div style="color:var(--slate);padding:14px 0">No history recorded.</div>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> '+esc(r.case_no||('Case '+r.id))+' — review history</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,560px);max-height:70vh;overflow:auto">'+rowsHtml+'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+};
+
 /* ---------- Advocates ----------------------------------------------------------------------- */
 async function legalAdvocates(){
   setCrumb(['Legal','Advocates']);
@@ -3526,6 +3807,10 @@ window.misExportCauselist=async function(){
    so that is effectively "every new session") puts the same popup straight back up the next time
    JainE is opened. Submit is still the only way to actually clear a matter off this list. */
 window._clrevRows=[]; window._clrevLegal=[];
+// Set by a caller that needs to know when a clrev popup actually finished (answered or closed) -
+// the Causelist Reviews tab uses this to repaint itself with the fresh status instead of going
+// stale the moment its own "Answer now" popup closes. Cleared right after it fires, once.
+window._clrevOnDone=null;
 // A case where action has already been taken - an open action already logged (action_needed) or
 // one already carried out (action_executed_date) - has nothing left for this popup to ask about,
 // on top of one this popup itself already reviewed (causelist_reviewed_at). None of this touches
@@ -3545,18 +3830,33 @@ async function clrevLoadLegal(){
 async function clrevMaybeOpen(rows){
   const pending=(rows||[]).filter(function(r){ return !clrevAlreadyActioned(r); });
   if(!pending.length) return;
+  // Claim these cases as this exporter's to review, written immediately (not left until Submit) so
+  // it survives a closed tab or a later session — clrevCheckPending() only ever shows a case to
+  // whoever holds this claim. Re-exporting an overlapping range later just re-claims it for
+  // whoever ran that export, which is the point: it should nag the person who most recently
+  // downloaded it, not whoever exported it first.
+  const ids=pending.map(function(r){return r.id;});
+  try{
+    await sb.from('mis_cases').update({causelist_pending_by:state.email}).in('id',ids);
+    pending.forEach(function(r){ r.causelist_pending_by=state.email; });
+    await sb.from('mis_causelist_review_log').insert(ids.map(function(id){
+      return {case_id:id, event:'exported', actor:state.email};
+    }));
+  }catch(e){}
   await clrevLoadLegal();
   window._clrevRows=clrevPrepRows(pending);
   clrevRender();
 }
-// Called once from boot(), after auth resolves, for anyone who can see Legal MIS at all - not
-// tied to exporting anything. Only cases with a real hearing date are in scope (the same universe
-// a causelist ever draws from), so this never turns into "review every case in the system".
+// Called once from boot(), after auth resolves - only for the person who actually exported a
+// causelist and left it unanswered (causelist_pending_by = them), never for anyone else with Legal
+// MIS access. Only cases with a real hearing date are in scope (the same universe a causelist ever
+// draws from), so this never turns into "review every case in the system".
 async function clrevCheckPending(){
   if(!(typeof pageAllowed==='function') || !pageAllowed('legal')) return;
+  if(!state.email) return;
   let rows=[];
   try{
-    const {data,error}=await sb.from('mis_cases').select('*');
+    const {data,error}=await sb.from('mis_cases').select('*').eq('causelist_pending_by',state.email);
     if(error) throw error;
     rows=(data||[]).filter(function(r){ return misHearingIso(r) && !clrevAlreadyActioned(r); });
   }catch(e){ return; }
@@ -3583,6 +3883,20 @@ window.clrevSetNeeded=function(id,val){
 };
 function clrevDmy(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
   return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+// A task to prepare for a hearing due AFTER the hearing is pointless - the MIS "Action Date" for a
+// case has always mirrored its hearing date (the old per-case editor sets action_date=next_date
+// the moment an action is raised), so this is the same rule the old system already enforced,
+// applied here to the date this popup's task carries. Shared by both the popup and the Causelist
+// Reviews tab's inline editor.
+function clrevDueTooLate(due, hearing){ return !!(due && hearing && due > hearing); }
+window.clrevDueChange=function(id){
+  const r=(window._clrevRows||[]).find(function(x){return x.id===id;});
+  const d=$('clrevDue_'+id);
+  if(r && d && clrevDueTooLate(d.value, r.hearing)){
+    toast('Due date can\'t be after the '+clrevDmy(r.hearing)+' hearing — reset to that date','warn');
+    d.value=r.hearing;
+  }
+};
 function clrevRender(){
   const rows=window._clrevRows||[], legal=window._clrevLegal||[];
   const isDone=function(r){ return r.needed===false || (r.needed===true && r.due && r.person); };
@@ -3607,7 +3921,8 @@ function clrevRender(){
       +'</div>'
       +(yesOn
         ? '<div class="clrev-fields">'
-            +'<label>Due date<input type="date" id="clrevDue_'+r.id+'" value="'+esc(r.due||'')+'"></label>'
+            +'<label>Due date'+(r.hearing?' <span style="font-weight:400;color:var(--slate)">(on or before the '+esc(clrevDmy(r.hearing))+' hearing)</span>':'')
+              +'<input type="date" id="clrevDue_'+r.id+'" value="'+esc(r.due||'')+'"'+(r.hearing?' max="'+esc(r.hearing)+'"':'')+' onchange="clrevDueChange('+r.id+')"></label>'
             +'<label>Responsible (Legal)<select id="clrevPerson_'+r.id+'">'+personOpts+'</select></label>'
           +'</div>'
         : '')
@@ -3635,13 +3950,92 @@ function clrevRender(){
     +'.clrev-fields input,.clrev-fields select{display:block;width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;color:var(--ink);background:var(--card)}'
     +'</style>'
     +'<div class="modal-head"><h3><i class="fa-solid fa-scale-balanced" style="color:var(--brand)"></i> Causelist — action review</h3>'
-      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<span class="x" onclick="clrevClose()">&times;</span></div>'
     +'<div class="modal-body clrev-body">'
       +'<div class="clrev-progress-wrap"><div class="clrev-progress-txt"><span>Mark whether each matter needs action</span><span>'+answered+' of '+rows.length+'</span></div>'
         +'<div class="clrev-progress-bar"><div class="clrev-progress-fill" style="width:'+pct+'%"></div></div></div>'
       +(body||'<div style="color:var(--slate)">Nothing left to answer.</div>')
     +'</div>'
     +'<div class="modal-foot"><button class="btn btn-primary" onclick="clrevSubmit()">Submit</button></div>','lg');
+}
+// The X closes the popup without deciding anything (causelist_pending_by is untouched, so
+// clrevCheckPending() puts the same rows back up next session) - logged here so the review log
+// shows it was seen and skipped, not just silently missing between the export and whenever it's
+// finally answered.
+window.clrevClose=function(){
+  clrevSync();
+  const unanswered=(window._clrevRows||[]).filter(function(r){
+    return !(r.needed===false || (r.needed===true && r.due && r.person));
+  });
+  if(unanswered.length){
+    sb.from('mis_causelist_review_log').insert(unanswered.map(function(r){
+      return {case_id:r.id, event:'closed_without_answering', actor:state.email};
+    })).then(function(){},function(){});
+  }
+  closeModal();
+  if(typeof window._clrevOnDone==='function'){ const fn=window._clrevOnDone; window._clrevOnDone=null; try{ fn(); }catch(e){} }
+};
+// The actual save for one row - task (create/update/delete as needed), mis_cases update, log
+// entry, in-memory sync. Shared by clrevSubmit's loop (the modal - always a fresh answer, never an
+// edit), the Causelist Reviews table's inline answer (also fresh), and its inline EDIT of an
+// already-answered row.
+//
+// opts.prevTaskId is the task an earlier answer on this same case created, if any (read from that
+// answer's own log entry - nothing on mis_cases points at it directly). Editing needed=true with a
+// prevTaskId updates that task in place rather than creating a second one; editing needed=true
+// without one creates a fresh task, same as a first answer; editing down to needed=false with a
+// prevTaskId deletes that task outright, since a case marked no-action-needed shouldn't still carry
+// one. opts.isEdit only controls which event name gets logged (edited vs answered) - it does not
+// change what happens to the task, which is decided by whether prevTaskId is actually set.
+async function clrevSaveOneRow(r, opts){
+  opts=opts||{};
+  const prevTaskId=opts.prevTaskId||null;
+  let taskId=null;
+  if(r.needed===true){
+    if(prevTaskId){
+      const {error:ue2}=await sb.schema('acc').from('ptasks').update({due_date:r.due}).eq('id',prevTaskId);
+      if(ue2) throw ue2;
+      const {data:cur}=await sb.schema('acc').from('ptask_assignees').select('email').eq('task_id',prevTaskId);
+      const already=(cur||[]).some(function(x){return String(x.email||'').toLowerCase()===String(r.person||'').toLowerCase();});
+      if(!already){
+        const {error:de}=await sb.schema('acc').from('ptask_assignees').delete().eq('task_id',prevTaskId);
+        if(de) throw de;
+        const {error:ae2}=await sb.schema('acc').from('ptask_assignees').insert({task_id:prevTaskId, email:r.person});
+        if(ae2) throw ae2;
+      }
+      taskId=prevTaskId;
+    }else{
+      const {data:t,error}=await sb.schema('acc').from('ptasks').insert({
+        title:'Legal MIS — Case '+(r.case_no||r.id),
+        description:(r.cause_title||'')+(r.court?' · '+r.court:'')+' · Hearing '+clrevDmy(r.hearing),
+        delegator:'businessanalyst@thejaingroup.com', created_by:'businessanalyst@thejaingroup.com',
+        due_date:r.due, order_index:0, source:'causelist'
+      }).select().single();
+      if(error) throw error;
+      const {error:ae}=await sb.schema('acc').from('ptask_assignees').insert({task_id:t.id, email:r.person});
+      if(ae) throw ae;
+      taskId=t.id;
+    }
+  }else if(prevTaskId){
+    // Edited down to "no action needed" - the task an earlier "action needed" answer created no
+    // longer applies.
+    try{ await sb.schema('acc').from('ptask_assignees').delete().eq('task_id',prevTaskId); }catch(_de){}
+    const {error:de2}=await sb.schema('acc').from('ptasks').delete().eq('id',prevTaskId);
+    if(de2) throw de2;
+  }
+  const {error:ue}=await sb.from('mis_cases').update({
+    causelist_reviewed_at:new Date().toISOString(),
+    causelist_action_needed:r.needed,
+    causelist_reviewed_by:state.email,
+    causelist_pending_by:null
+  }).eq('id',r.id);
+  if(ue) throw ue;
+  try{ await sb.from('mis_causelist_review_log').insert({case_id:r.id, event:opts.isEdit?'edited':'answered', actor:state.email,
+    detail:{needed:r.needed, due:r.needed?(r.due||null):null, person:r.needed?(r.person||null):null, task_id:taskId}}); }catch(_le){}
+  // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in this
+  // same session doesn't ask about this case again without a full reload.
+  const src=(window._misRows||[]).find(function(x){return x.id===r.id;});
+  if(src){ src.causelist_reviewed_at=new Date().toISOString(); src.causelist_action_needed=r.needed; src.causelist_reviewed_by=state.email; src.causelist_pending_by=null; }
 }
 window.clrevSubmit=async function(){
   clrevSync();
@@ -3652,32 +4046,16 @@ window.clrevSubmit=async function(){
     clrevRender();
     return;
   }
+  const late=rows.find(function(r){ return r.needed===true && clrevDueTooLate(r.due,r.hearing); });
+  if(late){
+    toast('Case '+(late.case_no||late.id)+'\'s due date is after its '+clrevDmy(late.hearing)+' hearing — fix it first','warn');
+    clrevRender();
+    return;
+  }
   const btn=document.querySelector('.modal-foot .btn-primary');
   if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
   try{
-    for(const r of rows){
-      if(r.needed===true){
-        const {data:t,error}=await sb.schema('acc').from('ptasks').insert({
-          title:'Legal MIS — Case '+(r.case_no||r.id),
-          description:(r.cause_title||'')+(r.court?' · '+r.court:'')+' · Hearing '+clrevDmy(r.hearing),
-          delegator:'businessanalyst@thejaingroup.com', created_by:'businessanalyst@thejaingroup.com',
-          due_date:r.due, order_index:0, source:'causelist'
-        }).select().single();
-        if(error) throw error;
-        const {error:ae}=await sb.schema('acc').from('ptask_assignees').insert({task_id:t.id, email:r.person});
-        if(ae) throw ae;
-      }
-      const {error:ue}=await sb.from('mis_cases').update({
-        causelist_reviewed_at:new Date().toISOString(),
-        causelist_action_needed:r.needed,
-        causelist_reviewed_by:state.email
-      }).eq('id',r.id);
-      if(ue) throw ue;
-      // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in
-      // this same session doesn't ask about this case again without a full reload.
-      const src=(window._misRows||[]).find(function(x){return x.id===r.id;});
-      if(src){ src.causelist_reviewed_at=new Date().toISOString(); src.causelist_action_needed=r.needed; src.causelist_reviewed_by=state.email; }
-    }
+    for(const r of rows){ await clrevSaveOneRow(r); }
   }catch(e){
     toast('Could not save: '+((e&&e.message)||e),'err');
     if(btn){ btn.disabled=false; btn.innerHTML='Submit'; }
@@ -3686,6 +4064,7 @@ window.clrevSubmit=async function(){
   window._clrevRows=[]; window._clrevLegal=[];
   closeModal();
   toast('Causelist reviewed — tasks created for every matter marked action-needed','ok');
+  if(typeof window._clrevOnDone==='function'){ const fn=window._clrevOnDone; window._clrevOnDone=null; try{ fn(); }catch(e){} }
 };
 // View is the same sheet, opened for on-screen reading instead of forced onto disk - the
 // causelist-format equivalent of every other module's Preview/Download pair.
@@ -9142,6 +9521,9 @@ const USB_COL4={
   'tasks.meetings.schedule_a_meeting_one_time_or_recurring':           {header:null, keys:[]},
   'tasks.meetings.start_stop_recording':                               {header:null, keys:[]},
   'tasks.meetings.save_meeting_wrap_up_summary':                       {header:null, keys:[]},
+  // Uploading a recording for a meeting that wasn't recorded live: it carries the meeting title,
+  // never an attendee list, so it must not inherit the tab's permanently-blank Attendees column.
+  'tasks.meetings.add_a_recording_for_transcription':                  {header:null, keys:[]},
   'legal.mis.search_cases_incl_ai_semantic_search':                    {header:null, keys:[]},
   'legal.mis.filter_cases_by_hearing_date_range':                      {header:null, keys:[]},
   'legal.actions.view_search_filter_case_actions':                     {header:null, keys:[], hideDetails:true},
@@ -15419,15 +15801,19 @@ function cpaParsePTC(wb){
     isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
   }));
 }
-// Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
-// (project, tower, unit code) only for the rare pre-Booking-No-convention record.
+// Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
+// carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
+// lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
+// holds that flat now - another buyer's money in the current owner's ledger. The flat-level lookup
+// is only for the rare record with no Booking No.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
-  if(bookingNo){ const u=units.find(u=>u.booking_no===bookingNo); if(u) return u; }
-  if(projectId&&unitCode){
-    const norm=s=>String(s||'').trim().toLowerCase();
-    return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
-  }
-  return null;
+  if(bookingNo) return units.find(u=>u.booking_no===bookingNo)||null;
+  return cpaResolveFlat(units,projectId,tower,unitCode);
+}
+function cpaResolveFlat(units,projectId,tower,unitCode){
+  if(!projectId||!unitCode) return null;
+  const norm=s=>String(s||'').trim().toLowerCase();
+  return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
 }
 function cpaResolveProject(projects,businessUnit){
   if(!businessUnit) return null;
@@ -15797,7 +16183,10 @@ async function cpaImportConfirmXlsx(st){
           if(error)throw error; customerId=created.id;
         }
       }
-      const existingUnit=cpaResolveUnit(await cpaUnits(),m.project.id,r.bookingNo,r.tower,r.unitCode);
+      // Sales Details lists Active bookings only, and a flat has one non-cancelled row
+      // (units_project_tower_code_active_uq), so a rebooked flat must still find its existing row.
+      const allUnits=await cpaUnits();
+      const existingUnit=cpaResolveUnit(allUnits,m.project.id,r.bookingNo,null,null)||cpaResolveFlat(allUnits,m.project.id,r.tower,r.unitCode);
       const unitRow={project_id:m.project.id,unit_code:r.unitCode,tower:r.tower,floor_no:r.floor||null,
         unit_type:r.typology||null,carpet_area_sqft:r.carpet||null,super_built_up_area_sqft:r.superBuiltUp||null,
         built_up_area_sqft:r.builtUp||null,agreement_value:r.totalBasic+r.totalTax,booking_no:r.bookingNo,
@@ -15899,18 +16288,23 @@ async function cpaImportConfirmXlsx(st){
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
     }
   }else if(st.type==='receipt_reversal'){
-    for(const m of st.matched){
-      const r=m.rec;
-      // Skip if already exists
-      const {data:existing}=await sb.schema('cust').from('receipt_reversals').select('id').eq('unit_id',m.unit.id).eq('receipt_reversal_no',r.reversalNo).limit(1);
-      if(existing&&existing.length) continue;
-      const {error}=await sb.schema('cust').from('receipt_reversals').insert({
-        unit_id:m.unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
+    // One report row per revenue-head line, and every consumer (Ledger, reconciliation) sums
+    // reversal_amount across a reversal's rows - so all lines must land. Skipping a reversal number
+    // once its first line existed kept Rs 3,201 of a Rs 10,00,000 bounced cheque.
+    const byRev={};
+    for(const m of st.matched){ const k=m.unit.id+'|'+m.rec.reversalNo; (byRev[k]=byRev[k]||{unit:m.unit,lines:[]}).lines.push(m.rec); }
+    for(const k of Object.keys(byRev)){
+      const {unit,lines}=byRev[k];
+      const {error:ue}=await sb.schema('cust').from('receipt_reversals').update({is_current:false})
+        .eq('unit_id',unit.id).eq('receipt_reversal_no',lines[0].reversalNo).eq('is_current',true);
+      if(ue)throw ue;
+      const {error}=await sb.schema('cust').from('receipt_reversals').insert(lines.map(r=>({
+        unit_id:unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
         receipt_no:r.receiptNo,receipt_date:r.receiptDate,
         instrument_no:r.instrumentNo,instrument_date:r.instrumentDate,
         reversal_amount:r.reversalAmount,total_reversal_amount:r.totalReversalAmount,
         narration:r.narration,bank_description:r.bankDescription,reason:r.reason,
-        is_current:true,import_batch_id:batchId});
+        is_current:true,import_batch_id:batchId})));
       if(error)throw error;
     }
   }else if(st.type==='booking_register'){

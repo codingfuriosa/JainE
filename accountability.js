@@ -432,7 +432,19 @@
     .mtg-card{display:flex;align-items:stretch;gap:14px;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;transition:box-shadow .12s,border-color .12s}
     .mtg-card:hover{border-color:#c7d2fe;box-shadow:0 2px 10px rgba(15,23,42,.06)}
     .mtg-bar{width:4px;border-radius:3px;flex:none}
-    .mtg-time{width:132px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:2px;line-height:1.35}
+    .mtg-time{width:146px;flex:none;font-size:12.5px;color:#6b7280;font-weight:600;padding-top:1px;line-height:1.35}
+    .mtg-when{font-size:13px;font-weight:800;color:#334155}
+    .mtg-when.now{color:#16a34a}
+    .mtg-when.late{color:#b45309}
+    .mtg-clock{font-size:12px;font-weight:600;color:#6b7280;margin-top:2px}
+    .mtg-dur{font-size:11px;font-weight:600;color:#9ca3af;margin-top:1px}
+    .mtg-chips{display:flex;flex-wrap:wrap;gap:6px;margin:1px 0 5px}
+    .mtg-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#475569;background:#f1f5f9;border-radius:99px;padding:3px 9px;white-space:nowrap}
+    .mtg-chip.ok{background:#dcfce7;color:#15803d}
+    .mtg-chip.warn{background:#fef3c7;color:#b45309}
+    .mtg-chip.pend{background:#e0f2fe;color:#0369a1}
+    .mtg-chip.click{cursor:pointer}
+    .mtg-chip.click:hover{filter:brightness(.95)}
     .mtg-info{flex:1;min-width:0}
     .mtg-title{font-size:14px;font-weight:700;color:#1f2937;margin-bottom:4px}
     .mtg-recur-tag{font-size:10.5px;font-weight:600;color:#7c3aed;background:#f5f3ff;padding:2px 7px;border-radius:10px;margin-left:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
@@ -445,6 +457,15 @@
     .mtg-join:hover{filter:brightness(.94)}
     .mtg-join.disabled{border-color:#e5e7eb;background:#f8fafc;color:#9ca3af;cursor:not-allowed}
     .mtg-join.ghost{border-color:#e5e7eb;background:#fff;color:#475569;cursor:default}
+    .mtg-owed{margin:14px 16px 0;border:1px solid #fde68a;background:#fffbeb;border-radius:11px;padding:13px 15px}
+    .mtg-owed-h{font-size:13.5px;font-weight:800;color:#92400e;display:flex;align-items:center;gap:8px}
+    .mtg-owed-sub{font-size:12.5px;color:#a16207;line-height:1.5;margin:5px 0 10px}
+    .mtg-owed-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid #fde68a;border-radius:9px;padding:8px 11px;margin-bottom:6px}
+    .mtg-owed-t b{font-size:13px;color:#1f2937;display:block}
+    .mtg-owed-when{font-size:11.5px;color:#a16207}
+    .mtg-owed-more{font-size:12px;color:#a16207;margin-top:2px}
+    .mtg-join.alt{border-color:#cbd5e1;background:#fff;color:#334155}
+    .mtg-join.alt:hover{border-color:#94a3b8;background:#f8fafc;filter:none}
     .mtg-del{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 8px;height:32px;border-radius:6px;margin-left:6px}
     .mtg-del:hover{color:#dc2626;background:#fef2f2}
     .mtg-static-hint{height:38px;display:flex;align-items:center;color:#94a3b8;font-size:13px;font-style:italic}
@@ -460,6 +481,14 @@
       .mtg-info{order:2}
       .mtg-title{font-size:13px;margin-bottom:1px}
       .mtg-meta{font-size:11px}
+      .mtg-when{font-size:12px;display:inline}
+      .mtg-clock{display:inline;margin:0 0 0 6px}
+      .mtg-dur{display:inline;margin:0 0 0 6px}
+      .mtg-chips{gap:4px;margin:2px 0 3px}
+      .mtg-chip{font-size:10.5px;padding:2px 7px;gap:4px}
+      .mtg-owed{margin:12px 14px 0;padding:11px 12px}
+      .mtg-owed-row{flex-direction:column;align-items:stretch;gap:7px}
+      .mtg-owed-row .mtg-join.alt{width:100%}
       .mtg-actions{order:3;width:100%;justify-content:flex-end;gap:0;margin-top:2px}
       .mtg-join{height:26px;padding:0 10px;font-size:11.5px}
       .mtg-del{height:26px;width:26px}
@@ -944,6 +973,7 @@
   VIEWS.tasks = async function(v, seg){
     injectCss();
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
+    if (seg[0]==='meetings' && seg[1]==='detail' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgDetailPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
@@ -1073,7 +1103,12 @@
     accSearchRestoreOrder();
     body.querySelectorAll('.ac-row').forEach(function(row){
       const el=row.querySelector('.ti .t');
-      const txt=el?el.textContent.toLowerCase():'';
+      // A workflow-step row's visible text is built purely from that instance's own field values
+      // (vendor, bill no., amount, ...) - the workflow's own name (e.g. "Challan Processing") and
+      // case number never appear in it at all, so searching "challan" found nothing even though
+      // every Challan bill was sitting right there. data-wf carries that name/number for matching
+      // without changing what the row actually displays.
+      const txt=(el?el.textContent.toLowerCase():'')+' '+(row.dataset.wf||'').toLowerCase();
       row.style.display=(!q||txt.includes(q))?'':'none';
     });
     /* The "Add task" dotted rows go away for the duration of a search. They used to stay on if
@@ -9891,6 +9926,14 @@
 
   /* ---------- MEETINGS ---------- */
   let MTG_LIST=[], MTG_ATT={}, MTG_PPL=[], MTG_DONE=new Set(), MTG_SKIP=new Set(), MTG_RESCHED=null;
+  // Most recent completed occurrence of each meeting, keyed by meeting id. It's what lets the
+  // single line item report whether the last time it ran was transcribed.
+  let MTG_LAST={};
+  // Completed occurrences still owing a transcript — see the note where it's loaded.
+  let MTG_OWED=[];
+  // Attendees from outside the company directory (msWidget's picker only ever lists directory
+  // people) — typed in by email rather than picked, reset each time the Schedule/Edit modal opens.
+  let MTG_EXTRA=[];
   /* How many people a meeting action actually serves, for the Usability report.
      "Scheduled a meeting" is the same row whether two people spoke for ten minutes or fifteen sat
      through a review, and those are not the same fact about the feature. The attendee list is
@@ -9965,36 +10008,80 @@
     set.forEach(function(e){ const k=String(e||'').toLowerCase(); if(k&&!seen[k]){ seen[k]=true; out.push(k); } });
     return out;
   }
-  // Sort key used within every group: recurring meetings float to the top (they're
-  // always "live"), then one-time meetings in chronological order.
-  function mtgSortKey(m){
+  // THE NEXT DATE THIS MEETING ACTUALLY HAPPENS, on or after today: the first occurrence that
+  // isn't already logged as held and hasn't been moved out by a "this time only" reschedule.
+  // This is the single fact the whole list is now built from — it's what a recurring meeting is
+  // filed under, and it's what "when is it due next" means once today's one has been held.
+  // Returns null only for a one-time meeting whose day has gone by but which the archive cron
+  // hasn't closed out yet (that job runs every minute, so it's a seconds-wide window).
+  function mtgNextOccurrence(m){
+    const today=istTodayISO();
     const rt=m.recur_type||'none';
-    return rt!=='none' ? ('0'+String(m.start_time||'')) : ('1'+String(m.meeting_date||'9999-99-99')+String(m.start_time||''));
+    if(rt==='none'){
+      if(!m.meeting_date||m.meeting_date<today) return null;
+      return MTG_DONE.has(m.id+'|'+m.meeting_date) ? null : m.meeting_date;
+    }
+    // 400 days is more than a full year, so even "monthly on the 31st" — which skips every short
+    // month — always resolves rather than running off the end of the loop.
+    let d=today;
+    for(let i=0;i<400;i++){
+      if(mtgOccursOn(m,d)&&!MTG_DONE.has(m.id+'|'+d)) return d;
+      d=calShiftISO(d,1);
+    }
+    return null;
   }
-  // Splits a list of meetings into Today / Tomorrow / This Week (the remaining days of the
-  // week after tomorrow). A daily-recurring meeting occurs every one of those remaining days —
-  // rather than listing it once per day (spammy), it's shown ONCE in "This Week" with a
-  // _weekCount attached (how many more times it occurs this week) for the card to badge.
+  // The frequency spelled out in full for the line item ("Every Monday"), as opposed to the
+  // compact tag that sits next to the title ("Weekly · Mon").
+  function mtgFreqText(m){
+    const rt=m.recur_type||'none';
+    if(rt==='daily') return 'Every day';
+    if(rt==='weekly'){ const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; return 'Every '+(days[m.recur_day]||'week'); }
+    if(rt==='monthly') return 'Every month on the '+m.recur_date+mtgOrdinalSuffix(m.recur_date);
+    return 'One-time';
+  }
+  // Today / Tomorrow / "Sat, 27 Sep" — a date read without doing arithmetic. The year is only
+  // added when it isn't this one, so the common case stays short.
+  function mtgWhenText(dateStr){
+    if(!dateStr) return '';
+    const today=istTodayISO();
+    if(dateStr===today) return 'Today';
+    if(dateStr===calShiftISO(today,1)) return 'Tomorrow';
+    const d=new Date(dateStr+'T00:00:00');
+    const opts={weekday:'short',day:'numeric',month:'short'};
+    if(d.getFullYear()!==new Date(today+'T00:00:00').getFullYear()) opts.year='numeric';
+    return d.toLocaleDateString('en-IN',opts);
+  }
+  // Within a bucket, order by the next occurrence's date and then time of day. (It used to float
+  // recurring meetings to the top, which only made sense while a recurring meeting could be
+  // listed in a bucket on a day it wasn't actually happening.)
+  function mtgSortKey(m){
+    return String(m._next||'9999-99-99')+'T'+String(m.start_time||'99:99');
+  }
+  // ONE MEETING, ONE LINE ITEM. A daily meeting used to be pushed into Today AND Tomorrow AND
+  // This Week, so the same meeting appeared three times over with three sets of buttons, and the
+  // only way to tell the copies apart was that two of them were lying about when they were.
+  // Now each meeting goes in exactly one bucket — the one its NEXT occurrence falls in — and the
+  // card states the frequency and that date itself. Holding today's occurrence moves the next one
+  // to tomorrow, so the meeting simply moves down the page: that is how it shows when it's due
+  // next, with no second row anywhere.
   function mtgDayBuckets(items){
-    const todayS=istTodayISO(), tomS=calShiftISO(todayS,1), weekEnd=gcalWeekBounds(todayS)[1]; // Kolkata-anchored, matches mtgEndedToday
-    const today=[], tomorrow=[], week=[];
+    const todayS=istTodayISO(), tomS=calShiftISO(todayS,1), weekEnd=gcalWeekBounds(todayS)[1]; // Kolkata-anchored
+    const today=[], tomorrow=[], week=[], later=[], awaiting=[];
     items.forEach(function(m){
-      if(mtgOccursOn(m,todayS)) today.push(m);
-      if(mtgOccursOn(m,tomS)) tomorrow.push(m);
-      if((m.recur_type||'none')==='daily'){
-        let d=calShiftISO(tomS,1), count=0;
-        while(d<=weekEnd){ count++; d=calShiftISO(d,1); }
-        if(count>0){ m._weekCount=count; week.push(m); }
-      } else {
-        let d=calShiftISO(tomS,1), inWeek=false;
-        while(d<=weekEnd){ if(mtgOccursOn(m,d)){ inWeek=true; break; } d=calShiftISO(d,1); }
-        if(inWeek) week.push(m);
-      }
+      const nx=mtgNextOccurrence(m);
+      m._next=nx;
+      if(!nx) awaiting.push(m);                 // one-time meeting past its day, archive cron pending
+      else if(nx===todayS) today.push(m);
+      else if(nx===tomS) tomorrow.push(m);
+      else if(nx<=weekEnd) week.push(m);
+      else later.push(m);
     });
     return [
       {label:'Today',items:today},
       {label:'Tomorrow',items:tomorrow},
-      {label:'This Week',items:week}
+      {label:'Later This Week',items:week},
+      {label:'Upcoming',items:later},
+      {label:'Awaiting Close',items:awaiting}
     ].filter(function(g){return g.items.length;});
   }
   // Applies the Today/Tomorrow/This-Week split within one already-filtered category, prefixing
@@ -10055,10 +10142,35 @@
     // Which occurrences are already done (a log exists). Recurring meetings keep meeting_id on their
     // logs; one-time meetings are deleted when done so they simply drop off the list. Used to turn the
     // Record button into "Done" and to hide a done occurrence from that day in the calendar.
-    try{ const {data:lg}=await ACC().from('meeting_logs').select('meeting_id,occurrence_date').not('meeting_id','is',null); const s=new Set(); (lg||[]).forEach(function(r){ s.add(r.meeting_id+'|'+r.occurrence_date); }); MTG_DONE=s; }catch(e){ MTG_DONE=new Set(); }
+    // Alongside MTG_DONE this now keeps the most recent completed occurrence per meeting
+    // (MTG_LAST), which is what the line item reads to report the transcript.
+    try{
+      const {data:lg}=await ACC().from('meeting_logs').select('id,meeting_id,occurrence_date,transcript_status,audio_url').not('meeting_id','is',null);
+      const s=new Set(), lastMap={};
+      (lg||[]).forEach(function(r){
+        s.add(r.meeting_id+'|'+r.occurrence_date);
+        const cur=lastMap[r.meeting_id];
+        if(!cur||String(r.occurrence_date)>String(cur.occurrence_date)) lastMap[r.meeting_id]=r;
+      });
+      MTG_DONE=s; MTG_LAST=lastMap;
+    }catch(e){ MTG_DONE=new Set(); MTG_LAST={}; }
     // Occurrences of a recurring meeting that were moved elsewhere ("this time only" reschedule) —
     // hidden from their original day.
     try{ const {data:sk}=await ACC().from('meeting_skips').select('meeting_id,occ_date'); const ss=new Set(); (sk||[]).forEach(function(r){ ss.add(r.meeting_id+'|'+r.occ_date); }); MTG_SKIP=ss; }catch(e){ MTG_SKIP=new Set(); }
+    // Occurrences of MY meetings that finished with no transcript. Loaded separately from MTG_LAST
+    // because a one-time meeting's row is deleted the moment it completes, so its log is no longer
+    // reachable from anything in the list — and those are exactly the ones that would otherwise be
+    // forgotten about entirely. 60 days back is far enough to matter and near enough to still act on.
+    try{
+      const {data:ow}=await ACC().from('meeting_logs')
+        .select('id,occurrence_date,title,mode,transcript_status,audio_url')
+        .contains('attendee_emails',[my])
+        .or('audio_url.is.null,transcript_status.eq.failed')
+        .neq('transcript_status','ready')
+        .gte('occurrence_date',calShiftISO(istTodayISO(),-60))
+        .order('occurrence_date',{ascending:false}).limit(50);
+      MTG_OWED=ow||[];
+    }catch(e){ MTG_OWED=[]; }
     MTG_PPL=await people();
     return {list,attMap};
   }
@@ -10071,13 +10183,11 @@
   }
   function mtgGoogleStatusHtml(){
     if(GOOGLE_CONNECTED===true) return '<span class="mtg-gstatus connected"><i class="fa-brands fa-google"></i> Connected to Google</span>';
-    if(GOOGLE_CONNECTED===false){
-      // A non-thejaingroup.com account can't connect Google Meet at all, so don't offer a
-      // Connect button that would only ever fail — the offline banner explains what they CAN do.
-      const offDomain=!/@thejaingroup\.com$/i.test(me()||'');
-      if(offDomain) return '';
-      return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
-    }
+    // Any JAIN-E account can offer to connect now, not just thejaingroup.com ones — the OAuth flow
+    // itself (google-oauth-start/callback) never checked domain, it only ever confirmed the Google
+    // account authorizing matches the JAIN-E email that started the flow, which works the same for
+    // a personal Gmail login as it does for a company one.
+    if(GOOGLE_CONNECTED===false) return '<button class="mtg-gstatus connect" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>';
     return '';
   }
   window.googleConnect=function(){
@@ -10135,40 +10245,118 @@
     try{ usageQueue('tasks.meetings.join_a_meeting','view',Object.assign({title:m.title}, mtgUsageAttendees(id)||{})); }catch(_e){}
     window.open(m.meet_link,'_blank','noopener');
   };
-  function mtgCard(m,weekCount){
+  // A meeting's ONE AND ONLY line item. Everything worth knowing is stated on the card itself —
+  // how often it repeats, the next date it actually happens, the time and how long it runs, where
+  // it is, who's in it, and what became of the last time it was held. That is what lets a
+  // recurring meeting be listed once rather than once per occurrence: none of this used to be
+  // visible without opening the edit form, so repetition was doing the explaining.
+  function mtgCard(m){
     const modeColor = m.mode==='offline' ? '#64748b' : '#2563eb';
     const people2=mtgAllAttendees(m);
-    const rt=m.recur_type||'none';
-    const dateLbl = rt==='none' ? (fmtDate(m.meeting_date)+', ') : '';
-    const timeLabel=dateLbl+mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
+    const today=istTodayISO();
+    // _next is stamped by mtgDayBuckets; recomputed here so the card also stands on its own.
+    const nx=(m._next!==undefined)?m._next:mtgNextOccurrence(m);
+    const doneToday=MTG_DONE.has(m.id+'|'+today);
+    const mins=mtgDurationMinutes(m.start_time,m.end_time);
+    const timeRange=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     const recurLbl=mtgRecurLabel(m);
-    const whereHtml = m.mode==='offline' ? '<i class="fa-solid fa-people-group"></i> Offline' : '<i class="fa-solid fa-video"></i> Online';
-    const doneToday = MTG_DONE.has(m.id+'|'+istTodayISO());
-    let join;
-    if(doneToday) join='<button class="mtg-join" disabled title="Already done today">Done</button>';
-    // Online meetings get Join AND Record — recording an online meeting captures the shared meeting
-    // tab's audio as well as the microphone, so it too can be transcribed by Gemini.
-    else if(m.mode==='online' && m.meet_link) join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>'
-      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
-    // An online meeting with no link yet can still be recorded; Join is what's unavailable.
-    else if(m.mode==='online') join='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>'
-      +'<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
-    else join='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record this meeting">Record</button>';
+
+    // LEFT — when it next happens, at what time, for how long.
+    const timeCol='<div class="mtg-time">'
+      +'<div class="mtg-when'+(nx===today?' now':(nx?'':' late'))+'">'+esc2(nx?mtgWhenText(nx):'Past due')+'</div>'
+      +'<div class="mtg-clock">'+esc2(timeRange)+'</div>'
+      +(mins?('<div class="mtg-dur">'+mins+' min</div>'):'')
+      +'</div>';
+
+    // MIDDLE — the details of the meeting, on the row instead of behind the edit form.
+    const chips=['<span class="mtg-chip"><i class="fa-solid fa-rotate"></i> '+esc2(mtgFreqText(m))+'</span>'];
+    if(nx) chips.push('<span class="mtg-chip"><i class="fa-regular fa-calendar"></i> '+(doneToday?'Next: ':'')+esc2(fmtDateY(nx))+'</span>');
+    chips.push('<span class="mtg-chip" style="color:'+modeColor+'"><i class="fa-solid fa-'+(m.mode==='offline'?'people-group':'video')+'"></i> '+esc2(mtgModeLabel(m))+'</span>');
+    if(m.mode==='online'&&!m.meet_link) chips.push('<span class="mtg-chip warn"><i class="fa-solid fa-link-slash"></i> No link yet</span>');
+    chips.push('<span class="mtg-chip"><i class="fa-solid fa-users"></i> '+people2.length+(people2.length===1?' person':' people')+'</span>');
+    if(doneToday) chips.push('<span class="mtg-chip ok"><i class="fa-solid fa-circle-check"></i> Held today</span>');
+
+    // TRANSCRIPTION — a completed occurrence is transcribed by JAIN-E automatically whenever a
+    // recording exists, so the card reports where that got to. When an occurrence closed without
+    // one (nobody pressed Record, or Google closed an online call by itself) it asks for the audio
+    // rather than leaving that meeting with no transcript for good.
+    const last=MTG_LAST[m.id];
+    let addRec='';
+    if(last){
+      const st=last.transcript_status;
+      const heldTxt=(last.occurrence_date===today)?'today':('on '+fmtDateY(last.occurrence_date));
+      if(st==='ready')
+        chips.push('<span class="mtg-chip ok click" onclick="event.stopPropagation();navTo(\'tasks/meetings/log/'+last.id+'\')" title="Open the transcript from '+esc2(fmtDateY(last.occurrence_date))+'"><i class="fa-solid fa-file-lines"></i> Transcript ready</span>');
+      else if(st==='processing'||st==='transcribing'||st==='pending')
+        chips.push('<span class="mtg-chip pend"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing '+esc2(heldTxt)+'&hellip;</span>');
+      else if(st==='failed')
+        chips.push('<span class="mtg-chip warn"><i class="fa-solid fa-triangle-exclamation"></i> Transcription failed</span>');
+      else if(!last.audio_url)
+        chips.push('<span class="mtg-chip"><i class="fa-solid fa-microphone-slash"></i> Not recorded '+esc2(heldTxt)+'</span>');
+      if(!last.audio_url||st==='failed')
+        addRec='<button class="mtg-join alt" onclick="event.stopPropagation();mtgAddRecording('+last.id+')" title="Upload the audio from that meeting — JAIN-E will transcribe it">Add recording</button>';
+    }
+
+    // ACTIONS — Record only appears on the day the meeting actually runs, because mtgTryRecord
+    // refuses every other day, so offering it then was only ever a way to be told no.
+    let join='';
+    if(m.mode==='online'&&m.meet_link) join+='<button class="mtg-join" onclick="event.stopPropagation();mtgTryJoin('+m.id+')" title="Join meeting">Join</button>';
+    else if(m.mode==='online') join+='<button class="mtg-join disabled" disabled title="No link added yet">Join</button>';
+    if(nx===today&&!doneToday) join+='<button class="mtg-join" onclick="event.stopPropagation();mtgTryRecord('+m.id+')" title="Record it — JAIN-E transcribes it when you stop">Record</button>';
+    join+=addRec;
     const mine = eq(m.created_by,me());
-    const isRecurring = !!(m.recur_type&&m.recur_type!=='none');
     const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
     const delBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgCancelAsk('+m.id+')" title="Cancel meeting"><i class="fa-solid fa-trash"></i></button>' : '';
-    // Recurring meetings: clicking anywhere on the free space of the card opens its Logs
-    // (past occurrences) — no separate Logs button needed. One-time meetings aren't clickable
-    // here (they have no history yet; their completed record only exists after in Archive).
-    const cardClick = isRecurring ? ' onclick="navTo(\'tasks/meetings/logs/'+m.id+'\')" style="cursor:pointer" title="View past occurrences"' : '';
+    // Clicking anywhere on the free space of the card opens the meeting's own detail page — basic
+    // info first, then every day-wise occurrence below it. Once a one-time meeting is actually held
+    // its acc.meetings row is deleted and its card disappears from this list entirely (the
+    // completed record then only lives in Archive), so this only ever fires pre-completion for one
+    // -time meetings — which is fine, the day-wise section just reads "No completed occurrences yet".
+    const cardClick = ' onclick="navTo(\'tasks/meetings/detail/'+m.id+'\')" style="cursor:pointer" title="View meeting details"';
     return '<div class="mtg-card"'+cardClick+'>'
       +'<div class="mtg-bar" style="background:'+modeColor+'"></div>'
-      +'<div class="mtg-time">'+esc2(timeLabel)+'</div>'
-      +'<div class="mtg-info"><div class="mtg-title">'+esc2(m.title)+(recurLbl?(' <span class="mtg-recur-tag"><i class="fa-solid fa-rotate"></i> '+esc2(recurLbl)+'</span>'):'')+(weekCount?(' <span class="mtg-recur-tag" style="color:#0369a1;background:#eff6ff">×'+weekCount+' more this week</span>'):'')+'</div><div class="mtg-meta">'+whereHtml+' · <span style="color:'+modeColor+';font-weight:600">'+mtgModeLabel(m)+'</span>'+mtgAvatars(people2)+'</div></div>'
+      +timeCol
+      +'<div class="mtg-info">'
+        +'<div class="mtg-title">'+esc2(m.title)+(recurLbl?(' <span class="mtg-recur-tag"><i class="fa-solid fa-rotate"></i> '+esc2(recurLbl)+'</span>'):'')+'</div>'
+        +'<div class="mtg-chips">'+chips.join('')+'</div>'
+        +'<div class="mtg-meta">'+mtgAvatars(people2)+'</div>'
+      +'</div>'
       +'<div class="mtg-actions">'+join+editBtn+delBtn+'</div>'
       +'</div>';
   }
+  // Transcription for an occurrence that completed WITHOUT an in-app recording — nobody pressed
+  // Record, or Google closed an online call on its own. The audio goes to exactly the same place
+  // a live recording does and lands in the same queue, so JAIN-E's own transcriber picks it up in
+  // whichever desktop browser has the portal open — no second path to keep working.
+  window.mtgAddRecording=function(logId){
+    const inp=document.createElement('input');
+    inp.type='file'; inp.accept='audio/*,video/*'; inp.style.display='none';
+    inp.onchange=async function(){
+      const f=inp.files&&inp.files[0];
+      try{ inp.remove(); }catch(_e){}
+      if(!f) return;
+      let l=null;
+      try{ const {data}=await ACC().from('meeting_logs').select('id,meeting_id,occurrence_date,title').eq('id',logId).maybeSingle(); l=data; }catch(_e){}
+      if(!l){ toast('Could not find that meeting occurrence.','err'); return; }
+      toast('Uploading the recording…');
+      const ext=String(f.name||'').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'webm';
+      const key='accountability/meeting-audio/'+(l.meeting_id||('log'+l.id))+'-'+l.occurrence_date+'-'+Date.now()+'.'+ext;
+      const up=await mtgUploadAudio(key,f);
+      if(!up||!up.data){ toast('Upload failed: '+(((up||{}).error||{}).message||'unknown error'),'err'); return; }
+      // transcript_attempts resets so a previously-failed occurrence gets a fresh set of tries —
+      // claim_transcription_job stops handing a job out after three.
+      try{
+        const {error}=await ACC().from('meeting_logs')
+          .update({audio_url:up.data.path,transcript_status:'processing',transcript_attempts:0,transcript_claimed_at:null})
+          .eq('id',logId);
+        if(error) throw error;
+      }catch(e){ toast('Could not queue the transcription: '+((e&&e.message)||e),'err'); return; }
+      try{ usageQueue('tasks.meetings.add_a_recording_for_transcription','create',{title:l.title}); }catch(_e){}
+      toast('Recording added — JAIN-E is transcribing it now.','ok');
+      navTo(String(location.hash||'').indexOf('/meetings/log/')>=0 ? ('tasks/meetings/log/'+logId) : 'tasks/meetings');
+    };
+    document.body.appendChild(inp); inp.click();
+  };
   function mtgDateFieldHtml(recur,m){
     const val = (m&&m.meeting_date)?m.meeting_date:'';
     if(recur==='daily') return '<label>Date</label><div class="mtg-static-hint">Repeats every day</div>';
@@ -10316,6 +10504,15 @@
     const pickable = (GOOGLE_CONNECTED===true)
       ? list.filter(function(p){ const e=String(p.email||'').toLowerCase(); return !eq(p.email,my) && (connected.has(e) || selSet.has(e)); })
       : list.filter(function(p){ return !eq(p.email,my); });
+    // The picker above only ever lists people already in the company directory. Anyone outside it —
+    // a client, a vendor, anyone without a JainE account — has to be typed in by email instead; the
+    // Google Calendar invite goes out to them exactly the same way (google-calendar-sync sends the
+    // whole meeting_attendees list to Google, with no directory check on that side at all). An
+    // attendee already saved on this meeting who isn't in `pickable` (i.e. wasn't picked from the
+    // directory) is assumed to be one of these and is restored here, or editing would silently drop
+    // them the moment the picker re-renders without a matching row for their email.
+    const pickableSet = new Set(pickable.map(function(p){ return String(p.email||'').toLowerCase(); }));
+    MTG_EXTRA = editing ? selAtt.filter(function(e){ return !pickableSet.has(String(e||'').toLowerCase()); }) : [];
     const recurVal = m ? (m.recur_type||'none') : 'none';
     // New meetings default to Offline when Google isn't connected (Online needs a real Meet link).
     const modeVal = m ? (m.mode||'online') : (GOOGLE_CONNECTED===true ? 'online' : 'offline');
@@ -10330,12 +10527,38 @@
       +'<div id="mtgLinkWrap">'+mtgLinkFieldHtml(modeVal,m)+'</div>'
       +'<label>Attendees <span style="color:var(--slate);font-weight:400">('+(GOOGLE_CONNECTED===true?'optional — only people who\'ve connected Google can be added':'optional')+')</span></label>'+msWidget('mtgAttBox',pickable,selAtt)
       +((GOOGLE_CONNECTED===true&&!pickable.length)?'<p style="color:var(--slate);font-size:12.5px;margin:4px 0 0">Nobody else has connected their Google account yet.</p>':'')
+      +'<label style="margin-top:10px">Add someone outside the company <span style="color:var(--slate);font-weight:400">(optional — any email, e.g. a client or vendor)</span></label>'
+      +'<div style="display:flex;gap:8px"><input type="email" id="mtgExtraEmail" placeholder="name@example.com" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();mtgAddExtraAttendee();}"><button type="button" class="ac-btn" onclick="mtgAddExtraAttendee()">Add</button></div>'
+      +'<div id="mtgExtraChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+mtgExtraChipsHtml()+'</div>'
       +'<div id="mtgConflictBox"></div>'
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" id="mtgSaveBtn" onclick="mtgFormSave('+(editing?id:'null')+')"><i class="fa-solid fa-check"></i> '+(editing?'Save changes':'Schedule')+'</button></div>');
     MTG_CONFLICT_EDIT_ID = editing ? id : null;
     mtgWireConflictCheckOnce();
     mtgRefreshConflicts();
+  };
+  function mtgExtraChipsHtml(){
+    return (MTG_EXTRA||[]).map(function(e){
+      return '<span class="chip active" style="cursor:default">'+esc2(e)
+        +'<i class="fa-solid fa-xmark" style="cursor:pointer;margin-left:2px" onclick="mtgRemoveExtraAttendee(\''+escJs(e)+'\')"></i></span>';
+    }).join('');
+  }
+  window.mtgAddExtraAttendee=function(){
+    const inp=$('mtgExtraEmail'); if(!inp) return;
+    const v=(inp.value||'').trim().toLowerCase();
+    if(!v) return;
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){ toast('Enter a valid email address','err'); return; }
+    if(eq(v,me())){ toast('That\'s you — no need to add yourself','warn'); return; }
+    if(MTG_EXTRA.some(function(e){return eq(e,v);})){ toast('Already added','warn'); inp.value=''; return; }
+    MTG_EXTRA.push(v);
+    inp.value='';
+    const host=$('mtgExtraChips'); if(host) host.innerHTML=mtgExtraChipsHtml();
+    try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_e){}
+  };
+  window.mtgRemoveExtraAttendee=function(email){
+    MTG_EXTRA=MTG_EXTRA.filter(function(e){return !eq(e,email);});
+    const host=$('mtgExtraChips'); if(host) host.innerHTML=mtgExtraChipsHtml();
+    try{ if(typeof mtgRefreshConflicts==='function')mtgRefreshConflicts(); }catch(_e){}
   };
   window.mtgFormSave=async function(id){
     const editing = id!=null;
@@ -10401,7 +10624,11 @@
         }
       }
     }
-    const attendees=(typeof msGet==='function'?msGet('mtgAttBox'):[]).filter(function(e){return !eq(e,me());});
+    // Directory picks plus whatever was typed in under "Add someone outside the company" — the
+    // Google side treats them identically (google-calendar-sync just mails the whole list an
+    // invite), so there's no reason to keep them in separate arrays past this point.
+    const pickedAtt=(typeof msGet==='function'?msGet('mtgAttBox'):[]);
+    const attendees=[...new Set(pickedAtt.concat(MTG_EXTRA||[]))].filter(function(e){return !eq(e,me());});
     const b=$('mtgSaveBtn'); if(b){b.disabled=true;b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Saving…';}
     const row={title:title,mode:mode,recur_type:recur,meeting_date:meeting_date,recur_day:recur_day,recur_date:recur_date,start_time:start,end_time:end};
     if(mode==='offline') row.meet_link=null; // real Meet links only ever exist for online meetings — clear any stale one if switched away from online
@@ -10548,9 +10775,12 @@
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
-        const durLbl=p.duration_min!=null?(' · '+p.duration_min+' min'):'';
+        // The actual clock times, not just the derived duration - "who joined and when" needs the
+        // "when" spelled out, same IST-formatted style already used for the recording's own start/end.
+        const timesLbl=(p.join?(' · joined '+esc2(mtgClockIST(p.join))):'')+(p.leave?(' – left '+esc2(mtgClockIST(p.leave))):'');
+        const durLbl=p.duration_min!=null?(' ('+p.duration_min+' min)'):'';
         const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
-        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+durLbl+rejoinLbl+'</div>';
+        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
       }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
@@ -10571,12 +10801,17 @@
     const recordingHtml = audioSrc
       ? ('<audio controls preload="none" style="width:100%;margin-top:4px" src="'+esc2(audioSrc)+'"></audio>')
       : ('<p style="color:var(--slate);font-size:13px;margin:6px 0 0">No recording was captured for this meeting.'
-         +(l.mode==='online'?' Use the <b>Record</b> button during an online meeting and share the meeting tab\'s audio to capture one.':'')+'</p>');
+         +(l.mode==='online'?' Use the <b>Record</b> button during an online meeting and share the meeting tab\'s audio to capture one.':'')+'</p>'
+         // A meeting can also be recorded on a phone, a dictaphone or Meet's own recording. Taking
+         // the file here runs it through the same transcriber, so an occurrence that was completed
+         // without pressing Record isn't stuck without a transcript for good.
+         +'<div style="margin-top:10px"><button class="ac-btn primary" onclick="mtgAddRecording('+l.id+')"><i class="fa-solid fa-file-audio"></i> Add a recording to transcribe</button>'
+         +'<div style="color:var(--slate);font-size:12px;margin-top:6px">Upload the audio or video from this meeting and JAIN-E will transcribe it automatically.</div></div>');
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
-    // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
-    // own Logs page instead.
-    const backTarget = l.meeting_id!=null ? ('tasks/meetings/logs/'+l.meeting_id) : 'tasks/archive';
+    // goes there. A meeting that still exists keeps meeting_id, so Back returns to its own detail
+    // page (basic info + every day-wise occurrence) instead.
+    const backTarget = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
       +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
@@ -10590,8 +10825,54 @@
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-play" style="color:#64748b"></i> Recording</h3>'+recordingHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3>'+transcriptHtml+'</div>';
   }
-  // Recurring meetings never go to Archive — clicking anywhere on their card (mtgCard) navigates
-  // here instead, listing every past completed occurrence; each row navigates to mtgLogPage above.
+  // A meeting's own detail page: basic info first (mode, recurrence, time, organizer, invited
+  // people, Meet link), then every day-wise occurrence below it — reached by clicking anywhere on
+  // its card (mtgCard), for one-time and recurring meetings alike. Previously only recurring
+  // meetings were clickable at all, and clicking skipped straight to the bare occurrence list
+  // (mtgLogsPage, still below, now only reached from here or old links) with no basic info first.
+  // Self-contained like mtgLogPage: fetches the meeting itself rather than assuming MTG_LIST/MTG_ATT
+  // are already warm, so it also works on a direct link/refresh.
+  async function mtgDetailPage(v,meetingId){
+    injectCss(); setCrumb(['Accountability','Meeting']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    if(!m){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Meeting not found — it may have been cancelled.</div></div>'; return; }
+    const plist=await people();
+    let attEmails=[];
+    try{ attEmails=mtgAllAttendees(m); }catch(e){ attEmails=[m.created_by].filter(Boolean); }
+    const names=attEmails.map(function(e){return nameOf(plist,e);}).filter(Boolean).join(', ');
+    const recurLbl=mtgRecurLabel(m);
+    const modeColor=m.mode==='offline'?'#64748b':'#2563eb';
+    const isOneOff=(!m.recur_type||m.recur_type==='none');
+    const basicHtml='<div class="gcal-panel-row"><i class="fa-solid '+(m.mode==='offline'?'fa-people-group':'fa-video')+'" style="color:'+modeColor+'"></i> '+esc2(mtgModeLabel(m))+(recurLbl?(' · '+esc2(recurLbl)):'')+'</div>'
+      +(isOneOff
+        ? '<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> '+esc2(fmtDateY(m.meeting_date))+' · '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>'
+        : '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>')
+      +'<div class="gcal-panel-row"><i class="fa-solid fa-user"></i> Organized by '+esc2(nameOf(plist,m.created_by)||m.created_by)+'</div>'
+      +(names?('<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(names)+'</div>'):'')
+      +((m.mode==='online'&&m.meet_link)?('<div class="gcal-panel-row"><i class="fa-solid fa-link"></i> <a href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Meet link</a></div>'):'');
+    let logs=[];
+    try{ const {data}=await ACC().from('meeting_logs').select('*').eq('meeting_id',meetingId).order('occurrence_date',{ascending:false}).limit(100); logs=data||[]; }catch(e){}
+    const dayRows=logs.length?logs.map(function(l){
+      return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+        +'<div><div class="mtg-log-title">'+esc2(fmtDateY(l.occurrence_date))+'</div><div class="mtg-log-meta">'+esc2(mtgLogTimeLabel(l))+'</div></div>'
+        +mtgAttendanceBadgeHtml(l)
+        +'</div>';
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed occurrences yet</div>';
+    const mine=eq(m.created_by,me());
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-video" style="color:#1d4ed8"></i> '+esc2(m.title)+'</div>'
+      +'<div class="tp-sub">Meeting details</div></div>'
+      +'<div class="tp-acts">'
+        +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
+        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'</div></div>'
+      +'<div class="tp-card">'+basicHtml+'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
+  }
+  // Superseded as the card's own click target by mtgDetailPage above, which now embeds this same
+  // occurrence list under a meeting's basic info — kept for any old link still pointing here.
   async function mtgLogsPage(v,meetingId){
     injectCss(); setCrumb(['Accountability','Meeting Logs']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -10648,9 +10929,17 @@
       const factsHtml=facts.length?('<div class="mtg-tr-facts">'+facts.map(function(f){return '<div class="mtg-tr-fact"><div class="k">'+esc2(f[0])+'</div><div class="v">'+esc2(f[1])+'</div></div>';}).join('')+'</div>'):'';
       const hasBn=!!(l.transcript_bn&&String(l.transcript_bn).trim());
       const lang=(MTG_LOG_LANG==='bn'&&hasBn)?'bn':'en';
+      // The language switch is only offered when there really ARE two versions to switch between.
+      // A transcript JAIN-E made itself is a single faithful record in the languages spoken —
+      // translating it would need a language model, which is precisely what is no longer used —
+      // so showing an "English / Original" pair that served the same text twice would be a lie
+      // about what is stored. Older Gemini-era logs do have both and keep the switch.
       const toggle='<div class="mtg-tr-bar"><div class="mtg-tr-h"><i class="fa-solid fa-quote-left"></i> Transcript</div>'
-        +'<div class="mtg-tr-btns"><button class="ac-btn'+(lang==='en'?' primary':'')+'" id="mtgLang_en" onclick="mtgSetLang(\'en\')">English</button>'
-        +'<button class="ac-btn'+(lang==='bn'?' primary':'')+'" id="mtgLang_bn" onclick="mtgSetLang(\'bn\')">বাংলা / Original</button></div></div>';
+        +(hasBn
+          ? ('<div class="mtg-tr-btns"><button class="ac-btn'+(lang==='en'?' primary':'')+'" id="mtgLang_en" onclick="mtgSetLang(\'en\')">English</button>'
+             +'<button class="ac-btn'+(lang==='bn'?' primary':'')+'" id="mtgLang_bn" onclick="mtgSetLang(\'bn\')">বাংলা / Original</button></div>')
+          : '<span style="font-size:11.5px;color:var(--slate)">Transcribed by JAIN-E on this device</span>')
+        +'</div>';
       return factsHtml+sumHtml+toggle+'<div id="mtgTrBody">'+mtgTrBody(l,lang)+'</div>';
     }
     if(l.transcript_status==='processing') return '<p style="color:var(--slate);font-size:13px;margin:6px 0 0"><i class="fa-solid fa-spinner fa-spin"></i> Transcribing the recording&hellip; this appears here automatically once ready.</p>';
@@ -10723,9 +11012,9 @@
     // An OFFLINE meeting happens in the room, so the microphone hears everyone.
     // An ONLINE meeting does not: the other people arrive as sound coming OUT of this device, which
     // a microphone either misses entirely (headphones) or picks up faintly. So for online meetings
-    // we also ask the browser to share the Meet tab's audio and mix the two together, giving Gemini
-    // one track with both sides of the conversation. If that share is declined we fall back to the
-    // microphone alone rather than failing outright.
+    // we also ask the browser to share the Meet tab's audio and mix the two together, so the
+    // transcriber gets one track with both sides of the conversation. If that share is declined we
+    // fall back to the microphone alone rather than failing outright.
     const isOnline=(R.meeting.mode==='online');
     let stream, mic=null, tab=null, mixCtx=null;
     try{ mic=await navigator.mediaDevices.getUserMedia({audio:true}); }
@@ -10791,6 +11080,26 @@
     const resp=await mtgRecCall({action:'save-recording',meeting_id:R.meeting.id,occ:occ,actual_start:R.startedAt,actual_end:endedAt,audio_url:audioPath});
     if(!resp||!resp.log_id){ toast('Could not save the recording: '+((resp&&resp.error)||'unknown error'),'err'); if(sp){sp.disabled=false;sp.innerHTML='<i class="fa-solid fa-stop"></i> Stop &amp; finish';} return; }
     try{ usageQueue('tasks.meetings.start_stop_recording','create',{title:R.meeting&&R.meeting.title}); }catch(_e){}
+    // TRANSCRIBE IT HERE, NOW. The audio is still in memory on the machine that just recorded it,
+    // so there is nothing to download and nobody else's browser has to be open for this to happen.
+    // Deliberately NOT awaited: the wrap-up screen is what the organiser needs next, and its
+    // existing poller shows the transcript the moment this lands. If they close the tab first the
+    // recording is already in S3, so the catch-up worker finishes the job instead — the work is
+    // never lost, only moved.
+    if(blob.size && resp.log_id){
+      const logId=resp.log_id;
+      (async function(){
+        try{
+          wtChip(true,'JAIN-E is transcribing this meeting…');
+          await wtRunAndSave(await wtDecodeBuffer(await blob.arrayBuffer()), logId);
+          toast('Transcript ready.','ok');
+        }catch(_e){
+          // Hand it back to the queue rather than marking it failed — a closed tab, a browser
+          // without WebGPU or a machine that went to sleep is a reason to try again elsewhere.
+          try{ await mtgRecCall({action:'save-transcript',log_id:logId,status:'processing'}); }catch(_e2){}
+        }finally{ wtChip(false); }
+      })();
+    }
     MTG_REC=null;
     navTo('tasks/meetings/wrap/'+resp.log_id);
   };
@@ -10868,7 +11177,7 @@
     toast('Saved to Logs','ok');
     const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
     try{ usageQueue('tasks.meetings.save_meeting_wrap_up_summary','update',{title:l&&l.title}); }catch(_e){}
-    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
+    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/detail/'+l.meeting_id);
     else navTo('tasks/meetings/log/'+lid);
   };
 
@@ -10900,15 +11209,40 @@
     })();
     return WT_pipePromise;
   }
-  async function wtDecode(url){
-    const res=await fetch(url); if(!res.ok) throw new Error('audio fetch '+res.status);
-    const buf=await res.arrayBuffer();
+  function wtDecodeBuffer(buf){
     const AC=window.AudioContext||window.webkitAudioContext;
     const ctx=new AC({sampleRate:16000});
-    const audio=await ctx.decodeAudioData(buf);
-    const data=audio.getChannelData(0).slice();
-    try{ ctx.close(); }catch(_e){}
-    return data;
+    return ctx.decodeAudioData(buf).then(function(audio){
+      const data=audio.getChannelData(0).slice();
+      try{ ctx.close(); }catch(_e){}
+      return data;
+    });
+  }
+  async function wtDecode(url){
+    const res=await fetch(url); if(!res.ok) throw new Error('audio fetch '+res.status);
+    return wtDecodeBuffer(await res.arrayBuffer());
+  }
+  // Turn decoded audio into a transcript and store it. The model runs HERE, in this browser:
+  // the recording is never sent to Gemini, Claude, Google or any other service, and nothing is
+  // billed per use.
+  //
+  // WHAT A LOCAL TRANSCRIPT DOES NOT INCLUDE. summary, num_speakers, transcript_en and
+  // transcript_bn were all produced by asking a language model, which is exactly what is no longer
+  // being done. Whisper returns one thing - the words, in the languages they were spoken in - so
+  // that is what gets stored, and the LLM-only columns are explicitly cleared rather than left
+  // holding a stale value from an earlier engine.
+  async function wtRunAndSave(audio, logId){
+    const pipe=await wtLoadPipe();
+    const out=await pipe(audio,{chunk_length_s:30,stride_length_s:5,task:'transcribe'});
+    const text=(out&&out.text!=null?String(out.text):'').trim();
+    if(!text) throw new Error('empty transcript');
+    const {error}=await ACC().from('meeting_logs').update({
+      transcript:text, transcript_en:null, transcript_bn:null,
+      summary:null, num_speakers:null, languages:null,
+      transcript_status:'ready'
+    }).eq('id',logId);
+    if(error) throw error;
+    return text;
   }
   async function wtTick(){
     if(!WT_started) return;
@@ -10917,56 +11251,76 @@
     let job=null;
     try{ const r=await mtgRecCall({action:'claim-transcription'}); if(r&&r.log_id)job=r; }catch(_e){}
     if(!job){ return again(60000); }
-    WT_busy=true; wtChip(true,'Transcribing a meeting…');
+    WT_busy=true; wtChip(true,'JAIN-E is transcribing a meeting…');
     try{
-      const pipe=await wtLoadPipe();
       let src=job.audio_url;
       if(typeof src==='string' && src.indexOf('s3:')===0){ const {data}=await s3Sign('get',src.slice(3)); src=data&&data.url; }
       if(!src) throw new Error('no audio url');
-      const audio=await wtDecode(src);
-      const out=await pipe(audio,{chunk_length_s:30,stride_length_s:5,task:'transcribe'});
-      const text=(out&&out.text!=null?String(out.text):'').trim();
-      await mtgRecCall({action:'save-transcript',log_id:job.log_id,transcript:text,status:'ready'});
+      await wtRunAndSave(await wtDecode(src), job.log_id);
     }catch(e){
       // release the job so another browser/attempt can try (claim() gives up after 3 tries)
       try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
     }finally{ WT_busy=false; wtChip(false); again(3000); }
   }
-  // TURNED OFF. Recordings are transcribed server-side by GEMINI (the transcribe-pending function,
-  // which runs on its own every couple of minutes) — the same engine the Transcription module uses.
-  // Gemini is markedly better on the Bengali/Hindi/English code-switching in these meetings than the
-  // small in-browser Whisper model was, and it doesn't need anyone to leave a desktop browser open.
-  // Both paths claim from the same queue, so leaving this running would race Gemini and sometimes
-  // win with the worse transcript. The worker code above is left in place as a fallback should the
-  // Gemini key ever be withdrawn.
+  // OFF. Transcription is Gemini's job again (transcribe-pending / meet-transcript-sync, both
+  // re-scheduled) — live, server-side, no browser needed. This in-browser Whisper worker stays
+  // switched off rather than deleted, same reason it was written in the first place: a fallback
+  // should the Gemini key ever be withdrawn. It must not run alongside Gemini: the cron jobs pick
+  // up transcript_status='processing' rows directly with no claim/lock step, while this worker
+  // claims jobs atomically through claim_transcription_job() — both live at once would race for
+  // the same rows, and one engine is already enough.
   function mtgStartBrowserTranscriber(){ return; }
 
+  // The standing list of meetings that finished without a transcript, at the top of the tab where
+  // it can't be scrolled past. Every meeting is supposed to end up transcribed; an online one now
+  // does so on its own, but an offline one can only ever be transcribed from a recording somebody
+  // made — so when that didn't happen, this is where it gets put right, rather than the occurrence
+  // quietly ageing into Archive with nothing in it.
+  function mtgOwedHtml(){
+    const list=MTG_OWED||[];
+    if(!list.length) return '';
+    const n=list.length;
+    return '<div class="mtg-owed">'
+      +'<div class="mtg-owed-h"><i class="fa-solid fa-file-circle-exclamation"></i> '
+        +n+(n===1?' meeting has':' meetings have')+' no transcript</div>'
+      +'<div class="mtg-owed-sub">JAIN-E transcribes every meeting it has a recording of. These finished without one — add the audio and the transcript appears on the meeting automatically.</div>'
+      +list.slice(0,6).map(function(l){
+        const failed=l.transcript_status==='failed';
+        return '<div class="mtg-owed-row">'
+          +'<div class="mtg-owed-t"><b>'+esc2(l.title)+'</b>'
+            +'<span class="mtg-owed-when">'+esc2(fmtDateY(l.occurrence_date))+' · '+(l.mode==='offline'?'Offline':'Online')
+            +(failed?' · transcription failed':'')+'</span></div>'
+          +'<button class="mtg-join alt" onclick="mtgAddRecording('+l.id+')" title="Upload the audio — JAIN-E will transcribe it">'
+            +(failed?'Try again':'Add recording')+'</button>'
+          +'</div>';
+      }).join('')
+      +(n>6?('<div class="mtg-owed-more">and '+(n-6)+' more — see Archive</div>'):'')
+      +'</div>';
+  }
   function mtgRenderOnly(){
     try{ mtgStartBrowserTranscriber(); }catch(e){}
     const b=$('acBody'); if(!b)return;
     // Meetings are open to everyone: anyone can create and run OFFLINE meetings without Google.
-    // Online (Google Meet) meetings still need a connected thejaingroup.com Google account — that's
-    // enforced in the Schedule form below, instead of locking the whole section for everyone.
+    // Online (Google Meet) meetings need a connected Google account — any JAIN-E user's, on any
+    // email domain, not just thejaingroup.com — that's enforced in the Schedule form below, instead
+    // of locking the whole section for everyone.
     let mtgBanner='';
     if(GOOGLE_CONNECTED!==true){
-      const myEmail=me();
-      const offDomain=!/@thejaingroup\.com$/i.test(myEmail||'');
       mtgBanner='<div class="mtg-connect-banner"><i class="fa-brands fa-google mcb-ico"></i><div class="mcb-txt">'
-        +(offDomain
-            ? 'You\'re signed in as <b>'+esc2(myEmail)+'</b>. Online (Google Meet) meetings need a thejaingroup.com Google account — but you can create and run <b>Offline meetings</b> right here.'
-            : 'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.')
+        +'You can create and run <b>Offline meetings</b> right away. Connect Google to also schedule <b>Online</b> meetings with an auto-created Meet link.'
         +'</div>'
-        +(offDomain?'':'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>')
+        +'<button class="mcb-btn" onclick="googleConnect()"><i class="fa-brands fa-google"></i> Connect Google</button>'
         +'</div>';
     }
     const groups=mtgGroupedSections(MTG_GROUP);
     groups.forEach(function(g){ g.items=g.items.slice().sort(function(a,b){return mtgSortKey(a).localeCompare(mtgSortKey(b));}); });
-    let body=groups.map(function(g){ const isWeek=/This Week$/.test(g.label); return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m,isWeek?m._weekCount:null); }).join(''); }).join('');
+    let body=groups.map(function(g){ return '<div class="mtg-sec-label">'+esc2(g.label)+'</div>'+g.items.map(function(m){ return mtgCard(m); }).join(''); }).join('');
     if(!groups.length) body='<div class="ac-empty" style="cursor:default;border:0">No meetings yet — click <b>Schedule Meeting</b> to add one.</div>';
     b.innerHTML='<div class="mtg-page">'
       +'<div class="mtg-main">'
       +'<div class="mtg-toolbar"><div class="mtg-toolbar-title">Meetings</div>'+mtgGoogleStatusHtml()+'<button class="mtg-create" onclick="mtgOpenCreate()"><i class="fa-solid fa-plus"></i> Schedule Meeting</button></div>'
       +mtgBanner
+      +mtgOwedHtml()
       +mtgGroupTabsHtml()
       +'<div class="mtg-body">'+body+'</div>'
       +'</div></div>';
@@ -11027,7 +11381,7 @@
         let casesD=[]; if(caseIds.length){ const r=await ACC().from('flow_cases').select('id,case_no,jaine_id,flow_id,trigger_details,created_by,skipped_seqs,route,route_seqs').in('id',caseIds); casesD=(r&&r.data)||[]; }
         const caseMap={}; casesD.forEach(function(c){ caseMap[c.id]=c; });
         const flowIds=Array.from(new Set(casesD.map(function(c){return c.flow_id;})));
-        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields').in('id',flowIds); flowsD=(r&&r.data)||[]; }
+        let flowsD=[]; if(flowIds.length){ const r=await ACC().from('flows').select('id,name,trigger_event,reject_deletes_instance,tracker_sum_field,task_fields,id_label').in('id',flowIds); flowsD=(r&&r.data)||[]; }
         const flowMap={}; flowsD.forEach(function(f){ flowMap[f.id]=f; });
         /* How far the workflow actually runs, taken from its DEFINITION. Working "is this the last
            step?" out purely from the instance's own steps meant it depended on being able to READ
@@ -11097,7 +11451,7 @@
           // wfWhoOfStep/wfStepWhoText need the next step's DEFINITION (owner_emails/owner_from_trigger/...)
           // merged in - nextStep itself only ever carries the instance-row fields (person/candidates).
           const nextDef=nextStep?(stepDefByFlowSeq[c.flow_id+':'+nextStep.seq]||null):null;
-          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
+          window._wfStepInfo[s.id]={seq:s.seq,case_id:s.case_id,received_at:s.received_at,forwarded_at:s.forwarded_at,minSeq:firstSeq,maxSeq:bb.max,stepTitle:s.title,details:(Array.isArray(c.trigger_details)?c.trigger_details:[]),caseNo:c.case_no,idLabel:f.id_label||'',flowName:f.name,triggerEvent:f.trigger_event,rejectEnds:!!f.reject_deletes_instance,nextReceived:!!(nextStep&&nextStep.received_at),nextExists:moreToCome,nextWho:nextStep?wfWhoOfStep(Object.assign({},nextDef,nextStep)):'',owner:c.created_by||'',sumNamed:!!f.tracker_sum_field,chequeChoice:(c.flow_id===26&&s.seq===5&&c.route!=='payment'),paymentChoice:(c.flow_id===26&&s.seq===2),route:(c.route||''),taskFields:(Array.isArray(f.task_fields)&&f.task_fields.length?f.task_fields:null),confirmOnly:!!confirmOnly[c.flow_id+':'+s.seq]};
         });
       }
     }catch(e){ window._wfStepInfo={}; }
@@ -12047,7 +12401,14 @@
       : (emails.length?avatars(list,emails):'');
     const wfCombined=wfRowTitle(wfInfo,list,t&&t.description);
     const wfTitle=wfInfo?(esc2(wfCombined)||esc2(t.title)):esc2(t.title);
-    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}" onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
+    // Searchable but not necessarily shown: the workflow's own name/noun and JAINE's OWN instance
+    // number under its own label (e.g. "Challan Id 12") - not the invoice/challan number typed on
+    // the form, which is a completely different value that happens to live in the same row's
+    // visible detail line. A task whose visible text is only ever that instance's own field values
+    // never mentions the workflow's name or its JainE id at all otherwise.
+    const wfSearch=wfInfo?esc2([wfInfo.flowName,wfInfo.triggerEvent,
+      wfInfo.caseNo?((wfInfo.idLabel||'Id')+' '+wfInfo.caseNo):''].filter(Boolean).join(' ')):'';
+    return `<div class="ac-row${opt.showDoneDate?' ac-row-full':''}" data-id="${t.id}"${wfSearch?` data-wf="${wfSearch}"`:''} onclick="navTo('tasks/task/${t.id}')"${hover}>${chk}${grip}${letterHtml}<div class="ti"><div class="t" title="${esc2(wfInfo?(wfCombined||t.title):t.title)}">${wfIcon2}${wfTitle}</div></div>${wfRR}<div class="rt">${meta}${doneBadge2}${ownerVis}</div>${approve}</div>`;
   }
 
   function wirePointerDrag(col,sel,persist,onSwipeLeft){ col.querySelectorAll(sel).forEach(row=>{ const grip=row.querySelector('.grip'); if(!grip)return; grip.style.touchAction='none'; grip.addEventListener('pointerdown',function(e){ e.preventDefault(); e.stopPropagation(); try{grip.setPointerCapture(e.pointerId);}catch(_){} const startX=e.clientX,startY=e.clientY,isTouch=e.pointerType==='touch'; let mode=null,lastDx=0; window._dragging=true; function move(ev){ const dx=ev.clientX-startX,dy=ev.clientY-startY; lastDx=dx; if(mode===null){ if(Math.abs(dx)>10||Math.abs(dy)>10){ if(onSwipeLeft&&isTouch&&dx<0&&Math.abs(dx)>Math.abs(dy)*1.2){ mode='swipe'; } else { mode='drag'; row.classList.add('drag'); } } } if(mode==='swipe'){ row.style.transition='none'; row.style.transform='translateX('+Math.max(dx,-88)+'px)'; } else if(mode==='drag'){ const el=document.elementFromPoint(ev.clientX,ev.clientY); const tgt=el&&el.closest(sel); if(tgt&&tgt!==row&&col.contains(tgt)){ const r=tgt.getBoundingClientRect(); if(ev.clientY<r.top+r.height/2)col.insertBefore(row,tgt); else col.insertBefore(row,tgt.nextSibling); } } } function up(){ try{grip.releasePointerCapture(e.pointerId);}catch(_){} window._dragging=false; row.classList.remove('drag'); row.style.transition='transform .15s'; row.style.transform=''; document.removeEventListener('pointermove',move); document.removeEventListener('pointerup',up); if(mode==='swipe'&&lastDx<-44)onSwipeLeft(row); else if(mode==='drag')persist(col); } document.addEventListener('pointermove',move); document.addEventListener('pointerup',up); }); }); }
