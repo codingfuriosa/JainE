@@ -20321,7 +20321,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -20340,6 +20340,7 @@ function trcResetFilters(){
   const y=traYesterday();
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
+  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -20412,6 +20413,15 @@ function trcDailyPlainCell(n){
   const shown=n||0;
   return '<td style="text-align:center'+(shown?'':';color:var(--slate)')+'">'+shown+'</td>';
 }
+/* Reconciliation, point 2: not just the raw Transcribed/Failed counts already in the row (both were
+   already columns in acc.daily_qa_summary, just never surfaced here as a rate) - the PROPORTION of the
+   day's calls each one accounts for, so a day of 4 failed out of 6 calls reads as the crisis it is
+   instead of looking the same as 4 failed out of 400. */
+function trcDailyRateCell(n,total){
+  if(!total)return '<td style="text-align:center;color:var(--slate)">—</td>';
+  const pct=Math.round((Number(n||0)/Number(total))*1000)/10;
+  return '<td style="text-align:center;font-variant-numeric:tabular-nums">'+pct+'%</td>';
+}
 function trcRenderDaily(){
   const el=$('trcDaily');if(!el)return;
   if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
@@ -20423,12 +20433,15 @@ function trcRenderDaily(){
       +trcDailyCell(r.date,'all','all',r.total_leads)
       +trcDailyCell(r.date,'all','all',r.total_followups)
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
+      +trcDailyRateCell(r.transcribed,r.total_followups)
+      +trcDailyCell(r.date,'proc','failed',r.transcription_failed)
+      +trcDailyRateCell(r.transcription_failed,r.total_followups)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
       +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
       +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(7+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(10+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -20442,6 +20455,8 @@ function trcRenderDaily(){
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
       +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
+        +'<th title="Transcribed ÷ Total calls">Success rate</th>'
+        +'<th>Failed</th><th title="Transcription failed ÷ Total calls">Failure rate</th>'
         +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
         +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
         +'moment that later call is judged.">Mismatched</th>'
@@ -21024,6 +21039,22 @@ function trcApply(rows,skipCards){
        casing the CRM happened to send. Matching those exactly is how a selected caller's own calls
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
+    // Same shape as crm/bu above - an independent lens on the follow-up's own two accuracy verdicts,
+    // combined by AND with every other filter rather than acting as a fourth KPI-card tab. 'NONE'
+    // means "not assessed at all" (no QA row yet, or transcribed with nothing to judge), not a status
+    // value the model ever returns.
+    if(TRC_F.fdate!=='all'){
+      if(TRC_F.fdate==='NONE'){ if(r.followup_date_status)return false; }
+      else if(String(r.followup_date_status||'')!==TRC_F.fdate)return false;
+    }
+    if(TRC_F.remarks!=='all'){
+      if(TRC_F.remarks==='NONE'){ if(r.remarks_status)return false; }
+      else if(String(r.remarks_status||'')!==TRC_F.remarks)return false;
+    }
+    if(TRC_F.pitch!=='all'){
+      if(TRC_F.pitch==='NONE'){ if(r.pitch_status)return false; }
+      else if(String(r.pitch_status||'')!==TRC_F.pitch)return false;
+    }
     if(!skipCards){
       if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
       else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
@@ -21092,6 +21123,7 @@ function trcLeads(rows){
     g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
+    g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -21271,6 +21303,11 @@ function trcKpiHtml(rows){
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
+  /* Missed callback needs lead_current_status (to exclude Lost leads), which only the full join
+     carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
+     actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
+     property of a LEAD's latest call, not of any one row. */
+  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -21283,6 +21320,9 @@ function trcKpiHtml(rows){
       return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
@@ -21363,6 +21403,17 @@ window.trcCard=async function(kind,val){
   // trcEnsureQaFieldsMerged for why that is the lighter, and much more common, of the two.
   if(TRC_F.proc!=='all')await trcEnsureFullEnrichment();
   else if(TRC_F.match!=='all')await trcEnsureQaFieldsMerged();
+  trcRender(true);
+};
+
+/* An independent toggle, not a fourth tab in the group above - it narrows whichever set of leads is
+   already on screen (a card, a mismatch category, a search) down to the ones with a missed callback,
+   the same way the accuracy dropdowns in the filter bar narrow it, rather than replacing that set.
+   Needs lead_current_status (to exclude Lost leads) - only the full join carries that, same as the
+   'proc' cards. */
+window.trcToggleOverdue=async function(){
+  TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
+  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
   trcRender(true);
 };
 
@@ -21454,6 +21505,29 @@ function trcFilterBar(all){
       +opt('all','All business units',TRC_F.bu)
       +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
+    +'<select onchange="trcSet(\'pitch\',this.value)" style="padding:6px 8px">'
+      +opt('all','Pitch accuracy: all',TRC_F.pitch)
+      +opt('Accurate','Pitch: Accurate',TRC_F.pitch)
+      +opt('Partially Accurate','Pitch: Partially Accurate',TRC_F.pitch)
+      +opt('Inaccurate','Pitch: Inaccurate',TRC_F.pitch)
+      +opt('Not Verifiable','Pitch: Not Verifiable',TRC_F.pitch)
+      +opt('NONE','Pitch: Not yet assessed',TRC_F.pitch)
+    +'</select>'
+    +'<select onchange="trcSet(\'fdate\',this.value)" style="padding:6px 8px">'
+      +opt('all','Follow-up date accuracy: all',TRC_F.fdate)
+      +opt('Accurate','Follow-up date: Accurate',TRC_F.fdate)
+      +opt('Inaccurate','Follow-up date: Inaccurate',TRC_F.fdate)
+      +opt('Not Verifiable','Follow-up date: Not Verifiable',TRC_F.fdate)
+      +opt('NONE','Follow-up date: Not yet assessed',TRC_F.fdate)
+    +'</select>'
+    +'<select onchange="trcSet(\'remarks\',this.value)" style="padding:6px 8px">'
+      +opt('all','Remarks accuracy: all',TRC_F.remarks)
+      +opt('Accurate','Remarks: Accurate',TRC_F.remarks)
+      +opt('Partially Accurate','Remarks: Partially Accurate',TRC_F.remarks)
+      +opt('Inaccurate','Remarks: Inaccurate',TRC_F.remarks)
+      +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
+      +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
+    +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
     // Refresh now lives at the top of the page, beside the count it reloads - see trcView.
@@ -21466,12 +21540,15 @@ window.trcSet=async function(k,v){
   // required at least the qa-fields merge to be showing at all - this is a no-op in that case, and a
   // safety net otherwise, not the normal way this gets triggered (see trcCard).
   if(k==='mismatch'&&v!=='all')await trcEnsureQaFieldsMerged();
+  // followup_date_status/remarks_status live on acc.followup_qa exactly like match/mismatch do - same
+  // light merge, no join to call_transcripts/transcription_queue needed.
+  if((k==='fdate'||k==='remarks'||k==='pitch')&&v!=='all')await trcEnsureQaFieldsMerged();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';
+  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -21548,7 +21625,10 @@ function trcLeadRowHtml(g,sl){
     +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
-          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
+          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
+      +(g.callbackOverdue?' '+trcTag('t-red','fa-phone-slash','',
+          'Missed callback - promised '+(trcWall(g.callbackOverdue.dueDate)||g.callbackOverdue.dueDate)
+          +', '+g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
        carried-over verdict from another date, not this range's own, so it is labelled with exactly
        that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
@@ -21570,7 +21650,10 @@ function trcLeadRowHtml(g,sl){
        g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
        g.lastAssessed). */
     +trcTextCell(last.personnel_name,140)
-    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px'
+      +(g.callbackOverdue?';color:#dc2626;font-weight:600':'')+'"'
+      +(g.callbackOverdue?' title="'+esc(g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue')+'"':'')+'>'
+      +esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     /* No Recording column. A per-lead download only ever offered the LATEST call's audio, which is
@@ -21653,7 +21736,10 @@ function trcRender(full,keepPage){
      &&!rows.some(function(r){return String(r.lead_id)===String(TRC_LAST_LEAD_ID);})){
     rows=rows.concat(TRC_PIN_ROWS);
   }
-  const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
+  // the call-level Mismatch table, which trcLeads never runs over in the first place.
+  if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -22094,6 +22180,41 @@ function trcAddDays(dateStr,delta){
   dt.setUTCDate(dt.getUTCDate()+delta);
   return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
 }
+/* Same UTC-noon arithmetic as trcAddDays, the subtraction direction instead of the addition - how many
+   whole days sit between two YYYY-MM-DD strings. */
+function trcDaysBetween(fromStr,toStr){
+  const p=function(s){const a=String(s).split('-').map(Number);return Date.UTC(a[0],a[1]-1,a[2]);};
+  return Math.round((p(toStr)-p(fromStr))/86400000);
+}
+/* A promised callback date that has passed with nothing logged since is a missed callback - the agent
+   said "I'll call back on X" and X came and went in silence. Computed the same way trcOvHealth checks
+   its own promised date: against traToday(), over whichever rows the caller hands in - the lead's full
+   history on the detail page (see trcLeadDetail), or only the selected range's rows on the list (see
+   trcLeads) - a call outside that set is invisible here exactly as everywhere else this page rolls up
+   a lead's calls. Not applicable to a lead that has closed the door (Lost) - there is nothing left to
+   call back about. "Lost, then Reopened" is deliberately NOT treated as Lost, same reasoning as
+   everywhere else on this page (see the status_assessment prompt): the "then Reopened" half means the
+   lead is live again. Only the LATEST call's own promise matters - rows arrives chronological
+   (oldest-first, the same order trcLeads and trcLeadDetail already sort it into), so an earlier call's
+   promise was superseded the moment a later call happened, on time or not. */
+function trcCallbackOverdue(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const last=(rows||[])[(rows||[]).length-1];
+  if(!last||!last.next_follow_up_text)return null;
+  const dueDate=String(last.next_follow_up_text).slice(0,10);
+  const today=traToday();
+  if(!(dueDate<today))return null;
+  return {dueDate:dueDate,daysLate:trcDaysBetween(dueDate,today)};
+}
+function trcCallbackOverdueHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed callback</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
+    +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
+  +'</div>';
+}
 /* The two-part OV rule: enforced here, not just checked by hand.
    (1) each of the two days immediately BEFORE the visit day needs its own follow-up call logged on
        that exact day - not merely some call somewhere in the last two days, which could just as
@@ -22330,10 +22451,12 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
+  const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
+    +callbackOverdue
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
