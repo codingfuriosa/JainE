@@ -15378,15 +15378,19 @@ function cpaParsePTC(wb){
     isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
   }));
 }
-// Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
-// (project, tower, unit code) only for the rare pre-Booking-No-convention record.
+// Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
+// carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
+// lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
+// holds that flat now - another buyer's money in the current owner's ledger. The flat-level lookup
+// is only for the rare record with no Booking No.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
-  if(bookingNo){ const u=units.find(u=>u.booking_no===bookingNo); if(u) return u; }
-  if(projectId&&unitCode){
-    const norm=s=>String(s||'').trim().toLowerCase();
-    return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
-  }
-  return null;
+  if(bookingNo) return units.find(u=>u.booking_no===bookingNo)||null;
+  return cpaResolveFlat(units,projectId,tower,unitCode);
+}
+function cpaResolveFlat(units,projectId,tower,unitCode){
+  if(!projectId||!unitCode) return null;
+  const norm=s=>String(s||'').trim().toLowerCase();
+  return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
 }
 function cpaResolveProject(projects,businessUnit){
   if(!businessUnit) return null;
@@ -15756,7 +15760,10 @@ async function cpaImportConfirmXlsx(st){
           if(error)throw error; customerId=created.id;
         }
       }
-      const existingUnit=cpaResolveUnit(await cpaUnits(),m.project.id,r.bookingNo,r.tower,r.unitCode);
+      // Sales Details lists Active bookings only, and a flat has one non-cancelled row
+      // (units_project_tower_code_active_uq), so a rebooked flat must still find its existing row.
+      const allUnits=await cpaUnits();
+      const existingUnit=cpaResolveUnit(allUnits,m.project.id,r.bookingNo,null,null)||cpaResolveFlat(allUnits,m.project.id,r.tower,r.unitCode);
       const unitRow={project_id:m.project.id,unit_code:r.unitCode,tower:r.tower,floor_no:r.floor||null,
         unit_type:r.typology||null,carpet_area_sqft:r.carpet||null,super_built_up_area_sqft:r.superBuiltUp||null,
         built_up_area_sqft:r.builtUp||null,agreement_value:r.totalBasic+r.totalTax,booking_no:r.bookingNo,
