@@ -973,6 +973,7 @@
   VIEWS.tasks = async function(v, seg){
     injectCss();
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
+    if (seg[0]==='meetings' && seg[1]==='detail' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgDetailPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
@@ -10259,7 +10260,6 @@
     const mins=mtgDurationMinutes(m.start_time,m.end_time);
     const timeRange=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     const recurLbl=mtgRecurLabel(m);
-    const isRecurring=!!(m.recur_type&&m.recur_type!=='none');
 
     // LEFT — when it next happens, at what time, for how long.
     const timeCol='<div class="mtg-time">'
@@ -10307,10 +10307,12 @@
     const mine = eq(m.created_by,me());
     const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
     const delBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgCancelAsk('+m.id+')" title="Cancel meeting"><i class="fa-solid fa-trash"></i></button>' : '';
-    // Recurring meetings: clicking anywhere on the free space of the card opens its Logs
-    // (past occurrences) — no separate Logs button needed. One-time meetings aren't clickable
-    // here (they have no history yet; their completed record only exists after in Archive).
-    const cardClick = isRecurring ? ' onclick="navTo(\'tasks/meetings/logs/'+m.id+'\')" style="cursor:pointer" title="View past occurrences"' : '';
+    // Clicking anywhere on the free space of the card opens the meeting's own detail page — basic
+    // info first, then every day-wise occurrence below it. Once a one-time meeting is actually held
+    // its acc.meetings row is deleted and its card disappears from this list entirely (the
+    // completed record then only lives in Archive), so this only ever fires pre-completion for one
+    // -time meetings — which is fine, the day-wise section just reads "No completed occurrences yet".
+    const cardClick = ' onclick="navTo(\'tasks/meetings/detail/'+m.id+'\')" style="cursor:pointer" title="View meeting details"';
     return '<div class="mtg-card"'+cardClick+'>'
       +'<div class="mtg-bar" style="background:'+modeColor+'"></div>'
       +timeCol
@@ -10773,9 +10775,12 @@
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
-        const durLbl=p.duration_min!=null?(' · '+p.duration_min+' min'):'';
+        // The actual clock times, not just the derived duration - "who joined and when" needs the
+        // "when" spelled out, same IST-formatted style already used for the recording's own start/end.
+        const timesLbl=(p.join?(' · joined '+esc2(mtgClockIST(p.join))):'')+(p.leave?(' – left '+esc2(mtgClockIST(p.leave))):'');
+        const durLbl=p.duration_min!=null?(' ('+p.duration_min+' min)'):'';
         const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
-        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+durLbl+rejoinLbl+'</div>';
+        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
       }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
@@ -10804,9 +10809,9 @@
          +'<div style="color:var(--slate);font-size:12px;margin-top:6px">Upload the audio or video from this meeting and JAIN-E will transcribe it automatically.</div></div>');
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
-    // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
-    // own Logs page instead.
-    const backTarget = l.meeting_id!=null ? ('tasks/meetings/logs/'+l.meeting_id) : 'tasks/archive';
+    // goes there. A meeting that still exists keeps meeting_id, so Back returns to its own detail
+    // page (basic info + every day-wise occurrence) instead.
+    const backTarget = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
       +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
@@ -10820,8 +10825,54 @@
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-play" style="color:#64748b"></i> Recording</h3>'+recordingHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3>'+transcriptHtml+'</div>';
   }
-  // Recurring meetings never go to Archive — clicking anywhere on their card (mtgCard) navigates
-  // here instead, listing every past completed occurrence; each row navigates to mtgLogPage above.
+  // A meeting's own detail page: basic info first (mode, recurrence, time, organizer, invited
+  // people, Meet link), then every day-wise occurrence below it — reached by clicking anywhere on
+  // its card (mtgCard), for one-time and recurring meetings alike. Previously only recurring
+  // meetings were clickable at all, and clicking skipped straight to the bare occurrence list
+  // (mtgLogsPage, still below, now only reached from here or old links) with no basic info first.
+  // Self-contained like mtgLogPage: fetches the meeting itself rather than assuming MTG_LIST/MTG_ATT
+  // are already warm, so it also works on a direct link/refresh.
+  async function mtgDetailPage(v,meetingId){
+    injectCss(); setCrumb(['Accountability','Meeting']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    if(!m){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Meeting not found — it may have been cancelled.</div></div>'; return; }
+    const plist=await people();
+    let attEmails=[];
+    try{ attEmails=mtgAllAttendees(m); }catch(e){ attEmails=[m.created_by].filter(Boolean); }
+    const names=attEmails.map(function(e){return nameOf(plist,e);}).filter(Boolean).join(', ');
+    const recurLbl=mtgRecurLabel(m);
+    const modeColor=m.mode==='offline'?'#64748b':'#2563eb';
+    const isOneOff=(!m.recur_type||m.recur_type==='none');
+    const basicHtml='<div class="gcal-panel-row"><i class="fa-solid '+(m.mode==='offline'?'fa-people-group':'fa-video')+'" style="color:'+modeColor+'"></i> '+esc2(mtgModeLabel(m))+(recurLbl?(' · '+esc2(recurLbl)):'')+'</div>'
+      +(isOneOff
+        ? '<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> '+esc2(fmtDateY(m.meeting_date))+' · '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>'
+        : '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>')
+      +'<div class="gcal-panel-row"><i class="fa-solid fa-user"></i> Organized by '+esc2(nameOf(plist,m.created_by)||m.created_by)+'</div>'
+      +(names?('<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(names)+'</div>'):'')
+      +((m.mode==='online'&&m.meet_link)?('<div class="gcal-panel-row"><i class="fa-solid fa-link"></i> <a href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Meet link</a></div>'):'');
+    let logs=[];
+    try{ const {data}=await ACC().from('meeting_logs').select('*').eq('meeting_id',meetingId).order('occurrence_date',{ascending:false}).limit(100); logs=data||[]; }catch(e){}
+    const dayRows=logs.length?logs.map(function(l){
+      return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+        +'<div><div class="mtg-log-title">'+esc2(fmtDateY(l.occurrence_date))+'</div><div class="mtg-log-meta">'+esc2(mtgLogTimeLabel(l))+'</div></div>'
+        +mtgAttendanceBadgeHtml(l)
+        +'</div>';
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed occurrences yet</div>';
+    const mine=eq(m.created_by,me());
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-video" style="color:#1d4ed8"></i> '+esc2(m.title)+'</div>'
+      +'<div class="tp-sub">Meeting details</div></div>'
+      +'<div class="tp-acts">'
+        +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
+        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'</div></div>'
+      +'<div class="tp-card">'+basicHtml+'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
+  }
+  // Superseded as the card's own click target by mtgDetailPage above, which now embeds this same
+  // occurrence list under a meeting's basic info — kept for any old link still pointing here.
   async function mtgLogsPage(v,meetingId){
     injectCss(); setCrumb(['Accountability','Meeting Logs']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -11126,7 +11177,7 @@
     toast('Saved to Logs','ok');
     const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
     try{ usageQueue('tasks.meetings.save_meeting_wrap_up_summary','update',{title:l&&l.title}); }catch(_e){}
-    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
+    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/detail/'+l.meeting_id);
     else navTo('tasks/meetings/log/'+lid);
   };
 
@@ -11211,24 +11262,14 @@
       try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
     }finally{ WT_busy=false; wtChip(false); again(3000); }
   }
-  // ON. Transcription is JAIN-E's own work again — the Whisper model above runs inside the browser
-  // (WebGPU where available, WASM otherwise), so no recording leaves the organisation and there is
-  // no per-use cost and no API key anywhere in the path.
-  //
-  // This is the CATCH-UP path, not the main one. A meeting recorded in the portal is transcribed
-  // the moment recording stops, on the machine that recorded it, straight from the audio still in
-  // memory (see mtgRecStop). This worker exists for the rest: a recording uploaded after the fact
-  // through "Add recording", one whose browser was closed mid-transcription, and one that failed.
-  // Jobs are claimed atomically server-side, so two open browsers never do the same one.
-  //
-  // Desktop only, and only while the tab is actually visible — the model is heavy enough that
-  // running it on someone's phone, or behind their back, would be a rude thing to do.
-  function mtgStartBrowserTranscriber(){
-    if(WT_started) return;
-    if(wtIsMobile()) return;
-    WT_started=true;
-    setTimeout(wtTick, 4000);
-  }
+  // OFF. Transcription is Gemini's job again (transcribe-pending / meet-transcript-sync, both
+  // re-scheduled) — live, server-side, no browser needed. This in-browser Whisper worker stays
+  // switched off rather than deleted, same reason it was written in the first place: a fallback
+  // should the Gemini key ever be withdrawn. It must not run alongside Gemini: the cron jobs pick
+  // up transcript_status='processing' rows directly with no claim/lock step, while this worker
+  // claims jobs atomically through claim_transcription_job() — both live at once would race for
+  // the same rows, and one engine is already enough.
+  function mtgStartBrowserTranscriber(){ return; }
 
   // The standing list of meetings that finished without a transcript, at the top of the tab where
   // it can't be scrolled past. Every meeting is supposed to end up transcribed; an online one now

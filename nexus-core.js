@@ -491,9 +491,6 @@ const NAV=[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
   ]},
-  {group:'IT & Support',items:[
-    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
-  ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
     {id:'crm',label:'CRM & Sales',icon:'fa-handshake'},
@@ -541,6 +538,13 @@ const NAV=[
   ]},
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
+  ]},
+  // Last on purpose. Internet Speed is a thing you go and look at when something feels slow, not
+  // something you work in, so it sat oddly as the second group in the sidebar — above Sales,
+  // Operations and everything people actually open all day. It keeps its own group rather than
+  // being folded into System, so the sidebar still says what it is.
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
   ]},
 ];
 const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
