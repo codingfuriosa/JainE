@@ -69,7 +69,7 @@ the work.
 | `acc.crm_leads` | lead | the CRM's current state, carried forward |
 | `acc.crm_followups` | follow-up | **the lead history.** Every follow-up ever seen |
 | `acc.call_transcripts` | **recording_url** | the transcript. This is the deduplication key |
-| `acc.followup_qa` | follow-up | the six assessments |
+| `acc.followup_qa` | follow-up | the seven assessments |
 | `acc.transcription_queue` | pre-sales follow-up with a recording | FIFO state |
 | `acc.followup_timeline_v` | follow-up | all of the above joined — what the UI reads |
 | `acc.daily_qa_summary_v` | day | the day's numbers, including the four mismatch counts |
@@ -255,7 +255,7 @@ the transcriber uses. OpenAI's Structured Outputs would mean restating this cont
 Schema, and the contract is nullable unions and a `null` member inside an enum — expressible only by
 relaxing it, which trades a real guarantee for a nominal one. (Gemini's `responseSchema` could not
 express it either, so this is unchanged by the move.) The guarantee therefore lives in `qaPhase`'s
-validation: a reply missing any of the six assessments is refused and retried, and nothing
+validation: a reply missing any of the seven assessments is refused and retried, and nothing
 half-formed is ever saved.
 
 `CHATGPT_QA_MODEL` moves the judge. An o-series or gpt-5 name is detected and sent
@@ -284,7 +284,7 @@ Do not remove them.
 
 ### What the QA step measures
 
-Six assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
+Seven assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
 and its reasoning. "Not Verifiable" is a real answer everywhere and is never penalised — guessing is
 the only wrong answer.
 
@@ -296,6 +296,7 @@ the only wrong answer.
 | **Retention effort** (Lost leads only) | Pass · Partial · Fail · Not Applicable | counting a call as a real retention attempt when it was one perfunctory line ("are you sure?") with no engagement of the actual objection. Not Applicable outside Lost, or when the customer ended the call before the agent had any opening to try. |
 | **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
 | **Status assessment** | Lost · Qualified · In Follow Up · Unclear | deciding from one keyword. "I'm not interested right now" is usually In Follow Up; "send me the details" is usually not Qualified. |
+| **Personal mobile number requested** | Yes · No | counting a confirmation of the CRM's own number on file as a request — only a genuinely new number being asked for counts. Captures the number itself (`number_shared`) when the customer gave one. |
 
 Plus the **six-point agent audit** — Script, Etiquette, Query Handling, Call to Action, Leakage
 Avoidance, Hyper-personalization — scored Pass / Partial / Fail / Not Applicable against the explicit

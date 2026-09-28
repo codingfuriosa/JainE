@@ -326,6 +326,12 @@ Every key below must be present on every reply. Where you have nothing to say, u
         to establish anything.
     ]
   },
+  "personal_mobile_requested": {
+    "status": "Yes" | "No",
+    "number_shared": "the number exactly as the customer stated it, or null - null whenever status is No, and also null when Yes but the customer was asked and did not actually give one",
+    "evidence": "the line where this happened, or null when status is No",
+    "reason": "why this verdict"
+  },
   "summary_verdict": "several sentences"
 }`;
 
@@ -707,10 +713,24 @@ own mismatch, flagged for review rather than silently dropped from the count, re
 write in "status_match" or "mismatch_type" for that call - both are re-derived deterministically from
 ai_assessed_status alone. Only the CRM-status-not-covered case above still gets a real null.
 
-### 7. VERDICT
+### 8. VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
 agreed, where the CRM's record differs from the call, and what should happen to this lead now. If the
 call was a few words long, say that plainly instead of padding it out.
+
+### 9. PERSONAL MOBILE NUMBER REQUESTED
+Did the agent ask the customer for a mobile number to reach them on that is ADDITIONAL to whatever the
+CRM already has on file for this lead - or ask to call/WhatsApp them on a different, personal line -
+rather than simply confirming or reading back the number already on record?
+- "Yes" - the agent asked for a number to reach the customer on, and that request is present on this
+          call, whether or not the customer actually gave one.
+- "No"  - no such request was made on this call.
+Confirming the existing CRM number back to the customer ("is this still the best number to reach you
+on, the one ending XXXX") is NOT a request for a personal number - only count a genuinely NEW number
+being asked for.
+If "Yes", put the number the customer actually stated in "number_shared", exactly as said (digits only,
+no spaces needed) - null if they were asked but did not give one, or the call ended before they could.
+Quote the line where this happened in "evidence" - null when status is "No".
 
 ${CATALOGUE}
 

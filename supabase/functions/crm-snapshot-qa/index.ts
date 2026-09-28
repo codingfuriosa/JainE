@@ -771,6 +771,16 @@ function qaScoreFor(qa: unknown): number | null {
   return counted ? Math.round((got / counted) * 100) : null;
 }
 
+/* Flattens one named point out of the six-point agent_qa array into its own scalar column, the same
+   reason pitch_status/remarks_status/etc exist beside their own jsonb blobs: a plain column is what
+   the transcription list's filter dropdowns can actually query, where a value buried inside a jsonb
+   array cannot. */
+function agentQaStatusFor(qa: unknown, point: string): string | null {
+  if (!Array.isArray(qa)) return null;
+  const hit = (qa as any[]).find((p) => String(p?.point || "").trim() === point);
+  return hit ? String(hit.status || "").trim() || null : null;
+}
+
 /* THE JUDGE CALL - OPENAI. Text in, JSON out: no audio ever reaches this stage, and there is no
    transcript field in its output, which is why the project catalogue is safe in this prompt and was
    not safe in the old single-call design.
@@ -779,7 +789,7 @@ function qaScoreFor(qa: unknown): number | null {
    strict JSON Schema, and this contract is nullable unions and a `null` member inside an enum -
    expressible only by relaxing it, which trades a real guarantee for a nominal one. So the shape is
    stated in the prompt (QA_OUTPUT_SHAPE) and enforced where it can be enforced honestly: qaPhase
-   refuses and retries any reply missing one of the six assessments, and nothing half-formed is saved.
+   refuses and retries any reply missing one of the seven assessments, and nothing half-formed is saved.
    `json_object` still removes the failure this pipeline actually sees - prose or a code fence around
    the JSON.
 
@@ -944,8 +954,10 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
   const retention = p.retention_effort && typeof p.retention_effort === "object" ? p.retention_effort : null;
   const rem = p.remarks_accuracy && typeof p.remarks_accuracy === "object" ? p.remarks_accuracy : null;
   const sa = p.status_assessment && typeof p.status_assessment === "object" ? p.status_assessment : null;
-  if (!pitch || !fdate || !lreason || !retention || !rem || !sa) {
-    return failQueue("the QA reply was missing one of the six required assessments");
+  const mobileAsk = p.personal_mobile_requested && typeof p.personal_mobile_requested === "object"
+    ? p.personal_mobile_requested : null;
+  if (!pitch || !fdate || !lreason || !retention || !rem || !sa || !mobileAsk) {
+    return failQueue("the QA reply was missing one of the seven required assessments");
   }
 
   /* status_assessment.ai_assessed_status MUST be one of these four words - nothing else is a status.
@@ -992,6 +1004,7 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
 
     pitch_accuracy: pitch, followup_date_accuracy: fdate,
     lost_reason_accuracy: lreason, retention_effort: retention, remarks_accuracy: rem,
+    personal_mobile_requested: mobileAsk,
     /* The stored ai_assessed_status is the EFFECTIVE one - the model's verdict after the ratchet has
        been applied to it - because that is the verdict the dashboard's counters and the mismatch
        category are derived from, and a stored status that disagreed with them would read as a bug.
@@ -1009,12 +1022,16 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
     followup_date_status: String(fdate.status || "").trim() || null,
     lost_reason_status: String(lreason.status || "").trim() || null,
     retention_status: String(retention.status || "").trim() || null,
+    personal_mobile_status: String(mobileAsk.status || "").trim() || null,
+    personal_mobile_number: mobileAsk.number_shared ? String(mobileAsk.number_shared).trim() || null : null,
     remarks_status: String(rem.status || "").trim() || null,
     ai_assessed_status: aiStatus,
     visit_pending: visitPending,
     status_match: derived.status_match,
     mismatch_type: derived.mismatch_type,
     agent_qa: Array.isArray(p.agent_qa) ? p.agent_qa : null,
+    etiquette_status: agentQaStatusFor(p.agent_qa, "Etiquette"),
+    query_handling_status: agentQaStatusFor(p.agent_qa, "Query Handling"),
     qa_score: qaScoreFor(p.agent_qa),
     summary_verdict: p.summary_verdict ? String(p.summary_verdict) : null,
     qa_model: qaModel, qa_raw: null, qa_error: null,
@@ -1027,7 +1044,7 @@ async function qaPhase(db: DB, item: any, openaiKey: string, qaModel: string) {
   return { follow_up_id: item.follow_up_id, phase: "qa", status: "completed", qa_id: saved.id,
            pitch: pitchStatus, pitch_score: pitchScore,
            followup_date: fdate.status, lost_reason: lreason.status, retention_effort: retention.status,
-           remarks: rem.status,
+           personal_mobile_requested: mobileAsk.status, remarks: rem.status,
            crm_status: ctx.crm_status, ai_assessed_status: aiStatus,
            model_assessed_status: modelStatus, qualification_ratcheted: derived.ratcheted,
            status_match: derived.status_match, mismatch_type: derived.mismatch_type };

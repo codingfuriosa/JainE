@@ -20773,7 +20773,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -20793,7 +20793,7 @@ function trcResetFilters(){
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
   TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
-  TRC_F.cadence='all';TRC_F.callbackTat='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -20885,8 +20885,11 @@ function trcRenderDaily(){
       +'<td style="white-space:nowrap;font-weight:600">'+esc(trcWall(r.date,true)||r.date)+'</td>'
       +trcDailyCell(r.date,'all','all',r.total_leads)
       +trcDailyCell(r.date,'all','all',r.total_followups)
+      +trcDailyCell(r.date,'proc','no_recording',Math.max(0,Number(r.total_followups||0)-Number(r.recordings_available||0)))
+      +trcDailyCell(r.date,'proc','non_transcribable',r.non_transcribable)
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
       +trcDailyRateCell(r.transcribed,r.total_followups)
+      +trcDailyPlainCell(r.already_transcribed)
       +trcDailyCell(r.date,'proc','failed',r.transcription_failed)
       +trcDailyRateCell(r.transcription_failed,r.total_followups)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
@@ -20894,7 +20897,7 @@ function trcRenderDaily(){
       +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(10+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(13+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -20907,8 +20910,12 @@ function trcRenderDaily(){
       +'</div>'
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
-      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
+      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th>'
+        +'<th title="Total calls ÷ recordings available - calls with no recording at all to transcribe">No recording</th>'
+        +'<th title="Had a recording, but nothing usable came out of it (silence, wrong number, too short, etc)">No conversation</th>'
+        +'<th>Transcribed</th>'
         +'<th title="Transcribed ÷ Total calls">Success rate</th>'
+        +'<th title="Of the Transcribed count, how many reused a recording already transcribed earlier - no repeat model call, no second bill. Not a link: this counts a fact about already-completed rows, not a separate status to filter the table by.">Reused (old transcript)</th>'
         +'<th>Failed</th><th title="Transcription failed ÷ Total calls">Failure rate</th>'
         +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
         +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
@@ -21045,7 +21052,7 @@ const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communicati
   +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_first_seen_date,lead_current_status,'
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
-  +'lost_reason_status,retention_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+  +'lost_reason_status,retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
   +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,is_latest_assessed';
 const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
@@ -21255,7 +21262,7 @@ async function trcEnsureQaFieldsMerged(){
   try{
     let q=sb.schema('acc').from('followup_qa').select(
       'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'retention_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
       +'qa_error,reused_transcription,is_latest_assessed');
     if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
     if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
@@ -21507,6 +21514,26 @@ function trcApply(rows,skipCards){
     if(TRC_F.pitch!=='all'){
       if(TRC_F.pitch==='NONE'){ if(r.pitch_status)return false; }
       else if(String(r.pitch_status||'')!==TRC_F.pitch)return false;
+    }
+    if(TRC_F.etiquette!=='all'){
+      if(TRC_F.etiquette==='NONE'){ if(r.etiquette_status)return false; }
+      else if(String(r.etiquette_status||'')!==TRC_F.etiquette)return false;
+    }
+    if(TRC_F.queryHandling!=='all'){
+      if(TRC_F.queryHandling==='NONE'){ if(r.query_handling_status)return false; }
+      else if(String(r.query_handling_status||'')!==TRC_F.queryHandling)return false;
+    }
+    if(TRC_F.retention!=='all'){
+      if(TRC_F.retention==='NONE'){ if(r.retention_status)return false; }
+      else if(String(r.retention_status||'')!==TRC_F.retention)return false;
+    }
+    if(TRC_F.lostReason!=='all'){
+      if(TRC_F.lostReason==='NONE'){ if(r.lost_reason_status)return false; }
+      else if(String(r.lost_reason_status||'')!==TRC_F.lostReason)return false;
+    }
+    if(TRC_F.personalMobile!=='all'){
+      if(TRC_F.personalMobile==='NONE'){ if(r.personal_mobile_status)return false; }
+      else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
     }
     if(!skipCards){
       if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
@@ -21919,6 +21946,12 @@ function trcDateBar(){
      state), so a one-click shortcut back to it would only ever restate what's already showing. */
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   const personnelValues=trcPersonnelOptionsList(TRC_ROWS);
+  /* Moved up from the filter bar below (by request), same row as All personnel - the two are the
+     "who/which team" pair someone reaches for first, so they sit beside each other rather than one at
+     the top and one a row down. Same buValues logic trcFilterBar used to run itself: Durbaar Banquets
+     dropped (see trcFilterBar's own note - it no longer queues at all), everything else sorted. */
+  const buValues=Array.from(new Set((TRC_ROWS||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
@@ -21928,6 +21961,10 @@ function trcDateBar(){
     +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
       +opt('all','All personnel',TRC_F.personnel)
       +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'</select>'
+    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRC_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
   +'</div>';
 }
@@ -21971,11 +22008,6 @@ function trcPersonnelOptionsList(all){
 function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
     .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
-     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
-     offering to filter down to a project this pipeline no longer transcribes. */
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
-    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -21987,10 +22019,6 @@ function trcFilterBar(all){
     +'<select onchange="trcSet(\'crm\',this.value)" style="padding:6px 8px">'
       +opt('all','All CRM statuses',TRC_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRC_F.crm);}).join('')
-    +'</select>'
-    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
-      +opt('all','All business units',TRC_F.bu)
-      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
     +'<select onchange="trcSet(\'pitch\',this.value)" style="padding:6px 8px">'
       +opt('all','Pitch accuracy: all',TRC_F.pitch)
@@ -22015,6 +22043,43 @@ function trcFilterBar(all){
       +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
       +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
     +'</select>'
+    +'<select onchange="trcSet(\'etiquette\',this.value)" style="padding:6px 8px">'
+      +opt('all','Etiquette: all',TRC_F.etiquette)
+      +opt('Pass','Etiquette: Pass',TRC_F.etiquette)
+      +opt('Partial','Etiquette: Partial',TRC_F.etiquette)
+      +opt('Fail','Etiquette: Fail',TRC_F.etiquette)
+      +opt('Not Applicable','Etiquette: Not Applicable',TRC_F.etiquette)
+      +opt('NONE','Etiquette: Not yet assessed',TRC_F.etiquette)
+    +'</select>'
+    +'<select onchange="trcSet(\'queryHandling\',this.value)" style="padding:6px 8px">'
+      +opt('all','Query handling: all',TRC_F.queryHandling)
+      +opt('Pass','Query handling: Pass',TRC_F.queryHandling)
+      +opt('Partial','Query handling: Partial',TRC_F.queryHandling)
+      +opt('Fail','Query handling: Fail',TRC_F.queryHandling)
+      +opt('Not Applicable','Query handling: Not Applicable',TRC_F.queryHandling)
+      +opt('NONE','Query handling: Not yet assessed',TRC_F.queryHandling)
+    +'</select>'
+    +'<select onchange="trcSet(\'retention\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Applicable everywhere else">'
+      +opt('all','Retention effort: all',TRC_F.retention)
+      +opt('Pass','Retention: Pass',TRC_F.retention)
+      +opt('Partial','Retention: Partial',TRC_F.retention)
+      +opt('Fail','Retention: Fail',TRC_F.retention)
+      +opt('Not Applicable','Retention: Not Applicable',TRC_F.retention)
+      +opt('NONE','Retention: Not yet assessed',TRC_F.retention)
+    +'</select>'
+    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Verifiable everywhere else">'
+      +opt('all','Lost reason accuracy: all',TRC_F.lostReason)
+      +opt('Accurate','Lost reason: Accurate',TRC_F.lostReason)
+      +opt('Inaccurate','Lost reason: Inaccurate',TRC_F.lostReason)
+      +opt('Not Verifiable','Lost reason: Not Verifiable',TRC_F.lostReason)
+      +opt('NONE','Lost reason: Not yet assessed',TRC_F.lostReason)
+    +'</select>'
+    +'<select onchange="trcSet(\'personalMobile\',this.value)" style="padding:6px 8px" title="Did the agent ask for a personal mobile number additional to the one already on file">'
+      +opt('all','Personal mobile asked: all',TRC_F.personalMobile)
+      +opt('Yes','Personal mobile asked: Yes',TRC_F.personalMobile)
+      +opt('No','Personal mobile asked: No',TRC_F.personalMobile)
+      +opt('NONE','Personal mobile asked: Not yet assessed',TRC_F.personalMobile)
+    +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
     // Refresh now lives at the top of the page, beside the count it reloads - see trcView.
@@ -22029,14 +22094,14 @@ window.trcSet=async function(k,v){
   if(k==='mismatch'&&v!=='all')await trcEnsureQaFieldsMerged();
   // followup_date_status/remarks_status live on acc.followup_qa exactly like match/mismatch do - same
   // light merge, no join to call_transcripts/transcription_queue needed.
-  if((k==='fdate'||k==='remarks'||k==='pitch')&&v!=='all')await trcEnsureQaFieldsMerged();
+  if((k==='fdate'||k==='remarks'||k==='pitch'||k==='etiquette'||k==='queryHandling'||k==='retention'||k==='lostReason'||k==='personalMobile')&&v!=='all')await trcEnsureQaFieldsMerged();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
-  TRC_F.cadence='all';TRC_F.callbackTat='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -22484,7 +22549,8 @@ function trcQaTableHtml(r,m){
             : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
   }
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
-        retention=r.retention_effort||{}, rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+        retention=r.retention_effort||{}, rem=r.remarks_accuracy||{}, sa=r.status_assessment||{},
+        mobileAsk=r.personal_mobile_requested||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
@@ -22498,6 +22564,9 @@ function trcQaTableHtml(r,m){
      why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])},
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
+    {topic:'Personal mobile number requested',status:r.personal_mobile_status,score:null,
+     why:join([mobileAsk.reason,(r.personal_mobile_number||mobileAsk.number_shared)?'Number given: '+(r.personal_mobile_number||mobileAsk.number_shared):null,
+               mobileAsk.evidence?'"'+mobileAsk.evidence+'"':null])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
      /* Visit-pending only excuses the CRM's In Follow Up when this lead had ALREADY qualified on an
         earlier call (2026-09-21 gate) - on a first-time qualification it's still flagged, so this note
@@ -22739,7 +22808,10 @@ function trcCadenceIssues(status,rows){
 }
 function trcCadenceIssuesHtml(o){
   if(!o)return '';
-  const rows=o.gaps.map(function(g){
+  /* trcCadenceIssues builds gaps walking the history oldest-first, since each one is judged against
+     whatever call came right after it - display order is the opposite: the most recent gap is the one
+     someone actually needs to act on today, so it reads top of the card, newest first. */
+  const rows=o.gaps.slice().reverse().map(function(g){
     return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">'
       +(g.scheduled?'Promised for ':'No date promised - overdue past ')+esc(trcWall(g.limitDate)||g.limitDate)
       +(g.open?', nothing logged since':', next call on '+esc(trcWall(g.actualDate)||g.actualDate))
