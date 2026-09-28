@@ -20664,6 +20664,13 @@ async function trcPrefetchHistories(leadIds){
          for itself on click. A failed chunk simply stays uncached. */
     }
   }
+  /* Added so trcLeads' cadence/callbackTat (see its own note) stop reading the range-limited rows the
+     moment each lead's real history lands - a soft repaint, same as trcEnrichVisiblePage/
+     trcBackfillLastJudgement already do on their own completion. Gated on the same generation check as
+     everything above: a newer prefetch (or a page/filter change) means this one's result is stale and
+     must not repaint over whatever now owns the screen. Only reached at all when todo was non-empty,
+     so this never fires on a page that was already fully cached. */
+  if(gen===TRC_PREFETCH_GEN)trcRender(false,true);
 }
 
 /* THE ONE PLACE A LEAD'S HISTORY IS FETCHED, for the click and for the prefetch alike.
@@ -20715,7 +20722,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -20735,6 +20742,7 @@ function trcResetFilters(){
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
   TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -20983,10 +20991,10 @@ function trcRecallRow(sl){
    call - see trcLeadDetail below. */
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
-  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
+  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_first_seen_date,lead_current_status,'
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
-  +'lost_reason_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+  +'lost_reason_status,retention_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
   +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,is_latest_assessed';
 const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
@@ -21196,7 +21204,7 @@ async function trcEnsureQaFieldsMerged(){
   try{
     let q=sb.schema('acc').from('followup_qa').select(
       'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+      +'retention_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
       +'qa_error,reused_transcription,is_latest_assessed');
     if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
     if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
@@ -21518,6 +21526,19 @@ function trcLeads(rows){
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
     g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
+    /* Cadence and callback TAT judge a lead's WHOLE follow-up history, not just whatever slice of it
+       falls inside the selected date range - g.rows is range-limited, so judging off it directly would
+       silently score a lead only on the one call that happened to land in the window (which is why
+       these two used to read exactly like g.callbackOverdue - both collapsing to "the latest call in
+       range" when the range is a single day). The full history is exactly what trcPrefetchHistories
+       already warms in the background for click-through (see trcAfterListRender) - reuse it once it
+       has arrived; a lead not yet warmed simply falls back to the range-limited rows for this one
+       render, same as every other lazily-enriched field here, until trcPrefetchHistories' own
+       completion re-render (see its own note) picks it up. */
+    const cachedHistory=trcLeadCacheRead(g.lead_id);
+    const historyRows=cachedHistory?cachedHistory.rows:g.rows;
+    g.cadence=trcCadenceIssues(g.status,historyRows);
+    g.callbackTat=trcFirstCallbackTat(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -21702,6 +21723,8 @@ function trcKpiHtml(rows){
      actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
      property of a LEAD's latest call, not of any one row. */
   const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
+  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
+  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -21717,6 +21740,10 @@ function trcKpiHtml(rows){
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
       +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Cadence issues'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-volume"></i> Slow first callback'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
@@ -21808,6 +21835,21 @@ window.trcCard=async function(kind,val){
 window.trcToggleOverdue=async function(){
   TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
   if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
+   trcCadenceIssues) instead of only the current open one. Needs the full join for the same reason -
+   the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
+window.trcToggleCadence=async function(){
+  TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
+  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
+   (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
+window.trcToggleCallbackTat=async function(){
+  TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
+  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
   trcRender(true);
 };
 
@@ -21943,6 +21985,7 @@ window.trcSet=async function(k,v){
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
   TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -22134,6 +22177,8 @@ function trcRender(full,keepPage){
   // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
   // the call-level Mismatch table, which trcLeads never runs over in the first place.
   if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
+  if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
+  if(!callLevel&&TRC_F.callbackTat==='1')items=items.filter(function(g){return g.callbackTat;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -22388,7 +22433,7 @@ function trcQaTableHtml(r,m){
             : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
   }
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
-        rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+        retention=r.retention_effort||{}, rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
@@ -22398,6 +22443,8 @@ function trcQaTableHtml(r,m){
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
     {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
+    {topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
+     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])},
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
@@ -22607,6 +22654,76 @@ function trcCallbackOverdueHtml(o){
     +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
     +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
     +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
+  +'</div>';
+}
+/* Follow-up frequency/cadence - was the recontact after each call made on time?
+   Scheduled   - the call named a next_follow_up_text date; late if the FOLLOWING call (or, for the
+                 lead's own still-open gap, today) falls after that date.
+   Unscheduled - the call named no date at all; late if more than TRC_CADENCE_UNSCHEDULED_DAYS days
+                 pass before the next call (or today, for the still-open gap).
+   Not evaluated once a lead is Lost - same reasoning as trcCallbackOverdue, there is nothing left to
+   call back about. rows must already be chronological, oldest-first (trcLeads/trcLeadDetail's own
+   order), since each gap is judged against the call that comes right after it. */
+const TRC_CADENCE_UNSCHEDULED_DAYS=3;
+function trcCadenceIssues(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const list=rows||[];
+  const today=traToday();
+  const gaps=[];
+  for(let i=0;i<list.length;i++){
+    const prev=list[i];
+    const nextRow=list[i+1]||null;
+    const actualDate=nextRow?trcRowDate(nextRow):today;
+    if(!actualDate)continue;
+    const scheduled=!!prev.next_follow_up_text;
+    const prevDate=trcRowDate(prev);
+    const limitDate=scheduled?String(prev.next_follow_up_text).slice(0,10)
+                             :(prevDate?trcAddDays(prevDate,TRC_CADENCE_UNSCHEDULED_DAYS):null);
+    if(!limitDate||!(actualDate>limitDate))continue;
+    gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
+      actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
+  }
+  if(!gaps.length)return null;
+  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+}
+function trcCadenceIssuesHtml(o){
+  if(!o)return '';
+  const rows=o.gaps.map(function(g){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">'
+      +(g.scheduled?'Promised for ':'No date promised - overdue past ')+esc(trcWall(g.limitDate)||g.limitDate)
+      +(g.open?', nothing logged since':', next call on '+esc(trcWall(g.actualDate)||g.actualDate))
+      +' - '+g.daysLate+' day'+(g.daysLate===1?'':'s')+' late.</div>';
+  }).join('');
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Follow-up cadence - '
+    +o.lateCount+' late of '+o.totalGaps+'</div>'
+    +rows
+  +'</div>';
+}
+/* Inbound lead -> first callback turnaround: how long after this lead first appeared in the CRM the
+   first logged call actually happened. lead_first_seen_date (acc.crm_leads, not the per-follow-up
+   f.first_seen_date - see the view's own note) carries no time-of-day, so this is a calendar-day
+   proxy for a 24-hour target, not an hour-level measurement - same day counts as on time, anything
+   later is flagged. rows must be chronological, oldest-first. Only available where the row came from
+   the full join (TRC_LIGHT/followup_timeline_v) - on the fast crm_followups-only path this field is
+   simply absent and the function returns null, the same way trcIsRegression treats a light row. */
+function trcFirstCallbackTat(rows){
+  const list=rows||[];
+  const first=list[0];
+  if(!first||!first.lead_first_seen_date)return null;
+  const firstCallDate=trcRowDate(first);
+  if(!firstCallDate)return null;
+  const daysLate=trcDaysBetween(first.lead_first_seen_date,firstCallDate);
+  if(!(daysLate>0))return null;
+  return {leadSeenDate:first.lead_first_seen_date,firstCallDate:firstCallDate,daysLate:daysLate};
+}
+function trcFirstCallbackTatHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#d97706"></i> First callback turnaround</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">Lead first seen '+esc(trcWall(o.leadSeenDate)||o.leadSeenDate)
+    +', first call logged '+esc(trcWall(o.firstCallDate)||o.firstCallDate)+' - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' after.</div>'
   +'</div>';
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
@@ -22846,11 +22963,15 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
   const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
+  const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
+  const callbackTat=trcFirstCallbackTatHtml(trcFirstCallbackTat(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
     +callbackOverdue
+    +cadenceIssues
+    +callbackTat
     +calls;
 
   if(!document.getElementById('trcTwoCss')){

@@ -69,7 +69,7 @@ the work.
 | `acc.crm_leads` | lead | the CRM's current state, carried forward |
 | `acc.crm_followups` | follow-up | **the lead history.** Every follow-up ever seen |
 | `acc.call_transcripts` | **recording_url** | the transcript. This is the deduplication key |
-| `acc.followup_qa` | follow-up | the five assessments |
+| `acc.followup_qa` | follow-up | the six assessments |
 | `acc.transcription_queue` | pre-sales follow-up with a recording | FIFO state |
 | `acc.followup_timeline_v` | follow-up | all of the above joined — what the UI reads |
 | `acc.daily_qa_summary_v` | day | the day's numbers, including the four mismatch counts |
@@ -255,7 +255,7 @@ the transcriber uses. OpenAI's Structured Outputs would mean restating this cont
 Schema, and the contract is nullable unions and a `null` member inside an enum — expressible only by
 relaxing it, which trades a real guarantee for a nominal one. (Gemini's `responseSchema` could not
 express it either, so this is unchanged by the move.) The guarantee therefore lives in `qaPhase`'s
-validation: a reply missing any of the five assessments is refused and retried, and nothing
+validation: a reply missing any of the six assessments is refused and retried, and nothing
 half-formed is ever saved.
 
 `CHATGPT_QA_MODEL` moves the judge. An o-series or gpt-5 name is detected and sent
@@ -284,7 +284,7 @@ Do not remove them.
 
 ### What the QA step measures
 
-Five assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
+Six assessments per follow-up, each carrying its own status, its evidence quoted from the transcript,
 and its reasoning. "Not Verifiable" is a real answer everywhere and is never penalised — guessing is
 the only wrong answer.
 
@@ -293,6 +293,7 @@ the only wrong answer.
 | **Pitch accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | scoring a pitch that never happened. A call cut short is Not Verifiable and scores `null`, not 0 — a zero would drag the day's average down as though the agent had pitched badly. |
 | **Follow-up date accuracy** | Accurate · Inaccurate · Not Verifiable | marking a date wrong merely because the customer never named one. No discussion is **Not Verifiable**, never Inaccurate. Only a conversation that *contradicts* the CRM date is Inaccurate. |
 | **Lost reason accuracy** | Accurate · Inaccurate · Not Verifiable | inventing a specific reason. "Not interested, thank you" is not evidence of a budget problem. |
+| **Retention effort** (Lost leads only) | Pass · Partial · Fail · Not Applicable | counting a call as a real retention attempt when it was one perfunctory line ("are you sure?") with no engagement of the actual objection. Not Applicable outside Lost, or when the customer ended the call before the agent had any opening to try. |
 | **Remarks accuracy** | Accurate · Partially Accurate · Inaccurate · Not Verifiable | demanding the salesperson's shorthand match word for word. Meaning is judged, not wording. |
 | **Status assessment** | Lost · Qualified · In Follow Up · Unclear | deciding from one keyword. "I'm not interested right now" is usually In Follow Up; "send me the details" is usually not Qualified. |
 
@@ -411,12 +412,32 @@ a lead — showing the CRM's verdict and the call's verdict side by side.
 
 **Clicking a lead** opens its complete story: the lead as the CRM has it today, an accuracy roll-up
 across all its calls, and then **every conversation in chronological order, oldest first**. Each one
-carries what the CRM recorded, how it was processed, the four accuracy assessments with their
+carries what the CRM recorded, how it was processed, the five accuracy assessments with their
 evidence, the status check, the verdict, the **full transcript** turn by turn with MM:SS timestamps
 and speaker labels, and the six-point audit. A call that reused an existing transcript is marked as
 such and shows that transcript.
 
 The lead list is newest-first. Inside a lead it is oldest-first: a history only reads forwards.
+
+### Three things computed from CRM data alone, never the AI
+
+These are not model judgements — they are plain arithmetic over `acc.crm_followups`/`acc.crm_leads`,
+computed client-side in `nexus-core.js` and shown as cards on a lead's detail page (`trcCallbackOverdue`,
+`trcCadenceIssues`, `trcFirstCallbackTat`). None of the three add a database column; all three read
+data the pipeline already stores.
+
+- **Missed callback** — the lead's LATEST call promised a `next_follow_up_text` date that has passed
+  with nothing logged against the lead since. Not evaluated once a lead is Lost.
+- **Follow-up cadence** — the same idea, applied to every gap in a lead's history, not only the
+  current open one. A call that named a date is late if the NEXT call happens after it; a call that
+  named no date is late if more than 3 days pass before the next one. Also skipped for Lost leads.
+- **First callback turnaround (TAT)** — how long after the lead first appeared in the CRM
+  (`acc.crm_leads.first_seen_date`) the first logged call actually happened. That column carries no
+  time-of-day, so this is a calendar-day proxy for a 24-hour target: the same day counts as on time,
+  anything later is flagged. Only available where the row came through the full join
+  (`followup_timeline_v`/`TRC_LIGHT`) — on the fast `crm_followups`-only path used for some list
+  fetches, `acc.crm_leads` is not joined, so this reads as not-flagged there, the same way a
+  regression tag does on a light row (see the note above `TRC_LIGHT`).
 
 **The AI Status column carries a lead's last judgement across date ranges** (2026-09-22). When none of
 a lead's calls in the *selected* range were ever assessed — no recording, out of scope, no
