@@ -22560,8 +22560,11 @@ function trcQaTableHtml(r,m){
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
     {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
-    {topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
-     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])},
+    // Only meaningful when the CRM status for THIS follow-up is Lost (see qa-prompt.ts section 4) -
+    // every other call gets "Not Applicable" from the model, which is a correct answer but not one
+    // worth a row on every single call, so the row itself is left out rather than shown as N/A.
+    r.crm_status==='Lost'?{topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
+     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])}:null,
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
     {topic:'Personal mobile number requested',status:r.personal_mobile_status,score:null,
@@ -22578,7 +22581,7 @@ function trcQaTableHtml(r,m){
                (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
-  ];
+  ].filter(Boolean);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
