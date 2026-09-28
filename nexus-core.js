@@ -553,6 +553,19 @@ const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label]))
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
 const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
+/* Modules nobody needs to be granted — they are part of the furniture, and were previously spelled
+   out three separate times inside allowedSet() plus once more in pageAllowed(), which is how a new
+   one gets added to some of them and not others.
+
+   The Scoreboard is here because it is meant to be seen by everyone: it is a company-wide
+   leaderboard, and a leaderboard half the company cannot open is not a leaderboard. This replaces
+   the narrower "holding tasks grants scoreboard" rule it shipped with a few commits ago.
+
+   This decides only whether a menu entry is drawn and a page will open. It is not a grant of
+   anything else: the figures come from acc.scoreboard(), which is SECURITY DEFINER, reads only
+   already-approved task counts, and is unchanged. Customers never reach any of this — pageAllowed()
+   sends a customer session to the customer page before it gets here. */
+const ALWAYS_ON=['dashboard','settings','network','scoreboard'];
 function navIcon(id){return ICONS[id]||'fa-square';}
 /* THE PAGES WERE RENAMED AND NOBODY'S PERMISSIONS FOLLOWED.
 
@@ -570,27 +583,14 @@ function navIcon(id){return ICONS[id]||'fa-square';}
    app.can_write('hr') by role, recruit.can_manage_tests() by its own list, each re-checked in the
    database on every write. Somebody who could only look before can still only look. */
 const MODULE_RENAMES={recruitment:'recruitment_new', hr:'hr_new'};
-/* A PAGE THAT WAS SPLIT OUT OF ANOTHER, rather than renamed.
-
-   The Scoreboard used to be a tab inside Accountability, so everyone who could open Accountability
-   could already see it. Giving it its own module id would otherwise have hidden it from all 84
-   accounts on the same day it appeared, because not one of them carries a 'scoreboard' id — the
-   identical mistake MODULE_RENAMES above exists to undo.
-
-   Holding 'tasks' therefore grants 'scoreboard': exactly what people could already reach, and
-   nothing more. Like the renames, this decides only whether a menu entry is drawn; the numbers
-   themselves come from acc.scoreboard(), which is SECURITY DEFINER and unchanged. */
-const MODULE_SPLITS={tasks:'scoreboard'};
 function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
-  Object.keys(MODULE_SPLITS).forEach(function(parentId){
-    if(ss.has(parentId)) ss.add(MODULE_SPLITS[parentId]);
-  });
+  ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return expandModules(ss);}const ss=new Set(['dashboard','settings','network']);return ss;}
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
    superadmins. So it is granted the ordinary way — 'usability' in a person's modules — and the
@@ -604,7 +604,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -8625,9 +8625,13 @@ async function sbRenderAllTasks(host){
            .sort((a,b)=>b.score-a.score||b.tasks_completed-a.tasks_completed);
   if(!host)return;
   host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Counts tasks someone else assigned you. Completed <b>+1</b> · finished by its due date <b>+1 more</b> · missed the due date <b>&minus;1</b>. A task with no due date still earns the completion point but cannot earn the on-time point. Tasks you assigned to yourself are listed under <b>Self</b> and do not score. Declines automatically reverse the credit.</div>'
-    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th title="Tasks this person created for themselves — shown for completeness, not scored">Self</th><th>Score</th></tr></thead><tbody>'
-    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_completed+'</td><td>'+r.checklist_items_done+'</td><td style="color:#16a34a">'+r.tasks_on_time+'</td><td style="color:#dc2626">'+r.tasks_late+'</td><td style="color:var(--slate)">'+(r.tasks_self||0)+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
-       :'<tr><td colspan="8"><div class="empty" style="padding:22px">No activity yet</div></td></tr>')
+    /* No "Sub" column. It showed acc.scoreboard()'s checklist_items_done, which counts done
+       subtasks by the names in ptask_subtasks.people — and every completed subtask in the system
+       has that array empty, so the column read 0 for all 85 people. It never fed the score either.
+       The RPC still returns the count; nothing displays it now. */
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>On-time</th><th>Overdue</th><th title="Tasks this person created for themselves — shown for completeness, not scored">Self</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_completed+'</td><td style="color:#16a34a">'+r.tasks_on_time+'</td><td style="color:#dc2626">'+r.tasks_late+'</td><td style="color:var(--slate)">'+(r.tasks_self||0)+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="7"><div class="empty" style="padding:22px">No activity yet</div></td></tr>')
     +'</tbody></table></div>';
 }
 
