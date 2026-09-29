@@ -20745,17 +20745,22 @@ async function custTabOverview(data,unit){
     const osScheds=osItems.filter(o=>o.document_no===lastInv.document_no&&o.schedule).map(o=>o.schedule);
     const schedules=[...new Set(osScheds)];
     dueBanner=`<div class="card card-pad" style="background:${days!=null&&days<0?'#fef2f2':'#eff4ff'};border-color:${days!=null&&days<0?'#fecaca':'#cfe0ef'};margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Demand due — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
+      <div><i class="fa-solid fa-file-invoice-dollar" style="color:${days!=null&&days<0?'#c83232':'#1d4ed8'}"></i> <b>Amount due now — ${custInr(billOutstanding)}</b> <span style="color:var(--slate);font-size:13px">${esc(schedules.join(', ')||lastInv.document_no||'')}${lastInv.due_date?' · due '+fmtDate(lastInv.due_date):''}</span></div>
       ${dueText?`<span class="tag ${days!=null&&days<0?'t-red':'t-blue'}">${esc(dueText)}</span>`:''}
     </div>`;
   }
 
   const gate=await custReconGate(unit.id);
+  /* Named for the customer, not the accounts team. "Property value", "Demand due" and "Remaining"
+     read as three versions of one number; these say what each one is, and the small line under
+     Balance to pay ties the row together: Total flat cost = Amount paid + Balance to pay, and the
+     balance already includes what is due now. */
   const kpis=[
-    ['Property value',custInr(propertyValue),snap?'as recorded with us':'agreement value'],
-    ['Paid to date',custInr(totalReceivedFinal),paidPct+'% paid'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
-    ['Demand due',custInr(billOutstanding),billOutstanding>0?(lastInv?esc(lastInv.document_no||''):'against raised invoices'):'nothing currently due',billOutstanding>0?'#e08600':'#16855a'],
-    ['Remaining',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':'against full agreement value')]
+    ['Total flat cost',custInr(propertyValue),'incl. GST and all charges'],
+    ['Amount paid',custInr(totalReceivedFinal),paidPct+'% of total cost'+(receiptRows.length?' · '+receiptRows.length+' receipt'+(receiptRows.length===1?'':'s'):''),'#16855a'],
+    ['Amount due now',custInr(billOutstanding),billOutstanding>0?'billed to you, not yet paid':'nothing to pay right now',billOutstanding>0?'#e08600':'#16855a'],
+    ['Balance to pay',custInr(remaining),lateFee?'+ '+custInr(lateFee)+' late fee':(onAccount?custInr(onAccount)+' on account':
+      (billOutstanding>0?'incl. '+custInr(billOutstanding)+' due now; rest billed as work progresses':'billed as construction progresses'))]
   ];
   // Every figure here derives from the same imported rows, so if the unit does not reconcile there is
   // no subset of them that is safe to keep showing.
@@ -20884,10 +20889,10 @@ window.custPrintStatement=function(){
     '<h1>Statement of Account — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((snap.c&&snap.c.contact_name)||'')+' · as on '+fmtDate(new Date())+'</h2>'+
     '<div class="kpis">'+
-      '<div class="kpi"><div class="lbl">Property value</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Paid to date</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Demand due</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
-      '<div class="kpi"><div class="lbl">Remaining</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Total flat cost</div><div class="val">'+custInr(snap.propertyValue)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Amount paid</div><div class="val">'+custInr(snap.totalReceived)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Amount due now</div><div class="val">'+custInr(snap.billOutstanding)+'</div></div>'+
+      '<div class="kpi"><div class="lbl">Balance to pay</div><div class="val">'+custInr(snap.remaining)+'</div></div>'+
     '</div>'+
     (tableHtml||'<p>No transactions recorded yet.</p>')+
     '</body></html>';
