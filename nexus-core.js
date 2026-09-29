@@ -11163,8 +11163,10 @@ function misCss() {
   .mis-doc h4{margin:0 0 2px;font-size:15px}
   .mis-doc .sub{font-size:12.5px;color:var(--slate);margin-bottom:14px}
   .mis-doc table{width:100%;border-collapse:collapse;font-size:13px}
-  .mis-doc th{background:#7e22ce;color:#fff;font-size:11px;letter-spacing:.4px;text-transform:uppercase;
-    padding:9px 10px;text-align:left;vertical-align:middle}
+  /* The sheet's own header colour: FFFF00 with black bold text. */
+  .mis-doc th{background:#ffff00;color:#000;font-weight:800;font-size:11px;letter-spacing:.4px;
+    text-transform:uppercase;padding:9px 10px;text-align:left;vertical-align:middle;
+    border:1px solid #000}
   .mis-doc td{padding:8px 10px;border-bottom:1px solid var(--line)}
   .mis-stage{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:9px}
   .mis-stage table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -11708,15 +11710,15 @@ window.misExportXlsx = async function (id, btn) {
     ws.getRow(2).height = 22;
     ws.mergeCells('A3:E3');
     ws.getCell('A3').value = t.sub;
-    ws.getCell('A3').font = { size: 11, bold: true, color: { argb: 'FF7E22CE' } };
+    ws.getCell('A3').font = { size: 11, bold: true, color: { argb: 'FF000000' } };
     ws.getCell('A3').alignment = { horizontal: 'center' };
 
     const head = ws.getRow(4);
     head.values = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
     head.height = 42;
     head.eachCell(function (c) {
-      c.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10.5 };
-      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7E22CE' } };
+      c.font = { bold: true, color: { argb: 'FF000000' }, size: 10.5 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
       c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
     });
@@ -11766,15 +11768,19 @@ window.misExportXlsx = async function (id, btn) {
 
 /* ── PDF ───────────────────────────────────────────────────────────────────────────────── */
 
-/* PLAIN. No letterhead, no logo, no rule, no stripes, no colour, no explanatory line at the
-   foot. This is the MIS sheet on a page and nothing else - the same five columns in the same
-   order, printed. Anything else here is something to read past on the way to the figures.
+/* THE PDF IS THE SHEET. Landscape, a yellow header band with black bold text, a thin black
+   grid, the two centred title lines above it - the same document that has been circulated
+   every week, printed. The colours and weights are lifted from MIS_Template.xlsx rather than
+   chosen here: header fill FFFF00, every piece of text black, everything but the figures
+   bold, columns in the template's own proportions (35.5 / 49.8 / 41.8 / 36.4 / 42.0).
 
-   The column headings are shortened too. The sheet spells them out in full ("Current Month
-   Collection Amount Upto - Sep'26") because a spreadsheet column has no other place to say
-   what it is; on a printed page the date is already in the line above it, so the column only
-   has to say Sep'26. Portrait A4, because that is what a document is and what a printer is
-   loaded with. */
+   The column headings are the full ones the sheet carries. They were shortened while this was
+   a plain portrait page and there was no room; landscape gives the room back, and the whole
+   point of the exercise is that the printout looks like the sheet.
+
+   Helvetica stands in for Arial and Calibri - it is metrically the same as Arial, it is one of
+   the fonts every PDF reader already has, and embedding two font files to gain nothing visible
+   would add a quarter of a megabyte to a document that is otherwise nine kilobytes. */
 window.misExportPdf = async function (id, btn) {
   const restore = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
@@ -11787,88 +11793,120 @@ window.misExportPdf = async function (id, btn) {
     const reg = await doc.embedFont(L.StandardFonts.Helvetica);
     const bold = await doc.embedFont(L.StandardFonts.HelveticaBold);
 
-    const W = 595.28, H = 841.89, M = 42;
-    const ink = L.rgb(0, 0, 0), soft = L.rgb(0.35, 0.35, 0.35),
-          rule = L.rgb(0.72, 0.72, 0.72), head = L.rgb(0.93, 0.93, 0.93);
-    /* The money columns need only as much room as "24,49,73,606" and no more, so the width
-       goes to the two name columns, which are the ones that actually vary. */
-    const COL = [118, 159, 78, 78, 78];
+    const W = 841.89, H = 595.28, M = 36;
+    const ink = L.rgb(0, 0, 0), yellow = L.rgb(1, 1, 0), line = L.rgb(0, 0, 0);
+    // the template's column widths, scaled to the page
+    const RAW = [35.5, 49.8, 41.8, 36.4, 42.0];
+    const span = W - M * 2, rawTot = RAW.reduce(function (a, b) { return a + b; }, 0);
+    const COL = RAW.map(function (w) { return w / rawTot * span; });
     const X = []; { let x = M; COL.forEach(function (w) { X.push(x); x += w; }); }
-    const RIGHT = M + COL.reduce(function (a, b) { return a + b; }, 0);
-    const HEAD = ['Project Name', 'Business Unit Name', 'Outstanding',
-                  rep.curr_month_label, rep.prev_month_label];
+    const RIGHT = M + span;
+    const HEAD = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+
+    // Wrap to the column, because the three money headings are a line of prose each.
+    const wrap = function (str, f, size, room) {
+      const out = []; let cur = '';
+      String(str).split(' ').forEach(function (w) {
+        const test = cur ? cur + ' ' + w : w;
+        if (f.widthOfTextAtSize(test, size) > room && cur) { out.push(cur); cur = w; }
+        else cur = test;
+      });
+      if (cur) out.push(cur);
+      return out;
+    };
+    // A name too long for its column is set smaller rather than allowed to run into the figures.
+    const shrinkToFit = function (str, f, size, room) {
+      let sz = size;
+      while (sz > 6 && f.widthOfTextAtSize(str, sz) > room) sz -= 0.25;
+      return sz;
+    };
 
     let page, y;
-    const right = function (s, i, yy, f, size, col) {
-      const w = f.widthOfTextAtSize(s, size);
-      page.drawText(s, { x: X[i] + COL[i] - 6 - w, y: yy, size: size, font: f, color: col });
-    };
-    /* A name that will not fit is SET SMALLER, not cut off and not left to run into the column
-       beside it. "DREAM GURUKUL(DOLTALA MADHYAMGRAM)" is wider than any sensible column at the
-       body size, and a business unit is the one thing on this row nobody should have to guess
-       at. It drops a point at a time to 6pt, which is still legible in print, and only truncates
-       if even that will not do - which nothing here does. */
-    const left = function (s, i, yy, f, size, col) {
-      const room = COL[i] - 12;
-      let sz = size;
-      while (sz > 6 && f.widthOfTextAtSize(s, sz) > room) sz -= 0.25;
-      if (f.widthOfTextAtSize(s, sz) > room) {
-        while (s.length > 1 && f.widthOfTextAtSize(s + '…', sz) > room) s = s.slice(0, -1);
-        s += '…';
+    const vrules = function (top, bottom) {
+      for (let i = 0; i <= COL.length; i++) {
+        const x = (i === COL.length) ? RIGHT : X[i];
+        page.drawLine({ start: { x: x, y: top }, end: { x: x, y: bottom }, thickness: 0.7, color: line });
       }
-      page.drawText(s, { x: X[i] + 6, y: yy, size: sz, font: f, color: col });
     };
+    const HEADH = 34;
     const drawHead = function () {
-      const hh = 20;
-      page.drawRectangle({ x: M, y: y - hh, width: RIGHT - M, height: hh, color: head });
+      page.drawRectangle({ x: M, y: y - HEADH, width: span, height: HEADH, color: yellow });
       HEAD.forEach(function (lab, i) {
-        if (i < 2) page.drawText(lab, { x: X[i] + 6, y: y - hh + 6.5, size: 8, font: bold, color: ink });
-        else right(lab, i, y - hh + 6.5, bold, 8, ink);
+        const lines = wrap(lab, bold, 8.5, COL[i] - 12);
+        const startY = y - HEADH / 2 + (lines.length * 10) / 2 - 7.5;
+        lines.forEach(function (ln, k) {
+          const w = bold.widthOfTextAtSize(ln, 8.5);
+          const x = i < 2 ? X[i] + 6 : X[i] + COL[i] - 6 - w;
+          page.drawText(ln, { x: x, y: startY - k * 10, size: 8.5, font: bold, color: ink });
+        });
       });
-      page.drawLine({ start: { x: M, y: y - hh }, end: { x: RIGHT, y: y - hh }, thickness: 0.7, color: ink });
-      y -= hh;
+      page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 0.7, color: line });
+      page.drawLine({ start: { x: M, y: y - HEADH }, end: { x: RIGHT, y: y - HEADH }, thickness: 0.7, color: line });
+      vrules(y, y - HEADH);
+      y -= HEADH;
     };
     const newPage = function (first) {
       page = doc.addPage([W, H]);
       y = H - M;
       if (first) {
-        page.drawText(t.heading, { x: M, y: y - 12, size: 11.5, font: bold, color: ink });
-        y -= 12 + 13;
-        page.drawText(t.sub, { x: M, y: y - 9, size: 9, font: reg, color: soft });
-        y -= 9 + 16;
+        /* The two title lines sit INSIDE the grid, each in its own full-width bordered band,
+           the way the sheet has them - merged across A:E. Drawn as boxes rather than floating
+           text so the printout is the sheet rather than something resembling it. */
+        [[t.heading, 12, 25], [t.sub, 12.5, 26]].forEach(function (b) {
+          const txt = b[0], size = b[1], h = b[2];
+          page.drawRectangle({ x: M, y: y - h, width: span, height: h,
+            borderColor: line, borderWidth: 0.7 });
+          const cx = (span - bold.widthOfTextAtSize(txt, size)) / 2;
+          page.drawText(txt, { x: M + cx, y: y - h / 2 - size / 2 + 1.5, size: size, font: bold, color: ink });
+          y -= h;
+        });
       }
       drawHead();
     };
 
     newPage(true);
-    const RH = 18;
+    const RH = 21;
     rows.forEach(function (r) {
-      if (y - RH < M + 20) newPage(false);
-      const ty = y - RH + 5.5;
-      left(String(r.project_name || ''), 0, ty, reg, 8.5, ink);
-      left(String(r.bu_name || ''), 1, ty, reg, 8.5, ink);
-      [r.outstanding, r.curr, r.prev].forEach(function (v, k) {
-        const blank = (v == null || Number(v) === 0);
-        right(misIN(v, true), k + 2, ty, reg, 8.5, blank ? soft : ink);
+      if (y - RH < M + 24) newPage(false);
+      const ty = y - RH + 6.5;
+      [String(r.project_name || ''), String(r.bu_name || '')].forEach(function (txt, i) {
+        const room = COL[i] - 12;
+        const lines = wrap(txt, bold, 9, room);
+        if (lines.length === 1) {
+          page.drawText(txt, { x: X[i] + 6, y: ty, size: shrinkToFit(txt, bold, 9, room), font: bold, color: ink });
+        } else {
+          // two short lines beat one squeezed one, exactly as the sheet wraps them
+          lines.slice(0, 2).forEach(function (ln, k) {
+            page.drawText(ln, { x: X[i] + 6, y: ty + 4.5 - k * 9, size: 8, font: bold, color: ink });
+          });
+        }
       });
-      page.drawLine({ start: { x: M, y: y - RH }, end: { x: RIGHT, y: y - RH }, thickness: 0.4, color: rule });
+      [r.outstanding, r.curr, r.prev].forEach(function (v, k) {
+        const str = misIN(v, true), i = k + 2;
+        const w = reg.widthOfTextAtSize(str, 9);
+        page.drawText(str, { x: X[i] + COL[i] - 6 - w, y: ty, size: 9, font: reg, color: ink });
+      });
+      page.drawLine({ start: { x: M, y: y - RH }, end: { x: RIGHT, y: y - RH }, thickness: 0.7, color: line });
+      vrules(y, y - RH);
       y -= RH;
     });
 
-    if (y - 20 < M + 20) newPage(false);
-    const ty = y - 20 + 6;
-    page.drawText('TOTAL', { x: X[0] + 6, y: ty, size: 9, font: bold, color: ink });
-    right(misIN(tot.o), 2, ty, bold, 9, ink);
-    right(misIN(tot.c), 3, ty, bold, 9, ink);
-    right(misIN(tot.p), 4, ty, bold, 9, ink);
-    page.drawLine({ start: { x: M, y: y - 20 }, end: { x: RIGHT, y: y - 20 }, thickness: 0.8, color: ink });
+    if (y - 24 < M + 24) newPage(false);
+    const tty = y - 24 + 7.5;
+    page.drawText('TOTAL', { x: X[0] + 6, y: tty, size: 11.5, font: bold, color: ink });
+    [tot.o, tot.c, tot.p].forEach(function (v, k) {
+      const str = misIN(v), i = k + 2;
+      const w = bold.widthOfTextAtSize(str, 10);
+      page.drawText(str, { x: X[i] + COL[i] - 6 - w, y: tty, size: 10, font: bold, color: ink });
+    });
+    page.drawLine({ start: { x: M, y: y - 24 }, end: { x: RIGHT, y: y - 24 }, thickness: 0.7, color: line });
+    vrules(y, y - 24);
 
-    // A page number only when there is more than one page to keep in order.
     const pages = doc.getPages();
     if (pages.length > 1) {
       pages.forEach(function (pg, i) {
         pg.drawText(String(i + 1) + ' / ' + pages.length,
-          { x: RIGHT - 30, y: M - 18, size: 8, font: reg, color: soft });
+          { x: RIGHT - 30, y: M - 16, size: 8, font: reg, color: L.rgb(0.35, 0.35, 0.35) });
       });
     }
 
