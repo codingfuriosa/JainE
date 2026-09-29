@@ -21602,23 +21602,40 @@ window.custPrintInvoice=function(){
   setTimeout(function(){try{w.focus();w.print();}catch(_e){}},350);
 };
 
-/* The "Unit Charges" rows of a cost sheet, as each project's CRM cost sheet prints them.
-   Dream Ananta's CRM sheet shows Unit Cost, Floor Escalation (FLC), PLC and Vehicle Parking as ONE
-   line, "Unit Price (Add On Premium Specification Pack)", with a per-sq-ft Rate beside it: D/8G is
-   48,92,500 + 3,32,500 + 95,000 + 5,00,000 = 58,20,000 on 950 sq ft. Every other project is left
-   exactly as Farvision itemises it, with no Rate column.
-   Rate = amount / super built-up area, which is how the CRM's 5150 / 350 / 100 come out. */
+/* Cost sheet rows with a Rate, as the CRM cost sheet prints them.
+   RATE is per sq ft of super built-up area - how the CRM's 5150 / 350 / 100 come out of
+   48,92,500 / 3,32,500 / 95,000 on 950 sq ft. Farvision's files carry no per-charge rate, so it is
+   worked out from the amount:
+     * Unit Cost, Floor Escalation (FLC) and PLC always have one - the CRM prices all three per
+       sq ft - even when a discount leaves paise (FLC 2,49,536 on 860 sq ft = 290.16);
+     * any other charge shows one only when it divides by the area into whole rupees - legal 25,
+       generator 35, club infrastructure 65... A lump sum (association formation 15,000, cheque
+       dishonoured 2,000) does not, and shows "-";
+     * parking never does: it is priced per slot, and 4,00,000 on a 1,000 sq ft flat would
+       otherwise read as a rate of 400.
+   A table shows the Rate column only if at least one of its rows has a rate.
+   DREAM ANANTA's CRM sheet prints Unit Cost, Floor Escalation (FLC), PLC and Vehicle Parking as ONE
+   line, "Unit Price (Add On Premium Specification Pack)" (D/8G: 58,20,000 on 950 sq ft = 6,126.32).
+   Every other project keeps Farvision's own line-by-line split. */
 const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge|vehicle parking/i;
-function custCostUnitRows(unit,unitGroupItems){
-  const isAnanta=/^dream ananta$/i.test(String((unit.projects&&unit.projects.name)||'').trim());
+function custCostRows(unit,list,isUnitGroup){
   const sbu=Number(unit.super_built_up_area_sqft||0);
-  const row=(label,list,perSqft)=>{const amount=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-    return {label,amount,tax,rate:perSqft&&sbu?amount/sbu:null};};
-  if(!isAnanta) return {showRate:false,rows:unitGroupItems.map(i=>row(i.component,[i],false))};
-  const price=unitGroupItems.filter(i=>CUST_ANANTA_UNIT_PRICE.test(i.component||''));
-  const rest=unitGroupItems.filter(i=>!CUST_ANANTA_UNIT_PRICE.test(i.component||''));
-  return {showRate:true,rows:(price.length?[row('Unit Price (Add On Premium Specification Pack)',price,true)]:[])
-    .concat(rest.map(i=>row(i.component,[i],false)))};  // nothing today: the whole unit group is merged
+  const sum=(l,k)=>l.reduce((s,i)=>s+Number(i[k]||0),0);
+  const itemRate=i=>{const amt=Number(i.amount||0);
+    if(!sbu||!amt||/parking/i.test(i.component||'')) return null;
+    const r=amt/sbu;
+    if(/^unit cost$|flc charge|plc charge/i.test(String(i.component||'').trim())) return r;
+    return Math.abs(r-Math.round(r))<1e-9?Math.round(r):null;};
+  let rows;
+  const isAnanta=/^dream ananta$/i.test(String((unit.projects&&unit.projects.name)||'').trim());
+  if(isUnitGroup&&isAnanta){
+    const price=list.filter(i=>CUST_ANANTA_UNIT_PRICE.test(i.component||''));
+    const rest=list.filter(i=>!CUST_ANANTA_UNIT_PRICE.test(i.component||''));
+    rows=(price.length?[{label:'Unit Price (Add On Premium Specification Pack)',amount:sum(price,'amount'),tax:sum(price,'tax_amount'),
+        rate:sbu?sum(price,'amount')/sbu:null}]:[])
+      .concat(rest.map(i=>({label:i.component,amount:Number(i.amount||0),tax:Number(i.tax_amount||0),rate:itemRate(i)})));
+  }else rows=list.map(i=>({label:i.component,amount:Number(i.amount||0),tax:Number(i.tax_amount||0),rate:itemRate(i)}));
+  return {showRate:rows.some(r=>r.rate!=null),rows,amount:sum(list,'amount'),tax:sum(list,'tax_amount')};
 }
 function custFmtRate(r){return r==null?'—':Number(r).toLocaleString('en-IN',{maximumFractionDigits:2});}
 async function custTabCostSheet(data,unit){
@@ -21694,27 +21711,21 @@ async function custTabCostSheet(data,unit){
     const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
     const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
     const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
-    const breakupRow=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
-      return [esc(i.component),custInr(amt),gstPct+'%',custInr(tax),custInr(amt+tax)];};
-    const breakupTotal=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-      return ['<b>'+label+'</b>','<b>'+custInr(amt)+'</b>','','<b>'+custInr(tax)+'</b>','<b>'+custInr(amt+tax)+'</b>'];};
+    // One table per group; the Rate column appears only where some row has a rate (custCostRows).
+    const breakupTable=(list,isUnitGroup,totalLabel)=>{
+      const g=custCostRows(unit,list,isUnitGroup), rc=g.showRate;
+      const cells=(r)=>{const gstPct=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
+        return [esc(r.label)].concat(rc?[custFmtRate(r.rate)]:[]).concat([custInr(r.amount),gstPct+'%',custInr(r.tax),custInr(r.amount+r.tax)]);};
+      return mTable(['Particulars'].concat(rc?['Rate']:[]).concat(['Amount','GST','GST Amount','Gross Amount']),
+        g.rows.map(cells).concat([['<b>'+totalLabel+'</b>'].concat(rc?['']:[]).concat(['<b>'+custInr(g.amount)+'</b>','','<b>'+custInr(g.tax)+'</b>','<b>'+custInr(g.amount+g.tax)+'</b>'])]));
+    };
     const groupTitle=t=>'<div style="font-size:12px;font-weight:700;color:var(--slate);text-transform:uppercase;letter-spacing:.03em;margin:16px 0 6px">'+t+'</div>';
     window._custCostSheetUnit=unit; window._custCostSheetContact=c; window._custCostSheetItems=items;
     out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="sec-title" style="margin:0">Cost Breakup</div>'+
       '<button class="btn" onclick="custPrintCostSheet()"><i class="fa-solid fa-print"></i> Print / Download PDF</button></div>';
-    if(unitGroupItems.length){
-      const uc=custCostUnitRows(unit,unitGroupItems);
-      const ucRow=r=>{const gstPct=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
-        return [esc(r.label)].concat(uc.showRate?[custFmtRate(r.rate)]:[]).concat([custInr(r.amount),gstPct+'%',custInr(r.tax),custInr(r.amount+r.tax)]);};
-      const tot=breakupTotal(unitGroupItems,'Total Flat Value');
-      out+=groupTitle('Unit Charges')+
-        mTable(['Particulars'].concat(uc.showRate?['Rate']:[]).concat(['Amount','GST','GST Amount','Gross Amount']),
-          uc.rows.map(ucRow).concat([uc.showRate?[tot[0],''].concat(tot.slice(1)):tot]));
-    }
-    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],edcGroupItems.map(breakupRow).concat([breakupTotal(edcGroupItems,'Total EDC')]));
-    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+
-      mTable(['Particulars','Amount','GST','GST Amount','Gross Amount'],adhocGroupItems.map(breakupRow).concat([breakupTotal(adhocGroupItems,'Total Adhoc')]));
+    if(unitGroupItems.length) out+=groupTitle('Unit Charges')+breakupTable(unitGroupItems,true,'Total Flat Value');
+    if(edcGroupItems.length) out+=groupTitle('Extra Development Charges (EDC)')+breakupTable(edcGroupItems,false,'Total EDC');
+    if(adhocGroupItems.length) out+=groupTitle('Other Charges (Adhoc)')+breakupTable(adhocGroupItems,false,'Total Adhoc');
     out+='<div style="margin-top:8px;padding-top:10px;border-top:2px solid #334155;text-align:right;font-size:14.5px"><b>Grand Total: '+custInr(totalWithTax)+'</b></div>';
   }
   if(invoices.length){
@@ -21746,22 +21757,14 @@ window.custPrintCostSheet=function(){
   const unitGroupItems=items.filter(i=>UNIT_GROUP.test(i.component||''));
   const edcGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&STANDARD_COMPONENTS.test(i.component||''));
   const adhocGroupItems=items.filter(i=>!UNIT_GROUP.test(i.component||'')&&!STANDARD_COMPONENTS.test(i.component||''));
-  const rowHtml=i=>{const amt=Number(i.amount||0),tax=Number(i.tax_amount||0),gstPct=amt?Math.round(tax/amt*1000)/10:0;
-    return '<tr><td>'+esc(i.component)+'</td><td>'+custInr(amt)+'</td><td>'+gstPct+'%</td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
-  const totalHtml=(list,label)=>{const amt=list.reduce((s,i)=>s+Number(i.amount||0),0),tax=list.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-    return '<tr style="font-weight:700"><td>'+label+'</td><td>'+custInr(amt)+'</td><td></td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr>';};
-  const groupTable=(label,list,totalLabel)=>list.length?'<h3>'+label+'</h3><table><thead><tr><th>Particulars</th><th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
-    list.map(rowHtml).join('')+totalHtml(list,totalLabel)+'</tbody></table>':'';
-  // Unit Charges goes through custCostUnitRows so the printout matches the screen (Dream Ananta's
-  // single "Unit Price" line and Rate column).
-  const unitChargesTable=()=>{
-    if(!unitGroupItems.length) return '';
-    const uc=custCostUnitRows(unit,unitGroupItems), rc=uc.showRate;
-    const amt=unitGroupItems.reduce((s,i)=>s+Number(i.amount||0),0),tax=unitGroupItems.reduce((s,i)=>s+Number(i.tax_amount||0),0);
-    return '<h3>Unit Charges</h3><table><thead><tr><th>Particulars</th>'+(rc?'<th>Rate</th>':'')+'<th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
-      uc.rows.map(r=>{const g=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
-        return '<tr><td>'+esc(r.label)+'</td>'+(rc?'<td>'+custFmtRate(r.rate)+'</td>':'')+'<td>'+custInr(r.amount)+'</td><td>'+g+'%</td><td>'+custInr(r.tax)+'</td><td>'+custInr(r.amount+r.tax)+'</td></tr>';}).join('')+
-      '<tr style="font-weight:700"><td>Total Flat Value</td>'+(rc?'<td></td>':'')+'<td>'+custInr(amt)+'</td><td></td><td>'+custInr(tax)+'</td><td>'+custInr(amt+tax)+'</td></tr></tbody></table>';
+  // Same rows and Rate column as the screen (custCostRows).
+  const groupTable=(label,list,totalLabel,isUnitGroup)=>{
+    if(!list.length) return '';
+    const g=custCostRows(unit,list,isUnitGroup), rc=g.showRate;
+    return '<h3>'+label+'</h3><table><thead><tr><th>Particulars</th>'+(rc?'<th>Rate</th>':'')+'<th>Amount</th><th>GST</th><th>GST Amount</th><th>Gross Amount</th></tr></thead><tbody>'+
+      g.rows.map(r=>{const p=r.amount?Math.round(r.tax/r.amount*1000)/10:0;
+        return '<tr><td>'+esc(r.label)+'</td>'+(rc?'<td>'+custFmtRate(r.rate)+'</td>':'')+'<td>'+custInr(r.amount)+'</td><td>'+p+'%</td><td>'+custInr(r.tax)+'</td><td>'+custInr(r.amount+r.tax)+'</td></tr>';}).join('')+
+      '<tr style="font-weight:700"><td>'+totalLabel+'</td>'+(rc?'<td></td>':'')+'<td>'+custInr(g.amount)+'</td><td></td><td>'+custInr(g.tax)+'</td><td>'+custInr(g.amount+g.tax)+'</td></tr></tbody></table>';
   };
   const grandTotal=items.reduce((s,i)=>s+Number(i.amount||0)+Number(i.tax_amount||0),0);
   const html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cost Sheet — '+esc(unit.unit_code)+'</title><style>'+
@@ -21774,9 +21777,9 @@ window.custPrintCostSheet=function(){
     '</style></head><body>'+
     '<h1>Cost Sheet — '+esc(unit.unit_code)+(unit.tower?', '+esc(unit.tower):'')+'</h1>'+
     '<h2>'+esc((unit.projects&&unit.projects.name)||'')+' · '+esc((c&&c.contact_name)||'')+(unit.booking_no?' · Booking No '+esc(unit.booking_no):'')+' · as on '+fmtDate(new Date())+'</h2>'+
-    unitChargesTable()+
-    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC')+
-    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc')+
+    groupTable('Unit Charges',unitGroupItems,'Total Flat Value',true)+
+    groupTable('Extra Development Charges (EDC)',edcGroupItems,'Total EDC',false)+
+    groupTable('Other Charges (Adhoc)',adhocGroupItems,'Total Adhoc',false)+
     '<div class="grand">Grand Total: '+custInr(grandTotal)+'</div>'+
     '</body></html>';
   try{ w.document.open(); w.document.write(html); w.document.close(); }
