@@ -166,6 +166,35 @@ window.__confirmAnswer=function(val){
   if(r)r(val);
 };
 
+/* SOME DECISIONS ARE NOT YES OR NO.
+
+   Rejecting a candidate is two different acts - turning them down, and telling them - and a
+   two-button dialog had to pick one. It asked "Reject & email?" and treated No as "do nothing",
+   so rejecting somebody without writing to them was simply not offered. This takes a list of
+   choices and returns the one pressed, or null for Cancel. */
+let __choiceResolve=null;
+function choiceDialog(message,opts){
+  opts=opts||{};
+  const btns=(opts.choices||[]).map(function(c){
+    return '<button class="btn '+(c.style||'')+'" onclick="__choiceAnswer('
+      +esc(JSON.stringify(String(c.key)))+')">'
+      +(c.icon?'<i class="fa-solid '+esc(c.icon)+'"></i> ':'')+esc(c.label)+'</button>';
+  }).join('');
+  return new Promise(function(resolve){
+    __choiceResolve=resolve;
+    openModal('<div class="modal-head"><h3><i class="fa-solid '+esc(opts.icon||'fa-circle-question')
+      +'" style="color:'+(opts.danger?'var(--err)':'var(--brand)')+'"></i> '+esc(opts.title||'Please choose')+'</h3></div>'
+      +'<div class="modal-body">'+esc(message)+'</div>'
+      +'<div class="modal-foot" style="flex-wrap:wrap;gap:8px">'
+      +'<button class="btn" onclick="__choiceAnswer(null)">Cancel</button>'+btns+'</div>');
+  });
+}
+window.__choiceAnswer=function(key){
+  const r=__choiceResolve;__choiceResolve=null;
+  closeModal();
+  if(r)r(key===undefined?null:key);
+};
+
 /* ============================ AUTH ============================ */
 function fatal(msg){
   var a=$('authLoad');
@@ -506,8 +535,8 @@ const NAV=[
     {id:'inspection',label:'Inspection',icon:'fa-clipboard-list'},
   ]},
   {group:'People',items:[
-    {id:'recruitment_new',label:'Recruitment (New)',icon:'fa-user-plus'},
-    {id:'hr_new',label:'Human Resources (New)',icon:'fa-users'},
+    {id:'recruitment_new',label:'Recruitment',icon:'fa-user-plus'},
+    {id:'hr_new',label:'Human Resources',icon:'fa-users'},
   ]},
   {group:'Governance',items:[
     {id:'finance',label:'Finance Vault',icon:'fa-indian-rupee-sign'},
@@ -1023,7 +1052,7 @@ const MODMETA={
   procurement:{icon:'fa-cart-shopping',c:'#b45309',bg:'#fffbeb',desc:'Indent → RFQ → PO → GRN with multi-level approvals & 3-way match.',kpis:[['Open POs','14','fa-file-invoice'],['Pending Approval','5','fa-clock'],['Vendors','86','fa-store'],['Spend (mo)','₹62L','fa-indian-rupee-sign']],cols:['PO No','Vendor','Amount','Status','Date'],rows:[['PO-0042','ACC Cement','₹4.2L','Pending','27 Jun'],['PO-0041','Tata Steel','₹9.1L','Approved','25 Jun'],['PO-0040','Pidilite','₹1.3L','Received','22 Jun']]},
   finance:{icon:'fa-indian-rupee-sign',c:'#15803d',bg:'#f0fdf4',desc:'Director vault — collections, dues, payables & project P&L.',kpis:[['Collections (mo)','₹1.2 Cr','fa-arrow-down'],['Outstanding','₹3.8 Cr','fa-hourglass'],['Payables','₹64L','fa-file-invoice-dollar'],['Net Position','₹5.6 Cr','fa-scale-balanced']],cols:['Account','Type','Amount','Status','Date'],rows:[['Skyline Collections','Inflow','₹42L','Cleared','26 Jun'],['Contractor Payment','Outflow','₹18L','Pending','27 Jun']]},
   hr:{icon:'fa-users',c:'#be123c',bg:'#fff1f2',desc:'Directory, attendance, payroll-grade data, performance & statutory.',kpis:[['Headcount','3','fa-users'],['Present Today','3','fa-user-check'],['On Leave','0','fa-plane'],['Open Requests','2','fa-inbox']],cols:['Employee','Department','Designation','Status','Joined'],rows:[['(salary columns are protected)','—','—','—','—']]},
-  recruitment:{icon:'fa-user-plus',c:'#0369a1',bg:'#f0f9ff',desc:'Hiring funnel — requisition → applications → interviews → offer → onboarding.',kpis:[['Open Roles','4','fa-briefcase'],['Applicants','37','fa-id-card'],['Interviews (wk)','6','fa-comments'],['Offers Out','2','fa-envelope-open-text']],cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
+  recruitment:{icon:'fa-user-plus',c:'#0369a1',bg:'#f0f9ff',desc:'Hiring funnel — request → applications → interviews → offer → onboarding.',kpis:[['Open Roles','4','fa-briefcase'],['Applicants','37','fa-id-card'],['Interviews (wk)','6','fa-comments'],['Offers Out','2','fa-envelope-open-text']],cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
   maintenance:{icon:'fa-screwdriver-wrench',c:'#7c3aed',bg:'#f5f3ff',desc:'Asset register, preventive-maintenance schedules & breakdown tracking.',kpis:[['Assets','64','fa-gears'],['PM Due (wk)','8','fa-calendar-check'],['Under Repair','2','fa-wrench'],['Downtime','3.2h','fa-clock']],cols:['Asset','Category','Location','Next PM','Status'],rows:[['DG Set 250kVA','Electrical','Skyline','02 Jul','Active'],['Passenger Lift 1','Mechanical','Greenfield','—','Under Repair']]},
   reports:{icon:'fa-chart-pie',c:'#1d4ed8',bg:'#eff4ff',desc:'Cross-module analytics, scoreboards & reconciliation tools.',kpis:[['Saved Reports','12','fa-floppy-disk'],['Reconciliations','4','fa-not-equal'],['Scheduled','3','fa-clock'],['Exports (mo)','28','fa-file-export']],cols:['Report','Module','Type','Last Run','Owner'],rows:[['Collections vs Demand','CRM','Reconciliation','Today','You'],['Stock Variance','Inventory','Reconciliation','Yesterday','You']]},
   helpdesk:{icon:'fa-headset',c:'#0f766e',bg:'#f0fdfa',desc:'AI-assisted answers from the company knowledge base, with ticket fallback.',kpis:[['Open Tickets','3','fa-ticket'],['Resolved (mo)','41','fa-circle-check'],['KB Articles','58','fa-book'],['Avg. Response','12m','fa-stopwatch']],cols:['Ticket','Subject','Department','Status','Raised'],rows:[['HD-0091','VPN access','IT','Open','Today'],['HD-0090','Salary slip','HR','Resolved','Yesterday']]},
@@ -1265,7 +1294,6 @@ function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/$
 function s3KeyForProjectPhoto(projectId,filename){return `customer-portal/projects/${projectId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProjectDoc(projectId,docType,filename){return `customer-portal/projects/${projectId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForUnitPhoto(unitId,filename){return `customer-portal/units/${unitId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
-function s3KeyForFloorPhoto(projectId,floorNo,filename){return `customer-portal/projects/${projectId}/floors/${s3SafeSeg(floorNo)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForTowerPhoto(projectId,tower,filename){return `customer-portal/projects/${projectId}/towers/${s3SafeSeg(tower)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/units/${unitId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
@@ -1292,12 +1320,49 @@ async function uploadFileToS3(key,file,onProgress){
     xhr.send(file);
   });
 }
+/* THE TAB IS OPENED ON THE CLICK, BEFORE THE URL IS SIGNED.
+
+   This used to sign the URL first and call window.open afterwards. By then the click that caused it
+   has been forgotten, so the browser treats the new tab as one the page opened by itself and blocks
+   it as a pop-up - silently, with no error and no file. Every file in JAIN-E opens through here, so
+   the Document Library, a CV, a job description and a test attachment all failed the same way and
+   for the same reason.
+
+   Opening a blank tab while the click is still live, then pointing it at the signed URL when it
+   arrives, is what makes it work. Downloads are unaffected - an <a download> is not a pop-up - so
+   that path is left exactly as it was.
+
+   If the tab is blocked anyway (some browsers block even this when pop-ups are disabled outright),
+   the address is handed over rather than lost. */
 async function s3OpenSigned(storagePath,downloadName){
   const key=storagePath.slice(3);
+  const tab=downloadName?null:window.open('','_blank');
+  if(tab){
+    try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening…</title>'
+      +'<body style="font:16px system-ui;padding:40px;color:#334155">Opening the file…</body>'); }catch(_e){}
+  }
   const {data,error}=await s3Sign('get',key);
-  if(error){toast('Could not open file: '+error.message,'err');return;}
-  if(downloadName){const a=document.createElement('a');a.href=data.url;a.download=downloadName;document.body.appendChild(a);a.click();a.remove();}
-  else window.open(data.url,'_blank');
+  if(error){
+    if(tab) try{ tab.close(); }catch(_e){}
+    toast('Could not open file: '+error.message,'err');
+    return;
+  }
+  if(downloadName){
+    const a=document.createElement('a');a.href=data.url;a.download=downloadName;
+    document.body.appendChild(a);a.click();a.remove();
+    return;
+  }
+  if(tab&&!tab.closed){ try{ tab.location.href=data.url; return; }catch(_e){} }
+  const w=window.open(data.url,'_blank');
+  if(!w){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-file"></i> Open file</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><p style="margin:0 0 10px;color:var(--slate);font-size:13px">'
+      +'Your browser blocked the new tab. Open it from here instead.</p>'
+      +'<input class="inp" readonly value="'+esc(data.url)+'" onclick="this.select()"></div>'
+      +'<div class="modal-foot"><a class="btn btn-primary" href="'+esc(data.url)+'" target="_blank" rel="noopener">Open</a>'
+      +'<button class="btn" onclick="closeModal()">Close</button></div>');
+  }
 }
 // Signed URL for inline display (an <img src>, not a click-to-open/download) — used by the
 // customer-portal photo galleries so a thumbnail actually shows the photo instead of a placeholder
@@ -7027,7 +7092,7 @@ function recGuard(){
   toast('Read-only — only HR, Abhay Mati and Administrators can change Recruitment records','err');
   return false;
 }
-const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareAddN','rtShareSend',
+const REC_WRITE_FNS=['rtAdd','rtRename','rtDelete','rtSave','rtUpdate','rtShareSend',
   'mpFillForm','mpEditSel','mpDeleteSel','mpEdit','mpDeleteOne','mpUpdate','mpSave',
   'recUploadModal','recDeleteSel','recJdSave','recJdDelete',
   'tpMpApprove','tpMpReject','tpMpRejectConfirm','tpMpDeleteOne','tpMpGenerate',
@@ -7091,18 +7156,20 @@ function hrEmpOptions(sel){return (HR_EMP||[]).map(e=>`<option value="${esc(e.em
 // talent, so hrResumes/hrInterviewQs are reused as-is -- they, and tp*, disagree on which body
 // container id they render into (hrBody vs recBody), so the id switches per tab below.
 VIEWS.hr_new=async function(v,seg){
-  setCrumb(['People','Human Resources (New)']);
-  const tabs=['Interview Tracker','Monthly Update','Resumes','Interview Qs'];
+  setCrumb(['People','Human Resources']);
+  const tabs=['Interviews','Monthly Progress','Resumes'];
   const ti=mTab(seg,tabs.length);
   const bodyId=(ti<=1)?'recBody':'hrBody';
-  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-users','#be123c','Human Resources (New)')
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-users','#be123c','Human Resources')
     +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators.</div>')
     +mTabs('hr_new',tabs,ti)+'<div id="'+bodyId+'" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
   if(ti===0){await tpTracker();return;}
   if(ti===1){await tpMonthlyUpdate();return;}
-  if(ti===2){await hrResumes();return;}
-  await hrInterviewQs();
+  /* Resumes is the last tab now. Interview Qs was removed: it was a library nobody was reaching
+     for, and it sat in the tab strip costing a decision on every visit. hrInterviewQs() is left in
+     the file rather than deleted, so nothing is lost if it is ever wanted back. */
+  await hrResumes();
 };
 
 /* ── Monthly Update ──
@@ -7163,7 +7230,7 @@ function muRenderList(b){
   if(!rows.length){
     html+='<div class="card card-pad empty"><i class="fa-regular fa-calendar"></i>'
       +'<div style="font-weight:600;color:var(--ink)">No months yet</div>'
-      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a ManPower requisition lands in it. '
+      +'<p style="max-width:400px;margin:6px auto 0">A month appears here as soon as a hiring request lands in it. '
       +'Fill a ManPower Form in Recruitment to start one.</p></div>';
   } else {
     html+='<div class="mu-grid">'+rows.map(function(r){
@@ -7204,7 +7271,7 @@ async function muRenderDetail(b){
 
   const head='<tr>'
     +'<th style="width:36px"><input type="checkbox" class="mu-cb" id="muChkAll" onchange="muToggleAll(this)"></th>'
-    +'<th>Position</th><th>Vacancies</th><th>Approval</th><th>Hiring</th>'
+    +'<th>Position</th><th>Vacancies</th><th>Status</th><th>Hiring</th>'
     +stages.map(function(s,i){ return '<th class="mu-n'+(i===0?' mu-split':'')+'">'+esc(s)+'</th>'; }).join('')
     +'</tr>';
 
@@ -7270,7 +7337,7 @@ async function muRenderDetail(b){
         +'<div id="muNoMatch" class="empty" style="display:none;padding:26px">No matches</div></div>'
       : '<div class="card card-pad empty"><i class="fa-regular fa-folder-open"></i>'
         +'<div style="font-weight:600;color:var(--ink)">Nothing in '+esc(muMonthLabel(MU_CUR))+' yet</div>'
-        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from ManPower requisitions.</p></div>');
+        +'<p style="max-width:400px;margin:6px auto 0">Positions appear here from hiring requests.</p></div>');
 }
 
 /* Closing a position is what takes its page off the website. hr.public_position only answers for
@@ -7382,7 +7449,7 @@ window.muDeleteSel=async function(){
   const what=ids.length===1
     ? 'Remove “'+((picked[0]&&picked[0].position_title)||'this position')+'” from '+muMonthLabel(MU_CUR)+'?'
     : 'Remove '+ids.length+' positions from '+muMonthLabel(MU_CUR)+'?';
-  if(!await confirmDialog(what+' The requisition itself is not deleted.',
+  if(!await confirmDialog(what+' The hiring request itself is not deleted.',
       {title:'Remove from month', okLabel:'Remove'})) return;
   const {error}=await sb.schema('hr').from('tracker_rows').delete().in('id',ids);
   if(error){ toast(error.message,'err'); return; }
@@ -7394,16 +7461,16 @@ window.muDeleteSel=async function(){
 /* Approve / Reject a fresh row. The decision is recorded against the REQUISITION, which is what the
    emailed one-click links act on as well, so both routes land in exactly the same place. */
 window.muApprove=async function(manpowerId,ok){
-  if(!manpowerId){ toast('This row has no requisition behind it','err'); return; }
-  if(!hrCan()){ toast('Only HR can approve a requisition','err'); return; }
+  if(!manpowerId){ toast('This row has no hiring request behind it','err'); return; }
+  if(!hrCan()){ toast('Only HR can approve a hiring request','err'); return; }
   const row=(MU_ROWS||[]).find(function(r){return r.manpower_id===manpowerId;})||{};
-  const who=row.position_title||'this requisition';
+  const who=row.position_title||'this request';
   /* confirmDialog defaults to danger:true with the OK button labelled "Delete" - which turned the
      Approve prompt into a red delete warning. Both buttons are named for what they actually do. */
   const okd=await confirmDialog(
-    (ok?'Approve the requisition for “':'Reject the requisition for “')+who+'”?',
-    ok ? {title:'Approve requisition', okLabel:'Approve', icon:'fa-circle-check', danger:false}
-       : {title:'Reject requisition',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
+    (ok?'Approve the hiring request for “':'Reject the hiring request for “')+who+'”?',
+    ok ? {title:'Approve hiring request', okLabel:'Approve', icon:'fa-circle-check', danger:false}
+       : {title:'Reject hiring request',  okLabel:'Reject',  icon:'fa-circle-xmark', danger:true});
   if(!okd) return;
   const patch=ok
     ? {approval_status:'Approved', approved_by:state.email, approved_at:new Date().toISOString(), rejection_reason:null}
@@ -7536,7 +7603,7 @@ async function hrTracker(){
             <td style="font-size:12px;color:var(--slate)">${cel(r.source)}</td>
             <td style="font-size:12px">${cel(r.entity)}</td>
             <td class="tr-nowrap" style="font-family:monospace;font-size:12px">${cel(r.number)}</td>
-            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${JSON.stringify(r.candidate_name||'')})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
+            <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" onclick="hrTrackerMailed(${esc(JSON.stringify(r.candidate_name||''))})" style="color:var(--brand)">${esc(r.email)}</a>`:''}</td>
             <td class="tr-nowrap" style="font-size:12px;color:var(--slate)">${cel(r.scheduled_date)}</td>
             <td class="tr-nowrap">${fbTag(r.feedback)}</td>
             <td class="tr-nowrap">${trResumeCell(r)}</td>
@@ -7770,16 +7837,19 @@ window.rsBulkDownload=async function(){
 };
 window.rsBulkDelete=async function(){
   if(!RS_SEL.size)return;
-  if(!await confirmDialog('Delete '+RS_SEL.size+' resume(s) permanently?'))return;
-  for(const id of RS_SEL){
-    const r=(RS_ROWS||[]).find(x=>x.id===id);
-    if(r&&r.storage_path){ if(isS3Path(r.storage_path)) await s3Delete(r.storage_path); else await sb.storage.from('resumes').remove([r.storage_path]); }
-    await sb.schema('hr').from('resumes').delete().eq('id',id);
-  }
+  const ids=[...RS_SEL];
+  if(!await confirmDialog(
+      'Delete '+ids.length+' CV'+(ids.length===1?'':'s')+' permanently? Where somebody is still '
+      +'waiting to be approved on the strength of one, their approval task is cancelled too.',
+      {title:'Delete CV'+(ids.length===1?'':'s'), okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  // One call, so the whole set succeeds or fails together instead of half-deleting on an error.
+  const {data,error}=await sb.schema('hr').rpc('resume_delete',{p_ids:ids});
+  if(error){toast('Could not delete: '+error.message,'err');return;}
+  await hrRemoveFiles(data);
   RS_ROWS=(RS_ROWS||[]).filter(x=>!RS_SEL.has(x.id));
   if(RS_SEARCH)RS_SEARCH=(RS_SEARCH||[]).filter(x=>!RS_SEL.has(x.id));
   RS_SEL=new Set();
-  toast('Deleted','ok');rsRender();
+  toast(ids.length+' deleted','ok');rsRender();
 };
 function rsDetailRow(label,html){
   if(!html)return '';
@@ -7828,38 +7898,166 @@ window.rsFilter=function(q){
   const el=$('rsQ'); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length); }
 };
 window.rsClearFilter=function(){ rsFilter(''); };
-window.rsUploadModal=function(){
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload Resume</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm">
-    <div class="dropzone" onclick="document.getElementById('rsFile').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="rsFName">Click to choose a PDF, Word doc, or image</div></div>
-    <input type="file" id="rsFile" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="document.getElementById('rsFName').textContent=this.files[0]?this.files[0].name:'Click to choose a PDF, Word doc, or image'">
-    <p style="font-size:12px;color:var(--slate);margin-top:10px">AI will automatically read the resume and fill in name, contact info, skills, experience and a summary — no need to type it in.</p>
-  </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>`);
-};
-window.rsUploadSave=async function(){
-  const fEl=$('rsFile');const f=fEl&&fEl.files&&fEl.files[0];
-  if(!f){toast('Choose a file first','err');return;}
-  const btn=$('rsUpBtn');btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading…';
-  const key=s3KeyForResume(f.name);
-  const {data:upData,error:upErr}=await uploadFileToS3(key,f);
-  if(upErr){
-    toast('Upload failed: '+upErr.message,'err');
-    btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
+/* THE OPEN POSITIONS, WHICH IS WHAT A CV CAN BE UPLOADED AGAINST.
+   Approved and still Open: an unapproved request is not a vacancy yet, and a closed one is not a
+   vacancy any more, so neither should be able to collect CVs. */
+async function hrOpenPositions(){
+  const {data,error}=await sb.schema('hr').from('manpower_requests')
+    .select('id,job_title,department')
+    .eq('approval_status','Approved').eq('status','Open')
+    .order('job_title',{ascending:true});
+  if(error) throw error;
+  return data||[];
+}
+
+/* UPLOADING A CV NOW REQUIRES SAYING WHICH JOB IT IS FOR, and takes as many files as you like for
+   that one job.
+
+   ONE position, never several. Letting a CV be filed against two vacancies at once sounds generous
+   and makes every later count wrong: the same person appears twice in the funnel, Monthly Progress
+   over-reports, and nobody can say which role they were actually being considered for. If somebody
+   genuinely suits two roles, that is two decisions made by a person, not one upload pretending to
+   be both.
+
+   preselectId lets Monthly Progress open this window with its own position already chosen and
+   locked, so uploading from a position's row cannot land the files on a different one. */
+window.rsUploadModal=async function(preselectId){
+  let positions=[];
+  try{ positions=await hrOpenPositions(); }
+  catch(e){ toast('Could not read the open positions: '+((e&&e.message)||e),'err'); return; }
+
+  if(!positions.length){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload CVs</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><div style="padding:18px;text-align:center;color:var(--slate);font-size:13.5px">'
+      +'There are no open positions to upload against yet.<br><br>'
+      +'A position appears here once its hiring request has been approved and is still open.'
+      +'</div></div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
     return;
   }
-  /* Nothing is read out of the file and nothing is sent to a model. The AI columns stay null,
-     which is why no row can sit on "Analyzing" any more - there is nothing to wait for. */
-  const {data:row,error}=await sb.schema('hr').from('resumes').insert({
-    file_name:f.name, storage_path:upData.path, file_size:f.size,
-    file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:null
-  }).select().single();
-  if(error){ toast('Saved the file but the record failed: '+error.message,'err'); closeModal(); hrResumes(); return; }
-  closeModal();
-  toast('Resume uploaded','ok');
-  RS_ROWS=[row,...(RS_ROWS||[])];
-  if(RS_Q) rsFilter(RS_Q); else rsRender();
+
+  const locked=preselectId!=null&&positions.some(function(x){return String(x.id)===String(preselectId);});
+  const opts=positions.map(function(x){
+    return '<option value="'+x.id+'"'+(String(x.id)===String(preselectId)?' selected':'')+'>'
+      +esc(x.job_title||'Untitled')+(x.department?(' \u00b7 '+esc(x.department)):'')+'</option>';
+  }).join('');
+
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-upload"></i> Upload CVs</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body frm">'
+    +'<label>Position <span style="color:var(--err)">*</span></label>'
+    +'<select id="rsPos" class="sel"'+(locked?' disabled style="background:#f1f5f9;color:var(--slate)"':'')+'>'
+    +(locked?'':'<option value="">\u2014 Choose the position these CVs are for \u2014</option>')
+    +opts+'</select>'
+    +(locked?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">Uploading for this position.</div>':'')
+    +'<label>Files</label>'
+    +'<div class="dropzone" onclick="document.getElementById(\'rsFile\').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="rsFName">Click to choose one or more PDFs, Word docs, or images</div></div>'
+    +'<input type="file" id="rsFile" class="hidden" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="rsFilesPicked(this)">'
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+    +'<button class="btn btn-primary" id="rsUpBtn" onclick="rsUploadSave()"><i class="fa-solid fa-upload"></i> Upload</button></div>');
 };
+window.rsFilesPicked=function(el){
+  const lbl=document.getElementById('rsFName'); if(!lbl)return;
+  const k=el&&el.files?el.files.length:0;
+  lbl.textContent=k?(k===1?el.files[0].name:(k+' files chosen')):'Click to choose one or more PDFs, Word docs, or images';
+};
+window.rsUploadSave=async function(){
+  const sel=$('rsPos');
+  const posId=sel?String(sel.value||'').trim():'';
+  if(!posId){ toast('Choose which position these CVs are for','err'); if(sel)sel.focus(); return; }
+  const posText=(sel&&sel.selectedOptions&&sel.selectedOptions[0])
+    ? String(sel.selectedOptions[0].textContent||'').split(' \u00b7 ')[0].trim() : '';
+
+  const fEl=$('rsFile');
+  const files=(fEl&&fEl.files)?Array.prototype.slice.call(fEl.files):[];
+  if(!files.length){ toast('Choose at least one file','err'); return; }
+
+  const btn=$('rsUpBtn'); if(btn){btn.disabled=true;}
+  /* One at a time, and one failure does not lose the rest. Uploading ten CVs and being told only
+     that "the upload failed" - with no way to know which of the ten landed - is the outcome worth
+     avoiding here, so each file is reported by name. */
+  const added=[]; const failed=[];
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    if(btn) btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+files.length+'\u2026';
+    try{
+      const up=await uploadFileToS3(s3KeyForResume(f.name),f);
+      if(up.error) throw new Error(up.error.message);
+      const {data:row,error}=await sb.schema('hr').from('resumes').insert({
+        file_name:f.name, storage_path:up.data.path, file_size:f.size,
+        file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:'analyzing',
+        manpower_request_id:Number(posId), position:posText||null,
+        uploaded_by:state.email||null
+      }).select().single();
+      if(error) throw new Error(error.message);
+      added.push(row);
+    }catch(e){ failed.push(f.name+' ('+((e&&e.message)||e)+')'); }
+  }
+  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}
+
+  if(added.length){
+    closeModal();
+    RS_ROWS=added.slice().reverse().concat(RS_ROWS||[]);
+    toast(added.length+' CV'+(added.length===1?'':'s')+' uploaded for '+(posText||'this position'),'ok');
+    if(RS_Q) rsFilter(RS_Q); else rsRender();
+    /* READING THE CVs HAPPENS AFTER THE UPLOAD IS SAFE, AND NEVER BLOCKS IT.
+
+       The files are stored and the rows exist before a single word is read, so a model being slow,
+       rate-limited or wrong cannot cost somebody their upload - the worst case is a row that says
+       it could not be read, with the file still there to open by hand.
+
+       One at a time rather than all at once: ten CVs fired in parallel is ten concurrent calls,
+       and being rate-limited halfway leaves half the batch unread for no reason. */
+    rsParseUploaded(added.map(function(r){return r.id;}));
+  }
+  if(failed.length) toast('Could not upload: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+};
+
+/* ONLY CVs UPLOADED HERE ARE READ BY THE MODEL.
+
+   A referral's CV and a careers-page application arrive with the name, email and phone already
+   typed by the person who sent them, and that is better evidence than anything read off a
+   document - overwriting a name somebody entered by hand with a model's reading of a scan is a
+   downgrade, not an improvement. Those paths go through hr.referral_submit and career-apply and
+   never come near this. */
+async function rsParseUploaded(ids){
+  if(!ids||!ids.length)return;
+  let done=0, failed=0;
+  /* WHAT HAPPENED TO EACH CV, NOT JUST HOW MANY WERE READ.
+     Matching on email correctly refuses to create a second copy of somebody already here, so
+     nothing new appears in Interviews - and from the outside that is indistinguishable from the
+     upload having failed. Three uploads of the same CV looked like three failures. Counted apart
+     so each outcome can be said in its own words. */
+  const matched=[], notLinked=[];
+  for(const id of ids){
+    try{
+      const {data,error}=await sb.functions.invoke('resume-ai',{body:{action:'parse_resume',resume_id:id}});
+      if(error||(data&&data.error)) throw new Error((data&&data.error)||error.message);
+      /* The list is updated in place so the row fills in where somebody is already looking,
+         instead of only after a refresh. */
+      const row=(RS_ROWS||[]).find(r=>r.id===id);
+      if(row&&data&&data.profile) Object.assign(row,data.profile);
+      done++;
+      const L=data&&data.linked;
+      if(L&&L.ok===false&&L.reason){
+        notLinked.push(((row&&row.candidate_name)||(row&&row.file_name)||'A CV')+' — '+L.reason);
+      }else if(L&&L.matched){
+        matched.push((row&&row.candidate_name)||'That person');
+      }
+    }catch(e){
+      failed++;
+      const row=(RS_ROWS||[]).find(r=>r.id===id);
+      if(row){ row.ai_status='failed'; row.ai_error=String((e&&e.message)||e).slice(0,300); }
+    }
+    if(RS_Q) rsFilter(RS_Q); else rsRender();
+  }
+  const added=done-matched.length-notLinked.length;
+  if(added>0) toast(added+' CV'+(added===1?'':'s')+' read \u2014 added to Interviews','ok');
+  if(matched.length) toast(matched.slice(0,3).join(', ')+(matched.length>3?(' and '+(matched.length-3)+' more'):'')
+    +' '+(matched.length===1?'is':'are')+' already in Interviews \u2014 the CV was added to their record','warn');
+  if(notLinked.length) toast(notLinked.slice(0,2).join(' \u00b7 '),'warn');
+  if(failed) toast(failed+' CV'+(failed===1?' could':'s could')+' not be read \u2014 the file is still there, open it to check','err');
+}
 
 /* Download keeps the candidate's own name on the file rather than the stamped storage name, the
    same as the Tracker's Resumes column does. */
@@ -7885,12 +8083,31 @@ window.rsDownload=async function(id){
   if(error){toast('Download failed: '+error.message,'err');return;}
   const a=document.createElement('a');a.href=data.signedUrl;a.download=r.file_name||'';document.body.appendChild(a);a.click();a.remove();
 };
+/* A database call can delete a row but not a file in S3, so every delete that removes a CV hands
+   back its storage path and the caller finishes the job. Failures are swallowed on purpose: a
+   file left behind is waste, a row left behind is a ghost record, so the rows going is what
+   matters and a storage hiccup must not make the delete look like it failed. */
+async function hrRemoveFiles(rows){
+  const paths=(rows||[]).map(function(x){return x&&x.storage_path;}).filter(Boolean);
+  if(!paths.length) return 0;
+  await Promise.all(paths.map(function(pth){
+    try{ return isS3Path(pth) ? s3Delete(pth).catch(function(){})
+                              : sb.storage.from('resumes').remove([pth]).catch(function(){}); }
+    catch(_e){ return null; }
+  }));
+  return paths.length;
+}
+
 window.rsDelete=async function(id){
-  if(!await confirmDialog('Delete this resume permanently?'))return;
-  const r=await rsGet(id);
-  if(r&&r.storage_path){ if(isS3Path(r.storage_path)) await s3Delete(r.storage_path); else await sb.storage.from('resumes').remove([r.storage_path]); }
-  const {error}=await sb.schema('hr').from('resumes').delete().eq('id',id);
-  if(error){toast(error.message,'err');return;}
+  if(!await confirmDialog(
+      'Delete this CV permanently? If somebody is still waiting to be approved on the strength of '
+      +'it, their approval task is cancelled too \u2014 there would be nothing left to read.',
+      {title:'Delete CV', okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  /* Through hr.resume_delete rather than a plain delete, so the rule about pending approval
+     tasks holds however the CV is removed. */
+  const {data,error}=await sb.schema('hr').rpc('resume_delete',{p_ids:[id]});
+  if(error){toast('Could not delete: '+error.message,'err');return;}
+  await hrRemoveFiles(data);
   RS_ROWS=(RS_ROWS||[]).filter(x=>x.id!==id);
   if(RS_SEARCH)RS_SEARCH=RS_SEARCH.filter(x=>x.id!==id);
   toast('Deleted','ok');rsRender();
@@ -9618,6 +9835,13 @@ const USB_COL4={
   'organic.overview.view_engagement_overview_by_type_and_page':        {header:null, keys:[], hideDetails:true},
   'campaigns.overview.drill_into_a_project_s_campaigns':               {header:null, keys:[], hideDetails:true},
   'postsales.adhoc.upload_document_for_adhoc_replacement':             {header:null, keys:[]},
+  /* MIS carries its own date in Details and how complete the day's set was in the column, which
+     is the thing worth knowing about a run: a report built off eight files is not the same
+     report as one built off twenty-four. */
+  'postsales.mis.build_mis_report_from_farvision_files':               {header:'Business units', keys:['status']},
+  'postsales.mis.preview_an_mis_report':                               {header:null, keys:[], hideDetails:true},
+  'postsales.mis.download_mis_report_as_excel':                        {header:null, keys:[], hideDetails:true},
+  'postsales.mis.download_mis_report_as_pdf':                          {header:null, keys:[], hideDetails:true},
   'postsales.adhoc.preview_a_document':                                {header:null, keys:[], hideDetails:true},
   'postsales.adhoc.download_all_documents_as_zip':                     {header:null, keys:[], hideDetails:true},
   'scaling.priorities_rocks.view_quarterly_rocks_progress':            {header:null, keys:[], hideDetails:true},
@@ -9913,13 +10137,845 @@ async function psaFetchAll(){
     });
   }catch(e){ return []; }
 }
+/* ============================== POST SALES — MIS REPORT ==============================
+   Outstanding against Collection, project by project, kept as a dated record.
+
+   HOW THE FIGURES GET HERE. FarVision is on the office network and JAIN-E is not, so nothing
+   here reaches into the ERP. What it does is take the files the morning extraction already
+   produces - one Receipt Register Summary and one Customer Outstanding Summary per business
+   unit - read them in the browser, and apply the same three rules that were being applied by
+   hand in Excel:
+
+     Current / Previous month collection : Money Receipt Date falls in that month,
+                                           AND Unit Status is Active, AND Is Reversed is No.
+     Outstanding                         : Customer Status is Active AND Net Outstanding > 0.
+
+   Nothing is typed in. Every figure on the report is a sum the browser did off the ERP's own
+   file, and every one of them keeps the file it came from and the number of receipts behind
+   it, so a line can be questioned later without re-running the extraction.
+
+   THE ORDER OF THE ROWS IS FIXED and lives in postsales.mis_bus, because the report is read
+   against last week's - a row that moved would make two dates uncomparable. A business unit
+   with no file that day is not dropped, it is shown blank, which is the honest answer.
+
+   The date comes out of the files themselves (the "To" of the receipt range, the "As On" of
+   the outstanding), not off the clock, so a set extracted yesterday and loaded today is filed
+   under the day it actually describes. */
+
+const MIS = { bus: [], reports: [], staged: null, busy: false };
+
+function misIN(n, dash) {
+  if (n === null || n === undefined || n === '') return dash ? '—' : '0';
+  n = Math.round(Number(n) || 0);
+  if (!n) return dash ? '—' : '0';
+  const neg = n < 0;
+  let s = String(Math.abs(n));
+  const last3 = s.slice(-3);
+  let rest = s.slice(0, -3);
+  const parts = [];
+  while (rest.length > 2) { parts.push(rest.slice(-2)); rest = rest.slice(0, -2); }
+  if (rest) parts.push(rest);
+  parts.reverse();
+  return (neg ? '-' : '') + (parts.length ? parts.join(',') + ',' + last3 : last3);
+}
+const MIS_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function misMonthLabel(y, m /* 1-12 */) { return MIS_MON[m - 1] + "'" + String(y).slice(2); }
+// `instanceof Date` is not asked here. A Date that arrived from another realm - the sheet
+// reader's, a worker's - is still a Date in every way that matters, and it answers false.
+function misIsDate(v) { return Object.prototype.toString.call(v) === '[object Date]' && isFinite(v.getTime()); }
+function misDMY(d) {
+  const dt = misIsDate(d) ? d : new Date(d + 'T00:00:00');
+  return String(dt.getDate()).padStart(2, '0') + '.' + String(dt.getMonth() + 1).padStart(2, '0')
+       + '.' + dt.getFullYear();
+}
+function misISO(dt) {
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-'
+       + String(dt.getDate()).padStart(2, '0');
+}
+// The month before a given one, rolling the year back in January.
+function misPrevMonth(y, m) { return m > 1 ? { y: y, m: m - 1 } : { y: y - 1, m: 12 }; }
+
+/* Business unit names are compared with the punctuation taken out. The ERP writes
+   "DREAM DIAMOND." with a full stop and "DREAM ONE BLK 3 \ 4" with a backslash, and whether
+   those survive a download, a rename and a re-save is not something worth betting a match on. */
+function misNorm(s) {
+  return String(s || '').toUpperCase().replace(/[\\\/]/g, ' ')
+    .replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/* ── reading one FarVision file ────────────────────────────────────────────────────────── */
+
+function misSheetRows(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+}
+// The header is not on a fixed row: Receipt Register puts it on 11, Customer Outstanding on 12,
+// and a future report banner would move both. It is found by the column that must be there.
+function misHeaderRow(rows, anchor) {
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (typeof row[c] === 'string' && row[c].trim() === anchor) return r;
+    }
+  }
+  return -1;
+}
+function misIndex(row) {
+  const idx = {};
+  (row || []).forEach(function (h, i) { if (h != null) idx[String(h).trim()] = i; });
+  return idx;
+}
+function misBannerLine(rows, prefix) {
+  for (let r = 0; r < Math.min(rows.length, 12); r++) {
+    const v = (rows[r] || [])[0];
+    if (typeof v === 'string' && v.trim().toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+      return v.trim().slice(prefix.length).trim();
+    }
+  }
+  return '';
+}
+// d/m/yy or dd/mm/yyyy, the two spellings the banners use. Day first, always - these are
+// Indian ERP dates and "3/4" is the third of April.
+function misParseDMY(s) {
+  const m = String(s || '').match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{2,4})/);
+  if (!m) return null;
+  let y = +m[3];
+  if (y < 100) y += 2000;
+  const d = new Date(y, +m[2] - 1, +m[1]);
+  return isFinite(d.getTime()) ? d : null;
+}
+/* THE SHEET IS READ WITHOUT cellDates, AND THIS IS WHY.
+
+   Asking the reader for Date objects looks like the obvious thing and quietly moves money
+   between months. Excel serial 46266 is the 1st of September; the reader hands back
+   2026-08-31T18:29:50Z, which in Indian time is the 31st of August at 23:59:50 - ten seconds
+   short of midnight, because the serial-to-Date conversion loses a fraction. Read the month
+   off that and every receipt dated the 1st is counted in the month before. On the 28.09.2026
+   set that was 12.4 lakh landing in the wrong month across three projects, with the totals
+   still adding up, which is the worst kind of wrong.
+
+   The serial is an integer day count with no clock and no timezone in it. The reader's own
+   SSF.parse_date_code turns it into the year, month and day the cell actually shows. Nothing
+   to drift.
+
+   A Date is still accepted, because a file saved elsewhere can arrive with real ones, and it
+   is nudged half a minute forward first so the same ten-second deficit cannot bite. These are
+   date-only columns; nothing in them is a genuine timestamp thirty seconds before midnight. */
+function misCellDate(v) {
+  if (v == null) return null;
+  if (typeof v === 'number' && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
+    const p = XLSX.SSF.parse_date_code(v);
+    if (p && p.y) return new Date(p.y, p.m - 1, p.d);
+  }
+  if (misIsDate(v)) { const t = new Date(v.getTime() + 30000); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
+  return misParseDMY(v);
+}
+function misNum(v) {
+  if (v == null || v === '') return 0;
+  const n = Number(String(v).replace(/[,₹\s]/g, ''));
+  return isFinite(n) ? n : 0;
+}
+function misIsA(v, want) { return String(v == null ? '' : v).trim().toLowerCase() === want; }
+
+/* One Receipt Register Summary. Totals are worked out for whichever two months are asked for,
+   in a single pass, and the rows that were left out are counted rather than discarded - that
+   count is the difference between "this project collected nothing" and "the file was wrong". */
+function misReadCollection(wb, curr, prev) {
+  const rows = misSheetRows(wb);
+  const hr = misHeaderRow(rows, 'Money Receipt Date');
+  if (hr < 0) throw new Error('This does not look like a Receipt Register Summary — no "Money Receipt Date" column.');
+  const ix = misIndex(rows[hr]);
+  const cDate = ix['Money Receipt Date'], cAmt = ix['Amount'],
+        cUnit = ix['Unit Status'], cRev = ix['Is Reversed'];
+  if (cAmt == null) throw new Error('No "Amount" column in this Receipt Register Summary.');
+  const out = { curr: 0, prev: 0, nCurr: 0, nPrev: 0, excluded: 0, nRows: 0 };
+  for (let r = hr + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const d = misCellDate(row[cDate]);
+    if (!d) continue;
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    const isCurr = (y === curr.y && m === curr.m), isPrev = (y === prev.y && m === prev.m);
+    if (!isCurr && !isPrev) continue;
+    out.nRows++;
+    const keep = (cUnit == null || misIsA(row[cUnit], 'active'))
+              && (cRev == null || misIsA(row[cRev], 'no'));
+    if (!keep) { out.excluded++; continue; }
+    const amt = misNum(row[cAmt]);
+    if (isCurr) { out.curr += amt; out.nCurr++; } else { out.prev += amt; out.nPrev++; }
+  }
+  out.buName = misBannerLine(rows, 'Business Unit:');
+  out.range = misBannerLine(rows, 'Custom Date:');
+  out.asOn = misParseDMY((out.range.split(/\bTo\b/i)[1] || ''));
+  return out;
+}
+
+/* One Customer Outstanding Summary. Net Outstanding is what the report has always used, and
+   credit balances are left out with the cancelled bookings rather than netted off against
+   somebody else's dues - a project does not owe less because one customer paid ahead. */
+function misReadOutstanding(wb) {
+  const rows = misSheetRows(wb);
+  const hr = misHeaderRow(rows, 'Net Outstanding');
+  if (hr < 0) throw new Error('This does not look like a Customer Outstanding Summary — no "Net Outstanding" column.');
+  const ix = misIndex(rows[hr]);
+  const cNet = ix['Net Outstanding'], cSt = ix['Customer Status'];
+  const out = { total: 0, n: 0, excluded: 0, nRows: 0 };
+  for (let r = hr + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    if (row[cNet] == null || row[cNet] === '') continue;
+    const v = misNum(row[cNet]);
+    out.nRows++;
+    if ((cSt == null || misIsA(row[cSt], 'active')) && v > 0) { out.total += v; out.n++; }
+    else out.excluded++;
+  }
+  out.buName = misBannerLine(rows, 'Business Unit:');
+  const asOn = misBannerLine(rows, 'As On Date:');
+  out.asOn = misParseDMY(asOn);
+  return out;
+}
+
+function misKindOf(rows) {
+  const head = String((rows[0] || [])[0] || '').toLowerCase();
+  if (head.indexOf('receipt register') >= 0) return 'collection';
+  if (head.indexOf('customer outstanding') >= 0) return 'outstanding';
+  if (misHeaderRow(rows, 'Money Receipt Date') >= 0) return 'collection';
+  if (misHeaderRow(rows, 'Net Outstanding') >= 0) return 'outstanding';
+  return null;
+}
+
+/* ── loading and drawing the tab ───────────────────────────────────────────────────────── */
+
+let MIS_CSS_DONE = false;
+function misCss() {
+  if (MIS_CSS_DONE) return;
+  MIS_CSS_DONE = true;
+  const st = document.createElement('style');
+  st.textContent = `
+  .mis-hint{flex:1;font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:8px;min-width:200px}
+  .mis-tbl td,.mis-tbl th{white-space:nowrap}
+  .mis-num{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .mis-tot td{font-weight:700;background:#f8fafc;border-top:2px solid var(--line)}
+  .mis-blank{color:#94a3b8}
+  .mis-prevwrap{max-height:62vh;overflow:auto}
+  .mis-doc{border:1px solid var(--line);border-radius:10px;padding:18px 20px;background:#fff}
+  .mis-doc h4{margin:0 0 2px;font-size:15px}
+  .mis-doc .sub{font-size:12.5px;color:var(--slate);margin-bottom:14px}
+  .mis-doc table{width:100%;border-collapse:collapse;font-size:13px}
+  .mis-doc th{background:#7e22ce;color:#fff;font-size:11px;letter-spacing:.4px;text-transform:uppercase;
+    padding:9px 10px;text-align:left;vertical-align:middle}
+  .mis-doc td{padding:8px 10px;border-bottom:1px solid var(--line)}
+  .mis-stage{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:9px}
+  .mis-stage table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .mis-stage th{position:sticky;top:0;background:#f8fafc;padding:8px 10px;text-align:left;
+    font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);
+    border-bottom:1px solid var(--line);z-index:1}
+  .mis-stage td{padding:7px 10px;border-bottom:1px solid var(--line)}
+  .mis-ok{color:#16a34a}.mis-miss{color:#94a3b8}
+  .mis-badfile{font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;
+    border-radius:8px;padding:9px 11px;margin-top:10px}
+  .mis-when{font-size:12px;color:var(--slate)}
+  `;
+  document.head.appendChild(st);
+}
+
+async function misLoadBus() {
+  const { data } = await sb.schema('postsales').from('mis_bus').select('*')
+    .eq('active', true).order('sort_order');
+  MIS.bus = data || [];
+}
+async function misLoadReports() {
+  const { data } = await sb.schema('postsales').from('mis_reports').select('*')
+    .order('report_date', { ascending: false }).limit(200);
+  MIS.reports = data || [];
+}
+
+function misRender() {
+  const host = $('misBody'); if (!host) return;
+  const latest = MIS.reports[0];
+  const kpis = mKpis([
+    ['Latest report', latest ? misDMY(latest.report_date) : '—',
+      latest ? (latest.bu_count + ' of ' + MIS.bus.length + ' business units') : 'nothing recorded yet'],
+    ['Outstanding', latest ? misIN(latest.total_outstanding) : '—',
+      latest ? ('as at ' + misDMY(latest.report_date)) : ''],
+    [latest ? ('Collection · ' + latest.curr_month_label) : 'Collection',
+      latest ? misIN(latest.total_curr) : '—',
+      latest ? (latest.prev_month_label + ': ' + misIN(latest.total_prev)) : ''],
+    ['Records', String(MIS.reports.length), MIS.reports.length === 1 ? 'report kept' : 'reports kept'],
+  ]);
+  const toolbar = '<div class="toolbar">'
+    + '<div class="mis-hint"><i class="fa-solid fa-file-invoice"></i> Drop the day’s Receipt Register and Customer Outstanding files and the report builds itself — Outstanding, this month’s collection and last month’s, per project.</div>'
+    + '<button class="btn btn-primary" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> New MIS Report</button>'
+    + '</div>';
+  const body = MIS.reports.length ? MIS.reports.map(function (r) {
+    return '<tr>'
+      + '<td><b>' + esc(misDMY(r.report_date)) + '</b>'
+        + (r.bu_count < MIS.bus.length
+            ? '<div class="mis-when" style="color:#b45309">' + (MIS.bus.length - r.bu_count) + ' business unit' + ((MIS.bus.length - r.bu_count) === 1 ? '' : 's') + ' had no file</div>'
+            : '')
+        + '</td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_outstanding)) + '</td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_curr)) + '<div class="mis-when">' + esc(r.curr_month_label) + '</div></td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_prev)) + '<div class="mis-when">' + esc(r.prev_month_label) + '</div></td>'
+      + '<td>' + esc((r.created_by || '').split('@')[0] || '—')
+        + '<div class="mis-when">' + esc(fmtDate(r.created_at)) + '</div></td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn btn-sm btn-ghost" title="Preview" onclick="misPreview(' + r.id + ')"><i class="fa-solid fa-eye"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Download as Excel" onclick="misExportXlsx(' + r.id + ',this)"><i class="fa-solid fa-file-excel"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Download as PDF" onclick="misExportPdf(' + r.id + ',this)"><i class="fa-solid fa-file-pdf"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Delete this record" onclick="misDelete(' + r.id + ')"><i class="fa-solid fa-trash"></i></button>'
+      + '</td></tr>';
+  }).join('')
+  : '<tr><td colspan="6"><div class="empty"><i class="fa-regular fa-file-lines"></i><div>No MIS report recorded yet</div>'
+    + '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> Build the first one</button></div></td></tr>';
+  host.innerHTML = kpis + toolbar
+    + '<div class="card"><div style="overflow-x:auto"><table class="tbl mis-tbl"><thead><tr>'
+    + '<th>Report date</th><th class="mis-num">Outstanding</th><th class="mis-num">Current month</th>'
+    + '<th class="mis-num">Previous month</th><th>Made by</th><th></th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+}
+
+/* ── building a new one ────────────────────────────────────────────────────────────────── */
+
+window.misNewModal = function () {
+  MIS.staged = null;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-invoice" style="color:#7e22ce"></i> New MIS Report</h3></div>'
+    + '<div class="modal-body">'
+      + '<div style="font-size:13px;color:var(--slate);margin-bottom:12px">Select every file the extraction produced for the day — the <b>Receipt Register Summary</b> and the <b>Customer Outstanding Summary</b> for each business unit. They are read here in your browser; nothing is uploaded. A business unit with no file is left blank rather than counted as nil.</div>'
+      + '<div class="dropzone" ondragover="event.preventDefault()" ondrop="misDrop(event)" onclick="document.getElementById(\'misFiles\').click()">'
+        + '<i class="fa-solid fa-file-arrow-up"></i><div id="misPickName">Drag &amp; drop the files, or click to choose them</div>'
+        + '<div style="font-size:12px;margin-top:4px">.xlsx or .xls · up to ' + (MIS.bus.length * 2) + ' files · exactly as they download from FarVision</div>'
+      + '</div>'
+      + '<input type="file" id="misFiles" multiple accept=".xlsx,.xls" style="display:none" onchange="misFilesPicked(this.files)">'
+      + '<div id="misStageHost" style="margin-top:14px"></div>'
+    + '</div>'
+    + '<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      + '<button class="btn btn-primary" id="misSaveBtn" disabled onclick="misSave(this)"><i class="fa-solid fa-floppy-disk"></i> Save this report</button></div>', 'lg');
+};
+window.misDrop = function (e) {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files;
+  if (f && f.length) misFilesPicked(f);
+};
+
+window.misFilesPicked = async function (fileList) {
+  const files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  const host = $('misStageHost'); if (!host) return;
+  const pick = $('misPickName'); if (pick) pick.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') + ' selected';
+  host.innerHTML = '<div class="loader"><div class="spin"></div></div>';
+  try {
+    if (!(await loadXLSX())) throw new Error('Could not load the spreadsheet reader. Check the connection and try again.');
+
+    /* WHICH DAY IS THIS. Every file carries its own as-at date, and they should agree because
+       they came out of one extraction run. The latest is taken as the report's date and any
+       disagreement is shown rather than hidden, because a stale file mixed into a fresh set is
+       exactly the mistake worth catching before it is filed. */
+    const read = [];
+    const bad = [];
+    for (const f of files) {
+      try {
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });   // serials, not Dates - see misCellDate
+        const rows = misSheetRows(wb);
+        const kind = misKindOf(rows);
+        if (!kind) { bad.push([f.name, 'not a Receipt Register or Customer Outstanding summary']); continue; }
+        read.push({ file: f, wb: wb, kind: kind, buName: misBannerLine(rows, 'Business Unit:') });
+      } catch (e) { bad.push([f.name, (e && e.message) || String(e)]); }
+    }
+    if (!read.length) throw new Error('None of those files could be read as a FarVision summary.');
+
+    const dates = [];
+    read.forEach(function (r) {
+      try {
+        const rows = misSheetRows(r.wb);
+        const d = r.kind === 'collection'
+          ? misParseDMY((misBannerLine(rows, 'Custom Date:').split(/\bTo\b/i)[1] || ''))
+          : misParseDMY(misBannerLine(rows, 'As On Date:'));
+        if (d) { r.asOn = d; dates.push(d.getTime()); }
+      } catch (e) { /* a file with no readable banner still contributes its figures */ }
+    });
+    const reportDate = dates.length ? new Date(Math.max.apply(null, dates)) : new Date();
+    const spread = dates.length ? (Math.max.apply(null, dates) - Math.min.apply(null, dates)) : 0;
+    const curr = { y: reportDate.getFullYear(), m: reportDate.getMonth() + 1 };
+    const prev = misPrevMonth(curr.y, curr.m);
+
+    // Each file lands on its business unit by the name the ERP wrote inside it, not the filename.
+    const byBu = {};
+    MIS.bus.forEach(function (b) { byBu[b.bu_name] = { bu: b, coll: null, out: null, cf: '', of: '' }; });
+    read.forEach(function (r) {
+      const key = misNorm(r.buName);
+      const match = MIS.bus.find(function (b) { return misNorm(b.bu_name) === key; });
+      if (!match) { bad.push([r.file.name, 'business unit "' + (r.buName || 'unnamed') + '" is not on the report']); return; }
+      const slot = byBu[match.bu_name];
+      try {
+        if (r.kind === 'collection') { slot.coll = misReadCollection(r.wb, curr, prev); slot.cf = r.file.name; }
+        else { slot.out = misReadOutstanding(r.wb); slot.of = r.file.name; }
+      } catch (e) { bad.push([r.file.name, (e && e.message) || String(e)]); }
+    });
+
+    MIS.staged = {
+      date: reportDate, curr: curr, prev: prev,
+      currLabel: misMonthLabel(curr.y, curr.m), prevLabel: misMonthLabel(prev.y, prev.m),
+      byBu: byBu, bad: bad, spreadDays: Math.round(spread / 86400000)
+    };
+    misStageRender();
+  } catch (e) {
+    host.innerHTML = '<div class="mis-badfile"><i class="fa-solid fa-circle-exclamation"></i> '
+      + esc((e && e.message) || String(e)) + '</div>';
+    const b = $('misSaveBtn'); if (b) b.disabled = true;
+  }
+};
+
+function misStageRows() {
+  const s = MIS.staged; if (!s) return [];
+  return MIS.bus.map(function (b) {
+    const slot = s.byBu[b.bu_name];
+    return {
+      bu: b,
+      outstanding: slot.out ? slot.out.total : null,
+      curr: slot.coll ? slot.coll.curr : null,
+      prev: slot.coll ? slot.coll.prev : null,
+      nCurr: slot.coll ? slot.coll.nCurr : null,
+      nPrev: slot.coll ? slot.coll.nPrev : null,
+      nOut: slot.out ? slot.out.n : null,
+      nExcl: (slot.coll ? slot.coll.excluded : 0) + (slot.out ? slot.out.excluded : 0),
+      cf: slot.cf, of: slot.of,
+      has: !!(slot.coll || slot.out)
+    };
+  });
+}
+
+function misStageRender() {
+  const host = $('misStageHost'); const s = MIS.staged;
+  if (!host || !s) return;
+  const rows = misStageRows();
+  const have = rows.filter(function (r) { return r.has; }).length;
+  const tot = rows.reduce(function (a, r) {
+    a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
+  }, { o: 0, c: 0, p: 0 });
+
+  const tick = function (yes, fname) {
+    return yes ? '<i class="fa-solid fa-circle-check mis-ok" title="' + esc(fname) + '"></i>'
+               : '<i class="fa-regular fa-circle mis-miss" title="no file"></i>';
+  };
+  const cell = function (v, n, unit) {
+    if (v === null) return '<td class="mis-num mis-blank">—</td>';
+    return '<td class="mis-num">' + esc(misIN(v, true))
+      + (n ? '<div class="mis-when">' + n + ' ' + unit + (n === 1 ? '' : 's') + '</div>' : '') + '</td>';
+  };
+
+  const warn = [];
+  if (s.spreadDays > 0) warn.push('The files are not all from the same day — they span ' + s.spreadDays + ' day' + (s.spreadDays === 1 ? '' : 's') + '. The latest, ' + misDMY(s.date) + ', is being used.');
+  if (have < MIS.bus.length) warn.push((MIS.bus.length - have) + ' business unit' + ((MIS.bus.length - have) === 1 ? ' has' : 's have') + ' no file and will be left blank.');
+  const clash = MIS.reports.find(function (r) { return r.report_date === misISO(s.date); });
+  if (clash) warn.push('A report for ' + misDMY(s.date) + ' already exists. Saving will replace it.');
+
+  host.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<div style="font-size:13px"><b>' + esc(misDMY(s.date)) + '</b> · current month <b>' + esc(s.currLabel)
+        + '</b> · previous <b>' + esc(s.prevLabel) + '</b></div>'
+      + '<div style="margin-left:auto;font-size:12.5px;color:var(--slate)">' + have + ' of ' + MIS.bus.length + ' business units matched</div>'
+    + '</div>'
+    + (warn.length ? '<div class="mis-badfile" style="margin-top:0;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i> ' + warn.map(esc).join('<br>') + '</div>' : '')
+    + '<div class="mis-stage"><table><thead><tr>'
+      + '<th>Business unit</th><th style="text-align:center">Coll.</th><th style="text-align:center">Outst.</th>'
+      + '<th class="mis-num">Outstanding</th><th class="mis-num">' + esc(s.currLabel) + '</th><th class="mis-num">' + esc(s.prevLabel) + '</th>'
+      + '</tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr' + (r.has ? '' : ' style="opacity:.55"') + '>'
+            + '<td>' + esc(r.bu.bu_name) + '<div class="mis-when">' + esc(r.bu.project_name) + '</div></td>'
+            + '<td style="text-align:center">' + tick(!!r.cf, r.cf) + '</td>'
+            + '<td style="text-align:center">' + tick(!!r.of, r.of) + '</td>'
+            + cell(r.outstanding, r.nOut, 'customer')
+            + cell(r.curr, r.nCurr, 'receipt')
+            + cell(r.prev, r.nPrev, 'receipt')
+            + '</tr>';
+        }).join('')
+      + '<tr class="mis-tot"><td colspan="3">TOTAL</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
+      + '</tbody></table></div>'
+    + (s.bad.length
+        ? '<div class="mis-badfile"><b>' + s.bad.length + ' file' + (s.bad.length === 1 ? '' : 's') + ' not used:</b><br>'
+          + s.bad.map(function (b) { return esc(b[0]) + ' — ' + esc(b[1]); }).join('<br>') + '</div>'
+        : '');
+  const btn = $('misSaveBtn'); if (btn) btn.disabled = !have;
+}
+
+window.misSave = async function (btn) {
+  const s = MIS.staged;
+  if (!s) return;
+  const rows = misStageRows().filter(function (r) { return r.has; });
+  if (!rows.length) { toast('Nothing matched — there is no report to save', 'warn'); return; }
+  const iso = misISO(s.date);
+  const clash = MIS.reports.find(function (r) { return r.report_date === iso; });
+  if (clash && !(await confirmDialog('A report for ' + misDMY(s.date) + ' is already on record. Replace it with this one?',
+      { title: 'Replace that day’s report?', okLabel: 'Replace', icon: 'fa-rotate' }))) return;
+
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
+  try {
+    // The old record goes first, so a replaced day can never end up with two sets of rows.
+    if (clash) await sb.schema('postsales').from('mis_reports').delete().eq('id', clash.id);
+    const tot = rows.reduce(function (a, r) {
+      a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
+    }, { o: 0, c: 0, p: 0 });
+    const { data: rep, error } = await sb.schema('postsales').from('mis_reports').insert({
+      report_date: iso, curr_month_label: s.currLabel, prev_month_label: s.prevLabel,
+      total_outstanding: Math.round(tot.o), total_curr: Math.round(tot.c), total_prev: Math.round(tot.p),
+      bu_count: rows.length,
+      note: s.bad.length ? (s.bad.length + ' file(s) were not used') : null,
+      created_by: (typeof state !== 'undefined' && state.email) || null
+    }).select('*').single();
+    if (error) throw error;
+    const payload = rows.map(function (r) {
+      return {
+        report_id: rep.id, sort_order: r.bu.sort_order,
+        project_name: r.bu.project_name, bu_name: r.bu.bu_name,
+        outstanding: r.outstanding === null ? null : Math.round(r.outstanding),
+        curr_collection: r.curr === null ? null : Math.round(r.curr),
+        prev_collection: r.prev === null ? null : Math.round(r.prev),
+        src_collection: r.cf || null, src_outstanding: r.of || null,
+        n_curr: r.nCurr, n_prev: r.nPrev, n_out: r.nOut, n_excluded: r.nExcl
+      };
+    });
+    const { error: re } = await sb.schema('postsales').from('mis_rows').insert(payload);
+    if (re) throw re;
+    try { usageQueue('postsales.mis.build_mis_report_from_farvision_files', 'create',
+      { title: misDMY(s.date), status: rows.length + ' of ' + MIS.bus.length + ' business units' }); } catch (e) {}
+    closeModal();
+    await misLoadReports();
+    misRender();
+    toast('MIS report for ' + misDMY(s.date) + ' saved', 'ok');
+  } catch (e) {
+    toast('Could not save the report: ' + ((e && e.message) || e), 'err');
+    if (btn) { btn.disabled = false; btn.innerHTML = restore; }
+  }
+};
+
+window.misDelete = async function (id) {
+  const r = MIS.reports.find(function (x) { return x.id === id; });
+  if (!r) return;
+  if (!(await confirmDialog('Delete the MIS report for ' + misDMY(r.report_date) + '? It is removed for everyone.',
+    { title: 'Delete this record?' }))) return;
+  try {
+    const { error } = await sb.schema('postsales').from('mis_reports').delete().eq('id', id);
+    if (error) throw error;
+    await misLoadReports();
+    misRender();
+    toast('Report deleted', 'ok');
+  } catch (e) { toast('Could not delete: ' + ((e && e.message) || e), 'err'); }
+};
+
+/* ── one saved report, read back ───────────────────────────────────────────────────────── */
+
+/* Always read from the database, never from whatever happens to be in memory. A record is a
+   record: preview, Excel and PDF must all be showing the same thing, and the only way to be
+   sure of that is for all three to fetch it the same way. */
+async function misFetch(id) {
+  const rep = MIS.reports.find(function (x) { return x.id === id; });
+  const { data, error } = await sb.schema('postsales').from('mis_rows').select('*')
+    .eq('report_id', id).order('sort_order');
+  if (error) throw error;
+  // Every business unit gets a line whether or not it had a file that day, in the fixed order.
+  const byBu = {};
+  (data || []).forEach(function (r) { byBu[r.bu_name] = r; });
+  const rows = MIS.bus.map(function (b) {
+    const r = byBu[b.bu_name];
+    return {
+      project_name: b.project_name, bu_name: b.bu_name,
+      outstanding: r ? r.outstanding : null,
+      curr: r ? r.curr_collection : null,
+      prev: r ? r.prev_collection : null
+    };
+  });
+  // A business unit retired from the list but present in an old report still belongs to it.
+  (data || []).forEach(function (r) {
+    if (!MIS.bus.some(function (b) { return b.bu_name === r.bu_name; })) {
+      rows.push({ project_name: r.project_name, bu_name: r.bu_name,
+        outstanding: r.outstanding, curr: r.curr_collection, prev: r.prev_collection });
+    }
+  });
+  return { rep: rep, rows: rows };
+}
+function misTotals(rows) {
+  return rows.reduce(function (a, r) {
+    a.o += Number(r.outstanding || 0); a.c += Number(r.curr || 0); a.p += Number(r.prev || 0); return a;
+  }, { o: 0, c: 0, p: 0 });
+}
+function misTitleLines(rep) {
+  const d = misDMY(rep.report_date);
+  return {
+    heading: 'Project Wise Outstanding Status VS Collection Status As Per ERP',
+    sub: 'Weekly Basis MIS Report - Date: ' + d,
+    cOut: 'Current Outstanding Amount Till Date ' + d,
+    cCur: 'Current Month Collection Amount Upto - ' + rep.curr_month_label,
+    cPrv: 'Previous Month Collection Amount Upto - ' + rep.prev_month_label
+  };
+}
+
+window.misPreview = async function (id) {
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye" style="color:#7e22ce"></i> MIS Report</h3></div>'
+    + '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>', 'xl');
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    const host = document.querySelector('#modalHost .modal-body');
+    if (!host) return;
+    host.innerHTML = '<div class="mis-prevwrap"><div class="mis-doc">'
+      + '<h4>' + esc(t.heading) + '</h4>'
+      + '<div class="sub">' + esc(t.sub) + '</div>'
+      + '<table><thead><tr><th>Project Name</th><th>Business Unit Name</th>'
+        + '<th style="text-align:right">' + esc(t.cOut) + '</th>'
+        + '<th style="text-align:right">' + esc(t.cCur) + '</th>'
+        + '<th style="text-align:right">' + esc(t.cPrv) + '</th></tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr><td>' + esc(r.project_name) + '</td><td>' + esc(r.bu_name) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.outstanding, true)) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.curr, true)) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.prev, true)) + '</td></tr>';
+        }).join('')
+      + '<tr class="mis-tot"><td>TOTAL</td><td></td>'
+        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
+      + '</tbody></table></div></div>';
+    const foot = document.querySelector('#modalHost .modal-foot');
+    if (!foot) {
+      document.querySelector('#modalHost .modal').insertAdjacentHTML('beforeend',
+        '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'
+        + '<button class="btn" onclick="misExportXlsx(' + id + ',this)"><i class="fa-solid fa-file-excel"></i> Excel</button>'
+        + '<button class="btn btn-primary" onclick="misExportPdf(' + id + ',this)"><i class="fa-solid fa-file-pdf"></i> PDF</button></div>');
+    }
+    try { usageQueue('postsales.mis.preview_an_mis_report', 'view', { title: misDMY(rep.report_date) }); } catch (e) {}
+  } catch (e) {
+    const host = document.querySelector('#modalHost .modal-body');
+    if (host) host.innerHTML = '<div class="mis-badfile">' + esc((e && e.message) || String(e)) + '</div>';
+  }
+};
+
+/* ── Excel ─────────────────────────────────────────────────────────────────────────────── */
+
+/* The figures go out as NUMBERS, not as the "2,13,84,025" strings the report is read in. The
+   template has always carried them as text, which is why the total at the bottom had to be
+   typed rather than summed - anybody who wanted to check a column had to retype it first.
+   The Indian grouping is a number format here, so it looks identical and still adds up. */
+const MIS_XL_FMT = '[>=10000000]##\\,##\\,##\\,##0;[>=100000]##\\,##\\,##0;##,##0';
+
+window.misExportXlsx = async function (id, btn) {
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    if (!(await usbLoadXlsx())) throw new Error('Could not load the spreadsheet library.');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'JAIN-E'; wb.created = new Date();
+    const ws = wb.addWorksheet('Sheet1');
+    ws.columns = [{ width: 26 }, { width: 38 }, { width: 22 }, { width: 22 }, { width: 22 }];
+
+    ws.mergeCells('A2:E2');
+    ws.getCell('A2').value = t.heading;
+    ws.getCell('A2').font = { size: 13, bold: true };
+    ws.getCell('A2').alignment = { horizontal: 'center' };
+    ws.getRow(2).height = 22;
+    ws.mergeCells('A3:E3');
+    ws.getCell('A3').value = t.sub;
+    ws.getCell('A3').font = { size: 11, bold: true, color: { argb: 'FF7E22CE' } };
+    ws.getCell('A3').alignment = { horizontal: 'center' };
+
+    const head = ws.getRow(4);
+    head.values = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+    head.height = 42;
+    head.eachCell(function (c) {
+      c.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10.5 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7E22CE' } };
+      c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    });
+
+    /* A dash, not a nought. Nothing collected and no file to say so both read as a dash on the
+       screen and in the PDF, and a spreadsheet that showed 0 for the same line would look like a
+       different report. SUM steps over text, so a dash costs the total nothing. */
+    const cellVal = function (v) { return (v == null || Number(v) === 0) ? null : Number(v); };
+    rows.forEach(function (r) {
+      const row = ws.addRow([r.project_name, r.bu_name,
+        cellVal(r.outstanding), cellVal(r.curr), cellVal(r.prev)]);
+      [3, 4, 5].forEach(function (i) {
+        const c = row.getCell(i);
+        c.numFmt = MIS_XL_FMT;
+        c.alignment = { horizontal: 'right' };
+        if (c.value == null) { c.value = '—'; c.alignment = { horizontal: 'center' }; c.font = { color: { argb: 'FF94A3B8' } }; }
+      });
+      row.eachCell(function (c) { c.border = { top: { style: 'hair' }, left: { style: 'hair' }, bottom: { style: 'hair' }, right: { style: 'hair' } }; });
+    });
+
+    /* The total is a live SUM over the rows above it, so the sheet checks itself - and it
+       carries the answer with it. A formula written without a cached result is blank until
+       something recalculates the file; Excel does, a phone viewer and Google Sheets' preview
+       do not, and this report is forwarded more often than it is opened in Excel. */
+    const first = 5, last = 4 + rows.length;
+    const tr = ws.addRow(['TOTAL', null,
+      { formula: 'SUM(C' + first + ':C' + last + ')', result: Math.round(tot.o) },
+      { formula: 'SUM(D' + first + ':D' + last + ')', result: Math.round(tot.c) },
+      { formula: 'SUM(E' + first + ':E' + last + ')', result: Math.round(tot.p) }]);
+    tr.height = 20;
+    tr.eachCell(function (c, i) {
+      c.font = { bold: true, size: 11 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      c.border = { top: { style: 'medium' }, left: { style: 'thin' }, bottom: { style: 'double' }, right: { style: 'thin' } };
+      if (i >= 3) { c.numFmt = MIS_XL_FMT; c.alignment = { horizontal: 'right' }; }
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      'MIS_Report_' + misDMY(rep.report_date) + '.xlsx');
+    try { usageQueue('postsales.mis.download_mis_report_as_excel', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
+    toast('Excel downloaded', 'ok');
+  } catch (e) {
+    toast('Could not build the spreadsheet: ' + ((e && e.message) || e), 'err');
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
+};
+
+/* ── PDF ───────────────────────────────────────────────────────────────────────────────── */
+
+/* Landscape, because five columns with rupee figures and two headings that each run to a line
+   of prose do not fit across a portrait page without being squeezed into something nobody
+   wants to read off a phone. The Jain Group letterhead goes on every page - this one leaves
+   the building. */
+window.misExportPdf = async function (id, btn) {
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    const L = await loadPdfLib();
+    if (!L) throw new Error('Could not load the PDF library.');
+    const doc = await L.PDFDocument.create();
+    const reg = await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold = await doc.embedFont(L.StandardFonts.HelveticaBold);
+    let logo = null;
+    try { const b = await jgLogoPngBytes(); if (b) logo = await doc.embedPng(b); } catch (e) {}
+
+    const W = 841.89, H = 595.28, M = 40;
+    const ink = L.rgb(0.09, 0.11, 0.15), soft = L.rgb(0.42, 0.45, 0.50),
+          brand = L.rgb(0.494, 0.133, 0.808), line = L.rgb(0.85, 0.87, 0.90),
+          zebra = L.rgb(0.976, 0.980, 0.988);
+    // Project, Business unit, then three money columns of equal width.
+    const COL = [150, 215, 132, 132, 132];
+    const X = []; { let x = M; COL.forEach(function (w) { X.push(x); x += w; }); }
+    const RIGHT = M + COL.reduce(function (a, b) { return a + b; }, 0);
+
+    let page, y;
+    const headerHeight = function () { return logo ? (150 * logo.height / logo.width) + 16 : 0; };
+    const newPage = function () {
+      page = doc.addPage([W, H]);
+      y = H - M;
+      if (logo) {
+        const lw = 150, lh = lw * logo.height / logo.width;
+        page.drawImage(logo, { x: M, y: y - lh, width: lw, height: lh });
+        y -= lh + 10;
+        page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 1.4, color: L.rgb(0.78, 0.09, 0.14) });
+        y -= 18;
+      }
+    };
+    // The column headings repeat on every page; a continued table with no headings is a wall of
+    // numbers whose meaning is on a sheet somebody already turned over.
+    const drawHead = function () {
+      const hh = 34;
+      page.drawRectangle({ x: M, y: y - hh, width: RIGHT - M, height: hh, color: brand });
+      const labels = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+      labels.forEach(function (lab, i) {
+        const size = 7.6;
+        // Two short lines beat one clipped one for the three long money headings.
+        const words = lab.split(' ');
+        const lines = [];
+        let cur = '';
+        words.forEach(function (w) {
+          const test = cur ? cur + ' ' + w : w;
+          if (bold.widthOfTextAtSize(test, size) > COL[i] - 12 && cur) { lines.push(cur); cur = w; }
+          else cur = test;
+        });
+        if (cur) lines.push(cur);
+        const startY = y - hh / 2 + (lines.length * 9) / 2 - 7;
+        lines.forEach(function (ln, k) {
+          const w = bold.widthOfTextAtSize(ln, size);
+          const cx = i < 2 ? X[i] + 6 : X[i] + COL[i] - 6 - w;
+          page.drawText(ln, { x: cx, y: startY - k * 9, size: size, font: bold, color: L.rgb(1, 1, 1) });
+        });
+      });
+      y -= hh;
+    };
+
+    newPage();
+    page.drawText(t.heading, { x: M, y: y - 12, size: 12.5, font: bold, color: ink });
+    y -= 12 + 15;
+    page.drawText(t.sub, { x: M, y: y - 10, size: 10, font: bold, color: brand });
+    y -= 10 + 16;
+    drawHead();
+
+    const RH = 20;
+    const money = function (v, x, w, yy, f, col) {
+      const s = misIN(v, true);
+      const tw = f.widthOfTextAtSize(s, 9);
+      page.drawText(s, { x: x + w - 6 - tw, y: yy, size: 9, font: f, color: col });
+    };
+    rows.forEach(function (r, i) {
+      if (y - RH < M + 26) { newPage(); drawHead(); }
+      if (i % 2) page.drawRectangle({ x: M, y: y - RH, width: RIGHT - M, height: RH, color: zebra });
+      const ty = y - RH + 6.5;
+      page.drawText(String(r.project_name || ''), { x: X[0] + 6, y: ty, size: 9, font: reg, color: ink });
+      page.drawText(String(r.bu_name || ''), { x: X[1] + 6, y: ty, size: 9, font: reg, color: ink });
+      const blank = function (v) { return v == null || Number(v) === 0; };
+      money(r.outstanding, X[2], COL[2], ty, reg, blank(r.outstanding) ? soft : ink);
+      money(r.curr, X[3], COL[3], ty, reg, blank(r.curr) ? soft : ink);
+      money(r.prev, X[4], COL[4], ty, reg, blank(r.prev) ? soft : ink);
+      page.drawLine({ start: { x: M, y: y - RH }, end: { x: RIGHT, y: y - RH }, thickness: 0.5, color: line });
+      y -= RH;
+    });
+
+    if (y - 24 < M + 26) { newPage(); drawHead(); }
+    page.drawRectangle({ x: M, y: y - 24, width: RIGHT - M, height: 24, color: L.rgb(0.945, 0.957, 0.973) });
+    page.drawText('TOTAL', { x: X[0] + 6, y: y - 24 + 8, size: 10, font: bold, color: ink });
+    money(tot.o, X[2], COL[2], y - 24 + 8, bold, ink);
+    money(tot.c, X[3], COL[3], y - 24 + 8, bold, ink);
+    money(tot.p, X[4], COL[4], y - 24 + 8, bold, ink);
+    page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 1.2, color: ink });
+    y -= 24;
+
+    // Page numbers last, once the count is known.
+    const pages = doc.getPages();
+    pages.forEach(function (p, i) {
+      const s = 'Page ' + (i + 1) + ' of ' + pages.length + '  ·  Generated from FarVision extracts on ' + misDMY(rep.report_date);
+      p.drawText(s, { x: M, y: M - 16, size: 7.5, font: reg, color: soft });
+    });
+
+    const bytes = await doc.save();
+    usbSaveBlob(new Blob([bytes], { type: 'application/pdf' }),
+      'MIS_Report_' + misDMY(rep.report_date) + '.pdf');
+    try { usageQueue('postsales.mis.download_mis_report_as_pdf', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
+    toast('PDF downloaded', 'ok');
+  } catch (e) {
+    toast('Could not build the PDF: ' + ((e && e.message) || e), 'err');
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
+};
+
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC']];
+  const tabs=[['adhoc','ADHOC'],['mis','MIS']];
   const tab=(seg&&seg[0])||'adhoc';
+  // One body div per tab rather than one shared one: the two are rendered by different code
+  // that each look up their own host by id, and a shared id would have them fighting over it.
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
-    +'<div id="psaBody" style="margin-top:16px"></div>';
+    +'<div id="'+(tab==='mis'?'misBody':'psaBody')+'" style="margin-top:16px"></div>';
+  if(tab==='mis'){
+    misCss();
+    const host=$('misBody'); if(host) loader(host);
+    await misLoadBus();
+    await misLoadReports();
+    misRender();
+    return;
+  }
   if(tab==='adhoc'){
     const host=$('psaBody'); if(host) loader(host);
     PSA.queue=await psaFetchAll();
@@ -10992,17 +12048,17 @@ let REC_SEL=new Set();
 // submitted creates a real task in Accountability's own Pending Approval card instead (see
 // acc.hr_approval_task_upsert, called from manpower-ai-generate and hr.referral_approval_task_trg).
 VIEWS.recruitment_new=async function(v,seg){
-  setCrumb(['People','Recruitment (New)']);
+  setCrumb(['People','Recruitment']);
   const canApprove=rtCanManage();
   const slots=[
     {label:'Tests',run:recTests},
-    canApprove?{label:'Descriptions',run:()=>recLoadJDs(v)}:null,
-    {label:'ManPower Form',run:tpManpower},
-    {label:'Referrals',run:tpReferrals},
+    canApprove?{label:'Job Descriptions',run:()=>recLoadJDs(v)}:null,
+    {label:'Hiring Request',run:tpManpower},
+    {label:recCanWrite()?'Referrals':'Refer to HR',run:tpReferrals},
   ].filter(Boolean);
   const tabs=slots.map(s=>s.label);
   const ti=mTab(seg,tabs.length);
-  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment (New)')
+  v.innerHTML=REC_RO_CSS+TP_CSS+mHead('fa-user-plus','#0369a1','Recruitment')
     +(recCanWrite()?'':'<div class="rec-ro"><i class="fa-solid fa-lock"></i> Approving, editing and deleting here is limited to HR, Abhay Mati and Administrators — anyone can still submit a ManPower Form or Referral.</div>')
     +mTabs('recruitment_new',tabs,ti)+'<div id="recBody" style="margin-top:16px"><div class="loader"><div class="spin"></div></div></div>';
   recWatchPerms();
@@ -11028,11 +12084,12 @@ function rtRender(){
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Assessment Tests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <!-- RENAME AND DELETE ARE GONE, BY REQUEST. A test is not a document to tidy: results,
+           attempts and answers hang off it, and renaming one silently relabels every result
+           already recorded against it. Email is what this screen is for. The functions are left
+           in the file, unreferenced, so nothing is lost if they are ever wanted back. -->
       ${rtCanManage()?`
-      <button class="btn btn-primary" onclick="rtAdd()"><i class="fa-solid fa-plus"></i> Add Test</button>
-      <button class="btn" id="rtRenBtn" disabled style="${dis}" onclick="rtRename()"><i class="fa-solid fa-pen"></i> Rename</button>
-      <button class="btn" id="rtDelBtn" disabled style="${dis};color:var(--err);border-color:var(--err)" onclick="rtDelete()"><i class="fa-solid fa-trash"></i> Delete</button>
-      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-share-nodes"></i> Share</button>`
+      <button class="btn" id="rtShareBtn" disabled style="${dis}" onclick="rtShare()"><i class="fa-solid fa-envelope"></i> Email</button>`
       : `<span style="font-size:12px;color:var(--slate);display:inline-flex;align-items:center;gap:6px"><i class="fa-solid fa-lock"></i> View only</span>`}
     </div>
   </div>
@@ -11048,22 +12105,37 @@ function rtRender(){
       <th style="width:52px;text-align:center">Sl.</th>
       <th style="width:60px;text-align:center">Type</th>
       <th>Test Name</th>
-      <th style="width:250px;text-align:center">Actions</th>
+      <th style="width:200px;text-align:center">Actions</th>
     </tr></thead>
-    <tbody>${rows.length?rows.map(t=>{
+    <!-- Sl. is the row's position in this list, not the stored sl column. That column keeps the
+         number a test was given when it was created, so deleting three tests left the list reading
+         1, 2, 5, 6, 9 - which looks like rows are missing rather than like numbers were reused. -->
+    <tbody>${rows.length?rows.map((t,i)=>{
       const native=t.engine==='native';
       return `<tr>
       <td style="text-align:center"><input type="checkbox" class="rt-chk" value="${t.id}" onchange="rtSyncToolbar()"></td>
-      <td style="text-align:center;color:var(--slate);font-size:13px">${t.sl}</td>
+      <td style="text-align:center;color:var(--slate);font-size:13px">${i+1}</td>
       <td style="text-align:center"><span class="tag ${native?'t-green':'t-gray'}" style="font-size:11px">${native?'Native':'Legacy'}</span></td>
-      <td style="font-weight:500;overflow-wrap:anywhere">${esc(t.name)}${native&&t.duration_seconds?`<div style="font-size:11px;color:var(--slate);font-weight:400">${Math.round(t.duration_seconds/60)} min</div>`:''}</td>
-      <td style="text-align:center;white-space:nowrap">${native
-        ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtManageQuestions(${t.id})"><i class="fa-solid fa-list-check"></i> Questions</button>
-           <button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>
-           <button class="btn btn-sm" style="font-size:12px" onclick="rtPreviewNative(${t.id})" title="Sit this paper yourself"><i class="fa-solid fa-eye"></i> Preview</button>
-           ${rtCanManage()?`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtGetLink(${t.id})"><i class="fa-solid fa-link"></i> Get Link</button>`:''}`
-        :`<button class="btn btn-sm btn-primary" style="font-size:12px" onclick="rtPreview(${t.id})"><i class="fa-solid fa-plus"></i> Preview</button>`}</td>
-    </tr>`;}).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests yet — click <b>Add Test</b></td></tr>'}
+      <!-- THE NAME IS THE WAY INTO THE QUESTIONS. The row used to carry a fourth button for it,
+           which is what pushed the last button out of sight, and a button that only ever repeats
+           what the row already says is a button worth not having. Clicking the name of a test to
+           edit that test needs no label and costs no width. -->
+      <td style="font-weight:500;overflow-wrap:anywhere">${native
+        ?`<a href="javascript:void(0)" onclick="rtManageQuestions(${t.id})" style="color:var(--brand);text-decoration:none" title="Open this test's questions">${esc(t.name)}</a>`
+        :esc(t.name)}${native&&t.duration_seconds?`<div style="font-size:11px;color:var(--slate);font-weight:400">${Math.round(t.duration_seconds/60)} min</div>`:''}</td>
+      <!-- TWO BUTTONS. There were four, in a fixed-width column set to never wrap, so the last one
+           was cropped off the edge with no scrollbar to reach it - present in the page and
+           unusable, which reads as missing. Questions moved onto the test name; Get Link went
+           entirely, because Email already sends a test and a link copied by hand bypasses the very
+           thing that ties a result to a named candidate. -->
+      <!-- TRY IT REMOVED, BY REQUEST. Sitting the paper yourself minted a real attempt against
+           your own address, which then had to be filtered out of Results everywhere it appeared.
+           The questions are readable by clicking the test's name, which is what people actually
+           wanted it for. -->
+      <td style="text-align:center;white-space:nowrap;padding-right:14px">${native
+        ?`<button class="btn btn-sm" style="font-size:12px" onclick="rtResultsNative(${t.id})"><i class="fa-solid fa-chart-simple"></i> Results</button>`
+        :`<span style="font-size:12px;color:var(--slate)">—</span>`}</td>
+    </tr>`;}).join(''):'<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--slate)">No tests set up yet.</td></tr>'}
     </tbody>
   </table>
   </div>
@@ -11076,10 +12148,8 @@ window.rtSyncToolbar=function(){
   if(!rtCanManage()) return;
   const sel=[...document.querySelectorAll('.rt-chk:checked')];
   const n=sel.length;
-  const ren=$('rtRenBtn'),del=$('rtDelBtn');
+  // Rename and Delete no longer exist on this screen; only Email is driven by the ticks.
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
-  if(ren){ren.disabled=n!==1;ren.style.cssText=n===1?'':dis;}
-  if(del){del.disabled=n===0;del.style.cssText=n>0?'color:var(--err);border-color:var(--err)':dis+';color:var(--err);border-color:var(--err)';}
   const shr=$('rtShareBtn');
   if(shr){shr.disabled=n!==1;shr.style.cssText=n===1?'':dis;}
 };
@@ -11403,9 +12473,7 @@ const RT_TESTS_ALLOWED=[
   'hr@thejaingroup.com',       // Khusbu Singh
   'career@thejaingroup.com',   // Uzma Ahmed
   'ayushruia1@gmail.com',      // Administrator
-  'ai@thejaingroup.com'        // TEMPORARY, added on request - remove here AND from
-                               // recruit.can_manage_tests() in the database, which is what
-                               // actually enforces this; this list only decides what is drawn.
+  'system1@thejaingroup.com'   // Abhay Mati
 ];
 function rtCanManage(){
   return RT_TESTS_ALLOWED.includes(String(state.email||'').trim().toLowerCase());
@@ -11447,72 +12515,335 @@ window.rtShareConnectGoogle=function(){
 // Sharing is one of the managed actions, not a separately-permissioned one; the name is kept so
 // the existing call sites read unchanged.
 function rtCanShare(){ return rtCanManage(); }
-function rtShareFieldRow(val){
-  return `<div class="rt-share-field" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-    <input class="inp rt-email-inp" type="email" placeholder="candidate@email.com" value="${val?esc(val):''}" style="flex:1">
-    <button type="button" class="btn btn-sm" style="color:var(--err);border-color:var(--err);flex:none;padding:6px 10px" onclick="rtShareRemoveField(this)" title="Remove this email"><i class="fa-solid fa-xmark"></i></button>
-  </div>`;
+/* A TEST GOES TO SOMEBODY IN THE INTERVIEW TRACKER, AND NOWHERE ELSE.
+
+   This used to be five empty boxes to type addresses into, which meant a test could be sent to any
+   address at all - a typo, a personal account, somebody who was never a candidate here. Nothing
+   downstream could cope with that: the attempt, the answers, the time taken and the pass are all
+   recorded against the address the link was minted for, so an address that belongs to no candidate
+   produces a result that can never be tied back to a person, and a mistyped one silently sends the
+   paper to a stranger while the real candidate waits.
+
+   So the addresses are no longer typed - they are PICKED, from the Interview Tracker, which is the
+   list of people who are actually being considered. Anyone who should get a test is added there
+   first. That is also what lets 'Tests Sent' and 'Test Passed' land on the right row.
+
+   Read straight from hr.interview_tracker rather than from TP_TR_RECORDS, because that variable is
+   only filled while the Interview Tracker page is open and is empty when Tests is where you are. */
+let RT_TRACKER_PEOPLE=null, RT_TRACKER_HIDDEN=0, RT_TRACKER_WAITING=0, RT_TRACKER_EXCLUDED=[];
+/* ONLY SOMEBODY WHO HAS NOT BEEN ANYWHERE YET CAN BE SENT A TEST.
+
+   A stage in the Feedback column means something has already happened to this person, and in every
+   case it is a reason not to post them a paper:
+
+     Tests Sent          they already have one, sitting unanswered - a second link would replace
+                         nothing and leave two live attempts against one person
+     Test Passed         they have sat it and passed; sending it again invites a second, different
+                         score against the same name
+     Interview Scheduled / Interview Done / Selected / Joined
+                         they are past the testing stage entirely
+     Rejected / Backed Out
+                         they are not a candidate any more
+     Hold                a decision has been deliberately paused; a test would restart it
+
+   TP_STAGES is the funnel in order and begins at 'Tests Sent', so "everything from Tests Sent
+   onward, plus Hold, Rejected, Selected and Backed Out" is in fact every stage in that list.
+
+   WHICH IS WHY THIS HIDES THE NAMED STAGES RATHER THAN SHOWING ONLY BLANK ONES. Written the other
+   way round - "only somebody with no stage at all" - it looked equivalent and was not: live rows
+   carry 'Pending', which is not in TP_STAGES, and hiding it would have emptied this list of the
+   only people eligible to sit a test. Anything that is not one of the stages below is somebody
+   nothing has happened to yet, and they belong here.
+
+   Note a test cannot be re-sent to the same person from here once it has gone: they move to Tests
+   Sent the moment the link is generated and drop out of this list. If somebody never receives
+   theirs, set their Feedback back in the Interview Tracker and they reappear. */
+/* Built on first use, not at load. TP_STAGES is declared further down this same file, so reading
+   it from a top-level const up here throws a ReferenceError the instant the script is parsed and
+   takes every page of JAIN-E down with it. Inside the function it is only read on a click, long
+   after the whole file has run. */
+let RT_NOT_TESTABLE=null;
+function rtTestable(feedback){
+  if(!RT_NOT_TESTABLE) RT_NOT_TESTABLE=new Set(TP_STAGES.map(x=>x.toLowerCase()));
+  const f=String(feedback||'').trim().toLowerCase();
+  return !RT_NOT_TESTABLE.has(f);
 }
-window.rtShareRemoveField=function(btn){const row=btn.closest('.rt-share-field');if(row)row.remove();};
-window.rtShareAddN=function(){
-  const raw=parseInt(($('rtAddN')||{}).value);
-  const n=Math.max(1,Math.min(50,isNaN(raw)?1:raw));
-  const cont=$('rtEmailFields');if(!cont)return;
-  for(let i=0;i<n;i++)cont.insertAdjacentHTML('beforeend',rtShareFieldRow());
+/* ONE ENTRY PER TRACKER ROW, NOT PER PERSON.
+
+   The obvious thing is to list each address once, and it is wrong. One person can be a live
+   candidate for two positions at the same time, and the two are judged separately - somebody who
+   backed out of Operations Head can still be Pending for Sales Executive, which is exactly what
+   the live data looks like. Collapsing them to one line per address means judging that person by
+   whichever row happened to be newest, and hiding a candidate who is genuinely still in the
+   running.
+
+   A test is sent FOR A POSITION, and Monthly Update counts per position, so the row is the unit.
+   Each row carries its own candidate_id, which is what makes the count land on the right position.
+
+   candidate_id is the whole reason this is carried at all: without it recruit-test-generate-link
+   has nobody to move to 'Tests Sent', so hr.candidates.stage never changes and Monthly Update -
+   which counts those stages - stays at zero however many tests have actually gone out. */
+async function rtTrackerPeople(force){
+  if(RT_TRACKER_PEOPLE&&!force) return RT_TRACKER_PEOPLE;
+  const {data,error}=await sb.schema('hr').from('interview_tracker')
+    .select('id,candidate_id,candidate_name,email,position,feedback').order('id',{ascending:false});
+  if(error) throw error;
+
+  /* NOBODY UNAPPROVED IS OFFERED A TEST.
+     The database refuses the stage change anyway, so sending to one would deliver an email and
+     then fail to record it - the worst of both. Asking which candidates are approved here means
+     they are simply not in the list, with the reason said once above it rather than as a failure
+     per person. */
+  const ids=[...new Set((data||[]).map(r=>r.candidate_id).filter(x=>x!=null))];
+  let approved=new Set();
+  if(ids.length){
+    const {data:cands}=await sb.schema('hr').from('candidates')
+      .select('id,approval_status').in('id',ids);
+    (cands||[]).forEach(c=>{ if((c.approval_status||'Approved')==='Approved') approved.add(c.id); });
+  }
+
+  /* Counted apart, because they are different problems with different answers. "Waiting to be
+     approved" is something you can go and fix in a minute; "already tested or moved on" is not a
+     problem at all. Lumping them together produced the worst possible message for a brand new
+     candidate: that they had already been sent a test and moved on. */
+  /* WHY SOMEBODY IS NOT IN THE LIST IS KEPT PER ROW, NOT AS ONE TOTAL.
+
+     The counts used to be two numbers for the whole tracker, and the message about a single
+     position read from them. So on a position where everyone had already been tested, the window
+     still said "1 is still waiting to be approved in Accountability" - counting somebody waiting
+     on a completely different position. It sent people to Pending Approval to look for a task
+     that had nothing to do with the position they were on.
+
+     Each excluded row now carries its own position and reason, so the sentence can be counted
+     from exactly the rows the sentence is about. */
+  const out=[]; const excluded=[];
+  for(const r of (data||[])){
+    const em=String(r.email||'').trim().toLowerCase();
+    if(!em) continue;
+    const pos=r.position||'';
+    if(r.candidate_id!=null && !approved.has(r.candidate_id)){
+      excluded.push({position:pos,reason:'waiting'}); continue;
+    }
+    if(!rtTestable(r.feedback)){
+      excluded.push({position:pos,reason:'moved_on',feedback:r.feedback||''}); continue;
+    }
+    out.push({email:em,name:r.candidate_name||'',position:pos,
+              feedback:r.feedback||'',candidateId:r.candidate_id||null});
+  }
+  RT_TRACKER_PEOPLE=out;
+  RT_TRACKER_EXCLUDED=excluded;
+  RT_TRACKER_HIDDEN=excluded.length;
+  RT_TRACKER_WAITING=excluded.filter(function(x){return x.reason==='waiting';}).length;
+  return out;
+}
+/* The sentence for one position, counted from that position's own rows. Returns null when there
+   is genuinely nothing to say. */
+function rtWhyNobody(position){
+  const rows=(RT_TRACKER_EXCLUDED||[]).filter(function(x){
+    return position==null || String(x.position||'')===String(position); });
+  const waiting=rows.filter(function(x){return x.reason==='waiting';}).length;
+  const movedOn=rows.filter(function(x){return x.reason==='moved_on';}).length;
+  const who=position?('\u201c'+position+'\u201d'):'the Interview Tracker';
+  if(!rows.length) return 'There is nobody on '+who+' to send a test to.';
+  if(waiting&&movedOn){
+    return 'Nobody on '+who+' can be sent a test right now '+'—'+' '+movedOn+' '
+      +(movedOn===1?'has':'have')+' already been sent one or moved on, and '+waiting+' '
+      +(waiting===1?'is':'are')+' still waiting to be approved in Accountability \u203a Pending Approval.';
+  }
+  if(waiting){
+    return 'Nobody on '+who+' can be sent a test yet '+'—'+' '+waiting+' '
+      +(waiting===1?'is':'are')+' still waiting to be approved in Accountability \u203a Pending Approval.';
+  }
+  return 'Nobody on '+who+' can be sent a test right now '+'—'
+    +' they have all been sent one already, or moved on.';
+}
+/* Styled by .rt-cand-* in nexus.css, not inline, because this sits inside .frm - see the note
+   there. The row must stay a <label> so that a click anywhere on it ticks the box. */
+function rtSharePersonRow(p,preTick){
+  const sub=[p.position,p.feedback].filter(Boolean).join(' \u00b7 ');
+  return `<label class="rt-cand-row" data-hay="${esc((p.name+' '+p.email+' '+p.position).toLowerCase())}">
+    <input type="checkbox" class="rt-cand-chk"${preTick?' checked':''} value="${esc(p.email)}" data-cand="${p.candidateId==null?'':p.candidateId}">
+    <span style="min-width:0">
+      <span class="rt-cand-name">${esc(p.name||p.email)}</span>
+      <span class="rt-cand-mail">${esc(p.email)}</span>
+      ${sub?`<span class="rt-cand-sub">${esc(sub)}</span>`:''}
+    </span>
+  </label>`;
+}
+/* Keeps the subject in step with the chosen test, but never overwrites wording somebody has
+   typed - the default is recognisable, so anything else is theirs. */
+window.rtShareTestChanged=function(){
+  const selEl=$('rtShareTest'); if(!selEl)return;
+  const t=(RT_RECORDS||[]).find(x=>String(x.id)===String(selEl.value));
+  const subj=$('rtShareSubj');
+  if(t&&subj){
+    const looksDefault=/^Check This .* provided by JainGroup$/.test(subj.value||'');
+    if(looksDefault||!String(subj.value||'').trim()) subj.value='Check This '+t.name+' provided by JainGroup';
+  }
 };
-window.rtShare=async function(){
+window.rtShareFilter=function(q){
+  const t=String(q||'').trim().toLowerCase();
+  let shown=0;
+  document.querySelectorAll('#rtEmailFields .rt-cand-row').forEach(function(el){
+    const hit=!t||(el.dataset.hay||'').includes(t);
+    el.style.display=hit?'':'none';   // '' falls back to the stylesheet's flex
+    if(hit)shown++;
+  });
+  const none=$('rtCandNone'); if(none)none.style.display=shown?'none':'block';
+};
+window.rtShareCheckAll=function(el){
+  /* Ticks only what is visible, so a filter then Select-all means "everyone matching this",
+     not "everyone in the tracker" - which is what somebody filtering plainly intends. */
+  document.querySelectorAll('#rtEmailFields .rt-cand-row').forEach(function(row){
+    if(row.style.display==='none')return;
+    const cb=row.querySelector('.rt-cand-chk'); if(cb)cb.checked=el.checked;
+  });
+  rtShareCountSel();
+};
+window.rtShareCountSel=function(){
+  const n=document.querySelectorAll('#rtEmailFields .rt-cand-chk:checked').length;
+  const lbl=$('rtCandCount'); if(lbl)lbl.textContent=n?(n+' selected'):'none selected';
+};
+/* fromPosition is set when this was opened from a Monthly Progress row. It narrows the list to
+   that one position and ticks everybody, because on a position's own row the normal case is "send
+   it to all of them" - unticking one is less work than ticking nine. Opened the usual way from
+   Tests, nothing is narrowed and nothing is pre-ticked, which is the safer default when the whole
+   company's candidates are on screen. */
+window.rtShare=async function(fromPosition){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
   await rtShareCheckGmail();
-  const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
-  if(sel.length!==1){toast('Select exactly one test to share','err');return;}
-  const rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);if(!rec)return;
+
+  /* WHICH TEST IS ASKED FOR, NOT ASSUMED.
+
+     This used to read the ticked row in the Tests table and refuse with "Select exactly one test
+     to share" if there was not exactly one. Opened from Tests that is fair. Opened from Monthly
+     Progress it was nonsense: the Tests table is on a different tab, nothing there is ticked and
+     nothing can be ticked without leaving the screen you are on - so the window refused, naming a
+     control that was not on it, for a reason nobody could act on.
+
+     From Monthly Progress the position is known and the test is not, so the test is a field in the
+     window. From Tests the test is known and stays as it was. */
+  const fromPos=fromPosition===true;
+  let rec=null;
+  if(!fromPos){
+    const sel=[...document.querySelectorAll('.rt-chk:checked')].map(c=>parseInt(c.value));
+    if(sel.length!==1){toast('Tick exactly one test to email','err');return;}
+    rec=(RT_RECORDS||[]).find(r=>r.id===sel[0]);
+    if(!rec)return;
+  }else{
+    const usable=(RT_RECORDS||[]).filter(t=>t.engine==='native');
+    if(!usable.length){toast('There are no tests set up to send','err');return;}
+    rec=usable[0];            // the window opens on the first, and the dropdown changes it
+  }
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
   const subject=`Check This ${rec.name} provided by JainGroup`;
   const body=`Dear Candidate,\nFill This Test at the latest.\nTest Attachment`;
-  const fields=Array.from({length:5}).map(()=>rtShareFieldRow()).join('');
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-share-nodes"></i> Share Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  let people=[];
+  try{ people=await rtTrackerPeople(true); }
+  catch(e){ toast('Could not read the Interview Tracker: '+((e&&e.message)||e),'err'); return; }
+  const onlyPos=fromPosition===true?TP_MU_EMAIL_POS:null;
+  if(onlyPos){
+    people=people.filter(function(x){return String(x.position||'')===String(onlyPos);});
+    if(!people.length){
+      /* Says which of the two it is. A candidate added a minute ago being told they have "already
+         been sent one" is a message that sends somebody looking for a test that was never sent. */
+      toast(rtWhyNobody(onlyPos),'err');
+      return;
+    }
+  }
+  /* AN EMPTY WINDOW IS NOT AN ANSWER. Opening a Send window with nobody in it, and a sentence
+     explaining why, asks somebody to read a dialog in order to learn there was nothing to do -
+     and leaves a Send button on screen that cannot send. The reason is said as a message and the
+     window stays shut. */
+  if(!people.length){
+    toast(RT_TRACKER_WAITING
+      ? (RT_TRACKER_WAITING+' candidate'+(RT_TRACKER_WAITING===1?' is':'s are')
+         +' waiting to be approved \u2014 approve them in Accountability \u203a Pending Approval, then send the test')
+      : RT_TRACKER_HIDDEN
+      ? 'Everybody in the Interview Tracker has already been sent a test or moved on'
+      : 'Nobody in the Interview Tracker has an email address yet \u2014 add a candidate there first',
+      'err');
+    return;
+  }
+
+  const fields=people.length
+    ? people.map(function(x){return rtSharePersonRow(x,!!onlyPos);}).join('')
+    : '<div style="padding:18px;text-align:center;color:var(--slate);font-size:13px">'
+      /* Three situations, three answers. Telling somebody their brand new candidate has "already
+         been moved on" is worse than saying nothing: it describes a history that did not happen,
+         and hides the one action that would actually fix it. */
+      +(RT_TRACKER_WAITING
+        ? '<b>'+RT_TRACKER_WAITING+' candidate'+(RT_TRACKER_WAITING===1?' is':'s are')+' waiting to be approved.</b>'
+          +'<div style="margin-top:6px;font-size:12.5px">Approve them in <b>Accountability \u203a Pending '
+          +'Approval</b> and they can be sent a test.</div>'
+        : RT_TRACKER_HIDDEN
+        ? 'Every candidate in the Interview Tracker has already been moved on \u2014 sent a test, '
+          +'interviewed, selected, rejected, backed out or put on hold. Add a new candidate there to '
+          +'send a test.'
+        : 'Nobody in the Interview Tracker has an email address yet. Add the candidate there first, '
+          +'with their email, and they will appear here.')
+      +'</div>';
+  /* THE WINDOW SAYS WHAT IT NEEDS AND NOTHING ELSE.
+
+     It had grown four blocks of explanation - where the mail comes from, how per-person links work,
+     why some candidates are missing, what the search box searches. Every one was true and together
+     they buried the three things somebody actually came here to do: pick a test, write a line, tick
+     people. Explanations that are never read are not documentation, they are noise with a cost.
+
+     What stayed: the sender line, because a letter going out over the wrong address is worth one
+     sentence; and the count of who is not shown, cut to the fact itself. Everything else moved to
+     a tooltip or went. */
+  openModal(/* wider: this window holds a subject, a message and a scrolling list of
+     candidates, and at 560px the list was a narrow column with names wrapping onto two lines */
+  `<div class="modal-head"><h3><i class="fa-solid fa-envelope"></i> Email Test</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
-    ${RT_CAN_SEND_AS_SELF
-      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#166534;margin-bottom:4px"><i class="fa-brands fa-google"></i> Sending from <b>${esc(state.email||'')}</b> — it will be in your own Sent folder, and replies come straight to you.</div>`
-      : `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12.5px;color:#92400e;margin-bottom:4px">
-           <div style="margin-bottom:7px">This will be sent from the shared JAIN-E address, signed by you, with replies pointed at <b>${esc(state.email||'')}</b>. Connect your Google account to send it from your own address instead.</div>
-           <button type="button" class="btn btn-sm" onclick="rtShareConnectGoogle()"><i class="fa-brands fa-google"></i> Connect Google</button>
-         </div>`}
-    <label>Test</label><input class="inp" value="${esc(rec.name)}" disabled>
-    <label>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
-    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
-    ${rec.engine==='native'
-      ? `<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Each person gets their OWN link to this paper, so their answers and their time are recorded against them.</div>`
-      : (rec.link?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px"><i class="fa-solid fa-paperclip"></i> Test link attached: <span style="word-break:break-all">${esc(rec.link)}</span></div>`:'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>')}
-    <label style="margin-top:6px">Candidate Emails <span style="font-size:11px;color:var(--slate)">(fill in as many as you need &mdash; blank ones are ignored)</span></label>
-    <div id="rtEmailFields">${fields}</div>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      <input id="rtAddN" type="number" min="1" max="50" value="1" class="inp" style="width:84px" title="How many fields to add">
-      <button type="button" class="btn btn-sm" onclick="rtShareAddN()"><i class="fa-solid fa-plus"></i> Add Field(s)</button>
+    <div style="font-size:12px;color:var(--slate);margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span><i class="fa-solid fa-paper-plane" style="opacity:.6"></i> From <b>${RT_CAN_SEND_AS_SELF?esc(state.email||''):'the shared JAIN-E address'}</b></span>
+      ${RT_CAN_SEND_AS_SELF?'':`<button type="button" class="btn btn-sm" style="padding:2px 10px" onclick="rtShareConnectGoogle()" title="Send from your own address instead"><i class="fa-brands fa-google"></i> Use mine</button>`}
     </div>
+
+    ${fromPos?`<label>Test</label>
+    <select id="rtShareTest" class="sel" onchange="rtShareTestChanged()">
+      ${(RT_RECORDS||[]).filter(t=>t.engine==='native').map(t=>`<option value="${t.id}"${t.id===rec.id?' selected':''}>${esc(t.name||'Untitled')}</option>`).join('')}
+    </select>`:''}
+
+    <label${fromPos?'':' style="margin-top:0"'}>Subject</label><input id="rtShareSubj" class="inp" value="${esc(subject)}">
+    <label>Message</label><textarea id="rtShareBody" class="inp" rows="3" style="resize:vertical">${esc(body)}</textarea>
+    ${rec.engine==='native'?'':(rec.link?'':'<div style="font-size:11.5px;color:var(--err);margin-top:2px">&#9888; This test has no form link.</div>')}
+
+    <div style="display:flex;align-items:baseline;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <label style="margin:0">Send to${onlyPos?` <span style="font-weight:400;color:var(--slate)">\u00b7 ${esc(onlyPos)}</span>`:''}</label>
+      ${RT_TRACKER_HIDDEN?`<span style="font-size:11.5px;color:var(--slate)" title="Candidates already sent a test, interviewed, selected, rejected, backed out, on hold, or still waiting to be approved">${RT_TRACKER_HIDDEN} not shown</span>`:''}
+      <span id="rtCandCount" style="margin-left:auto;font-size:12px;color:var(--slate)">${onlyPos?(people.length+' selected'):'none selected'}</span>
+    </div>
+    <input id="rtCandSearch" class="inp" placeholder="Search\u2026" oninput="rtShareFilter(this.value)" style="margin:6px 0">
+    <div class="rt-cand-tools" style="margin-bottom:6px">
+      <label><input type="checkbox" onchange="rtShareCheckAll(this)"> Select all shown</label>
+    </div>
+    <div id="rtEmailFields" class="rt-cand-list" onchange="rtShareCountSel()">${fields}</div>
+    <div id="rtCandNone" style="display:none;padding:12px;text-align:center;color:var(--slate);font-size:12.5px">Nobody matches that.</div>
   </div>
-  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="rtShareSend(${rec.id})"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+  <div class="modal-foot"><button class="btn btn-primary" id="rtShareSendBtn" onclick="${fromPos?'rtShareSendPicked()':'rtShareSend('+rec.id+')'}"><i class="fa-solid fa-paper-plane"></i> Send</button><button class="btn" onclick="closeModal()">Cancel</button></div>`,'lg');
+};
+/* The dropdown decides, not whatever the window opened on. Reading it at Send time is what makes
+   changing the test actually change what goes out. */
+window.rtShareSendPicked=function(){
+  const selEl=$('rtShareTest');
+  const id=selEl?parseInt(selEl.value,10):NaN;
+  if(!id||isNaN(id)){toast('Choose a test to send','err');return;}
+  return rtShareSend(id);
 };
 window.rtShareSend=async function(id){
   if(!rtCanShare()){toast('You do not have permission to share tests','err');return;}
   const rec=(RT_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  const inps=[...document.querySelectorAll('#rtEmailFields .rt-email-inp')];
-  if(!inps.length){toast('Add at least one candidate email','err');return;}
-  const re=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const emails=[];
-  /* A blank box is simply not a candidate. The window opens with five and can be grown fifty at a
-     time, so treating every empty one as an error meant deleting boxes before a smaller send would
-     go - the box count is a convenience, not a declaration of how many people are being written to.
-     What was actually typed is still checked properly for shape and for duplicates. */
-  for(const el of inps){
-    const v=(el.value||'').trim();
-    el.style.borderColor='';
-    if(!v)continue;
-    if(!re.test(v)){el.style.borderColor='var(--err)';toast('Invalid email: '+v,'err');el.focus();return;}
-    if(emails.includes(v.toLowerCase())){el.style.borderColor='var(--err)';toast('Duplicate email: '+v,'err');el.focus();return;}
-    emails.push(v.toLowerCase());
-  }
-  if(!emails.length){toast('Type at least one candidate email','err');inps[0].focus();return;}
+  /* The recipients are the rows ticked in the Interview Tracker list - an address AND the
+     candidate it belongs to. Nothing typed can reach here, so there is no shape to validate. */
+  const picked=[...document.querySelectorAll('#rtEmailFields .rt-cand-chk:checked')].map(function(c){
+    const cid=parseInt(c.dataset.cand,10);
+    return {email:String(c.value||'').trim().toLowerCase(), candidateId:isNaN(cid)?null:cid};
+  }).filter(function(x){return x.email;});
+  if(!picked.length){toast('Tick at least one candidate to send this to','err');return;}
+  const emails=picked.map(function(x){return x.email;});
   const subject=($('rtShareSubj')||{}).value?.trim()||`Check This ${rec.name} provided by JainGroup`;
   const body=($('rtShareBody')||{}).value?.trim()||'';
   const senderName=(state.profile&&state.profile.full_name)||(state.roles&&state.roles.full_name)||(state.email||'').split('@')[0];
@@ -11527,24 +12858,32 @@ window.rtShareSend=async function(id){
      'Tests Sent' against a candidate, which a shared form address could never do. One address
      failing does not stop the rest: the others still go, and the failures are named afterwards. */
   if(rec.engine==='native'){
-    let sent=0; const failed=[];
-    for(const to of emails){
+    let sent=0, staged=0; const failed=[];
+    for(const who of picked){
+      const to=who.email;
       try{
+        /* candidate_id is what moves this person to 'Tests Sent', which is what Monthly Update
+           counts. Sending without it delivers the email and leaves every report reading zero. */
         const {data:gen,error:genErr}=await sb.functions.invoke('recruit-test-generate-link',
-          {body:{test_id:id,candidate_email:to,origin:location.origin}});
+          {body:{test_id:id,candidate_email:to,candidate_id:who.candidateId,origin:location.origin}});
         if(genErr||gen?.error) throw new Error((gen&&gen.error)||genErr.message);
         const {data:sd,error:se}=await sb.functions.invoke('send-test-email',
           {body:{test_id:id,test_name:rec.name,link:gen.link,subject,body,recipients:[to],
                  sender_name:senderName,sender_email:state.email||''}});
         if(se||sd?.error) throw new Error((sd&&sd.error)||se.message);
-        sent++;
+        sent++; if(who.candidateId) staged++;
       }catch(e){ failed.push(to+' ('+((e&&e.message)||e)+')'); }
     }
     if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Send';}
     if(sent){
       try{usageQueue('recruitment.tests.share_test_via_email','update',{title:rec.name,recipients:sent});}catch(_e){}
       closeModal();
-      toast('Sent to '+sent+' candidate'+(sent===1?'':'s')+' — each has their own link, and is now at Tests Sent','ok');
+      toast('Sent to '+sent+' candidate'+(sent===1?'':'s')+' — each has their own link'
+            +(staged?', and '+(staged===sent?(sent===1?'is':'are'):(staged+' of them are'))+' now at Tests Sent':''),'ok');
+      /* A tracker row with no candidate_id behind it cannot be moved to a stage, so it will never
+         appear in Monthly Update however many tests it receives. Better said out loud than left to
+         be discovered as a report that quietly reads zero. */
+      if(staged<sent) toast((sent-staged)+' of those are not linked to a candidate record, so they will not show in Monthly Update','err');
     }
     if(failed.length) toast('Could not send to: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
     if(!sent&&!failed.length) toast('Nothing was sent','err');
@@ -11605,16 +12944,40 @@ window.rtResultsNative=async function(testId,showPreviews){
     // Rehearsals are excluded: HR checking the paper is not a result, and before this they piled
     // up in here beside the candidates - 18 of them under one address before a single real
     // candidate had sat anything.
-    const{data,error}=await sb.schema('recruit').from('test_attempts')
+    let{data,error}=await sb.schema('recruit').from('test_attempts')
       .select('id,candidate_email,status,started_at,submitted_at,mcq_score,mcq_max,ai_score,ai_max,ai_status,final_pct,pass_fail')
       .eq('test_id',testId).eq('is_preview',!!showPreviews).order('submitted_at',{ascending:false,nullsFirst:false});
     if(error)throw new Error(error.message);
-    if(!data||!data.length){
+
+    /* A RESULT IS SOMEBODY WHO PRESSED START. NOTHING ELSE.
+
+       Sending a test creates an attempt row straight away - that is what mints the link and what
+       moves the candidate to 'Tests Sent'. But an attempt that exists is not a person who sat
+       anything: it is an invitation, and until they open the page and press Start no question has
+       been seen and no answer exists. Listing those here filled Results with names scoring zero out
+       of zero, which reads exactly like somebody who sat the paper and failed it - worse than
+       showing nothing, because it is a wrong answer to "how did they do".
+
+       started_at is stamped by the server when Start is pressed, so it is the honest dividing line:
+       opened the email, opened the page, wandered off - no row here. Pressed Start - a row, even if
+       they never submitted, because by then they have seen the paper and the clock has run. Those
+       show as 'still open' rather than as a score.
+
+       The ones still waiting are counted on the line above the table rather than dropped silently,
+       so "sent to 5, two have sat it" is visible instead of looking like three sends went missing. */
+    const all=data||[];
+    const waiting=all.filter(function(r){return !r.started_at;}).length;
+    data=all.filter(function(r){return !!r.started_at;});
+
+    if(!data.length){
       rb.innerHTML='<div class="empty" style="padding:36px;color:var(--slate)">'
         +'<i class="fa-solid fa-inbox" style="font-size:28px;opacity:.3;display:block;margin-bottom:10px"></i>'
         +(showPreviews
           ? 'You have not previewed this test yet. Press Preview on its row to sit it \u2014 the marking will show up here.'
-          : 'No candidate has taken this test yet.')
+          : (waiting
+             ? '<b>'+waiting+' candidate'+(waiting===1?' has':'s have')+' been sent this test, but nobody has started it yet.</b>'
+               +'<div style="margin-top:6px;font-size:12.5px">A result appears the moment somebody opens their link and presses Start.</div>'
+             : 'No candidate has taken this test yet.'))
         +'</div>';
       return;
     }
@@ -11640,7 +13003,7 @@ window.rtResultsNative=async function(testId,showPreviews){
       return `<b style="color:${col}">${r.final_pct}%</b> <span style="font-size:11px;color:var(--slate)">(${(Number(r.mcq_score||0)+Number(r.ai_score||0))} / ${(Number(r.mcq_max||0)+Number(r.ai_max||0))})</span> — <span style="color:${col};font-weight:600">${r.pass_fail?'Pass':'Fail'}</span>`;
     };
     rb.innerHTML=`
-      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} ${showPreviews?('preview'+(data.length!==1?'s':'')+' · not counted anywhere'):('response'+(data.length!==1?'s':''))} · click a row to see answers</div>
+      <div style="font-size:12px;color:var(--slate);margin-bottom:10px">${data.length} ${showPreviews?('preview'+(data.length!==1?'s':'')+' · not counted anywhere'):('response'+(data.length!==1?'s':''))}${(!showPreviews&&waiting)?` · ${waiting} sent but not started yet`:''} · click a row to see answers</div>
       <div style="overflow-x:auto">
       <table class="tbl" style="min-width:500px">
         <thead><tr>
@@ -11676,7 +13039,9 @@ window.rtResultsAttemptDetail=async function(attemptId){
     const byQ={}; (answers||[]).forEach(a=>byQ[a.question_id]=a);
     rb.innerHTML=`<button class="btn btn-sm" onclick="rtResultsNative(${full.test_id},${!!full.is_preview})" style="margin-bottom:12px"><i class="fa-solid fa-arrow-left"></i> Back to ${full.is_preview?'Previews':'Results'}</button>
       <div style="font-size:13px;color:var(--slate);margin-bottom:14px">${esc(full.candidate_email||'—')} · ${full.final_pct!=null?full.final_pct+'% — '+(full.pass_fail?'Pass':'Fail'):'Not yet graded'}
-        ${full.ai_status==='failed'?`<button class="btn btn-sm" style="margin-left:8px" onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> Retry AI Grading</button>`:''}
+        ${(full.mcq_max==null||Number(full.ai_max||0)>0)?`<button class="btn btn-sm" style="margin-left:8px"
+            title="${full.ai_status==='failed'?'Grading did not finish — run it again':'Mark the written answers again'}"
+            onclick="rtRegradeAttempt('${attemptId}')"><i class="fa-solid fa-rotate"></i> ${full.ai_status==='failed'?'Retry grading':'Re-grade'}</button>`:''}
       </div>
       ${(qs||[]).map((q,i)=>{
         const a=byQ[q.id]||{};
@@ -11890,7 +13255,7 @@ async function recManpower(){
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">ManPower Requisitions <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap" id="mpToolbar">
       <button class="btn btn-primary" onclick="mpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
       <button class="btn" id="mpEditBtn" disabled style="${dis}" onclick="mpEditSel()"><i class="fa-solid fa-pen"></i> Edit</button>
@@ -11915,7 +13280,7 @@ async function recManpower(){
       <td style="font-size:12px">${esc(r.salary_range||'—')}</td>
       <td>${esc(r.location||'—')}</td>
       <td>${priTag(r.priority)}</td>
-    </tr>`).join(''):'<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--slate)">No requisitions yet — click <b>Fill Form</b> to add one</td></tr>'}
+    </tr>`).join(''):'<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>Fill Form</b> to add one</td></tr>'}
     </tbody>
   </table>
   </div>
@@ -11938,11 +13303,11 @@ window.mpEditSel=function(){if(!recGuard())return;
 window.mpDeleteSel=async function(){if(!recGuard())return;
   const sel=[...document.querySelectorAll('.mp-chk:checked')].map(c=>parseInt(c.value));
   if(!sel.length)return;
-  if(!await confirmDialog('Delete '+sel.length+' requisition(s)? This cannot be undone.'))return;
+  if(!await confirmDialog('Delete '+sel.length+' hiring request'+(sel.length===1?'':'s')+'? This cannot be undone.'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().in('id',sel);
   if(error){toast(error.message,'err');return;}
   if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>!sel.includes(r.id));
-  toast(sel.length+' deleted');recManpower();
+  toast(sel.length+' deleted');mpRefreshList();
 };
 window.mpShowDetail=function(id,e){
   if(e&&e.target&&e.target.type==='checkbox')return;
@@ -11997,37 +13362,115 @@ function mpGetField(id,opts){
 }
 function mpModal(title,vals,saveBtn){
   const locs=['HO','Site/Project Name','Durgapur','Siliguri'];
-  const selLocs=vals&&vals.location?vals.location.split(',').map(s=>s.trim()):[];
-  const locChk=locs.map(l=>`<label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;margin-bottom:4px"><input type="checkbox" class="mp-loc" value="${l}"${selLocs.includes(l)?' checked':''}> ${l}</label>`).join('');
+  /* HO on a new form, because most requests are for head office and an empty set of locations is
+     never what anybody meant. An EXISTING request keeps exactly what it was saved with - including
+     none - so editing one cannot quietly add a location nobody chose. */
+  const selLocs=vals ? (vals.location?vals.location.split(',').map(s=>s.trim()):[]) : ['HO'];
+  const locChk=locs.map(l=>`<label class="mpf-chip"><input type="checkbox" class="mp-loc" value="${l}"${selLocs.includes(l)?' checked':''}> ${l}</label>`).join('');
   // A new form opens on today; an existing one shows the day it was actually raised. Neither
   // can be typed over - see mpTodayInput above.
   const dateVal=mpToDateInput(vals&&vals.date_of_request||'')||mpTodayInput();
+  /* THE FORM, REBUILT AROUND WHAT IS BEING ASKED RATHER THAN WHAT THE TABLE HOLDS.
+
+     It used to be eleven fields in a flat stack, every one the same weight, with two of them
+     explaining themselves in grey text underneath. Three things went:
+
+       Date of Request  - it is always today and could never be edited. A disabled box that always
+                          says the same thing is furniture, not a field. It is still recorded.
+       Job Description  - a description is WRITTEN from this request, by AI, and then reviewed.
+       / KPI              Asking for one here meant typing something that would be replaced.
+       The suggestions  - Department and Qualification guessed from the job title. A guess that is
+                          right most of the time is worse than no guess, because the times it is
+                          wrong are the times nobody looks.
+
+     What is left is grouped: the role, then the person, then the terms. Defaults are set where
+     there is an obvious one - Location HO, Not Urgent - so the common request is mostly filled in
+     before anybody types. */
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pen"></i> ${title}</h3><span class="x" onclick="closeModal()">&times;</span></div>
-  <div class="modal-body frm" style="max-height:72vh;overflow-y:auto">
-    <div class="two">
-      <div><label>Job Title *</label><input id="mpFTitle" class="inp" value="${esc(vals&&vals.job_title||'')}" placeholder="e.g. Sales Executive" oninput="mpTitleSuggest()"></div>
-      <div><label>Date of Request</label><input id="mpFDate" type="date" class="inp" value="${dateVal}" disabled style="background:#f1f5f9;color:var(--slate);cursor:not-allowed"><div style="font-size:11px;color:var(--slate);margin-top:4px">Set automatically — the day the request is raised.</div></div>
+  <style>
+    /* THREE GROUPS, AND YOU CAN SEE THAT THERE ARE THREE.
+
+       The fields were already in sections, but the only thing separating them was a hairline and
+       18px - less than the gap between two fields inside a section. So everything sat at the same
+       distance from everything else and the form read as one long column of thirteen boxes.
+       Things that belong together are now closer to each other than to anything else, which is
+       what makes a group a group: each section is its own panel, with real space between panels
+       and a quieter heading, because the panel already says where the boundary is. */
+    .mpf-sec{background:#fff;border:1px solid var(--line);border-radius:12px;
+      padding:16px 18px 18px;margin:0 0 16px}
+    .mpf-sec:last-of-type{margin-bottom:4px}
+    .mpf-sec-t{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;
+      letter-spacing:.8px;text-transform:uppercase;color:var(--slate);margin:0 0 14px}
+    .mpf-sec-t::after{content:"";flex:1;height:1px;background:var(--line)}
+    .mpf-sec-t i{color:var(--brand);font-size:12px}
+    /* 22px between rows, 20px between the two columns - a field is nearer its own label than the
+       next field is, which is the whole point. */
+    .frm .mpf-row{display:grid;grid-template-columns:1fr 1fr;gap:18px 20px;margin-bottom:18px}
+    .frm .mpf-row:last-child{margin-bottom:0}
+    .frm .mpf-row.one{grid-template-columns:1fr}
+    .frm .mpf-row label{display:block;margin:0 0 6px;font-size:12px;font-weight:600;
+      color:var(--slate);letter-spacing:.2px}
+    .frm .mpf-row .inp,.frm .mpf-row .sel,.frm .mpf-row select{margin:0}
+    .mpf-hint{font-size:11.5px;color:var(--slate);margin-top:7px;line-height:1.45}
+    .mpf-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+    .mpf-chip{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--line);
+      border-radius:999px;cursor:pointer;font-size:13px;background:#fff;margin:0;transition:.12s}
+    .mpf-chip:hover{background:#f8fafc;border-color:#94a3b8}
+    .mpf-chip:has(input:checked){background:#eff6ff;border-color:var(--brand);color:#1e40af;font-weight:600}
+    .frm .mpf-chip input{width:auto;margin:0;padding:0;border:0;box-shadow:none;background:none}
+    @media(max-width:620px){
+      .frm .mpf-row{grid-template-columns:1fr;gap:16px}
+      .mpf-sec{padding:14px 14px 16px}
+    }
+  </style>
+  <div class="modal-body frm" style="max-height:74vh;overflow-y:auto;background:var(--bg);padding-top:16px">
+    <div class="mpf-sec">
+    <div class="mpf-sec-t"><i class="fa-solid fa-briefcase"></i>The role</div>
+    <div class="mpf-row">
+      <div><label>Job Title *</label><input id="mpFTitle" class="inp" value="${esc(vals&&vals.job_title||'')}" placeholder="e.g. Sales Executive"></div>
+      <div><label>Department *</label>${mpSelOpt('mpFDept',MP_DEPTS,vals&&vals.department||'')}</div>
     </div>
-    <div class="two">
-      <div><label>Department *</label>${mpSelOpt('mpFDept',MP_DEPTS,vals&&vals.department||'')}<div style="font-size:11px;color:var(--slate);margin-top:4px">Suggested from the Job Title — change it if it is wrong.</div></div>
-      <div><label>No. of Vacancy *</label><input id="mpFVac" class="inp" value="${esc(vals&&vals.no_of_vacancy||'')}" placeholder="e.g. 2"></div>
-    </div>
-    <div class="two">
+    <div class="mpf-row">
+      <div><label>Number of People *</label><input id="mpFVac" class="inp" value="${esc(vals&&vals.no_of_vacancy||'')}" placeholder="e.g. 2"></div>
       <div><label>Reporting Person / HOD *</label><input id="mpFHOD" class="inp" value="${esc(vals&&vals.reporting_person||'')}" placeholder="Name"></div>
-      <div><label>Required Qualification</label><input id="mpFQual" class="inp" value="${esc(vals&&vals.qualification||'')}" placeholder="e.g. Graduate, B.Tech" oninput="mpMarkTouched(this)"></div>
     </div>
-    <div class="two">
+    <div class="mpf-row one">
+      <div><label>Location</label><div class="mpf-chips">${locChk}</div></div>
+    </div>
+    </div>
+
+    <div class="mpf-sec">
+    <div class="mpf-sec-t"><i class="fa-solid fa-user-check"></i>The person</div>
+    <div class="mpf-row">
       <div><label>Experience</label>${mpSelOpt('mpFExp',MP_EXP,vals&&vals.experience||'')}</div>
-      <div><label>Gender</label><select id="mpFGender" class="sel"><option value="">— Select —</option>${MP_GEND.map(g=>`<option${g===(vals&&vals.gender||'')?'  selected':''}>${g}</option>`).join('')}<option value="Other"${!MP_GEND.includes(vals&&vals.gender||'')?'  selected':''}>Other</option></select></div>
+      <div><label>Required Qualification</label><input id="mpFQual" class="inp" value="${esc(vals&&vals.qualification||'')}" placeholder="e.g. Graduate, B.Tech"></div>
     </div>
-    <div><label>Salary Range</label>${mpSelOpt('mpFSalary',MP_SAL,vals&&vals.salary_range||'')}</div>
-    <div><label>Location</label><div style="display:flex;flex-wrap:wrap;margin-top:6px">${locChk}</div></div>
-    <div><label>Job Description / KPI</label><textarea id="mpFJD" class="inp" rows="4" placeholder="Key responsibilities and requirements...">${esc(vals&&vals.job_description||'')}</textarea></div>
-    <div><label>Priority</label><div style="display:flex;gap:20px;margin-top:6px">
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="radio" name="mpPri" value="Urgent"${vals&&vals.priority==='Urgent'?' checked':''}> <span style="color:#c83232;font-weight:600">Urgent</span></label>
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="radio" name="mpPri" value="Not Urgent"${vals&&vals.priority==='Not Urgent'?' checked':!vals?' checked':''}> Not Urgent</label>
-    </div><div style="font-size:11.5px;color:var(--slate);margin-top:4px">Kindly use Urgent only in rare cases (sudden absence/resignation). Non Urgent is default.</div></div>
-    <div><label>Notes / Reason</label><textarea id="mpFNotes" class="inp" rows="2" placeholder="Any additional context...">${esc(vals&&vals.notes||'')}</textarea></div>
+    <div class="mpf-row one">
+      <div><label>Gender</label>
+        <div class="mpf-chips">
+          ${['Any','Male','Female'].map(g=>`<label class="mpf-chip"><input type="radio" name="mpGender" value="${g}"${(vals&&vals.gender||'Any')===g?' checked':''}> ${g}</label>`).join('')}
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="mpf-sec">
+    <div class="mpf-sec-t"><i class="fa-solid fa-file-signature"></i>The terms</div>
+    <div class="mpf-row">
+      <div><label>Salary Range</label>${mpSelOpt('mpFSalary',MP_SAL,vals&&vals.salary_range||'')}</div>
+      <div><label>Priority</label>
+        <div class="mpf-chips">
+          <label class="mpf-chip"><input type="radio" name="mpPri" value="Not Urgent"${(vals&&vals.priority)==='Urgent'?'':' checked'}> Not Urgent</label>
+          <label class="mpf-chip"><input type="radio" name="mpPri" value="Urgent"${(vals&&vals.priority)==='Urgent'?' checked':''}> <span style="color:#c83232;font-weight:600">Urgent</span></label>
+        </div>
+        <div class="mpf-hint">Urgent is for a sudden absence or resignation.</div>
+      </div>
+    </div>
+    <div class="mpf-row one">
+      <div><label>Notes / Reason</label><textarea id="mpFNotes" class="inp" rows="3" placeholder="Anything the approver should know">${esc(vals&&vals.notes||'')}</textarea></div>
+    </div>
+    </div>
+    <input type="hidden" id="mpFDate" value="${dateVal}">
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>${saveBtn}</div>`);
 }
@@ -12047,27 +13490,36 @@ function mpCollect(){
     reporting_person:($('mpFHOD').value||'').trim(),
     qualification:($('mpFQual').value||'').trim(),
     experience:mpGetField('mpFExp',MP_EXP),
-    gender:$('mpFGender')&&$('mpFGender').value&&$('mpFGender').value!=='— Select —'?$('mpFGender').value:'',
+    gender:(document.querySelector('input[name="mpGender"]:checked')||{}).value||'Any',
     salary_range:mpGetField('mpFSalary',MP_SAL),
     location:locs,
-    job_description:($('mpFJD').value||'').trim(),
     priority:pri,
     notes:($('mpFNotes').value||'').trim(),
     submitted_at:new Date().toISOString()
   };
 }
-window.mpFillForm=function(){if(!recGuard())return;mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
+window.mpFillForm=function(){if(!recGuard())return;mpModal('Hiring Request',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="mpSave()"><i class="fa-solid fa-check"></i> Submit</button>');};
 window.mpSave=async function(){
   const d=mpCollect();
   if(!d.job_title){toast('Job Title is required','err');return;}
   const btn=$('mpSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
-  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Requisition submitted');recManpower();
+  MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();toast('Hiring request submitted');mpRefreshList();
 };
+/* REDRAW WHICHEVER LIST IS ACTUALLY ON SCREEN.
+
+   Both layouts render into #recBody: the Hiring Request tab through tpMpRender, and the retired
+   recruitment page through recManpower. Saving an edit called recManpower unconditionally, so the
+   new tab was redrawn with the OLD toolbar - same data, different screen, and only ever after an
+   edit, which is why it looked like the page had changed its mind. */
+function mpRefreshList(){
+  if(PAGE==='recruitment_new'&&typeof tpManpower==='function'){ tpManpower(); return; }
+  recManpower();
+}
 window.mpEdit=function(id){if(!recGuard())return;
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);if(!rec)return;
-  mpModal('Edit Requisition',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
+  mpModal('Edit Hiring Request',rec,`<button class="btn btn-primary" id="mpSaveBtn" onclick="mpUpdate(${id})"><i class="fa-solid fa-check"></i> Update</button>`);
 };
 window.mpUpdate=async function(id){
   const d=mpCollect();delete d.submitted_at;
@@ -12078,14 +13530,14 @@ window.mpUpdate=async function(id){
   if(prevRec&&prevRec.priority!==d.priority){ try{usageQueue('recruitment.manpower_form.mark_requisition_priority','update',{title:d.job_title,priority:d.priority});}catch(_e){} }
   const idx=(MP_RECORDS||[]).findIndex(r=>r.id===id);
   if(idx>-1&&MP_RECORDS)MP_RECORDS[idx]=data;
-  closeModal();toast('Updated');recManpower();
+  closeModal();toast('Updated');mpRefreshList();
 };
 window.mpDeleteOne=async function(id){if(!recGuard())return;
-  if(!await confirmDialog('Delete this requisition?'))return;
+  if(!await confirmDialog('Delete this hiring request?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
   if(MP_RECORDS)MP_RECORDS=MP_RECORDS.filter(r=>r.id!==id);
-  toast('Deleted');recManpower();
+  toast('Deleted');mpRefreshList();
 };
 window.mpDelete=window.mpDeleteOne;
 window.mpReload=function(){MP_RECORDS=null;if(PAGE==='recruitment')renderPage();};
@@ -12156,7 +13608,7 @@ function mpCopyFallback(txt,done){
 window.mpAiGenerate=async function(id,isRewrite){
   if(!recGuard()) return;
   if(isRewrite && !await confirmDialog(
-      'Rewrite the Job Description, post text and creative for this requisition? The current ones are replaced.',
+      'Rewrite the Job Description, post text and creative for this hiring request? The current ones are replaced.',
       {title:'Rewrite', okLabel:'Rewrite', icon:'fa-rotate', danger:false})) return;
   const rec=(MP_RECORDS||[]).find(function(r){return r.id===id;});
   if(rec){ rec.ai_status='generating'; mpShowDetail(id); }
@@ -12485,10 +13937,16 @@ window.refDecide=async function(id,ok){
 window.refDelete=async function(id){
   if(!hrCan()){ toast('Only HR can delete a referral','err'); return; }
   const r=(REF_RECORDS||[]).find(function(x){return x.id===id;})||{};
-  if(!await confirmDialog('Delete the referral for “'+(r.referred_name||'this person')+'”? This cannot be undone.')) return;
-  const {error}=await sb.schema('hr').from('referrals').delete().eq('id',id);
+  if(!await confirmDialog(
+      'Delete the referral for “'+(r.referred_name||'this person')+'”? The candidate it '
+      +'created is deleted as well, along with their CV. This cannot be undone.',
+      {title:'Delete referral', okLabel:'Delete', icon:'fa-trash', danger:true})) return;
+  /* Through the same function the other screen uses. This one used to delete the row straight
+     out of the table, which left the candidate behind and skipped the rule entirely. */
+  const {data,error}=await sb.schema('hr').rpc('referral_withdraw',{p_id:id});
   if(error){ toast(error.message,'err'); return; }
-  toast('Referral deleted','ok');
+  await hrRemoveFiles(data);
+  toast('Referral deleted \u2014 the candidate was removed too','ok');
   REF_RECORDS=null; recReferrals();
 };
 
@@ -12497,12 +13955,25 @@ window.refReload=function(){ REF_RECORDS=null; REF_POSITIONS=null; if(PAGE==='re
 async function recLoadJDs(v){
   REC_SEL=new Set();
   let uploaded=[];
-  try{const {data,error}=await sb.schema('recruit').from('job_descriptions').select('*').order('created_at',{ascending:true});if(!error)uploaded=data||[];}catch(e){}
-  /* AI-generated descriptions are written the moment generation succeeds — including a draft
-     nobody has reviewed yet, and a fresh rewrite sitting there while its requisition is back to
-     Pending after a reject. Descriptions is the published library, so a generated-but-not-yet-
-     Approved one is held back from it; manually uploaded reference JDs (source 'upload') were
-     never part of any approval workflow and are shown unconditionally, same as always. */
+  // Newest first. Ordered the other way, a description written a minute ago arrived at the BOTTOM
+  // of a grid of a dozen, which reads exactly like it was never created.
+  try{const {data,error}=await sb.schema('recruit').from('job_descriptions').select('*').order('created_at',{ascending:false});if(!error)uploaded=data||[];}catch(e){}
+
+  /* A DESCRIPTION IS JUDGED ON ITS OWN APPROVAL, NOT ITS REQUEST'S.
+
+     This used to show an AI-written description only when the hiring request behind it was
+     Approved, which broke in two ways at once:
+
+       - a request deleted later leaves its description with no request at all (the foreign key
+         clears the link deliberately, so the document survives) - and a description that can never
+         match an approved request id was hidden for good, with no way back;
+       - a request approved, then reopened, hid a description that had already been reviewed and
+         published.
+
+     Job descriptions carry their own approval_status now, set when the approval task is approved,
+     so that is what decides it. The request's status is still honoured as a fallback for rows
+     approved before that column existed. Manually uploaded reference JDs were never part of any
+     approval workflow and are shown unconditionally, same as always. */
   const genReqIds=[...new Set(uploaded.filter(j=>j.source==='ai_generated'&&j.manpower_request_id!=null).map(j=>j.manpower_request_id))];
   let approvedSet=new Set();
   if(genReqIds.length){
@@ -12511,23 +13982,529 @@ async function recLoadJDs(v){
       approvedSet=new Set((reqs||[]).filter(r=>r.approval_status==='Approved').map(r=>r.id));
     }catch(e){}
   }
-  uploaded=uploaded.filter(jd=>jd.source!=='ai_generated'||approvedSet.has(jd.manpower_request_id));
+  uploaded=uploaded.filter(jd=>jd.source!=='ai_generated'
+    || jd.approval_status==='Approved'
+    || approvedSet.has(jd.manpower_request_id));
   const uploadedCards=uploaded.map(jd=>({...jd,isDefault:false}));
   const allJDs=[...DEFAULT_JDS,...uploadedCards];
   window._recAllJDs=allJDs;
   const n=REC_SEL.size;
   const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
   $('recBody').innerHTML=`
+    <!-- THREE BUTTONS DID TWO JOBS, AND ONE OF THEM DID NOTHING NEW.
+         Download sat here AND on every card, so downloading one description meant ticking it,
+         coming back up here, and clicking - three actions to do what the card already did in one.
+         The toolbar's Download is gone. Delete stays, because deleting several at once is the only
+         thing the tick-boxes are genuinely for, and it now only appears once something is ticked
+         rather than sitting greyed out asking to be understood. -->
     <div id="recBar" style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload JD</button>
-      <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:''}" onclick="recDownloadSel()"><i class="fa-solid fa-download"></i> Download</button>
-      <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:'color:var(--err)'}" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
-      ${n>0?`<span style="font-size:12px;color:var(--slate)">${n} selected</span>`:''}
+      <button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button>
+      ${n>0?`<button class="btn" style="color:var(--err)" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete ${n}</button>
+      <button class="btn btn-ghost" onclick="recClearSel()">Clear</button>`:''}
     </div>
     <div class="grid lib-grid" id="recGrid">
       ${allJDs.map(jd=>recJDCard(jd)).join('')}
     </div>`;
 }
+/* A JOB DESCRIPTION OPENS IN ITS OWN TAB, AS SOMETHING YOU CAN CHANGE.
+
+   It used to open as a finished PDF, which is the right thing to send to a candidate and the wrong
+   thing to be handed when the text is AI-written and nearly always needs a line fixing. Reading it
+   and correcting it were two different journeys: open the PDF, notice the mistake, go back, find
+   Regenerate, hope the next draft was better.
+
+   So Open gives you the text, in a full tab, editable, with Save and Download on it. Save writes
+   back to the same record the PDF is built from, so the next PDF carries the correction.
+
+   THE TAB IS OPENED ON THE CLICK, BEFORE ANY await. A window.open that happens after an await has
+   lost the click that caused it and browsers block it as a pop-up - the same trap that made Preview
+   look broken. The editor is written into the blank tab immediately and filled in afterwards.
+
+   The child page is same-origin (about:blank inherits this origin), so it can call back into this
+   page directly rather than needing its own database connection. */
+/* ONE EDITOR, TWO WAYS IN.
+
+   The same tab is opened from the Descriptions tab and from a hiring request's own panel, so the
+   two cannot drift into behaving differently. What changes between them is only WHERE Save writes:
+   a library description saves to recruit.job_descriptions, a request's description saves to the
+   request itself. The caller passes that in.
+
+   THE TAB IS OPENED ON THE CLICK, BEFORE ANY await. A window.open after an await has lost the
+   click that caused it and browsers block it as a pop-up - the trap that made Preview look broken.
+
+   The child page is same-origin (about:blank inherits this origin), so it calls back into this
+   page directly rather than needing its own database connection. */
+window.jdOpenEditorTab=function(title,text,onSave){
+  const tab=window.open('','_blank');
+  if(!tab){ toast('Your browser blocked the new tab','err'); return; }
+  const escH=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  /* THE SAME GEOMETRY THE PDF IS BUILT WITH, IN PIXELS.
+
+     jdBuildPdfBytes lays out A4 at 595.28 x 841.89 points with a 56pt margin, 10.5pt text on a
+     15pt line, and a 15pt bold title. At 96dpi a point is 4/3 of a pixel, so those numbers are
+     converted once here and used for both the sheets on screen and the measuring column that
+     decides where each page ends.
+
+     The header height is DERIVED, not eyeballed: the PDF draws the logo 150pt wide, the file is
+     600x189, so it lands 47.25pt tall, then 10pt of gap, the rule, and a 24pt drop before text. */
+  const PT=4/3;
+  const PW=Math.round(595.28*PT), PH=Math.round(841.89*PT);   // 794 x 1123
+  const MG=Math.round(56*PT);                                  // 75
+  const FS=(10.5*PT).toFixed(2), LH=(15*PT).toFixed(2);        // 14 / 20
+  const TITLE_FS=(15*PT).toFixed(2), TITLE_LH=(21*PT).toFixed(2);
+  const LOGO_W=150, LOGO_H=LOGO_W*189/600;
+  const HEAD_H=Math.round((LOGO_H+10+24)*PT);
+  const FOOT_H=Math.round(24*PT);
+
+
+  tab.document.write('<!doctype html><meta charset="utf-8"><title>'+escH(title)+'</title>'
+  +'<style>'
+  +'*{box-sizing:border-box}'
+  +'body{margin:0;font:14px/1.5 Segoe UI,Arial,sans-serif;background:#535659;color:#0f172a;overflow:hidden}'
+  +'header{position:fixed;inset:0 0 auto 0;z-index:5;background:#323639;color:#e8eaed}'
+  +'.bar{display:flex;align-items:center;gap:10px;padding:0 14px;height:52px}'
+  +'.bar2{display:flex;align-items:center;gap:6px;padding:0 14px 8px;flex-wrap:wrap}'
+  +'header h1{font-size:14px;margin:0;font-weight:600;flex:1;min-width:90px;overflow:hidden;'
+   +'text-overflow:ellipsis;white-space:nowrap}'
+  +'.grp{display:flex;align-items:center;gap:2px;background:#3c4043;border-radius:8px;padding:3px}'
+  +'.ic{min-width:32px;height:30px;border:0;border-radius:6px;background:transparent;color:#e8eaed;'
+   +'font-size:15px;cursor:pointer;line-height:1;padding:0 7px}'
+  +'.ic:hover{background:#4a4e51}.ic:disabled{opacity:.35;cursor:not-allowed}'
+  +'.ic.on{background:#5f6368}'
+  +'#zlabel{min-width:52px;text-align:center;font-size:12.5px;color:#e8eaed;cursor:pointer;'
+   +'user-select:none;padding:0 4px}'
+  +'#pglabel{font-size:12.5px;color:#bdc1c6;min-width:64px;text-align:center}'
+  +'select.tb,input.tb{height:30px;border-radius:6px;border:1px solid #5f6368;background:#3c4043;'
+   +'color:#e8eaed;font:13px Segoe UI,Arial,sans-serif;padding:0 6px}'
+  +'input.tb[type=color]{width:34px;padding:2px;cursor:pointer}'
+  +'button.txt{font:600 13px Segoe UI,Arial,sans-serif;padding:8px 14px;border-radius:7px;'
+   +'border:1px solid #5f6368;background:#3c4043;color:#e8eaed;cursor:pointer}'
+  +'button.txt:hover{background:#4a4e51}'
+  +'button.primary{background:#e0121c;border-color:#e0121c;color:#fff}'
+  +'button.txt:disabled{opacity:.5;cursor:not-allowed}'
+  +'#msg{font-size:12.5px;color:#bdc1c6;min-width:10px}'
+  +'#view{position:fixed;inset:96px 0 0 0;overflow:auto;padding:24px 0 40px}'
+  +'#doc{transform-origin:top center;margin:0 auto;width:'+PW+'px}'
+  +'.sheet{width:'+PW+'px;height:'+PH+'px;background:#fff;margin:0 auto 20px;position:relative;'
+   +'box-shadow:0 1px 3px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.25)}'
+  +'.sheet .hd{position:absolute;left:'+MG+'px;right:'+MG+'px;top:'+MG+'px;'
+   +'user-select:none;-webkit-user-select:none;pointer-events:none}'
+  +'.sheet .logo{display:block;width:'+Math.round(LOGO_W*PT)+'px;height:auto}'
+  +'.sheet .brand{font:700 15px Arial,Helvetica,sans-serif;letter-spacing:1.4px;color:#0f172a;'
+   +'height:'+Math.round(LOGO_H*PT)+'px;display:flex;align-items:flex-end}'
+  +'.sheet .rule{height:1.6px;background:#e0121c;margin-top:8px}'
+  /* The title is page furniture, not text: outside the editable box, so it cannot be selected
+     into, deleted, or dragged out of place. */
+  +'.sheet .ttl{position:absolute;left:'+MG+'px;right:'+MG+'px;top:'+(MG+HEAD_H)+'px;'
+   +'font:700 '+TITLE_FS+'px/'+TITLE_LH+'px Arial,Helvetica,sans-serif;'
+   +'user-select:none;-webkit-user-select:none;pointer-events:none}'
+  +'.sheet .bd{position:absolute;left:'+MG+'px;right:'+MG+'px;top:'+(MG+HEAD_H)+'px;'
+   +'bottom:'+(MG+FOOT_H)+'px;font:'+FS+'px/'+LH+'px Arial,Helvetica,sans-serif;outline:0;'
+   +'white-space:pre-wrap;word-wrap:break-word}'
+  +'.sheet .pn{position:absolute;left:0;right:0;bottom:'+Math.round(MG/2)+'px;text-align:center;'
+   +'font-size:11px;color:#94a3b8}'
+  +'.ln{min-height:'+LH+'px}'
+  +'#meas{position:absolute;visibility:hidden;left:-9999px;top:0;width:'+(PW-2*MG)+'px;'
+   +'font:'+FS+'px/'+LH+'px Arial,Helvetica,sans-serif;white-space:pre-wrap;word-wrap:break-word}'
+  +'#meas .ln{min-height:'+LH+'px}'
+  +'</style>'
+  +'<header>'
+   +'<div class="bar">'
+     +'<h1>'+escH(title)+'</h1>'
+     +'<span id="pglabel">1 / 1</span>'
+     +'<div class="grp">'
+       +'<button class="ic" id="zo" title="Zoom out">&#8722;</button>'
+       +'<span id="zlabel" title="Click to fit the width">100%</span>'
+       +'<button class="ic" id="zi" title="Zoom in">&#43;</button>'
+       +'<button class="ic" id="zf" title="Fit width">&#8596;</button>'
+     +'</div>'
+     +'<span id="msg"></span>'
+     +'<button class="txt primary" id="save">Save</button>'
+     +'<button class="txt" id="dl">Download PDF</button>'
+   +'</div>'
+   +'<div class="bar2">'
+     +'<div class="grp">'
+       +'<button class="ic" id="undo" title="Undo (Ctrl+Z)">&#8630;</button>'
+       +'<button class="ic" id="redo" title="Redo (Ctrl+Y)">&#8631;</button>'
+     +'</div>'
+     +'<div class="grp">'
+       +'<button class="ic" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>'
+       +'<button class="ic" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>'
+       +'<button class="ic" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>'
+     +'</div>'
+     /* Size, typeface and colour removed by request. Bold, italic and underline are the ones a
+        job description actually uses, and they are the ones that read the same in every document;
+        three people each picking their own font and colour is how a set of company documents
+        stops looking like a set. The PDF still renders all of it, so anything already saved with
+        a size or a colour keeps it. */
+     +'<button class="ic" id="clr" title="Remove formatting" style="min-width:auto;padding:0 10px;font-size:13px">Clear</button>'
+   +'</div>'
+  +'</header>'
+  +'<div id="view"><div id="doc"></div></div>'
+  +'<div id="meas"></div>');
+  tab.document.close();
+
+  try{
+    const d=tab.document, w=tab;
+    const view=d.getElementById('view'), doc=d.getElementById('doc'),
+          meas=d.getElementById('meas'), msg=d.getElementById('msg'),
+          zlabel=d.getElementById('zlabel'), pglabel=d.getElementById('pglabel');
+
+
+    /* THE SAME IMAGE THE PDF EMBEDS, not a typed approximation of it. Drawn outside the editable
+       area and made unselectable, so it is on every page and cannot be edited out. */
+    const LOGO_HTML=(typeof JG_LOGO_PNG_B64==='string'&&JG_LOGO_PNG_B64)
+      ? '<img class="logo" alt="The Jain Group" src="data:image/png;base64,'+JG_LOGO_PNG_B64+'">'
+      : '<div class="brand">THE JAIN GROUP</div>';
+
+    /* A PARAGRAPH IS A STRING OF HTML, not a string of text.
+
+       The document used to be plain lines, so there was nowhere to keep bold or a colour. Each
+       paragraph is now its own fragment of HTML and that is what gets saved, measured and handed
+       to the PDF builder.
+
+       Plain text still loads: everything written before today is plain, and so is everything the
+       AI writes. It is escaped line by line, and the old rule that a short line ending in a colon
+       is a heading is applied ONCE on the way in - turning it into real bold that can then be
+       edited, rather than a guess the PDF re-makes every time. */
+    function parseInput(src){
+      const raw=String(src||'');
+      if(!/<[a-z!/]/i.test(raw)){
+        return raw.split('\n').map(function(l){
+          const head=/:$/.test(l.trim())&&l.trim().length<40;
+          const e=escH(l);
+          return l===''?'<br>':(head?'<b>'+e+'</b>':e);
+        });
+      }
+      const dom=new DOMParser().parseFromString('<body>'+raw+'</body>','text/html');
+      const kids=Array.prototype.filter.call(dom.body.children,function(n){
+        return /^(DIV|P|LI|H[1-6])$/.test(n.tagName); });
+      if(!kids.length) return [dom.body.innerHTML||'<br>'];
+      return kids.map(function(n){ return n.innerHTML||'<br>'; });
+    }
+
+    let BLOCKS=parseInput(text);
+    let PAGES=[];          // {start,end} indexes into BLOCKS
+    let TITLE_H=0;
+    let zoom=1, fitMode=false;
+
+    /* WHERE THE PAGES BREAK, measured rather than guessed. Every paragraph is laid out once in a
+       hidden column of exactly the page's text width, so one that wraps to three rows - or that
+       carries a 24pt word - is counted at its real height. */
+    function paginate(){
+      meas.innerHTML=BLOCKS.map(function(h){return '<div class="ln">'+h+'</div>';}).join('');
+      const els=meas.children;
+      const th=d.createElement('div');
+      th.style.cssText='font:700 '+TITLE_FS+'px/'+TITLE_LH+'px Arial,Helvetica,sans-serif';
+      th.textContent=title||'Job Description';
+      meas.appendChild(th);
+      const titleH=th.getBoundingClientRect().height+8;
+      TITLE_H=titleH;
+
+      const hs=[];
+      for(let i=0;i<BLOCKS.length;i++) hs.push(els[i]?els[i].getBoundingClientRect().height:parseFloat(LH));
+      /* ONLY PAGE ONE CARRIES THE LETTERHEAD, so only page one pays for it. A later page starts
+         at the top margin and has the logo's worth of extra room, which is why the two limits
+         below are different rather than one number reused. */
+      const FIRST_LIMIT=PH-2*MG-HEAD_H-titleH-FOOT_H;
+      const REST_LIMIT =PH-2*MG-FOOT_H;
+      /* A few pixels held back. The measuring column and the page's own text box agree to within
+         about 3px - line boxes are not laid out identically in a bare div and in a contenteditable
+         one - and the error always went the same way. Breaking a hair early is the safe direction. */
+      const SAFE=6;
+      PAGES=[]; let start=0, used=0, limit=FIRST_LIMIT-SAFE;
+      for(let i=0;i<BLOCKS.length;i++){
+        if(used+hs[i]>limit && i>start){
+          PAGES.push({start:start,end:i});
+          start=i; used=0; limit=REST_LIMIT-SAFE;
+        }
+        used+=hs[i];
+      }
+      PAGES.push({start:start,end:BLOCKS.length});
+      meas.innerHTML='';
+    }
+
+    function render(){
+      paginate();
+      let html='';
+      for(let p=0;p<PAGES.length;p++){
+        const seg=BLOCKS.slice(PAGES[p].start,PAGES[p].end);
+        const bodyTop=(p===0?MG+HEAD_H+Math.round(TITLE_H):MG);
+        html+='<div class="sheet" data-p="'+p+'">'
+          +(p===0?'<div class="hd">'+LOGO_HTML+'<div class="rule"></div></div>'
+                 +'<div class="ttl">'+escH(title||'Job Description')+'</div>':'')
+          +'<div class="bd" contenteditable="true" spellcheck="true" data-p="'+p+'"'
+            +' style="top:'+bodyTop+'px">'
+          +seg.map(function(h){ return '<div class="ln">'+(h||'<br>')+'</div>'; }).join('')
+          +'</div>'
+          +'<div class="pn">'+(p+1)+' / '+PAGES.length+'</div>'
+          +'</div>';
+      }
+      doc.innerHTML=html;
+      Array.prototype.forEach.call(d.querySelectorAll('.bd'),function(b){
+        b.addEventListener('input',onInput);
+        b.addEventListener('keydown',onKey);
+        b.addEventListener('paste',onPaste);
+        b.addEventListener('keyup',syncButtons);
+        b.addEventListener('mouseup',syncButtons);
+      });
+      applyZoom();
+      updatePageLabel();
+    }
+
+    // The paragraphs a page currently holds, read back off the screen.
+    function blocksOf(bd){
+      const out=[];
+      Array.prototype.forEach.call(bd.children,function(c){ out.push(c.innerHTML); });
+      return out;
+    }
+    function collect(){
+      const all=[];
+      Array.prototype.forEach.call(d.querySelectorAll('.bd'),function(b){
+        Array.prototype.push.apply(all,blocksOf(b));
+      });
+      // What gets saved: one div per paragraph, which is what parseInput reads back.
+      return all.map(function(h){ return '<div>'+h+'</div>'; }).join('');
+    }
+
+    /* THE CARET SURVIVES RE-PAGINATION. A paragraph never changes its position in the sequence
+       when pages are recut - only which page it sits on - so the caret is remembered as
+       "paragraph N, character C" and put back by the same pair. */
+    function caretPos(){
+      const sel=w.getSelection();
+      if(!sel||!sel.rangeCount) return null;
+      let node=sel.anchorNode; if(!node) return null;
+      let el=node.nodeType===3?node.parentNode:node;
+      let ln=el; while(ln&&!(ln.classList&&ln.classList.contains('ln'))) ln=ln.parentNode;
+      if(!ln) return null;
+      const bd=ln.closest('.bd'); if(!bd) return null;
+      const p=parseInt(bd.getAttribute('data-p'),10)||0;
+      const idx=Array.prototype.indexOf.call(bd.children,ln);
+      if(idx<0) return null;
+      const r=d.createRange(); r.selectNodeContents(ln);
+      try{ r.setEnd(sel.anchorNode,sel.anchorOffset); }catch(_e){ return null; }
+      return {block:PAGES[p].start+idx, ch:r.toString().length};
+    }
+    function setCaret(pos){
+      if(!pos) return;
+      for(let p=0;p<PAGES.length;p++){
+        if(pos.block>=PAGES[p].start && pos.block<PAGES[p].end){
+          const bd=d.querySelector('.bd[data-p="'+p+'"]'); if(!bd) return;
+          const ln=bd.children[pos.block-PAGES[p].start]; if(!ln) return;
+          const walker=d.createTreeWalker(ln,w.NodeFilter.SHOW_TEXT,null);
+          let left=pos.ch, node=null;
+          while(walker.nextNode()){
+            node=walker.currentNode;
+            if(left<=node.length) break;
+            left-=node.length;
+          }
+          const r=d.createRange();
+          if(node) r.setStart(node,Math.max(0,Math.min(left,node.length)));
+          else { r.selectNodeContents(ln); }
+          r.collapse(true);
+          const sel=w.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+          bd.focus();
+          return;
+        }
+      }
+    }
+
+    /* ── UNDO AND REDO ────────────────────────────────────────────────────────────────────
+       The browser's own undo stack is useless here: re-cutting the pages replaces the whole
+       document, and every replacement throws that stack away - which is why Ctrl+Z did nothing.
+       So the editor keeps its own. A state is the list of paragraphs plus where the caret was,
+       and one is recorded whenever a change settles, not on every keystroke, so a single undo
+       takes back a word rather than a letter. */
+    let HIST=[{blocks:BLOCKS.slice(),caret:null}], HPOS=0;
+    const HMAX=200;
+    function commit(){
+      const st={blocks:BLOCKS.slice(),caret:caretPos()};
+      // Nothing actually changed - do not fill the history with duplicates.
+      if(HIST[HPOS] && HIST[HPOS].blocks.join('\u0001')===st.blocks.join('\u0001')) return;
+      HIST=HIST.slice(0,HPOS+1);
+      HIST.push(st);
+      if(HIST.length>HMAX){ HIST.shift(); } else { HPOS++; }
+      syncHistButtons();
+    }
+    function applyState(st){
+      BLOCKS=st.blocks.slice();
+      render();
+      setCaret(st.caret);
+      syncHistButtons();
+    }
+    function undo(){ if(HPOS>0){ HPOS--; applyState(HIST[HPOS]); } }
+    function redo(){ if(HPOS<HIST.length-1){ HPOS++; applyState(HIST[HPOS]); } }
+    function syncHistButtons(){
+      d.getElementById('undo').disabled=HPOS<=0;
+      d.getElementById('redo').disabled=HPOS>=HIST.length-1;
+    }
+    d.getElementById('undo').onclick=undo;
+    d.getElementById('redo').onclick=redo;
+
+    /* Re-cut on a pause, not on every keystroke: recutting mid-word would move the text under
+       the cursor while somebody is still typing the word. */
+    let t=null;
+    function onInput(){
+      clearTimeout(t);
+      t=setTimeout(function(){
+        const pos=caretPos();
+        BLOCKS=(function(){ const a=[]; Array.prototype.forEach.call(d.querySelectorAll('.bd'),
+          function(b){ Array.prototype.push.apply(a,blocksOf(b)); }); return a; })();
+        render();
+        setCaret(pos);
+        commit();
+      },400);
+    }
+    function onKey(e){
+      const mod=e.ctrlKey||e.metaKey;
+      if(mod&&e.key==='s'){ e.preventDefault(); d.getElementById('save').click(); return; }
+      if(mod&&!e.shiftKey&&String(e.key).toLowerCase()==='z'){ e.preventDefault(); clearTimeout(t); undo(); return; }
+      if(mod&&(String(e.key).toLowerCase()==='y'||(e.shiftKey&&String(e.key).toLowerCase()==='z'))){
+        e.preventDefault(); clearTimeout(t); redo(); return; }
+      // Ctrl+B/I/U are left to the browser, which applies them to the selection; the change is
+      // picked up by the input handler like any other edit.
+    }
+    /* Pasting from Word brings its own fonts, colours, tables and class names with it. Only the
+       words are taken, and anything you want emphasised you set here. */
+    function onPaste(e){
+      e.preventDefault();
+      const txt=(e.clipboardData||w.clipboardData).getData('text/plain');
+      d.execCommand('insertText',false,String(txt||''));
+    }
+
+    /* ── FORMATTING ───────────────────────────────────────────────────────────────────────
+       styleWithCSS makes the browser write inline styles rather than <font> tags, which is what
+       the PDF builder reads. Bold, italic and underline go through execCommand, which handles a
+       selection spanning several paragraphs properly. */
+    try{ d.execCommand('styleWithCSS',false,true); }catch(_e){}
+
+    function afterFormat(){
+      const pos=caretPos();
+      BLOCKS=(function(){ const a=[]; Array.prototype.forEach.call(d.querySelectorAll('.bd'),
+        function(b){ Array.prototype.push.apply(a,blocksOf(b)); }); return a; })();
+      render(); setCaret(pos); commit();
+    }
+    Array.prototype.forEach.call(d.querySelectorAll('[data-cmd]'),function(btn){
+      // mousedown is cancelled so the button never steals the selection it is about to act on.
+      btn.addEventListener('mousedown',function(e){ e.preventDefault(); });
+      btn.addEventListener('click',function(){
+        d.execCommand(btn.getAttribute('data-cmd'),false,null);
+        syncButtons(); afterFormat();
+      });
+    });
+    d.getElementById('clr').addEventListener('mousedown',function(e){ e.preventDefault(); });
+    d.getElementById('clr').onclick=function(){
+      d.execCommand('removeFormat',false,null);
+      syncButtons(); afterFormat();
+    };
+    // The B / I / U buttons light up when the caret is inside text that already has them.
+    function syncButtons(){
+      ['bold','italic','underline'].forEach(function(c){
+        const btn=d.querySelector('[data-cmd="'+c+'"]'); if(!btn) return;
+        let on=false; try{ on=d.queryCommandState(c); }catch(_e){}
+        btn.classList.toggle('on',!!on);
+      });
+    }
+
+    // ── zoom ────────────────────────────────────────────────────────────────────────────
+    const STEPS=[0.5,0.67,0.75,0.9,1,1.1,1.25,1.5,1.75,2,2.5,3];
+    function applyZoom(){
+      doc.style.transform='scale('+zoom+')';
+      const natural=PAGES.length*(PH+20);
+      doc.style.marginBottom=((zoom-1)*natural)+'px';
+      const wide=PW*zoom;
+      doc.style.marginLeft=wide>view.clientWidth?((wide-PW)/2)+'px':'auto';
+      doc.style.marginRight=doc.style.marginLeft==='auto'?'auto':'0';
+      zlabel.textContent=Math.round(zoom*100)+'%';
+    }
+    function setZoom(z,keepFit){
+      zoom=Math.max(0.25,Math.min(4,z));
+      if(!keepFit) fitMode=false;
+      applyZoom();
+    }
+    function fitWidth(){ fitMode=true; setZoom((view.clientWidth-48)/PW,true); }
+    d.getElementById('zi').onclick=function(){
+      const nx=STEPS.find(s=>s>zoom+0.001); setZoom(nx||Math.min(4,zoom*1.1));
+    };
+    d.getElementById('zo').onclick=function(){
+      const pv=STEPS.slice().reverse().find(s=>s<zoom-0.001); setZoom(pv||Math.max(0.25,zoom/1.1));
+    };
+    d.getElementById('zf').onclick=fitWidth;
+    zlabel.onclick=fitWidth;
+    view.addEventListener('wheel',function(e){
+      if(!(e.ctrlKey||e.metaKey)) return;
+      e.preventDefault();
+      setZoom(zoom*(e.deltaY<0?1.1:1/1.1));
+    },{passive:false});
+    d.addEventListener('keydown',function(e){
+      if(!(e.ctrlKey||e.metaKey)) return;
+      if(e.key==='='||e.key==='+'){ e.preventDefault(); d.getElementById('zi').click(); }
+      else if(e.key==='-'){ e.preventDefault(); d.getElementById('zo').click(); }
+      else if(e.key==='0'){ e.preventDefault(); setZoom(1); }
+    });
+    w.addEventListener('resize',function(){ if(fitMode) fitWidth(); });
+
+    function updatePageLabel(){
+      const sheets=d.querySelectorAll('.sheet');
+      if(!sheets.length) return;
+      const mid=view.scrollTop+view.clientHeight/2;
+      let cur=1;
+      for(let i=0;i<sheets.length;i++){ if(sheets[i].offsetTop*zoom<=mid) cur=i+1; }
+      pglabel.textContent=cur+' / '+sheets.length;
+    }
+    view.addEventListener('scroll',updatePageLabel);
+
+    // ── save / download ─────────────────────────────────────────────────────────────────
+    d.getElementById('save').onclick=async function(){
+      const btn=this; btn.disabled=true; msg.textContent='Saving…';
+      try{
+        await onSave(collect());
+        /* SAVED MEANS DONE, SO THE TAB CLOSES. The short pause is so "Saved" is actually seen. */
+        msg.textContent='Saved';
+        setTimeout(function(){ try{ tab.close(); }catch(_e){} }, 600);
+      }catch(e){
+        msg.textContent='Could not save: '+((e&&e.message)||e);
+        btn.disabled=false;
+      }
+    };
+    d.getElementById('dl').onclick=async function(){
+      const btn=this; btn.disabled=true; msg.textContent='Building the PDF…';
+      try{ await window.opener.jdEditorDownload(title, collect()); msg.textContent=''; }
+      catch(e){ msg.textContent='Could not build it: '+((e&&e.message)||e); }
+      btn.disabled=false;
+    };
+
+    render();
+    fitWidth();
+    syncHistButtons();
+  }catch(e){ /* the tab is still readable even if the controls could not be wired */ }
+};
+window.jdEditOpen=function(id){
+  const jd=(window._recAllJDs||[]).find(j=>j.id===id);
+  if(!jd){ toast('That description could not be found','err'); return; }
+  if(jd.source!=='ai_generated'){
+    // An uploaded PDF is a file, not text we hold - there is nothing here to edit, so it opens as
+    // the file it is.
+    return recJdOpen(id);
+  }
+  jdOpenEditorTab(String(jd.name||'Job Description'), String(jd.content_text||''),
+    async function(text){ await jdEditorSave(id, text); });
+};
+/* Called by the editor tab. Kept on this page because this is where the database connection and
+   the PDF builder already live. */
+window.jdEditorSave=async function(id,text){
+  const {error}=await sb.schema('recruit').from('job_descriptions')
+    .update({content_text:String(text||'')}).eq('id',id);
+  if(error) throw new Error(error.message);
+  const jd=(window._recAllJDs||[]).find(j=>j.id===id);
+  if(jd) jd.content_text=String(text||'');
+  toast('Job description saved');
+};
+window.jdEditorDownload=async function(title,text){
+  const bytes=await jdBuildPdfBytes(title||'Job Description',String(text||''));
+  jdPdfOpen(bytes,(String(title||'job-description').replace(/[^A-Za-z0-9 ()-]/g,'').trim()||'job-description')+'.pdf',true);
+};
 window.recJdOpen=async function(id){
   const jd=(window._recAllJDs||[]).find(j=>j.id===id);if(!jd)return;
   if(jd.source==='ai_generated'){
@@ -12582,8 +14559,11 @@ function recJDCard(jd){
         ${!jd.isDefault&&jd.file_name?`<div style="font-size:11.5px;color:var(--slate);margin-top:2px">${esc(jd.file_name)}</div>`:''}
       </div>
     </div>
+    <!-- Open reads it in a tab, Download saves the file. Both live on the card; what was removed
+         was the DUPLICATE Download up on the toolbar, which needed a tick and a trip upwards to do
+         what this button does in one click. -->
     <div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn btn-sm" style="flex:1" onclick="event.stopPropagation();recJdOpen('${jd.id}')"><i class="fa-solid fa-eye"></i> Preview</button>
+      <button class="btn btn-sm" style="flex:1" onclick="event.stopPropagation();jdEditOpen('${jd.id}')"><i class="fa-solid fa-eye"></i> Open</button>
       <button class="btn btn-sm" style="flex:1" onclick="event.stopPropagation();recJdDownload('${jd.id}')"><i class="fa-solid fa-download"></i> Download</button>
     </div>
   </div>`;
@@ -12594,13 +14574,27 @@ window.recToggleSel=function(id){
   if(jd){const el=document.getElementById('rjd_'+id);if(el){const tmp=document.createElement('div');tmp.innerHTML=recJDCard(jd);el.replaceWith(tmp.firstElementChild);}}
   recRefreshBar();
 };
+/* Untick everything at once. The toolbar only appears while something is selected, so without this
+   the only way out of a selection you did not mean to make is to find and untick each card again. */
+window.recClearSel=function(){
+  const ids=[...REC_SEL];
+  REC_SEL.clear();
+  ids.forEach(function(id){
+    const jd=(window._recAllJDs||[]).find(j=>j.id===id);
+    if(!jd)return;
+    const el=document.getElementById('rjd_'+id);
+    if(el){const tmp=document.createElement('div');tmp.innerHTML=recJDCard(jd);el.replaceWith(tmp.firstElementChild);}
+  });
+  recRefreshBar();
+};
 window.recRefreshBar=function(){
-  const n=REC_SEL.size;const dis='opacity:.38;cursor:not-allowed;pointer-events:none';
+  /* Must match the bar built in recLoadJDs exactly - this redraws it on every tick, so any
+     difference between the two silently reinstates the old three-button version. */
+  const n=REC_SEL.size;
   const bar=$('recBar');if(!bar)return;
-  bar.innerHTML=`<button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload JD</button>
-    <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:''}" onclick="recDownloadSel()"><i class="fa-solid fa-download"></i> Download</button>
-    <button class="btn" ${n===0?'disabled':''} style="${n===0?dis:'color:var(--err)'}" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>
-    ${n>0?`<span style="font-size:12px;color:var(--slate)">${n} selected</span>`:''}`;
+  bar.innerHTML=`<button class="btn btn-primary" onclick="recUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button>
+    ${n>0?`<button class="btn" style="color:var(--err)" onclick="recDeleteSel()"><i class="fa-solid fa-trash"></i> Delete ${n}</button>
+    <button class="btn btn-ghost" onclick="recClearSel()">Clear</button>`:''}`;
 };
 window.recUploadModal=function(){if(!recGuard())return;
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-file-pdf"></i> Upload Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -12623,7 +14617,13 @@ window.recJdSave=async function(){
   if(se){toast('Upload failed: '+se.message,'err');console.error('JD S3 upload error',se);if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}return;}
   const {error:de}=await sb.schema('recruit').from('job_descriptions').insert({name,storage_path:upData.path,file_name:file.name,file_size:file.size,uploaded_by:state.email});
   if(de){toast(de.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';}return;}
-  closeModal();toast(name+' uploaded to S3','ok');recLoadJDs($('view'));
+  closeModal();toast(name+' uploaded','ok');recLoadJDs($('view'));
+  /* The three HRs are told, with the file attached. A description sitting in a library nobody has
+     been pointed at is the same as not having one, and this is the moment there is something to
+     point at. Sent from ai@ because nobody decided this - it happened, and they are being told. */
+  const r=await hrNotify({kind:'job_description_created',title:name,
+    created_by:state.email||'',storage_path:upData.path});
+  if(r&&r.ok) toast('The HR team has been emailed the description','ok');
 };
 window.recDownloadSel=async function(){
   let jds=[];try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jds=data||[];}catch(e){}
@@ -13449,18 +15449,31 @@ function tpApprovalTag(rec){
    Returns null if anything goes wrong. A job description with no logo is a small disappointment; a
    job description that would not open at all because of the logo is a real problem. */
 let JG_LOGO_PNG=null;
+/* THE LOGO IS CARRIED IN THE FILE, NOT FETCHED AND CONVERTED.
+
+   Three things went wrong with loading it from assets/ and converting it through a canvas, and
+   each one failed silently into "no logo, PDF otherwise perfect":
+
+     - crossOrigin='anonymous' turned a same-origin read into a CORS check, which a file:// page
+       can never satisfy;
+     - even without that, drawing a file:// image onto a canvas TAINTS the canvas, so toBlob
+       throws - there is no way around that from a page opened off disk;
+     - the source was webp, and pdf-lib embeds PNG and JPEG only, so the canvas step was not
+       optional as long as the source stayed webp.
+
+   So the logo is a PNG, base64 here, decoded straight to bytes. No network, no canvas, no format
+   conversion, and it behaves the same on the live site and from a local file. It is 15KB on a
+   1.8MB file. assets/jain-group-logo.png is the same image if it is ever needed elsewhere.
+
+   To replace it: convert the new artwork to PNG, base64 it, and swap the string. */
+const JG_LOGO_PNG_B64='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';
 async function jgLogoPngBytes(){
   if(JG_LOGO_PNG!==null) return JG_LOGO_PNG||null;
   try{
-    const img=new Image();
-    img.crossOrigin='anonymous';
-    await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; img.src='assets/jain-group-logo.webp'; });
-    const c=document.createElement('canvas');
-    c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
-    c.getContext('2d').drawImage(img,0,0);
-    const blob=await new Promise(r=>c.toBlob(r,'image/png'));
-    if(!blob) throw new Error('the logo could not be converted');
-    JG_LOGO_PNG=new Uint8Array(await blob.arrayBuffer());
+    const bin=atob(JG_LOGO_PNG_B64);
+    const out=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+    JG_LOGO_PNG=out;
     return JG_LOGO_PNG;
   }catch(_e){ JG_LOGO_PNG=false; return null; }
 }
@@ -13469,12 +15482,125 @@ async function jgLogoPngBytes(){
    across pages properly. Returns the bytes; what the caller does with them - open a tab, save a
    file - is the caller's business, so preview and download cannot drift into showing two different
    documents. */
+/* ── THE DESCRIPTION IS RICH TEXT NOW, AND THE PDF HAS TO CARRY IT ─────────────────────────
+   The editor lets people set bold, italic, underline, size, colour and typeface, so a PDF that
+   threw all of that away and re-derived its own bold from a colon would be showing something
+   nobody wrote. This reads the editor's HTML and draws it.
+
+   It still accepts PLAIN TEXT, unchanged, because every description written before today is
+   plain and so is everything the AI generates. With no tags in it the old rule applies - a short
+   line ending in a colon is a heading - so old documents come out exactly as they did.
+
+   Only the three PDF base-14 families exist, in four styles each, so a font nobody can embed is
+   mapped to its nearest relative rather than silently dropped. */
+function jdRgbToPdf(L, css){
+  const s = String(css || '').trim();
+  let m = s.match(/^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+  if (m) return L.rgb(+m[1] / 255, +m[2] / 255, +m[3] / 255);
+  m = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (m) {
+    let h = m[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return L.rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255,
+                 parseInt(h.slice(4, 6), 16) / 255);
+  }
+  return null;
+}
+function jdFamilyKey(css){
+  const f = String(css || '').toLowerCase();
+  if (/times|georgia|serif/.test(f) && !/sans/.test(f)) return 'times';
+  if (/courier|mono|consolas/.test(f)) return 'courier';
+  return 'helvetica';
+}
+/* The style in force at one piece of text, worked out by walking up its ancestors. The editor
+   writes inline styles (styleWithCSS), and the browser's own execCommand still emits B/I/U in
+   places, so both are read. */
+function jdStyleAt(node, stopAt){
+  const st = { b: false, i: false, u: false, size: null, color: null, fam: null };
+  for (let n = node.parentNode; n && n !== stopAt.parentNode; n = n.parentNode) {
+    if (n.nodeType !== 1) continue;
+    const tag = n.tagName;
+    if (tag === 'B' || tag === 'STRONG') st.b = true;
+    if (tag === 'I' || tag === 'EM') st.i = true;
+    if (tag === 'U') st.u = true;
+    const s = n.style || {};
+    const fw = String(s.fontWeight || '');
+    if (fw === 'bold' || fw === 'bolder' || (parseInt(fw, 10) >= 600)) st.b = true;
+    if (String(s.fontStyle || '') === 'italic') st.i = true;
+    const dec = String(s.textDecoration || '') + ' ' + String(s.textDecorationLine || '');
+    if (dec.indexOf('underline') >= 0) st.u = true;
+    if (st.size === null && s.fontSize) { const v = parseFloat(s.fontSize); if (isFinite(v)) st.size = v; }
+    if (st.color === null && s.color) st.color = s.color;
+    if (st.fam === null && s.fontFamily) st.fam = s.fontFamily;
+  }
+  return st;
+}
+/* One entry per paragraph, each a list of runs. A run is a stretch of text that shares one
+   style, which is the unit the layout below can measure and draw. */
+function jdParseBlocks(input){
+  const raw = String(input || '');
+  if (!/<[a-z!/]/i.test(raw)) {
+    // Plain text, the way it has always been stored.
+    return raw.split('\n').map(function (line) {
+      const head = /:$/.test(line.trim()) && line.trim().length < 40;
+      return [{ text: line, b: head, i: false, u: false, size: null, color: null, fam: null }];
+    });
+  }
+  const dom = new DOMParser().parseFromString('<body>' + raw + '</body>', 'text/html');
+  const body = dom.body;
+  let tops = Array.prototype.filter.call(body.childNodes, function (n) {
+    return n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim() !== '');
+  });
+  if (!tops.length) return [[{ text: '', b: false, i: false, u: false, size: null, color: null, fam: null }]];
+  // Bare text with no wrapper is still one paragraph.
+  if (!tops.some(function (n) { return n.nodeType === 1 && /^(DIV|P|LI|H[1-6])$/.test(n.tagName); })) {
+    tops = [body];
+  }
+  const blocks = [];
+  tops.forEach(function (top) {
+    if (top.nodeType === 3) {
+      blocks.push([{ text: top.textContent, b: false, i: false, u: false, size: null, color: null, fam: null }]);
+      return;
+    }
+    // A <br> ends a line inside a block, so each one starts another paragraph. brSplit records
+    // that the block already contributed something, so <div><br></div> - an empty paragraph, the
+    // commonest thing in these documents - yields ONE blank paragraph and not two.
+    let runs = [], brSplit = false;
+    const walk = function (n) {
+      if (n.nodeType === 3) {
+        const t = n.textContent.replace(/ /g, ' ');
+        if (t !== '') { const s = jdStyleAt(n, top); runs.push({ text: t, b: s.b, i: s.i, u: s.u, size: s.size, color: s.color, fam: s.fam }); }
+        return;
+      }
+      if (n.nodeType !== 1) return;
+      if (n.tagName === 'BR') { blocks.push(runs); runs = []; brSplit = true; return; }
+      Array.prototype.forEach.call(n.childNodes, walk);
+    };
+    Array.prototype.forEach.call(top.childNodes, walk);
+    if (runs.length || !brSplit) blocks.push(runs);
+  });
+  return blocks.map(function (r) {
+    return r.length ? r : [{ text: '', b: false, i: false, u: false, size: null, color: null, fam: null }];
+  });
+}
+
 async function jdBuildPdfBytes(title,bodyText){
   const L=await loadPdfLib(); if(!L)throw new Error('the PDF library could not be loaded');
   const doc=await L.PDFDocument.create();
-  const reg=await doc.embedFont(L.StandardFonts.Helvetica);
-  const bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
-  const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD=15,MAXW=W-2*M;
+  const S=L.StandardFonts;
+  const FAM={
+    helvetica:{r:await doc.embedFont(S.Helvetica), b:await doc.embedFont(S.HelveticaBold),
+               i:await doc.embedFont(S.HelveticaOblique), bi:await doc.embedFont(S.HelveticaBoldOblique)},
+    times:{r:await doc.embedFont(S.TimesRoman), b:await doc.embedFont(S.TimesRomanBold),
+           i:await doc.embedFont(S.TimesRomanItalic), bi:await doc.embedFont(S.TimesRomanBoldItalic)},
+    courier:{r:await doc.embedFont(S.Courier), b:await doc.embedFont(S.CourierBold),
+             i:await doc.embedFont(S.CourierOblique), bi:await doc.embedFont(S.CourierBoldOblique)}
+  };
+  const bold=FAM.helvetica.b;
+  const W=595.28,Hh=841.89,M=56,SIZE=10.5,LEAD_RATIO=15/10.5,MAXW=W-2*M;
+  const pick=(r)=>FAM[r.fam?jdFamilyKey(r.fam):'helvetica'][r.b&&r.i?'bi':r.b?'b':r.i?'i':'r'];
+  // The editor works in CSS pixels; a PDF works in points.
+  const sizeOf=(r)=>r.size?Math.max(4,Math.min(72,r.size*0.75)):SIZE;
 
   let logo=null,logoDims=null;
   const png=await jgLogoPngBytes();
@@ -13485,30 +15611,84 @@ async function jdBuildPdfBytes(title,bodyText){
     words.forEach(w=>{const t=cur?cur+' '+w:w; if(font.widthOfTextAtSize(t,size)<=MAXW){cur=t;}else{if(cur)out.push(cur);cur=w;}});
     if(cur)out.push(cur); return out.length?out:[''];
   }
-  // Every page carries the letterhead, because a description is often read one page at a time.
+  /* THE LETTERHEAD IS ON THE FIRST PAGE ONLY, and so is the title - the editor shows it that way
+     and the two have to agree or the preview is lying about where the text will fall. A
+     continuation page starts at the top margin with the full column to itself. */
+  let pageNo=0;
   function newPage(){
     const pg=doc.addPage([W,Hh]);
     let top=Hh-M;
-    if(logo&&logoDims){
-      pg.drawImage(logo,{x:M,y:top-logoDims.height,width:logoDims.width,height:logoDims.height});
-      top-=logoDims.height+10;
+    if(pageNo===0){
+      if(logo&&logoDims){
+        pg.drawImage(logo,{x:M,y:top-logoDims.height,width:logoDims.width,height:logoDims.height});
+        top-=logoDims.height+10;
+      }
+      pg.drawLine({start:{x:M,y:top},end:{x:W-M,y:top},thickness:1.2,
+                   color:L.rgb(0.88,0.07,0.11)});
+      top-=24;
     }
-    pg.drawLine({start:{x:M,y:top},end:{x:W-M,y:top},thickness:1.2,
-                 color:L.rgb(0.88,0.07,0.11)});
-    return {pg,y:top-24};
+    pageNo++;
+    return {pg,y:top};
   }
   let {pg:page,y}=newPage();
   wrapLine(title||'Job Description',bold,15).forEach(function(l){
     page.drawText(l,{x:M,y,size:15,font:bold}); y-=21;
   });
   y-=8;
-  String(bodyText||'').split('\n').forEach(function(line){
-    const isHead=/:$/.test(line.trim())&&line.trim().length<40;
-    wrapLine(line,isHead?bold:reg,SIZE).forEach(function(l){
-      if(y<M+24){ const np=newPage(); page=np.pg; y=np.y; }
-      page.drawText(l,{x:M,y,size:SIZE,font:isHead?bold:reg}); y-=LEAD;
+
+  /* EACH PARAGRAPH IS WRAPPED ACROSS LINES AS A SEQUENCE OF STYLED PIECES.
+
+     Words are measured with their own run's font and size, so a sentence that turns bold halfway
+     wraps in the right place instead of at the place it would have wrapped had it all been one
+     font. A line's leading follows its tallest piece, so a 24pt word does not sit on top of the
+     line above it. */
+  const blocks=jdParseBlocks(bodyText);
+  blocks.forEach(function(runs){
+    // Split the runs into words, each word remembering the style it came from.
+    const words=[];
+    runs.forEach(function(r){
+      const parts=String(r.text||'').split(/(\s+)/);
+      parts.forEach(function(p){ if(p!=='') words.push({t:p,r:r,space:/^\s+$/.test(p)}); });
     });
-    if(!line.trim())y-=4;
+    /* An empty paragraph takes the same room it always did - one line plus the 4pt the old
+       builder added - so a description written before today prints at exactly the same length. */
+    if(!words.length){ y-=SIZE*LEAD_RATIO+4; return; }
+
+    let line=[], lineW=0;
+    const flush=function(){
+      if(!line.length) return;
+      const maxSize=line.reduce(function(m,x){return Math.max(m,sizeOf(x.r));},SIZE);
+      const lead=maxSize*LEAD_RATIO;
+      if(y<M+24){ const np=newPage(); page=np.pg; y=np.y; }
+      let x=M;
+      line.forEach(function(x2){
+        const f=pick(x2.r), sz=sizeOf(x2.r);
+        const col=x2.r.color?jdRgbToPdf(L,x2.r.color):null;
+        const wpx=f.widthOfTextAtSize(x2.t,sz);
+        if(x2.t.trim()!==''){
+          page.drawText(x2.t,Object.assign({x:x,y:y,size:sz,font:f},col?{color:col}:{}));
+          if(x2.r.u){
+            page.drawLine({start:{x:x,y:y-sz*0.12},end:{x:x+wpx,y:y-sz*0.12},
+                           thickness:Math.max(0.4,sz*0.05)},
+                          );
+          }
+        }
+        x+=wpx;
+      });
+      y-=lead;
+      line=[]; lineW=0;
+    };
+    words.forEach(function(wd){
+      const f=pick(wd.r), sz=sizeOf(wd.r);
+      const wpx=f.widthOfTextAtSize(wd.t,sz);
+      if(lineW+wpx>MAXW && line.length){
+        // never start a wrapped line with the space that caused the wrap
+        flush();
+        if(wd.space) return;
+      }
+      line.push(wd); lineW+=wpx;
+    });
+    flush();
   });
   return await doc.save();
 }
@@ -13528,7 +15708,37 @@ function jdPdfOpen(bytes,filename,download){
   setTimeout(function(){URL.revokeObjectURL(url);},60000);
 }
 
+/* EDITING THE DESCRIPTION FROM THE REQUEST IT BELONGS TO.
+
+   Open used to build a PDF. A PDF is the right thing to send somebody and the wrong thing to be
+   handed when the text is AI-written and nearly always needs a line changed - correcting it meant
+   going to the Descriptions tab and finding it there, and while the request is still Pending its
+   description is not even shown there, so there was no way to edit it at all.
+
+   The text for a hiring request lives on hr.manpower_requests.ai_job_description, which is what
+   the PDF is built from, so saving here is what changes the document everybody else sees. Where a
+   recruit.job_descriptions row also exists for this request, it is kept in step - otherwise the
+   Descriptions tab would show the old wording after an edit. */
+window.mpJdEditOpen=async function(manpowerId){
+  await tpEnsurePositions();
+  const rec=(MP_RECORDS||[]).find(r=>r.id===manpowerId);
+  if(!rec||!String(rec.ai_job_description||'').trim()){toast('No description to edit yet','err');return;}
+  jdOpenEditorTab('Job Description \u2014 '+(rec.job_title||''), rec.ai_job_description||'',
+    async function(text){
+      const {error}=await sb.schema('hr').from('manpower_requests')
+        .update({ai_job_description:String(text||'')}).eq('id',manpowerId);
+      if(error) throw new Error(error.message);
+      rec.ai_job_description=String(text||'');
+      try{
+        await sb.schema('recruit').from('job_descriptions')
+          .update({content_text:String(text||'')}).eq('manpower_request_id',manpowerId);
+      }catch(_e){ /* the request's own copy is the one the PDF is built from */ }
+      toast('Job description saved');
+    });
+};
+
 window.hrJdPdfDownload=async function(manpowerId,download){
+  await tpEnsurePositions();
   const rec=(MP_RECORDS||[]).find(r=>r.id===manpowerId);
   if(!rec||!rec.ai_job_description){toast('No description to show yet','err');return;}
   try{
@@ -13538,46 +15748,172 @@ window.hrJdPdfDownload=async function(manpowerId,download){
 };
 
 /* ── ManPower Form v2 (approval workflow + AI-content preview) ── */
+/* ALWAYS READ FRESH. This used to keep MP_RECORDS for the life of the page and only fetch when it
+   was empty - which is fine for a list nothing else changes, and wrong for this one. Approving a
+   hiring request happens in Accountability, on another screen; coming back here showed the copy
+   loaded before the approval, still saying Pending, with no way to tell it was stale. The database
+   was right the whole time and the page was reporting an old answer as a current one.
+
+   A list of open positions is small and read rarely. Caching it saved nothing worth this. */
 async function tpManpower(){
   const b=$('recBody');
-  if(!MP_RECORDS){
-    b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
-    try{const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
-      if(error)throw error; MP_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
+  if(!MP_RECORDS) b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+  try{
+    const {data,error}=await sb.schema('hr').from('manpower_requests').select('*').order('submitted_at',{ascending:false});
+    if(error)throw error;
+    MP_RECORDS=data||[];
+  }catch(e){
+    // Keep whatever was on screen if the refresh fails - an empty list would read as "everything
+    // was deleted", which is a worse lie than a slightly old one.
+    if(!MP_RECORDS){ b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>'; return; }
+    toast('Could not refresh the list: '+((e&&e.message)||e),'err');
   }
+  await tpMpLoadApplied();
   tpMpRender();
+}
+
+/* HOW MANY PEOPLE HAVE ALREADY APPLIED FOR EACH POSITION.
+
+   Read here rather than per row, because the Edit button has to know before anybody clicks it -
+   a button that looks live and then refuses is worse than one that is plainly switched off.
+   Only fetched for people who can edit; everybody else never sees the button. A failure leaves
+   the map empty, which unlocks Edit rather than locking everything - the database refuses the
+   edit anyway, so the worst case is a clear error instead of a silent wrong state. */
+let TP_MP_APPLIED={};
+async function tpMpLoadApplied(){
+  TP_MP_APPLIED={};
+  if(!recCanWrite()) return;
+  try{
+    const {data,error}=await sb.schema('hr').from('candidates')
+      .select('manpower_request_id').not('manpower_request_id','is',null);
+    if(error) throw error;
+    (data||[]).forEach(function(c){
+      const k=c.manpower_request_id;
+      TP_MP_APPLIED[k]=(TP_MP_APPLIED[k]||0)+1;
+    });
+  }catch(_e){ /* leave it empty - see above */ }
 }
 function tpMpRender(){
   const b=$('recBody'); if(!b)return;
   const rows=MP_RECORDS||[];
   const canOpen=recCanWrite();
+  /* Ticks that no longer match a visible row are dropped, so deleting a request cannot leave a
+     phantom in the count. */
+  TP_MP_SEL=new Set([...TP_MP_SEL].filter(id=>rows.some(r=>r.id===id)));
+  const nSel=TP_MP_SEL.size;
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">ManPower Requisitions <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
-    <div style="margin-left:auto;display:flex;gap:8px">
-      <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-pen-to-square"></i> Fill Form</button>
+  b.innerHTML=TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Hiring Requests <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+    <!-- EDIT AND DELETE LIVE HERE, ON A SELECTION, NOT INSIDE EACH REQUEST.
+         They used to sit on the detail panel, which meant opening a request to delete it - reading
+         a thing in order to throw it away. Tick and act instead. Edit needs exactly one (there is
+         nothing sensible to show when two are ticked); Delete takes as many as are ticked. -->
+    <!-- ALWAYS DRAWN, SWITCHED OFF UNTIL SOMETHING IS TICKED.
+         They used to appear only once a box was ticked, which makes the toolbar jump and, worse,
+         hides the fact that ticking a row is what these are for - you cannot look for a button
+         that is not there. Greyed out they explain themselves: the control is visible, the reason
+         it cannot be pressed is in the tooltip, and the row does not move when it becomes live.
+         Edit takes exactly one, because there is nothing sensible to show for two at once. -->
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${canOpen?(function(){
+        /* A POSITION WITH APPLICANTS CANNOT BE EDITED, AND THE BUTTON SAYS SO BEFORE IT IS CLICKED.
+           People applied to the role as it was written; changing the title or the pay afterwards
+           would quietly turn them into candidates for something else. The database refuses it too
+           - this is the half that explains itself. */
+        const selId=nSel===1?[...TP_MP_SEL][0]:null;
+        const applied=selId!=null?(TP_MP_APPLIED[selId]||0):0;
+        const canEditSel=nSel===1&&applied===0;
+        const why=nSel!==1 ? 'Tick exactly one request to edit it'
+          : applied ? ('Locked — '+applied+' candidate'+(applied===1?' has':'s have')+' already applied for this position')
+          : 'Edit the ticked request';
+        return `<span style="font-size:12px;color:var(--slate)">${nSel?(nSel+' selected'):'Tick a row to edit or delete'}</span>
+        <button class="btn" ${canEditSel?'':'disabled style="opacity:.45;cursor:not-allowed"'}
+          title="${why}"
+          onclick="tpMpEditSel()">${applied&&nSel===1?'<i class="fa-solid fa-lock"></i>':'<i class="fa-solid fa-pen"></i>'} Edit</button>`;
+      })()+`
+        <button class="btn" ${nSel?'style="color:var(--err);border-color:var(--err)"':'disabled style="opacity:.45;cursor:not-allowed"'}
+          title="${nSel?('Delete the '+nSel+' ticked request'+(nSel===1?'':'s')):'Tick at least one request to delete it'}"
+          onclick="tpMpDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
+      <button class="btn btn-primary" onclick="tpMpFillForm()"><i class="fa-solid fa-plus"></i> New Request</button>
     </div>
   </div>
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">${canOpen?'Click a row for its status, the AI-generated Job Description / Description / Creative, and to Approve or Reject it.':'Anyone can raise a requisition here. Opening one to read its Job Description, its approval and its Careers Page link is limited to HR, Abhay Mati and Administrators.'}</div>
+  <!-- There used to be no Open button: the row itself was clickable, and the only hint was the
+       mouse cursor changing. Nobody discovers that, and nothing on screen said a panel would
+       appear, so the request looked like a dead list. The action is now a button that says Open. -->
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">${canOpen?'Open a request to read its job description, approve it or reject it.':'Anyone can raise a request here. Opening one is limited to HR, Abhay Mati and Administrators.'}</div>
   <div style="overflow-x:auto">
   <table class="tbl" id="tpMpTbl">
-    <thead><tr><th>Job Title</th><th>Department</th><th>Date</th><th style="text-align:center">Vacancy</th><th>Priority</th><th>Approval</th></tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row" data-id="${r.id}"${canOpen?` style="cursor:pointer" onclick="tpMpShowDetail(${r.id})"`:''}>
-      <td style="font-weight:600">${esc(r.job_title||'—')}</td>
+    <!-- COLUMNS CHOSEN FOR WHAT SOMEBODY SCANS THIS LIST TO FIND OUT: which job, for which
+         department, where, who asked, and has it been approved. Vacancy count and Priority were
+         columns of their own and neither answers a question anybody asks of a list - the count
+         matters once you open the request, and Priority only matters when it is Urgent. So Urgent
+         now rides next to the job title as a red chip, where it is more visible than a column of
+         mostly "Not Urgent", and both columns are gone. Location and Raised By took their place. -->
+    <thead><tr>${canOpen?'<th style="width:34px;text-align:center"><input type="checkbox" onchange="tpMpToggleAll(this)"></th>':''}<th>Job Title</th><th>Department</th><th>Location</th><th>Raised By</th><th>Date</th><th>Status</th>${canOpen?'<th style="width:90px"></th>':''}</tr></thead>
+    <!-- CLICKING A ROW SHOWS THE PEOPLE ON THAT POSITION, the same way a Monthly Progress row
+         does. A hiring request is a position, and the question you usually have of one is "who
+         have we got for it" - which meant going to Interviews and filtering by hand. The tick box
+         and the Details button keep their own jobs and stop the click reaching the row. -->
+    <tbody>${rows.length?rows.map(r=>`<tr class="tp-mp-row tp-mp-click" data-id="${r.id}"
+      onclick="tpMuOpenPeople(${esc(JSON.stringify(r.job_title||''))})"
+      title="See the candidates on ${esc(r.job_title||'this position')}">
+      ${canOpen?`<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="tp-mp-cb" value="${r.id}"${TP_MP_SEL.has(r.id)?' checked':''} onchange="tpMpPick(${r.id},this.checked)"></td>`:''}
+      <td style="font-weight:600">${esc(r.job_title||'—')}${r.priority==='Urgent'?' <span class="tag t-red" style="font-size:10px">Urgent</span>':''}</td>
       <td>${esc(r.department||'—')}</td>
+      <td style="font-size:12px">${esc(r.location||'—')}</td>
+      <td style="font-size:12px;color:var(--slate);overflow-wrap:anywhere">${esc(r.raised_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${esc(mpFmtDate(r.date_of_request))}</td>
-      <td style="text-align:center">${esc(String(r.no_of_vacancy||'—'))}</td>
-      <td>${priTag(r.priority)}</td>
       <td>${tpApprovalTag(r)}</td>
-    </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--slate)">No requisitions yet — click <b>Fill Form</b> to add one</td></tr>'}
+      ${canOpen?`<td style="text-align:right" onclick="event.stopPropagation()"><button class="btn btn-sm" style="font-size:12px" onclick="tpMpShowDetail(${r.id})"><i class="fa-solid fa-eye"></i> Details</button></td>`:''}
+    </tr>`).join(''):`<tr><td colspan="${canOpen?8:6}" style="text-align:center;padding:40px;color:var(--slate)">No hiring requests yet — click <b>New Request</b> to raise one</td></tr>`}
     </tbody>
   </table>
   </div>
   <div id="tpMpDetail" style="display:none"></div>`;
 }
+let TP_MP_SEL=new Set();
+window.tpMpPick=function(id,on){ if(on)TP_MP_SEL.add(id); else TP_MP_SEL.delete(id); tpMpRender(); };
+window.tpMpToggleAll=function(el){
+  if(el.checked)(MP_RECORDS||[]).forEach(r=>TP_MP_SEL.add(r.id)); else TP_MP_SEL.clear();
+  tpMpRender();
+};
+window.tpMpEditSel=function(){
+  if(!recGuard())return;
+  const id=[...TP_MP_SEL][0]; if(id==null){toast('Tick a request first','err');return;}
+  // The button is already disabled for this; the check is here for a screen left open while
+  // somebody else's application landed.
+  const applied=TP_MP_APPLIED[id]||0;
+  if(applied){
+    toast('This position cannot be edited — '+applied+' candidate'+(applied===1?' has':'s have')
+          +' already applied for it','err');
+    return;
+  }
+  mpEdit(id);
+};
+window.tpMpDeleteSel=async function(){
+  if(!recGuard())return;
+  const ids=[...TP_MP_SEL]; if(!ids.length){toast('Tick a request first','err');return;}
+  /* Says what else goes, because it is not obvious: the approval tasks are about the request and
+     follow it down. The job description does NOT - it is a document in its own right and keeps
+     existing, unlinked. */
+  /* JainE's own dialog, not the browser's. A window.confirm looks like the page has been taken
+     over by something else, cannot say which records are going, and on some browsers carries a
+     "prevent this page from creating more dialogs" tick that silently disables every later one. */
+  if(!await confirmDialog(
+      'Delete '+ids.length+' hiring request'+(ids.length===1?'':'s')+'? Their approval tasks will be '
+      +'cancelled. Any job description written for them stays in the library.',
+      {title:'Delete hiring request'+(ids.length===1?'':'s'), okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  const {error}=await sb.schema('hr').from('manpower_requests').delete().in('id',ids);
+  if(error){toast('Could not delete: '+error.message,'err');return;}
+  MP_RECORDS=(MP_RECORDS||[]).filter(r=>!ids.includes(r.id));
+  TP_MP_SEL=new Set();
+  const det=$('tpMpDetail'); if(det)det.style.display='none';
+  toast(ids.length+' deleted','ok');
+  tpMpRender();
+};
 window.tpMpFillForm=function(){
   // Open to everyone — this is the "raise a need" side of the approval workflow, not a write-guarded action.
-  mpModal('ManPower Requisition Form',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="tpMpSave()"><i class="fa-solid fa-check"></i> Submit</button>');
+  mpModal('Hiring Request',null,'<button class="btn btn-primary" id="mpSaveBtn" onclick="tpMpSave()"><i class="fa-solid fa-check"></i> Submit</button>');
 };
 window.tpMpSave=async function(){
   const d=mpCollect();
@@ -13587,7 +15923,7 @@ window.tpMpSave=async function(){
   const {data,error}=await sb.schema('hr').from('manpower_requests').insert(d).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Submit';}return;}
   MP_RECORDS=[data,...(MP_RECORDS||[])];closeModal();
-  toast(data.approval_status==='Approved'?'Requisition submitted and auto-approved':'Requisition submitted — pending HR approval');
+  toast(data.approval_status==='Approved'?'Hiring request submitted and approved':'Hiring request submitted — HR has been asked to approve it');
   tpMpRender();
   // Fire the AI JD/Description/Creative generation in the background — the submitter doesn't need
   // to wait or have write access for this; it's just drafting content, not an approval action.
@@ -13595,6 +15931,18 @@ window.tpMpSave=async function(){
     const rec=(MP_RECORDS||[]).find(r=>r.id===data.id);if(!rec)return;
     if(error||!gen||gen.error){rec.ai_status='failed';return;}
     rec.ai_status='ready';rec.ai_job_description=gen.job_description;rec.ai_job_description_json=gen.job_description_json;rec.ai_platform_post_text=gen.platform_post_text;rec.ai_creative_path=gen.creative_path;
+    /* THE EMAIL WAS ONLY EVER WIRED TO A MANUAL UPLOAD.
+
+       Most job descriptions are not uploaded - they are written from a hiring request, by AI, the
+       moment the request is raised. That path told nobody, so raising a position produced a
+       description that existed and a notification that did not. This is the point at which there
+       is something to tell them about: the text exists and is on the record.
+
+       There is no file to attach here. A description written in JAIN-E is text, and the PDF is
+       built on demand, so the text travels in the body rather than promising an attachment that
+       was never created. */
+    hrNotify({kind:'job_description_created',title:rec.job_title||'Untitled',
+              created_by:state.email||'',content_text:gen.job_description||''});
   });
 };
 /* thejaingroup.com does NOT serve this repo (confirmed live: career-position.html there falls back
@@ -13612,11 +15960,11 @@ window.tpMpShowDetail=function(id){
      rows are also drawn without a pointer for everyone else, so it does not merely fail on a
      click - it never looks clickable. */
   if(!recCanWrite()){
-    toast('Only HR, Abhay Mati and Administrators can open a requisition','err');
+    toast('Only HR, Abhay Mati and Administrators can open a hiring request','err');
     return;
   }
   const rec=(MP_RECORDS||[]).find(r=>r.id===id);
-  if(!rec){toast('Could not find requisition #'+id+' — try refreshing the page','err');console.error('tpMpShowDetail: no record with id',id,'in MP_RECORDS',MP_RECORDS);return;}
+  if(!rec){toast('Could not find hiring request #'+id+' — try refreshing the page','err');console.error('tpMpShowDetail: no record with id',id,'in MP_RECORDS',MP_RECORDS);return;}
   const panel=$('tpMpDetail');
   if(!panel){toast('Detail panel container missing from the page — try refreshing','err');console.error('tpMpShowDetail: #tpMpDetail not found in DOM');return;}
   document.querySelectorAll('.tp-mp-row').forEach(tr=>tr.style.background='');
@@ -13625,22 +15973,48 @@ window.tpMpShowDetail=function(id){
   panel.style.display='block';
   const canAct=recCanWrite(), pending=(rec.approval_status||'Pending')==='Pending';
   const priTag=p=>p==='Urgent'?'<span class="tag t-red">Urgent</span>':'<span class="tag t-gray">'+(p||'—')+'</span>';
-  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px;position:relative">
-    <button style="position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--slate);line-height:1" onclick="tpMpCloseDetail()">&times;</button>
-    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding-right:32px">
+  /* THE PANEL WAS SIX BUTTONS AND A TITLE FIGHTING FOR ONE ROW, WITH THE WAY OUT AS A GREY ×.
+
+     Approve, Reject, Edit and Delete all sat together at the same size and weight, so the one
+     thing you came to do looked exactly like the one thing you must not do by accident. The close
+     control was an 18px × floated over the corner - the smallest thing on a panel that fills the
+     screen, and the only way back to the list.
+
+     Now: a bar across the top that says what you are looking at and carries a real Close button
+     with a word on it. Under it, one row of actions where Approve is the only filled button and
+     Delete is pushed to the far right, away from everything else. Then plain sections with
+     headings, so the panel reads in an order instead of all at once. */
+  panel.innerHTML=`<div class="card card-pad" style="margin-top:14px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:12px;border-bottom:2px solid var(--line)">
+      <button class="btn btn-sm" style="font-weight:600" onclick="tpMpCloseDetail()"><i class="fa-solid fa-arrow-left"></i> Close</button>
       <div style="flex:1;min-width:220px">
         <div style="font-size:18px;font-weight:700;color:var(--ink)">${esc(rec.job_title||'—')}</div>
         <div style="color:var(--slate);font-size:13px;margin-top:2px">${esc(rec.department||'—')} &nbsp;·&nbsp; ${mpFmtDate(rec.date_of_request)} &nbsp;·&nbsp; raised by ${esc(rec.raised_by||'—')}</div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${priTag(rec.priority)}${tpApprovalTag(rec)}
-        ${canAct&&pending?`<button class="btn btn-sm btn-primary" onclick="tpMpApprove(${rec.id})"><i class="fa-solid fa-check"></i> Approve</button><button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpReject(${rec.id})"><i class="fa-solid fa-xmark"></i> Reject</button>`:''}
-        <button class="btn btn-sm" onclick="mpEdit(${rec.id})"><i class="fa-solid fa-pen"></i> Edit</button>
-        ${canAct?`<button class="btn btn-sm" style="color:var(--err);border-color:var(--err)" onclick="tpMpDeleteOne(${rec.id})"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
-      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${priTag(rec.priority)}${tpApprovalTag(rec)}</div>
     </div>
+    <!-- APPROVING DOES NOT HAPPEN HERE ANY MORE.
+
+         A hiring request already raises a Pending Approval task for each approver in Accountability,
+         which is where every other approval in JAIN-E is worked. Having Approve and Reject ALSO sit
+         on this panel meant two places to do one job, and the two could disagree: approve it here
+         and the task stayed open, waiting for somebody who had already decided. One queue, one
+         decision. This panel is now for reading the request.
+
+         What is left is Edit and Delete, and they are not peers - Edit is the ordinary thing and
+         Delete is the one you cannot undo. They are separated, weighted differently, and Delete is
+         a proper bordered button rather than red text, which read as a label rather than a control. -->
+    <!-- Edit and Delete moved to the toolbar, on a tick. Opening a request in order to delete it
+         meant reading a thing to throw it away, and put the most destructive control on the screen
+         you land on after a click. -->
+    ${pending?`<div style="margin-top:10px;font-size:12.5px;color:var(--slate);background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:9px 12px">
+      <i class="fa-solid fa-circle-info"></i> Waiting for approval — approve or reject it from <b>Accountability › Pending Approval</b>.
+    </div>`:''}
     ${rec.approval_status==='Rejected'&&rec.rejection_reason?`<div style="margin-top:10px;padding:10px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#b91c1c">Rejection reason · </span><span style="font-size:13px;color:#7f1d1d">${esc(rec.rejection_reason)}</span></div>`:''}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:10px">The request</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 20px">
       <div><div class="tp-lbl">Vacancies</div><div style="font-size:14px;margin-top:2px">${esc(String(rec.no_of_vacancy||'—'))}</div></div>
       <div><div class="tp-lbl">Reporting To / HOD</div><div style="font-size:14px;margin-top:2px">${esc(rec.reporting_person||'—')}</div></div>
       <div><div class="tp-lbl">Qualification</div><div style="font-size:14px;margin-top:2px">${esc(rec.qualification||'—')}</div></div>
@@ -13653,19 +16027,35 @@ window.tpMpShowDetail=function(id){
     ${rec.notes?`<div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;border:1px solid #fde68a"><span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#a16207">Note · </span><span style="font-size:13px;color:#78350f">${esc(rec.notes)}</span></div>`:''}
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <i class="fa-solid fa-wand-magic-sparkles" style="color:#7c3aed"></i><span style="font-weight:700;font-size:13.5px">AI-generated for this posting</span>
+        <span style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)">Job description</span>
         ${rec.ai_status==='generating'?'<span class="tag t-amber"><i class="fa-solid fa-spinner fa-spin"></i> Generating…</span>':''}
         ${rec.ai_status==='failed'?'<span class="tag t-red">Generation failed</span>':''}
-        ${canAct&&rec.ai_status!=='generating'?`<button class="btn btn-sm" style="margin-left:auto" onclick="tpMpGenerate(${rec.id})"><i class="fa-solid fa-wand-magic-sparkles"></i> ${rec.ai_status==='ready'?'Regenerate':'Generate with AI'}</button>`:''}
+        <!-- The generate button used to sit up here on its own, at the far end of a heading row,
+             while Open and Download sat in the card below it. Three buttons about one document,
+             in two places. It has moved down beside them. -->
       </div>
+      <!-- THE SENTENCE AND THE BUTTONS SHARE A LINE. They were stacked, under an empty label, so
+           three rows of card were spent saying one thing. The sentence explains what the buttons
+           are for, so it belongs beside them, not above them. -->
       <div class="card" style="padding:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px"><div class="tp-lbl">Description</div>
-          ${rec.ai_job_description?`<button class="btn btn-sm" style="margin-left:auto" onclick="hrJdPdfDownload(${rec.id})"><i class="fa-solid fa-file-pdf"></i> View as PDF</button><button class="btn btn-sm" style="margin-left:6px" onclick="hrJdPdfDownload(${rec.id},true)"><i class="fa-solid fa-download"></i> Download PDF</button>`:''}
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px;font-size:12.5px;color:var(--slate)">${rec.ai_job_description
+            ? '<i class="fa-solid fa-file-lines"></i> A job description has been written for this position.'
+            : 'No job description has been written yet.'}</div>
+          <div style="display:flex;gap:6px;flex:none;flex-wrap:wrap">
+            ${rec.ai_job_description?`
+            <button class="btn btn-sm" onclick="mpJdEditOpen(${rec.id})"><i class="fa-solid fa-pen"></i> Open</button>
+            <button class="btn btn-sm" onclick="hrJdPdfDownload(${rec.id},true)"><i class="fa-solid fa-download"></i> Download</button>`:''}
+            ${canAct&&rec.ai_status!=='generating'?`<button class="btn btn-sm${rec.ai_job_description?'':' btn-primary'}" onclick="tpMpGenerate(${rec.id})"><i class="fa-solid fa-wand-magic-sparkles"></i> ${rec.ai_job_description?'Regenerate':'Generate with AI'}</button>`:''}
+          </div>
         </div>
-        <div style="margin-top:8px;font-size:12.5px;max-height:260px;overflow-y:auto;${rec.ai_job_description?'color:var(--ink);white-space:pre-wrap':'color:var(--slate)'}">${rec.ai_job_description?esc(rec.ai_job_description):'Not generated yet'}</div>
+        <!-- The full text used to be printed below this, 260px of scrolling prose in the middle of
+             a panel about a hiring request. Nobody reads a job description in a scroll box, and it
+             buried everything under it. It is a document: the line above says whether one exists,
+             and Open puts it in a tab where it can actually be read. -->
       </div>
       ${(rec.approval_status==='Approved')?`<div class="card" style="padding:12px;margin-top:12px">
-        <div class="tp-lbl" style="margin-bottom:6px">JainGroup Careers Page</div>
+        <div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);margin-bottom:8px">Careers page</div>
         ${rec.status==='Open'?`
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input class="ac-in" readonly style="flex:1;min-width:220px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:#0369a1" value="${esc(tpCareersLink(rec.slug))}" onclick="this.select()">
@@ -13675,13 +16065,13 @@ window.tpMpShowDetail=function(id){
           <div style="font-size:11px;color:var(--slate);margin-top:6px">Live now — anyone with this link can apply. Closing hiring takes the page down.</div>`
         :`<div style="font-size:12.5px;color:var(--slate)">Hiring is closed for this position — its page is no longer live.</div>
           <button class="btn btn-sm btn-primary" style="margin-top:8px" onclick="tpMpReopenHiring(${rec.id})"><i class="fa-solid fa-unlock"></i> Reopen Hiring</button>`}
-      </div>`:`<div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The Careers Page link appears here once this requisition is Approved.</div>`}
+      </div>`:`<div style="font-size:11.5px;color:var(--slate);margin-top:10px"><i class="fa-solid fa-circle-info"></i> The careers page link appears here once this request is approved.</div>`}
     </div>
   </div>`;
   panel.scrollIntoView({behavior:'smooth',block:'nearest'});
  }catch(e){
   console.error('tpMpShowDetail threw:',e);
-  toast('Could not open that requisition: '+(e&&e.message||e),'err');
+  toast('Could not open that hiring request: '+(e&&e.message||e),'err');
  }
 };
 window.tpMpGenerate=async function(id){
@@ -13722,7 +16112,7 @@ window.tpMpReopenHiring=async function(id){
   }catch(e){toast('Could not reopen hiring: '+((e&&e.message)||e),'err');}
 };
 window.tpMpReject=function(id){if(!recGuard())return;
-  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Requisition</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  openModal(`<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Hiring Request</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm"><label>Reason (optional, shown to the requester)</label><textarea id="tpRejReason" class="inp" rows="3" placeholder="Why is this being rejected?"></textarea></div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" style="background:var(--err);border-color:var(--err)" onclick="tpMpRejectConfirm(${id})"><i class="fa-solid fa-xmark"></i> Reject</button></div>`);
 };
@@ -13749,7 +16139,7 @@ window.tpMpRejectConfirm=async function(id){
   }
 };
 window.tpMpDeleteOne=async function(id){if(!recGuard())return;
-  if(!await confirmDialog('Delete this requisition?'))return;
+  if(!await confirmDialog('Delete this hiring request?'))return;
   const {error}=await sb.schema('hr').from('manpower_requests').delete().eq('id',id);
   if(error){toast(error.message,'err');return;}
   MP_RECORDS=(MP_RECORDS||[]).filter(r=>r.id!==id);
@@ -13764,11 +16154,18 @@ async function tpReferrals(){
     if(error)throw error; TP_REF_RECORDS=data||[];}catch(e){b.innerHTML='<div class="empty" style="padding:40px;color:#c83232">'+esc(e.message)+'</div>';return;}
   tpRefRender();
 }
+const TP_NOTE_CSS=`<style>
+  .tp-mp-click{cursor:pointer}
+  .tp-mp-click:hover{background:#f8fafc}
+  .tbl td.tp-note{font-size:12px;color:var(--slate);max-width:240px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .tbl td.tp-note[title]:not([title=""]){cursor:help}
+</style>`;
 function tpRefRender(){
   const b=$('recBody'); if(!b)return;
   const rows=TP_REF_RECORDS||[];
   const canAct=recCanWrite();
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+  b.innerHTML=TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
     <div class="sec-title" style="margin:0">Employee Referrals <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto"><button class="btn btn-primary" onclick="tpRefAdd()"><i class="fa-solid fa-user-plus"></i> Refer Someone</button></div>
   </div>
@@ -13780,23 +16177,80 @@ function tpRefRender(){
          referral turned down for one role can be the right person for another later, so a
          Rejected row is not a dead end. Once it IS in the Tracker the button goes: pressing it
          again would make a second candidate out of the same person. */
-      const acts=canAct&&!connected
-        ? ` <button class="btn btn-sm btn-primary" style="margin-left:6px;padding:3px 8px" onclick="tpRefConnect(${r.id})" title="Connect to an open position"><i class="fa-solid fa-link"></i> Connect</button>`
-          +((r.approval_status||'Pending')==='Pending'?` <button class="btn btn-sm" style="margin-left:4px;padding:3px 8px;color:var(--err);border-color:var(--err)" onclick="tpRefReject(${r.id})" title="Reject"><i class="fa-solid fa-xmark"></i></button>`:'')
-        : (connected?' <span class="tag t-gray" style="margin-left:6px">In Interview Tracker</span>':'');
+      /* CONNECT ONLY, AND ONLY ONCE APPROVED.
+
+         Reject used to sit here too, which meant a referral could be turned down in two places -
+         this row and the approval task - and the two did different things: the task told the
+         referrer, this button did not. One decision with two buttons and two outcomes is worse
+         than one button in the wrong place. Rejecting now belongs to the task, where it is asked.
+
+         Connect appears only after the referral has been approved. It was offered on a Pending
+         referral and then refused, which is a button that exists to say no. A Pending row says
+         what it is waiting for instead. */
+      const approved=(r.approval_status||'Pending')==='Approved';
+      const acts=connected
+        ? '<span class="tag t-gray">In Interviews</span>'
+        : (canAct&&approved
+            ? `<button class="btn btn-sm btn-primary" style="padding:3px 10px" onclick="tpRefConnect(${r.id})" title="Connect to an open position"><i class="fa-solid fa-link"></i> Connect</button>`
+            : '');   // the Status pill beside this already says Pending - saying it twice, in
+                       // two different forms of words, only made the cell look busy
       return `<tr class="tp-ref-row">
       <td style="font-weight:600">${esc(r.referred_name||'—')}</td>
       <td>${r.referred_email?`<a href="mailto:${esc(r.referred_email)}" style="color:var(--brand)">${esc(r.referred_email)}</a>`:'—'}</td>
       <td>${esc(r.referred_phone||'—')}</td>
-      <td style="font-size:12px;color:var(--slate);max-width:220px" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
-      <td>${r.resume_id?`<button class="btn btn-sm" style="padding:3px 8px" onclick="tpRefCv(${r.resume_id},${JSON.stringify(r.referred_name||'CV')})" title="Open the CV"><i class="fa-solid fa-file-arrow-down"></i> CV</button>`:'<span style="color:var(--slate)">—</span>'}</td>
+      <!-- A long note used to wrap and push the whole row two or three lines tall, so a list of
+           ten referrals scrolled like a list of thirty. One line, cut with an ellipsis, and the
+           full text on hover - the note is worth reading, it is just not worth the whole table
+           rearranging itself around it. -->
+      <td class="tp-note" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
+      <td>${r.resume_id?`<button class="btn btn-sm" style="padding:3px 8px" onclick="tpRefCv(${r.resume_id},${esc(JSON.stringify(r.referred_name||'CV'))})" title="Open the CV"><i class="fa-solid fa-file-arrow-down"></i> CV</button>`:'<span style="color:var(--slate)">—</span>'}</td>
       <td style="font-size:12px">${esc(r.referred_by||'—')}</td>
       <td style="color:var(--slate);font-size:12px;white-space:nowrap">${new Date(r.created_at).toLocaleDateString()}</td>
-      <td style="white-space:nowrap">${tpApprovalTag(r)}${acts}</td>
+      <!-- THE STATUS AND THE BUTTONS ARE NOT THE SAME KIND OF THING, SO THEY DO NOT SIT TOGETHER.
+           The pill reports what has happened; the buttons change it. Pressed up against each other
+           they read as one control, and the eye cannot tell which part is clickable. The pill stays
+           left, the actions are pushed to the right of the cell, and the gap between them says they
+           are separate. -->
+      <td style="white-space:nowrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="flex:none">${tpApprovalTag(r)}</span>
+          <span style="margin-left:auto;display:flex;gap:6px;flex:none">${acts}${tpRefWithdrawBtn(r)}</span>
+        </div>
+      </td>
     </tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--slate)">No referrals yet — click <b>Refer Someone</b></td></tr>'}
     </tbody>
   </table></div>`;
 }
+/* WITHDRAW - shown to the person who made the referral, while it is still Pending, and to HR at
+   any time. Before this, a referral could be raised by anyone and removed by nobody: refer the
+   wrong person and it stayed for good. HR's existing control says Reject, which is a judgment on
+   the candidate, not a way to take back your own mistake - so the two are kept apart. The database
+   decides both questions again in hr.referral_withdraw; this only decides what is drawn. */
+function tpRefWithdrawBtn(r){
+  const me=String(state.email||'').toLowerCase();
+  const mine=String(r.referred_by||'').toLowerCase()===me&&me!=='';
+  const pending=(r.approval_status||'Pending')==='Pending';
+  if(!(recCanWrite()||(mine&&pending))) return '';
+  const label=recCanWrite()&&!mine?'Remove':'Withdraw';
+  return `<button class="btn btn-sm" style="padding:3px 10px;color:var(--err);border-color:var(--err)"
+    onclick="tpRefWithdraw(${r.id},${esc(JSON.stringify(r.referred_name||'this referral'))})"
+    title="${label} this referral"><i class="fa-solid fa-trash"></i> ${label}</button>`;
+}
+window.tpRefWithdraw=async function(id,who){
+  if(!await confirmDialog(
+      'Withdraw the referral for '+(who||'this person')+'? The candidate it created is deleted as '
+      +'well, along with their CV and any approval task \u2014 a referral and the candidate it put '
+      +'forward are one and the same.',
+      {title:'Withdraw referral', okLabel:'Withdraw', icon:'fa-trash', danger:true}))return;
+  const {data,error}=await sb.schema('hr').rpc('referral_withdraw',{p_id:id});
+  if(error){toast(error.message,'err');return;}
+  await hrRemoveFiles(data);
+  TP_REF_RECORDS=(TP_REF_RECORDS||[]).filter(r=>r.id!==id);
+  // The candidate went with it, so the Tracker on screen is now out of date.
+  TP_TR_RECORDS=null;
+  toast('Referral withdrawn \u2014 the candidate was removed too','ok');
+  tpRefRender();
+};
 /* Opens the CV behind a referral. The file keeps the candidate's own name rather than the stamped
    storage name, the same as the Resumes tab does. */
 window.tpRefCv=async function(resumeId,who){
@@ -13811,22 +16265,64 @@ window.tpRefAdd=function(){
   // No Position field here on purpose: a referral names a PERSON, not a role they're pre-committed
   // to — which position (if any, yet) fits them is a judgment call HR makes later, via Connect.
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-user-plus"></i> Refer Someone</h3><span class="x" onclick="closeModal()">&times;</span></div>
+  <!-- THE CV COMES FIRST. It was last, under a note field, at the bottom of a form - the single
+       most useful thing in a referral, in the place people stop reading. HR judges a referral on
+       the CV before anything typed about the person, so it is now the first thing asked for. -->
+  <!-- Name, then the two ways of reaching them, then the CV, then the note. The CV was at the very
+       bottom under the note, where people stop reading; putting it at the very top pushed the
+       person's own name below the fold. Between contact details and the note is where it belongs -
+       it is one more thing about who this person is, and it is the thing HR opens first. -->
   <div class="modal-body frm">
     <label>Candidate Name *</label><input id="tpRfName" class="inp">
     <div class="two"><div><label>Email</label><input id="tpRfEmail" class="inp"></div><div><label>Phone</label><input id="tpRfPhone" class="inp"></div></div>
-    <label>Note</label><textarea id="tpRfNotes" class="inp" rows="2" placeholder="How you know them, what they do now, why they'd be a good fit"></textarea>
-    <label style="margin-top:8px">CV</label>
+    <!-- A FILE YOU HAVE CHOSEN CAN BE TAKEN OFF AGAIN. Picking the wrong CV used to be permanent
+         for the life of the window: the box showed the filename and there was no way back to empty,
+         so the only way to correct it was to close the form and lose everything typed. -->
+    <label>CV <span style="color:var(--err)">*</span></label>
     <div class="dropzone" onclick="document.getElementById('tpRfCv').click()"><i class="fa-solid fa-cloud-arrow-up"></i><div id="tpRfCvName">Click to choose a PDF, Word doc, or image</div></div>
-    <input type="file" id="tpRfCv" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="document.getElementById('tpRfCvName').textContent=this.files[0]?this.files[0].name:'Click to choose a PDF, Word doc, or image'">
+    <div id="tpRfCvPicked" style="display:none;align-items:center;gap:8px;margin-top:6px;font-size:12.5px">
+      <i class="fa-solid fa-paperclip" style="color:var(--slate)"></i>
+      <span id="tpRfCvPickedName" style="font-weight:600;overflow-wrap:anywhere"></span>
+      <button type="button" class="btn btn-sm" style="margin-left:auto;padding:2px 10px;color:var(--err);border-color:var(--err)" onclick="tpRefCvClear()">Remove</button>
+    </div>
+    <input type="file" id="tpRfCv" class="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="tpRefCvPicked(this)">
+    <label>Note</label><textarea id="tpRfNotes" class="inp" rows="2" placeholder="How you know them, what they do now, why they'd be a good fit"></textarea>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfSaveBtn" onclick="tpRefSave()"><i class="fa-solid fa-check"></i> Submit Referral</button></div>`);
   setTimeout(()=>{const el=$('tpRfName');if(el)el.focus();},100);
+};
+/* Choosing and un-choosing the CV. Clearing sets the input's value to '' rather than trying to
+   build an empty FileList, which browsers do not allow. */
+window.tpRefCvPicked=function(el){
+  const f=el&&el.files&&el.files[0];
+  const zone=document.getElementById('tpRfCvName');
+  const box=document.getElementById('tpRfCvPicked');
+  const nm=document.getElementById('tpRfCvPickedName');
+  if(f){
+    if(zone)zone.textContent='Choose a different file';
+    if(nm)nm.textContent=f.name;
+    if(box)box.style.display='flex';
+  }else{
+    if(zone)zone.textContent='Click to choose a PDF, Word doc, or image';
+    if(box)box.style.display='none';
+  }
+};
+window.tpRefCvClear=function(){
+  const el=document.getElementById('tpRfCv');
+  if(el)el.value='';
+  tpRefCvPicked(el);
 };
 window.tpRefSave=async function(){
   const name=($('tpRfName')||{}).value?.trim();
   if(!name){toast('Candidate name is required','err');return;}
   const phone=($('tpRfPhone')||{}).value?.trim()||null, email=($('tpRfEmail')||{}).value?.trim()||null;
   if(!phone&&!email){toast('Give a phone number or an email — otherwise nobody can reach them','err');return;}
+  /* THE CV IS REQUIRED. A referral without one is a name and a phone number, and HR judges a
+     referral on the document before anything typed about the person - so a referral with no CV
+     sits in the list waiting for somebody to chase the referrer for it. Better to ask now, while
+     the person referring them still has the file to hand. */
+  const cvPick=$('tpRfCv');
+  if(!(cvPick&&cvPick.files&&cvPick.files[0])){toast('Attach their CV — a referral needs one','err');if(cvPick)cvPick.click();return;}
   const d={notes:($('tpRfNotes')||{}).value?.trim()||null};
   const btn=$('tpRfSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   /* The CV is uploaded first, then the referral and its Resumes record are written TOGETHER by
@@ -13887,17 +16383,40 @@ async function tpEntityForMe(){
   }catch(_e){ /* the profile name will do */ }
   return mine||(state.email||'').split('@')[0]||null;
 }
-window.tpRefConnect=function(id){if(!rtRefConnectGuard())return;
+/* THE POSITIONS LIST IS LOADED WHERE IT IS USED, NOT WHERE IT HAPPENS TO HAVE BEEN LOADED.
+
+   MP_RECORDS is filled by tpManpower(), which only runs when the Hiring Request tab is opened.
+   Everything else that needs the list of open positions - Connect Referral, Add Candidate - read
+   the cache directly, so on a fresh page load the dropdown was empty and the form said there were
+   no approved positions. Going to Hiring Request and back filled it, which is exactly the detour
+   that should not be necessary. This fetches it if it is not there yet. */
+async function tpEnsurePositions(){
+  if(MP_RECORDS) return MP_RECORDS;
+  try{
+    const {data,error}=await sb.schema('hr').from('manpower_requests').select('*')
+      .order('submitted_at',{ascending:false});
+    if(error)throw error;
+    MP_RECORDS=data||[];
+  }catch(e){
+    // An empty list here reads as "no positions are open", which is a lie when the fetch failed.
+    toast('Could not load the list of positions: '+((e&&e.message)||e),'err');
+    MP_RECORDS=null;
+  }
+  return MP_RECORDS;
+}
+
+window.tpRefConnect=async function(id){if(!rtRefConnectGuard())return;
   const rec=(TP_REF_RECORDS||[]).find(r=>r.id===id); if(!rec)return;
+  await tpEnsurePositions();
   const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved'&&(r.status||'Open')==='Open');
   openModal(`<div class="modal-head"><h3><i class="fa-solid fa-link"></i> Connect Referral</h3><span class="x" onclick="closeModal()">&times;</span></div>
   <div class="modal-body frm">
     <label>${esc(rec.referred_name)} — connect to which open position?</label>
     <select id="tpRfConnectPos" class="sel">
-      <option value="">— Select an open requisition —</option>
+      <option value="">— Select an open position —</option>
       ${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}${r.department?' · '+esc(r.department):''}</option>`).join('')}
     </select>
-    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open requisitions yet — approve a ManPower Form first.</div>':''}
+    ${!openReqs.length?'<div style="font-size:11.5px;color:var(--slate);margin-top:4px">No approved open positions yet — approve a Hiring Request first.</div>':''}
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpRfConnectBtn" onclick="tpRefConnectGo(${id})"><i class="fa-solid fa-check"></i> Connect</button></div>`);
 };
@@ -13909,6 +16428,11 @@ window.tpRefConnectGo=async function(id){
   const {data,error}=await sb.schema('hr').from('referrals').update({approval_status:'Approved',approved_by:state.email,
     approved_at:new Date().toISOString(),rejection_reason:null,manpower_request_id:reqId,position:req&&req.job_title||null}).eq('id',id).select().single();
   if(error){toast(error.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}return;}
+  if(String(data.referred_by||'').trim()){
+    const rn=await hrNotify({kind:'referral_decided',approved:true,
+      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
+    if(rn&&rn.ok) toast('The person who referred them has been told','ok');
+  }
   try{
     const {data:rowId}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
     /* ENTITY is whoever made the decision - here, whoever pressed Connect. hr.entities is the list
@@ -13948,6 +16472,15 @@ window.tpRefReject=async function(id){if(!rtRefConnectGuard())return;
   if(error){toast(error.message,'err');return;}
   const idx=(TP_REF_RECORDS||[]).findIndex(r=>r.id===id); if(idx>-1)TP_REF_RECORDS[idx]=data;
   toast('Rejected');tpRefRender();
+  /* The referrer is told, and nobody else. HR and administrators act on these all day; copying
+     them on their own decision is noise they would learn to ignore. Sent from ai@ rather than from
+     whoever pressed the button, because this is the company's answer and not one approver's
+     opinion - putting a name on it invites the referrer to go and argue with a colleague. */
+  if(String(data.referred_by||'').trim()){
+    const r=await hrNotify({kind:'referral_decided',approved:false,
+      referrer_email:data.referred_by,referrer_name:'',candidate_name:data.referred_name||''});
+    if(r&&r.ok) toast('The person who referred them has been told','ok');
+  }
 };
 
 /* ── Interview Tracker v2 ──
@@ -13959,8 +16492,42 @@ const TP_STAGES=['Tests Sent','Test Passed','Interview Scheduled','Interview Don
 // being graded a pass) -- deliberately NOT removed from TP_STAGES itself (hr.candidate_set_stage
 // looks stages up by label there and would break for that automatic path, and max_stage_seq
 // sequencing assumes the full 9-value domain), just filtered out of what a person can pick by hand.
-const TP_STAGES_SELECTABLE=TP_STAGES.filter(s=>s!=='Tests Sent'&&s!=='Test Passed');
+/* WHAT A PERSON MAY CHOOSE HERE, AND WHAT THEY MAY NOT.
+
+   Tests Sent and Test Passed are stamped by the system - one when a link is generated, one when a
+   paper clears the pass mark - so choosing them by hand would forge a record of something that did
+   not happen.
+
+   REJECTED IS DIFFERENT AND IS NOW ALSO OFF THE LIST. Turning somebody down is the one stage that
+   sends a letter to the person it is about, and that letter cannot be recalled. Leaving it in a
+   dropdown meant a rejection was one mis-click away, next to Hold and Interview Scheduled, with no
+   pause and nobody else involved. It belongs where it is asked as a question: the approval task in
+   Accountability, which names the person, warns that they will be emailed, and waits for an answer.
+
+   The database still permits Rejected - that is how Accountability sets it - so this closes the
+   accidental route without closing the deliberate one. */
+/* WHAT HR MAY SET BY HAND, AND IN WHAT ORDER.
+
+   Most stages are not HR's to type in any more, because something else owns them:
+
+     Tests Sent, Test Passed   stamped when a link is generated and when a paper passes
+     Interview Scheduled       set by scheduling an interview, which also books the interviewer
+     Selected, Rejected        the interviewer's verdict, taken on their own task
+
+   What is left is the three outcomes only HR knows about, because they come from talking to the
+   person rather than from anything the system can see: they accepted, they are on hold, they
+   walked away. Listed in the order they are most often needed rather than alphabetically. */
+const TP_STAGES_SELECTABLE=['Joined','Hold','Backed Out'];
 let TP_TR_RECORDS=null, TP_TR_SEL=new Set(), TP_TR_COMPLETED_ROWS=new Set();
+/* Set by a click on a Monthly Progress row, read once by the Interviews list, and cleared the
+   moment it is used - so it filters the visit it was meant for and does not quietly persist into
+   the next one, which would look like rows going missing. */
+let TP_TR_POS_FILTER=null;
+window.tpMuOpenPeople=function(position){
+  TP_TR_POS_FILTER=String(position||'')||null;
+  navTo('hr_new/0');
+};
+window.tpTrClearPosFilter=function(){ TP_TR_POS_FILTER=null; tpTrRender(); };
 async function tpTracker(){
   const b=$('recBody'); if(!b)return;
   b.innerHTML='<div class="empty" style="padding:40px"><i class="fa-solid fa-spinner fa-spin"></i></div>';
@@ -13970,6 +16537,16 @@ async function tpTracker(){
     // unqualified embed means - named explicitly by the FK that actually points the way we want.
     const {data,error}=await sb.schema('hr').from('interview_tracker').select('*,candidates!interview_tracker_candidate_id_fkey(tracker_row_id)').order('id',{ascending:false});
     if(error)throw error; TP_TR_RECORDS=data||[];
+    /* Loaded here, with the list, rather than after the Add window is already open. Fetching them
+       afterwards meant the Source dropdown was empty the first time anybody used it and filled in
+       a moment later - which reads as "there are no sources" and is how somebody ends up leaving
+       it blank. Failure is not fatal: the column falls back to plain text. */
+    if(!window._tpSources){
+      try{
+        const {data:src}=await sb.schema('hr').from('sources').select('name').order('sort');
+        window._tpSources=src||[];
+      }catch(_e){ window._tpSources=[]; }
+    }
     const rowIds=[...new Set((TP_TR_RECORDS||[]).map(r=>r.candidates&&r.candidates.tracker_row_id).filter(Boolean))];
     TP_TR_COMPLETED_ROWS=new Set();
     if(rowIds.length){
@@ -13980,13 +16557,31 @@ async function tpTracker(){
   TP_TR_SEL=new Set();
   tpTrRender();
 }
+/* ONE LOOK FOR THE TWO EDITABLE CELLS. They were native selects with a couple of inline rules,
+   so Source and Stage were different widths and different heights in the same row and neither
+   lined up with the text beside them. */
+const TP_SEL_CSS=`<style>
+  .tp-sel{width:100%;max-width:170px;font-size:12px;line-height:1.3;padding:5px 26px 5px 9px;
+    border:1px solid var(--line);border-radius:7px;background-color:#fff;color:var(--ink);
+    height:30px;cursor:pointer;appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath fill='%2364748b' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 9px center}
+  .tp-sel:hover:not(:disabled){border-color:#94a3b8}
+  .tp-sel:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .tp-sel:disabled{opacity:.6;cursor:not-allowed;background-color:#f8fafc}
+  .tp-sel optgroup{font-size:11px;color:var(--slate)}
+</style>`;
 function tpTrFbTag(s){
   const m={'Selected':'t-green','Joined':'t-green','Rejected':'t-red','Backed Out':'t-red','Hold':'t-amber','Tests Sent':'t-gray','Test Passed':'t-gray','Interview Scheduled':'t-gray','Interview Done':'t-gray'};
   return s?`<span class="tag ${m[s]||'t-gray'}">${esc(s)}</span>`:'<span class="tag t-gray">—</span>';
 }
 function tpTrRender(){
   const b=$('recBody'); if(!b)return;
-  const rows=TP_TR_RECORDS||[];
+  const all=TP_TR_RECORDS||[];
+  const posFilter=TP_TR_POS_FILTER;
+  const rows=posFilter
+    ? all.filter(function(r){return String(r.position||'')===posFilter;})
+    : all;
   const canAct=recCanWrite();
   /* Writing to a candidate is NOT ordinary Recruitment write access. It is the same four people who
      own the test bank - Shuchandra Das, Khusbu Singh, Uzma Ahmed, the Administrator - and the
@@ -13994,25 +16589,51 @@ function tpTrRender(){
      caller's own token). Checked here as well so the rest of HR never gets a button that would
      refuse them only after they had written the message. */
   const canMail=rtCanManage();
-  b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Interview Tracker <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
+  b.innerHTML=TP_SEL_CSS+TP_NOTE_CSS+`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <div class="sec-title" style="margin:0">Interviews <span class="tag t-gray" style="margin-left:4px">${rows.length}</span></div>
     <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add Candidate</button>
-      ${canMail?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email Selected</button>`:''}
+      <button class="btn btn-primary" onclick="tpTrAdd()"><i class="fa-solid fa-plus"></i> Add</button>
+      ${canMail?`<button class="btn" id="tpTrEmailBtn" disabled style="opacity:.4" onclick="tpTrEmailSel()"><i class="fa-solid fa-envelope"></i> Email</button>`:''}
       ${canAct?`<button class="btn" id="tpTrDelBtn" disabled style="opacity:.4;color:var(--err);border-color:var(--err)" onclick="tpTrDeleteSel()"><i class="fa-solid fa-trash"></i> Delete</button>`:''}
     </div>
   </div>
+  ${posFilter?`<div style="display:flex;align-items:center;gap:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;color:#1e40af">
+    <i class="fa-solid fa-filter"></i> Showing only <b>${esc(posFilter)}</b> — ${rows.length} of ${all.length}
+    <button class="btn btn-sm" style="margin-left:auto;padding:2px 10px" onclick="tpTrClearPosFilter()">Show all</button>
+  </div>`:''}
   <div style="font-size:12px;color:var(--slate);margin-bottom:12px">Only Hold candidates from before today, plus fresh ones from Approved Referrals or added directly here.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1200px">
     <thead><tr>
       ${canAct?'<th style="width:32px"><input type="checkbox" onchange="tpTrToggleAll(this)"></th>':''}
-      <th>Candidate</th><th>Position</th><th>Source</th><th>Entity</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Feedback</th><th>Notes</th>
+      <th>Candidate</th><th>Position</th><th>Source</th><th>Handled By</th><th>Phone</th><th>Email</th><th>Date &amp; Time</th><th style="width:170px">Stage</th><th>Notes</th>
     </tr></thead>
     <tbody>${rows.length?rows.map(r=>`<tr>
       ${canAct?`<td><input type="checkbox" class="tp-tr-cb" data-id="${r.id}" data-email="${esc(r.email||'')}" onchange="tpTrRowCheck(this)"></td>`:''}
       <td style="font-weight:600">${esc(r.candidate_name||'—')}</td>
       <td>${esc(r.position||'—')}</td>
-      <td style="font-size:12px;color:var(--slate)">${esc(r.source||'—')}</td>
+      <!-- SOURCE IS EDITABLE, THE SAME WAY STAGE IS. It was printed as text, so a row that came in
+           with the wrong source - or none, which is what a hand-added candidate starts with - could
+           only be corrected in the database. It is the field Monthly Progress and every "where do
+           our candidates come from" question reads, so it has to be fixable where it is seen. -->
+      <!-- SOURCE IS A FACT FOR A REFERRAL, NOT A CHOICE. Somebody referred this person; that is how
+           they got here and no later edit changes it. Leaving the dropdown open invited a row to be
+           relabelled LinkedIn, at which point nothing connects the candidate back to the colleague
+           who put them forward - and referral credit is the whole reason people refer anybody. -->
+      <td style="font-size:12px;color:var(--slate)">${String(r.source||'')==='Referral'
+        ? '<span class="tag t-gray" title="Set when the referral was connected">Referral</span>'
+        : canAct&&(window._tpSources||[]).length
+        ? (function(){
+            /* The current value is listed ONCE. A source that is not in the list any more was
+               appended as an extra option, so anything still in the list appeared twice. */
+            const names=(window._tpSources||[]).map(function(x){return x.name;});
+            const cur=String(r.source||'');
+            if(cur&&names.indexOf(cur)<0) names.push(cur);
+            return `<select class="tp-sel" onchange="tpTrSource(${r.id},this.value)">
+             <option value=""${cur?'':' selected'}>— None —</option>
+             ${names.map(x=>`<option${cur===String(x)?' selected':''}>${esc(x)}</option>`).join('')}
+           </select>`;
+          })()
+        : esc(r.source||'—')}</td>
       <td style="font-size:12px">${esc(r.entity||'—')}</td>
       <td style="font-family:monospace;font-size:12px">${esc(r.number||'—')}</td>
       <td style="font-size:12px">${r.email?`<a href="mailto:${esc(r.email)}" style="color:var(--brand)">${esc(r.email)}</a>`:'—'}</td>
@@ -14022,21 +16643,61 @@ function tpTrRender(){
           const locked=rowId&&TP_TR_COMPLETED_ROWS.has(rowId);
           if(locked)return tpTrFbTag(r.feedback)+' <i class="fa-solid fa-lock" style="color:var(--slate);font-size:10px" title="This position is marked Complete in Monthly Update"></i>';
           if(!canAct)return tpTrFbTag(r.feedback);
-          // Tests Sent/Test Passed aren't offered here -- they're set automatically when a test
-          // link is sent / graded a pass. If a candidate is already at one of those two (set
-          // automatically), it shows as a read-only tag instead of a dropdown that can't represent it.
-          if(r.feedback==='Tests Sent'||r.feedback==='Test Passed')return tpTrFbTag(r.feedback);
+          /* TESTS SENT AND TEST PASSED ARE NOT OFFERED, BUT THEY NO LONGER FREEZE THE ROW.
+
+             Those two stages are stamped by the system - one when a test link is generated, one
+             when a submission clears the pass mark - so they are deliberately absent from the list
+             of things a person can choose. That much was right. What was wrong was hiding the whole
+             dropdown once a candidate reached one of them: the moment you sent somebody a test they
+             became stuck, and there was no way to move them on to Interview Scheduled, or to Reject
+             them, without going into the database. A stage the system sets should stop you FORGING
+             it, not stop you continuing.
+
+             So the dropdown is always there. It shows the current stage as its heading when that
+             stage is one of the automatic two, and every manual stage stays selectable. */
           /* The per-row "Send Test" button used to live here. Sending a test is now one of the
              things the Email Selected window can do, so it is done the same way as any other mail
              to a candidate - tick the rows, write the message, optionally attach a test - instead
              of through a second button with its own separate window. Attaching a test there still
              generates each candidate their own link and still moves them to Tests Sent. */
-          return `<select class="sel" style="font-size:12px;padding:4px 6px" onchange="tpTrFeedback(${r.id},this.value)">
-            <option value="">— Select —</option>
-            ${TP_STAGES_SELECTABLE.map(s=>`<option${r.feedback===s?' selected':''}>${s}</option>`).join('')}
+          /* THE DROPDOWN STILL HAS TO SAY WHERE THEY ARE.
+
+             Most stages are no longer HR's to choose - the system sets Tests Sent and Test Passed,
+             booking sets Interview Scheduled, the interviewer sets Selected and Rejected. But a
+             stage you cannot choose is still a stage you need to SEE. With those removed from the
+             list, the box fell back to "- Select -" and the column stopped reporting anything: a
+             candidate sitting at Interview Scheduled looked identical to one who had just arrived.
+
+             So the closed part of the box shows the stage they are actually at, and the list below
+             offers only what this person may set. Reading and choosing are different jobs and the
+             control does both. */
+          const shown=String(r.feedback||'').trim();
+          const canPick=TP_STAGES_SELECTABLE.indexOf(shown)>=0;
+          /* REJECTED IS THE END OF THE ROAD, SO THE BOX STOPS OFFERING A WAY FORWARD.
+
+             Failing the test now rejects a candidate, and the dropdown still offered Joined,
+             Hold and Backed Out to somebody who had been rejected - picking one was refused by
+             the database, but only after it had been chosen. The stage is still shown, because
+             HR needs to see where the person stands; there is simply nothing left to pick. */
+          if(shown==='Rejected'){
+            return `<select class="tp-sel" disabled title="This candidate has been rejected — the decision is final"><option>Rejected</option></select>`;
+          }
+          /* THE CURRENT STAGE IS THE HEADING, NOT AN ITEM IN THE LIST.
+
+             It used to be an ordinary option, so a candidate sitting at Pending showed "Pending"
+             on the closed box and "Pending" again as the first line when you opened it - the
+             thing you already are, offered as somewhere to go. `hidden` keeps it as the closed
+             label and takes it out of the list, and `disabled` means it cannot be re-chosen even
+             where a browser ignores `hidden`. What is left under it is only what you may pick. */
+          const heading=shown?esc(shown):'Not started';
+          return `<select class="tp-sel" onchange="tpTrFeedback(${r.id},this.value)">
+            <option value="" selected disabled hidden>${heading}</option>
+            <optgroup label="Move to…">
+              ${TP_STAGES_SELECTABLE.filter(x=>x!==shown).map(x=>`<option>${x}</option>`).join('')}
+            </optgroup>
           </select>`;
         })()}</td>
-      <td style="font-size:12px;color:var(--slate)">${esc(r.notes||'—')}</td>
+      <td class="tp-note" title="${esc(r.notes||'')}">${esc(r.notes||'—')}</td>
     </tr>`).join(''):`<tr><td colspan="${canAct?9:8}" style="text-align:center;padding:40px;color:var(--slate)">No candidates yet — click <b>Add Candidate</b></td></tr>`}
     </tbody>
   </table></div>`;
@@ -14052,20 +16713,87 @@ function tpTrSyncToolbar(){
 // candidate_set_stage takes a candidates.id, but the Tracker row's own id (interview_tracker.id) is what
 // we render against — resolve via candidate_id when present, otherwise fall back to a direct tracker update
 // (rows with no candidate_id are the pre-reset Hold rows carried over, which never got a hr.candidates row).
+/* SENDING ONE OF THE THREE HR LETTERS.
+
+   Every caller goes through here so the wording, the sender rules and the reporting stay in one
+   place. It never throws: a letter failing must not undo the decision that prompted it - a
+   candidate who has been rejected stays rejected whether or not the email left the building - so
+   the outcome is reported and the caller carries on.
+
+   When the sender's own Google is not connected the letter still goes, from the shared account,
+   and the toast says so. Letting somebody believe a rejection went out over their name when it
+   did not is the failure worth avoiding here. */
+async function hrNotify(payload){
+  try{
+    const {data,error}=await sb.functions.invoke('hr-notify',{body:payload});
+    if(error||(data&&data.error)) throw new Error((data&&data.error)||error.message);
+    if(data&&data.not_connected){
+      toast('Sent from the shared JAIN-E address \u2014 connect your Google account to send from your own','warn');
+    }
+    return data;
+  }catch(e){
+    toast('The email could not be sent: '+((e&&e.message)||e),'err');
+    return null;
+  }
+}
+
 window.tpTrFeedback=async function(trackerId,stage){
   if(!recGuard()||!stage)return;
   const rec=(TP_TR_RECORDS||[]).find(r=>r.id===trackerId); if(!rec)return;
+  /* A REFUSED CHANGE PUTS THE DROPDOWN BACK.
+
+     The database refuses to move an unapproved candidate, and that part worked - but a <select>
+     keeps whatever was picked until something redraws it. So the toast said no and the box said
+     yes, which reads as "it complained but did it anyway". Re-rendering from the record we still
+     hold snaps it back to the truth, so the screen and the database never disagree. */
   if(rec.candidate_id){
     const {error}=await sb.schema('hr').rpc('candidate_set_stage',{p_id:rec.candidate_id,p_stage:stage});
-    if(error){toast(error.message,'err');return;}
+    if(error){toast(error.message,'err');tpTrRender();return;}
   }else{
     const {error}=await sb.schema('hr').from('interview_tracker').update({feedback:stage,status:stage}).eq('id',trackerId);
-    if(error){toast(error.message,'err');return;}
+    if(error){toast(error.message,'err');tpTrRender();return;}
   }
   rec.feedback=stage;toast('Updated');
+
+  /* Only Rejected writes to the candidate, and only if there is an address to write to. The other
+     stages are internal bookkeeping - nobody expects a letter saying they have moved to
+     "Interview Scheduled", and sending one would be worse than silence. Asked first, because a
+     rejection email cannot be recalled once it has gone. */
+  if(stage==='Rejected'&&String(rec.email||'').trim()){
+    const who=rec.candidate_name||'this candidate';
+    if(await confirmDialog(
+        'Send '+who+' a rejection email? It goes from your own address, says nothing about scores or '
+        +'reasons, and cannot be taken back.',
+        {title:'Send rejection email', okLabel:'Send', icon:'fa-envelope', danger:true})){
+      const r=await hrNotify({kind:'candidate_rejected',name:rec.candidate_name||'',
+                              email:rec.email,position:rec.position||''});
+      if(r&&r.ok) toast('Rejection email sent to '+rec.email,'ok');
+    }
+  }
 };
-window.tpTrAdd=function(){
+/* Written to the tracker row AND to the candidate record, because both carry a source and the two
+   are read by different screens - the Tracker prints its own, Monthly Progress and the reports read
+   the candidate's. Updating one would leave the other saying something else. */
+window.tpTrSource=async function(trackerId,value){
   if(!recGuard())return;
+  const rec=(TP_TR_RECORDS||[]).find(r=>r.id===trackerId); if(!rec)return;
+  if(String(rec.source||'')==='Referral'){
+    toast('A referred candidate stays a Referral — that is how they reached us','err');
+    tpTrRender();
+    return;
+  }
+  const v=String(value||'').trim()||null;
+  const {error}=await sb.schema('hr').from('interview_tracker').update({source:v}).eq('id',trackerId);
+  if(error){toast(error.message,'err');return;}
+  if(rec.candidate_id){
+    try{ await sb.schema('hr').from('candidates').update({source:v}).eq('id',rec.candidate_id); }catch(_e){}
+  }
+  rec.source=v;
+  toast('Source updated');
+};
+window.tpTrAdd=async function(){
+  if(!recGuard())return;
+  await tpEnsurePositions();
   const openReqs=(MP_RECORDS||[]).filter(r=>(r.approval_status||'Pending')==='Approved');
   const entities=(window._tpEntities||[]);
   const sources=(window._tpSources||[]);
@@ -14073,19 +16801,83 @@ window.tpTrAdd=function(){
   <div class="modal-body frm">
     <div class="two"><div><label>Candidate Name *</label><input id="tpTrName" class="inp"></div>
     <div><label>Position *</label><select id="tpTrPos" class="sel"><option value="">— Select —</option>${openReqs.map(r=>`<option value="${r.id}">${esc(r.job_title||'—')}</option>`).join('')}</select></div></div>
-    <div class="two"><div><label>Source</label><select id="tpTrSrc" class="sel"><option value="">— Select —</option>${sources.map(s=>`<option>${esc(s.name)}</option>`).join('')}</select></div>
-    <div><label>Entity (recruiter)</label><select id="tpTrEntity" class="sel"><option value="">— Select —</option>${entities.map(e=>`<option>${esc(e.name)}</option>`).join('')}</select></div></div>
+    <!-- ENTITY IS NOT ASKED FOR. It is who handled this candidate, and that is whoever is filling
+         this form in - asking them to pick themselves from a list is a question with one right
+         answer. It is recorded from the signed-in user instead. -->
+    <div><label>Source</label>
+      <select id="tpTrSrc" class="sel" onchange="tpTrSrcPick(this)">
+        <option value="">— Select —</option>
+        ${sources.map(s=>`<option>${esc(s.name)}</option>`).join('')}
+        <option value="__new">+ Add a new source…</option>
+      </select>
+      <div id="tpTrSrcNew" style="display:none;gap:6px;margin-top:6px">
+        <input id="tpTrSrcNewName" class="inp" placeholder="Name of the new source" style="flex:1"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();tpTrSrcNewSave();}else if(event.key==='Escape'){event.preventDefault();tpTrSrcNewCancel();}">
+        <button class="btn btn-primary" id="tpTrSrcNewBtn" type="button" onclick="tpTrSrcNewSave()"><i class="fa-solid fa-check"></i> Add</button>
+        <button class="btn" type="button" onclick="tpTrSrcNewCancel()">Cancel</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--slate);margin-top:4px">A source added here also appears on the careers page form.</div>
+    </div>
     <div class="two"><div><label>Phone</label><input id="tpTrPhone" class="inp"></div><div><label>Email</label><input id="tpTrEmail" class="inp"></div></div>
     <label>Notes</label><textarea id="tpTrNotes" class="inp" rows="2"></textarea>
   </div>
   <div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="tpTrSaveBtn" onclick="tpTrSave()"><i class="fa-solid fa-check"></i> Add</button></div>`);
-  if(!window._tpEntities){
-    sb.schema('hr').from('entities').select('name').eq('active',true).order('sort').then(({data})=>{window._tpEntities=data||[];const s=$('tpTrEntity');if(s&&data)s.innerHTML='<option value="">— Select —</option>'+data.map(e=>`<option>${esc(e.name)}</option>`).join('');});
-  }
   if(!window._tpSources){
-    sb.schema('hr').from('sources').select('name').order('sort').then(({data})=>{window._tpSources=data||[];const s=$('tpTrSrc');if(s&&data)s.innerHTML='<option value="">— Select —</option>'+data.map(x=>`<option>${esc(x.name)}</option>`).join('');});
+    sb.schema('hr').from('sources').select('name').order('sort').then(({data})=>{
+      window._tpSources=data||[]; tpTrSrcRefill();
+    });
   }
   setTimeout(()=>{const el=$('tpTrName');if(el)el.focus();},100);
+};
+/* Redraws the Source list from whatever is currently loaded, keeping what was chosen. Used after
+   the list arrives and after a new source is added. */
+function tpTrSrcRefill(keep){
+  const el=$('tpTrSrc'); if(!el) return;
+  const cur=keep!==undefined?keep:el.value;
+  el.innerHTML='<option value="">\u2014 Select \u2014</option>'
+    +(window._tpSources||[]).map(x=>`<option${String(cur)===String(x.name)?' selected':''}>${esc(x.name)}</option>`).join('')
+    +'<option value="__new">+ Add a new source\u2026</option>';
+}
+/* Adding a source from the place you needed it, rather than sending somebody to a settings
+   screen to come back later. It goes into hr.sources, which is the one list the Tracker, this
+   form and the careers page all read - so a source added here really does show up on the
+   website's "how did you hear about this opening?" the next time that page is opened. */
+window.tpTrSrcPick=function(el){
+  if(!el||el.value!=='__new') return;
+  el.value='';
+  // Inline, not a second modal on top of this one: the form stays where it is and the new name
+  // is typed in the place the answer belongs.
+  const box=$('tpTrSrcNew'); if(!box) return;
+  el.style.display='none'; box.style.display='flex';
+  const inp=$('tpTrSrcNewName'); if(inp){ inp.value=''; inp.focus(); }
+};
+window.tpTrSrcNewCancel=function(){
+  const el=$('tpTrSrc'), box=$('tpTrSrcNew');
+  if(box) box.style.display='none';
+  if(el){ el.style.display=''; el.value=''; }
+};
+/* Adding a source where you needed it, rather than sending somebody to a settings screen to come
+   back later. It goes into hr.sources, which is the one list the Tracker, this form and the
+   careers page all read - so a source added here really does appear in the website's "how did you
+   hear about this opening?" the next time that page loads. */
+window.tpTrSrcNewSave=async function(){
+  const inp=$('tpTrSrcNewName'); const v=String((inp&&inp.value)||'').trim();
+  if(!v){ toast('Type a name for the source','err'); if(inp)inp.focus(); return; }
+  if((window._tpSources||[]).some(x=>String(x.name).trim().toLowerCase()===v.toLowerCase())){
+    toast('That source is already in the list','warn'); tpTrSrcNewCancel(); tpTrSrcRefill(v); return;
+  }
+  const btn=$('tpTrSrcNewBtn'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+  try{
+    const maxSort=(window._tpSources||[]).reduce((m,x)=>Math.max(m,Number(x.sort)||0),0)+10;
+    const {error}=await sb.schema('hr').from('sources').insert({name:v,sort:maxSort});
+    if(error) throw new Error(error.message);
+    window._tpSources=[...(window._tpSources||[]),{name:v,sort:maxSort}];
+    tpTrSrcNewCancel(); tpTrSrcRefill(v);
+    toast('“'+v+'” added — it will show on the careers page too','ok');
+  }catch(e){
+    toast('Could not add that source: '+((e&&e.message)||e),'err');
+    if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}
+  }
 };
 window.tpTrSave=async function(){
   const name=($('tpTrName')||{}).value?.trim();
@@ -14095,7 +16887,14 @@ window.tpTrSave=async function(){
   const btn=$('tpTrSaveBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
   const {data:rowId,error:rrErr}=await sb.schema('hr').rpc('tracker_row_for_request',{p_req_id:reqId,p_month:null});
   if(rrErr){toast(rrErr.message,'err');if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Add';}return;}
-  const source=($('tpTrSrc')||{}).value||null, entity=($('tpTrEntity')||{}).value||(req?req.approved_by:null)||null;
+  let source=($('tpTrSrc')||{}).value||null;
+  if(source==='__new') source=null;            // the placeholder is not a source
+  /* Handled By is whoever is adding them. tpEntityForMe resolves the signed-in person to an entity
+     name where one matches, and falls back to their own name - which is more use than the blank
+     the old optional dropdown usually left behind. */
+  let entity=null;
+  try{ entity=await tpEntityForMe(); }catch(_e){ entity=null; }
+  if(!entity) entity=(req?req.approved_by:null)||state.email||null;
   const phone=($('tpTrPhone')||{}).value?.trim()||null, email=($('tpTrEmail')||{}).value?.trim()||null;
   const {data:cand,error:cErr}=await sb.schema('hr').from('candidates').insert({tracker_row_id:rowId,manpower_request_id:reqId,name,email,phone,
     // Same again - added to the Tracker, not yet tested. The Send Test button on the row is what
@@ -14238,14 +17037,40 @@ window.tpTrEmailSelSend=async function(){
   try{usageQueue('recruitment.interview_tracker.email_selected','update',{recipients:sent,test:testName||null});}catch(_e){}
   if(tested)tpTracker();
 };
+/* DELETING A CANDIDATE REMOVES THE CANDIDATE, NOT JUST THE LINE ON SCREEN.
+
+   This used to delete from hr.interview_tracker and nothing else. That table is only the row you
+   are looking at - the person lives in hr.candidates and their CV in hr.resumes - so a "deleted"
+   candidate was still a candidate, and their CV stayed in the Resumes tab with nothing pointing
+   at it and no way to tell whose it had been.
+
+   hr.candidate_delete does all three and hands back the storage paths of the CV files, because a
+   database call can delete a row but not a file in S3. The files are removed afterwards: a file
+   left behind is waste, whereas a row left behind is a ghost candidate, so the rows go first and
+   a failure to delete the file does not hold up the delete. */
 window.tpTrDeleteSel=async function(){
   if(!recGuard())return;
   const ids=[...TP_TR_SEL]; if(!ids.length)return;
-  if(!await confirmDialog('Delete '+ids.length+' candidate(s) from the Tracker? This cannot be undone.'))return;
-  const {error}=await sb.schema('hr').from('interview_tracker').delete().in('id',ids);
-  if(error){toast(error.message,'err');return;}
+  const names=ids.map(id=>((TP_TR_RECORDS||[]).find(r=>r.id===id)||{}).candidate_name).filter(Boolean);
+  if(!await confirmDialog(
+      'Delete '+ids.length+' candidate'+(ids.length===1?'':'s')
+      +(names.length&&names.length<=3?(' — '+names.join(', ')):'')
+      +'? Their CV, any interviews booked for them, and the referral that put them forward are '
+      +'deleted as well. This cannot be undone.',
+      {title:'Delete candidate'+(ids.length===1?'':'s'), okLabel:'Delete', icon:'fa-trash', danger:true}))return;
+  let paths=[];
+  try{
+    const {data,error}=await sb.schema('hr').rpc('candidate_delete',{p_tracker_ids:ids});
+    if(error)throw new Error(error.message);
+    paths=(data||[]).map(r=>r&&r.storage_path).filter(Boolean);
+  }catch(e){ toast('Could not delete: '+((e&&e.message)||e),'err'); return; }
+  // Best effort, and deliberately not fatal - see above.
+  let fileFails=0;
+  await Promise.all(paths.map(pth=>s3Delete(pth).catch(()=>{fileFails++;})));
   TP_TR_RECORDS=(TP_TR_RECORDS||[]).filter(r=>!ids.includes(r.id));TP_TR_SEL=new Set();
-  toast(ids.length+' deleted');tpTrRender();
+  toast(ids.length+' deleted'+(paths.length?(' — '+paths.length+' CV'+(paths.length===1?'':'s')+' removed'):''),'ok');
+  if(fileFails)toast(fileFails+' CV file'+(fileFails===1?'':'s')+' could not be removed from storage','warn');
+  tpTrRender();
 };
 
 /* ── Monthly Update v2 — one row per position per month, live stage counts, deletable ── */
@@ -14275,35 +17100,174 @@ async function tpMuLoad(){
     (cands||[]).forEach(c=>{counts[c.tracker_row_id]=counts[c.tracker_row_id]||{};counts[c.tracker_row_id][c.stage]=(counts[c.tracker_row_id][c.stage]||0)+1;});
   }
   TP_MU_ROWS=rows;
+  window._tpMuCounts=counts;   // kept so tpMuPick can redraw without refetching
   tpMuRender(counts);
 }
+/* MONTHLY PROGRESS SHOWS A SUBSET, AND THAT IS DELIBERATE.
+
+   The report's columns are not the same thing as the stages a candidate can be at. Interview Done
+   is a step somebody passes through on the way to Selected or Rejected, and as a column it was a
+   number nobody read between two that are. Dropping it from the report does not remove the stage -
+   candidates still reach it, the Interviews list still shows it, and hr.tracker_stages still
+   knows it. Only the column is gone.
+
+   Kept as its own list so the two can differ without one quietly changing the other. */
+const TP_MU_COLS=TP_STAGES.filter(s=>s!=='Interview Done');
+
 function tpMuRender(counts){
   const b=$('recBody'); if(!b)return;
   const rows=TP_MU_ROWS||[];
   const canAct=recCanWrite();
+  /* THE ACTIONS LIVE AT THE TOP, AND THE ROW IS CHOSEN FIRST.
+
+     Upload and Email were on every row, which put two buttons on each of ten lines and pushed the
+     numbers - the thing this screen exists to show - off to the side. One toolbar, and you say
+     which position it applies to by picking the row.
+
+     A RADIO, NOT A TICK BOX. Both actions need exactly one position: CVs are filed against one
+     vacancy, and the email window narrows to one position's candidates. Tick boxes would invite
+     choosing three and then being told you cannot, so the control only allows what the action
+     allows. */
+  const selPos=TP_MU_SEL;
   b.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-    <div class="sec-title" style="margin:0">Monthly Update</div>
+    <div class="sec-title" style="margin:0">Monthly Progress</div>
     <select class="sel" style="margin-left:8px" onchange="tpMuSwitchMonth(this.value)">${(TP_MU_MONTHS||[]).map(m=>`<option value="${m}"${m===TP_MU_CUR?' selected':''}>${tpMuMonthLabel(m)}</option>`).join('')}</select>
-    ${canAct?`<button class="btn" style="margin-left:auto" onclick="tpMuOpenMonth()"><i class="fa-solid fa-rotate"></i> Refresh open positions into this month</button>`:''}
+    ${canAct?`<div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${selPos?`<span style="font-size:12px;color:var(--slate)">Selected: <b>${esc(selPos)}</b></span>`:'<span style="font-size:12px;color:var(--slate)">Select a position to upload or email</span>'}
+      <button class="btn" ${selPos?'':'disabled style="opacity:.45;cursor:not-allowed"'} onclick="tpMuUpload()"><i class="fa-solid fa-upload"></i> Upload</button>
+      <button class="btn" ${selPos?'':'disabled style="opacity:.45;cursor:not-allowed"'} onclick="tpMuEmail()"><i class="fa-solid fa-envelope"></i> Email</button>
+    </div>`:''}
   </div>
-  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">One row per position; counts update live as candidates move through Tracker feedback. No manual data entry.</div>
+  <style>
+    .tp-mu-row:hover{background:#eff6ff}
+    .tp-mu-row:hover .tp-mu-go{opacity:1}
+  </style>
+  <div style="font-size:12px;color:var(--slate);margin-bottom:12px">One row per position, counted automatically as people move through their stages — nothing here is typed in. <b>Click a row</b> to see the people behind its numbers.</div>
   <div style="overflow-x:auto"><table class="tbl" style="min-width:1100px">
-    <thead><tr><th>Position</th><th>Department</th>${TP_STAGES.map(s=>`<th style="text-align:center;font-size:11px">${esc(s)}</th>`).join('')}${canAct?'<th></th>':''}</tr></thead>
+    <thead><tr>${canAct?'<th style="width:34px"></th>':''}<th>Position</th><th>Department</th>${TP_MU_COLS.map(s=>`<th style="text-align:center;font-size:11px">${esc(s)}</th>`).join('')}${canAct?'<th></th>':''}</tr></thead>
     <tbody>${rows.length?rows.map(r=>{
       const c=counts[r.id]||{};
-      return `<tr>
-        <td style="font-weight:600">${esc(r.position||'—')}${r.carried_from_row_id?' <span class="tag t-amber" style="margin-left:4px">carried</span>':''}</td>
+      /* A GRID OF NUMBERS YOU CANNOT OPEN IS A DEAD END. You could read "3" against Tests Sent and
+         had no way to find out which three - you went to Interviews and read the whole list. The
+         row now carries you there with that position already filtered, and it LOOKS like it will:
+         a hover state, a pointer, and a chevron that appears on the row. An affordance nobody can
+         see is the same as not having one, which is the mistake the Hiring Request rows made. */
+      const isSel=selPos!=null&&String(r.position||'')===String(selPos);
+      return `<tr class="tp-mu-row"${isSel?' style="background:#eff6ff"':' style="cursor:pointer"'} onclick="tpMuOpenPeople(${esc(JSON.stringify(r.position||''))})" title="See the people for ${esc(r.position||'this position')}">
+        ${canAct?`<td onclick="event.stopPropagation()" style="text-align:center">
+          <input type="radio" name="tpMuPick" ${isSel?'checked':''} onchange="tpMuPick(${esc(JSON.stringify(r.position||''))})" title="Choose this position">
+        </td>`:''}
+        <td style="font-weight:600">${esc(r.position||'—')}${r.carried_from_row_id?' <span class="tag t-amber" style="margin-left:4px">carried</span>':''}
+          <i class="fa-solid fa-chevron-right tp-mu-go" style="margin-left:6px;font-size:10px;color:var(--brand);opacity:0;transition:opacity .12s"></i></td>
         <td style="font-size:12px;color:var(--slate)">${esc((r.manpower_requests&&r.manpower_requests.department)||'—')}</td>
-        ${TP_STAGES.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
-        ${canAct?`<td>${r.completed_at
+        ${TP_MU_COLS.map(s=>`<td style="text-align:center">${c[s]||0}</td>`).join('')}
+        ${canAct?`<td onclick="event.stopPropagation()">${r.completed_at
             ?`<button class="btn btn-sm" onclick="tpMuUncompleteRow(${r.id})" title="Completed ${esc(new Date(r.completed_at).toLocaleDateString())} — click to reopen"><i class="fa-solid fa-lock"></i> Un-complete</button>`
             :`<button class="btn btn-sm btn-primary" onclick="tpMuCompleteRow(${r.id})"><i class="fa-solid fa-check-double"></i> Complete</button>`}</td>`:''}
       </tr>`;
-    }).join(''):`<tr><td colspan="${2+TP_STAGES.length+(canAct?1:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
+    }).join(''):`<tr><td colspan="${2+TP_MU_COLS.length+(canAct?2:0)}" style="text-align:center;padding:40px;color:var(--slate)">No positions for this month yet</td></tr>`}
     </tbody>
   </table></div>`;
 }
-window.tpMuSwitchMonth=function(m){TP_MU_CUR=m;tpMuLoad();};
+let TP_MU_SEL=null;
+window.tpMuPick=function(position){
+  TP_MU_SEL=String(position||'')||null;
+  /* Redrawn rather than patched, so the toolbar's enabled state, its "Selected: ..." line and the
+     highlighted row can never disagree with the radio. */
+  tpMuRender(window._tpMuCounts||{});
+};
+window.tpMuSwitchMonth=function(m){TP_MU_CUR=m;TP_MU_SEL=null;tpMuLoad();};
+
+/* UPLOAD AND EMAIL, FROM THE ROW OF THE POSITION THEY ARE ABOUT.
+
+   Both of these were possible already, in two other places, and both needed the position chosen
+   again by hand once you got there - which is how CVs end up filed against the wrong vacancy and
+   how a test goes to somebody from a different role. Starting from the row means the position is
+   already decided and cannot be got wrong.
+
+   Monthly Progress rows are keyed by job title rather than by the hiring request id, so the title
+   is what gets matched. Where a title has no open request behind it - a closed or carried row -
+   Upload says so instead of opening a window that cannot file anything. */
+/* STRAIGHT TO THE FILE PICKER. The position is already chosen - it is the row you ticked - so a
+   window that exists only to ask for it again is a step that asks a question already answered.
+   The picker opens, the files upload against that position, and the only thing on screen is
+   progress.
+
+   The <input> is created, used and thrown away each time rather than kept in the page, so choosing
+   the same file twice in a row still fires a change event. */
+window.tpMuUpload=async function(){
+  const position=TP_MU_SEL;
+  if(!position){ toast('Choose a position first','err'); return; }
+  let positions=[];
+  try{ positions=await hrOpenPositions(); }
+  catch(e){ toast('Could not read the open positions: '+((e&&e.message)||e),'err'); return; }
+  const match=positions.find(function(x){return String(x.job_title||'')===String(position||'');});
+  if(!match){
+    toast('There is no open hiring request for \u201c'+(position||'this position')+'\u201d, so CVs cannot be filed against it','err');
+    return;
+  }
+  const inp=document.createElement('input');
+  inp.type='file'; inp.multiple=true; inp.accept='.pdf,.doc,.docx,.png,.jpg,.jpeg';
+  inp.style.display='none';
+  document.body.appendChild(inp);
+  inp.onchange=async function(){
+    const files=inp.files?Array.prototype.slice.call(inp.files):[];
+    document.body.removeChild(inp);
+    if(!files.length) return;
+    await rsUploadFiles(files, match.id, match.job_title||position);
+  };
+  inp.click();
+};
+
+/* The upload itself, with no window around it. rsUploadSave reads the form; this takes what it is
+   given, so both the window and the direct picker end at the same code and cannot drift into
+   filing CVs differently. */
+window.rsUploadFiles=async function(files,posId,posText){
+  const added=[]; const failed=[];
+  toast('Uploading '+files.length+' file'+(files.length===1?'':'s')+'\u2026');
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    try{
+      const up=await uploadFileToS3(s3KeyForResume(f.name),f);
+      if(up.error) throw new Error(up.error.message);
+      const {data:row,error}=await sb.schema('hr').from('resumes').insert({
+        file_name:f.name, storage_path:up.data.path, file_size:f.size,
+        file_type:(f.name.split('.').pop()||'').toLowerCase(), ai_status:'analyzing',
+        manpower_request_id:Number(posId), position:posText||null,
+        uploaded_by:state.email||null
+      }).select().single();
+      if(error) throw new Error(error.message);
+      added.push(row);
+    }catch(e){ failed.push(f.name+' ('+((e&&e.message)||e)+')'); }
+  }
+  if(added.length){
+    RS_ROWS=added.slice().reverse().concat(RS_ROWS||[]);
+    toast(added.length+' CV'+(added.length===1?'':'s')+' uploaded for '+(posText||'this position'),'ok');
+    rsParseUploaded(added.map(function(r){return r.id;}));
+  }
+  if(failed.length) toast('Could not upload: '+failed.slice(0,3).join(', ')+(failed.length>3?(' and '+(failed.length-3)+' more'):''),'err');
+};
+
+/* Everybody on this position, already ticked. The window is the same one Tests uses, so the rules
+   that matter still hold - the addresses come from the Interviews list, never typed, and anyone
+   already sent a test or past that stage is not in it. Pre-ticking is the only difference: on a
+   position's own row the normal case is "all of them", and unticking the odd one is less work than
+   ticking nine. */
+window.tpMuEmail=async function(){
+  const position=TP_MU_SEL;
+  if(!position){ toast('Choose a position first','err'); return; }
+  if(!rtCanManage()){ toast('Only the test owners can email candidates','err'); return; }
+  if(!RT_RECORDS){
+    try{
+      const {data,error}=await sb.schema('recruit').from('tests').select('*').order('sl',{ascending:true});
+      if(error) throw error;
+      RT_RECORDS=data||[];
+    }catch(e){ toast('Could not load the tests: '+((e&&e.message)||e),'err'); return; }
+  }
+  TP_MU_EMAIL_POS=String(position||'')||null;
+  await rtShare(true);
+};
+let TP_MU_EMAIL_POS=null;
 window.tpMuOpenMonth=async function(){
   if(!recGuard())return;
   const {error}=await sb.schema('hr').rpc('tracker_open_month',{p_month:null});
@@ -16452,223 +19416,607 @@ window.cpaUndoImport=async function(id){
    images and videos together, multiple files at once, and lists what's already there with a
    Delete button so staff can remove anything wrongly uploaded) ---------- */
 function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)&&u.tower).map(u=>u.tower))].sort();}
-function cpaFloorsForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)).map(u=>custDeriveFloor(u.unit_code)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));}
-// A cancelled booking's unit row stays in cust.units for audit history (see the
-// units_project_tower_code_active_uq migration) - fine for financial records, but it means the
-// same physical flat can appear 2-4 times in a flat unit list (one 'booked' row plus every
-// historical 'cancelled' one). For picking WHICH flat to upload photos against, only the
-// currently-occupied row is ever relevant, so this list drops cancelled rows entirely - which
-// also removes every duplicate, since no physical unit has more than one non-cancelled row.
-// Grouped by tower (Farvision's own Project >> Block >> Unit hierarchy) so the list reads like
-// a floor plan instead of 90+ flat, unsorted options.
-function cpaUnitOptionsGrouped(units){
-  const active=units.filter(u=>u.status!=='cancelled');
-  const byTower={};
-  active.forEach(u=>{(byTower[u.tower||'Ungrouped']=byTower[u.tower||'Ungrouped']||[]).push(u);});
-  return Object.keys(byTower).sort().map(tower=>{
-    const group=byTower[tower];
-    const projName=(group[0].projects&&group[0].projects.name)||'';
-    const opts=group.slice().sort((a,b)=>{
-      const fa=Number(custDeriveFloor(a.unit_code))||0,fb=Number(custDeriveFloor(b.unit_code))||0;
-      return fa-fb||String(a.unit_code).localeCompare(String(b.unit_code));
-    }).map(u=>`<option value="${u.id}">Unit ${esc(u.unit_code)}${u.floor_casting_completed_at?'':' · casting pending'}</option>`).join('');
-    return `<optgroup label="${esc(projName)} » ${esc(tower)}">${opts}</optgroup>`;
-  }).join('');
-}
-// A full-width, tappable picker instead of the browser's small native file button - on a phone
-// that button is a thumb-sized target with no feedback. The real <input> stays inside the label,
-// so every upload function keeps reading $(id).files unchanged.
-function cpaMediaFilePicker(id){
-  return `<label class="cpa-file" for="${id}"><i class="fa-solid fa-camera"></i><span class="cpa-file-txt">Tap to add photos / videos</span>`+
-    `<input type="file" id="${id}" accept="image/*,video/*" multiple onchange="cpaMediaFileChosen(this)"></label>`;
-}
-window.cpaMediaFileChosen=function(el){
-  const lab=el&&el.closest('.cpa-file');if(!lab)return;
-  const n=el.files?el.files.length:0;
-  lab.classList.toggle('has-files',n>0);
-  lab.querySelector('.cpa-file-txt').textContent=n?(n===1?el.files[0].name:n+' files selected'):'Tap to add photos / videos';
-};
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   CONSTRUCTION PHOTOS & VIDEOS — one screen, three levels, one place to say where.
+
+   What was here before: four near-identical forms stacked two-by-two, every one of them on
+   screen at once, each with its own project picker, its own date, its own caption and its own
+   list of what had already been uploaded. To put photos against a flat you scrolled past three
+   forms you were not using, then hunted the flat in a single dropdown holding every unit in
+   every tower of every project. The most frequent job on the screen was the hardest one to do.
+
+   What it is now. WHERE is asked once, at the top, and it cascades: Project, then Block, then
+   Flat, with a search box because a block can hold ninety flats. WHAT LEVEL is a row of three
+   buttons, and only that level's form is on screen. Below, one panel to upload into and one
+   panel showing what is already there.
+
+   THE FLAT LEVEL TAKES THREE SETS OF FILES AT ONCE - common area, bathroom, kitchen - because
+   that is how somebody walks a flat and how a customer asks about it. Any one, any two, or all
+   three; whatever is filled in goes up together on one press.
+
+   FLOOR LEVEL IS GONE, by request. It held nothing (the table was empty), it sat between two
+   levels people actually use, and deriving a floor from a unit code was a guess.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+
+const CPA_PH_AREAS=[['common','Common area','fa-couch'],
+                    ['bathroom','Bathroom','fa-bath'],
+                    ['kitchen','Kitchen','fa-kitchen-set']];
+// level -> which of the three pickers it needs. Flat needs all three; the project level needs
+// only the project, so the pickers it does not use are hidden rather than left there to be
+// filled in pointlessly.
+const CPA_PH_LEVELS=[['project','Whole project','fa-city'],
+                     ['tower','Block / Tower','fa-building'],
+                     ['unit','Flat','fa-door-open']];
+let CPA_PH={level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+/* What the review panel is showing. It starts wherever the upload pickers are pointing, because
+   that is almost always what you want to check straight after uploading - but '' means "all", so
+   it can be widened to a whole block or a whole project without disturbing the upload target. */
+let CPA_PHF={project:'',tower:'',unit:'',area:''};
+
+function cpaPhCss(){return `<style>
+  /* Everything here is sized so the whole screen - pick, upload, review - fits a laptop
+     without scrolling. The first version let the chosen-files list grow under the drop zones,
+     so each batch pushed the Upload button further down and by the third area it was off the
+     bottom of the screen. Nothing on this screen grows now: the zones are a fixed height and
+     the file list scrolls inside the zone it belongs to. */
+  .cph-wrap{display:flex;flex-direction:column;gap:12px}
+  .cph-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .cph-h{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--slate);
+    margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  .cph-h::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* level buttons and the pickers share one row on a wide screen */
+  .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
+  .cph-levels{display:flex;gap:6px;background:#f1f5f9;padding:4px;border-radius:10px;flex:none}
+  .cph-lv{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border:0;border-radius:7px;
+    background:transparent;cursor:pointer;font:600 13px Segoe UI,Arial,sans-serif;color:var(--slate);transition:.12s}
+  .cph-lv:hover{color:var(--ink)}
+  .cph-lv.on{background:#fff;color:var(--brand);box-shadow:0 1px 2px rgba(15,23,42,.12)}
+
+  .cph-pick{display:flex;gap:12px;flex-wrap:wrap;flex:1;min-width:0}
+  .cph-f{display:flex;flex-direction:column;gap:5px;min-width:150px;flex:1}
+  .cph-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}
+  /* A real menu control rather than the browser's default: fixed height, its own caret, and a
+     focus ring that matches the rest of JainE. */
+  .cph-sel{position:relative;display:block}
+  .cph-sel select,.cph-in{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;
+    padding:0 30px 0 11px;font:13.5px Segoe UI,Arial,sans-serif;background:#fff;color:var(--ink);
+    appearance:none;-webkit-appearance:none;cursor:pointer;text-overflow:ellipsis}
+  .cph-in{padding-right:11px;cursor:text}
+  .cph-sel::after{content:"";position:absolute;right:11px;top:50%;margin-top:-2px;pointer-events:none;
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #64748b}
+  .cph-sel select:hover{border-color:#94a3b8}
+  .cph-sel select:focus,.cph-in:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  /* The open list itself - a long block of flats should scroll, not run off the screen. */
+  .cph-sel select option{padding:6px 8px}
+
+  /* ── drop zones: FIXED height, whatever is in them ── */
+  .cph-zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+  .cph-zone{border:1.5px dashed var(--line);border-radius:10px;background:#fafcff;cursor:pointer;
+    transition:.12s;height:132px;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden}
+  .cph-zone:hover{border-color:var(--brand);background:#eff6ff}
+  .cph-zone.over{border-color:var(--brand);background:#dbeafe;border-style:solid}
+  .cph-zone.has{border-style:solid;border-color:#86efac;background:#fff}
+  .cph-zhead{display:flex;align-items:center;gap:7px;padding:0 11px;height:36px;flex:none;box-sizing:border-box}
+  .cph-zhead i{font-size:14px;color:var(--slate)}
+  .cph-zone.has .cph-zhead i{color:#16a34a}
+  .cph-zt{font-size:12.5px;font-weight:700;color:var(--ink)}
+  .cph-zn{margin-left:auto;font-size:11px;font-weight:700;color:#16a34a;background:#f0fdf4;
+    border:1px solid #bbf7d0;border-radius:999px;padding:1px 7px}
+  .cph-zbody{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:4px;color:var(--slate);font-size:11.5px;padding:0 10px;text-align:center}
+  /* the only scrolling part of the screen */
+  /* ── what you have chosen but not yet sent: pictures, not filenames ──
+     A filename tells you nothing about whether you picked the right photo. These are the real
+     images, read straight off the disk before anything is uploaded. The strip sits under the
+     zones rather than inside them, and scrolls once it is three rows deep so the Upload button
+     never walks off the bottom of the screen. */
+  .cph-staged{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+  .cph-sgroup{margin-bottom:10px}
+  .cph-sgroup:last-child{margin-bottom:0}
+  .cph-sh{font-size:11px;font-weight:700;color:var(--slate);margin:0 0 6px;display:flex;align-items:center;gap:6px}
+  .cph-sh i{color:#16a34a;font-size:11px}
+  .cph-sh .n{font-weight:500}
+  .cph-strip{display:flex;flex-wrap:wrap;gap:7px;max-height:186px;overflow-y:auto}
+  .cph-sthumb{position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line);background:#f1f5f9;flex:none}
+  .cph-sthumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .cph-sthumb .vid{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#64748b}
+  .cph-sx{position:absolute;top:3px;right:3px;width:19px;height:19px;border-radius:5px;border:0;
+    background:rgba(15,23,42,.66);color:#fff;cursor:pointer;font-size:10px;line-height:1;padding:0}
+  .cph-sx:hover{background:var(--err)}
+
+  .cph-acts{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+
+  /* ── already uploaded: one row each, so a date, a flat and a caption can be read across ── */
+  .cph-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  /* The headers sat hard against the top of their strip and hard against the title above it.
+     A fixed height with vertical-align:middle centres the text in the strip whatever the font
+     does, and the strip itself is pushed clear of the section title. */
+  .cph-tbl{margin-top:4px}
+  .cph-tbl thead th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--slate);padding:0 10px;height:36px;vertical-align:middle;background:#f8fafc;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);white-space:nowrap}
+  .cph-tbl thead th:first-child{border-radius:8px 0 0 8px;border-left:1px solid var(--line)}
+  .cph-tbl thead th:last-child{border-radius:0 8px 8px 0;border-right:1px solid var(--line)}
+  .cph-tbl td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .cph-tbl tr:last-child td{border-bottom:0}
+  .cph-tbl tbody tr:hover{background:#f8fafc}
+  .cph-th{width:46px;height:46px;border-radius:7px;object-fit:cover;display:block;cursor:pointer;border:1px solid var(--line)}
+  .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
+  .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
+  .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
+    background:#eff6ff;color:#1e40af;white-space:nowrap}
+  .cph-rm{border:1px solid var(--line);background:#fff;color:var(--slate);border-radius:7px;
+    width:28px;height:28px;cursor:pointer;font-size:11px}
+  .cph-rm:hover{border-color:var(--err);color:var(--err)}
+
+  /* Filters for what is already there. Separate from the pickers at the top: those say where the
+     next upload goes, these say what you want to look at, and the two are not always the same
+     question - "show me every kitchen in Block E" is not an upload target. */
+  .cph-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;
+    padding-bottom:14px;border-bottom:1px solid var(--line)}
+  .cph-filters .cph-f{min-width:130px}
+  .cph-fcount{font-size:11.5px;color:var(--slate);margin-left:auto;padding-bottom:8px;white-space:nowrap}
+
+  /* A staged photo, full size, before it goes anywhere. */
+  .cph-box{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.82);display:flex;
+    align-items:center;justify-content:center;padding:32px}
+  .cph-box img,.cph-box video{max-width:92vw;max-height:84vh;border-radius:10px;display:block;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);background:#000}
+  .cph-boxbar{position:absolute;top:0;left:0;right:0;padding:14px 18px;display:flex;align-items:center;
+    gap:12px;color:#e8eaed;font-size:13px;background:linear-gradient(rgba(0,0,0,.55),transparent)}
+  .cph-boxbar .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cph-boxx{margin-left:auto;border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:8px;
+    width:32px;height:32px;cursor:pointer;font-size:16px;line-height:1;flex:none}
+  .cph-boxx:hover{background:rgba(255,255,255,.28)}
+  .cph-sthumb{cursor:zoom-in}
+  .cph-empty{padding:18px;text-align:center;color:var(--slate);font-size:12.5px;
+    border:1px dashed var(--line);border-radius:10px}
+  /* the review panel is the one thing allowed to be long, and it scrolls on its own */
+  .cph-review{max-height:330px;overflow-y:auto}
+  .cph-areahead{font-size:11.5px;font-weight:700;color:var(--ink);margin:12px 0 7px;display:flex;align-items:center;gap:7px}
+  .cph-areahead .n{font-weight:500;color:var(--slate)}
+  @media(max-width:820px){.cph-bar{align-items:stretch}.cph-pick{width:100%}}
+  /* Phone - mostly site staff standing in the flat. Full-width tap targets, 16px controls (smaller
+     makes iOS zoom on focus), zones stacked, and the uploaded list reflowed into rows of
+     thumbnail | details | delete instead of a table squeezed sideways. */
+  @media(max-width:760px){
+    .cph-card{padding:12px}
+    .cph-levels{width:100%;box-sizing:border-box}
+    .cph-lv{flex:1;justify-content:center;padding:10px 6px}
+    .cph-f{flex:1 1 100%;min-width:0;max-width:none!important}
+    .cph-sel select,.cph-in{height:46px;font-size:16px}
+    .cph-zones{grid-template-columns:1fr!important}
+    .cph-zone{height:104px}
+    .cph-acts .btn{flex:1;justify-content:center;min-height:48px;font-size:15px}
+    .cph-acts span{flex-basis:100%}
+    .cph-filters .cph-f{flex:1 1 calc(50% - 5px)}
+    .cph-fcount{margin-left:0;padding-bottom:0;flex-basis:100%}
+    .cph-review{max-height:none}
+    .cph-tbl,.cph-tbl tbody{display:block;width:100%}
+    .cph-tbl thead{display:none}
+    .cph-tbl tr{display:grid;grid-template-columns:56px minmax(0,1fr) auto;column-gap:12px;row-gap:0;
+      align-items:center;padding:10px 2px;border-bottom:1px solid var(--line)}
+    .cph-tbl tr:last-child{border-bottom:0}
+    .cph-tbl td{display:block;padding:1px 0;border:0;grid-column:2;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cph-tbl td:first-child{grid-column:1;grid-row:1/span 20;padding:0}
+    .cph-tbl td:last-child{grid-column:3;grid-row:1/span 20;padding:0}
+    .cph-th{width:56px;height:56px}
+    .cph-rm{width:40px;height:40px;font-size:13px}
+    .cph-box{padding:12px}
+  }
+</style>`;}
+
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const unitOpts=cpaUnitOptionsGrouped(units);
+  if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
+  host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
+  cpaPhPaint(projects,units);
+}
+
+// Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
+// way for the pickers, the form and the list to disagree about which flat is being looked at.
+async function cpaPhPaint(projects,units){
+  projects=projects||await cpaProjects(); units=units||await cpaUnits();
+  const wrap=$('cphWrap'); if(!wrap) return;
+  const lvl=CPA_PH.level;
+  const needTower=(lvl==='tower'||lvl==='unit'), needUnit=(lvl==='unit');
+
+  const towers=cpaTowersForProject(units,CPA_PH.project);
+  if(needTower&&towers.length&&towers.indexOf(CPA_PH.tower)<0) CPA_PH.tower=towers[0];
+  const flats=cpaPhFlats(units);
+  if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
+
   const today=new Date().toISOString().slice(0,10);
-  const firstProjectId=projects[0]?projects[0].id:null;
-  const towerOpts=firstProjectId?cpaTowersForProject(units,firstProjectId).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(''):'';
-  const floorOpts=firstProjectId?cpaFloorsForProject(units,firstProjectId).map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join(''):'';
-  host.innerHTML=`<div class="cpa-media-grid">
-    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Project-wide construction photos/videos</div>
-    <label>Project</label><select id="cpaPhProject" onchange="cpaRenderProjectPhotoList()">${projOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaPhCaption">
-    <label>Photos / videos</label>${cpaMediaFilePicker('cpaPhFiles')}
-    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaPhList" class="cpa-media-list"></div>
-    </div>
-    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
-    <label>Project</label><select id="cpaTwProject" onchange="cpaOnTwProjectChange()">${projOpts}</select>
-    <label>Tower / Block</label><select id="cpaTwTower" onchange="cpaRenderTowerPhotoList()">${towerOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaTwDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaTwCaption">
-    <label>Photos / videos</label>${cpaMediaFilePicker('cpaTwFiles')}
-    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaTwList" class="cpa-media-list"></div>
-    </div>
-    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Floor-wise construction photos/videos</div>
-    <label>Project</label><select id="cpaFlProject" onchange="cpaOnFlProjectChange()">${projOpts}</select>
-    <label>Floor</label><select id="cpaFlFloor" onchange="cpaRenderFloorPhotoList()">${floorOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaFlDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaFlCaption">
-    <label>Photos / videos</label>${cpaMediaFilePicker('cpaFlFiles')}
-    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaFlList" class="cpa-media-list"></div>
-    </div>
-    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Per-flat construction photos/videos</div>
-    <label>Unit</label><select id="cpaUhUnit" onchange="cpaRenderUnitPhotoList()">${unitOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaUhCaption">
-    <label>Photos / videos</label>${cpaMediaFilePicker('cpaUhFiles')}
-    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaUhList" class="cpa-media-list"></div>
-    </div></div>`;
-  cpaRenderProjectPhotoList();cpaRenderTowerPhotoList();cpaRenderFloorPhotoList();cpaRenderUnitPhotoList();
+  wrap.innerHTML=
+    '<div class="cph-card">'
+      +'<div class="cph-bar">'
+        +'<div class="cph-levels">'
+          +CPA_PH_LEVELS.map(l=>'<button class="cph-lv'+(lvl===l[0]?' on':'')+'" onclick="cpaPhSetLevel(\''+l[0]+'\')">'
+             +'<i class="fa-solid '+l[2]+'"></i>'+esc(l[1])+'</button>').join('')
+        +'</div>'
+        +'<div class="cph-pick">'
+          +'<div class="cph-f"><label>Project</label><div class="cph-sel"><select onchange="cpaPhSet(\'project\',this.value)">'
+            +projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(CPA_PH.project)?' selected':'')+'>'+esc(p.name)+'</option>').join('')
+          +'</select></div></div>'
+          +(needTower?'<div class="cph-f"><label>Block</label><div class="cph-sel"><select id="cphTower" onchange="cpaPhSet(\'tower\',this.value)">'
+            +(towers.length?towers.map(t=>'<option'+(t===CPA_PH.tower?' selected':'')+'>'+esc(t)+'</option>').join('')
+                           :'<option value="">No blocks on record</option>')
+          +'</select></div></div>':'')
+          +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
+            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)+'</option>').join('')
+                          :'<option value="">No flats in this block</option>')
+          +'</select></div></div>':'')
+        +'</div>'
+      +'</div>'
+    +'</div>'
+
+    +'<div class="cph-card">'
+      +'<div class="cph-bar" style="margin-bottom:12px">'
+        +'<div class="cph-f" style="max-width:190px"><label>Date shown to customers</label>'
+          +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
+      +'</div>'
+      +(lvl==='unit'
+        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
+      +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
+      +'<div class="cph-acts">'
+        +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
+          +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
+        +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+      +'</div>'
+    +'</div>'
+
+    +'<div class="cph-card">'
+      +'<div class="cph-h"><i class="fa-solid fa-images"></i>Already uploaded</div>'
+      +'<div id="cphList" class="cph-review"><div class="cph-empty">Loading\u2026</div></div>'
+    +'</div>';
+
+  cpaPhWireZones();
+  cpaPhStaged();
+  cpaPhSyncActions();
+  cpaPhList();
 }
-window.cpaOnTwProjectChange=async function(){
-  const units=await cpaUnits();
-  const towers=cpaTowersForProject(units,$('cpaTwProject').value);
-  $('cpaTwTower').innerHTML=towers.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  cpaRenderTowerPhotoList();
+
+// The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
+// its row for audit, which is why the same physical flat could appear two to four times), and
+// filtered by whatever has been typed.
+function cpaPhFlats(units){
+  return (units||[]).filter(u=>
+      u.status!=='cancelled'
+      && String(u.project_id)===String(CPA_PH.project)
+      && (!CPA_PH.tower||String(u.tower||'')===String(CPA_PH.tower)))
+    .sort((a,b)=>String(a.unit_code).localeCompare(String(b.unit_code),undefined,{numeric:true}));
+}
+/* The zone says what it is for and how much is in it. What was actually chosen is shown as
+   pictures underneath, where there is room for them - a filename in a narrow box told you
+   nothing about whether you had picked the right photo. */
+function cpaPhZone(key,title,icon){
+  const n=(CPA_PH.files[key]||[]).length;
+  return '<div class="cph-zone'+(n?' has':'')+'" data-zone="'+key+'" tabindex="0">'
+    +'<div class="cph-zhead"><i class="fa-solid '+(n?'fa-circle-check':icon)+'"></i>'
+      +'<span class="cph-zt">'+esc(title)+'</span>'
+      +(n?'<span class="cph-zn">'+n+'</span>':'')
+    +'</div>'
+    +'<div class="cph-zbody"><i class="fa-solid fa-arrow-down-to-line" style="font-size:15px"></i>'
+      +'<div>'+(n?'Drop more, or click':'Drop files here, or click')+'</div></div>'
+    +'</div>';
+}
+
+/* A preview for something that has not left the computer yet. The object URL is kept on the
+   file and revoked when it is taken back out, so choosing forty photos and changing your mind
+   does not leave forty images pinned in memory. */
+function cpaPhPreview(f){
+  if(!f.__u){ try{ f.__u=URL.createObjectURL(f); }catch(_e){ f.__u=''; } }
+  return f.__u;
+}
+function cpaPhForget(f){
+  if(f&&f.__u){ try{ URL.revokeObjectURL(f.__u); }catch(_e){} f.__u=null; }
+}
+/* Full size, before it is uploaded. A 74px tile is enough to see that you picked a photo and
+   not enough to see whether it is the right one or whether it came out blurred - which is the
+   moment to find out, not after it is in front of a customer. Video plays in place with the
+   browser's own controls. */
+window.cpaPhZoom=function(key,idx){
+  const f=(CPA_PH.files[key]||[])[idx]; if(!f) return;
+  const isVid=/^video\//.test(f.type||'');
+  const url=cpaPhPreview(f);
+  const box=document.createElement('div');
+  box.className='cph-box';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+    +'<span class="nm">'+esc(f.name)+'</span>'
+    +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(isVid?'<video src="'+url+'" controls autoplay playsinline></video>'
+           :'<img src="'+url+'" alt="">');
+  const shut=function(){
+    try{ document.removeEventListener('keydown',onKey); }catch(_e){}
+    if(box.parentNode) box.parentNode.removeChild(box);
+  };
+  const onKey=function(e){ if(e.key==='Escape') shut(); };
+  // Clicking the picture itself must not close it - only the backdrop or the button.
+  box.onclick=function(e){ if(e.target===box) shut(); };
+  box.querySelector('.cph-boxx').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
 };
-window.cpaOnFlProjectChange=async function(){
-  const units=await cpaUnits();
-  const floors=cpaFloorsForProject(units,$('cpaFlProject').value);
-  $('cpaFlFloor').innerHTML=floors.map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join('');
-  cpaRenderFloorPhotoList();
+function cpaPhStaged(){
+  const host=$('cphStaged'); if(!host) return;
+  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  let html='';
+  keys.forEach(function(k){
+    const fs=CPA_PH.files[k]||[]; if(!fs.length) return;
+    const meta=CPA_PH_AREAS.concat([['all','Chosen','fa-images']]).find(a=>a[0]===k);
+    html+='<div class="cph-sgroup">'
+      +(CPA_PH.level==='unit'
+        ? '<div class="cph-sh"><i class="fa-solid fa-circle-check"></i>'+esc(meta[1])
+          +' <span class="n">\u00b7 '+fs.length+'</span></div>' : '')
+      +'<div class="cph-strip">'
+      +fs.map(function(f,i){
+          const isVid=/^video\//.test(f.type||'');
+          const inner=isVid
+            ? '<div class="vid"><i class="fa-solid fa-circle-play fa-lg"></i></div>'
+            : '<img src="'+cpaPhPreview(f)+'" alt="">';
+          return '<div class="cph-sthumb" title="'+esc(f.name)+'" onclick="cpaPhZoom(\''+k+'\','+i+')">'+inner
+            +'<button class="cph-sx" title="Remove" onclick="event.stopPropagation();cpaPhDrop(\''+k+'\','+i+')">&times;</button></div>';
+        }).join('')
+      +'</div></div>';
+  });
+  host.innerHTML=html;
+  host.style.display=html?'':'none';
+}
+
+/* Click and drag-and-drop both, on every zone. The file input is made here rather than living in
+   the markup so that choosing a second batch ADDS to the first instead of replacing it - a plain
+   <input type=file> forgets everything it held the moment you pick again, which is why adding
+   "just one more photo" used to silently drop the rest. */
+function cpaPhWireZones(){
+  Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
+    const key=z.getAttribute('data-zone');
+    const open=function(){
+      const inp=document.createElement('input');
+      inp.type='file'; inp.multiple=true; inp.accept='image/*,video/*';
+      inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+      inp.click();
+    };
+    z.onclick=open;
+    z.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
+    z.ondragover=function(e){ e.preventDefault(); z.classList.add('over'); };
+    z.ondragleave=function(){ z.classList.remove('over'); };
+    z.ondrop=function(e){
+      e.preventDefault(); z.classList.remove('over');
+      cpaPhAdd(key,[...(e.dataTransfer&&e.dataTransfer.files||[])]);
+    };
+  });
+}
+function cpaPhAdd(key,files){
+  const keep=(files||[]).filter(f=>/^(image|video)\//.test(f.type||''));
+  const dropped=(files||[]).length-keep.length;
+  if(dropped) toast(dropped+' file'+(dropped===1?' was':'s were')+' not a photo or video and '+(dropped===1?'was':'were')+' skipped','warn');
+  if(!keep.length) return;
+  // Same file picked twice is the same file once.
+  const have=new Set((CPA_PH.files[key]||[]).map(f=>f.name+'|'+f.size));
+  CPA_PH.files[key]=(CPA_PH.files[key]||[]).concat(keep.filter(f=>!have.has(f.name+'|'+f.size)));
+  cpaPhRepaintZones();
+}
+window.cpaPhDrop=function(key,idx){
+  cpaPhForget(CPA_PH.files[key][idx]);
+  CPA_PH.files[key].splice(idx,1);
+  cpaPhRepaintZones();
 };
-// A real thumbnail (not just a generic file-type icon) so staff can see at a glance that the
-// right photo actually made it in, right after uploading - videos get a play-icon tile since
-// signing a video URL just to build a thumbnail isn't worth the round trip, only opened on click.
-async function cpaMediaThumb(p){
-  // Every branch below needs exactly one style="" attribute - a second style attribute on the
-  // same tag is silently dropped by the browser (first one wins), which is why the sizing here
-  // used to be ignored entirely and thumbnails rendered at their native full size.
-  const isVideo=(p.file_type||'').indexOf('video')===0;
-  const onclickAttr=`onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"`;
-  if(isVideo)return `<div ${onclickAttr} title="Open video" style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b;cursor:pointer"><i class="fa-solid fa-circle-play"></i></div>`;
-  const url=await s3SignedUrl(p.storage_path);
-  return url
-    ?`<img src="${url}" alt="" ${onclickAttr} title="Open full size" style="width:52px;height:52px;object-fit:cover;border-radius:6px;display:block;cursor:pointer">`
-    :`<div ${onclickAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8;cursor:pointer"><i class="fa-solid fa-image"></i></div>`;
+window.cpaPhClear=function(){
+  Object.keys(CPA_PH.files).forEach(k=>(CPA_PH.files[k]||[]).forEach(cpaPhForget));
+  CPA_PH.files={all:[],common:[],bathroom:[],kitchen:[]};
+  cpaPhRepaintZones();
+};
+/* Redrawing one zone in place keeps the caret and the scroll position of the others, which
+   matters when three of them are on screen. */
+function cpaPhRepaintZones(){
+  Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
+    const key=z.getAttribute('data-zone');
+    const meta=CPA_PH_AREAS.concat([['all','Photos or videos','fa-images']]).find(a=>a[0]===key);
+    const holder=document.createElement('div');
+    holder.innerHTML=cpaPhZone(key,meta?meta[1]:'Files',meta?meta[2]:'fa-images');
+    const fresh=holder.firstChild;
+    z.className=fresh.className;
+    z.innerHTML=fresh.innerHTML;
+  });
+  cpaPhStaged();
+  cpaPhSyncActions();
 }
-async function cpaMediaRow(p){return [await cpaMediaThumb(p),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
-// Caps each "Existing uploads" panel at roughly 5 rows tall (thumbnail rows run ~64px incl.
-// padding) and scrolls internally past that, so uploading a dozen photos to one scope doesn't
-// push the Upload button and every panel after it down the page - only this list scrolls.
-function cpaMediaListWrap(label,tableHtml){
-  return '<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">'+label+'</div>'+
-    '<div style="max-height:320px;overflow-y:auto">'+tableHtml+'</div>';
+// The two buttons that act on what has been chosen sit together and know how much there is.
+function cpaPhSyncActions(){
+  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
+  const go=$('cphGo'), clr=$('cphClear');
+  if(go){
+    go.disabled=!total; go.style.opacity=total?'':'.5';
+    go.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> '+(total?('Upload '+total+' file'+(total===1?'':'s')):'Upload');
+  }
+  if(clr){ clr.disabled=!total; clr.style.opacity=total?'':'.4'; }
 }
-async function cpaRenderProjectPhotoList(){
-  const host=$('cpaPhList');if(!host)return;
-  const projectId=Number($('cpaPhProject').value);
-  const {data}=await sb.schema('cust').from('project_photos').select('*').eq('project_id',projectId).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('project_photos',${p.id},'cpaRenderProjectPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+
+window.cpaPhSetLevel=function(l){ CPA_PH.level=l; cpaPhFollowPickers(); cpaPhPaint(); };
+// The filters snap back to the upload target whenever that target moves, so the panel always
+// opens on "what I am about to add to" rather than on a stale view of somewhere else.
+function cpaPhFollowPickers(){
+  CPA_PHF={project:CPA_PH.project,tower:CPA_PH.tower,unit:CPA_PH.unit,area:''};
 }
-async function cpaRenderTowerPhotoList(){
-  const host=$('cpaTwList');if(!host)return;
-  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value;
-  if(!tower){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no towers on record.</div>';return;}
-  const {data}=await sb.schema('cust').from('tower_photos').select('*').eq('project_id',projectId).eq('tower',tower).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('tower_photos',${p.id},'cpaRenderTowerPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for '+esc(tower),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+window.cpaPhFilter=function(k,v){ CPA_PHF[k]=v; if(k==='project'){CPA_PHF.tower='';CPA_PHF.unit='';} if(k==='tower'){CPA_PHF.unit='';} cpaPhList(); };
+window.cpaPhSet=function(k,v){
+  CPA_PH[k]=v;
+  // Changing the project invalidates the block and the flat under it.
+  if(k==='project'){ CPA_PH.tower=''; CPA_PH.unit=''; }
+  if(k==='tower'){ CPA_PH.unit=''; }
+  cpaPhFollowPickers();
+  cpaPhPaint();
+};
+window.cpaPhUpload=async function(){
+  const takenOn=($('cphDate')||{}).value;
+  // Captions were asked for on every upload and almost never written; the date, the flat and
+  // the section already say what a photo is. The column is left on the tables so anything
+  // written before today is not lost - it is simply no longer asked for or shown.
+  const caption=null;
+  const lvl=CPA_PH.level;
+  const jobs=[];
+  if(lvl==='unit'){
+    const unitId=Number(CPA_PH.unit);
+    if(!unitId){ toast('Choose a flat first','err'); return; }
+    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+  } else {
+    (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
+  }
+  if(!jobs.length){ toast('Add at least one photo or video','err'); return; }
+  if(lvl==='tower'&&!CPA_PH.tower){ toast('Choose a block first','err'); return; }
+
+  const go=$('cphGo'); go.disabled=true;
+  let ok=0; const failed=[];
+  for(let i=0;i<jobs.length;i++){
+    const {f,area}=jobs[i];
+    go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
+    try{
+      let key,table,row;
+      if(lvl==='project'){
+        key=s3KeyForProjectPhoto(CPA_PH.project,f.name); table='project_photos';
+        row={project_id:Number(CPA_PH.project)};
+      }else if(lvl==='tower'){
+        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,f.name); table='tower_photos';
+        row={project_id:Number(CPA_PH.project),tower:CPA_PH.tower};
+      }else{
+        key=s3KeyForUnitPhoto(CPA_PH.unit,f.name); table='unit_photos';
+        row={unit_id:Number(CPA_PH.unit),area:area};
+      }
+      const {data,error}=await uploadFileToS3(key,f);
+      if(error) throw new Error(error.message);
+      const {error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
+        taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
+        file_size:f.size,file_type:f.type,uploaded_by:state.email}));
+      if(insErr) throw new Error(insErr.message);
+      ok++;
+    }catch(e){ failed.push(f.name+' — '+((e&&e.message)||e)); }
+  }
+  go.disabled=false;
+  /* Only what actually went up is cleared. A failed file stays in the list so it can be tried
+     again, instead of being quietly dropped along with the ones that worked. */
+  if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded','ok');
+  if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
+  cpaPhList();
+};
+
+/* What is already there, as thumbnails rather than a table of 52px squares. At flat level it is
+   split by area, because that is the question being asked of it. */
+/* WHAT IS ALREADY THERE, AS ROWS, WITH ITS OWN FILTERS.
+
+   The columns follow the level - a project-wide photo has no block or flat to name, and only a
+   flat photo has a section - and so do the filters. They start on whatever the upload pickers
+   are pointing at and can then be widened: every block in the project, every flat in a block,
+   one section across all of them. That is a different question from "where does the next upload
+   go", which is why it is asked separately here rather than driven by the strip at the top. */
+async function cpaPhList(){
+  const host=$('cphList'); if(!host) return;
+  const lvl=CPA_PH.level;
+  host.innerHTML='<div class="cph-empty">Loading\u2026</div>';
+  try{
+    const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
+    const live=(units||[]).filter(u=>u.status!=='cancelled');
+    const nameOf=id=>{const x=(projects||[]).find(y=>String(y.id)===String(id));return (x&&x.name)||'\u2014';};
+
+    // ── the filter bar, showing only what this level can be filtered by ──
+    const towers=[...new Set(live.filter(u=>String(u.project_id)===String(CPA_PHF.project)&&u.tower)
+                                 .map(u=>u.tower))].sort();
+    const flats=live.filter(u=>String(u.project_id)===String(CPA_PHF.project)
+                             &&(!CPA_PHF.tower||String(u.tower||'')===String(CPA_PHF.tower)))
+                    .sort((x,y)=>String(x.unit_code).localeCompare(String(y.unit_code),undefined,{numeric:true}));
+    const sel=(id,label,opts,val,allLabel)=>
+      '<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel">'
+      +'<select onchange="cpaPhFilter(\''+id+'\',this.value)">'
+      +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
+      +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')
+      +'</select></div></div>';
+
+    let bar='<div class="cph-filters">'
+      +sel('project','Project',(projects||[]).map(x=>[x.id,x.name]),CPA_PHF.project,'');
+    if(lvl!=='project') bar+=sel('tower','Block',towers.map(t=>[t,t]),CPA_PHF.tower,'All blocks');
+    if(lvl==='unit'){
+      bar+=sel('unit','Flat',flats.map(u=>[u.id,u.unit_code]),CPA_PHF.unit,'All flats');
+      bar+=sel('area','Section',CPA_PH_AREAS.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
+    }
+    bar+='<span class="cph-fcount" id="cphCount"></span></div>';
+
+    // ── the rows ──
+    let rowsHtml,count=0;
+    if(lvl==='project'){
+      const {data}=await sb.schema('cust').from('project_photos').select('*')
+        .eq('project_id',Number(CPA_PHF.project)).is('deleted_at',null).order('taken_on',{ascending:false});
+      const list=data||[]; count=list.length;
+      rowsHtml=await cpaPhRows(list,'project_photos',['Project'],
+        ()=>[esc(nameOf(CPA_PHF.project))],'Nothing uploaded for this project yet.');
+    }else if(lvl==='tower'){
+      let q=sb.schema('cust').from('tower_photos').select('*').eq('project_id',Number(CPA_PHF.project));
+      if(CPA_PHF.tower) q=q.eq('tower',CPA_PHF.tower);
+      const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
+      const list=data||[]; count=list.length;
+      rowsHtml=await cpaPhRows(list,'tower_photos',['Project','Block'],
+        p=>[esc(nameOf(CPA_PHF.project)),esc(p.tower||'\u2014')],
+        CPA_PHF.tower?'Nothing uploaded for this block yet.':'Nothing uploaded for any block on this project yet.');
+    }else{
+      // "All flats" means every flat in scope, so the ids are gathered and asked for together
+      // rather than one query per flat.
+      const ids=CPA_PHF.unit?[Number(CPA_PHF.unit)]:flats.map(u=>u.id);
+      if(!ids.length){
+        rowsHtml='<div class="cph-empty">There are no flats in this block.</div>';
+      }else{
+        let q=sb.schema('cust').from('unit_photos').select('*').in('unit_id',ids);
+        if(CPA_PHF.area) q=q.eq('area',CPA_PHF.area);
+        const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
+        const list=data||[]; count=list.length;
+        const byId={}; live.forEach(u=>{byId[u.id]=u;});
+        rowsHtml=await cpaPhRows(list,'unit_photos',['Project','Block','Flat','Section'],
+          function(p){
+            const u=byId[p.unit_id]||{};
+            const ar=CPA_PH_AREAS.find(x=>x[0]===(p.area||'common'));
+            return [esc(nameOf(u.project_id||CPA_PHF.project)),esc(u.tower||'\u2014'),esc(u.unit_code||'\u2014'),
+                    '<span class="cph-area">'+esc(ar?ar[1]:p.area)+'</span>'];
+          },'Nothing uploaded here yet.');
+      }
+    }
+    host.innerHTML=bar+rowsHtml;
+    const c=$('cphCount'); if(c) c.textContent=count?(count+(count===1?' item':' items')):'';
+  }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
 }
-async function cpaRenderFloorPhotoList(){
-  const host=$('cpaFlList');if(!host)return;
-  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value;
-  if(!floorNo){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no units to derive floors from.</div>';return;}
-  const {data}=await sb.schema('cust').from('floor_photos').select('*').eq('project_id',projectId).eq('floor_no',floorNo).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('floor_photos',${p.id},'cpaRenderFloorPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for Floor '+esc(floorNo),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+// `cols` names the middle columns and `vals` fills them for one row, so the three levels share
+// one table rather than three that could drift apart.
+async function cpaPhRows(list,table,cols,vals,emptyMsg){
+  if(!list.length) return '<div class="cph-empty">'+esc(emptyMsg)+'</div>';
+  const rows=await Promise.all(list.map(async function(p){
+    const isVideo=(p.file_type||'').indexOf('video')===0;
+    const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
+    let thumb;
+    if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
+    else{
+      const url=await s3SignedUrl(p.storage_path);
+      thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
+               :'<div class="cph-th vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>';
+    }
+    return '<tr><td>'+thumb+'</td>'
+      +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
+      +vals(p).map(v=>'<td>'+v+'</td>').join('')
+      +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
+        +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
+  }));
+  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th>'
+    +cols.map(c=>'<th>'+esc(c)+'</th>').join('')
+    +'<th style="width:44px"></th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
 }
-async function cpaRenderUnitPhotoList(){
-  const host=$('cpaUhList');if(!host)return;
-  const unitId=Number($('cpaUhUnit').value);
-  const {data}=await sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unitId).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('unit_photos',${p.id},'cpaRenderUnitPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for this flat',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
-}
-window.cpaDeletePhoto=async function(table,id,refreshFn){
-  if(!await confirmDialog('Remove this photo/video from the customer portal?',{okLabel:'Delete'}))return;
+window.cpaPhDelete=async function(table,id){
+  if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
+     {title:'Remove', okLabel:'Remove', icon:'fa-trash', danger:true})) return;
   const {error}=await sb.schema('cust').from(table).update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
-  if(error){toast('Delete failed: '+error.message,'err');return;}
-  toast('Removed','ok');window[refreshFn]();
-};
-window.cpaUploadProjectPhotos=async function(){
-  const projectId=Number($('cpaPhProject').value),takenOn=$('cpaPhDate').value,caption=$('cpaPhCaption').value.trim()||null;
-  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaPhBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForProjectPhoto(projectId,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('project_photos').insert({project_id:projectId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaPhFiles').value='';cpaMediaFileChosen($('cpaPhFiles'));
-  cpaRenderProjectPhotoList();
-};
-window.cpaUploadTowerPhotos=async function(){
-  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value,takenOn=$('cpaTwDate').value,caption=$('cpaTwCaption').value.trim()||null;
-  if(!tower){toast('This project has no towers on record','err');return;}
-  const files=[...$('cpaTwFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaTwBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForTowerPhoto(projectId,tower,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('tower_photos').insert({project_id:projectId,tower,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaTwFiles').value='';cpaMediaFileChosen($('cpaTwFiles'));
-  cpaRenderTowerPhotoList();
-};
-window.cpaUploadFloorPhotos=async function(){
-  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value,takenOn=$('cpaFlDate').value,caption=$('cpaFlCaption').value.trim()||null;
-  if(!floorNo){toast('This project has no units to derive floors from','err');return;}
-  const files=[...$('cpaFlFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaFlBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForFloorPhoto(projectId,floorNo,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('floor_photos').insert({project_id:projectId,floor_no:floorNo,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaFlFiles').value='';cpaMediaFileChosen($('cpaFlFiles'));
-  cpaRenderFloorPhotoList();
-};
-window.cpaUploadUnitPhotos=async function(){
-  const unitId=Number($('cpaUhUnit').value),takenOn=$('cpaUhDate').value,caption=$('cpaUhCaption').value.trim()||null;
-  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaUhBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForUnitPhoto(unitId,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('unit_photos').insert({unit_id:unitId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaUhFiles').value='';cpaMediaFileChosen($('cpaUhFiles'));
-  cpaRenderUnitPhotoList();
+  if(error){ toast('Could not remove it: '+error.message,'err'); return; }
+  toast('Removed','ok'); cpaPhList();
 };
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
@@ -17186,14 +20534,6 @@ function custFormatUnitType(t){
   const m=String(t).trim().match(/^(\d+(?:\.\d+)?)\s*BHK$/i);
   if(!m)return t;
   return (parseFloat(m[1]))+' BHK';
-}
-// Floor number derived from the leading digits of unit_code (e.g. "5" from "5A", "12" from
-// "12C") - the same Farvision <floor><unit-letter> convention the RLS policy on
-// cust.floor_photos matches against (substring(unit_code from '^[0-9]+')), so a customer's own
-// derived floor always lines up with what the admin picks when uploading floor-wise media.
-function custDeriveFloor(unitCode){
-  const m=String(unitCode||'').match(/^\d+/);
-  return m?m[0]:null;
 }
 /* Farvision stores names as "Mr. AKSHAY DEBNATH" - shouted back at a customer that reads like a
    demand letter, so the greeting uses just the given name, title-cased. */
@@ -18403,25 +21743,44 @@ async function custMediaGrid(list){
       return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
     <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
 }
+/* THREE LEVELS, NOT FOUR, AND THE FLAT IS SPLIT BY ROOM.
+
+   The floor level is gone. It sat between the block and the flat, it was worked out by reading
+   digits off a unit code rather than from anything anybody recorded, and in the whole life of
+   the portal not one photo was ever put against it.
+
+   The flat's photos no longer wait for the slab to be cast. That gate meant a customer whose
+   photos HAD been taken was shown a message saying there would be none until casting finished -
+   the photos existed and were being withheld by a date field nobody kept up. If there are
+   photos of your flat you see them; if there are none you are told that, which is the honest
+   version of the same sentence.
+
+   Within the flat they are grouped common area / bathroom / kitchen, because that is how people
+   ask: "is my kitchen done yet" is not answerable by one long reverse-chronological pile. */
 async function custTabProgress(unit){
-  const floorNo=custDeriveFloor(unit.unit_code);
-  const [{data:pPhotos},{data:tPhotos},{data:fPhotos},{data:uPhotos}]=await Promise.all([
+  const [{data:pPhotos},{data:tPhotos},{data:uPhotos}]=await Promise.all([
     sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
     unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    floorNo?sb.schema('cust').from('floor_photos').select('*').eq('project_id',unit.project_id).eq('floor_no',floorNo).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
+    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
   ]);
   let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
     ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
   out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
   out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your floor'+(floorNo?' — Floor '+esc(floorNo):'')+'</div>';
-  out+=(fPhotos&&fPhotos.length)?await custMediaGrid(fPhotos):'<div class="card card-pad empty">No floor-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
-  if(!unit.floor_casting_completed_at){
-    out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div>';
+  const mine=uPhotos||[];
+  if(!mine.length){
+    out+='<div class="card card-pad empty">No photos of your flat yet — check back soon, these are added roughly every two weeks.</div>';
   }else{
-    out+=(uPhotos&&uPhotos.length)?await custMediaGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+    // Only the rooms that actually have something are given a heading; three headings with two
+    // "nothing yet" messages under them reads as a fault rather than as a stage of the build.
+    const AREAS=[['common','Common area'],['bathroom','Bathroom'],['kitchen','Kitchen']];
+    for(const a of AREAS){
+      const list=mine.filter(function(x){return (x.area||'common')===a[0];});
+      if(!list.length) continue;
+      out+='<div style="font-size:13px;font-weight:700;color:var(--ink);margin:14px 0 8px">'+esc(a[1])+'</div>';
+      out+=await custMediaGrid(list);
+    }
   }
   return out;
 }
