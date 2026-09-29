@@ -20589,7 +20589,11 @@ async function custLoadData(customerId,force){
   // see boot() above) has full staff_all read access to every cust.* row, so without this filter a
   // preview would show every customer's units mixed together instead of just the one being previewed.
   if(CUST_DATA&&CUST_DATA.customerId===customerId&&!force)return CUST_DATA;
-  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId).order('id');
+  // Live flats only. A cancelled booking keeps its unit row (audit, and the money that moved off it),
+  // but it is not the customer's flat any more - Arup Bhawal's D/8G stayed in his "Viewing" list
+  // after he moved to D/8H, beside the flat he actually owns.
+  const {data:units}=await sb.schema('cust').from('units').select('*, projects(id,name)').eq('customer_id',customerId)
+    .neq('status','cancelled').is('deleted_at',null).order('id');
   const list=units||[];
   const unitIds=list.map(u=>u.id);
   let contacts=[];
