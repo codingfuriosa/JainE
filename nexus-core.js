@@ -516,6 +516,9 @@ sb.auth.onAuthStateChange((ev,session)=>{
 
 /* ============================ NAV ============================ */
 const NAV=[
+  {group:'Feedback',items:[
+    {id:'feedback_hub',label:'Feedback Hub',icon:'fa-qrcode'},
+  ]},
   {group:'Overview',items:[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
@@ -554,11 +557,7 @@ const NAV=[
   {group:'Knowledge',items:[
     {id:'documents',label:'Document Library',icon:'fa-folder-open'},
     {id:'video',label:'Video Library',icon:'fa-clapperboard'},
-    {id:'helpdesk',label:'AI Help Desk',icon:'fa-headset'},
     {id:'reports',label:'Reports',icon:'fa-chart-pie'},
-  ]},
-  {group:'Feedback',items:[
-    {id:'feedback_hub',label:'Feedback Hub',icon:'fa-qrcode'},
   ]},
   {group:'Stakeholder Portals',items:[
     // Deliberately no 'customer' entry here — customer.html is a real customer-only login
@@ -630,13 +629,28 @@ function allowedSet(){if(state.super)return null;const m=state.roles&&state.role
    rule inside erp_usability_report(), which is what actually protects the numbers; this only decides
    whether the menu entry is worth drawing. */
 function hasUsability(){ if(state.super)return true; const m=state.roles&&state.roles.modules; return Array.isArray(m)&&m.indexOf('usability')!==-1; }
-function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>!allow||allow.has(it.id))})).filter(g=>g.items.length);
+/* FEEDBACK HUB IS FOR TWO PEOPLE, BY NAME.
+
+   Not "granted the ordinary way" like every other module, and deliberately not open to every
+   superadmin either: the instruction was the Administrator and Shuchandra Das, and there is a
+   second superadmin account (system1@) that would otherwise pick it up silently. So the test
+   runs BEFORE the state.super shortcut in pageAllowed, and the list is one constant here
+   rather than a condition spread across the two places that ask.
+
+   To change who can see it, add an address to this list - nothing else needs touching. */
+const FEEDBACK_HUB_PEOPLE=['ayushruia1@gmail.com','mgr.hr@thejaingroup.com'];
+function canFeedbackHub(){
+  if(state.isCustomer||state.impersonating) return false;
+  const me=String(state.email||'').trim().toLowerCase();
+  return FEEDBACK_HUB_PEOPLE.indexOf(me)!==-1;
+}
+function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g.group,items:g.items.filter(it=>(it.id==='feedback_hub')?canFeedbackHub():(!allow||allow.has(it.id)))})).filter(g=>g.items.length);
   const admItems=[];
   if(state.super) admItems.push({id:'security',label:'Control Panel',icon:'fa-sliders'});
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(id==='feedback_hub')return canFeedbackHub();if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -1036,7 +1050,7 @@ VIEWS.dashboard=async function(v){
   }catch(e){$('wAct').innerHTML='<div class="empty" style="padding:22px">No recent activity</div>';}
 
   // quick actions
-  const q=[{l:'Upload Document',i:'fa-upload',h:'documents'},{l:'New Task',i:'fa-list-check',h:'tasks'},{l:'Legal Vault',i:'fa-scale-balanced',h:'legal'},{l:'Add Lead',i:'fa-handshake',h:'crm'},{l:'View Reports',i:'fa-chart-pie',h:'reports'},{l:'Help Desk',i:'fa-headset',h:'helpdesk'},{l:'New Inspection',i:'fa-clipboard-check',h:'inspection/new'},{l:'Projects',i:'fa-building',h:'projects'},{l:'Finance Vault',i:'fa-indian-rupee-sign',h:'finance'},{l:'Renewals',i:'fa-calendar-check',h:'compliance'}];
+  const q=[{l:'Upload Document',i:'fa-upload',h:'documents'},{l:'New Task',i:'fa-list-check',h:'tasks'},{l:'Legal Vault',i:'fa-scale-balanced',h:'legal'},{l:'Add Lead',i:'fa-handshake',h:'crm'},{l:'View Reports',i:'fa-chart-pie',h:'reports'},{l:'New Inspection',i:'fa-clipboard-check',h:'inspection/new'},{l:'Projects',i:'fa-building',h:'projects'},{l:'Finance Vault',i:'fa-indian-rupee-sign',h:'finance'},{l:'Renewals',i:'fa-calendar-check',h:'compliance'}];
   $('wQuick').innerHTML='<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">'+q.map(x=>'<div class="lib-card" style="padding:14px;display:flex;align-items:center;gap:10px" onclick="navTo(\''+x.h+'\')"><div class="ic" style="width:36px;height:36px;margin:0;background:var(--brand-50);color:var(--brand)"><i class="fa-solid '+x.i+'"></i></div><div style="font-weight:600;font-size:13px">'+x.l+'</div></div>').join('')+'</div>';
 
 
@@ -1053,7 +1067,6 @@ const MODMETA={
   recruitment:{icon:'fa-user-plus',c:'#0369a1',bg:'#f0f9ff',desc:'Hiring funnel — request → applications → interviews → offer → onboarding.',kpis:[['Open Roles','4','fa-briefcase'],['Applicants','37','fa-id-card'],['Interviews (wk)','6','fa-comments'],['Offers Out','2','fa-envelope-open-text']],cols:['Applicant','Role','Stage','Score','Status'],rows:[['Neha Verma','Site Engineer','Interview L2','82','Active'],['Karan Singh','Accountant','Shortlisted','—','Active']]},
   maintenance:{icon:'fa-screwdriver-wrench',c:'#7c3aed',bg:'#f5f3ff',desc:'Asset register, preventive-maintenance schedules & breakdown tracking.',kpis:[['Assets','64','fa-gears'],['PM Due (wk)','8','fa-calendar-check'],['Under Repair','2','fa-wrench'],['Downtime','3.2h','fa-clock']],cols:['Asset','Category','Location','Next PM','Status'],rows:[['DG Set 250kVA','Electrical','Skyline','02 Jul','Active'],['Passenger Lift 1','Mechanical','Greenfield','—','Under Repair']]},
   reports:{icon:'fa-chart-pie',c:'#1d4ed8',bg:'#eff4ff',desc:'Cross-module analytics, scoreboards & reconciliation tools.',kpis:[['Saved Reports','12','fa-floppy-disk'],['Reconciliations','4','fa-not-equal'],['Scheduled','3','fa-clock'],['Exports (mo)','28','fa-file-export']],cols:['Report','Module','Type','Last Run','Owner'],rows:[['Collections vs Demand','CRM','Reconciliation','Today','You'],['Stock Variance','Inventory','Reconciliation','Yesterday','You']]},
-  helpdesk:{icon:'fa-headset',c:'#0f766e',bg:'#f0fdfa',desc:'AI-assisted answers from the company knowledge base, with ticket fallback.',kpis:[['Open Tickets','3','fa-ticket'],['Resolved (mo)','41','fa-circle-check'],['KB Articles','58','fa-book'],['Avg. Response','12m','fa-stopwatch']],cols:['Ticket','Subject','Department','Status','Raised'],rows:[['HD-0091','VPN access','IT','Open','Today'],['HD-0090','Salary slip','HR','Resolved','Yesterday']]},
   gtd:{icon:'fa-brain',c:'#7c3aed',bg:'#f5f3ff',desc:'Getting Things Done — one trusted system: capture, clarify, organise, reflect, engage.',kpis:[['Inbox','9','fa-inbox'],['Next Actions','14','fa-bolt'],['Waiting On','5','fa-hourglass-half'],['Someday','21','fa-cloud']],cols:['Action','Context','Project','Due','Status'],rows:[['Finalise RERA filing','@office','Skyline','Today','Next'],['Call structural consultant','@calls','Riverdale','Tomorrow','Waiting'],['Review tender draft','@computer','Greenfield','2 days','Next']]},
   compliance:{icon:'fa-calendar-check',c:'#b45309',bg:'#fffbeb',desc:'Licences, RERA, NOCs, insurance & statutory renewals — never miss an expiry.',kpis:[['Active Licences','38','fa-id-badge'],['Due in 30d','6','fa-bell'],['Expired','1','fa-triangle-exclamation'],['Renewed (mo)','4','fa-rotate']],cols:['Item','Type','Authority','Expiry','Status'],rows:[['RERA — Skyline','Registration','MahaRERA','14 Aug','Active'],['Fire NOC — Greenfield','NOC','Fire Dept','02 Jul','Due Soon'],['Labour Licence','Statutory','Labour Dept','—','Expired']]},
   campaigns:{icon:'fa-bullhorn',c:'#db2777',bg:'#fdf2f8',desc:'Marketing campaign performance — channels, leads, cost per lead & ROAS.',kpis:[['Active Campaigns','5','fa-rectangle-ad'],['Leads (mo)','428','fa-user-plus'],['Cost / Lead','₹540','fa-indian-rupee-sign'],['ROAS','4.2x','fa-arrow-trend-up']],cols:['Campaign','Channel','Spend','Leads','CPL'],rows:[['Skyline Launch','Meta','₹3.2L','186','₹172'],['Festive Offer','Google','₹2.1L','142','₹148'],['Brand Awareness','Hoardings','₹1.8L','100','₹1800']]},
@@ -6701,364 +6714,6 @@ window.setProfileSave=async function(){
 };
 
 
-/* ============================ HELP DESK ============================ */
-const UNDER_CONSTRUCTION='This module is currently <b>under construction</b> — no further details can be provided at this time. Please raise a ticket if you need help.';
-const HD_KB=[
- // ── Documents ──────────────────────────────────────────────────────────────
- {k:['upload document','upload file','add document','add file','put file','upload a doc'],a:`To upload a document: open <b>Document Library</b> from the sidebar, pick a department tab, then click <b>Upload</b>. Select your file, choose or type a <b>Category/Folder</b>, and save. Large files (up to 5 GB) are supported via resumable upload.`},
- {k:['folder','category','new folder','create folder','add category'],a:`To create a folder/category: inside any Document Library click <b>+ New Folder</b>. In <b>Legal</b>, every folder and category in the tree has a small <b>+</b> icon — click it to add a category inside that exact spot (Litigation, Projects, a project, or a category), or use <b>+ Add main folder</b> at the bottom for a brand-new top-level folder.`},
- {k:['search document','find document','document search','search file','search by name'],a:`Use the <b>Find a Document</b> tab here to search by file name, title or document number. In the Document Library you can filter by status and date. Word-inside-file search has been replaced with name-based search for speed.`},
- {k:['reindex','re-index','index all','ocr','scan document','search inside'],a:`Indexing is now <b>automatic</b> — when you upload a scanned PDF or image it is read by AI (Gemini OCR) in the background, so the words inside it become searchable within moments. There's nothing to click: just type in the search box in a Document Library or the Legal module and matching files appear by name and by text inside them.`},
- {k:['download file','download document','get file','open file','preview file'],a:`To download or preview: find the file in <b>Document Library</b>, click the file row to open its detail panel, then click <b>Open</b> or <b>Download</b>. Files open in a new tab.`},
- {k:['delete document','remove file','delete file'],a:`To delete a document: open the file in <b>Document Library</b>, then click <b>Delete</b> in the detail panel. This removes both the database record and the stored file.`},
- {k:['legal','vault','title deed','deed','rera','agreement','noc','sanction','land record','court'],a:`The <b>Legal Vault</b> is organised as a tree: two main folders, <b>Litigation</b> and <b>Projects</b>. Under <b>Projects</b> sit the individual projects (Dream Gurukul, Dream World City, Dream One, Dream Eco City, Dream Valley, Dream Exotica, Dream Ananta), and each project has <b>History of Land / Chain</b>, <b>Title Papers</b>, <b>Permissions & Sanctions</b>, <b>RERA & Compliance</b> and <b>Project Manual</b>. Click the <b>+</b> next to any folder to add a category inside it, and <b>Upload</b> to add files to a category.`},
- // ── Accountability ─────────────────────────────────────────────────────────
- {k:['task','new task','create task','to-do','todo','make task'],a:`To create a task: go to <b>Accountability → Tasks</b> and click <b>New Task</b>. Add title, description, owner, members, priority, due date and progress. Tasks with members added appear in the <b>Tasks</b> tab for all members. Solo tasks (no members) appear only in your <b>Home → My Tasks</b>.`},
- {k:['team task','shared task','task member','add member to task'],a:`Tasks with members are called <b>Team Tasks</b>. Add members in the New Task form. They appear in the <b>Tasks</b> tab for every member and the creator. Personal tasks with no members only appear in your <b>Home → My Tasks</b>.`},
- {k:['delegate','delegation','assign','give work','assign task'],a:`To delegate: go to <b>Accountability → Delegation</b> and click <b>Delegate a task</b>. Choose the person from your delegation list, fill in details and due date. It shows under <b>I've Assigned</b> in your Home, and under <b>I've Been Assigned</b> for the recipient. Delegation requires the <b>can delegate</b> setting to be enabled in your profile.`},
- {k:['goal','objective','target','personal goal','team goal','company goal'],a:`Goals are in <b>Accountability → Goals</b>. Choose scope — <b>Personal</b> (yours only, visible in Home → My Goals), <b>Team</b> (shared with added members, visible in Team Goals tab), or <b>Company</b> (visible to everyone). Click <b>New Goal</b> and fill in name, dates and description.`},
- {k:['home','my tasks','accountability home','my goals','assigned to me'],a:`<b>Accountability Home</b> shows: <b>My Tasks</b> (your solo tasks), <b>Assigned To Me</b> (delegations from others), <b>I've Assigned</b> (delegations you sent), plus <b>My Goals</b>, an Activity Feed, and productivity/workload charts.`},
- {k:['profile','designation','department','reporting manager','edit profile'],a:`Your profile (name, designation, department, reporting manager, delegation settings) is set when you first open Accountability, and editable anytime from <b>Settings → Edit profile</b>.`},
- // ── Procurement ────────────────────────────────────────────────────────────
- {k:['procurement','indent','quote','po','grn','purchase order','quotation'],a:`The <b>Procurement</b> module has four tabs: <b>Indent</b> (purchase requests), <b>Quote Comp</b> (quotation comparison sheets — upload, preview, download, select and delete), <b>PO</b> (purchase orders), and <b>GRN</b> (goods received notes).`},
- {k:['quote comp','quotation comparison','sheet upload','procurement upload'],a:`In <b>Procurement → Quote Comp</b>: click <b>Upload</b> to add a sheet (PDF, Excel etc.), enter a name, and save. Cards appear for each sheet. Click to select (blue border), double-click to preview in a new tab. With one selected you can <b>Edit</b> (rename/replace file), <b>Download</b>, or <b>Delete</b>. Multiple selections allow Download and Delete but not Edit.`},
- // ── Recruitment ────────────────────────────────────────────────────────────
- {k:['recruitment','test','assessment','aptitude test','hiring test','job test'],a:`<b>Recruitment → Tests</b> lists all assessment links (Common Attitude, Accounts, Legal, Post Sales Admin, HR, Sales, Tele Sales, Legal New). Click any link to open the test form in a new tab. This table is read-only.`},
- {k:['job description','jd','description','position description'],a:`<b>Recruitment → Descriptions</b> shows job description PDFs for all positions. Click a card to select it, double-click or press <b>Preview</b> to open the PDF, or <b>Download</b> to save it. Admins can add new JDs via <b>Upload JD</b>, and remove any of them from there too.`},
- // ── Control Panel ──────────────────────────────────────────────────────────
- {k:['control panel','admin','administrator','user access','module access','tab access','permissions'],a:`The <b>Control Panel</b> is visible only to administrators. It lists all users — new signups show an amber <b>New · needs setup</b> badge with 0 tabs until configured. Click a user to set their department, level (Manager/Employee etc.) and which modules they can access using the grouped checkbox panel.`},
- {k:['new user','signup','onboarding','approve user','set up user'],a:`When someone signs up, they fill an onboarding form (name, designation, reporting manager). They then appear in the <b>Control Panel</b> with 0 tabs and a pending badge. An admin must open their profile and assign department, level and module access, then click <b>Save access</b>.`},
- // ── Projects / Dashboard ───────────────────────────────────────────────────
- {k:['projects','active projects','dashboard','kpi','project count'],a:`The <b>Dashboard</b> shows KPIs including Active Projects (currently 6 — Dream Valley Ph-2, Jain Heights, Green Acres, Royal Enclave, Trade Centre, Siliguri). The Projects panel lists all ongoing construction projects with their site and status.`},
- // ── Help Desk ──────────────────────────────────────────────────────────────
- {k:['ticket','raise ticket','support ticket','help ticket','complaint','problem'],a:`To raise a support ticket: open <b>Help Desk → My Tickets</b>, fill in the subject, department and description, then click <b>Submit ticket</b>. You can track all your tickets in the same tab.`},
- {k:['password','reset password','forgot password','sign in','login','log in'],a:`To reset your password: use <b>Forgot password?</b> on the sign-in page. You'll receive an email link to set a new one. Alternatively, contact your administrator.`},
- {k:['navigate','menu','sidebar','module','how to use','get around'],a:`Use the left sidebar to navigate: <b>Dashboard</b> (overview KPIs), <b>Accountability</b> (tasks, goals, delegation), <b>Document Library</b> & <b>Legal</b> (files), <b>Procurement</b>, <b>Recruitment</b>, <b>Help Desk</b>, and <b>Control Panel</b> (admins only). The <b>JAIN-E</b> logo always brings you Home.`},
- // ── Construction module ───────────────────────────────────────────────────
- {k:['construction','construction module','site','rcc','work order','contractor','tower','plinth','finishing','stage','construction stage'],a:`The <b>Construction</b> module shows live site data across all active projects. It has three tabs: <b>Towers & Units</b> (project tower breakdown, units sold, current stage), <b>Construction Stages</b> (% complete, target date, on-track/delayed status per project), and <b>Work Orders</b> (WO number, contractor, scope, amount, status).`},
- // ── Sign out ───────────────────────────────────────────────────────────────
- {k:['sign out','signout','log out','logout','exit','how to sign out','how to log out'],a:`To sign out: click your <b>avatar / name</b> in the top-right corner of the screen, then click <b>Sign out</b> from the dropdown menu.`},
- // ── Recruitment PDFs ───────────────────────────────────────────────────────
- {k:['find jd','search jd','find job description','search job description','general manager','executive pr','gm sales','human resource','litigation officer','accountant','compliance officer','executive sales','recruitment pdf'],a:`Job Description PDFs are in <b>Recruitment → Descriptions</b>. Eight positions are available by default: General Manager Commercial, Executive PR, GM Sales & Marketing, Human Resource, Executive Sales, Litigation Officer, Accountant, and Compliance Officer. Click any card to select it, then <b>Preview</b> to open or <b>Download</b> to save.`},
- // ── Under construction catch-all ───────────────────────────────────────────
- {k:['gtd','get things done','crm','sales pipeline','maintenance','asset','inspection','finance','financial','compliance','renewal','video library','scaling','playbook','customer portal','supplier portal','whatsapp bot','mail','naren'],a:`${UNDER_CONSTRUCTION}`},
-];
-function hdAnswer(q){
-  const ql=' '+q.toLowerCase()+' ';
-  let best=null,score=0;
-  const UNDER=['gtd','crm','maintenance','asset','inspection','finance','compliance','renewal','video','scaling','playbook','customer portal','supplier portal','whatsapp','naren'];/* construction, campaign analytics are live */
-  const isUnder=UNDER.some(k=>ql.includes(k));
-  HD_KB.forEach(e=>{let sc=0;e.k.forEach(k=>{if(ql.includes(k))sc+=k.length*2;});if(sc>score){score=sc;best=e;}});
-  if(score>0)return best.a;
-  if(isUnder)return 'This module is currently <b>under construction</b> — no further details can be provided at this time. Please <a style="color:var(--brand);font-weight:600;cursor:pointer" onclick="navTo(`helpdesk/tickets`)">raise a ticket</a> if you need help.';
-  return null;
-}
-
-let HD_MSGS=[];
-VIEWS.helpdesk=function(v,seg){
-  setCrumb(['Home','Help Desk']);
-  // "Find a Document" has been removed: document searching belongs in the Legal module (and the
-  // Document Library), where the folders, filters and permissions live. A second search box here
-  // only split the habit in two. Anyone landing on the old /helpdesk/docs address is sent there.
-  let tab=(seg[0]||'assistant');
-  if(tab==='docs'){ navTo('legal'); return; }
-  v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-headset" style="color:#0f766e"></i> Help Desk</h1><p>Ask a question or get help using the portal</p></div></div>
-  <div class="tabs">
-    <div class="tab ${tab==='assistant'?'active':''}" onclick="navTo('helpdesk/assistant')"><i class="fa-solid fa-robot"></i> Assistant</div>
-    <div class="tab ${tab==='tickets'?'active':''}" onclick="navTo('helpdesk/tickets')"><i class="fa-solid fa-ticket"></i> My Tickets</div>
-  </div><div id="hdBody"></div>`;
-  if(tab==='tickets')hdTickets(); else hdAssistant();
-};
-/* The assistant answers in markdown — bold, bullets, and small tables when it lists things — so it
-   needs rendering rather than dumping. Deliberately a small, closed renderer over escaped text:
-   the reply travels through ChatGPT and can quote case titles and document contents, so nothing is
-   ever treated as HTML. Only the handful of shapes the assistant is asked to produce are turned
-   back into tags. */
-function hdMd(src){
-  let s=esc(String(src==null?'':src));
-  // tables first, while the pipe rows are still on their own lines
-  s=s.replace(/(?:^\|.*\|[ \t]*\n)+/gm,function(block){
-    const lines=block.trim().split('\n').map(l=>l.trim()).filter(Boolean);
-    const cells=l=>l.replace(/^\|/,'').replace(/\|$/,'').split('|').map(c=>c.trim());
-    if(lines.length<2||!/^\|[\s:|-]+\|$/.test(lines[1])) return block;
-    const head=cells(lines[0]), body=lines.slice(2).map(cells);
-    return '<table class="hd-tbl"><thead><tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'
-      +body.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table>\n';
-  });
-  s=s.replace(/```([\s\S]*?)```/g,(_m,c)=>'<pre class="hd-pre">'+c.replace(/^\n/,'')+'</pre>');
-  s=s.replace(/`([^`\n]+)`/g,'<code class="hd-code">$1</code>');
-  s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
-  s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g,'$1<i>$2</i>');
-  s=s.replace(/^#{1,4}\s+(.+)$/gm,'<div class="hd-h">$1</div>');
-  // bullet and numbered runs
-  s=s.replace(/(?:^[-*]\s+.+\n?)+/gm,function(b){
-    return '<ul class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^[-*]\s+/,'')+'</li>').join('')+'</ul>';
-  });
-  s=s.replace(/(?:^\d+\.\s+.+\n?)+/gm,function(b){
-    return '<ol class="hd-ul">'+b.trim().split('\n').map(l=>'<li>'+l.replace(/^\d+\.\s+/,'')+'</li>').join('')+'</ol>';
-  });
-  s=s.replace(/\n{2,}/g,'<br><br>').replace(/\n/g,'<br>');
-  s=s.replace(/<br>\s*(<(?:ul|ol|table|pre|div class="hd-h")\b)/g,'$1');
-  s=s.replace(/(<\/(?:ul|ol|table|pre)>)\s*<br>/g,'$1');
-  return s;
-}
-const HD_SUGGEST=[
-  {g:'My work',   q:['Where do I stand right now?','What have I got overdue?','What am I waiting to approve?','What are my goals at?']},
-  {g:'Legal',     q:['Which hearings are in the next 10 days?','Show me the High priority cases','Any case at the High Court?']},
-  {g:'Workflow',  q:['How many invoices are still in progress?','Which step is each pending invoice sitting at?']},
-  {g:'Around me', q:['Who is in the Legal department?','Who does Ankita report to?','What meetings are coming up?','What did the last meeting cover?']},
-  {g:'How do I',  q:['How do I delegate a task?','How do I upload a document?','How do I record an online meeting?','How do I export a causelist?']},
-  {g:'Modules',   q:['Which modules are actually live?','Is CRM ready yet?','Is the Finance Vault real data?','Can I see competitor ads?']},
-  {g:'Account',   q:['How do I sign in or get an account?','I forgot my password','Why is a module missing from my sidebar?','Where do I change my profile?']},
-  {g:'Problems',  q:['Why am I not getting emails?','The page is showing an error','My transcript is stuck on Transcribing','Which outside services does the portal use?']}
-];
-function hdAssistant(){
-  const b=$('hdBody');
-  b.innerHTML=`<style>
-    .hd-wrap{max-width:900px;margin:0 auto}
-    .hd-shell{border:1px solid var(--line);border-radius:16px;background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(15,23,42,.05)}
-    .hd-top{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f766e,#0d5f59)}
-    .hd-top .ava{width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;flex:none}
-    .hd-top .who{color:#fff;font-size:14px;font-weight:700;line-height:1.25}
-    .hd-top .sub{color:rgba(255,255,255,.72);font-size:11.5px}
-    .hd-top .live{margin-left:auto;display:flex;align-items:center;gap:6px;color:rgba(255,255,255,.85);font-size:11px;font-weight:600}
-    .hd-top .live i{font-size:7px;color:#4ade80}
-    .hd-new{border:1px solid rgba(255,255,255,.28);background:transparent;color:#fff;height:28px;padding:0 10px;border-radius:8px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
-    .hd-new:hover{background:rgba(255,255,255,.14)}
-    .hd-scroll{padding:18px 16px;height:52vh;min-height:320px;overflow-y:auto;background:var(--bg-subtle,#fafbfd)}
-    .hd-msg{display:flex;gap:11px;margin-bottom:16px;align-items:flex-start}
-    .hd-msg.me{flex-direction:row-reverse}
-    .hd-ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
-    .hd-ic.bot{background:#0f766e}
-    .hd-bub{max-width:78%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.62;overflow-wrap:anywhere}
-    .hd-msg.bot .hd-bub{background:var(--bg-card);border:1px solid var(--line);border-top-left-radius:4px;color:var(--ink)}
-    .hd-msg.me  .hd-bub{background:var(--brand);color:#fff;border-top-right-radius:4px}
-    .hd-bub b{font-weight:700}
-    .hd-h{font-weight:700;font-size:13.5px;margin:10px 0 4px}
-    .hd-ul{margin:6px 0 6px 18px;padding:0}
-    .hd-ul li{margin:3px 0}
-    .hd-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin:9px 0;display:block;overflow-x:auto}
-    .hd-tbl th,.hd-tbl td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
-    .hd-tbl th{background:var(--bg-subtle,#f8fafc);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--slate);white-space:nowrap}
-    .hd-pre{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:12px;overflow-x:auto;margin:8px 0}
-    .hd-code{background:var(--bg-subtle,#f1f5f9);padding:1px 5px;border-radius:4px;font-size:12.5px}
-    .hd-tools{margin-top:9px;padding-top:8px;border-top:1px dashed var(--line);color:var(--slate);font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-    .hd-tools .tp{background:var(--bg-subtle,#f1f5f9);border-radius:5px;padding:1px 6px;font-weight:600}
-    .hd-foot{color:var(--slate);font-size:11.5px;margin-top:8px}
-    .hd-foot a{color:var(--brand);font-weight:600;cursor:pointer}
-    .hd-sug{padding:12px 16px;border-top:1px solid var(--line);background:var(--bg-card)}
-    .hd-sug-g{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px}
-    .hd-sug-g:last-child{margin-bottom:0}
-    .hd-sug-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--slate);flex:0 0 76px}
-    .hd-chip{border:1px solid var(--line);background:var(--bg-card);color:var(--ink);border-radius:20px;padding:5px 12px;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:border-color .12s,color .12s,background .12s}
-    .hd-chip:hover{border-color:#0f766e;color:#0f766e;background:#f0fdfa}
-    .hd-bar{display:flex;gap:9px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end;background:var(--bg-card)}
-    .hd-in{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:13.5px;font-family:inherit;line-height:1.5;max-height:132px;background:var(--bg-card);color:var(--ink)}
-    .hd-in:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.12)}
-    .hd-send{height:42px;width:42px;flex:none;border:0;border-radius:12px;background:#0f766e;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:filter .12s}
-    .hd-send:hover:not(:disabled){filter:brightness(1.12)}
-    .hd-send:disabled{opacity:.5;cursor:not-allowed}
-    .hd-dots span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:var(--slate);animation:hdb 1s infinite}
-    .hd-dots span:nth-child(2){animation-delay:.15s}
-    .hd-dots span:nth-child(3){animation-delay:.3s}
-    @keyframes hdb{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
-    .hd-hint{text-align:center;color:var(--slate);font-size:11px;padding:0 16px 11px;background:var(--bg-card)}
-    @media(max-width:760px){
-      .hd-scroll{height:56vh;padding:14px 12px}
-      .hd-bub{max-width:88%}
-      .hd-sug-lbl{flex:1 1 100%}
-      .hd-sug{max-height:132px;overflow-y:auto}
-    }
-  </style>
-  <div class="hd-wrap"><div class="hd-shell">
-    <div class="hd-top">
-      <div class="ava"><i class="fa-solid fa-robot"></i></div>
-      <div><div class="who">JAIN-E Assistant</div><div class="sub">Reads your live portal data · never changes anything</div></div>
-      <span class="live"><i class="fa-solid fa-circle"></i> Online</span>
-      <button class="hd-new" onclick="hdReset()"><i class="fa-solid fa-rotate-left"></i> New chat</button>
-    </div>
-    <div class="hd-scroll" id="hdChat"></div>
-    <div class="hd-sug" id="hdChips"></div>
-    <div class="hd-bar">
-      <textarea id="hdQ" class="hd-in" rows="1" placeholder="Ask anything — your tasks, a hearing date, where an invoice is stuck, how to do something…"
-        oninput="hdGrow(this)" onkeydown="hdKey(event)"></textarea>
-      <button class="hd-send" id="hdSendBtn" onclick="hdSend()" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
-    </div>
-    <div class="hd-hint">Enter to send · Shift+Enter for a new line. Answers come from live data — double-check anything you act on.</div>
-  </div></div>`;
-  $('hdChips').innerHTML=HD_SUGGEST.map(g=>'<div class="hd-sug-g"><span class="hd-sug-lbl">'+esc(g.g)+'</span>'
-    +g.q.map(q=>'<button class="hd-chip" onclick="hdAsk(this.textContent)">'+esc(q)+'</button>').join('')+'</div>').join('');
-  if(!HD_MSGS.length) HD_MSGS=[{who:'bot',md:"Ask me anything about your work here — I can read the live data.\n\n- **Your plate** — what's open, overdue, or waiting on you\n- **Legal** — hearings coming up, a case, a court, a priority\n- **Workflow** — where an invoice has got to, and what's still moving\n- **People** — who is in which department, who reports to whom\n- **Meetings, documents, calls, ad spend** — figures and summaries\n- **Any module** — whether it's live yet, and what it does\n- **Signing in, email, settings, errors** — and which outside services we use\n\nI only read — I can't change anything, and I'll tell you plainly when a module hasn't started yet rather than quote its sample figures."}];
-  hdRenderChat();
-  setTimeout(()=>{const i=$('hdQ'); if(i)try{i.focus();}catch(_e){}},60);
-}
-window.hdGrow=function(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,132)+'px'; };
-window.hdKey=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); hdSend(); } };
-window.hdReset=function(){ HD_MSGS=[]; hdAssistant(); };
-/* A message carries EITHER .md (markdown from the assistant, rendered through hdMd) or .html (a
-   fixed bit of our own markup, e.g. the typing dots). A person's own message is escaped text. */
-function hdRenderChat(){
-  const c=$('hdChat');if(!c)return;
-  const mine=esc(initials((state.profile&&state.profile.full_name)||state.email).toUpperCase());
-  c.innerHTML=HD_MSGS.map(function(m){
-    if(m.who!=='bot'){
-      return '<div class="hd-msg me"><div class="hd-ic" style="background:'+colorFor(state.email)+'">'+mine+'</div>'
-        +'<div class="hd-bub">'+esc(m.text||'')+'</div></div>';
-    }
-    let body=m.html||hdMd(m.md||'');
-    if(m.tools&&m.tools.length){
-      const seen=[]; m.tools.forEach(function(t){ if(t&&seen.indexOf(t)===-1) seen.push(t); });
-      body+='<div class="hd-tools"><i class="fa-solid fa-database"></i> read '
-        +seen.map(function(t){ return '<span class="tp">'+esc(String(t).replace(/_/g,' '))+'</span>'; }).join(' ')+'</div>';
-    }
-    if(m.offerTicket) body+='<div class="hd-foot">Not what you needed? <a onclick="navTo(\'helpdesk/tickets\')">Raise a ticket</a>.</div>';
-    return '<div class="hd-msg bot"><div class="hd-ic bot"><i class="fa-solid fa-robot"></i></div>'
-      +'<div class="hd-bub">'+body+'</div></div>';
-  }).join('');
-  c.scrollTop=c.scrollHeight;
-}
-window.hdAsk=function(q){const i=$('hdQ');if(i){i.value=q;hdGrow(i);}hdSend();};
-window.hdSend=async function(){
-  const inp=$('hdQ'), btn=$('hdSendBtn');
-  const q=((inp&&inp.value)||'').trim(); if(!q)return;
-  inp.value=''; hdGrow(inp); inp.disabled=true; if(btn)btn.disabled=true;
-  HD_MSGS.push({who:'me',text:q});
-  HD_MSGS.push({who:'bot',html:'<span class="hd-dots"><span></span><span></span><span></span></span>',isLoading:true});
-  hdRenderChat();
-  // The last few turns go with the question so follow-ups ("and the one after that?") make sense.
-  const history=HD_MSGS.filter(function(m){ return !m.isLoading && (m.text||m.md); })
-    .slice(-9,-1)
-    .map(function(m){ return {role:(m.who==='bot'?'assistant':'user'), content:(m.md||m.text||'')}; });
-  try{
-    const {data:{session}}=await sb.auth.getSession();
-    const token=session&&session.access_token;
-    const res=await fetch(SUPABASE_URL+'/functions/v1/helpdesk-ai',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(token||''),'apikey':SUPABASE_KEY},
-      body:JSON.stringify({question:q, history:history})
-    });
-    const d=await res.json();
-    HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    // hdAnswer() is the old hard-coded answer sheet — still the fallback if the key is missing.
-    const notSetUp=d.answer&&/not configured/i.test(d.answer);
-    const md=notSetUp?(hdAnswer(q)||d.answer):(d.answer||'I could not work that out.');
-    HD_MSGS.push({who:'bot', md:md, tools:d.tools_used||[], offerTicket:true});
-    // Logged directly, after the assistant actually answered, rather than through USAGE_MAP - a
-    // click here can genuinely fail (network error reaching helpdesk-ai), so the generic wrapper
-    // would have counted a failed round-trip as a real answer.
-    try{usageQueue('helpdesk.assistant.ask_a_question','search',{query:q});}catch(_e){}
-  }catch(e){
-    HD_MSGS=HD_MSGS.filter(m=>!m.isLoading);
-    HD_MSGS.push({who:'bot', md:hdAnswer(q)||'I could not reach the assistant just now. Please try again in a moment.', offerTicket:true});
-    try{usageQueue('helpdesk.assistant.ask_a_question','error');}catch(_e){}
-  }
-  inp.disabled=false; if(btn)btn.disabled=false;
-  try{inp.focus();}catch(_e){}
-  hdRenderChat();
-};
-function hdDocs(){
-  $('hdBody').innerHTML=`<div class="card card-pad" style="max-width:880px;margin:0 auto">
-   <div class="sec-title">Find a document</div><div class="sec-sub">Search all uploaded documents and job descriptions by file name</div>
-   <div class="toolbar"><div class="grow"><i class="fa-solid fa-magnifying-glass"></i><input id="hdDocQ" placeholder="Type a word and press Enter…" onkeydown="if(event.key==='Enter')hdDocSearch()"></div><button class="btn btn-primary" onclick="hdDocSearch()"><i class="fa-solid fa-magnifying-glass"></i> Search</button></div>
-   <div id="hdDocRes"><div class="empty" style="padding:30px"><i class="fa-regular fa-folder-open"></i><div>Search to find documents you can open or download</div></div></div></div>`;
-}
-window.hdDocSearch=async function(){
-  const q=($('hdDocQ').value||'').trim();const host=$('hdDocRes');if(!q)return;
-  host.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  const ql=q.toLowerCase();
-  // 1. Search document library
-  let docs=[];
-  try{const {data}=await sb.schema('doc').from('documents').select('id,title,file_name,category,department,storage_path,doc_no,created_at').or('file_name.ilike.%'+q+'%,title.ilike.%'+q+'%,doc_no.ilike.%'+q+'%').order('created_at',{ascending:false}).limit(40);docs=data||[];}catch(e){}
-  // 2. Search uploaded JDs
-  let jdUploaded=[];
-  try{const {data}=await sb.schema('recruit').from('job_descriptions').select('*');jdUploaded=data||[];}catch(e){}
-  // 3. Include default JDs matching query
-  const defaultMatches=(typeof DEFAULT_JDS!=='undefined'?DEFAULT_JDS:[]).filter(j=>j.name.toLowerCase().includes(ql));
-  const uploadedJdMatches=jdUploaded.filter(j=>j.name.toLowerCase().includes(ql)||(j.file_name||'').toLowerCase().includes(ql));
-  // Build combined rows
-  const docRows=docs.map(r=>({file:r.file_name||r.title||'—',title:r.title||'—',cat:r.category||'—',dept:r.department||'—',date:r.created_at,url:r.storage_path?SUPABASE_URL+'/storage/v1/object/public/documents/'+encodeURIComponent(r.storage_path).replace(/%2F/g,'/'):null}));
-  const jdRows=[...defaultMatches,...uploadedJdMatches].map(j=>({file:j.name+'.pdf',title:j.name,cat:'Job Description',dept:'Recruitment',date:j.created_at||null,url:j.url||(j.storage_path?SUPABASE_URL+'/storage/v1/object/public/recruitment/'+encodeURIComponent(j.storage_path).replace(/%2F/g,'/'):null)}));
-  const all=[...docRows,...jdRows];
-  if(!all.length){host.innerHTML='<div class="empty" style="padding:30px"><i class="fa-regular fa-folder-open"></i><div>No documents found for <b>'+esc(q)+'</b></div></div>';return;}
-  host.innerHTML='<div style="margin-top:6px;font-size:12.5px;color:var(--slate);margin-bottom:10px">'+all.length+' result(s) for <b>'+esc(q)+'</b></div>'+
-    '<table class="tbl"><thead><tr><th>File Name</th><th>Category</th><th>Department</th><th>Date</th><th></th></tr></thead><tbody>'+
-    all.map(r=>'<tr><td style="font-weight:500">'+esc(r.file)+'</td><td>'+esc(r.cat)+'</td><td>'+esc(r.dept)+'</td><td style="color:var(--slate);font-size:12px">'+(r.date?fmtDate(r.date):'—')+'</td><td>'+(r.url?'<a href="'+r.url+'" target="_blank" class="btn btn-sm"><i class="fa-solid fa-eye"></i> Open</a>':'—')+'</td></tr>').join('')+
-    '</tbody></table>';
-}
-window.hdTicketSave=async function(){
-  // Logged directly, after the ticket actually exists, rather than through USAGE_MAP - real
-  // validation (empty subject/description) and a DB insert that can genuinely error both silently
-  // stop this, which a generic wrapper would have counted as a raised ticket either way.
-  const subject=$('hdSub').value.trim(),category=$('hdDept').value,message=$('hdMsg').value.trim();
-  if(!subject||!message){toast('Add a subject and a description','err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}return;}
-  const btn=$('hdSubmitBtn');if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Submitting…';}
-  const {error}=await sb.schema('acc').from('helpdesk_tickets').insert({subject,category,message,status:'Open',raised_by:state.email,assigned_dept:category});
-  if(error){toast(error.message,'err');try{usageQueue('helpdesk.tickets.raise_a_ticket','error');}catch(_e){}if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}return;}
-  try{usageQueue('helpdesk.tickets.raise_a_ticket','create',{subject:subject,category:category});}catch(_e){}
-  // email the support inbox via Web3Forms (no backend needed)
-  try{
-    await fetch('https://api.web3forms.com/submit',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({access_key:'9fa7700f-b082-46a4-8b70-e1861c554bb4',subject:'New Help Desk Ticket: '+subject,from_name:'JAIN-E Help Desk',Ticket_Subject:subject,Category:category,Description:message,Raised_by:state.email,Submitted_at:new Date().toLocaleString()})});
-  }catch(e){console.warn('email relay failed',e);}
-  toast('Ticket submitted & emailed to support','ok');
-  $('hdSub').value='';$('hdMsg').value='';
-  if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-paper-plane"></i> Submit ticket';}
-  hdLoadTickets();
-};
-
-function hdTickets(){
-  const b=$('hdBody');
-  const depts=['IT','HR','Finance','Operations','Legal','Admin','Other'];
-  b.innerHTML=`
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1000px;margin:0 auto" class="hdTicketLayout">
-    <div class="card card-pad">
-      <div class="sec-title" style="margin:0 0 14px"><i class="fa-solid fa-ticket" style="color:#0f766e"></i> Raise a Ticket</div>
-      <div class="frm">
-        <label>Subject</label>
-        <input id="hdSub" class="sel" placeholder="e.g. Can't access Legal Vault">
-        <label>Department</label>
-        <select id="hdDept" class="sel">
-          ${depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('')}
-        </select>
-        <label>Description</label>
-        <textarea id="hdMsg" class="sel" rows="5" placeholder="Describe your issue in detail…" style="resize:vertical"></textarea>
-      </div>
-      <button class="btn btn-primary" id="hdSubmitBtn" style="margin-top:14px;width:100%" onclick="hdTicketSave()">
-        <i class="fa-solid fa-paper-plane"></i> Submit ticket
-      </button>
-    </div>
-    <div>
-      <div class="card card-pad" style="margin-bottom:0">
-        <div class="sec-title" style="margin:0 0 12px"><i class="fa-solid fa-list-check" style="color:#0f766e"></i> My Tickets</div>
-        <div id="hdTicketList"><div class="loader"><div class="spin"></div></div></div>
-      </div>
-    </div>
-  </div>`;
-  // Responsive: stack on mobile
-  const style=document.createElement('style');
-  style.textContent='@media(max-width:700px){.hdTicketLayout{grid-template-columns:1fr!important}}';
-  document.head.appendChild(style);
-  hdLoadTickets();
-}
-async function hdLoadTickets(){
-  const el=$('hdTicketList');if(!el)return;
-  el.innerHTML='<div class="loader"><div class="spin"></div></div>';
-  let rows=[];
-  try{const {data}=await sb.schema('acc').from('helpdesk_tickets').select('*').eq('raised_by',state.email).order('created_at',{ascending:false}).limit(30);rows=data||[];}catch(e){}
-  if(!rows.length){el.innerHTML='<div style="color:var(--slate);font-size:13px;padding:8px 0">No tickets yet.</div>';return;}
-  const badge=s=>{const m={'Open':'t-amber','In Progress':'t-blue','Resolved':'t-green','Closed':'t-gray'};return`<span class="tag ${m[s]||'t-gray'}">${esc(s)}</span>`;};
-  el.innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+rows.map(r=>`
-    <div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-        <div style="font-weight:600;font-size:13.5px">${esc(r.subject||'—')}</div>
-        ${badge(r.status||'Open')}
-      </div>
-      <div style="font-size:12px;color:var(--slate);margin-top:4px">${esc(r.assigned_dept||r.category||'—')} · ${r.created_at?new Date(r.created_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'}):'—'}</div>
-      ${r.message?`<div style="font-size:12.5px;color:var(--body);margin-top:6px;line-height:1.5">${esc(r.message.slice(0,140))}${r.message.length>140?'…':''}</div>`:''}
-    </div>`).join('')+'</div>';
-}
-
-
 /* ============================ HUMAN RESOURCES ============================ */
 let HR_EMP=null, HR_DIR_Q='', HR_DIR_DEPT='', HR_ATT_DATE=null;
 async function hrEmployees(force){
@@ -10375,10 +10030,6 @@ const USB_COL4={
      said the same words twice. Opening the chat and opening My Tickets are screen-opens with no
      question and no ticket behind them. Raising a ticket is the one action here with two facts to
      its name: the subject in Details, the department it went to in the column. */
-  'helpdesk.tickets':                       {header:'Topic', keys:['category']},
-  'helpdesk.assistant.ask_a_question':      {header:null, keys:[]},
-  'helpdesk.assistant.view_ai_assistant_chat':{header:null, keys:[], hideDetails:true},
-  'helpdesk.tickets.view_my_tickets':       {header:null, keys:[], hideDetails:true},
 
   /* --- single features whose subject is unlike anything else in their tab -------------------- */
   /* Monthly Update is the case that proved per-tab was not enough. Approve/reject and close/reopen
@@ -29074,12 +28725,8 @@ const USAGE_VIEWS={
   'playbook/2':          'playbook.roles_raci.view_raci_roles_by_step',
   // Helpdesk / Reports / Inventory / Maintenance — previously untracked
   // Assistant is Help Desk's default landing tab, reached with NO segment in the hash at all
-  // (the sidebar link is a bare navTo('helpdesk')) - usageViewTick's own fallback for "no segment"
   // is the string '0', not the tab's name, so '0' has to be listed too for that landing to ever
   // match; clicking the Assistant tab explicitly (from Tickets) sets the hash to 'assistant' instead.
-  'helpdesk/0':          'helpdesk.assistant.view_ai_assistant_chat',
-  'helpdesk/assistant':  'helpdesk.assistant.view_ai_assistant_chat',
-  'helpdesk/tickets':    'helpdesk.tickets.view_my_tickets',
   'inventory/0':         'inventory.indents_rfq.view_indent_rfq_pipeline',
   'inventory/1':         'inventory.quote_comparison.view_quote_comparison',
   'inventory/2':         'inventory.purchase_orders.view_purchase_orders',
