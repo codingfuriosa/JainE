@@ -5209,6 +5209,11 @@
         return 'a signature is missing';
       }
       if(key==='Market valuation Sheet') return res.market_valuation_reason || 'higher than the unit price';
+      if(key==='Document Quality'){
+        const uf=res.uncertain_figures||[];
+        if(uf.length) return uf.length+' figure'+(uf.length===1?'':'s')+' hard to read – verify against the original';
+        return (res.document_quality&&res.document_quality.reason)||'scan quality made a figure unreliable';
+      }
       return '';
     };
 
@@ -5255,7 +5260,7 @@
       return [t,false];
     };
     ['Cost Sheet','Market valuation Sheet','KYC of Customer','Mobile Number','Email ID',
-     'Pan Card No.'].forEach(function(k){
+     'Pan Card No.','Document Quality'].forEach(function(k){
       const d=verdict(k); row(k,d[0],d[1]); y-=22;
     });
     (function(){ const src=said(cl['Source']); row('Source',src||'\u2014',!src); y-=22; })();
