@@ -21672,7 +21672,7 @@ async function custTabCostSheet(data,unit){
   const [{data:costItemRows},{data:invRows},{data:uploadedDocs}]=await Promise.all([
     sb.schema('cust').from('cost_sheet_items').select('*').eq('unit_id',unit.id).eq('is_current',true).order('sort_order'),
     sb.schema('cust').from('invoices').select('document_no,document_date,due_date,invoice_type,invoice_items(schedule,net_amount)').eq('unit_id',unit.id).eq('is_current',true).neq('status',CUST_INVOICE_CANCELLED).order('document_date'),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').order('created_at',{ascending:false})
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).eq('doc_type','cost_sheet').is('deleted_at',null).order('created_at',{ascending:false})
   ]);
   const items=costItemRows||[], invoices=invRows||[], uploaded=uploadedDocs||[];
   if(!items.length&&!uploaded.length)return '<div class="card card-pad empty">Your cost sheet hasn\'t been shared yet.</div>';
@@ -21843,11 +21843,14 @@ async function custMediaGrid(list){
 
    Within the flat they are grouped common area / bathroom / kitchen, because that is how people
    ask: "is my kitchen done yet" is not answerable by one long reverse-chronological pile. */
+// Every customer-side read filters deleted_at itself. RLS already hides removed rows from a real
+// customer, but staff (and Staff preview) pass the staff policy, which returns deleted rows too - so
+// preview showed photos an admin had removed and the customer could not see.
 async function custTabProgress(unit){
   const [{data:pPhotos},{data:tPhotos},{data:uPhotos}]=await Promise.all([
-    sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
-    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
+    sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).is('deleted_at',null).order('taken_on',{ascending:false}),
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
+    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false})
   ]);
   let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
     ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
@@ -21872,8 +21875,8 @@ async function custTabProgress(unit){
 }
 async function custTabDocuments(unit){
   const [{data:pDocs},{data:cDocs}]=await Promise.all([
-    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id),
-    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id)
+    sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id).is('deleted_at',null),
+    sb.schema('cust').from('customer_documents').select('*').eq('unit_id',unit.id).is('deleted_at',null)
   ]);
   const docRow=d=>[fileIcon(d.file_type||'')+' '+esc(d.title||d.file_name||'Document'),fmtDate(d.created_at),
     `<button class="btn btn-sm btn-primary" onclick="s3OpenSigned('${d.storage_path.replace(/'/g,"\\'")}','${(d.file_name||'download').replace(/'/g,"\\'")}')"><i class="fa-solid fa-download"></i> Download</button>`];
@@ -21886,7 +21889,7 @@ async function custTabDocuments(unit){
 async function custTabInspection(unit){
   const [{data:checklist},{data:updates}]=await Promise.all([
     sb.schema('cust').from('inspection_checklists').select('*').eq('unit_id',unit.id).maybeSingle(),
-    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
+    sb.schema('cust').from('inspection_updates').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false})
   ]);
   const checklistSection='<div class="sec-title" style="margin:0 0 10px">Inspection checklist</div>'+
     (checklist?
@@ -21897,7 +21900,7 @@ async function custTabInspection(unit){
   return checklistSection+updatesSection;
 }
 async function custTabVideos(){
-  const {data}=await sb.schema('cust').from('process_videos').select('*').order('category').order('created_at',{ascending:false});
+  const {data}=await sb.schema('cust').from('process_videos').select('*').is('deleted_at',null).order('category').order('created_at',{ascending:false});
   const byCat={};(data||[]).forEach(v=>{(byCat[v.category]=byCat[v.category]||[]).push(v);});
   return Object.keys(CPA_VIDEO_CATEGORIES).map(cat=>{
     const vids=byCat[cat]||[];
