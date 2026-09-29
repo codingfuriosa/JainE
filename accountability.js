@@ -7970,7 +7970,7 @@
          first glance. It goes to whoever raised the instance rather than one step back: they are the
          only person who can actually correct it. Not styled as a destructive action any more, since
          nothing is destroyed - it is a return. */
-      const rejectBtn='<button class="ac-btn" title="Send the whole '+esc2(wfNounOf(flow).lc)+' back to whoever raised it" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
+      const rejectBtn='<button class="ac-btn" title="Mark this '+esc2(wfNounOf(flow).lc)+' Sent Back and hold it yourself until it is corrected" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
@@ -8045,7 +8045,7 @@
       +'<div class="tp-card" id="wfUpdCard"><h3><i class="fa-solid fa-comments" style="color:#16a34a"></i> Updates &amp; Feedback'+tip('Everything posted here is visible to EVERYONE in this workflow — there are no private notes. Whatever you write stays with the '+wfNounOf(flow).lc+' as it moves to the next person, and rejection reasons appear here too.')+'</h3>'
         +wfOriginalAttachmentHtml(caseRow,flow)+wfQrCodeAttachmentHtml(caseRow,flow)
         +'<div class="wf-updlist" id="wfUpdList">'+(updates.length?updates.map(function(u){return wfUpdateHtml(u,attsByUpdate[u.id]);}).join(''):'<div class="ac-empty" style="cursor:default;border:0">No updates yet</div>')+'</div>'
-        +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Rejecting this step — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm rejection</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
+        +'<div id="wfRejectBar" class="wf-reject-bar" style="display:none"><span><i class="fa-solid fa-ban"></i> Marking this Sent Back — add a reason below (optional), then:</span><span class="wf-reject-acts"><button class="ac-btn danger" onclick="wfDoReject('+fcs.id+','+fcs.case_id+')">Confirm</button><button class="ac-btn" onclick="wfRejectCancel()">Cancel</button></span></div>'
         +'<div class="wf-updbar"><input class="ac-in" id="wfUpdIn" placeholder="Write an update…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wfPostUpdate('+fcs.case_id+');}"><label class="ac-btn ic" title="Attach files" id="wfUpdFileLbl"><i class="fa-solid fa-paperclip"></i><input type="file" id="wfUpdFile" multiple style="display:none" onchange="wfUpdFilePicked(this)"></label><button class="ac-btn primary ic" onclick="wfPostUpdate('+fcs.case_id+')"><i class="fa-solid fa-paper-plane"></i></button></div>'
         +'<div id="wfUpdFileList" class="wf-updfile-list"></div>'
       +'</div></div>';
@@ -8338,12 +8338,14 @@
         if(mine&&Array.isArray(sib)) isFirst=!sib.some(function(x){ return x.seq<mine.seq; });
       }
     }catch(e){}
-    /* Every rejection now goes the same way: the whole thing returns to whoever raised it, every
-       task on it stops, and it only moves again once they have corrected it. Nothing is deleted, so
-       there is no longer anything to warn about - just a plain statement of what happens next. */
-    const who=raisedBy?wfNm(raisedBy):('whoever raised this '+noun);
+    /* IT STAYS WITH YOU. Sending something back used to wind the whole instance to its first step
+       and hand it to whoever raised it, which meant the person who had just objected lost sight of
+       it entirely - and somebody then had to work out where it should really have gone. It now
+       stops where it is, marked Sent Back, and sits with you as a received task until it is put
+       right and you pass it on. */
     const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
-      +' goes back to <b>'+esc2(who)+'</b> to correct. It stops here until they have — nobody else can act on it in the meantime.</span></div>';
+      +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing moves on '
+      +'until you forward it, and the reason is recorded on the '+esc2(noun)+'.</span></div>';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
@@ -8351,20 +8353,20 @@
            rejection is just a rejection and an empty box would only be noise. */
         +(wantsReason
           ? '<label>Reason</label>'
-            +'<textarea id="wfRejReason" rows="4" placeholder="What needs correcting? Be specific — this is all they have to go on."></textarea>'
+            +'<textarea id="wfRejReason" rows="4" placeholder="What needs correcting? This is recorded on the record and is what anybody reviewing it later will read."></textarea>'
             +'<div id="wfRejErr" class="wf-rej-err" style="display:none"></div>'
           : '')
       +'</div>'
       +'<div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button>'
         +'<button class="ac-btn primary" id="wfRejGo" onclick="wfRejectConfirm('+fcsId+','+(wantsReason?'true':'false')+',true)">'
-        +'<i class="fa-solid fa-rotate-left"></i> Send back for correction</button></div>','md');
+        +'<i class="fa-solid fa-rotate-left"></i> Mark Sent Back</button></div>','md');
     if(wantsReason) setTimeout(function(){ const t=$('wfRejReason'); if(t)try{t.focus();}catch(_){} },40);
   };
   window.wfRejectConfirm=async function(fcsId, needReason, ends){
     const box=$('wfRejReason'), err=$('wfRejErr');
     const reason=((box&&box.value)||'').trim();
     if(needReason && reason.length<3){
-      if(err){ err.textContent='Please say why — this is all they will have to go on.'; err.style.display='block'; }
+      if(err){ err.textContent='Please say why — this is what gets recorded against it.'; err.style.display='block'; }
       if(box)try{box.focus();}catch(_){}
       return;
     }
@@ -8373,12 +8375,13 @@
     // nothing is deleted any more, so there are no files to collect first
     try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
     catch(e){
-      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Send back for correction'; }
+      if(go){ go.disabled=false; go.innerHTML='<i class="fa-solid fa-rotate-left"></i> Mark Sent Back'; }
       toast('Could not send it back: '+((e&&e.message)||e),'err'); return;
     }
     await wfLogReject(um, cid);
     closeModal();
-    toast('Sent back for correction — an email has gone out','ok');
+    // No email: the one person who needs to know is the one who pressed it.
+    toast('Marked Sent Back — it is with you as a received task','ok');
     navTo('tasks/work');
   };
   window.wfRejectCancel=function(){ const bar=$('wfRejectBar'); if(bar) bar.style.display='none'; };
@@ -8386,10 +8389,14 @@
   window.wfRowReject=function(fcsId, caseId, taskId){ wfRejectStart(fcsId, caseId); };
   window.wfDoReject=async function(fcsId, caseId){
     const um=await wfStepUsageMeta(fcsId);
-    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId}); if(error)throw error; }
-    catch(e){ toast('Could not reject: '+((e&&e.message)||e),'err'); return; }
+    const box=$('wfRejReason');
+    const reason=((box&&box.value)||'').trim();
+    try{ const {error}=await ACC().rpc('wf_reject',{p_fcs_id:fcsId, p_reason:reason}); if(error)throw error; }
+    catch(e){ toast('Could not send it back: '+((e&&e.message)||e),'err'); return; }
     await wfLogReject(um, caseId!=null?caseId:await wfCaseIdOfStep(fcsId));
-    toast('Step rejected — sent back to the previous person','ok'); navTo('tasks/work');
+    // It never went "to the previous person" - it said so, but the instance went to the raiser.
+    // Now it stays here, and the message says the thing that actually happened.
+    toast('Marked Sent Back — it is with you as a received task','ok'); navTo('tasks/work');
   };
 
   // Revert: pull the flow back to me from whoever currently holds it
@@ -9113,9 +9120,54 @@
 
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
-  let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
+  let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case','interview']);
   let GCAL_LAST=null; // {byDate,list,asg}
   let GCAL_CASES=[]; // Legal cases with an upcoming Action Date and/or Next Date — only ever populated for users with 'legal' module access
+  /* SCHEDULED INTERVIEWS, FOR THE PEOPLE WHOSE JOB THEY ARE.
+
+     Booking one created a task for each interviewer and a stage on the candidate, and left no
+     mark at all on the calendar - the one screen somebody looks at to answer "what is happening
+     on Thursday". Now it is a bar like everything else.
+
+     Same permission as the + that books them: HR, Abhay Mati and Administrators. Not
+     participation-based like tasks and meetings, because an interview is HR's business whoever is
+     holding it - the interviewer already has a task about theirs. */
+  let GCAL_INTERVIEWS=[];
+  function gcalCanSeeInterviews(){
+    return !!(typeof recCanWrite==='function' && recCanWrite());
+  }
+  async function gcalInterviewsLoadData(){
+    if(!gcalCanSeeInterviews()){ GCAL_INTERVIEWS=[]; return GCAL_INTERVIEWS; }
+    try{
+      const {data}=await sb.schema('hr').from('interviews')
+        .select('id,candidate_id,scheduled_at,holders,decision,candidates(name,position)')
+        .order('scheduled_at',{ascending:true});
+      /* ONCE IT HAS AN OUTCOME IT COMES OFF THE CALENDAR.
+
+         A calendar answers "what is happening, and what still needs me". An interview that has
+         been held and recorded is neither - it is history, and it lives on the candidate's row
+         and in Monthly Progress. Leaving the bars there meant the week filled up with interviews
+         that were already finished, and the one or two still needing a verdict were lost among
+         them.
+
+         A deleted candidate takes their interviews with them at the database - the foreign key
+         cascades - so that case needs nothing here: the row is simply not returned any more. */
+      GCAL_INTERVIEWS=(data||[]).filter(function(iv){return !!iv.scheduled_at&&!iv.decision;}).map(function(iv){
+        const c=iv.candidates||{};
+        const when=new Date(iv.scheduled_at);
+        // Bucketed by the Indian date, because that is the day the office means - a 9pm UTC
+        // booking is the next morning here, and would otherwise land on the wrong square.
+        const ist=new Date(when.getTime()+(330+when.getTimezoneOffset())*60000);
+        const pad=function(x){return String(x).padStart(2,'0');};
+        iv.date_iso=ist.getFullYear()+'-'+pad(ist.getMonth()+1)+'-'+pad(ist.getDate());
+        iv.time_label=((ist.getHours()%12)||12)+':'+pad(ist.getMinutes())+' '+(ist.getHours()<12?'AM':'PM');
+        iv.title='Interview \u00b7 '+(c.name||'Candidate')+(c.position?(' \u00b7 '+c.position):'');
+        iv.cand_name=c.name||''; iv.cand_position=c.position||'';
+        return iv;
+      });
+    }catch(e){ GCAL_INTERVIEWS=[]; }
+    return GCAL_INTERVIEWS;
+  }
   // Legal dates ride the same Calendar as tasks/meetings, but visibility is permission-based
   // (module access), not participation-based like tasks/meetings — not everyone who can see the
   // Calendar has Legal access, so this must be checked before ever querying mis_cases.
@@ -9143,7 +9195,7 @@
     return [iso(mon),iso(sun)];
   }
   async function gcalLoadData(){
-    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData(), gcalCasesLoadData()]).then(r=>[r[0],r[1]]);
+    const [list,{tasks,asg}]=await Promise.all([people(), loadAll(), mtgLoadData(), gcalCasesLoadData(), gcalInterviewsLoadData()]).then(r=>[r[0],r[1]]);
     // Completed tasks never appear on the calendar (matches the old behaviour) — only active, dated tasks.
     const withDue=tasks.filter(t=>t.due_date && stOf(t)!=='approved');
     const byDate={};
@@ -9163,7 +9215,11 @@
     // A case's own separate Next Date lands as its own entry, same day or not — a case can appear
     // twice on the calendar (once per date) when both happen to be set.
     const nextDateItems=past?[]:(GCAL_CASES||[]).filter(function(c){return c.case_next_date_iso===dateStr;}).map(function(c){return {t:c,kind:'nextdate'};});
-    return items.concat(mtgItems).concat(caseItems).concat(nextDateItems).filter(x=>{
+    /* Past interviews stay on the calendar, unlike past legal dates: an interview that happened
+       is a record of the day, and a verdict may still be outstanding on it. */
+    const ivItems=(GCAL_INTERVIEWS||[]).filter(function(iv){return iv.date_iso===dateStr;})
+      .map(function(iv){return {t:iv,kind:'interview'};});
+    return items.concat(mtgItems).concat(caseItems).concat(nextDateItems).concat(ivItems).filter(x=>{
       // Next Date entries share the "Legal dates" toggle with Action Date entries — one shared
       // filter key, not two, since they are the same underlying legal case.
       if(!GCAL_FILTERS.has(x.kind==='nextdate'?'case':x.kind))return false;
@@ -9171,13 +9227,118 @@
       return true;
     });
   }
-  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':(kind==='nextdate'?'#0e7490':'#16a34a'))); }
-  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : (x.kind==='nextdate' ? ('n'+x.t.id) : String(x.t.id))); }
+  function gcalEvColor(kind){ return kind==='toMe'?'#2563eb':(kind==='meeting'?'#ea580c':(kind==='case'?'#1e3a8a':(kind==='nextdate'?'#0e7490':(kind==='interview'?'#7c3aed':'#16a34a')))); }
+  function gcalItemKey(x){ return x.kind==='meeting' ? ('m'+x.t.id) : (x.kind==='case' ? ('c'+x.t.id) : (x.kind==='nextdate' ? ('n'+x.t.id) : (x.kind==='interview' ? ('i'+x.t.id) : String(x.t.id)))); }
   window.gcalOpenItem=function(key){
     key=String(key);
     if(key.charAt(0)==='m'){ window.gcalOpenMeetingPanel(Number(key.slice(1))); }
     else if(key.charAt(0)==='c'||key.charAt(0)==='n'){ window.gcalOpenCase(Number(key.slice(1))); }
+    else if(key.charAt(0)==='i'){ window.gcalOpenInterview(Number(key.slice(1))); }
     else { window.gcalOpenTask(Number(key)); }
+  };
+
+  /* The calendar is often the screen you are standing on when a verdict is recorded - its day
+     panel lists the very task you press. Reloading it means the bar goes at once, rather than
+     lingering until the next visit and reading as though the verdict had not taken. Does nothing
+     when the calendar is not on screen. */
+  async function gcalReloadIfOpen(){
+    if(!$('gcalBody')) return;
+    try{ await gcalLoadData(); await gcalRefresh(); }catch(_e){}
+  }
+
+  /* A booking whose day went by more than 24 hours ago and that nobody has answered. The grace
+     period is deliberate: an interview held at 4pm is not late at 4:05, and a Reschedule button
+     sitting there on the morning of the interview is an invitation to move it. */
+  window.ivIsStale=function(ivId){
+    const v=(window._ivInfo||{})[ivId];
+    if(!v||!v.scheduled_at||v.decision) return false;
+    return (Date.now()-new Date(v.scheduled_at).getTime()) > 24*3600*1000;
+  };
+
+  /* MOVING ONE, rather than cancelling it and booking another. It is the same conversation on a
+     different day, so it keeps its own record and its own tasks; the Tracker's date and the
+     candidate's stage follow it, which is what puts the new date in front of HR and keeps
+     Monthly Progress counting them as Interview Scheduled. */
+  window.ivReschedule=async function(ivId){
+    if(!(typeof recCanWrite==='function'&&recCanWrite())){
+      toast('Only HR, Abhay Mati and Administrators can move an interview','err'); return;
+    }
+    const v=(window._ivInfo||{})[ivId]||{};
+    const pad=function(x){return String(x).padStart(2,'0');};
+    const t=new Date();
+    const nowIst=new Date(t.getTime()+(330+t.getTimezoneOffset())*60000);
+    const todayStr=nowIst.getFullYear()+'-'+pad(nowIst.getMonth()+1)+'-'+pad(nowIst.getDate());
+    // Opens on tomorrow: the old date has gone, so today is rarely what is meant.
+    const tm=new Date(nowIst.getTime()+24*3600*1000);
+    const dStr=tm.getFullYear()+'-'+pad(tm.getMonth()+1)+'-'+pad(tm.getDate());
+    const was=v.scheduled_at
+      ? new Date(new Date(v.scheduled_at).getTime()+(330+new Date(v.scheduled_at).getTimezoneOffset())*60000)
+      : null;
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-day"></i> Move this interview</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<div style="font-size:15px;font-weight:700">'+esc2(v.candidate_name||'Candidate')+'</div>'
+      +(v.position_title?'<div style="color:var(--slate);font-size:13px;margin-top:2px">'+esc2(v.position_title)+'</div>':'')
+      +(was?'<div style="margin-top:10px;font-size:12.5px;color:var(--slate)">Was '
+            +esc2(pad(was.getDate())+'/'+pad(was.getMonth()+1)+'/'+was.getFullYear())+' at '
+            +esc2(((was.getHours()%12)||12)+':'+pad(was.getMinutes())+' '+(was.getHours()<12?'AM':'PM'))
+            +' \u2014 nobody recorded an outcome.</div>':'')
+      +'<div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;margin-top:12px">'
+      +'<div><label style="margin-top:0">New date</label><input type="date" id="ivRsDate" class="inp" value="'+dStr+'" min="'+todayStr+'" onchange="ivRsTimeRefresh()"></div>'
+      +'<div><label style="margin-top:0">Time <span style="font-size:11px;color:var(--slate)">IST</span></label>'
+      +'<select id="ivRsTime" class="sel">'+ivTimeOptions(dStr)+'</select></div></div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="ivRsGo" onclick="ivRescheduleGo('+ivId+')"><i class="fa-solid fa-check"></i> Move it</button></div>');
+  };
+  window.ivRsTimeRefresh=function(){
+    const d=$('ivRsDate'), t=$('ivRsTime');
+    if(d&&t) t.innerHTML=ivTimeOptions(d.value);
+  };
+  window.ivRescheduleGo=async function(ivId){
+    const date=($('ivRsDate')||{}).value, time=($('ivRsTime')||{}).value;
+    if(!date||!time){ toast('Choose a date and a time','err'); return; }
+    // +05:30 spelt out, so the moment stored is the one picked in Indian time whatever the
+    // machine's own clock is set to.
+    const when=new Date(date+'T'+time+':00+05:30');
+    if(isNaN(when.getTime())){ toast('That date and time could not be read','err'); return; }
+    if(when.getTime()<Date.now()){ toast('That time has already passed \u2014 choose a later one','err'); return; }
+    const btn=$('ivRsGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      const {data,error}=await sb.schema('hr').rpc('interview_reschedule',
+        {p_interview_id:ivId, p_when:when.toISOString()});
+      if(error) throw new Error(error.message);
+      closeModal();
+      toast('Moved to '+((data&&data.when)||'the new time')+' \u2014 the Tracker and Monthly Progress follow it','ok');
+      await gcalReloadIfOpen();
+      hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Move it';}
+      toast('Could not move it: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  /* Read-only: the verdict belongs to the task, where HR records it, and scheduling belongs to
+     the + button. This says who, when and what was decided. */
+  window.gcalOpenInterview=function(id){
+    const iv=(GCAL_INTERVIEWS||[]).find(function(x){return Number(x.id)===Number(id);});
+    if(!iv){ toast('That interview is no longer on the calendar','err'); return; }
+    const holders=(iv.holders||[]).join(', ')||'nobody recorded';
+    // Only interviews still waiting for an answer reach the calendar, so this is what it says.
+    const verdict=iv.decision
+      ? '<span class="tag '+(iv.decision==='Selected'?'t-green':'t-red')+'">'+esc2(iv.decision)+'</span>'
+      : '<span style="color:var(--slate)">Waiting on HR to record the outcome</span>';
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-user-tie"></i> Interview</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<div style="font-size:16px;font-weight:700">'+esc2(iv.cand_name||'Candidate')+'</div>'
+      +(iv.cand_position?'<div style="color:var(--slate);font-size:13px;margin-top:2px">'+esc2(iv.cand_position)+'</div>':'')
+      +'<div style="margin-top:14px;display:grid;gap:8px;font-size:13.5px">'
+      +'<div><b>When</b><br>'+esc2(iv.date_iso)+' at '+esc2(iv.time_label)+' IST</div>'
+      +'<div><b>Held by</b><br>'+esc2(holders)+'</div>'
+      +'<div><b>Outcome</b><br>'+verdict+'</div>'
+      +'</div></div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
   };
 
   /* ---- sidebar: mini month calendar ---- */
@@ -9215,14 +9376,20 @@
     const caseRow=gcalCanSeeCases()
       ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('case')?'checked':'')+' onchange="gcalToggleFilter(\'case\',this.checked)"><span class="gcal-filter-dot" style="background:#1e3a8a"></span>Legal dates</label>'
       : '';
+    // Only drawn for the people who can see interviews at all - a toggle for something you never
+    // see is a control that does nothing.
+    const ivRow=gcalCanSeeInterviews()
+      ? '<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('interview')?'checked':'')+' onchange="gcalToggleFilter(\'interview\',this.checked)"><span class="gcal-filter-dot" style="background:#7c3aed"></span>Interviews</label>'
+      : '';
     return '<div class="gcal-filters"><div class="gcal-filters-title">Quick filters</div>'+rows
       +'<label class="gcal-filter-row"><input type="checkbox" '+(GCAL_FILTERS.has('meeting')?'checked':'')+' onchange="gcalToggleFilter(\'meeting\',this.checked)"><span class="gcal-filter-dot" style="background:#ea580c"></span>Meetings</label>'
+      +ivRow
       +caseRow
       +'</div>';
   }
   window.gcalToggleFilter=function(k,on){ if(on)GCAL_FILTERS.add(k); else GCAL_FILTERS.delete(k);
     try{ usageQueue('tasks.calendar.filter_by_assigned_to_me_by_me_meetings_legal_dates','search',
-      {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
+      {title:({toMe:'Assigned to me',byMe:'Assigned by me',meeting:'Meetings',case:'Legal dates',interview:'Interviews'}[k]||k)+' — '+(on?'on':'off')}); }catch(_e){}
     gcalRenderOnly(); };
 
   /* Which way the calendar is being read, for the Usability report.
@@ -9552,7 +9719,215 @@
   /* ---- Create button + floating action button ----
      Task-creation from the calendar is disabled for now — once Meetings exist this
      will be redesigned around them rather than quietly creating a plain Task. */
-  window.gcalQuickAdd=function(){ window._mtgAutoOpenCreate=true; navTo('tasks/meetings'); };
+  /* THE + ON THE CALENDAR BOOKS AN INTERVIEW.
+
+     It used to be a shortcut to the meeting form. Meetings keep their own screen and their own
+     Schedule Meeting button, so nothing is lost by giving this the job it is actually wanted for -
+     and the + is now only drawn for HR and the Administrator, which is exactly who books
+     interviews. */
+  window.gcalQuickAdd=function(){ ivOpenSchedule(); };
+
+  /* ── SCHEDULING AN INTERVIEW ───────────────────────────────────────────────────────────
+     Three questions: who, when, and who is holding it. The candidate list is built by the
+     database (hr.interviewable_candidates) rather than filtered here, so the rule about who can
+     still be interviewed - on an open position, approved, not yet at an outcome - lives in one
+     place and cannot drift between this window and anything else that asks. */
+  window.ivOpenSchedule=async function(){
+    if(!(typeof recCanWrite==='function'&&recCanWrite())){
+      toast('Only HR, Abhay Mati and Administrators can schedule an interview','err'); return;
+    }
+    /* WHO HOLDS IT IS NOT ASKED ANY MORE. It is HR, every time, so the list of people is gone
+       and the database resolves the HR group itself - which also means adding somebody to the HR
+       department is the one place that changes. */
+    let cands=[];
+    try{
+      const cR=await sb.schema('hr').rpc('interviewable_candidates');
+      cands=cR.data||[];
+    }catch(e){ toast('Could not load candidates: '+((e&&e.message)||e),'err'); return; }
+
+    if(!cands.length){
+      openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-plus"></i> Schedule an interview</h3>'
+        +'<span class="x" onclick="closeModal()">&times;</span></div>'
+        +'<div class="modal-body frm"><div style="padding:18px;text-align:center;color:var(--slate);font-size:13.5px">'
+        +'Nobody is ready to be interviewed.<br><br>A candidate appears here once their position is open, '
+        +'they have been approved, and they have not already been selected, rejected or put on hold.'
+        +'</div></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>');
+      return;
+    }
+
+    /* EVERYTHING HERE IS RECKONED IN IST, WHATEVER THE MACHINE IS SET TO.
+
+       The first version used the browser's own clock. On a laptop set to IST that is right by
+       accident; on one set to anything else it is wrong twice over - the date picker's idea of
+       "today" is a different day from the office's, and the moment saved is not the moment the
+       person chose. The Tracker then prints the time converted back to IST, so the booking and
+       the row disagree and neither is obviously at fault.
+
+       India has no daylight saving, so IST is always UTC+5:30 and a fixed offset is exact rather
+       than an approximation. istNow gives a Date whose ordinary fields - getHours, getDate - read
+       as Indian time, which is what the pickers need. */
+    const IST_OFFSET_MIN=330;
+    const pad=function(x){return String(x).padStart(2,'0');};
+    const istNow=function(){
+      const t=new Date();
+      return new Date(t.getTime()+(IST_OFFSET_MIN+t.getTimezoneOffset())*60000);
+    };
+    const istDateStr=function(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); };
+
+    const nowIst=istNow();
+    const todayStr=istDateStr(nowIst);
+    /* Opens on today while a slot is still left on it, and on tomorrow once the working day is
+       gone - the same 15-minute notice ivTimeOptions uses, so the date it opens on is always a
+       date that actually has times under it. */
+    const LAST_SLOT_MIN=20*60;
+    const dStr=((nowIst.getHours()*60+nowIst.getMinutes()+15)<=LAST_SLOT_MIN)
+      ? todayStr
+      : istDateStr(new Date(nowIst.getTime()+24*3600*1000));
+
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-calendar-plus"></i> Schedule an interview</h3>'
+      +'<span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm">'
+      +'<label style="margin-top:0">Candidate</label>'
+      +'<select id="ivCand" class="sel">'
+      +cands.map(function(c){
+          return '<option value="'+c.id+'">'+esc2(c.name||'Unnamed')
+            +(c.position_title?(' \u00b7 '+esc2(c.position_title)):'')
+            +(c.stage?(' \u00b7 '+esc2(c.stage)):'')+'</option>';
+        }).join('')
+      +'</select>'
+      +'<div class="two" style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">'
+      +'<div><label>Date</label><input type="date" id="ivDate" class="inp" value="'+dStr+'" min="'+todayStr+'" onchange="ivTimeRefresh()"></div>'
+      +'<div><label>Time <span style="font-size:11px;color:var(--slate)">IST</span></label>'
+      +'<select id="ivTime" class="sel">'+ivTimeOptions(dStr)+'</select></div></div>'
+      +'<div style="margin-top:14px;background:var(--bg);border:1px solid var(--line);border-radius:8px;'
+       +'padding:10px 12px;font-size:12.5px;color:var(--slate)">'
+       +'<i class="fa-solid fa-users" style="margin-right:6px"></i>'
+       +'HR will be given the task to record the outcome. The first answer is the one that counts.'
+      +'</div>'
+      +'</div>'
+      +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      +'<button class="btn btn-primary" id="ivGo" onclick="ivScheduleGo()"><i class="fa-solid fa-check"></i> Schedule</button></div>');
+  };
+
+  /* The slots for one day. On today it starts from the next half hour, so a time that has gone
+     is not offered at all - a disabled option somebody cannot pick is still a question they have
+     to read and dismiss. On any later day the full working range is there. */
+  window.ivTimeOptions=function(dayStr){
+    const IST_OFFSET_MIN=330;
+    const pad=function(x){return String(x).padStart(2,'0');};
+    const t=new Date();
+    const nowIst=new Date(t.getTime()+(IST_OFFSET_MIN+t.getTimezoneOffset())*60000);
+    const todayStr=nowIst.getFullYear()+'-'+pad(nowIst.getMonth()+1)+'-'+pad(nowIst.getDate());
+    const isToday=(String(dayStr||'')===todayStr);
+    /* The next slot that has not gone, and nothing further. A 15-minute cushion was added here
+       on the theory that nobody books an interview for two minutes' time - but at 2:56 it pushed
+       the first offer to 3:30 and hid 3:00, which is a perfectly good time and the obvious one to
+       want. A slot in the future is offered; the cushion was inventing a rule nobody asked for. */
+    const minMinutes=isToday?(nowIst.getHours()*60+nowIst.getMinutes()+1):0;
+    let o='', first=true;
+    for(let h=8;h<=20;h++){
+      for(const m of ['00','30']){
+        const mins=h*60+(m==='00'?0:30);
+        if(mins<minMinutes||mins>20*60) continue;   // 8 PM is the last slot, not 8:30
+        const lbl=((h%12)||12)+':'+m+' '+(h<12?'AM':'PM');
+        o+='<option value="'+pad(h)+':'+m+'"'+(first?' selected':'')+'>'+lbl+'</option>';
+        first=false;
+      }
+    }
+    if(!o) o='<option value="">No time left today \u2014 choose another date</option>';
+    return o;
+  };
+  window.ivTimeRefresh=function(){
+    const d=$('ivDate'), t=$('ivTime');
+    if(d&&t) t.innerHTML=ivTimeOptions(d.value);
+  };
+
+  window.ivScheduleGo=async function(){
+    const cid=parseInt(($('ivCand')||{}).value,10);
+    const date=($('ivDate')||{}).value;
+    const time=($('ivTime')||{}).value;
+    if(!cid){ toast('Choose a candidate','err'); return; }
+    if(!date){ toast('Choose a date','err'); return; }
+
+    /* THE OFFSET IS SPELT OUT, SO THE INSTANT STORED IS THE ONE THEY PICKED IN INDIAN TIME.
+
+       Without +05:30 the browser reads the value in its own zone. On a machine set to IST that
+       happens to be right; on any other it quietly stores a different moment, and the Tracker -
+       which prints times converted to IST - then shows an hour nobody chose. */
+    const when=new Date(date+'T'+time+':00+05:30');
+    if(isNaN(when.getTime())){ toast('That date and time could not be read','err'); return; }
+    /* The dropdown no longer offers a time that has gone, so this is now a backstop rather than
+       the only guard - it still matters for a window left open across the slot it was showing. */
+    if(when.getTime() < Date.now()){
+      toast('That time has already passed — choose a later one','err'); return;
+    }
+
+    const btn=$('ivGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      const {error}=await sb.schema('hr').rpc('interview_schedule',
+        {p_candidate_id:cid, p_when:when.toISOString()});
+      if(error) throw new Error(error.message);
+      closeModal();
+      toast('Interview scheduled \u2014 HR has the task to record the outcome','ok');
+      if(typeof calendarTab==='function') navTo('tasks/calendar');
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Schedule';}
+      toast('Could not schedule: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  /* ── THE VERDICT ───────────────────────────────────────────────────────────────────────
+     Only Selected and Rejected, because those are the only two things an interviewer decides.
+     Joined, Hold and Backed Out are HR's, and they are what is left on the Interviews dropdown. */
+  window.ivDecide=async function(interviewId,decision){
+    if(!await confirmDialog(
+        'Record this interview as '+decision+'?'
+        +(decision==='Rejected'?' The candidate will be emailed to say they were not successful.':'')
+        +' The first answer is the one that counts \u2014 once it is in, the other interviewers can '
+        +'no longer change it.',
+        {title:decision, okLabel:decision, icon:decision==='Selected'?'fa-check':'fa-xmark',
+         danger:decision==='Rejected'}))return;
+    try{
+      const {data,error}=await sb.schema('hr').rpc('interview_decide',
+        {p_interview_id:interviewId, p_decision:decision});
+      if(error) throw new Error(error.message);
+      if(data&&data.ok===false&&data.already){
+        toast('Already recorded as '+data.decision+' by '+(data.by||'someone else'),'warn');
+        await gcalReloadIfOpen();
+        hrAfterApprovalAction();
+        return;
+      }
+      toast('Recorded as '+decision,'ok');
+
+      /* A REJECTION HERE IS STILL A REJECTION, SO THE CANDIDATE IS STILL TOLD.
+
+         The letter was wired to the two HR routes and not to this one, so being turned down at
+         interview - the most likely way of all - happened in silence.
+
+         Sent after the verdict is recorded, so a mail failure cannot leave somebody told about a
+         decision the record does not show. The interview id travels with it because an interviewer
+         is usually NOT one of the four people allowed to email candidates, and holding this
+         interview is what entitles them to send this one letter. */
+      if(decision==='Rejected'&&data&&data.candidate_id){
+        try{
+          const {data:c}=await sb.schema('hr').from('candidates')
+            .select('name,email,position').eq('id',data.candidate_id).single();
+          if(c&&String(c.email||'').trim()){
+            const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+              {body:{kind:'candidate_rejected',name:c.name||'',email:c.email,
+                     position:c.position||'',interview_id:interviewId}});
+            if(se||(sent&&sent.error)) toast('Recorded, but the email failed: '+((sent&&sent.error)||se.message),'err');
+            else toast(c.email+' has been told','ok');
+          }else{
+            toast('No email address on file, so the candidate was not told','warn');
+          }
+        }catch(e){ toast('Recorded, but the email failed: '+((e&&e.message)||e),'err'); }
+      }
+      await gcalReloadIfOpen();
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+
 
   /* ---- drag & drop: dragging a task or one-time-meeting row onto another day moves its date ----
      Uses pointer events (not native HTML5 DnD) to match the touch-friendly drag pattern already used
@@ -9851,7 +10226,15 @@
       +'</div>'
       +'<div class="gcal-backdrop" id="gcalBackdrop" onclick="gcalClosePanel()"></div>'
       +'<div class="gcal-panel" id="gcalPanel"><div class="gcal-panel-head"><b>Details</b><div class="x" onclick="gcalClosePanel()"><i class="fa-solid fa-xmark"></i></div></div><div class="gcal-panel-body"></div><div class="gcal-panel-foot"></div></div>'
-      +'<button class="gcal-fab" onclick="gcalQuickAdd()" title="Schedule a meeting"><i class="fa-solid fa-plus"></i></button>';
+      /* THE + IS FOR THE PEOPLE WHO BOOK THINGS, NOT EVERYONE WHO LOOKS AT THE CALENDAR.
+         Most of the company reads this screen to see what is happening; scheduling is HR's and the
+         Administrator's job. A button that everybody can press and nobody else should is an
+         invitation to a mistake, and hiding it is honest here because the actions behind it are
+         refused for everybody else anyway. recCanWrite comes from nexus-core.js, which this page
+         loads, and is the same question every other HR control asks. */
+      +((typeof recCanWrite==='function'&&recCanWrite())
+        ? '<button class="gcal-fab" onclick="gcalQuickAdd()" title="Schedule"><i class="fa-solid fa-plus"></i></button>'
+        : '');
     gcalWireDrag($('gcalBody'));
     gcalWireTimeDrag();
   }
@@ -10980,6 +11363,18 @@
     const b=$('acBody');
     const [list,{tasks,asg,pm},myRanks]=await Promise.all([people(), loadAll(), loadMyRanks()]);
     const delegatedByMeIds=new Set(tasks.filter(t=>t.parent_task_id&&isOwner(t)).map(t=>t.parent_task_id));
+    /* When each interview is and whether it has been answered, so a card can decide whether to
+       offer Reschedule. Read once for the whole visible list rather than a query per card. */
+    window._ivInfo={};
+    try{
+      const ivIds=Array.from(new Set(tasks.filter(function(t){return t.interview_id!=null;})
+                                          .map(function(t){return t.interview_id;})));
+      if(ivIds.length){
+        const {data:ivs}=await sb.schema('hr').rpc('interviews_info',{p_ids:ivIds});
+        (ivs||[]).forEach(function(v){ window._ivInfo[v.id]=v; });
+      }
+    }catch(_e){ window._ivInfo={}; }
+
     // Workflow step state (per-task) so rows can show Forward vs Receive/Reject correctly
     window._wfStepInfo={};
     try{
@@ -11947,10 +12342,40 @@
     // Pending Approval card - it's exactly what Recruitment's own tab used to be - but Approve/
     // Decline here must run the actual domain action (approve a JD, connect a referral) rather than
     // the generic subtree-completion bookkeeping accApprove/accDecline do for an ordinary task.
+    /* THE DOCUMENT YOU ARE BEING ASKED TO APPROVE, ON THE TASK.
+       Approving a job description meant leaving Accountability, finding Recruitment, finding the
+       request and opening it from there - four steps to read the one thing the decision is about,
+       which is how approvals get rubber-stamped. The paperclip builds the same PDF Recruitment
+       does, from the same bytes, in a new tab. accountability.html loads nexus-core.js, so
+       hrJdPdfDownload is already here. */
     const approve=opt.approve?(t.manpower_request_id!=null
-      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve" onclick="hrTaskApproveManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ic" style="height:30px;width:30px" title="Open the job description" onclick="hrTaskOpenJd(${t.manpower_request_id})"><i class="fa-solid fa-paperclip"></i></button><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve" onclick="hrTaskApproveManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectManpower(${t.id},${t.manpower_request_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      /* APPROVE, NOT CONNECT. The task asks whether to accept the referral; connecting it to a
+         position is what HR does afterwards, in the Referrals tab, once it has been accepted.
+         Putting Connect here made the approval queue ask one question and offer the answer to a
+         different one - and left the task titled "Approve Referral" with no Approve button on it. */
       :t.referral_id!=null
-      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Connect to a position" onclick="hrTaskConnectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-link"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this referral" onclick="hrTaskApproveReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this referral" onclick="hrTaskRejectReferral(${t.id},${t.referral_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      /* A JOB DESCRIPTION AND A CANDIDATE NEEDED THEIR OWN BRANCHES.
+         Without them both fell through to the generic accApprove/accDecline at the end, which does
+         the subtree bookkeeping for an ordinary task: the row vanished from the card and nothing
+         happened to the description or the candidate. A button that ticks itself off and changes
+         nothing is worse than a missing one, because it reports success. */
+      :t.job_description_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve and publish to the Document Library" onclick="hrTaskApproveJd(${t.id},'${t.job_description_id}')"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject" onclick="hrTaskRejectJd(${t.id},'${t.job_description_id}')"><i class="fa-solid fa-xmark"></i></button></div>`
+      :t.candidate_id!=null
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve this candidate" onclick="hrTaskApproveCandidate(${t.id},${t.candidate_id})"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Reject this candidate" onclick="hrTaskRejectCandidate(${t.id},${t.candidate_id})"><i class="fa-solid fa-xmark"></i></button></div>`
+      /* An interview verdict, which is a different question from approving somebody: this asks how
+         the interview went, and the answer moves the candidate straight to Selected or Rejected. */
+      :t.interview_id!=null
+      /* RESCHEDULE TURNS UP A DAY AFTER THE INTERVIEW SHOULD HAVE HAPPENED.
+
+         Not before: while the day is still ahead, the only honest answers are Selected and
+         Rejected, and offering a third invites the interview to be pushed rather than held. A
+         day after, though, a booking with no verdict is the commonest loose end there is - the
+         candidate did not turn up, or it slipped - and the only ways out were to record a
+         verdict that never happened or leave the task for ever. */
+      ?`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()">${ivIsStale(t.interview_id)?`<button class="ac-btn" style="height:30px" title="Move this interview to another day" onclick="ivReschedule(${t.interview_id})"><i class="fa-solid fa-calendar-day"></i> Reschedule</button>`:''}<button class="ac-btn ok ic" style="height:30px;width:30px" title="Selected" onclick="ivDecide(${t.interview_id},'Selected')"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Rejected" onclick="ivDecide(${t.interview_id},'Rejected')"><i class="fa-solid fa-xmark"></i></button></div>`
       :`<div style="display:flex;gap:5px;flex:none" onclick="event.stopPropagation()"><button class="ac-btn ok ic" style="height:30px;width:30px" title="Approve (A)" onclick="accApprove(${t.id},true)"><i class="fa-solid fa-check"></i></button><button class="ac-btn danger ic" style="height:30px;width:30px" title="Decline (D)" onclick="accDecline(${t.id})"><i class="fa-solid fa-xmark"></i></button></div>`
       ):'';
     const wfInfo=(t.flow_case_step_id!=null)?((window._wfStepInfo||{})[t.flow_case_step_id]||null):null;
@@ -12158,7 +12583,37 @@
     const amOwner=eq(t.delegator,me()), amMember=members.some(e=>eq(e,me())), st=stOf(t); const iHaveDelegated=(dR.data||[]).length>0;
     const selfTask=amOwner&&amMember;
     const locked=ro&&st==='approved';
-    const canEdit=amOwner&&!locked;
+    /* AN HR APPROVAL TASK BELONGS TO ALL FOUR APPROVERS, NOT TO ONE OF THEM.
+
+       Ordinary tasks are owned by whoever delegated them, and only that person may delete one -
+       which is right, because somebody else's task is somebody else's business. The HR approval
+       tasks are different: the system writes four copies of the same question, one per approver,
+       and none of the four "owns" it more than the others. Opening the copy addressed to Khushbu
+       and finding no Delete is correct for a normal task and wrong for this one - it is the same
+       question, and clearing it is the same act.
+
+       So any of the four approvers may delete any copy of an approval task. Everything else is
+       unchanged. */
+    const isHrApproval = t.manpower_request_id!=null || t.referral_id!=null
+                      || t.candidate_id!=null || t.job_description_id!=null
+                      || t.interview_id!=null;
+    const hrApprovers = ['mgr.hr@thejaingroup.com','hr@thejaingroup.com',
+                         'career@thejaingroup.com','ayushruia1@gmail.com'];
+    const amApprover = isHrApproval && hrApprovers.some(e=>eq(e,me()));
+    const canEdit=(amOwner||amApprover)&&!locked;
+
+    /* AN APPROVAL TASK IS THE DECISION, NOT A NOTE ABOUT IT - SO IT CANNOT BE DELETED.
+
+       Deleting one does not cancel the hiring request, the referral, the candidate or the job
+       description behind it. It only removes the question. The record stays Pending for ever,
+       with nothing left anywhere that can approve it and nothing on screen saying so: the request
+       simply stops existing as far as anybody is concerned, and the person who raised it is still
+       waiting. Approve and Reject are the two ways out, and both leave a record of who decided.
+
+       Renaming and re-describing go the same way: the wording is written by the system from the
+       request, and an edited title would describe something other than what is being approved. */
+    const isApprovalTask = isHrApproval;
+    const canEditThis = canEdit && !isApprovalTask;
     const dueHist=acts.filter(a=>a.action==='due date changed');
     window._tp={dueHist,list,amOwner,amMember,tid,canApprove:(amOwner&&st==='await'),selfTask,comments};
     let A='';
@@ -12177,7 +12632,7 @@
     const verb=t.parent_task_id?'Delegated':'Assigned', doneC=subL.filter(s=>s.done).length;
     v.innerHTML=`
     <div class="tp-head">
-      <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEdit?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
+      <div><div class="tp-title"><i class="fa-solid fa-clipboard-check" style="color:#7c3aed"></i> ${esc2(t.title)} ${canEditThis?`<button class="ac-btn ic" style="height:26px;width:26px" title="Rename" onclick="accEditTitle(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div>
         <div class="tp-sub">${selfTask?'Self task':(verb+' to '+(members.map(e=>esc2(nameOf(list,e))).join(', ')||'nobody yet')+' by '+esc2(nameOf(list,t.delegator)))}</div></div>
       <div class="tp-acts">
         <button class="ac-btn ic" title="Back" onclick="navTo('tasks/work')"><i class="fa-solid fa-arrow-left"></i></button>
@@ -12186,11 +12641,12 @@
         ${A}
       </div>
     </div>
-    ${t.description?`<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description${canEdit?`<span class="r"><button class="ac-btn ic" title="Edit" onclick="accEditDesc(${tid})"><i class="fa-solid fa-pen"></i></button></span>`:''}</h3><div class="tp-desc">${mdBold(t.description)}</div></div>`:''}
+    ${t.description?`<div class="tp-card"><h3><i class="fa-solid fa-align-left" style="color:#64748b"></i> Description${canEditThis?`<span class="r"><button class="ac-btn ic" title="Edit" onclick="accEditDesc(${tid})"><i class="fa-solid fa-pen"></i></button></span>`:''}</h3><div class="tp-desc">${mdBold(t.description)}</div></div>`:''}
     <div class="tp-card">
       <h3><i class="fa-solid fa-circle-info" style="color:#64748b"></i> Details<span class="r">
-        ${canEdit?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
-        ${canEdit?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`:''}</span></h3>
+        ${canEditThis?`<button class="ac-btn ic" title="${t.description?'Edit':'Add'} description" onclick="accEditDesc(${tid})"><i class="fa-solid fa-align-left"></i></button>`:''}
+        ${canEditThis?`<button class="ac-btn ic danger" title="Delete" onclick="accTaskDelete(${tid})"><i class="fa-solid fa-trash"></i></button>`
+          :(isApprovalTask&&!locked?`<span style="font-size:11.5px;color:var(--slate);font-weight:500"><i class="fa-solid fa-lock" style="margin-right:5px"></i>Approve or reject to clear this</span>`:'')}</span></h3>
       <div class="tp-grid">
         <div class="tp-f"><div class="k">Due date</div><div class="v">${t.due_date?fmtDateY(t.due_date):'—'}${t.recur?` <span class="dp-chip-rep"><i class="fa-solid fa-rotate"></i> ${esc2(dpDescribe(t.recur))}</span>`:''} ${dueHist.length?`<a onclick="accDueHistory(${tid})" title="History"><i class="fa-solid fa-clock-rotate-left"></i></a>`:''} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit due date" onclick="accEditDue(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
         <div class="tp-f"><div class="k">Tag</div><div class="v">${projName?esc2(projName):'—'} ${canEdit?`<button class="ac-btn ic" style="height:24px;width:24px" title="Edit tag" onclick="accEditProject(${tid})"><i class="fa-solid fa-pen"></i></button>`:''}</div></div>
@@ -12468,7 +12924,21 @@
    whole subject is assignment - so the column had to be taken off it. `sel` is already the final
    member list, so the answer was in hand and simply never written down. */
 try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts.join('; '), assignee:sel.map(e=>nameOf(list,e)).join(', ')}); }catch(_e){}} closeModal();toast('Members updated','ok');renderPage(); }catch(e){toast('Could not update members: '+((e&&e.message)||e),'err');} };
-  window.accTaskDelete=function(tid){ accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
+  /* Guarded here as well as on the button. The button is drawn from data already on screen; this
+     re-reads the task, so a page left open before the rule existed still cannot delete one. */
+  window.accTaskDelete=async function(tid){
+    try{
+      const {data:chk}=await ACC().from('ptasks')
+        .select('manpower_request_id,referral_id,candidate_id,job_description_id,interview_id')
+        .eq('id',tid).single();
+      if(chk&&(chk.manpower_request_id!=null||chk.referral_id!=null||chk.candidate_id!=null
+               ||chk.job_description_id!=null||chk.interview_id!=null)){
+        toast('An approval task cannot be deleted — approve or reject it instead, so the '
+              +'request behind it is not left waiting for ever','err');
+        return;
+      }
+    }catch(_e){ /* cannot confirm what it is - fall through to the normal confirmation */ }
+    accConfirm('Delete this task permanently?', async function(){ try{ const [{data:pf},{data:cm}]=await Promise.all([ ACC().from('ptask_files').select('storage_path').eq('task_id',tid), ACC().from('ptask_comments').select('attach_path').eq('task_id',tid).not('attach_path','is',null) ]); const paths=[...(pf||[]).map(x=>x.storage_path),...(cm||[]).map(x=>x.attach_path)].filter(Boolean); await ACC().from('ptasks').delete().eq('id',tid); if(paths.length)await Promise.all(paths.map(p=>s3Delete(p).catch(()=>{}))); toast('Deleted','ok');navTo('tasks/work');}catch(e){toast('Failed: '+((e&&e.message)||e),'err');} }); };
 
   window.accDelegate=async function(tid){ const list=await people(); const others=list.filter(p=>!eq(p.email,me()));
     openModal(`<div class="modal-head"><h3><i class="fa-solid fa-people-arrows"></i> Delegate task</h3><span class="x" onclick="closeModal()">&times;</span></div><div class="modal-body" style="width:100%;box-sizing:border-box;overflow-x:hidden"><p style="font-size:12.5px;color:var(--slate);margin:0 0 8px">Pick who to delegate to — they become members of a new task you own. People above you will not see it.</p>${msWidget('dgM',others,[])}</div><div class="modal-foot"><button class="ac-btn" onclick="closeModal()">Cancel</button><button class="ac-btn primary" onclick="accDelegateSave(${tid})"><i class="fa-solid fa-check"></i> Delegate</button></div>`,'lg'); };
@@ -12503,11 +12973,51 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
      acc.hr_approval_task_resolve_all - so it disappears from everyone's Pending Approval at once,
      not just the person who acted. ── */
   function hrAfterApprovalAction(){ if(location.hash.includes('/task/'))renderPage(); else if(PAGE==='tasks')tasksScreen(); }
+  /* Reads the request straight from the database rather than from MP_RECORDS, which is
+     Recruitment's in-memory list and is empty on this page. */
+  window.hrTaskOpenJd=async function(mpId){
+    const tab=window.open('','_blank');   // opened on the click, before any await, or it is blocked
+    if(tab){ try{ tab.document.write('<!doctype html><meta charset="utf-8"><title>Opening\u2026</title>'
+      +'<body style="font:16px system-ui;padding:40px;color:#334155">Building the job description\u2026</body>'); }catch(_e){} }
+    try{
+      const {data,error}=await sb.schema('hr').from('manpower_requests')
+        .select('job_title,ai_job_description').eq('id',mpId).single();
+      if(error) throw new Error(error.message);
+      if(!data||!String(data.ai_job_description||'').trim()){
+        if(tab) tab.close();
+        toast('No job description has been written for this request yet','err');
+        return;
+      }
+      const bytes=await jdBuildPdfBytes('Job Description \u2014 '+(data.job_title||''),data.ai_job_description);
+      const blob=new Blob([bytes],{type:'application/pdf'});
+      const url=URL.createObjectURL(blob);
+      if(tab) tab.location.href=url; else window.open(url,'_blank');
+    }catch(e){
+      if(tab) try{ tab.close(); }catch(_e){}
+      toast('Could not open it: '+((e&&e.message)||e),'err');
+    }
+  };
+
   window.hrTaskApproveManpower=async function(tid,mpId){
     try{
       await sb.schema('hr').from('manpower_requests').update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',mpId);
       await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'manpower',p_ref_id:mpId,p_by:me()});
-      toast('Job Description approved','ok'); hrAfterApprovalAction();
+      /* Approving the description is what publishes it. Leaving it in Recruitment would make the
+         approval decorative - the point of approving is that the rest of the company can find it,
+         so the same click copies it into the Document Library under Job Descriptions. */
+      let published=false;
+      try{
+        const {data:jd}=await sb.schema('recruit').from('job_descriptions')
+          .select('id').eq('manpower_request_id',mpId).limit(1);
+        if(jd&&jd[0]){
+          await sb.schema('recruit').from('job_descriptions')
+            .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',jd[0].id);
+          const {error:pubErr}=await sb.schema('recruit').rpc('job_description_publish',{p_id:jd[0].id});
+          published=!pubErr;
+        }
+      }catch(_e){ /* the approval itself still stands */ }
+      toast(published?'Approved \u2014 the description is now in the Document Library':'Job Description approved','ok');
+      hrAfterApprovalAction();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };
   window.hrTaskRejectManpower=function(tid,mpId){
@@ -12531,6 +13041,123 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
       toast('Failed: '+((e&&e.message)||e),'err');
     }
   };
+  /* APPROVING A JOB DESCRIPTION PUBLISHES IT.
+     Marking it approved and leaving it in Recruitment would make the approval decorative - the
+     point of approving a description is that the rest of the company can then find it, so the
+     same click copies it into the Document Library under Job Descriptions. The copy is exactly
+     that: Recruitment keeps its own working record, and re-approving a corrected description
+     updates the published copy instead of leaving two. */
+  window.hrTaskApproveJd=async function(tid,jdId){
+    try{
+      await sb.schema('recruit').from('job_descriptions')
+        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null}).eq('id',jdId);
+      const {error:pubErr}=await sb.schema('recruit').rpc('job_description_publish',{p_id:jdId});
+      await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()});
+      if(pubErr) toast('Approved, but it could not be copied to the Document Library: '+pubErr.message,'err');
+      else toast('Approved \u2014 it is now in the Document Library under Job Descriptions','ok');
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+  window.hrTaskRejectJd=function(tid,jdId){
+    openModal('<div class="modal-head"><h3><i class="fa-solid fa-xmark"></i> Reject Job Description</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+      +'<div class="modal-body frm"><label>Reason</label><textarea id="hrJdRejReason" class="inp" rows="3" placeholder="What needs to change?"></textarea>'
+      +'<div style="font-size:11.5px;color:var(--slate);margin-top:6px">The description stays in Recruitment so it can be corrected. It is not published.</div></div>'
+      +'<div class="modal-foot"><button class="btn btn-primary" id="hrJdRejGo" onclick="hrTaskRejectJdGo(\''+jdId+'\')"><i class="fa-solid fa-xmark"></i> Reject</button><button class="btn" onclick="closeModal()">Cancel</button></div>');
+    setTimeout(function(){ const el=$('hrJdRejReason'); if(el)el.focus(); },100);
+  };
+  window.hrTaskRejectJdGo=async function(jdId){
+    const reason=(($('hrJdRejReason')||{}).value||'').trim();
+    const btn=$('hrJdRejGo'); if(btn){btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>';}
+    try{
+      await sb.schema('recruit').from('job_descriptions')
+        .update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO(),rejection_reason:reason||null}).eq('id',jdId);
+      await ACC().rpc('hr_approval_task_resolve_jd',{p_ref_id:jdId,p_by:me()});
+      closeModal(); toast('Job description rejected','ok'); hrAfterApprovalAction();
+    }catch(e){
+      if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-xmark"></i> Reject';}
+      toast('Failed: '+((e&&e.message)||e),'err');
+    }
+  };
+
+  /* A candidate added by hand. Approving leaves them where they are - they are already in the
+     Interviews list - and simply closes the review. Rejecting sets the stage, which is what the
+     rejection email keys off, so the two stay in step. */
+  /* APPROVING IS WHAT LETS ANYTHING HAPPEN TO THIS PERSON.
+     A candidate starts Pending and the database refuses to move their stage or let a test be sent
+     while they are. hr.candidate_decide is what lifts that, so resolving the task alone is not
+     enough - doing only that would close the task and leave the person frozen, which is the
+     decorative approval this replaced. */
+  window.hrTaskApproveCandidate=async function(tid,candId){
+    try{
+      const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:true});
+      if(error) throw new Error(error.message);
+      await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
+      toast('Candidate approved — they can now be sent a test and moved on','ok');
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+  window.hrTaskRejectCandidate=async function(tid,candId){
+    try{
+      // candidate_decide sets the stage to Rejected itself, which is the one move a Pending
+      // candidate is allowed - otherwise turning somebody down would be impossible.
+      /* ASKED BEFORE ANYTHING HAPPENS, NOT AFTER.
+
+         This used to reject the candidate, close the task, announce "Candidate rejected", and only
+         THEN ask whether to email them - so the confirmation arrived after the decision it was
+         supposed to be confirming, and the toast contradicted the dialog still on screen. The
+         question now comes first, and its answer is about the email only: the rejection itself is
+         the button you already pressed. */
+      /* TURNING SOMEBODY DOWN AND WRITING TO THEM ARE TWO DECISIONS, SO THEY ARE TWO BUTTONS.
+
+         The dialog used to ask "Reject & email?" and treat No as "do nothing at all" - so there
+         was no way to reject somebody quietly, which is what you want when the referral came
+         from a colleague, or when HR will call them instead. Reject does exactly that; Reject
+         and email does both; Cancel still changes nothing. */
+      let sendMail=false, who=null;
+      try{
+        const {data:c}=await sb.schema('hr').from('candidates')
+          .select('name,email,position').eq('id',candId).single();
+        who=c||null;
+        if(who&&String(who.email||'').trim()){
+          const pick=await choiceDialog(
+            'Reject '+(who.name||'this candidate')+'? Rejecting is final either way. If you choose '
+            +'to email them, the letter goes from your own address, says nothing about scores or '
+            +'reasons, and cannot be taken back.',
+            {title:'Reject candidate', icon:'fa-user-xmark', danger:true, choices:[
+              {key:'reject', label:'Reject', style:'btn-danger', icon:'fa-user-xmark'},
+              {key:'reject_email', label:'Reject and email', style:'btn-danger', icon:'fa-envelope'}
+            ]});
+          if(!pick){ toast('Nothing was changed','warn'); return; }
+          sendMail=(pick==='reject_email');
+        }
+      }catch(_e){ /* no address on file: rejected without an email, which is said below */ }
+
+      const {error}=await sb.schema('hr').rpc('candidate_decide',{p_id:candId,p_approved:false});
+      if(error) throw new Error(error.message);
+      await ACC().rpc('hr_approval_task_resolve_candidate',{p_ref_id:candId,p_by:me()});
+      /* REJECTING FROM HERE TELLS THE CANDIDATE TOO.
+         The rejection email was wired to the Tracker's stage dropdown only, so turning somebody
+         down from the approvals queue - which is the more natural place to do it - rejected them
+         in silence. The same person, the same decision, and whether they heard about it depended
+         on which screen it was taken from. Asked first, because it cannot be recalled. */
+      /* The email is sent AFTER the rejection is recorded, so a mail failure cannot leave somebody
+         told they were rejected when the record still says otherwise. Errors are shown rather than
+         swallowed - a silent catch here is how the missing email went unexplained. */
+      if(sendMail&&who){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'candidate_rejected',name:who.name||'',email:who.email,position:who.position||''}});
+          if(se||(sent&&sent.error)) toast('Rejected, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else if(sent&&sent.not_connected) toast('Rejected and emailed from the shared JAIN-E address — connect your Google account to send from your own','warn');
+          else toast('Rejected — '+who.email+' has been told','ok');
+        }catch(e){ toast('Rejected, but the email failed: '+((e&&e.message)||e),'err'); }
+      }else{
+        toast('Candidate rejected — no email address on file, so nobody was told','warn');
+      }
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+
   window.hrTaskConnectReferral=async function(tid,refId){
     const {data:rec}=await sb.schema('hr').from('referrals').select('*').eq('id',refId).single();
     if(!rec){toast('Referral not found','err');return;}
@@ -12565,19 +13192,112 @@ try{ usageQueue('tasks.tasks.edit_task_members_assignees','update',{change:parts
       }
       await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
       closeModal();
-      toast('Connected to '+(req&&req.job_title||'position')+' and added to Interview Tracker','ok');
+      toast('Connected to '+(req&&req.job_title||'position')+' and added to Interviews','ok');
+
+      /* The referrer is told their referral was accepted, from here as well as from the Referrals
+         tab. Both sides of the decision now behave the same wherever it is taken - an acceptance
+         that goes unmentioned is the reason people stop referring anybody. */
+      if(rec&&String(rec.referred_by||'').trim()){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'referral_decided',approved:true,
+                   referrer_email:rec.referred_by,referrer_name:'',
+                   candidate_name:rec.referred_name||''}});
+          if(se||(sent&&sent.error)) toast('Connected, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else toast(rec.referred_by+' has been told their referral was accepted','ok');
+        }catch(e){ toast('Connected, but the email failed: '+((e&&e.message)||e),'err'); }
+      }
       hrAfterApprovalAction();
     }catch(e){
       if(btn){btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-check"></i> Connect';}
       toast('Failed: '+((e&&e.message)||e),'err');
     }
   };
+  /* REJECTING A REFERRAL TELLS THE PERSON WHO MADE IT, FROM WHEREVER IT IS REJECTED.
+
+     The email was wired to the Reject button on the Referrals tab and not to this one, so the same
+     decision taken from the approvals queue - which is the more natural place to take it - happened
+     in silence. Somebody put a name forward and never heard back, and nothing on either screen
+     showed that the two behaved differently.
+
+     Sent from ai@, not from whoever clicked: this is the company's answer, not one approver's
+     opinion, and a name on it invites the referrer to go and argue with a colleague. */
+  /* Accepting a referral. It does NOT create a candidate - that happens when HR connects them to a
+     position, which is a judgment about WHICH role they suit and cannot be made from a queue that
+     does not ask it. Approving says "yes, worth pursuing"; Connect says "for this job". */
+  window.hrTaskApproveReferral=async function(tid,refId){
+    let ref=null;
+    try{
+      const {data}=await sb.schema('hr').from('referrals')
+        .select('referred_name,referred_by').eq('id',refId).single();
+      ref=data||null;
+    }catch(_e){ /* the name only makes the question clearer */ }
+
+    const who=(ref&&ref.referred_name)||'this referral';
+    const tellThem=!!(ref&&String(ref.referred_by||'').trim());
+    if(!await confirmDialog(
+        'Approve '+who+'?'+(tellThem
+          ? ' '+ref.referred_by+' will be emailed to say the referral was accepted. HR can then connect them to a position.'
+          : ' HR can then connect them to a position.'),
+        {title:'Approve referral', okLabel:'Approve', icon:'fa-check', danger:false}))return;
+
+    try{
+      await sb.schema('hr').from('referrals')
+        .update({approval_status:'Approved',approved_by:me(),approved_at:nowISO(),rejection_reason:null})
+        .eq('id',refId);
+      await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
+      toast('Referral approved — connect them to a position from Recruitment › Referrals','ok');
+
+      if(tellThem){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'referral_decided',approved:true,
+                   referrer_email:ref.referred_by,referrer_name:'',
+                   candidate_name:ref.referred_name||''}});
+          if(se||(sent&&sent.error)) toast('Approved, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else toast(ref.referred_by+' has been told','ok');
+        }catch(e){ toast('Approved, but the email failed: '+((e&&e.message)||e),'err'); }
+      }
+      hrAfterApprovalAction();
+    }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
+  };
+
   window.hrTaskRejectReferral=async function(tid,refId){
-    if(!await confirmDialog('Reject this referral?'))return;
+    let ref=null;
+    try{
+      const {data}=await sb.schema('hr').from('referrals')
+        .select('referred_name,referred_by').eq('id',refId).single();
+      ref=data||null;
+    }catch(_e){ /* the name just makes the question clearer */ }
+
+    const who=(ref&&ref.referred_name)||'this referral';
+    const tellThem=!!(ref&&String(ref.referred_by||'').trim());
+    if(!await confirmDialog(
+        'Reject '+who+'?'+(tellThem
+          ? ' '+ref.referred_by+' will be emailed to say the referral was not taken forward.'
+          : ' Nobody will be emailed — there is no address for whoever referred them.'),
+        {title:'Reject referral', okLabel:'Reject', icon:'fa-xmark', danger:true}))return;
+
     try{
       await sb.schema('hr').from('referrals').update({approval_status:'Rejected',approved_by:me(),approved_at:nowISO()}).eq('id',refId);
       await ACC().rpc('hr_approval_task_resolve_all',{p_kind:'referral',p_ref_id:refId,p_by:me()});
-      toast('Referral rejected','ok'); hrAfterApprovalAction();
+
+      /* After the rejection is recorded, so a mail failure cannot leave the referrer told about a
+         decision the record does not show. Errors are surfaced, not swallowed - a silent catch is
+         how the missing email went unexplained the first time. */
+      if(tellThem){
+        try{
+          const {data:sent,error:se}=await sb.functions.invoke('hr-notify',
+            {body:{kind:'referral_decided',approved:false,
+                   referrer_email:ref.referred_by,referrer_name:'',
+                   candidate_name:ref.referred_name||''}});
+          if(se||(sent&&sent.error)) toast('Rejected, but the email failed: '+((sent&&sent.error)||se.message),'err');
+          else toast('Rejected — '+ref.referred_by+' has been told','ok');
+        }catch(e){ toast('Rejected, but the email failed: '+((e&&e.message)||e),'err'); }
+      }else{
+        toast('Referral rejected — no address for the referrer, so nobody was told','warn');
+      }
+      hrAfterApprovalAction();
     }catch(e){ toast('Failed: '+((e&&e.message)||e),'err'); }
   };
   function accPoll(fn){ clearInterval(window._accPoll); window._accPoll=setInterval(function(){ const ov=$('overlay'); if(ov&&ov.classList.contains('show'))return; if(window._dragging)return; const a=document.activeElement; if(a&&/INPUT|TEXTAREA/.test(a.tagName))return; fn(); },13000); }
