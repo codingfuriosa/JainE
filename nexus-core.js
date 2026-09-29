@@ -17744,7 +17744,7 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
       '<tfoot><tr><td colspan="7">Total Receipt Amount</td><td class="amt">'+custInr(total)+'</td></tr>'+
       '<tr><td colspan="8" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(total))+'</td></tr></tfoot>'+
       '</table></div>'+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
     '</div>';
 }
 // Styles are shared by the on-screen modal and the printable window.
@@ -17775,7 +17775,6 @@ const CUST_RECEIPT_CSS=
   '.rcpt-terms p{margin:0 0 6px;text-align:justify}'+
   '.rcpt-terms ul{margin:0 0 6px;padding-left:16px}.rcpt-terms li{margin-bottom:3px}'+
   '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
-  '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
   // On a phone the two header columns cannot sit side by side without clipping the right one.
   '@media(max-width:640px){.rcpt-grid{grid-template-columns:1fr;gap:12px}'+
   '.rcpt-f span{min-width:82px;flex:0 0 82px}.rcpt-title{font-size:13px}}';
@@ -18079,7 +18078,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
       '<tbody>'+(rowsHtml||'<tr><td colspan="6" style="text-align:center;color:#64748b">No charge lines recorded.</td></tr>')+'</tbody>'+
       '<tfoot>'+foot+'</tfoot></table></div>'+
       tail+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
       '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
       '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
     '</div>';
@@ -22560,8 +22559,11 @@ function trcQaTableHtml(r,m){
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
     {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
-    {topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
-     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])},
+    // Only meaningful when the CRM status for THIS follow-up is Lost (see qa-prompt.ts section 4) -
+    // every other call gets "Not Applicable" from the model, which is a correct answer but not one
+    // worth a row on every single call, so the row itself is left out rather than shown as N/A.
+    r.crm_status==='Lost'?{topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
+     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])}:null,
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
     {topic:'Personal mobile number requested',status:r.personal_mobile_status,score:null,
@@ -22578,7 +22580,7 @@ function trcQaTableHtml(r,m){
                (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
-  ];
+  ].filter(Boolean);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
