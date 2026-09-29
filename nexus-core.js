@@ -19521,7 +19521,16 @@ function cpaPhCss(){return `<style>
   .cph-zn{margin-left:auto;font-size:11px;font-weight:700;color:#16a34a;background:#f0fdf4;
     border:1px solid #bbf7d0;border-radius:999px;padding:1px 7px}
   .cph-zbody{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:4px;color:var(--slate);font-size:11.5px;padding:0 10px;text-align:center}
+    gap:5px;color:var(--slate);font-size:11.5px;padding:0 10px 8px;text-align:center}
+  /* Camera / Video / Gallery - icon over label so three fit a 200px zone */
+  .cph-zbtns{display:flex;gap:6px;width:100%}
+  .cph-zb{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    height:48px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);cursor:pointer;
+    font:600 11.5px Segoe UI,Arial,sans-serif;padding:0 4px}
+  .cph-zb i{font-size:15px;color:var(--brand)}
+  .cph-zb:hover{border-color:var(--brand);background:#eff6ff}
+  .cph-zb:active{background:#dbeafe}
+  .cph-zhint{font-size:11px}
   /* the only scrolling part of the screen */
   /* ── what you have chosen but not yet sent: pictures, not filenames ──
      A filename tells you nothing about whether you picked the right photo. These are the real
@@ -19605,7 +19614,10 @@ function cpaPhCss(){return `<style>
     .cph-f{flex:1 1 100%;min-width:0;max-width:none!important}
     .cph-sel select,.cph-in{height:46px;font-size:16px}
     .cph-zones{grid-template-columns:1fr!important}
-    .cph-zone{height:104px}
+    .cph-zone{height:auto;min-height:0}
+    .cph-zb{height:56px;font-size:13px}
+    .cph-zb i{font-size:18px}
+    .cph-zhint{display:none}
     .cph-acts .btn{flex:1;justify-content:center;min-height:48px;font-size:15px}
     .cph-acts span{flex-basis:100%}
     .cph-filters .cph-f{flex:1 1 calc(50% - 5px)}
@@ -19718,8 +19730,11 @@ function cpaPhZone(key,title,icon){
       +'<span class="cph-zt">'+esc(title)+'</span>'
       +(n?'<span class="cph-zn">'+n+'</span>':'')
     +'</div>'
-    +'<div class="cph-zbody"><i class="fa-solid fa-arrow-down-to-line" style="font-size:15px"></i>'
-      +'<div>'+(n?'Drop more, or click':'Drop files here, or click')+'</div></div>'
+    +'<div class="cph-zbody"><div class="cph-zbtns">'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'photo\',event)"><i class="fa-solid fa-camera"></i>Camera</button>'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'video\',event)"><i class="fa-solid fa-video"></i>Video</button>'
+      +'<button type="button" class="cph-zb" onclick="cpaPhPick(\''+key+'\',\'gallery\',event)"><i class="fa-solid fa-images"></i>Gallery</button>'
+      +'</div><div class="cph-zhint">'+(n?'Add more, or drop files here':'or drop files here')+'</div></div>'
     +'</div>';
 }
 
@@ -19789,17 +19804,26 @@ function cpaPhStaged(){
    the markup so that choosing a second batch ADDS to the first instead of replacing it - a plain
    <input type=file> forgets everything it held the moment you pick again, which is why adding
    "just one more photo" used to silently drop the rest. */
+/* Camera / Video open the phone's camera straight away (capture="environment" = the rear camera);
+   Gallery is the multi-select picker. On a computer, capture is ignored and all three open the file
+   picker. Every capture goes through cpaPhAdd, so shooting five photos one after another adds five,
+   the same as picking five. */
+window.cpaPhPick=function(key,mode,ev){
+  if(ev) ev.stopPropagation();
+  const inp=document.createElement('input');
+  inp.type='file';
+  if(mode==='gallery'){ inp.multiple=true; inp.accept='image/*,video/*'; }
+  else{ inp.accept=mode==='video'?'video/*':'image/*'; inp.setAttribute('capture','environment'); }
+  inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+  inp.click();
+};
 function cpaPhWireZones(){
   Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
     const key=z.getAttribute('data-zone');
-    const open=function(){
-      const inp=document.createElement('input');
-      inp.type='file'; inp.multiple=true; inp.accept='image/*,video/*';
-      inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
-      inp.click();
-    };
+    const open=function(){ cpaPhPick(key,'gallery'); };
     z.onclick=open;
-    z.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
+    // Enter on one of the zone's own buttons is that button's click - not the zone's as well.
+    z.onkeydown=function(e){ if(e.target!==z) return; if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
     z.ondragover=function(e){ e.preventDefault(); z.classList.add('over'); };
     z.ondragleave=function(){ z.classList.remove('over'); };
     z.ondrop=function(e){
