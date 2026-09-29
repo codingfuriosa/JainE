@@ -973,6 +973,7 @@
   VIEWS.tasks = async function(v, seg){
     injectCss();
     if (seg[0]==='task' && seg[1]) { ROUTE={tab:'task',taskId:Number(seg[1])}; return taskPage(v, seg[1], seg[2]==='ro'); }
+    if (seg[0]==='meetings' && seg[1]==='detail' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgDetailPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='logs' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogsPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='log' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgLogPage(v, Number(seg[2])); }
     if (seg[0]==='meetings' && seg[1]==='record' && seg[2]) { ROUTE={tab:'meetings',taskId:null}; return mtgRecordPage(v, Number(seg[2])); }
@@ -982,19 +983,20 @@
     if (seg[0]==='workflow' && seg[1]==='edit' && seg[2]) { ROUTE={tab:'workflow',taskId:null}; return wfFormPage(v, Number(seg[2])); }
     if (seg[0]==='workflow' && seg[1]==='case' && seg[2]) { ROUTE={tab:'workflow',taskId:null}; return wfCaseRoute(v, Number(seg[2])); }
     if (seg[0]==='workflow' && seg[1]) { ROUTE={tab:'workflow',taskId:null}; return wfDetailPage(v, Number(seg[1]), null); }
+    // The Scoreboard is its own module now (Overview > Scoreboard). Anything still pointing at the
+    // old tab — a bookmark, a pasted link, a stale open tab — goes there rather than to a blank tab.
+    if (seg[0]==='scoreboard') { navTo('scoreboard'); return; }
     let tab = seg[0] || 'work'; if(tab==='home')tab='work';
     ROUTE={tab:tab,taskId:null};
     setCrumb(['Accountability', tab==='work'?'Tasks':(tab.charAt(0).toUpperCase()+tab.slice(1))]);
-    v.innerHTML = `<div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks, delegation & scoreboard</p></div></div>
+    v.innerHTML = `<div class="page-head"><div><h1><i class="fa-solid fa-list-check" style="color:#1d4ed8"></i> Accountability</h1><p>Tasks &amp; delegation</p></div></div>
     <div class="ac-tabs">
       <div class="ac-tab ${tab==='work'?'active':''}" onclick="navTo('tasks/work')"><i class="fa-solid fa-list-check"></i> Tasks</div>
       <div class="ac-tab ${tab==='calendar'?'active':''}" onclick="navTo('tasks/calendar')"><i class="fa-solid fa-calendar-days"></i> Calendar</div>
       <div class="ac-tab ${tab==='meetings'?'active':''}" onclick="navTo('tasks/meetings')"><i class="fa-solid fa-video"></i> Meetings</div>
       <div class="ac-tab ${tab==='workflow'?'active':''}" onclick="navTo('tasks/workflow')"><i class="fa-solid fa-diagram-project"></i> Workflow</div>
       <div class="ac-tab ${tab==='archive'?'active':''}" onclick="navTo('tasks/archive')"><i class="fa-solid fa-box-archive"></i> Archive</div>
-      <div class="ac-tab ${tab==='scoreboard'?'active':''}" onclick="navTo('tasks/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div><div id="acBody"><div class="loader"><div class="spin"></div></div></div>`;
-    if (tab==='scoreboard') return scoreboardTab();
     if (tab==='meetings') return meetingsTab();
     if (tab==='calendar') return calendarTab();
     if (tab==='archive') return archiveTab();
@@ -9140,38 +9142,6 @@
     document.head.appendChild(s);
   }
 
-  /* ---------- SCOREBOARD ---------- */
-  /* Two different leaderboards, not one: acc.scoreboard() covers ordinary tasks with its original
-     flat +1 completed/+1 on-time/-1 late credit (computed here from the raw counts, same as always),
-     and acc.scoreboard_causelist() is a separate ranking that exists ONLY for tasks the Legal MIS
-     causelist action-review popup creates (acc.ptasks.source='causelist'), scored instead by how
-     many days ahead of the due date they were finished. SB_VIEW just picks which RPC gets called
-     and how the table renders — nothing about acc.scoreboard() itself changed. */
-  let SB_VIEW='all';
-  window.sbSetView=function(v){ if(SB_VIEW===v)return; SB_VIEW=v; scoreboardTab(); };
-  async function scoreboardTab(){
-    const b=$('acBody');
-    b.innerHTML=`<div class="tp-card" style="padding:0">`
-      +`<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center"><b style="margin-right:6px">Scoreboard</b>`
-      +`<button class="ac-btn${SB_VIEW==='all'?' primary':''}" onclick="sbSetView('all')">All Tasks</button>`
-      +`<button class="ac-btn${SB_VIEW==='causelist'?' primary':''}" onclick="sbSetView('causelist')">Causelist</button>`
-      +`</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>`;
-    if(SB_VIEW==='causelist') await sbRenderCauselist(); else await sbRenderAll();
-  }
-  async function sbRenderAll(){
-    let rows=[]; try{const {data}=await ACC().rpc('scoreboard');rows=data||[];}catch(e){}
-    rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)*1+(r.tasks_on_time||0)*1-(r.tasks_late||0)*1})).sort((a,b)=>b.score-a.score);
-    const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
-    const host=$('sbBody'); if(!host)return;
-    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">task completed +1 · on-time +1 · overdue −1 (declines automatically reverse the credit)</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>Sub</th><th>On-time</th><th>Overdue</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_completed}</td><td>${r.checklist_items_done}</td><td style="color:#16a34a">${r.tasks_on_time}</td><td style="color:#dc2626">${r.tasks_late}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="7"><div class="ac-empty" style="cursor:default;border:0">No activity yet</div></td></tr>'}</tbody></table></div>`;
-  }
-  async function sbRenderCauselist(){
-    let rows=[]; try{const {data}=await ACC().rpc('scoreboard_causelist');rows=data||[];}catch(e){}
-    const medal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
-    const host=$('sbBody'); if(!host)return;
-    host.innerHTML=`<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Legal MIS causelist tasks only — per task, by how far ahead of its due date it was finished: 7+ days early +2 · 3–6 days early +1 · 0–2 days early 0 · after the due date −1</div><div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Score</th></tr></thead><tbody>${rows.length?rows.map((r,i)=>`<tr><td>${medal(i)}</td><td><b>${esc2(r.full_name||r.email)}</b></td><td>${r.tasks_assigned}</td><td>${r.tasks_completed}</td><td>${r.tasks_pending}</td><td style="font-weight:800">${r.score}</td></tr>`).join(''):'<tr><td colspan="6"><div class="ac-empty" style="cursor:default;border:0">No causelist tasks yet</div></td></tr>'}</tbody></table></div>`;
-  }
-
   /* ---------- CALENDAR (Google-Calendar-inspired UI) ---------- */
   let GCAL_VIEW='month', GCAL_DATE=null, GCAL_MINI_MONTH=null, GCAL_Q='';
   let GCAL_FILTERS=new Set(['toMe','byMe','meeting','case']);
@@ -10259,7 +10229,6 @@
     const mins=mtgDurationMinutes(m.start_time,m.end_time);
     const timeRange=mtgFmtTime(m.start_time)+(m.end_time?(' – '+mtgFmtTime(m.end_time)):'');
     const recurLbl=mtgRecurLabel(m);
-    const isRecurring=!!(m.recur_type&&m.recur_type!=='none');
 
     // LEFT — when it next happens, at what time, for how long.
     const timeCol='<div class="mtg-time">'
@@ -10307,10 +10276,12 @@
     const mine = eq(m.created_by,me());
     const editBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgOpenCreate('+m.id+')" title="Edit meeting"><i class="fa-solid fa-pen"></i></button>' : '';
     const delBtn = mine ? '<button class="mtg-del" onclick="event.stopPropagation();mtgCancelAsk('+m.id+')" title="Cancel meeting"><i class="fa-solid fa-trash"></i></button>' : '';
-    // Recurring meetings: clicking anywhere on the free space of the card opens its Logs
-    // (past occurrences) — no separate Logs button needed. One-time meetings aren't clickable
-    // here (they have no history yet; their completed record only exists after in Archive).
-    const cardClick = isRecurring ? ' onclick="navTo(\'tasks/meetings/logs/'+m.id+'\')" style="cursor:pointer" title="View past occurrences"' : '';
+    // Clicking anywhere on the free space of the card opens the meeting's own detail page — basic
+    // info first, then every day-wise occurrence below it. Once a one-time meeting is actually held
+    // its acc.meetings row is deleted and its card disappears from this list entirely (the
+    // completed record then only lives in Archive), so this only ever fires pre-completion for one
+    // -time meetings — which is fine, the day-wise section just reads "No completed occurrences yet".
+    const cardClick = ' onclick="navTo(\'tasks/meetings/detail/'+m.id+'\')" style="cursor:pointer" title="View meeting details"';
     return '<div class="mtg-card"'+cardClick+'>'
       +'<div class="mtg-bar" style="background:'+modeColor+'"></div>'
       +timeCol
@@ -10773,9 +10744,12 @@
     } else if(l.attendance_status==='fetched'){
       const parts=(l.participants||[]);
       const joinedRows=parts.length?parts.map(function(p){
-        const durLbl=p.duration_min!=null?(' · '+p.duration_min+' min'):'';
+        // The actual clock times, not just the derived duration - "who joined and when" needs the
+        // "when" spelled out, same IST-formatted style already used for the recording's own start/end.
+        const timesLbl=(p.join?(' · joined '+esc2(mtgClockIST(p.join))):'')+(p.leave?(' – left '+esc2(mtgClockIST(p.leave))):'');
+        const durLbl=p.duration_min!=null?(' ('+p.duration_min+' min)'):'';
         const rejoinLbl=p.rejoined?' <span style="color:#a16207;font-weight:600">(rejoined)</span>':'';
-        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+durLbl+rejoinLbl+'</div>';
+        return '<div class="mtg-log-attendee"><i class="fa-solid fa-circle-check" style="color:#16a34a"></i> '+esc2(p.name)+timesLbl+durLbl+rejoinLbl+'</div>';
       }).join(''):'<p style="color:var(--slate);font-size:13px;margin:2px 0 0">Nobody joined this call.</p>';
       attendeesHtml='<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(invitedNames.join(', ')||'—')+'</div>'
         +'<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--slate)">Joined ('+parts.length+' of '+invitedNames.length+')</b>'+joinedRows+'</div>';
@@ -10804,9 +10778,9 @@
          +'<div style="color:var(--slate);font-size:12px;margin-top:6px">Upload the audio or video from this meeting and JAIN-E will transcribe it automatically.</div></div>');
     // One-time meetings' logs have meeting_id set to null once the meeting itself is deleted
     // (see acc.log_completed_meetings) — those were only ever reachable from Archive, so Back
-    // goes there. Recurring meetings' logs keep meeting_id, so Back returns to that meeting's
-    // own Logs page instead.
-    const backTarget = l.meeting_id!=null ? ('tasks/meetings/logs/'+l.meeting_id) : 'tasks/archive';
+    // goes there. A meeting that still exists keeps meeting_id, so Back returns to its own detail
+    // page (basic info + every day-wise occurrence) instead.
+    const backTarget = l.meeting_id!=null ? ('tasks/meetings/detail/'+l.meeting_id) : 'tasks/archive';
     v.innerHTML='<div class="tp-head">'
       +'<div><div class="tp-title"><i class="fa-solid fa-box-archive" style="color:#7c3aed"></i> '+esc2(l.title)+'</div>'
       +'<div class="tp-sub">'+fmtDateY(l.occurrence_date)+'</div></div>'
@@ -10820,8 +10794,54 @@
       +'<div class="tp-card"><h3><i class="fa-solid fa-circle-play" style="color:#64748b"></i> Recording</h3>'+recordingHtml+'</div>'
       +'<div class="tp-card"><h3><i class="fa-solid fa-file-lines" style="color:#64748b"></i> Transcript</h3>'+transcriptHtml+'</div>';
   }
-  // Recurring meetings never go to Archive — clicking anywhere on their card (mtgCard) navigates
-  // here instead, listing every past completed occurrence; each row navigates to mtgLogPage above.
+  // A meeting's own detail page: basic info first (mode, recurrence, time, organizer, invited
+  // people, Meet link), then every day-wise occurrence below it — reached by clicking anywhere on
+  // its card (mtgCard), for one-time and recurring meetings alike. Previously only recurring
+  // meetings were clickable at all, and clicking skipped straight to the bare occurrence list
+  // (mtgLogsPage, still below, now only reached from here or old links) with no basic info first.
+  // Self-contained like mtgLogPage: fetches the meeting itself rather than assuming MTG_LIST/MTG_ATT
+  // are already warm, so it also works on a direct link/refresh.
+  async function mtgDetailPage(v,meetingId){
+    injectCss(); setCrumb(['Accountability','Meeting']);
+    v.innerHTML='<div class="loader"><div class="spin"></div></div>';
+    let m=(MTG_LIST||[]).find(function(x){return x.id===meetingId;});
+    if(!m){ try{ const {data}=await ACC().from('meetings').select('*').eq('id',meetingId).maybeSingle(); m=data; }catch(e){} }
+    if(!m){ v.innerHTML='<div class="tp-card"><div class="ac-empty" style="cursor:default;border:0">Meeting not found — it may have been cancelled.</div></div>'; return; }
+    const plist=await people();
+    let attEmails=[];
+    try{ attEmails=mtgAllAttendees(m); }catch(e){ attEmails=[m.created_by].filter(Boolean); }
+    const names=attEmails.map(function(e){return nameOf(plist,e);}).filter(Boolean).join(', ');
+    const recurLbl=mtgRecurLabel(m);
+    const modeColor=m.mode==='offline'?'#64748b':'#2563eb';
+    const isOneOff=(!m.recur_type||m.recur_type==='none');
+    const basicHtml='<div class="gcal-panel-row"><i class="fa-solid '+(m.mode==='offline'?'fa-people-group':'fa-video')+'" style="color:'+modeColor+'"></i> '+esc2(mtgModeLabel(m))+(recurLbl?(' · '+esc2(recurLbl)):'')+'</div>'
+      +(isOneOff
+        ? '<div class="gcal-panel-row"><i class="fa-regular fa-calendar"></i> '+esc2(fmtDateY(m.meeting_date))+' · '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>'
+        : '<div class="gcal-panel-row"><i class="fa-regular fa-clock"></i> '+esc2(mtgFmtTime(m.start_time))+(m.end_time?(' – '+esc2(mtgFmtTime(m.end_time))):'')+'</div>')
+      +'<div class="gcal-panel-row"><i class="fa-solid fa-user"></i> Organized by '+esc2(nameOf(plist,m.created_by)||m.created_by)+'</div>'
+      +(names?('<div class="gcal-panel-row"><i class="fa-solid fa-users"></i> Invited: '+esc2(names)+'</div>'):'')
+      +((m.mode==='online'&&m.meet_link)?('<div class="gcal-panel-row"><i class="fa-solid fa-link"></i> <a href="'+esc2(m.meet_link)+'" target="_blank" rel="noopener">Meet link</a></div>'):'');
+    let logs=[];
+    try{ const {data}=await ACC().from('meeting_logs').select('*').eq('meeting_id',meetingId).order('occurrence_date',{ascending:false}).limit(100); logs=data||[]; }catch(e){}
+    const dayRows=logs.length?logs.map(function(l){
+      return '<div class="mtg-log-row" onclick="navTo(\'tasks/meetings/log/'+l.id+'\')">'
+        +'<div><div class="mtg-log-title">'+esc2(fmtDateY(l.occurrence_date))+'</div><div class="mtg-log-meta">'+esc2(mtgLogTimeLabel(l))+'</div></div>'
+        +mtgAttendanceBadgeHtml(l)
+        +'</div>';
+    }).join(''):'<div class="ac-empty" style="cursor:default">No completed occurrences yet</div>';
+    const mine=eq(m.created_by,me());
+    v.innerHTML='<div class="tp-head">'
+      +'<div><div class="tp-title"><i class="fa-solid fa-video" style="color:#1d4ed8"></i> '+esc2(m.title)+'</div>'
+      +'<div class="tp-sub">Meeting details</div></div>'
+      +'<div class="tp-acts">'
+        +(mine?('<button class="ac-btn ic" title="Edit meeting" onclick="mtgOpenCreate('+m.id+')"><i class="fa-solid fa-pen"></i></button>'):'')
+        +'<button class="ac-btn ic" title="Back" onclick="navTo(\'tasks/meetings\')"><i class="fa-solid fa-arrow-left"></i></button>'
+      +'</div></div>'
+      +'<div class="tp-card">'+basicHtml+'</div>'
+      +'<div class="tp-card"><h3><i class="fa-solid fa-calendar-days" style="color:#7c3aed"></i> Day-wise — who joined, and when</h3>'+dayRows+'</div>';
+  }
+  // Superseded as the card's own click target by mtgDetailPage above, which now embeds this same
+  // occurrence list under a meeting's basic info — kept for any old link still pointing here.
   async function mtgLogsPage(v,meetingId){
     injectCss(); setCrumb(['Accountability','Meeting Logs']);
     v.innerHTML='<div class="loader"><div class="spin"></div></div>';
@@ -11126,7 +11146,7 @@
     toast('Saved to Logs','ok');
     const l=MTG_WRAP.l, lid=MTG_WRAP.logId; MTG_WRAP=null;
     try{ usageQueue('tasks.meetings.save_meeting_wrap_up_summary','update',{title:l&&l.title}); }catch(_e){}
-    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/logs/'+l.meeting_id);
+    if(l && l.recur_type && l.recur_type!=='none' && l.meeting_id!=null) navTo('tasks/meetings/detail/'+l.meeting_id);
     else navTo('tasks/meetings/log/'+lid);
   };
 
@@ -11211,24 +11231,14 @@
       try{ await mtgRecCall({action:'save-transcript',log_id:job.log_id,status:'processing'}); }catch(_e){}
     }finally{ WT_busy=false; wtChip(false); again(3000); }
   }
-  // ON. Transcription is JAIN-E's own work again — the Whisper model above runs inside the browser
-  // (WebGPU where available, WASM otherwise), so no recording leaves the organisation and there is
-  // no per-use cost and no API key anywhere in the path.
-  //
-  // This is the CATCH-UP path, not the main one. A meeting recorded in the portal is transcribed
-  // the moment recording stops, on the machine that recorded it, straight from the audio still in
-  // memory (see mtgRecStop). This worker exists for the rest: a recording uploaded after the fact
-  // through "Add recording", one whose browser was closed mid-transcription, and one that failed.
-  // Jobs are claimed atomically server-side, so two open browsers never do the same one.
-  //
-  // Desktop only, and only while the tab is actually visible — the model is heavy enough that
-  // running it on someone's phone, or behind their back, would be a rude thing to do.
-  function mtgStartBrowserTranscriber(){
-    if(WT_started) return;
-    if(wtIsMobile()) return;
-    WT_started=true;
-    setTimeout(wtTick, 4000);
-  }
+  // OFF. Transcription is Gemini's job again (transcribe-pending / meet-transcript-sync, both
+  // re-scheduled) — live, server-side, no browser needed. This in-browser Whisper worker stays
+  // switched off rather than deleted, same reason it was written in the first place: a fallback
+  // should the Gemini key ever be withdrawn. It must not run alongside Gemini: the cron jobs pick
+  // up transcript_status='processing' rows directly with no claim/lock step, while this worker
+  // claims jobs atomically through claim_transcription_job() — both live at once would race for
+  // the same rows, and one engine is already enough.
+  function mtgStartBrowserTranscriber(){ return; }
 
   // The standing list of meetings that finished without a transcript, at the top of the tab where
   // it can't be scrolled past. Every meeting is supposed to end up transcribed; an online one now

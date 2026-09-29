@@ -192,7 +192,7 @@ words instead of forcing it into one that does not fit.`;
    contract in strict JSON Schema, and this contract is nullable unions and a `null` member inside an
    enum - expressible only by relaxing it, which trades a real guarantee for a nominal one. The same
    was true of Gemini's responseSchema, so the arrangement here is unchanged by the vendor move.
-   The guarantee therefore lives in qaPhase(), which refuses any reply missing one of the five
+   The guarantee therefore lives in qaPhase(), which refuses any reply missing one of the six
    assessments and retries it. Nothing half-formed is ever saved: that is the same rule the
    transcriber follows, and it is why a weaker guarantee here is not a weaker result. `json_object`
    still removes the failure this pipeline actually sees - prose or a code fence around the JSON.
@@ -242,6 +242,12 @@ Every key below must be present on every reply. Where you have nothing to say, u
     "crm_reason": "the CRM value exactly as given, or null",
     "actual_reason": "the reason the conversation actually supports, or null",
     "evidence": "the line from the transcript that settles it, or null",
+    "reason": "why this verdict"
+  },
+  "retention_effort": {
+    "status": "Pass" | "Partial" | "Fail" | "Not Applicable",
+    "score": 0-100, or null when status is "Not Applicable",
+    "evidence": "the line(s) from the transcript that show what the agent did or did not try, or null",
     "reason": "why this verdict"
   },
   "remarks_accuracy": {
@@ -319,6 +325,12 @@ Every key below must be present on every reply. Where you have nothing to say, u
         should when the call is not clear-cut. Omit entirely (empty array) only for a call too short
         to establish anything.
     ]
+  },
+  "personal_mobile_requested": {
+    "status": "Yes" | "No",
+    "number_shared": "the number exactly as the customer stated it, or null - null whenever status is No, and also null when Yes but the customer was asked and did not actually give one",
+    "evidence": "the line where this happened, or null when status is No",
+    "reason": "why this verdict"
   },
   "summary_verdict": "several sentences"
 }`;
@@ -435,7 +447,29 @@ Also give "score", 0-100: 100 when the CRM's lost_reason is exactly the reason t
 scaling down for a reason that is only partly right. Null whenever status is "Not Verifiable" -
 including every follow-up that is not marked Lost, since the question does not apply there.
 
-### 4. REMARKS ACCURACY
+### 4. RETENTION EFFORT (LOST LEADS ONLY)
+Only meaningful when the CRM status for this follow-up is Lost. If it is not Lost, return
+"Not Applicable" with a one-line reason saying so, and leave "evidence" null.
+Where the status is Lost: did the agent make a genuine attempt to keep the lead before accepting the
+loss - probing the actual objection, offering an alternative (a different configuration, budget,
+location or project), addressing a concern the customer raised, or asking them to reconsider - rather
+than accepting the first "not interested" and moving straight on?
+- Pass     - the agent made a real attempt: asked why, engaged with the actual objection raised, or
+             offered something concrete before letting the lead go.
+- Partial  - a token gesture only ("are you sure?", one line with no follow-through) that never
+             engages with the actual objection.
+- Fail     - the agent accepted the loss with no attempt at all, or ended the call as soon as the
+             customer hesitated.
+- Not Applicable - the CRM status is not Lost; or the customer ended the call before the agent had any
+             opening to try (hung up mid-sentence, call cut); or the loss was already decided on an
+             earlier call with nothing left to attempt on this one.
+Do not penalise an agent for accepting a genuinely firm, final refusal ("do not call me again" or
+equivalent) - Pass still requires an actual objection to engage with, not manufacturing a debate the
+customer has already closed.
+Also give "score", 0-100, scaling with how substantive the retention attempt was. Null only when
+status is "Not Applicable".
+
+### 5. REMARKS ACCURACY
 Do the CRM's remarks represent what actually happened on the call?
 The remarks are shorthand typed by a salesperson - "no req", "received then cut the call". They do
 NOT need to be word-for-word anything. Judge whether the meaning is right, over: the customer's
@@ -452,11 +486,11 @@ happened, not a restatement of "status" in digits - Accurate is not automaticall
 Accurate is not automatically 50, score what the remarks actually get right and leave out. Null only
 when status is "Not Verifiable".
 
-### 5. THE SIX-POINT AGENT AUDIT - DO THIS BEFORE YOU DECIDE THE STATUS
-This audit comes first on purpose, and section 6 depends on it. What the agent asked decides what
+### 6. THE SIX-POINT AGENT AUDIT - DO THIS BEFORE YOU DECIDE THE STATUS
+This audit comes first on purpose, and section 7 depends on it. What the agent asked decides what
 the call is even capable of establishing: an agent who never asked the budget cannot have
 established that the budget matches, and a status resting on a question nobody asked is a guess
-dressed up as a verdict. Work through all six points, then carry what you found into section 6.
+dressed up as a verdict. Work through all six points, then carry what you found into section 7.
 
 Return "agent_qa" as an array of six objects, each {"point","status","score","evidence","reason"},
 with "status" exactly "Pass", "Fail", "Partial" or "Not Applicable", and "evidence" quoting the
@@ -474,8 +508,8 @@ ${QA_RUBRIC}
 
 Use "Not Applicable" only where the call ended before the point could arise, and say so in "reason".
 
-### 6. STATUS ASSESSMENT - BUILT ON SECTION 5, NEVER DECIDED BEFORE IT
-Decide, from the whole conversation and from what section 5 established, what the status of this
+### 7. STATUS ASSESSMENT - BUILT ON SECTION 6, NEVER DECIDED BEFORE IT
+Decide, from the whole conversation and from what section 6 established, what the status of this
 lead SHOULD be, and compare it with what the CRM recorded.
 
 THE QUALIFICATION TEST - FOUR REQUIREMENT GATES.
@@ -490,7 +524,7 @@ four of these:
                 launching in 2026, and one happy to wait matches either.
 Fill in "qualification_check" with "Match", "Mismatch" or "Not Established" for each of the four,
 plus a one-line "note" on what settled it. "Not Established" is for a gate the call never reached -
-usually because the agent never asked, which section 5 will already have marked down under Script.
+usually because the agent never asked, which section 6 will already have marked down under Script.
 All four Match is Qualified. Any Mismatch fails the test. Gates left Not Established do not qualify
 a lead, but they do not disqualify it either - that call is In Follow Up or Unclear, not Lost.
 
@@ -679,10 +713,24 @@ own mismatch, flagged for review rather than silently dropped from the count, re
 write in "status_match" or "mismatch_type" for that call - both are re-derived deterministically from
 ai_assessed_status alone. Only the CRM-status-not-covered case above still gets a real null.
 
-### 7. VERDICT
+### 8. VERDICT
 "summary_verdict": several sentences - what the customer wanted, how the agent handled it, what was
 agreed, where the CRM's record differs from the call, and what should happen to this lead now. If the
 call was a few words long, say that plainly instead of padding it out.
+
+### 9. PERSONAL MOBILE NUMBER REQUESTED
+Did the agent ask the customer for a mobile number to reach them on that is ADDITIONAL to whatever the
+CRM already has on file for this lead - or ask to call/WhatsApp them on a different, personal line -
+rather than simply confirming or reading back the number already on record?
+- "Yes" - the agent asked for a number to reach the customer on, and that request is present on this
+          call, whether or not the customer actually gave one.
+- "No"  - no such request was made on this call.
+Confirming the existing CRM number back to the customer ("is this still the best number to reach you
+on, the one ending XXXX") is NOT a request for a personal number - only count a genuinely NEW number
+being asked for.
+If "Yes", put the number the customer actually stated in "number_shared", exactly as said (digits only,
+no spaces needed) - null if they were asked but did not give one, or the call ended before they could.
+Quote the line where this happened in "evidence" - null when status is "No".
 
 ${CATALOGUE}
 

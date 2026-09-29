@@ -490,9 +490,7 @@ const NAV=[
   {group:'Overview',items:[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
-  ]},
-  {group:'IT & Support',items:[
-    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+    {id:'scoreboard',label:'Scoreboard',icon:'fa-ranking-star'},
   ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
@@ -542,12 +540,32 @@ const NAV=[
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
+  // Last on purpose. Internet Speed is a thing you go and look at when something feels slow, not
+  // something you work in, so it sat oddly as the second group in the sidebar — above Sales,
+  // Operations and everything people actually open all day. It keeps its own group rather than
+  // being folded into System, so the sidebar still says what it is.
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+  ]},
 ];
 const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
 const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
+/* Modules nobody needs to be granted — they are part of the furniture, and were previously spelled
+   out three separate times inside allowedSet() plus once more in pageAllowed(), which is how a new
+   one gets added to some of them and not others.
+
+   The Scoreboard is here because it is meant to be seen by everyone: it is a company-wide
+   leaderboard, and a leaderboard half the company cannot open is not a leaderboard. This replaces
+   the narrower "holding tasks grants scoreboard" rule it shipped with a few commits ago.
+
+   This decides only whether a menu entry is drawn and a page will open. It is not a grant of
+   anything else: the figures come from acc.scoreboard(), which is SECURITY DEFINER, reads only
+   already-approved task counts, and is unchanged. Customers never reach any of this — pageAllowed()
+   sends a customer session to the customer page before it gets here. */
+const ALWAYS_ON=['dashboard','settings','network','scoreboard'];
 function navIcon(id){return ICONS[id]||'fa-square';}
 /* THE PAGES WERE RENAMED AND NOBODY'S PERMISSIONS FOLLOWED.
 
@@ -565,13 +583,14 @@ function navIcon(id){return ICONS[id]||'fa-square';}
    app.can_write('hr') by role, recruit.can_manage_tests() by its own list, each re-checked in the
    database on every write. Somebody who could only look before can still only look. */
 const MODULE_RENAMES={recruitment:'recruitment_new', hr:'hr_new'};
-function applyModuleRenames(ss){
+function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
+  ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return applyModuleRenames(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return applyModuleRenames(ss);}const ss=new Set(['dashboard','settings','network']);return ss;}
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
    superadmins. So it is granted the ordinary way — 'usability' in a person's modules — and the
@@ -585,7 +604,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return applyModuleRenames(new Set(m)).has(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -4566,7 +4585,8 @@ async function getPeople(){
 }
 function nameOf(email){if(!email)return '—';const p=(PEOPLE||[]).find(x=>x.email===email);return p?p.name:email.split('@')[0];}
 function taskTabs(active){
-  const t=[['','Home','fa-house'],['list','Projects','fa-diagram-project'],['scoreboard','Scoreboard','fa-trophy']];
+  // No Scoreboard tab here any more — it's its own module (Overview > Scoreboard).
+  const t=[['','Home','fa-house'],['list','Projects','fa-diagram-project']];
   return '<div class="tabs">'+t.map(x=>`<div class="tab ${active===x[0]?'active':''}" onclick="location.hash='#/tasks${x[0]?'/'+x[0]:''}'"><i class="fa-solid ${x[2]}"></i> ${x[1]}</div>`).join('')+'</div>';
 }
 
@@ -8579,30 +8599,65 @@ window.secSave=async function(email){
 };
 function noAccess(v){ setCrumb(['Access']); v.innerHTML=`<div class="card card-pad empty" style="max-width:520px;margin:24px auto;text-align:center"><i class="fa-solid fa-lock" style="font-size:30px;color:#94a3b8"></i><h2 style="margin-top:12px">No access to this module</h2><p style="color:var(--slate)">You do not have permission to view this page. Contact your administrator if you need access.</p><button class="btn btn-primary" style="margin-top:14px" onclick="navTo('dashboard')">Go to Dashboard</button></div>`; }
 
-async function taskScoreboard(v){
-  setCrumb(['Accountability','Scoreboard']);
-  v.innerHTML=taskTabs('scoreboard')+'<div class="card card-pad"><div class="loader"><div class="spin"></div></div></div>';
-  await getPeople();
-  let rowsRaw=[];try{const {data}=await sb.schema('acc').rpc('scoreboard');rowsRaw=data||[];}catch(e){}
-  let rows=rowsRaw.map(r=>{
-    const tasksTotal=(r.tasks_on_time||0)+(r.tasks_late||0);
-    const punctuality=tasksTotal?Math.round((r.tasks_on_time||0)/tasksTotal*100):null;
-    // Score: task closure + punctuality + checklist volume (normalised), lightly penalised for frequent due-date extensions
-    const closureScore=Math.min(100,(r.tasks_completed||0)*8);
-    const checklistScore=Math.min(100,(r.checklist_items_done||0)*4);
-    const parts=[punctuality,closureScore,checklistScore].filter(x=>x!=null);
-    let score=parts.length?Math.round(parts.reduce((a,b)=>a+b,0)/parts.length):0;
-    score=Math.max(0,score-Math.min(20,(r.due_date_extensions||0)*3));
-    return {name:r.full_name||nameOf(r.email),email:r.email,checklist:r.checklist_items_done||0,completed:r.tasks_completed||0,punctuality,extensions:r.due_date_extensions||0,score};
-  }).sort((a,b)=>b.score-a.score);
-  const bar=(val,col)=>val==null?'<span style="color:#94a3b8">—</span>':'<div style="display:flex;align-items:center;gap:8px"><div class="progress" style="flex:1;max-width:130px"><span style="width:'+val+'%;background:'+col+'"></span></div><span style="font-size:12px;color:var(--slate);min-width:34px">'+val+'%</span></div>';
-  const medal=i=>i===0?'<span style="font-size:18px">🥇</span>':i===1?'<span style="font-size:18px">🥈</span>':i===2?'<span style="font-size:18px">🥉</span>':'<span style="color:var(--slate);font-weight:600">'+(i+1)+'</span>';
-  v.innerHTML=taskTabs('scoreboard')+
-    '<p style="color:var(--slate);font-size:13px;margin:6px 2px 14px">Score = Time Sheet items completed + tasks finished + punctuality against due dates, with a penalty for frequent due-date extensions.</p>'+
-    '<div class="card"><table class="tbl"><thead><tr><th>Rank</th><th>Person</th><th>Time Sheet items done</th><th>Tasks completed</th><th>Punctuality</th><th>Due-date extensions</th><th>Score</th></tr></thead><tbody>'+
-    (rows.length?rows.map((r,i)=>'<tr><td>'+medal(i)+'</td><td>'+avatar(r.name)+' <b>'+esc(r.name)+'</b></td><td>'+r.checklist+'</td><td>'+r.completed+'</td><td>'+bar(r.punctuality,'#0f766e')+'</td><td style="color:var(--slate)">'+r.extensions+'</td><td style="font-weight:700;font-size:15px">'+r.score+'</td></tr>').join(''):'<tr><td colspan="7"><div class="empty" style="padding:22px">No completed work yet</div></td></tr>')+
-    '</tbody></table></div>';
+/* ===== SCOREBOARD — its own module, not a tab inside Accountability =====
+
+   It used to exist twice, in two places, computing two different numbers from the same RPC: the
+   real one in accountability.js, and a legacy copy here that averaged punctuality, a capped
+   "closure score" and a capped checklist score, then docked points for due-date extensions - a
+   figure that shared nothing with the one people actually saw, and which leaned on
+   due_date_extensions, a column acc.scoreboard() has always returned hardcoded to 0. Pulling the
+   Scoreboard out of Accountability is the moment to have one implementation instead of two, so
+   this is now the only one, and it is the arithmetic the tab really used.
+
+   Lives in nexus-core.js rather than its own page script because nexus-core is loaded by every
+   page already: no extra <script>, no load-order race, and the legacy /tasks/scoreboard route can
+   hand straight over to it. */
+let SB_VIEW='all';
+window.sbSetView=function(v){ if(SB_VIEW===v)return; SB_VIEW=v; if(typeof renderPage==='function')renderPage(); };
+const sbMedal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+
+async function sbRenderAllTasks(host){
+  let rows=[]; try{const {data}=await sb.schema('acc').rpc('scoreboard');rows=data||[];}catch(e){}
+  /* The score is the sum of the counts the RPC returns, and the RPC decides which tasks reach
+     those counts: self-assigned ones are excluded, and a task with no due date is not counted as
+     having met one. So per task: due date met +2, due date missed 0, no due date +1. */
+  rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)+(r.tasks_on_time||0)-(r.tasks_late||0)}))
+           .sort((a,b)=>b.score-a.score||b.tasks_completed-a.tasks_completed);
+  if(!host)return;
+  host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Counts tasks someone else assigned you. Completed <b>+1</b> · finished by its due date <b>+1 more</b> · missed the due date <b>&minus;1</b>. A task with no due date still earns the completion point but cannot earn the on-time point. Tasks you assigned to yourself are listed under <b>Self</b> and do not score. Declines automatically reverse the credit.</div>'
+    /* No "Sub" column. It showed acc.scoreboard()'s checklist_items_done, which counts done
+       subtasks by the names in ptask_subtasks.people — and every completed subtask in the system
+       has that array empty, so the column read 0 for all 85 people. It never fed the score either.
+       The RPC still returns the count; nothing displays it now. */
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>On-time</th><th>Overdue</th><th title="Tasks this person created for themselves — shown for completeness, not scored">Self</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_completed+'</td><td style="color:#16a34a">'+r.tasks_on_time+'</td><td style="color:#dc2626">'+r.tasks_late+'</td><td style="color:var(--slate)">'+(r.tasks_self||0)+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="7"><div class="empty" style="padding:22px">No activity yet</div></td></tr>')
+    +'</tbody></table></div>';
 }
+
+async function sbRenderCauselistBoard(host){
+  let rows=[]; try{const {data}=await sb.schema('acc').rpc('scoreboard_causelist');rows=data||[];}catch(e){}
+  if(!host)return;
+  host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Legal MIS causelist tasks only — per task, by how far ahead of its due date it was finished: 7+ days early <b>+2</b> · 3–6 days early <b>+1</b> · 0–2 days early <b>0</b> · after the due date <b>&minus;1</b></div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_assigned+'</td><td>'+r.tasks_completed+'</td><td>'+r.tasks_pending+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="6"><div class="empty" style="padding:22px">No causelist tasks yet</div></td></tr>')
+    +'</tbody></table></div>';
+}
+
+VIEWS.scoreboard=async function(v){
+  setCrumb(['Scoreboard']);
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-ranking-star" style="color:#b8902f"></i> Scoreboard</h1><p>Who is delivering assigned work, and on time</p></div></div>'
+    +'<div class="card" style="padding:0">'
+      +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
+        +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
+        +'<button class="btn'+(SB_VIEW==='causelist'?' btn-primary':'')+'" onclick="sbSetView(\'causelist\')">Causelist</button>'
+      +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
+  if(SB_VIEW==='causelist') await sbRenderCauselistBoard($('sbBody'));
+  else await sbRenderAllTasks($('sbBody'));
+};
+// Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
+function taskScoreboard(){ navTo('scoreboard'); }
 
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
@@ -20659,6 +20714,13 @@ async function trcPrefetchHistories(leadIds){
          for itself on click. A failed chunk simply stays uncached. */
     }
   }
+  /* Added so trcLeads' cadence/callbackTat (see its own note) stop reading the range-limited rows the
+     moment each lead's real history lands - a soft repaint, same as trcEnrichVisiblePage/
+     trcBackfillLastJudgement already do on their own completion. Gated on the same generation check as
+     everything above: a newer prefetch (or a page/filter change) means this one's result is stale and
+     must not repaint over whatever now owns the screen. Only reached at all when todo was non-empty,
+     so this never fires on a page that was already fully cached. */
+  if(gen===TRC_PREFETCH_GEN)trcRender(false,true);
 }
 
 /* THE ONE PLACE A LEAD'S HISTORY IS FETCHED, for the click and for the prefetch alike.
@@ -20710,7 +20772,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -20729,6 +20791,8 @@ function trcResetFilters(){
   const y=traYesterday();
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
+  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -20801,6 +20865,15 @@ function trcDailyPlainCell(n){
   const shown=n||0;
   return '<td style="text-align:center'+(shown?'':';color:var(--slate)')+'">'+shown+'</td>';
 }
+/* Reconciliation, point 2: not just the raw Transcribed/Failed counts already in the row (both were
+   already columns in acc.daily_qa_summary, just never surfaced here as a rate) - the PROPORTION of the
+   day's calls each one accounts for, so a day of 4 failed out of 6 calls reads as the crisis it is
+   instead of looking the same as 4 failed out of 400. */
+function trcDailyRateCell(n,total){
+  if(!total)return '<td style="text-align:center;color:var(--slate)">—</td>';
+  const pct=Math.round((Number(n||0)/Number(total))*1000)/10;
+  return '<td style="text-align:center;font-variant-numeric:tabular-nums">'+pct+'%</td>';
+}
 function trcRenderDaily(){
   const el=$('trcDaily');if(!el)return;
   if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
@@ -20811,13 +20884,19 @@ function trcRenderDaily(){
       +'<td style="white-space:nowrap;font-weight:600">'+esc(trcWall(r.date,true)||r.date)+'</td>'
       +trcDailyCell(r.date,'all','all',r.total_leads)
       +trcDailyCell(r.date,'all','all',r.total_followups)
+      +trcDailyCell(r.date,'proc','no_recording',Math.max(0,Number(r.total_followups||0)-Number(r.recordings_available||0)))
+      +trcDailyCell(r.date,'proc','non_transcribable',r.non_transcribable)
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
+      +trcDailyRateCell(r.transcribed,r.total_followups)
+      +trcDailyPlainCell(r.already_transcribed)
+      +trcDailyCell(r.date,'proc','failed',r.transcription_failed)
+      +trcDailyRateCell(r.transcription_failed,r.total_followups)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
       +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
       +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(7+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(13+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -20830,7 +20909,13 @@ function trcRenderDaily(){
       +'</div>'
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
-      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
+      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th>'
+        +'<th title="Total calls ÷ recordings available - calls with no recording at all to transcribe">No recording</th>'
+        +'<th title="Had a recording, but nothing usable came out of it (silence, wrong number, too short, etc)">No conversation</th>'
+        +'<th>Transcribed</th>'
+        +'<th title="Transcribed ÷ Total calls">Success rate</th>'
+        +'<th title="Of the Transcribed count, how many reused a recording already transcribed earlier - no repeat model call, no second bill. Not a link: this counts a fact about already-completed rows, not a separate status to filter the table by.">Reused (old transcript)</th>'
+        +'<th>Failed</th><th title="Transcription failed ÷ Total calls">Failure rate</th>'
         +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
         +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
         +'moment that later call is judged.">Mismatched</th>'
@@ -20963,10 +21048,10 @@ function trcRecallRow(sl){
    call - see trcLeadDetail below. */
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
-  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
+  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_first_seen_date,lead_current_status,'
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
-  +'lost_reason_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+  +'lost_reason_status,retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
   +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,is_latest_assessed';
 const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
@@ -21176,7 +21261,7 @@ async function trcEnsureQaFieldsMerged(){
   try{
     let q=sb.schema('acc').from('followup_qa').select(
       'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
       +'qa_error,reused_transcription,is_latest_assessed');
     if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
     if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
@@ -21413,6 +21498,42 @@ function trcApply(rows,skipCards){
        casing the CRM happened to send. Matching those exactly is how a selected caller's own calls
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
+    // Same shape as crm/bu above - an independent lens on the follow-up's own two accuracy verdicts,
+    // combined by AND with every other filter rather than acting as a fourth KPI-card tab. 'NONE'
+    // means "not assessed at all" (no QA row yet, or transcribed with nothing to judge), not a status
+    // value the model ever returns.
+    if(TRC_F.fdate!=='all'){
+      if(TRC_F.fdate==='NONE'){ if(r.followup_date_status)return false; }
+      else if(String(r.followup_date_status||'')!==TRC_F.fdate)return false;
+    }
+    if(TRC_F.remarks!=='all'){
+      if(TRC_F.remarks==='NONE'){ if(r.remarks_status)return false; }
+      else if(String(r.remarks_status||'')!==TRC_F.remarks)return false;
+    }
+    if(TRC_F.pitch!=='all'){
+      if(TRC_F.pitch==='NONE'){ if(r.pitch_status)return false; }
+      else if(String(r.pitch_status||'')!==TRC_F.pitch)return false;
+    }
+    if(TRC_F.etiquette!=='all'){
+      if(TRC_F.etiquette==='NONE'){ if(r.etiquette_status)return false; }
+      else if(String(r.etiquette_status||'')!==TRC_F.etiquette)return false;
+    }
+    if(TRC_F.queryHandling!=='all'){
+      if(TRC_F.queryHandling==='NONE'){ if(r.query_handling_status)return false; }
+      else if(String(r.query_handling_status||'')!==TRC_F.queryHandling)return false;
+    }
+    if(TRC_F.retention!=='all'){
+      if(TRC_F.retention==='NONE'){ if(r.retention_status)return false; }
+      else if(String(r.retention_status||'')!==TRC_F.retention)return false;
+    }
+    if(TRC_F.lostReason!=='all'){
+      if(TRC_F.lostReason==='NONE'){ if(r.lost_reason_status)return false; }
+      else if(String(r.lost_reason_status||'')!==TRC_F.lostReason)return false;
+    }
+    if(TRC_F.personalMobile!=='all'){
+      if(TRC_F.personalMobile==='NONE'){ if(r.personal_mobile_status)return false; }
+      else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
+    }
     if(!skipCards){
       if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
       else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
@@ -21481,6 +21602,20 @@ function trcLeads(rows){
     g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
+    g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
+    /* Cadence and callback TAT judge a lead's WHOLE follow-up history, not just whatever slice of it
+       falls inside the selected date range - g.rows is range-limited, so judging off it directly would
+       silently score a lead only on the one call that happened to land in the window (which is why
+       these two used to read exactly like g.callbackOverdue - both collapsing to "the latest call in
+       range" when the range is a single day). The full history is exactly what trcPrefetchHistories
+       already warms in the background for click-through (see trcAfterListRender) - reuse it once it
+       has arrived; a lead not yet warmed simply falls back to the range-limited rows for this one
+       render, same as every other lazily-enriched field here, until trcPrefetchHistories' own
+       completion re-render (see its own note) picks it up. */
+    const cachedHistory=trcLeadCacheRead(g.lead_id);
+    const historyRows=cachedHistory?cachedHistory.rows:g.rows;
+    g.cadence=trcCadenceIssues(g.status,historyRows);
+    g.callbackTat=trcFirstCallbackTat(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -21660,6 +21795,13 @@ function trcKpiHtml(rows){
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
+  /* Missed callback needs lead_current_status (to exclude Lost leads), which only the full join
+     carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
+     actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
+     property of a LEAD's latest call, not of any one row. */
+  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
+  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
+  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -21672,6 +21814,13 @@ function trcKpiHtml(rows){
       return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Cadence issues'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-volume"></i> Slow first callback'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
@@ -21755,6 +21904,32 @@ window.trcCard=async function(kind,val){
   trcRender(true);
 };
 
+/* An independent toggle, not a fourth tab in the group above - it narrows whichever set of leads is
+   already on screen (a card, a mismatch category, a search) down to the ones with a missed callback,
+   the same way the accuracy dropdowns in the filter bar narrow it, rather than replacing that set.
+   Needs lead_current_status (to exclude Lost leads) - only the full join carries that, same as the
+   'proc' cards. */
+window.trcToggleOverdue=async function(){
+  TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
+  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
+   trcCadenceIssues) instead of only the current open one. Needs the full join for the same reason -
+   the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
+window.trcToggleCadence=async function(){
+  TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
+  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
+   (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
+window.trcToggleCallbackTat=async function(){
+  TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
+  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+
 /* "All time" is gone - it asked Postgres to sort and hand back the whole table (11k+ rows and
    climbing) in one shot, the single most expensive shape of this query, and it only got slower as the
    table grew. Previous day plus a manual From/To range covers the same ground a click at a time
@@ -21770,6 +21945,12 @@ function trcDateBar(){
      state), so a one-click shortcut back to it would only ever restate what's already showing. */
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   const personnelValues=trcPersonnelOptionsList(TRC_ROWS);
+  /* Moved up from the filter bar below (by request), same row as All personnel - the two are the
+     "who/which team" pair someone reaches for first, so they sit beside each other rather than one at
+     the top and one a row down. Same buValues logic trcFilterBar used to run itself: Durbaar Banquets
+     dropped (see trcFilterBar's own note - it no longer queues at all), everything else sorted. */
+  const buValues=Array.from(new Set((TRC_ROWS||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
@@ -21779,6 +21960,10 @@ function trcDateBar(){
     +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
       +opt('all','All personnel',TRC_F.personnel)
       +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'</select>'
+    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRC_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
     +'</select>'
   +'</div>';
 }
@@ -21822,11 +22007,6 @@ function trcPersonnelOptionsList(all){
 function trcFilterBar(all){
   const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
     .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
-     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
-     offering to filter down to a project this pipeline no longer transcribes. */
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
-    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -21839,9 +22019,65 @@ function trcFilterBar(all){
       +opt('all','All CRM statuses',TRC_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRC_F.crm);}).join('')
     +'</select>'
-    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
-      +opt('all','All business units',TRC_F.bu)
-      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
+    +'<select onchange="trcSet(\'pitch\',this.value)" style="padding:6px 8px">'
+      +opt('all','Pitch accuracy: all',TRC_F.pitch)
+      +opt('Accurate','Pitch: Accurate',TRC_F.pitch)
+      +opt('Partially Accurate','Pitch: Partially Accurate',TRC_F.pitch)
+      +opt('Inaccurate','Pitch: Inaccurate',TRC_F.pitch)
+      +opt('Not Verifiable','Pitch: Not Verifiable',TRC_F.pitch)
+      +opt('NONE','Pitch: Not yet assessed',TRC_F.pitch)
+    +'</select>'
+    +'<select onchange="trcSet(\'fdate\',this.value)" style="padding:6px 8px">'
+      +opt('all','Follow-up date accuracy: all',TRC_F.fdate)
+      +opt('Accurate','Follow-up date: Accurate',TRC_F.fdate)
+      +opt('Inaccurate','Follow-up date: Inaccurate',TRC_F.fdate)
+      +opt('Not Verifiable','Follow-up date: Not Verifiable',TRC_F.fdate)
+      +opt('NONE','Follow-up date: Not yet assessed',TRC_F.fdate)
+    +'</select>'
+    +'<select onchange="trcSet(\'remarks\',this.value)" style="padding:6px 8px">'
+      +opt('all','Remarks accuracy: all',TRC_F.remarks)
+      +opt('Accurate','Remarks: Accurate',TRC_F.remarks)
+      +opt('Partially Accurate','Remarks: Partially Accurate',TRC_F.remarks)
+      +opt('Inaccurate','Remarks: Inaccurate',TRC_F.remarks)
+      +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
+      +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
+    +'</select>'
+    +'<select onchange="trcSet(\'etiquette\',this.value)" style="padding:6px 8px">'
+      +opt('all','Etiquette: all',TRC_F.etiquette)
+      +opt('Pass','Etiquette: Pass',TRC_F.etiquette)
+      +opt('Partial','Etiquette: Partial',TRC_F.etiquette)
+      +opt('Fail','Etiquette: Fail',TRC_F.etiquette)
+      +opt('Not Applicable','Etiquette: Not Applicable',TRC_F.etiquette)
+      +opt('NONE','Etiquette: Not yet assessed',TRC_F.etiquette)
+    +'</select>'
+    +'<select onchange="trcSet(\'queryHandling\',this.value)" style="padding:6px 8px">'
+      +opt('all','Query handling: all',TRC_F.queryHandling)
+      +opt('Pass','Query handling: Pass',TRC_F.queryHandling)
+      +opt('Partial','Query handling: Partial',TRC_F.queryHandling)
+      +opt('Fail','Query handling: Fail',TRC_F.queryHandling)
+      +opt('Not Applicable','Query handling: Not Applicable',TRC_F.queryHandling)
+      +opt('NONE','Query handling: Not yet assessed',TRC_F.queryHandling)
+    +'</select>'
+    +'<select onchange="trcSet(\'retention\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Applicable everywhere else">'
+      +opt('all','Retention effort: all',TRC_F.retention)
+      +opt('Pass','Retention: Pass',TRC_F.retention)
+      +opt('Partial','Retention: Partial',TRC_F.retention)
+      +opt('Fail','Retention: Fail',TRC_F.retention)
+      +opt('Not Applicable','Retention: Not Applicable',TRC_F.retention)
+      +opt('NONE','Retention: Not yet assessed',TRC_F.retention)
+    +'</select>'
+    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Verifiable everywhere else">'
+      +opt('all','Lost reason accuracy: all',TRC_F.lostReason)
+      +opt('Accurate','Lost reason: Accurate',TRC_F.lostReason)
+      +opt('Inaccurate','Lost reason: Inaccurate',TRC_F.lostReason)
+      +opt('Not Verifiable','Lost reason: Not Verifiable',TRC_F.lostReason)
+      +opt('NONE','Lost reason: Not yet assessed',TRC_F.lostReason)
+    +'</select>'
+    +'<select onchange="trcSet(\'personalMobile\',this.value)" style="padding:6px 8px" title="Did the agent ask for a personal mobile number additional to the one already on file">'
+      +opt('all','Personal mobile asked: all',TRC_F.personalMobile)
+      +opt('Yes','Personal mobile asked: Yes',TRC_F.personalMobile)
+      +opt('No','Personal mobile asked: No',TRC_F.personalMobile)
+      +opt('NONE','Personal mobile asked: Not yet assessed',TRC_F.personalMobile)
     +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
@@ -21855,12 +22091,16 @@ window.trcSet=async function(k,v){
   // required at least the qa-fields merge to be showing at all - this is a no-op in that case, and a
   // safety net otherwise, not the normal way this gets triggered (see trcCard).
   if(k==='mismatch'&&v!=='all')await trcEnsureQaFieldsMerged();
+  // followup_date_status/remarks_status live on acc.followup_qa exactly like match/mismatch do - same
+  // light merge, no join to call_transcripts/transcription_queue needed.
+  if((k==='fdate'||k==='remarks'||k==='pitch'||k==='etiquette'||k==='queryHandling'||k==='retention'||k==='lostReason'||k==='personalMobile')&&v!=='all')await trcEnsureQaFieldsMerged();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';
+  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -21937,7 +22177,10 @@ function trcLeadRowHtml(g,sl){
     +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
-          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
+          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
+      +(g.callbackOverdue?' '+trcTag('t-red','fa-phone-slash','',
+          'Missed callback - promised '+(trcWall(g.callbackOverdue.dueDate)||g.callbackOverdue.dueDate)
+          +', '+g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
        carried-over verdict from another date, not this range's own, so it is labelled with exactly
        that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
@@ -21959,7 +22202,10 @@ function trcLeadRowHtml(g,sl){
        g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
        g.lastAssessed). */
     +trcTextCell(last.personnel_name,140)
-    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px'
+      +(g.callbackOverdue?';color:#dc2626;font-weight:600':'')+'"'
+      +(g.callbackOverdue?' title="'+esc(g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue')+'"':'')+'>'
+      +esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     /* No Recording column. A per-lead download only ever offered the LATEST call's audio, which is
@@ -22042,7 +22288,12 @@ function trcRender(full,keepPage){
      &&!rows.some(function(r){return String(r.lead_id)===String(TRC_LAST_LEAD_ID);})){
     rows=rows.concat(TRC_PIN_ROWS);
   }
-  const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
+  // the call-level Mismatch table, which trcLeads never runs over in the first place.
+  if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
+  if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
+  if(!callLevel&&TRC_F.callbackTat==='1')items=items.filter(function(g){return g.callbackTat;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -22297,7 +22548,8 @@ function trcQaTableHtml(r,m){
             : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
   }
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
-        rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+        retention=r.retention_effort||{}, rem=r.remarks_accuracy||{}, sa=r.status_assessment||{},
+        mobileAsk=r.personal_mobile_requested||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
@@ -22307,8 +22559,16 @@ function trcQaTableHtml(r,m){
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
     {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
+    // Only meaningful when the CRM status for THIS follow-up is Lost (see qa-prompt.ts section 4) -
+    // every other call gets "Not Applicable" from the model, which is a correct answer but not one
+    // worth a row on every single call, so the row itself is left out rather than shown as N/A.
+    r.crm_status==='Lost'?{topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
+     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])}:null,
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
+    {topic:'Personal mobile number requested',status:r.personal_mobile_status,score:null,
+     why:join([mobileAsk.reason,(r.personal_mobile_number||mobileAsk.number_shared)?'Number given: '+(r.personal_mobile_number||mobileAsk.number_shared):null,
+               mobileAsk.evidence?'"'+mobileAsk.evidence+'"':null])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
      /* Visit-pending only excuses the CRM's In Follow Up when this lead had ALREADY qualified on an
         earlier call (2026-09-21 gate) - on a first-time qualification it's still flagged, so this note
@@ -22320,7 +22580,7 @@ function trcQaTableHtml(r,m){
                (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
-  ];
+  ].filter(Boolean);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -22482,6 +22742,114 @@ function trcAddDays(dateStr,delta){
   const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]));
   dt.setUTCDate(dt.getUTCDate()+delta);
   return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+}
+/* Same UTC-noon arithmetic as trcAddDays, the subtraction direction instead of the addition - how many
+   whole days sit between two YYYY-MM-DD strings. */
+function trcDaysBetween(fromStr,toStr){
+  const p=function(s){const a=String(s).split('-').map(Number);return Date.UTC(a[0],a[1]-1,a[2]);};
+  return Math.round((p(toStr)-p(fromStr))/86400000);
+}
+/* A promised callback date that has passed with nothing logged since is a missed callback - the agent
+   said "I'll call back on X" and X came and went in silence. Computed the same way trcOvHealth checks
+   its own promised date: against traToday(), over whichever rows the caller hands in - the lead's full
+   history on the detail page (see trcLeadDetail), or only the selected range's rows on the list (see
+   trcLeads) - a call outside that set is invisible here exactly as everywhere else this page rolls up
+   a lead's calls. Not applicable to a lead that has closed the door (Lost) - there is nothing left to
+   call back about. "Lost, then Reopened" is deliberately NOT treated as Lost, same reasoning as
+   everywhere else on this page (see the status_assessment prompt): the "then Reopened" half means the
+   lead is live again. Only the LATEST call's own promise matters - rows arrives chronological
+   (oldest-first, the same order trcLeads and trcLeadDetail already sort it into), so an earlier call's
+   promise was superseded the moment a later call happened, on time or not. */
+function trcCallbackOverdue(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const last=(rows||[])[(rows||[]).length-1];
+  if(!last||!last.next_follow_up_text)return null;
+  const dueDate=String(last.next_follow_up_text).slice(0,10);
+  const today=traToday();
+  if(!(dueDate<today))return null;
+  return {dueDate:dueDate,daysLate:trcDaysBetween(dueDate,today)};
+}
+function trcCallbackOverdueHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed callback</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
+    +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
+  +'</div>';
+}
+/* Follow-up frequency/cadence - was the recontact after each call made on time?
+   Scheduled   - the call named a next_follow_up_text date; late if the FOLLOWING call (or, for the
+                 lead's own still-open gap, today) falls after that date.
+   Unscheduled - the call named no date at all; late if more than TRC_CADENCE_UNSCHEDULED_DAYS days
+                 pass before the next call (or today, for the still-open gap).
+   Not evaluated once a lead is Lost - same reasoning as trcCallbackOverdue, there is nothing left to
+   call back about. rows must already be chronological, oldest-first (trcLeads/trcLeadDetail's own
+   order), since each gap is judged against the call that comes right after it. */
+const TRC_CADENCE_UNSCHEDULED_DAYS=3;
+function trcCadenceIssues(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const list=rows||[];
+  const today=traToday();
+  const gaps=[];
+  for(let i=0;i<list.length;i++){
+    const prev=list[i];
+    const nextRow=list[i+1]||null;
+    const actualDate=nextRow?trcRowDate(nextRow):today;
+    if(!actualDate)continue;
+    const scheduled=!!prev.next_follow_up_text;
+    const prevDate=trcRowDate(prev);
+    const limitDate=scheduled?String(prev.next_follow_up_text).slice(0,10)
+                             :(prevDate?trcAddDays(prevDate,TRC_CADENCE_UNSCHEDULED_DAYS):null);
+    if(!limitDate||!(actualDate>limitDate))continue;
+    gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
+      actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
+  }
+  if(!gaps.length)return null;
+  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+}
+function trcCadenceIssuesHtml(o){
+  if(!o)return '';
+  /* trcCadenceIssues builds gaps walking the history oldest-first, since each one is judged against
+     whatever call came right after it - display order is the opposite: the most recent gap is the one
+     someone actually needs to act on today, so it reads top of the card, newest first. */
+  const rows=o.gaps.slice().reverse().map(function(g){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">'
+      +(g.scheduled?'Promised for ':'No date promised - overdue past ')+esc(trcWall(g.limitDate)||g.limitDate)
+      +(g.open?', nothing logged since':', next call on '+esc(trcWall(g.actualDate)||g.actualDate))
+      +' - '+g.daysLate+' day'+(g.daysLate===1?'':'s')+' late.</div>';
+  }).join('');
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Follow-up cadence - '
+    +o.lateCount+' late of '+o.totalGaps+'</div>'
+    +rows
+  +'</div>';
+}
+/* Inbound lead -> first callback turnaround: how long after this lead first appeared in the CRM the
+   first logged call actually happened. lead_first_seen_date (acc.crm_leads, not the per-follow-up
+   f.first_seen_date - see the view's own note) carries no time-of-day, so this is a calendar-day
+   proxy for a 24-hour target, not an hour-level measurement - same day counts as on time, anything
+   later is flagged. rows must be chronological, oldest-first. Only available where the row came from
+   the full join (TRC_LIGHT/followup_timeline_v) - on the fast crm_followups-only path this field is
+   simply absent and the function returns null, the same way trcIsRegression treats a light row. */
+function trcFirstCallbackTat(rows){
+  const list=rows||[];
+  const first=list[0];
+  if(!first||!first.lead_first_seen_date)return null;
+  const firstCallDate=trcRowDate(first);
+  if(!firstCallDate)return null;
+  const daysLate=trcDaysBetween(first.lead_first_seen_date,firstCallDate);
+  if(!(daysLate>0))return null;
+  return {leadSeenDate:first.lead_first_seen_date,firstCallDate:firstCallDate,daysLate:daysLate};
+}
+function trcFirstCallbackTatHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#d97706"></i> First callback turnaround</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">Lead first seen '+esc(trcWall(o.leadSeenDate)||o.leadSeenDate)
+    +', first call logged '+esc(trcWall(o.firstCallDate)||o.firstCallDate)+' - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' after.</div>'
+  +'</div>';
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
    (1) each of the two days immediately BEFORE the visit day needs its own follow-up call logged on
@@ -22719,10 +23087,16 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
+  const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
+  const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
+  const callbackTat=trcFirstCallbackTatHtml(trcFirstCallbackTat(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
+    +callbackOverdue
+    +cadenceIssues
+    +callbackTat
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
