@@ -21829,50 +21829,212 @@ async function custMediaGrid(list){
       return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
     <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
 }
-/* THREE LEVELS, NOT FOUR, AND THE FLAT IS SPLIT BY ROOM.
+/* CONSTRUCTION PROGRESS - what the customer sees: their BLOCK and their FLAT, nothing else.
 
-   The floor level is gone. It sat between the block and the flat, it was worked out by reading
-   digits off a unit code rather than from anything anybody recorded, and in the whole life of
-   the portal not one photo was ever put against it.
+   Project-wide photos are not shown here any more, by request: a customer's question is "how is
+   my building doing, how is my flat doing", and a gallery of the whole site answered neither. The
+   floor level went with the Photos & Videos redesign (it was guessed from digits in a unit code
+   and never held a photo).
 
-   The flat's photos no longer wait for the slab to be cast. That gate meant a customer whose
-   photos HAD been taken was shown a message saying there would be none until casting finished -
-   the photos existed and were being withheld by a date field nobody kept up. If there are
-   photos of your flat you see them; if there are none you are told that, which is the honest
-   version of the same sentence.
+   Layout: a summary card (where, how many, when it was last updated), then the block's updates
+   grouped by the date the photos were taken - so it reads as a progress diary, newest first - then
+   the flat, filterable by room (Common area / Bathroom / Kitchen) because "is my kitchen done yet"
+   is the question people actually ask. Any photo opens full screen with next / previous, arrow
+   keys and swipe; a video plays in place.
 
-   Within the flat they are grouped common area / bathroom / kitchen, because that is how people
-   ask: "is my kitchen done yet" is not answerable by one long reverse-chronological pile. */
-// Every customer-side read filters deleted_at itself. RLS already hides removed rows from a real
-// customer, but staff (and Staff preview) pass the staff policy, which returns deleted rows too - so
-// preview showed photos an admin had removed and the customer could not see.
-async function custTabProgress(unit){
-  const [{data:pPhotos},{data:tPhotos},{data:uPhotos}]=await Promise.all([
-    sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).is('deleted_at',null).order('taken_on',{ascending:false}),
-    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false})
-  ]);
-  let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
-    ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
-  out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div>';
-  const mine=uPhotos||[];
-  if(!mine.length){
-    out+='<div class="card card-pad empty">No photos of your flat yet — check back soon, these are added roughly every two weeks.</div>';
-  }else{
-    // Only the rooms that actually have something are given a heading; three headings with two
-    // "nothing yet" messages under them reads as a fault rather than as a stage of the build.
-    const AREAS=[['common','Common area'],['bathroom','Bathroom'],['kitchen','Kitchen']];
-    for(const a of AREAS){
-      const list=mine.filter(function(x){return (x.area||'common')===a[0];});
-      if(!list.length) continue;
-      out+='<div style="font-size:13px;font-weight:700;color:var(--ink);margin:14px 0 8px">'+esc(a[1])+'</div>';
-      out+=await custMediaGrid(list);
-    }
+   Every read filters deleted_at itself. RLS already hides removed rows from a real customer, but
+   staff (and Staff preview) pass the staff policy, which returns deleted rows too - so preview used
+   to show photos an admin had removed and the customer could not see. */
+const CUST_PG_AREAS=[['common','Common area','fa-couch'],['bathroom','Bathroom','fa-bath'],['kitchen','Kitchen','fa-kitchen-set']];
+let CUST_PG={items:[],flat:[],room:'all'};
+function custPgCss(){return `<style>
+  .cpg{display:flex;flex-direction:column;gap:18px;position:relative;z-index:1}
+  .cpg-hero{border-radius:16px;padding:20px 22px;color:#fff;position:relative;overflow:hidden;
+    background:linear-gradient(135deg,#0f1e3d 0%,#1d4ed8 60%,#3b82f6 100%);box-shadow:0 10px 30px rgba(29,78,216,.22)}
+  .cpg-hero::after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%);pointer-events:none}
+  .cpg-hero h2{font-size:20px;font-weight:700;margin:0 0 4px;letter-spacing:-.2px}
+  .cpg-hero .sub{font-size:13.5px;opacity:.85}
+  .cpg-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .cpg-chip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+    padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600}
+  .cpg-sec{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow)}
+  .cpg-sh{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .cpg-ic{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    background:var(--brand-50);color:var(--brand);font-size:17px;flex:none}
+  .cpg-st{font-size:16px;font-weight:700;color:var(--ink);line-height:1.2}
+  .cpg-ss{font-size:12.5px;color:var(--slate);margin-top:2px}
+  .cpg-count{margin-left:auto;font-size:12px;font-weight:700;color:var(--brand);background:var(--brand-50);
+    padding:4px 11px;border-radius:999px;white-space:nowrap}
+  .cpg-day{display:flex;align-items:center;gap:10px;margin:18px 0 10px;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .cpg-body>.cpg-day:first-child{margin-top:2px}
+  .cpg-day .dot{width:9px;height:9px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px var(--brand-50);flex:none}
+  .cpg-day .n{font-weight:500;color:var(--slate)}
+  .cpg-day::after{content:"";flex:1;height:1px;background:var(--line-2)}
+  .cpg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+  .cpg-tile{position:relative;aspect-ratio:4/3;border-radius:12px;overflow:hidden;cursor:pointer;background:#e9eef6;
+    border:0;padding:0;display:block;width:100%;box-shadow:0 1px 3px rgba(16,24,40,.08);transition:transform .15s,box-shadow .15s}
+  .cpg-tile:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(16,24,40,.16)}
+  .cpg-tile:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+  .cpg-tile img,.cpg-tile video{width:100%;height:100%;object-fit:cover;display:block;transition:transform .35s}
+  .cpg-tile:hover img,.cpg-tile:hover video{transform:scale(1.05)}
+  .cpg-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:22px}
+  .cpg-play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .cpg-play span{width:46px;height:46px;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-size:16px;padding-left:3px}
+  .cpg-tag{position:absolute;left:8px;bottom:8px;font-size:11px;font-weight:600;color:#fff;background:rgba(15,23,42,.62);
+    padding:3px 9px;border-radius:999px}
+  .cpg-rooms{display:flex;gap:6px;flex-wrap:wrap;background:#f1f5f9;padding:4px;border-radius:12px;margin-bottom:6px;width:fit-content;max-width:100%}
+  .cpg-room{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;border-radius:9px;padding:8px 14px;
+    font:600 13px Inter,system-ui,sans-serif;color:var(--slate);cursor:pointer;transition:.12s}
+  .cpg-room .n{font-size:11px;background:#e2e8f0;color:var(--slate);border-radius:999px;padding:1px 7px}
+  .cpg-room:hover{color:var(--ink)}
+  .cpg-room.on{background:#fff;color:var(--brand);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .cpg-room.on .n{background:var(--brand-50);color:var(--brand)}
+  .cpg-empty{text-align:center;padding:28px 16px;border:1.5px dashed var(--line);border-radius:14px;background:#fafbfd}
+  .cpg-empty i{font-size:26px;color:#cbd5e1;margin-bottom:10px;display:block}
+  .cpg-empty b{display:block;font-size:14px;color:var(--ink);margin-bottom:4px}
+  .cpg-empty span{font-size:12.5px;color:var(--slate)}
+  /* full-screen viewer */
+  .cpg-lb{position:fixed;inset:0;z-index:9500;background:rgba(6,10,20,.98);display:flex;flex-direction:column}
+  .cpg-lbbar{display:flex;align-items:center;gap:12px;padding:14px 18px;color:#e5e7eb;font-size:13.5px}
+  .cpg-lbbar .t{font-weight:600;color:#fff}
+  .cpg-lbbar .c{margin-left:auto;opacity:.75;white-space:nowrap}
+  .cpg-lbx{border:0;background:rgba(255,255,255,.12);color:#fff;width:38px;height:38px;border-radius:10px;cursor:pointer;font-size:18px;flex:none}
+  .cpg-lbx:hover{background:rgba(255,255,255,.24)}
+  .cpg-lbstage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;padding:0 64px 24px}
+  .cpg-lbstage img,.cpg-lbstage video{max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5);background:#000}
+  .cpg-lbnav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border-radius:50%;border:0;cursor:pointer;
+    background:rgba(255,255,255,.14);color:#fff;font-size:17px}
+  .cpg-lbnav:hover{background:rgba(255,255,255,.28)}
+  .cpg-lbnav.prev{left:10px}.cpg-lbnav.next{right:10px}
+  @media(max-width:760px){
+    .cpg-hero{padding:18px}.cpg-hero h2{font-size:18px}
+    .cpg-sec{padding:14px}
+    .cpg-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .cpg-tile{border-radius:10px}
+    .cpg-rooms{width:100%}.cpg-room{flex:1;justify-content:center;padding:9px 6px;font-size:12.5px}
+    .cpg-count{margin-left:0}
+    .cpg-lbstage{padding:0 0 84px}
+    .cpg-lbnav{top:auto;bottom:22px;transform:none}
+    .cpg-lbnav.prev{left:calc(50% - 58px)}.cpg-lbnav.next{right:calc(50% - 58px)}
   }
+</style>`;}
+
+// One tile. `i` indexes CUST_PG.items, which is what the viewer walks through.
+function custPgTile(it,i,showRoom){
+  const media=it.url
+    ?(it.isVideo?'<video src="'+it.url+'#t=0.5" muted playsinline preload="metadata"></video>':'<img src="'+it.url+'" alt="" loading="lazy">')
+    :'<div class="cpg-ph"><i class="fa-solid '+(it.isVideo?'fa-film':'fa-image')+'"></i></div>';
+  return '<button type="button" class="cpg-tile" onclick="custPgOpen('+i+')" aria-label="Open '+esc(it.label)+' '+(it.isVideo?'video':'photo')+' of '+esc(fmtDate(it.date))+'">'
+    +media+(it.isVideo?'<div class="cpg-play"><span><i class="fa-solid fa-play"></i></span></div>':'')
+    +(showRoom&&it.room?'<span class="cpg-tag">'+esc(it.room)+'</span>':'')+'</button>';
+}
+// Newest day first, one heading per day - reads as a progress diary.
+function custPgByDay(idxs,showRoom){
+  const days={},order=[];
+  idxs.forEach(i=>{const d=CUST_PG.items[i].date||'';if(!(d in days)){days[d]=[];order.push(d);}days[d].push(i);});
+  return '<div class="cpg-body">'+order.map(d=>{const l=days[d],v=l.filter(i=>CUST_PG.items[i].isVideo).length,ph=l.length-v;
+    const n=[ph?ph+' photo'+(ph===1?'':'s'):'',v?v+' video'+(v===1?'':'s'):''].filter(Boolean).join(' · ');
+    return '<div class="cpg-day"><span class="dot"></span>'+esc(d?fmtDate(d):'Undated')+' <span class="n">'+n+'</span></div>'
+      +'<div class="cpg-grid">'+l.map(i=>custPgTile(CUST_PG.items[i],i,showRoom)).join('')+'</div>';}).join('')+'</div>';
+}
+function custPgEmpty(icon,title,text){return '<div class="cpg-empty"><i class="fa-solid '+icon+'"></i><b>'+esc(title)+'</b><span>'+esc(text)+'</span></div>';}
+function custPgFlatIdx(){
+  return CUST_PG.room==='all'?CUST_PG.flat:CUST_PG.flat.filter(i=>CUST_PG.items[i].roomKey===CUST_PG.room);
+}
+function custPgFlatBody(){
+  const idxs=custPgFlatIdx();
+  return idxs.length?custPgByDay(idxs,CUST_PG.room==='all'):custPgEmpty('fa-camera','Nothing here yet','Photos of this room will appear as soon as they are taken.');
+}
+window.custPgRoom=function(k){
+  CUST_PG.room=k;
+  document.querySelectorAll('.cpg-room').forEach(b=>b.classList.toggle('on',b.getAttribute('data-k')===k));
+  const host=$('cpgFlatBody'); if(host) host.innerHTML=custPgFlatBody();
+};
+
+async function custTabProgress(unit){
+  const [{data:tPhotos},{data:uPhotos}]=await Promise.all([
+    unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).is('deleted_at',null).order('taken_on',{ascending:false}).order('created_at',{ascending:false})
+  ]);
+  const block=tPhotos||[], flat=uPhotos||[];
+  const roomOf=k=>(CUST_PG_AREAS.find(a=>a[0]===k)||CUST_PG_AREAS[0]);
+  const raw=block.map(p=>({p,label:'Block',roomKey:null,room:null}))
+    .concat(flat.map(p=>{const r=roomOf(p.area||'common');return {p,label:r[1],roomKey:r[0],room:r[1]};}));
+  const urls=await Promise.all(raw.map(r=>s3SignedUrl(r.p.storage_path).catch(()=>null)));
+  CUST_PG.items=raw.map((r,i)=>({url:urls[i],isVideo:(r.p.file_type||'').indexOf('video')===0,
+    date:r.p.taken_on,label:r.label,roomKey:r.roomKey,room:r.room,where:r.roomKey?'Your flat':'Your block'}));
+  CUST_PG.flat=CUST_PG.items.map((it,i)=>it.roomKey?i:-1).filter(i=>i>=0);
+  CUST_PG.room='all';
+  const blockIdx=CUST_PG.items.map((it,i)=>it.roomKey?-1:i).filter(i=>i>=0);
+
+  const total=CUST_PG.items.length, vids=CUST_PG.items.filter(i=>i.isVideo).length, pics=total-vids;
+  const latest=CUST_PG.items.reduce((m,i)=>i.date&&(!m||i.date>m)?i.date:m,null);
+  const projName=(unit.projects&&unit.projects.name)||'';
+  const where=[unit.tower,unit.unit_code?'Flat '+unit.unit_code:''].filter(Boolean).join(' · ');
+  const upd=n=>n+' update'+(n===1?'':'s');
+
+  let out=custPgCss()+'<div class="cpg">';
+  out+='<div class="cpg-hero"><h2>Construction progress</h2><div class="sub">'+esc(projName)+(where?' — '+esc(where):'')+'</div>'
+    +'<div class="cpg-chips">'
+      +'<span class="cpg-chip"><i class="fa-solid fa-clock-rotate-left"></i>'+(latest?'Last update '+esc(fmtDate(latest)):'Updates coming soon')+'</span>'
+      +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
+    +'</div></div>';
+
+  out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-building"></i></div>'
+    +'<div><div class="cpg-st">Your block'+(unit.tower?' — '+esc(unit.tower):'')+'</div><div class="cpg-ss">How your building is coming along</div></div>'
+    +(blockIdx.length?'<span class="cpg-count">'+upd(blockIdx.length)+'</span>':'')+'</div>'
+    +(blockIdx.length?custPgByDay(blockIdx,false):custPgEmpty('fa-building','No block updates yet','Our site team adds photos of your building as work progresses.'))
+    +'</div>';
+
+  const counts={}; CUST_PG.flat.forEach(i=>{const k=CUST_PG.items[i].roomKey;counts[k]=(counts[k]||0)+1;});
+  const rooms=CUST_PG_AREAS.filter(a=>counts[a[0]]);
+  out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-door-open"></i></div>'
+    +'<div><div class="cpg-st">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div><div class="cpg-ss">Room by room, as it is built</div></div>'
+    +(CUST_PG.flat.length?'<span class="cpg-count">'+upd(CUST_PG.flat.length)+'</span>':'')+'</div>';
+  if(CUST_PG.flat.length){
+    // Only rooms that have something get a button, and the row only appears when there is a choice.
+    if(rooms.length>1) out+='<div class="cpg-rooms"><button type="button" class="cpg-room on" data-k="all" onclick="custPgRoom(\'all\')">All <span class="n">'+CUST_PG.flat.length+'</span></button>'
+      +rooms.map(a=>'<button type="button" class="cpg-room" data-k="'+a[0]+'" onclick="custPgRoom(\''+a[0]+'\')"><i class="fa-solid '+a[2]+'"></i>'+esc(a[1])+' <span class="n">'+counts[a[0]]+'</span></button>').join('')+'</div>';
+    out+='<div id="cpgFlatBody">'+custPgFlatBody()+'</div>';
+  }else out+=custPgEmpty('fa-door-open','No photos of your flat yet','You will see your common area, bathroom and kitchen here as each one is built.');
+  out+='</div></div>';
   return out;
 }
+
+/* Full-screen viewer: next / previous, arrow keys, swipe, Esc. It walks only the section the tile
+   came from (the block, or the flat under the current room filter), so "next" never jumps from the
+   kitchen to the building's facade. */
+window.custPgOpen=function(start){
+  const it0=CUST_PG.items[start]; if(!it0) return;
+  const list=it0.roomKey?custPgFlatIdx():CUST_PG.items.map((it,i)=>it.roomKey?-1:i).filter(i=>i>=0);
+  let pos=Math.max(0,list.indexOf(start));
+  const box=document.createElement('div'); box.className='cpg-lb';
+  const go=function(d){ if(list.length<2) return; pos=(pos+d+list.length)%list.length; draw(); };
+  const onKey=function(e){ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight') go(1); else if(e.key==='ArrowLeft') go(-1); };
+  function shut(){ document.removeEventListener('keydown',onKey); if(box.parentNode) box.parentNode.removeChild(box); document.body.style.overflow=''; }
+  function draw(){
+    const it=CUST_PG.items[list[pos]];
+    box.innerHTML='<div class="cpg-lbbar"><span class="t">'+esc(it.where)+(it.room?' · '+esc(it.room):'')+'</span><span>'+esc(fmtDate(it.date))+'</span>'
+      +'<span class="c">'+(pos+1)+' / '+list.length+'</span><button class="cpg-lbx" title="Close">&times;</button></div>'
+      +'<div class="cpg-lbstage">'
+        +(it.url?(it.isVideo?'<video src="'+it.url+'" controls autoplay playsinline></video>':'<img src="'+it.url+'" alt="">'):'<div style="color:#94a3b8">This file could not be loaded.</div>')
+        +(list.length>1?'<button class="cpg-lbnav prev" title="Previous"><i class="fa-solid fa-chevron-left"></i></button><button class="cpg-lbnav next" title="Next"><i class="fa-solid fa-chevron-right"></i></button>':'')
+      +'</div>';
+    box.querySelector('.cpg-lbx').onclick=shut;
+    const pv=box.querySelector('.prev'), nx=box.querySelector('.next');
+    if(pv) pv.onclick=function(e){e.stopPropagation();go(-1);};
+    if(nx) nx.onclick=function(e){e.stopPropagation();go(1);};
+  }
+  box.onclick=function(e){ if(e.target===box||e.target.classList.contains('cpg-lbstage')) shut(); };
+  let sx=null;
+  box.addEventListener('touchstart',function(e){ sx=e.touches[0].clientX; },{passive:true});
+  box.addEventListener('touchend',function(e){ if(sx==null) return; const dx=e.changedTouches[0].clientX-sx; sx=null; if(Math.abs(dx)>50) go(dx<0?1:-1); });
+  document.addEventListener('keydown',onKey);
+  document.body.style.overflow='hidden';
+  draw(); document.body.appendChild(box);
+};
 async function custTabDocuments(unit){
   const [{data:pDocs},{data:cDocs}]=await Promise.all([
     sb.schema('cust').from('project_documents').select('*').eq('project_id',unit.project_id).is('deleted_at',null),
