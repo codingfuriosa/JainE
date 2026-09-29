@@ -21603,12 +21603,12 @@ window.custPrintInvoice=function(){
 };
 
 /* The "Unit Charges" rows of a cost sheet, as each project's CRM cost sheet prints them.
-   Dream Ananta's CRM sheet shows Unit Cost, Floor Escalation (FLC) and PLC as ONE line, "Unit Price
-   (Add On Premium Specification Pack)", with a per-sq-ft Rate beside it: D/8G is 48,92,500 +
-   3,32,500 + 95,000 = 53,20,000 on 950 sq ft. Anything else in the group (parking) keeps its own
-   row, and every other project is left exactly as Farvision itemises it, with no Rate column.
+   Dream Ananta's CRM sheet shows Unit Cost, Floor Escalation (FLC), PLC and Vehicle Parking as ONE
+   line, "Unit Price (Add On Premium Specification Pack)", with a per-sq-ft Rate beside it: D/8G is
+   48,92,500 + 3,32,500 + 95,000 + 5,00,000 = 58,20,000 on 950 sq ft. Every other project is left
+   exactly as Farvision itemises it, with no Rate column.
    Rate = amount / super built-up area, which is how the CRM's 5150 / 350 / 100 come out. */
-const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge/i;
+const CUST_ANANTA_UNIT_PRICE=/^unit cost$|flc charges|plc charge|vehicle parking/i;
 function custCostUnitRows(unit,unitGroupItems){
   const isAnanta=/^dream ananta$/i.test(String((unit.projects&&unit.projects.name)||'').trim());
   const sbu=Number(unit.super_built_up_area_sqft||0);
@@ -21618,7 +21618,7 @@ function custCostUnitRows(unit,unitGroupItems){
   const price=unitGroupItems.filter(i=>CUST_ANANTA_UNIT_PRICE.test(i.component||''));
   const rest=unitGroupItems.filter(i=>!CUST_ANANTA_UNIT_PRICE.test(i.component||''));
   return {showRate:true,rows:(price.length?[row('Unit Price (Add On Premium Specification Pack)',price,true)]:[])
-    .concat(rest.map(i=>row(i.component,[i],false)))};
+    .concat(rest.map(i=>row(i.component,[i],false)))};  // nothing today: the whole unit group is merged
 }
 function custFmtRate(r){return r==null?'—':Number(r).toLocaleString('en-IN',{maximumFractionDigits:2});}
 async function custTabCostSheet(data,unit){
