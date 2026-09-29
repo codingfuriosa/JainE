@@ -8665,7 +8665,13 @@
     .wf-remark-entry:first-child{padding-top:0}
     .wf-remark-day{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--brand);margin-bottom:3px}
     .wf-remark-txt{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
-    .wf-card-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+    /* WRAPS. On Reimbursement this row carries a print-all button with a four-word label plus
+       edit and delete, and with nowrap the cluster ran 146px past the right edge of a 390px
+       screen - taking the whole page into sideways scroll, which is the one thing a layout must
+       never do. It wraps to a second line instead, and the title is allowed to shrink so the
+       wrap happens at the sensible place. */
+    .wf-card-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:700;font-size:13px;color:var(--ink);margin-bottom:12px;text-transform:uppercase;letter-spacing:.03em}
+    .wf-card-hd>span:not(.cnt):not(.wf-tip):not(.wf-inst-tools){min-width:0;overflow:hidden;text-overflow:ellipsis}
     .wf-card-hd i{color:var(--slate);font-size:13px}
     .wf-card-hd .cnt{background:var(--brand-a10,#eef2ff);color:var(--brand);border-radius:20px;padding:1px 9px;font-size:11.5px}
     .wf-inst-filterbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:10px}
@@ -9070,7 +9076,7 @@
     .wf-pill.wt{background:#fef3c7;color:#92400e}
     .wf-upd-sys{text-align:center;font-size:12px;color:var(--slate);margin:2px 0;padding:4px 8px}
     .wf-upd-sys i{opacity:.6;margin-right:4px}
-    .wf-inst-tools{margin-left:auto;display:flex;gap:6px}
+    .wf-inst-tools{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
     .wf-chk-col{width:36px;text-align:center;white-space:nowrap}
     .wf-inst-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--brand)}
     .wf-owner-pick{display:flex;gap:8px;align-items:center}
