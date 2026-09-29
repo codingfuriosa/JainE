@@ -370,6 +370,10 @@ async function boot(){
   renderPage();
   startSessionGuard();
   promptSetPassword();
+  // Not tied to the page just rendered - only to whether this user can see Legal MIS at all
+  // (clrevCheckPending checks pageAllowed('legal') itself). Fire-and-forget: it puts its own
+  // modal up over whatever renderPage() just drew, it doesn't need to be awaited first.
+  try{ clrevCheckPending(); }catch(e){}
 }
 // The customer portal's sections used to be a horizontally-scrolling tab row above the page body -
 // with 13 of them the active one was often scrolled out of view. They live in the sidebar instead
@@ -377,15 +381,27 @@ async function boot(){
 // its own long lists), so this scrolls for free with no CSS changes.
 // 'Home' is the landing page and must stay at index 0 - the tab index IS the route (customer/<i>),
 // so anything hard-coding a number moves with it.
-const CUST_TABS=['Home','Statement','Ledger','Cost Sheet','Construction Progress','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
-const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-book-open','fa-calculator','fa-helmet-safety','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-user-plus','fa-screwdriver-wrench','fa-pen-to-square'];
+// Construction Progress sits right after Statement (was after Cost Sheet) - a homebuyer mid-build
+// wants to see the site before the accounting. CUST_TAB_ICONS stays a parallel array in the same
+// order; the render switch below and the one hardcoded navTo('customer/N') deep link (the
+// Statement tab's "View full ledger" jump) were renumbered to match.
+const CUST_TABS=['Home','Statement','Construction Progress','Ledger','Cost Sheet','Inspection Checklist','Documents','Process Videos','Support','Amenities','Sub-meter','Referrals','Maintenance','Modification Requests'];
+const CUST_TAB_ICONS=['fa-house','fa-file-invoice-dollar','fa-helmet-safety','fa-book-open','fa-calculator','fa-clipboard-check','fa-folder-open','fa-clapperboard','fa-headset','fa-water-ladder','fa-gauge','fa-gift','fa-screwdriver-wrench','fa-pen-to-square'];
 function custSidebarTabs(ti){
   const nav=$('sbNav');
   if(!nav)return;
   nav.innerHTML='';
   nav.appendChild(el('div','sb-group','Customer Portal'));
+  /* "Earn" badge on Referrals - only while this customer has never submitted one. Reads CUST_DATA
+     directly rather than taking a parameter: the sidebar paints once at boot (renderCustomerShell,
+     before any data exists - CUST_DATA is null, badge stays off rather than flash on) and again from
+     VIEWS.customer once custLoadData resolves, so it appears a beat after first paint rather than
+     ever having to be taken back. custNewReferralSave flips CUST_DATA.hasReferred straight to true on
+     a successful submit, so the badge is gone on the very next sidebar rebuild - no stale cache read. */
+  const showReferralBadge=CUST_DATA&&CUST_DATA.hasReferred===false;
   CUST_TABS.forEach(function(t,i){
-    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> '+t);
+    const badge=(t==='Referrals'&&showReferralBadge)?' <span class="sb-badge-gold">Earn</span>':'';
+    const a=el('a','sb-item'+(i===ti?' active':''),'<i class="fa-solid '+(CUST_TAB_ICONS[i]||'fa-circle')+'"></i> <span class="sb-item-label">'+t+'</span>'+badge);
     a.href='javascript:void(0)';
     a.onclick=function(){navTo('customer/'+i);};
     nav.appendChild(a);
@@ -503,9 +519,7 @@ const NAV=[
   {group:'Overview',items:[
     {id:'dashboard',label:'Home / Dashboards',icon:'fa-gauge-high'},
     {id:'tasks',label:'Accountability',icon:'fa-clipboard-check'},
-  ]},
-  {group:'IT & Support',items:[
-    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+    {id:'scoreboard',label:'Scoreboard',icon:'fa-ranking-star'},
   ]},
   {group:'Sales',items:[
     {id:'gtd',label:'GTD',icon:'fa-brain'},
@@ -555,12 +569,32 @@ const NAV=[
   {group:'System',items:[
     {id:'settings',label:'Settings',icon:'fa-gear'},
   ]},
+  // Last on purpose. Internet Speed is a thing you go and look at when something feels slow, not
+  // something you work in, so it sat oddly as the second group in the sidebar — above Sales,
+  // Operations and everything people actually open all day. It keeps its own group rather than
+  // being folded into System, so the sidebar still says what it is.
+  {group:'IT & Support',items:[
+    {id:'network',label:'Internet Speed',icon:'fa-wifi'},
+  ]},
 ];
 const LABELS={};const ICONS={};NAV.forEach(g=>g.items.forEach(i=>{LABELS[i.id]=i.label;ICONS[i.id]=i.icon;}));LABELS.security='Control Panel';ICONS.security='fa-sliders';LABELS.usability='Usability';ICONS.usability='fa-chart-simple';
 const MODLIST=[];NAV.forEach(g=>g.items.forEach(i=>MODLIST.push([i.id,i.label])));
 const MODSET=new Set(MODLIST.map(m=>m[0]));
 const LEVELS=['Manager','Employee','New','Intern'];
 const DEFAULT_MODULES=['dashboard','tasks','projects','settings','network'];
+/* Modules nobody needs to be granted — they are part of the furniture, and were previously spelled
+   out three separate times inside allowedSet() plus once more in pageAllowed(), which is how a new
+   one gets added to some of them and not others.
+
+   The Scoreboard is here because it is meant to be seen by everyone: it is a company-wide
+   leaderboard, and a leaderboard half the company cannot open is not a leaderboard. This replaces
+   the narrower "holding tasks grants scoreboard" rule it shipped with a few commits ago.
+
+   This decides only whether a menu entry is drawn and a page will open. It is not a grant of
+   anything else: the figures come from acc.scoreboard(), which is SECURITY DEFINER, reads only
+   already-approved task counts, and is unchanged. Customers never reach any of this — pageAllowed()
+   sends a customer session to the customer page before it gets here. */
+const ALWAYS_ON=['dashboard','settings','network','scoreboard'];
 function navIcon(id){return ICONS[id]||'fa-square';}
 /* THE PAGES WERE RENAMED AND NOBODY'S PERMISSIONS FOLLOWED.
 
@@ -578,13 +612,14 @@ function navIcon(id){return ICONS[id]||'fa-square';}
    app.can_write('hr') by role, recruit.can_manage_tests() by its own list, each re-checked in the
    database on every write. Somebody who could only look before can still only look. */
 const MODULE_RENAMES={recruitment:'recruitment_new', hr:'hr_new'};
-function applyModuleRenames(ss){
+function expandModules(ss){
   Object.keys(MODULE_RENAMES).forEach(function(oldId){
     if(ss.has(oldId)) ss.add(MODULE_RENAMES[oldId]);
   });
+  ALWAYS_ON.forEach(function(id){ ss.add(id); });
   return ss;
 }
-function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return applyModuleRenames(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length){const ss=new Set(m);ss.add('dashboard');ss.add('settings');ss.add('network');return applyModuleRenames(ss);}const ss=new Set(['dashboard','settings','network']);return ss;}
+function allowedSet(){if(state.super)return null;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return expandModules(new Set(DEFAULT_MODULES));if(Array.isArray(m)&&m.length)return expandModules(new Set(m));return expandModules(new Set());}
 /* Usability sits under Control Panel in Administration, but unlike Control Panel it is NOT
    superadmin-only: the Systems department are the people who actually read it, and they are not
    superadmins. So it is granted the ordinary way — 'usability' in a person's modules — and the
@@ -598,7 +633,7 @@ function effectiveNav(){const allow=allowedSet();let groups=NAV.map(g=>({group:g
   if(hasUsability()) admItems.push({id:'usability',label:'Usability',icon:'fa-chart-simple'});
   if(admItems.length) groups=[{group:'Administration',items:admItems}].concat(groups);
   return groups;}
-function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='dashboard'||id==='settings'||id==='placeholder'||id==='network')return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return applyModuleRenames(new Set(m)).has(id);return id==='dashboard'||id==='settings';}
+function pageAllowed(id){if(state.isCustomer||state.impersonating)return id==='customer';if(state.super)return true;if(id==='security')return false;if(id==='usability')return hasUsability();if(id==='placeholder'||ALWAYS_ON.includes(id))return true;const m=state.roles&&state.roles.modules;if(m===null||m===undefined)return DEFAULT_MODULES.includes(id);if(Array.isArray(m)&&m.length)return expandModules(new Set(m)).has(id);return false;}
 
 function renderShell(){
   const nav=$('sbNav');nav.innerHTML='';
@@ -651,7 +686,22 @@ function renderShell(){
   const _gsDrop=document.createElement('div');
   _gsDrop.id='gsDrop';_gsDrop.style.cssText='position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:9999;max-height:340px;overflow-y:auto;display:none';
   _gs.parentElement.style.position='relative';_gs.parentElement.appendChild(_gsDrop);
-  _gs.addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.trim();_gsDrop.style.display='none';if(q)navTo('documents/search/'+encodeURIComponent(q));}});
+  _gs.addEventListener('keydown',async e=>{
+    if(e.key!=='Enter')return;
+    const q=e.target.value.trim();_gsDrop.style.display='none';
+    if(!q)return;
+    // Same exact-id lookup gsLiveSearch does for the dropdown, so pressing Enter before the debounced
+    // dropdown appears (or with it dismissed) still lands on the lead instead of a text search for it.
+    if(/^\d+$/.test(q)){
+      try{
+        const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+        if(error)throw error;
+        const hit=(data||[])[0];
+        if(hit&&hit.lead){navTo('transcription/lead/'+hit.lead.lead_id);return;}
+      }catch(e){}
+    }
+    navTo('documents/search/'+encodeURIComponent(q));
+  });
   _gs.addEventListener('input',e=>{
     clearTimeout(_gsTimer);const q=e.target.value.trim();
     if(!q){_gsDrop.style.display='none';return;}
@@ -673,6 +723,32 @@ async function gsLiveSearch(q){
   drop.style.display='block';
   drop.innerHTML='<div style="padding:10px 14px;color:var(--slate);font-size:13px">Searching…</div>';
   const ql=q.toLowerCase();
+  // A bare number is treated as a lead id lookup rather than a text search: acc.crm_lead_detail takes
+  // a bigint id and does an EXACT match, so this is "find this one lead", not "find leads like this".
+  // It returns the lead row plus its whole follow-up history (recordings included) in one round trip,
+  // the same RPC the Transcription lead page itself uses (see trcLeadFetchByIds) - so a hit here always
+  // opens straight into that same detail page, never a partial or reconstructed view of it.
+  let leadRow='';
+  if(/^\d+$/.test(q)){
+    try{
+      const {data,error}=await sb.schema('acc').rpc('crm_lead_detail',{p_lead_ids:[Number(q)]});
+      if(error)throw error;
+      const hit=(data||[])[0];
+      if(hit&&hit.lead){
+        const lead=hit.lead;
+        const followups=Array.isArray(hit.followups)?hit.followups:[];
+        const calls=followups.filter(f=>f&&(f.has_recording||f.recording_url)).length;
+        const sub='Lead · '+followups.length+' follow-up'+(followups.length===1?'':'s')
+          +(calls?' · '+calls+' call recording'+(calls===1?'':'s'):'')
+          +(lead.status?' · '+lead.status:'');
+        leadRow='<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line-2);background:#f0fdfa" '
+          +'onmousedown="event.preventDefault();navTo(\'transcription/lead/'+esc(String(lead.lead_id))+'\');document.getElementById(\'gsDrop\').style.display=\'none\'">'
+          +'<i class="fa-solid fa-user-clock" style="color:#0d9488;width:14px;font-size:13px"></i>'
+          +'<div><div style="font-size:13px;font-weight:500">'+esc(lead.lead_name||('Lead '+lead.lead_id))+'</div>'
+          +'<div style="font-size:11px;color:var(--slate)">'+esc(sub)+'</div></div></div>';
+      }
+    }catch(e){}
+  }
   // Search documents
   let docs=[];
   try{const {data}=await sb.schema('doc').from('documents').select('id,title,file_name,category,department,storage_path').or('file_name.ilike.%'+q+'%,title.ilike.%'+q+'%,doc_no.ilike.%'+q+'%').limit(6);docs=data||[];}catch(e){}
@@ -680,7 +756,7 @@ async function gsLiveSearch(q){
   let jds=[];
   try{const {data}=await sb.schema('recruit').from('job_descriptions').select('id,name,storage_path').limit(6);jds=(data||[]).filter(j=>j.name.toLowerCase().includes(ql));}catch(e){}
   const defJds=(typeof DEFAULT_JDS!=='undefined'?DEFAULT_JDS:[]).filter(j=>j.name.toLowerCase().includes(ql));
-  if(!docs.length&&!jds.length&&!defJds.length){drop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No documents found</div>';return;}
+  if(!leadRow&&!docs.length&&!jds.length&&!defJds.length){drop.innerHTML='<div style="padding:12px 14px;color:var(--slate);font-size:13px;text-align:center">No results found</div>';return;}
   const row=(icon,name,sub,url)=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--line-2)" onmousedown="event.preventDefault();window.open('${url}','_blank');document.getElementById('gsDrop').style.display='none'">
     <i class="fa-solid ${icon}" style="color:#64748b;width:14px;font-size:13px"></i>
     <div><div style="font-size:13px;font-weight:500">${esc(name)}</div><div style="font-size:11px;color:var(--slate)">${esc(sub)}</div></div>
@@ -688,7 +764,7 @@ async function gsLiveSearch(q){
   const docRows=docs.map(r=>{const url=r.storage_path?SUPABASE_URL+'/storage/v1/object/public/documents/'+encodeURIComponent(r.storage_path).replace(/%2F/g,'/'):'#';const sub=[r.department,r.category].filter(Boolean).join(' · ')||'Document Library';return row('fa-file',r.title||r.file_name,sub,url);});
   const jdDbRows=jds.map(j=>{const url=j.storage_path?SUPABASE_URL+'/storage/v1/object/public/recruitment/'+encodeURIComponent(j.storage_path).replace(/%2F/g,'/'):'#';return row('fa-file-pdf',j.name,'Job Description · Recruitment',url);});
   const jdDefRows=defJds.map(j=>row('fa-file-pdf',j.name,'Job Description · Recruitment',j.url));
-  drop.innerHTML=docRows.join('')+jdDbRows.join('')+jdDefRows.join('')+
+  drop.innerHTML=leadRow+docRows.join('')+jdDbRows.join('')+jdDefRows.join('')+
     `<div style="padding:8px 14px;font-size:12px;color:var(--brand);font-weight:600;cursor:pointer;text-align:center" onmousedown="event.preventDefault();navTo('documents/search/'+encodeURIComponent('${q}'));document.getElementById('gsDrop').style.display='none'">See all results →</div>`;
 }
 
@@ -2087,7 +2163,7 @@ async function legalOcrBarPaint(){
 }
 window.legalOcrBarPaint=legalOcrBarPaint;
 VIEWS.legal=async function(v,seg){
-  const known={mis:1,scoreboard:1,actions:1,advocates:1};
+  const known={mis:1,scoreboard:1,actions:1,advocates:1,causelist:1};
   const tab=known[seg[0]]?seg[0]:'docs';
   v.innerHTML=`<div class="page-head"><div><h1><i class="fa-solid fa-scale-balanced" style="color:#1e3a8a"></i> Legal</h1><p>Document vault and litigation MIS for the Legal department</p></div>
     <div id="legalHeadActions" style="display:flex;gap:10px;flex-wrap:wrap"></div></div>
@@ -2095,6 +2171,7 @@ VIEWS.legal=async function(v,seg){
       <div class="tab ${tab==='docs'?'active':''}" onclick="navTo('legal')"><i class="fa-solid fa-folder-open"></i> Documents</div>
       <div class="tab ${tab==='mis'?'active':''}" onclick="navTo('legal/mis')"><i class="fa-solid fa-gavel"></i> MIS</div>
       <div class="tab ${tab==='actions'?'active':''}" onclick="navTo('legal/actions')"><i class="fa-solid fa-list-check"></i> Actions</div>
+      <div class="tab ${tab==='causelist'?'active':''}" onclick="navTo('legal/causelist')"><i class="fa-solid fa-clipboard-check"></i> Causelist Reviews</div>
       <div class="tab ${tab==='advocates'?'active':''}" onclick="navTo('legal/advocates')"><i class="fa-solid fa-user-tie"></i> Advocates</div>
       <div class="tab ${tab==='scoreboard'?'active':''}" onclick="navTo('legal/scoreboard')"><i class="fa-solid fa-ranking-star"></i> Scoreboard</div>
     </div>
@@ -2104,6 +2181,7 @@ VIEWS.legal=async function(v,seg){
   if(tab==='mis') legalMIS();
   else if(tab==='scoreboard') legalScoreboard();
   else if(tab==='actions') legalActions();
+  else if(tab==='causelist') legalCauselistReviews();
   else if(tab==='advocates') legalAdvocates();
   else legalDocsView(seg);
 };
@@ -2757,6 +2835,17 @@ async function legalMIS(){
   try{const {data,error}=await sb.from('mis_cases').select('*').order('id',{ascending:true});if(error)throw error;rows=data||[];}catch(e){toast((e&&e.message)||'Could not load MIS cases','err');}
   window._misRows=rows;
   window._misSel=new Set();
+  // Anything this account exported and never finished answering nudges right here, not only
+  // silently again at the next login (clrevCheckPending covers that separately) — same claim,
+  // just checked on demand instead of only once at boot.
+  try{
+    const myPending=rows.filter(function(r){ return r.causelist_pending_by===state.email && !clrevAlreadyActioned(r); });
+    if(hAct && myPending.length){
+      hAct.innerHTML='<button class="btn" style="background:var(--warn-50);border-color:var(--warn);color:#b45309" '
+        +'onclick="clrevCheckPending()" title="Reopen the causelist action-review popup"><i class="fa-solid fa-triangle-exclamation"></i> '
+        +myPending.length+' matter'+(myPending.length===1?'':'s')+' awaiting your review</button>';
+    }
+  }catch(e){}
   /* How many papers are filed against each case, so the Documents button knows whether it has
      anything to open and the row can say so at a glance. One small query for the whole table. */
   window._misDocCounts={}; window._misDocFolders={};
@@ -3207,6 +3296,270 @@ window.legalActionsFilter=function(){
   usageQueueDebounced('legal.actions.view_search_filter_case_actions', q);
 };
 
+/* ---------- Causelist Reviews -----------------------------------------------------------------
+   Where the causelist action-review popup's decisions actually live once made - not just today's
+   snapshot on mis_cases (pending/answered/who), but the full history from
+   mis_causelist_review_log: every export claim, every answer, every time someone closed the popup
+   without answering. Also the on-demand way back into it: the toolbar nudge in legalMIS() covers
+   "I have some to answer"; this covers "let me see all of them, and who else does too". Sourced
+   from the log table itself (a case appears here iff it has at least one log row) rather than a
+   field-presence filter on mis_cases, so this and the log agree by construction. */
+function clrevDT(iso){ if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return String(iso);
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()
+    +', '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+async function legalCauselistReviews(){
+  setCrumb(['Legal','Causelist Reviews']);
+  const hAct=$('legalHeadActions'); if(hAct)hAct.innerHTML='';
+  const body=$('legalBody'); if(!body)return;
+  loader(body);
+  try{ await getPeople(); }catch(e){}
+  try{ await clrevLoadLegal(); }catch(e){}   // populates window._clrevLegal for the inline person picker below
+  let logs=[], cases=[];
+  try{ const {data}=await sb.from('mis_causelist_review_log').select('*').order('created_at',{ascending:true}); logs=data||[]; }catch(e){}
+  const ids=Array.from(new Set(logs.map(function(l){return l.case_id;})));
+  if(ids.length){
+    try{
+      // The date fields are needed for misHearingIso() when an inline answer creates a task -
+      // the narrower column set used before was fine for display but left the task description's
+      // hearing date blank.
+      const {data}=await sb.from('mis_cases').select('id,case_no,case_type,cause_title,court,'
+        +'causelist_pending_by,causelist_reviewed_at,causelist_action_needed,causelist_reviewed_by,'
+        +'case_next_date_iso,case_next_date,next_date_iso,next_date').in('id',ids);
+      cases=data||[];
+    }catch(e){}
+  }
+  const byCase={};
+  logs.forEach(function(l){ (byCase[l.case_id]=byCase[l.case_id]||[]).push(l); });
+  const rows=cases.map(function(c){
+    const hist=byCase[c.id]||[];
+    // The most recent DECISION (first answer or any later edit of it) - this is what the Due /
+    // Responsible cells show, and where an edit reads the previous task id from.
+    const decisions=hist.filter(function(l){return l.event==='answered'||l.event==='edited';});
+    const closes=hist.filter(function(l){return l.event==='closed_without_answering';}).length;
+    return Object.assign({}, c, {_hist:hist, _lastAnswered:decisions[decisions.length-1]||null,
+      _closes:closes, _pending:!!c.causelist_pending_by && !c.causelist_reviewed_at});
+  }).sort(function(a,b){
+    // Pending first (soonest claimed first among those), then most recently answered.
+    if(a._pending!==b._pending) return a._pending?-1:1;
+    return String((b.causelist_reviewed_at||b._hist[0]&&b._hist[0].created_at)||'').localeCompare(String((a.causelist_reviewed_at||a._hist[0]&&a._hist[0].created_at)||''));
+  });
+  window._clrevReviewRows=rows;
+  const pendingCount=rows.filter(function(r){return r._pending;}).length;
+  body.innerHTML=`<style>
+    .crv-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:13px}
+    .crv-search{position:relative;flex:1;min-width:180px;display:flex;align-items:center}
+    .crv-search i{position:absolute;left:11px;color:var(--slate);font-size:12.5px;pointer-events:none}
+    .crv-search input{width:100%;height:38px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:var(--bg-card);color:var(--ink)}
+    .crv-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-a10)}
+    .crv-sel{height:38px;padding:0 34px 0 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;
+      font-weight:600;font-family:inherit;background:var(--bg-card);color:var(--ink);cursor:pointer;
+      appearance:none;-webkit-appearance:none;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231e3a8a' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 12px center;background-size:11px 8px}
+    @media(max-width:760px){.crv-search,.crv-sel{flex:1 1 100%}}
+    #crvTbl{width:100%;border-collapse:collapse;font-size:13px}
+    #crvTbl th{text-align:left;padding:10px 12px;background:var(--bg-subtle,#f8fafc);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate);border-bottom:2px solid var(--line);white-space:nowrap}
+    #crvTbl td{padding:10px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+    /* Pending rows answer inline, right on the line item - no click-through, no popup. */
+    .crv-seg{display:inline-flex;gap:4px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px;margin-left:6px;vertical-align:middle}
+    .crv-seg-btn{border:none;background:transparent;color:var(--slate);font-size:11.5px;font-weight:600;padding:4px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+    .crv-seg-btn:hover{color:var(--ink)}
+    .crv-seg-btn.on{background:var(--card);color:var(--brand);box-shadow:var(--shadow)}
+    .crv-inline-fields{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .crv-inline-fields input,.crv-inline-fields select{padding:5px 7px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;color:var(--ink);background:var(--card)}
+    @media(max-width:760px){#crvTbl{min-width:820px}}
+  </style>
+  <div class="crv-bar">
+    <div class="crv-search"><i class="fa-solid fa-magnifying-glass"></i><input id="crvQ" placeholder="Search case, exporter or reviewer…" oninput="legalCauselistFilter()"></div>
+    <select class="crv-sel" id="crvState" onchange="legalCauselistFilter()">
+      <option value="all">All (${rows.length})</option>
+      <option value="pending">Pending review (${pendingCount})</option>
+      <option value="needed">Action needed (${rows.filter(function(r){return r.causelist_action_needed===true;}).length})</option>
+      <option value="noaction">No action needed (${rows.filter(function(r){return r.causelist_action_needed===false;}).length})</option>
+    </select>
+  </div>
+  <div class="card" style="overflow:hidden"><div style="overflow-x:auto">
+    <table id="crvTbl"><thead><tr>
+      <th>Case</th><th>Status</th><th>Pending with</th><th>Answered by</th><th>Due</th><th>Responsible</th>
+    </tr></thead><tbody id="crvBody"></tbody></table>
+  </div></div>
+  <div class="empty" id="crvEmpty" style="padding:34px;display:none"><i class="fa-regular fa-square-check"></i><div>Nothing here yet.</div>
+    <div style="font-size:12.5px;color:var(--slate);margin-top:6px">This fills in as causelists get exported from the MIS tab.</div></div>`;
+  legalCauselistFilter();
+}
+// Answering a pending row - or EDITING an already-answered one - happens right on the line item: a
+// segmented control in the Status cell, and (once "Action needed" is picked) a date input +
+// Legal-person select in the Due cell, both live in window._crvEdit until Save. No popup, no
+// click-through: every control needed is always visible on its own row.
+//
+// A row is "editable" either because it's genuinely still pending, or because Edit was explicitly
+// clicked on an already-answered one (window._crvEditingIds). The two look the same but behave
+// slightly differently: a fresh pending row's "No action" saves in one click since there's nothing
+// to lose; an explicit edit always needs a deliberate Save, even for "No action", since that can
+// delete an existing task.
+window._crvEdit={};
+window._crvEditingIds=new Set();
+function crvGetEdit(id){ return window._crvEdit[id] || (window._crvEdit[id]={needed:null,due:'',person:''}); }
+function crvEditable(r){ return r._pending || window._crvEditingIds.has(r.id); }
+function crvIsExplicitEdit(r){ return !r._pending && window._crvEditingIds.has(r.id); }
+function legalCauselistStatusPill(r){
+  if(!crvEditable(r)){
+    if(r.causelist_action_needed===true) return '<span class="mis-ptag mis-ptag--green">Action needed</span> '
+      +'<a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>'
+      +' · <a href="javascript:void(0)" onclick="legalCauselistEditStart('+r.id+')" style="font-size:12px">Edit</a>';
+    if(r.causelist_action_needed===false) return '<span class="mis-ptag">No action needed</span> '
+      +'<a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>'
+      +' · <a href="javascript:void(0)" onclick="legalCauselistEditStart('+r.id+')" style="font-size:12px">Edit</a>';
+    return '—';
+  }
+  const e=crvGetEdit(r.id);
+  return '<span class="mis-ptag mis-ptag--amber">'+(r._pending?'Pending':'Editing')+'</span>'
+    +'<span class="crv-seg">'
+      +'<button type="button" class="crv-seg-btn'+(e.needed===true?' on':'')+'" onclick="crvSetNeeded('+r.id+',true)"><i class="fa-solid fa-flag"></i> Action needed</button>'
+      +'<button type="button" class="crv-seg-btn'+(e.needed===false?' on':'')+'" onclick="crvSetNeeded('+r.id+',false)"><i class="fa-solid fa-check"></i> No action</button>'
+    +'</span>'
+    +((r._hist||[]).length?' <a href="javascript:void(0)" onclick="legalCauselistOpenHistory('+r.id+')" style="font-size:12px;color:var(--slate)">History</a>':'')
+    +(crvIsExplicitEdit(r)?' <a href="javascript:void(0)" onclick="legalCauselistEditCancel('+r.id+')" style="font-size:12px;color:var(--slate)">Cancel</a>':'');
+}
+function crvDueCellHtml(r){
+  if(!crvEditable(r)){
+    // Assigned person lives in its own Responsible column now (crvResponsibleName) - just the date here.
+    const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+    return (r.causelist_action_needed===true) ? esc(detail.due?clrevDmy(detail.due):'—') : '—';
+  }
+  const e=crvGetEdit(r.id);
+  if(e.needed===null) return '—';
+  if(e.needed!==true){
+    // Explicit edit landing on "No action" still needs a deliberate Save - a fresh pending row
+    // never reaches this branch, since crvSetNeeded already saved it and left edit mode.
+    return crvIsExplicitEdit(r)
+      ? '<div class="crv-inline-fields">—&nbsp;<button type="button" class="btn btn-primary" id="crvSaveBtn_'+r.id+'" style="padding:5px 10px;font-size:12px" onclick="crvSaveInline('+r.id+')">Save</button></div>'
+      : '—';
+  }
+  const legal=window._clrevLegal||[];
+  const opts='<option value="">— choose —</option>'+legal.map(function(p){
+    return '<option value="'+esc(p.email)+'"'+(e.person===p.email?' selected':'')+'>'+esc(p.name)+'</option>'; }).join('');
+  const hearing=misHearingIso(r);
+  return '<div class="crv-inline-fields">'
+    +'<input type="date" id="crvDue_'+r.id+'" value="'+esc(e.due||'')+'"'+(hearing?' max="'+esc(hearing)+'"':'')+' title="'+(hearing?'On or before the '+esc(clrevDmy(hearing))+' hearing':'')+'" onchange="crvFieldChange('+r.id+')">'
+    +'<select id="crvPerson_'+r.id+'" onchange="crvFieldChange('+r.id+')">'+opts+'</select>'
+    +'<button type="button" class="btn btn-primary" id="crvSaveBtn_'+r.id+'" style="padding:5px 10px;font-size:12px" onclick="crvSaveInline('+r.id+')" title="Save"><i class="fa-solid fa-check"></i></button>'
+  +'</div>';
+}
+// Who's actually doing it, once a matter has been marked action-needed and saved. Blank for
+// anything still pending (nobody's assigned yet) or answered as no-action (nobody needs to be).
+function crvResponsibleName(r){
+  const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+  return (r.causelist_action_needed===true && detail.person) ? esc(nameOf(detail.person)) : '—';
+}
+function crvRepaintRow(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  const st=$('crvStat_'+id); if(st) st.innerHTML=legalCauselistStatusPill(r);
+  const da=$('crvDA_'+id); if(da) da.innerHTML=crvDueCellHtml(r);
+}
+window.legalCauselistEditStart=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  window._crvEditingIds.add(id);
+  const detail=(r._lastAnswered&&r._lastAnswered.detail)||{};
+  window._crvEdit[id]={needed:r.causelist_action_needed, due:detail.due||'', person:detail.person||''};
+  crvRepaintRow(id);
+};
+window.legalCauselistEditCancel=function(id){
+  window._crvEditingIds.delete(id);
+  delete window._crvEdit[id];
+  crvRepaintRow(id);
+};
+window.crvSetNeeded=function(id,val){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;}); if(!r) return;
+  const e=crvGetEdit(id);
+  e.needed=val;
+  // Fresh (not-yet-answered) "No action" still saves in one click - nothing at stake to lose.
+  if(val===false && r._pending && !crvIsExplicitEdit(r)){ crvSaveInline(id); return; }
+  crvRepaintRow(id);
+};
+window.crvFieldChange=function(id){
+  const e=crvGetEdit(id), d=$('crvDue_'+id), p=$('crvPerson_'+id);
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  const hearing=r?misHearingIso(r):null;
+  if(d && clrevDueTooLate(d.value,hearing)){
+    toast('Due date can\'t be after the '+clrevDmy(hearing)+' hearing — reset to that date','warn');
+    d.value=hearing;
+  }
+  if(d) e.due=d.value||''; if(p) e.person=p.value||'';
+};
+window.crvSaveInline=async function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const e=crvGetEdit(id);
+  if(e.needed===null) return;
+  if(e.needed===true){
+    crvFieldChange(id);
+    if(!e.due||!e.person){ toast('Pick a due date and a responsible person first','warn'); return; }
+    if(clrevDueTooLate(e.due,misHearingIso(r))){ toast('Due date can\'t be after the '+clrevDmy(misHearingIso(r))+' hearing','warn'); return; }
+  }
+  const isEdit=!r._pending;
+  const prevTaskId=(r._lastAnswered&&r._lastAnswered.detail&&r._lastAnswered.detail.task_id)||null;
+  const btn=$('crvSaveBtn_'+id);
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try{
+    await clrevSaveOneRow({id:r.id, case_no:r.case_no, cause_title:r.cause_title, court:r.court,
+      hearing:misHearingIso(r), needed:e.needed, due:e.due, person:e.person}, {prevTaskId:prevTaskId, isEdit:isEdit});
+  }catch(err){
+    toast('Could not save: '+((err&&err.message)||err),'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-check"></i>'; }
+    return;
+  }
+  window._crvEditingIds.delete(id);
+  delete window._crvEdit[id];
+  toast(isEdit?'Updated':'Saved','ok');
+  legalCauselistReviews();
+};
+window.legalCauselistFilter=function(){
+  const rows=window._clrevReviewRows||[];
+  const q=(($('crvQ')||{}).value||'').trim().toLowerCase();
+  const st=(($('crvState')||{}).value)||'all';
+  const list=rows.filter(function(r){
+    if(st==='pending'&&!r._pending) return false;
+    if(st==='needed'&&r.causelist_action_needed!==true) return false;
+    if(st==='noaction'&&r.causelist_action_needed!==false) return false;
+    if(!q) return true;
+    return [r.case_no,r.cause_title,r.causelist_pending_by,r.causelist_reviewed_by].filter(Boolean).join(' ').toLowerCase().indexOf(q)!==-1;
+  });
+  const tb=$('crvBody'); if(!tb)return;
+  tb.innerHTML=list.map(function(r){
+    return '<tr>'
+      +'<td><b class="lg-clamp" title="'+esc(r.cause_title||'')+'">'+esc(r.case_no||('#'+r.id))+'</b>'
+        +'<div style="color:var(--slate);font-size:12px" class="lg-clamp">'+esc(r.cause_title||'')+'</div></td>'
+      +'<td id="crvStat_'+r.id+'">'+legalCauselistStatusPill(r)+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_pending_by?esc(nameOf(r.causelist_pending_by)):'—')+'</td>'
+      +'<td style="white-space:nowrap">'+(r.causelist_reviewed_by?(esc(nameOf(r.causelist_reviewed_by))+' · '+esc(clrevDmy(String(r.causelist_reviewed_at||'').slice(0,10)))):'—')+'</td>'
+      +'<td id="crvDA_'+r.id+'">'+crvDueCellHtml(r)+'</td>'
+      +'<td>'+crvResponsibleName(r)+'</td>'
+    +'</tr>';
+  }).join('');
+  const em=$('crvEmpty'); if(em)em.style.display=list.length?'none':'';
+};
+window.legalCauselistOpenHistory=function(id){
+  const r=(window._clrevReviewRows||[]).find(function(x){return x.id===id;});
+  if(!r) return;
+  const hist=r._hist||[];
+  const rowsHtml=hist.length ? hist.map(function(l){
+    let what='';
+    if(l.event==='exported') what='Exported / claimed by '+esc(nameOf(l.actor));
+    else if(l.event==='closed_without_answering') what='Closed the popup without answering — '+esc(nameOf(l.actor));
+    else if(l.event==='answered'||l.event==='edited'){
+      const d=l.detail||{}, verb=(l.event==='edited')?'Edited to':'Marked';
+      what=d.needed
+        ? verb+' <b>action needed</b> by '+esc(nameOf(l.actor))+' — due '+esc(d.due?clrevDmy(d.due):'—')+', assigned to '+esc(d.person?nameOf(d.person):'—')
+        : verb+' <b>no action needed</b> by '+esc(nameOf(l.actor));
+    }
+    return '<div style="padding:9px 0;border-bottom:1px solid var(--line-2)"><div style="font-size:12px;color:var(--slate)">'+esc(clrevDT(l.created_at))+'</div><div>'+what+'</div></div>';
+  }).join('') : '<div style="color:var(--slate);padding:14px 0">No history recorded.</div>';
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> '+esc(r.case_no||('Case '+r.id))+' — review history</h3><span class="x" onclick="closeModal()">&times;</span></div>'
+    +'<div class="modal-body" style="width:min(94vw,560px);max-height:70vh;overflow:auto">'+rowsHtml+'</div>'
+    +'<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>','md');
+};
+
 /* ---------- Advocates ----------------------------------------------------------------------- */
 async function legalAdvocates(){
   setCrumb(['Legal','Advocates']);
@@ -3498,7 +3851,7 @@ function usbCauselistMeta(built){
     return {range:misRangeLabel()||'All dates', cases:n+' case'+(n===1?'':'s')};
   }catch(e){ return null; }
 }
-window.misExportCauselist=function(){
+window.misExportCauselist=async function(){
   const built=misBuildCauselist();
   if(!built) return;   // misBuildCauselist already toasted why
   const rows=built.rows;
@@ -3515,6 +3868,284 @@ window.misExportCauselist=function(){
   // misBuildCauselist (no date range, or nothing in range) as a use just the same as a real
   // export, which is exactly the bug that made "1 use" unverifiable as a real success.
   try{ usageQueue('legal.mis.export_causelist','export', usbCauselistMeta(built)); }catch(_e){}
+  // Every matter an export just produced now has to be marked action-needed or not before the
+  // export counts as done - clrevMaybeOpen no-ops if every one of them was already answered by
+  // an earlier, overlapping export.
+  await clrevMaybeOpen(rows);
+};
+
+/* ---- Causelist export review: action-needed popup -----------------------------------------
+   Whoever exported a causelist, or is just starting a new session with matters still unanswered,
+   gets asked to say, for each one, whether it needs action and — if it does — by when and who in
+   Legal is doing it. That answer becomes a task delegated from businessanalyst@thejaingroup.com,
+   due the date picked here, assigned to the person picked here. A case already answered
+   (causelist_reviewed_at set), or already carrying an open or executed action from the ordinary
+   per-case action tracker, is never asked about again.
+
+   The popup itself can be closed with the X — but closing it decides nothing: nothing is written
+   to the database until Submit runs, so whatever was still unanswered stays unanswered, and
+   clrevCheckPending() (called once from boot(), i.e. once per page load — this app is multi-page,
+   so that is effectively "every new session") puts the same popup straight back up the next time
+   JainE is opened. Submit is still the only way to actually clear a matter off this list. */
+window._clrevRows=[]; window._clrevLegal=[];
+// Set by a caller that needs to know when a clrev popup actually finished (answered or closed) -
+// the Causelist Reviews tab uses this to repaint itself with the fresh status instead of going
+// stale the moment its own "Answer now" popup closes. Cleared right after it fires, once.
+window._clrevOnDone=null;
+// A case where action has already been taken - an open action already logged (action_needed) or
+// one already carried out (action_executed_date) - has nothing left for this popup to ask about,
+// on top of one this popup itself already reviewed (causelist_reviewed_at). None of this touches
+// what the export file itself lists - that stays every matter in the range, unfiltered.
+function clrevAlreadyActioned(r){
+  return !!r.causelist_reviewed_at || !!String(r.action_needed||'').trim() || !!String(r.action_executed_date||'').trim();
+}
+function clrevPrepRows(rows){
+  return (rows||[]).map(function(r){ return {id:r.id, case_no:r.case_no, case_type:r.case_type,
+    cause_title:r.cause_title, court:r.court, hearing:misHearingIso(r), needed:null, due:'', person:''}; });
+}
+async function clrevLoadLegal(){
+  const people=await getPeople();
+  window._clrevLegal=people.filter(function(p){ return Array.isArray(p.depts)&&p.depts.indexOf('Legal')!==-1; })
+    .sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+}
+async function clrevMaybeOpen(rows){
+  const pending=(rows||[]).filter(function(r){ return !clrevAlreadyActioned(r); });
+  if(!pending.length) return;
+  // Claim these cases as this exporter's to review, written immediately (not left until Submit) so
+  // it survives a closed tab or a later session — clrevCheckPending() only ever shows a case to
+  // whoever holds this claim. Re-exporting an overlapping range later just re-claims it for
+  // whoever ran that export, which is the point: it should nag the person who most recently
+  // downloaded it, not whoever exported it first.
+  const ids=pending.map(function(r){return r.id;});
+  try{
+    await sb.from('mis_cases').update({causelist_pending_by:state.email}).in('id',ids);
+    pending.forEach(function(r){ r.causelist_pending_by=state.email; });
+    await sb.from('mis_causelist_review_log').insert(ids.map(function(id){
+      return {case_id:id, event:'exported', actor:state.email};
+    }));
+  }catch(e){}
+  await clrevLoadLegal();
+  window._clrevRows=clrevPrepRows(pending);
+  clrevRender();
+}
+// Called once from boot(), after auth resolves - only for the person who actually exported a
+// causelist and left it unanswered (causelist_pending_by = them), never for anyone else with Legal
+// MIS access. Only cases with a real hearing date are in scope (the same universe a causelist ever
+// draws from), so this never turns into "review every case in the system".
+async function clrevCheckPending(){
+  if(!(typeof pageAllowed==='function') || !pageAllowed('legal')) return;
+  if(!state.email) return;
+  let rows=[];
+  try{
+    const {data,error}=await sb.from('mis_cases').select('*').eq('causelist_pending_by',state.email);
+    if(error) throw error;
+    rows=(data||[]).filter(function(r){ return misHearingIso(r) && !clrevAlreadyActioned(r); });
+  }catch(e){ return; }
+  if(!rows.length) return;
+  await clrevLoadLegal();
+  window._clrevRows=clrevPrepRows(rows);
+  clrevRender();
+}
+// Typed-in due-date/person values live only in the DOM between renders; a Yes/No toggle rebuilds
+// the whole modal (to show or hide that row's fields), so whatever is currently in every input
+// has to be pulled back into state first or it would be lost for every OTHER row on that rebuild.
+function clrevSync(){
+  (window._clrevRows||[]).forEach(function(r){
+    const d=$('clrevDue_'+r.id), p=$('clrevPerson_'+r.id);
+    if(d) r.due=d.value||'';
+    if(p) r.person=p.value||'';
+  });
+}
+window.clrevSetNeeded=function(id,val){
+  clrevSync();
+  const r=(window._clrevRows||[]).find(function(x){return x.id===id;});
+  if(r) r.needed=val;
+  clrevRender();
+};
+function clrevDmy(iso){ if(!iso)return '—'; const d=new Date(iso+'T00:00:00');
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+// A task to prepare for a hearing due AFTER the hearing is pointless - the MIS "Action Date" for a
+// case has always mirrored its hearing date (the old per-case editor sets action_date=next_date
+// the moment an action is raised), so this is the same rule the old system already enforced,
+// applied here to the date this popup's task carries. Shared by both the popup and the Causelist
+// Reviews tab's inline editor.
+function clrevDueTooLate(due, hearing){ return !!(due && hearing && due > hearing); }
+window.clrevDueChange=function(id){
+  const r=(window._clrevRows||[]).find(function(x){return x.id===id;});
+  const d=$('clrevDue_'+id);
+  if(r && d && clrevDueTooLate(d.value, r.hearing)){
+    toast('Due date can\'t be after the '+clrevDmy(r.hearing)+' hearing — reset to that date','warn');
+    d.value=r.hearing;
+  }
+};
+function clrevRender(){
+  const rows=window._clrevRows||[], legal=window._clrevLegal||[];
+  const isDone=function(r){ return r.needed===false || (r.needed===true && r.due && r.person); };
+  const answered=rows.filter(isDone).length;
+  const pct=rows.length?Math.round(100*answered/rows.length):0;
+  const opts=legal.map(function(p){ return {v:esc(p.email), t:esc(p.name)}; });
+  const body=rows.map(function(r,i){
+    const yesOn=r.needed===true, noOn=r.needed===false;
+    const personOpts='<option value="">— choose —</option>'+opts.map(function(o){
+      return '<option value="'+o.v+'"'+(r.person===o.v?' selected':'')+'>'+o.t+'</option>'; }).join('');
+    return '<div class="clrev-card'+(isDone(r)?' clrev-done':'')+'">'
+      +'<div class="clrev-card-top">'
+        +'<div class="clrev-meta">'
+          +'<span class="clrev-badge">'+esc(r.case_no||('#'+(i+1)))+'</span>'
+          +'<span class="clrev-sub">'+esc(r.case_type||'—')+' · '+esc(r.court||'—')+' · Hearing '+esc(clrevDmy(r.hearing))+'</span>'
+          +'<div class="clrev-title">'+esc(r.cause_title||'—')+'</div>'
+        +'</div>'
+        +'<div class="clrev-toggle">'
+          +'<button type="button" class="clrev-seg'+(yesOn?' on':'')+'" onclick="clrevSetNeeded('+r.id+',true)"><i class="fa-solid fa-flag"></i> Action needed</button>'
+          +'<button type="button" class="clrev-seg'+(noOn?' on':'')+'" onclick="clrevSetNeeded('+r.id+',false)"><i class="fa-solid fa-check"></i> No action</button>'
+        +'</div>'
+      +'</div>'
+      +(yesOn
+        ? '<div class="clrev-fields">'
+            +'<label>Due date'+(r.hearing?' <span style="font-weight:400;color:var(--slate)">(on or before the '+esc(clrevDmy(r.hearing))+' hearing)</span>':'')
+              +'<input type="date" id="clrevDue_'+r.id+'" value="'+esc(r.due||'')+'"'+(r.hearing?' max="'+esc(r.hearing)+'"':'')+' onchange="clrevDueChange('+r.id+')"></label>'
+            +'<label>Responsible (Legal)<select id="clrevPerson_'+r.id+'">'+personOpts+'</select></label>'
+          +'</div>'
+        : '')
+      +'</div>';
+  }).join('');
+  openModal('<style>'
+    +'.clrev-body{width:min(94vw,760px);max-height:74vh;overflow:auto;padding:20px 22px}'
+    +'.clrev-progress-wrap{margin-bottom:16px}'
+    +'.clrev-progress-txt{display:flex;justify-content:space-between;font-size:13px;color:var(--slate);margin-bottom:6px}'
+    +'.clrev-progress-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}'
+    +'.clrev-progress-fill{height:100%;background:var(--brand);border-radius:99px;transition:width .2s}'
+    +'.clrev-card{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:var(--card);transition:border-color .15s}'
+    +'.clrev-card.clrev-done{border-left-color:var(--ok)}'
+    +'.clrev-card-top{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-start}'
+    +'.clrev-meta{min-width:0}'
+    +'.clrev-badge{display:inline-block;background:var(--brand-50);color:var(--brand);font-weight:700;font-size:12px;padding:2px 9px;border-radius:6px;margin-bottom:5px}'
+    +'.clrev-sub{display:block;color:var(--slate);font-size:12.5px;margin-bottom:3px}'
+    +'.clrev-title{font-weight:600;font-size:14px;line-height:1.35}'
+    +'.clrev-toggle{display:flex;gap:6px;flex:none;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px}'
+    +'.clrev-seg{border:none;background:transparent;color:var(--slate);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}'
+    +'.clrev-seg:hover{color:var(--ink)}'
+    +'.clrev-seg.on{background:var(--card);color:var(--brand);box-shadow:var(--shadow)}'
+    +'.clrev-fields{display:flex;gap:12px;margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;flex-wrap:wrap}'
+    +'.clrev-fields label{flex:1;min-width:170px;font-size:12.5px;color:var(--slate);font-weight:600}'
+    +'.clrev-fields input,.clrev-fields select{display:block;width:100%;margin-top:5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;color:var(--ink);background:var(--card)}'
+    +'</style>'
+    +'<div class="modal-head"><h3><i class="fa-solid fa-scale-balanced" style="color:var(--brand)"></i> Causelist — action review</h3>'
+      +'<span class="x" onclick="clrevClose()">&times;</span></div>'
+    +'<div class="modal-body clrev-body">'
+      +'<div class="clrev-progress-wrap"><div class="clrev-progress-txt"><span>Mark whether each matter needs action</span><span>'+answered+' of '+rows.length+'</span></div>'
+        +'<div class="clrev-progress-bar"><div class="clrev-progress-fill" style="width:'+pct+'%"></div></div></div>'
+      +(body||'<div style="color:var(--slate)">Nothing left to answer.</div>')
+    +'</div>'
+    +'<div class="modal-foot"><button class="btn btn-primary" onclick="clrevSubmit()">Submit</button></div>','lg');
+}
+// The X closes the popup without deciding anything (causelist_pending_by is untouched, so
+// clrevCheckPending() puts the same rows back up next session) - logged here so the review log
+// shows it was seen and skipped, not just silently missing between the export and whenever it's
+// finally answered.
+window.clrevClose=function(){
+  clrevSync();
+  const unanswered=(window._clrevRows||[]).filter(function(r){
+    return !(r.needed===false || (r.needed===true && r.due && r.person));
+  });
+  if(unanswered.length){
+    sb.from('mis_causelist_review_log').insert(unanswered.map(function(r){
+      return {case_id:r.id, event:'closed_without_answering', actor:state.email};
+    })).then(function(){},function(){});
+  }
+  closeModal();
+  if(typeof window._clrevOnDone==='function'){ const fn=window._clrevOnDone; window._clrevOnDone=null; try{ fn(); }catch(e){} }
+};
+// The actual save for one row - task (create/update/delete as needed), mis_cases update, log
+// entry, in-memory sync. Shared by clrevSubmit's loop (the modal - always a fresh answer, never an
+// edit), the Causelist Reviews table's inline answer (also fresh), and its inline EDIT of an
+// already-answered row.
+//
+// opts.prevTaskId is the task an earlier answer on this same case created, if any (read from that
+// answer's own log entry - nothing on mis_cases points at it directly). Editing needed=true with a
+// prevTaskId updates that task in place rather than creating a second one; editing needed=true
+// without one creates a fresh task, same as a first answer; editing down to needed=false with a
+// prevTaskId deletes that task outright, since a case marked no-action-needed shouldn't still carry
+// one. opts.isEdit only controls which event name gets logged (edited vs answered) - it does not
+// change what happens to the task, which is decided by whether prevTaskId is actually set.
+async function clrevSaveOneRow(r, opts){
+  opts=opts||{};
+  const prevTaskId=opts.prevTaskId||null;
+  let taskId=null;
+  if(r.needed===true){
+    if(prevTaskId){
+      const {error:ue2}=await sb.schema('acc').from('ptasks').update({due_date:r.due}).eq('id',prevTaskId);
+      if(ue2) throw ue2;
+      const {data:cur}=await sb.schema('acc').from('ptask_assignees').select('email').eq('task_id',prevTaskId);
+      const already=(cur||[]).some(function(x){return String(x.email||'').toLowerCase()===String(r.person||'').toLowerCase();});
+      if(!already){
+        const {error:de}=await sb.schema('acc').from('ptask_assignees').delete().eq('task_id',prevTaskId);
+        if(de) throw de;
+        const {error:ae2}=await sb.schema('acc').from('ptask_assignees').insert({task_id:prevTaskId, email:r.person});
+        if(ae2) throw ae2;
+      }
+      taskId=prevTaskId;
+    }else{
+      const {data:t,error}=await sb.schema('acc').from('ptasks').insert({
+        title:'Legal MIS — Case '+(r.case_no||r.id),
+        description:(r.cause_title||'')+(r.court?' · '+r.court:'')+' · Hearing '+clrevDmy(r.hearing),
+        delegator:'businessanalyst@thejaingroup.com', created_by:'businessanalyst@thejaingroup.com',
+        due_date:r.due, order_index:0, source:'causelist'
+      }).select().single();
+      if(error) throw error;
+      const {error:ae}=await sb.schema('acc').from('ptask_assignees').insert({task_id:t.id, email:r.person});
+      if(ae) throw ae;
+      taskId=t.id;
+    }
+  }else if(prevTaskId){
+    // Edited down to "no action needed" - the task an earlier "action needed" answer created no
+    // longer applies.
+    try{ await sb.schema('acc').from('ptask_assignees').delete().eq('task_id',prevTaskId); }catch(_de){}
+    const {error:de2}=await sb.schema('acc').from('ptasks').delete().eq('id',prevTaskId);
+    if(de2) throw de2;
+  }
+  const {error:ue}=await sb.from('mis_cases').update({
+    causelist_reviewed_at:new Date().toISOString(),
+    causelist_action_needed:r.needed,
+    causelist_reviewed_by:state.email,
+    causelist_pending_by:null
+  }).eq('id',r.id);
+  if(ue) throw ue;
+  try{ await sb.from('mis_causelist_review_log').insert({case_id:r.id, event:opts.isEdit?'edited':'answered', actor:state.email,
+    detail:{needed:r.needed, due:r.needed?(r.due||null):null, person:r.needed?(r.person||null):null, task_id:taskId}}); }catch(_le){}
+  // Keep the in-memory MIS table in sync too, so re-exporting an overlapping range later in this
+  // same session doesn't ask about this case again without a full reload.
+  const src=(window._misRows||[]).find(function(x){return x.id===r.id;});
+  if(src){ src.causelist_reviewed_at=new Date().toISOString(); src.causelist_action_needed=r.needed; src.causelist_reviewed_by=state.email; src.causelist_pending_by=null; }
+}
+window.clrevSubmit=async function(){
+  clrevSync();
+  const rows=window._clrevRows||[];
+  const bad=rows.find(function(r){ return r.needed===null || (r.needed===true && (!r.due||!r.person)); });
+  if(bad){
+    toast('Answer every matter first — case '+(bad.case_no||bad.id)+' is still incomplete','warn');
+    clrevRender();
+    return;
+  }
+  const late=rows.find(function(r){ return r.needed===true && clrevDueTooLate(r.due,r.hearing); });
+  if(late){
+    toast('Case '+(late.case_no||late.id)+'\'s due date is after its '+clrevDmy(late.hearing)+' hearing — fix it first','warn');
+    clrevRender();
+    return;
+  }
+  const btn=document.querySelector('.modal-foot .btn-primary');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try{
+    for(const r of rows){ await clrevSaveOneRow(r); }
+  }catch(e){
+    toast('Could not save: '+((e&&e.message)||e),'err');
+    if(btn){ btn.disabled=false; btn.innerHTML='Submit'; }
+    return;
+  }
+  window._clrevRows=[]; window._clrevLegal=[];
+  closeModal();
+  toast('Causelist reviewed — tasks created for every matter marked action-needed','ok');
+  if(typeof window._clrevOnDone==='function'){ const fn=window._clrevOnDone; window._clrevOnDone=null; try{ fn(); }catch(e){} }
 };
 // View is the same sheet, opened for on-screen reading instead of forced onto disk - the
 // causelist-format equivalent of every other module's Preview/Download pair.
@@ -4020,7 +4651,8 @@ async function getPeople(){
 }
 function nameOf(email){if(!email)return '—';const p=(PEOPLE||[]).find(x=>x.email===email);return p?p.name:email.split('@')[0];}
 function taskTabs(active){
-  const t=[['','Home','fa-house'],['list','Projects','fa-diagram-project'],['scoreboard','Scoreboard','fa-trophy']];
+  // No Scoreboard tab here any more — it's its own module (Overview > Scoreboard).
+  const t=[['','Home','fa-house'],['list','Projects','fa-diagram-project']];
   return '<div class="tabs">'+t.map(x=>`<div class="tab ${active===x[0]?'active':''}" onclick="location.hash='#/tasks${x[0]?'/'+x[0]:''}'"><i class="fa-solid ${x[2]}"></i> ${x[1]}</div>`).join('')+'</div>';
 }
 
@@ -8185,30 +8817,65 @@ window.secSave=async function(email){
 };
 function noAccess(v){ setCrumb(['Access']); v.innerHTML=`<div class="card card-pad empty" style="max-width:520px;margin:24px auto;text-align:center"><i class="fa-solid fa-lock" style="font-size:30px;color:#94a3b8"></i><h2 style="margin-top:12px">No access to this module</h2><p style="color:var(--slate)">You do not have permission to view this page. Contact your administrator if you need access.</p><button class="btn btn-primary" style="margin-top:14px" onclick="navTo('dashboard')">Go to Dashboard</button></div>`; }
 
-async function taskScoreboard(v){
-  setCrumb(['Accountability','Scoreboard']);
-  v.innerHTML=taskTabs('scoreboard')+'<div class="card card-pad"><div class="loader"><div class="spin"></div></div></div>';
-  await getPeople();
-  let rowsRaw=[];try{const {data}=await sb.schema('acc').rpc('scoreboard');rowsRaw=data||[];}catch(e){}
-  let rows=rowsRaw.map(r=>{
-    const tasksTotal=(r.tasks_on_time||0)+(r.tasks_late||0);
-    const punctuality=tasksTotal?Math.round((r.tasks_on_time||0)/tasksTotal*100):null;
-    // Score: task closure + punctuality + checklist volume (normalised), lightly penalised for frequent due-date extensions
-    const closureScore=Math.min(100,(r.tasks_completed||0)*8);
-    const checklistScore=Math.min(100,(r.checklist_items_done||0)*4);
-    const parts=[punctuality,closureScore,checklistScore].filter(x=>x!=null);
-    let score=parts.length?Math.round(parts.reduce((a,b)=>a+b,0)/parts.length):0;
-    score=Math.max(0,score-Math.min(20,(r.due_date_extensions||0)*3));
-    return {name:r.full_name||nameOf(r.email),email:r.email,checklist:r.checklist_items_done||0,completed:r.tasks_completed||0,punctuality,extensions:r.due_date_extensions||0,score};
-  }).sort((a,b)=>b.score-a.score);
-  const bar=(val,col)=>val==null?'<span style="color:#94a3b8">—</span>':'<div style="display:flex;align-items:center;gap:8px"><div class="progress" style="flex:1;max-width:130px"><span style="width:'+val+'%;background:'+col+'"></span></div><span style="font-size:12px;color:var(--slate);min-width:34px">'+val+'%</span></div>';
-  const medal=i=>i===0?'<span style="font-size:18px">🥇</span>':i===1?'<span style="font-size:18px">🥈</span>':i===2?'<span style="font-size:18px">🥉</span>':'<span style="color:var(--slate);font-weight:600">'+(i+1)+'</span>';
-  v.innerHTML=taskTabs('scoreboard')+
-    '<p style="color:var(--slate);font-size:13px;margin:6px 2px 14px">Score = Time Sheet items completed + tasks finished + punctuality against due dates, with a penalty for frequent due-date extensions.</p>'+
-    '<div class="card"><table class="tbl"><thead><tr><th>Rank</th><th>Person</th><th>Time Sheet items done</th><th>Tasks completed</th><th>Punctuality</th><th>Due-date extensions</th><th>Score</th></tr></thead><tbody>'+
-    (rows.length?rows.map((r,i)=>'<tr><td>'+medal(i)+'</td><td>'+avatar(r.name)+' <b>'+esc(r.name)+'</b></td><td>'+r.checklist+'</td><td>'+r.completed+'</td><td>'+bar(r.punctuality,'#0f766e')+'</td><td style="color:var(--slate)">'+r.extensions+'</td><td style="font-weight:700;font-size:15px">'+r.score+'</td></tr>').join(''):'<tr><td colspan="7"><div class="empty" style="padding:22px">No completed work yet</div></td></tr>')+
-    '</tbody></table></div>';
+/* ===== SCOREBOARD — its own module, not a tab inside Accountability =====
+
+   It used to exist twice, in two places, computing two different numbers from the same RPC: the
+   real one in accountability.js, and a legacy copy here that averaged punctuality, a capped
+   "closure score" and a capped checklist score, then docked points for due-date extensions - a
+   figure that shared nothing with the one people actually saw, and which leaned on
+   due_date_extensions, a column acc.scoreboard() has always returned hardcoded to 0. Pulling the
+   Scoreboard out of Accountability is the moment to have one implementation instead of two, so
+   this is now the only one, and it is the arithmetic the tab really used.
+
+   Lives in nexus-core.js rather than its own page script because nexus-core is loaded by every
+   page already: no extra <script>, no load-order race, and the legacy /tasks/scoreboard route can
+   hand straight over to it. */
+let SB_VIEW='all';
+window.sbSetView=function(v){ if(SB_VIEW===v)return; SB_VIEW=v; if(typeof renderPage==='function')renderPage(); };
+const sbMedal=i=>i===0?'🥇':i===1?'🥈':i===2?'🥉':'<b style="color:var(--slate)">'+(i+1)+'</b>';
+
+async function sbRenderAllTasks(host){
+  let rows=[]; try{const {data}=await sb.schema('acc').rpc('scoreboard');rows=data||[];}catch(e){}
+  /* The score is the sum of the counts the RPC returns, and the RPC decides which tasks reach
+     those counts: self-assigned ones are excluded, and a task with no due date is not counted as
+     having met one. So per task: due date met +2, due date missed 0, no due date +1. */
+  rows=rows.map(r=>Object.assign({},r,{score:(r.tasks_completed||0)+(r.tasks_on_time||0)-(r.tasks_late||0)}))
+           .sort((a,b)=>b.score-a.score||b.tasks_completed-a.tasks_completed);
+  if(!host)return;
+  host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Counts tasks someone else assigned you. Completed <b>+1</b> · finished by its due date <b>+1 more</b> · missed the due date <b>&minus;1</b>. A task with no due date still earns the completion point but cannot earn the on-time point. Tasks you assigned to yourself are listed under <b>Self</b> and do not score. Declines automatically reverse the credit.</div>'
+    /* No "Sub" column. It showed acc.scoreboard()'s checklist_items_done, which counts done
+       subtasks by the names in ptask_subtasks.people — and every completed subtask in the system
+       has that array empty, so the column read 0 for all 85 people. It never fed the score either.
+       The RPC still returns the count; nothing displays it now. */
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Tasks</th><th>On-time</th><th>Overdue</th><th title="Tasks this person created for themselves — shown for completeness, not scored">Self</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_completed+'</td><td style="color:#16a34a">'+r.tasks_on_time+'</td><td style="color:#dc2626">'+r.tasks_late+'</td><td style="color:var(--slate)">'+(r.tasks_self||0)+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="7"><div class="empty" style="padding:22px">No activity yet</div></td></tr>')
+    +'</tbody></table></div>';
 }
+
+async function sbRenderCauselistBoard(host){
+  let rows=[]; try{const {data}=await sb.schema('acc').rpc('scoreboard_causelist');rows=data||[];}catch(e){}
+  if(!host)return;
+  host.innerHTML='<div style="padding:10px 16px;font-size:12px;color:var(--slate);border-bottom:1px solid var(--line)">Legal MIS causelist tasks only — per task, by how far ahead of its due date it was finished: 7+ days early <b>+2</b> · 3–6 days early <b>+1</b> · 0–2 days early <b>0</b> · after the due date <b>&minus;1</b></div>'
+    +'<div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Person</th><th>Assigned</th><th>Completed</th><th>Pending</th><th>Score</th></tr></thead><tbody>'
+    +(rows.length?rows.map((r,i)=>'<tr><td>'+sbMedal(i)+'</td><td><b>'+esc(r.full_name||r.email)+'</b></td><td>'+r.tasks_assigned+'</td><td>'+r.tasks_completed+'</td><td>'+r.tasks_pending+'</td><td style="font-weight:800">'+r.score+'</td></tr>').join('')
+       :'<tr><td colspan="6"><div class="empty" style="padding:22px">No causelist tasks yet</div></td></tr>')
+    +'</tbody></table></div>';
+}
+
+VIEWS.scoreboard=async function(v){
+  setCrumb(['Scoreboard']);
+  v.innerHTML='<div class="page-head"><div><h1><i class="fa-solid fa-ranking-star" style="color:#b8902f"></i> Scoreboard</h1><p>Who is delivering assigned work, and on time</p></div></div>'
+    +'<div class="card" style="padding:0">'
+      +'<div style="display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap">'
+        +'<button class="btn'+(SB_VIEW==='all'?' btn-primary':'')+'" onclick="sbSetView(\'all\')">All Tasks</button>'
+        +'<button class="btn'+(SB_VIEW==='causelist'?' btn-primary':'')+'" onclick="sbSetView(\'causelist\')">Causelist</button>'
+      +'</div><div id="sbBody"><div class="loader"><div class="spin"></div></div></div></div>';
+  if(SB_VIEW==='causelist') await sbRenderCauselistBoard($('sbBody'));
+  else await sbRenderAllTasks($('sbBody'));
+};
+// Kept so /tasks/scoreboard links and bookmarks from when it was a tab still land somewhere real.
+function taskScoreboard(){ navTo('scoreboard'); }
 
 /* ===== Global first-login onboarding (full screen, no sidebar) ===== */
 async function renderOnboarding(){
@@ -9101,7 +9768,92 @@ const USB_COL4={
   'maintenance':          {header:null, keys:[], hideDetails:true},
   'inventory':            {header:'Time spent', keys:['time_spent']},
   'playbook':             {header:'Time spent', keys:['time_spent']},
-  'finance':              {header:'Time spent', keys:['time_spent']}
+  'finance':              {header:'Time spent', keys:['time_spent']},
+
+  /* ---- features that inherit a column they cannot fill -------------------------------------
+     Each of these resolves, by module or by tab, to a column that is a dash on every single event
+     it has ever produced - 66 features, 801 events, measured rather than assumed. They are the
+     same shape of mistake in every case: the default is right for the module and wrong for the
+     one feature, because what the module does and what the feature does are not the same thing.
+     Inspection's Unit fits an inspection of a flat but not the console you filter it from; Legal's
+     Case · Court fits editing a case but not searching for one; Workflow's Waited fits a step
+     somebody received but not printing, editing or deleting an instance.
+
+     The line is almost always the same: a feature that DOES something carries a subject, and a
+     feature you only LOOK AT does not. Create task has an assignee, Search tasks never will.
+
+     hideDetails is set only where Details is empty too, so what is left is never a row of two
+     dashes - on the rest Details already carries the query, the item, the case number or the
+     check, which is why none of them loses anything by giving up the column. */
+  'tasks.meetings.join_a_meeting':                                     {header:null, keys:[]},
+  'tasks.meetings.filter_meetings_by_group':                           {header:null, keys:[], hideDetails:true},
+  'tasks.meetings.schedule_a_meeting_one_time_or_recurring':           {header:null, keys:[]},
+  'tasks.meetings.start_stop_recording':                               {header:null, keys:[]},
+  'tasks.meetings.save_meeting_wrap_up_summary':                       {header:null, keys:[]},
+  // Uploading a recording for a meeting that wasn't recorded live: it carries the meeting title,
+  // never an attendee list, so it must not inherit the tab's permanently-blank Attendees column.
+  'tasks.meetings.add_a_recording_for_transcription':                  {header:null, keys:[]},
+  'legal.mis.search_cases_incl_ai_semantic_search':                    {header:null, keys:[]},
+  'legal.mis.filter_cases_by_hearing_date_range':                      {header:null, keys:[]},
+  'legal.actions.view_search_filter_case_actions':                     {header:null, keys:[], hideDetails:true},
+  'legal.advocates.search_advocates':                                  {header:null, keys:[], hideDetails:true},
+  'legal.documents.search_sort_filter_documents':                      {header:null, keys:[]},
+  'legal.documents.replace_document_version':                          {header:null, keys:[], hideDetails:true},
+  'legal.documents.delete_document_s':                                 {header:null, keys:[], hideDetails:true},
+  'competitors.overview.fetch_ads_from_meta_ad_library':               {header:null, keys:[], hideDetails:true},
+  'competitors.overview.view_competitor_watchlist_and_stored_ads':     {header:null, keys:[], hideDetails:true},
+  'competitors.overview.view_ad_detail':                               {header:null, keys:[]},
+  'competitors.overview.add_competitor':                               {header:null, keys:[], hideDetails:true},
+  'competitors.overview.rebuild_ad_media_previews':                    {header:null, keys:[], hideDetails:true},
+  'competitors.overview.toggle_auto_sync_for_a_competitor':            {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.close_reopen_hiring':                             {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.edit_tracking_values':                            {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.create_new_month_record':                         {header:null, keys:[], hideDetails:true},
+  'hr.monthly_update.open_a_month':                                    {header:null, keys:[]},
+  'hr.interview_tracker.search_filter_interviews':                     {header:null, keys:[], hideDetails:true},
+  'hr.interview_qs.generate_ai_interview_guide':                       {header:null, keys:[]},
+  'hr.h_s_candidates.search_filter_candidates':                        {header:null, keys:[], hideDetails:true},
+  'hr.resumes.preview_download_resume':                                {header:null, keys:[], hideDetails:true},
+  'hr.resumes.delete_resume_s':                                        {header:null, keys:[], hideDetails:true},
+  'recruitment.descriptions.preview_download_job_description':         {header:null, keys:[]},
+  'recruitment.descriptions.upload_job_description':                   {header:null, keys:[]},
+  'recruitment.manpower_form.generate_jd_post_text_creative':          {header:null, keys:[], hideDetails:true},
+  'recruitment.manpower_form.submit_requisition':                      {header:null, keys:[]},
+  'recruitment.tests.preview_test_responses_scores':                   {header:null, keys:[]},
+  'recruitment.tests.share_test_via_email':                            {header:null, keys:[]},
+  'transcription.call_detail.switch_transcript_language':              {header:null, keys:[], hideDetails:true},
+  'transcription.call_detail.add_delete_a_remark':                     {header:null, keys:[]},
+  'transcription.deleted.restore_a_deleted_call_single_or_all':        {header:null, keys:[], hideDetails:true},
+  'transcription.all_calls.download_call_report_or_copy_link':         {header:null, keys:[], hideDetails:true},
+  'network.overview.filter_chart_by_date_range':                       {header:null, keys:[], hideDetails:true},
+  'network.all_readings.filter_readings_by_date_range':                {header:null, keys:[]},
+  'organic.overview.view_engagement_overview_by_type_and_page':        {header:null, keys:[], hideDetails:true},
+  'campaigns.overview.drill_into_a_project_s_campaigns':               {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.upload_document_for_adhoc_replacement':             {header:null, keys:[]},
+  'postsales.adhoc.preview_a_document':                                {header:null, keys:[], hideDetails:true},
+  'postsales.adhoc.download_all_documents_as_zip':                     {header:null, keys:[], hideDetails:true},
+  'scaling.priorities_rocks.view_quarterly_rocks_progress':            {header:null, keys:[], hideDetails:true},
+  'scaling.learning_hub.view_learning_resources_list':                 {header:null, keys:[], hideDetails:true},
+  'scaling.meeting_rhythm.view_meeting_cadence_schedule':              {header:null, keys:[], hideDetails:true},
+  'scaling.kpi_scoreboard.view_kpi_targets_vs_actuals':                {header:null, keys:[], hideDetails:true},
+  'inspection.new_inspection.mark_item_ok_not_ok_n_a':                 {header:null, keys:[]},
+  'inspection.new_inspection.submit_inspection':                       {header:null, keys:[]},
+  'inspection.console.view_inspection_kpis_and_breakdowns':            {header:null, keys:[], hideDetails:true},
+  'inspection.console.start_new_inspection':                           {header:null, keys:[], hideDetails:true},
+  'inspection.console.filter_by_project_block_floor_flat_work_type':   {header:null, keys:[], hideDetails:true},
+  'inspection.responses.open_and_edit_a_submission':                   {header:null, keys:[], hideDetails:true},
+  'procurement.vendor_trends.view_spend_kpis_trend_charts':            {header:null, keys:[], hideDetails:true},
+  'tasks.calendar.search_calendar_items':                              {header:null, keys:[]},
+  'tasks.workflow.print_an_instance':                                  {header:null, keys:[]},
+  'tasks.workflow.search_filter_the_tracker':                          {header:null, keys:[]},
+  'tasks.workflow.post_an_update_comment_on_an_instance':              {header:null, keys:[]},
+  'tasks.workflow.delete_an_instance':                                 {header:null, keys:[]},
+  'tasks.workflow.edit_an_instance':                                   {header:null, keys:[]},
+  'tasks.workflow.attach_a_file_to_an_update':                         {header:null, keys:[]},
+  'tasks.workflow.create_a_new_workflow':                              {header:null, keys:[]},
+  'tasks.workflow.edit_workflow_steps_owners':                         {header:null, keys:[]},
+  'tasks.workflow.reopen_a_completed_instance':                        {header:null, keys:[], hideDetails:true},
+  'tasks.workflow.delete_a_workflow':                                  {header:null, keys:[], hideDetails:true},
 };
 const USB_COL4_DEFAULT={header:'Assigned to', keys:['assignee']};
 /* Most specific wins: the feature itself, then its tab, then its module.
@@ -17226,15 +17978,19 @@ function cpaParsePTC(wb){
     isReversed:String(get('Is Reversed')||'').trim().toUpperCase()==='YES',
   }));
 }
-// Booking No is the real join key (unlike unit_code, which repeats across towers) - fall back to
-// (project, tower, unit code) only for the rare pre-Booking-No-convention record.
+// Booking No is the real join key (unlike unit_code, which repeats across towers). A record that
+// carries a Booking No resolves by it or not at all: falling back to (tower, unit code) whenever the
+// lookup missed attached every cancelled booking's invoices, receipts and Outstanding row to whoever
+// holds that flat now - another buyer's money in the current owner's ledger. The flat-level lookup
+// is only for the rare record with no Booking No.
 function cpaResolveUnit(units,projectId,bookingNo,tower,unitCode){
-  if(bookingNo){ const u=units.find(u=>u.booking_no===bookingNo); if(u) return u; }
-  if(projectId&&unitCode){
-    const norm=s=>String(s||'').trim().toLowerCase();
-    return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
-  }
-  return null;
+  if(bookingNo) return units.find(u=>u.booking_no===bookingNo)||null;
+  return cpaResolveFlat(units,projectId,tower,unitCode);
+}
+function cpaResolveFlat(units,projectId,tower,unitCode){
+  if(!projectId||!unitCode) return null;
+  const norm=s=>String(s||'').trim().toLowerCase();
+  return units.find(u=>u.project_id===projectId&&norm(u.tower)===norm(tower)&&norm(u.unit_code)===norm(unitCode))||null;
 }
 function cpaResolveProject(projects,businessUnit){
   if(!businessUnit) return null;
@@ -17604,7 +18360,10 @@ async function cpaImportConfirmXlsx(st){
           if(error)throw error; customerId=created.id;
         }
       }
-      const existingUnit=cpaResolveUnit(await cpaUnits(),m.project.id,r.bookingNo,r.tower,r.unitCode);
+      // Sales Details lists Active bookings only, and a flat has one non-cancelled row
+      // (units_project_tower_code_active_uq), so a rebooked flat must still find its existing row.
+      const allUnits=await cpaUnits();
+      const existingUnit=cpaResolveUnit(allUnits,m.project.id,r.bookingNo,null,null)||cpaResolveFlat(allUnits,m.project.id,r.tower,r.unitCode);
       const unitRow={project_id:m.project.id,unit_code:r.unitCode,tower:r.tower,floor_no:r.floor||null,
         unit_type:r.typology||null,carpet_area_sqft:r.carpet||null,super_built_up_area_sqft:r.superBuiltUp||null,
         built_up_area_sqft:r.builtUp||null,agreement_value:r.totalBasic+r.totalTax,booking_no:r.bookingNo,
@@ -17706,18 +18465,23 @@ async function cpaImportConfirmXlsx(st){
       if(itemRows.length){const {error}=await sb.schema('cust').from('receipt_items').insert(itemRows);if(error)throw error;}
     }
   }else if(st.type==='receipt_reversal'){
-    for(const m of st.matched){
-      const r=m.rec;
-      // Skip if already exists
-      const {data:existing}=await sb.schema('cust').from('receipt_reversals').select('id').eq('unit_id',m.unit.id).eq('receipt_reversal_no',r.reversalNo).limit(1);
-      if(existing&&existing.length) continue;
-      const {error}=await sb.schema('cust').from('receipt_reversals').insert({
-        unit_id:m.unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
+    // One report row per revenue-head line, and every consumer (Ledger, reconciliation) sums
+    // reversal_amount across a reversal's rows - so all lines must land. Skipping a reversal number
+    // once its first line existed kept Rs 3,201 of a Rs 10,00,000 bounced cheque.
+    const byRev={};
+    for(const m of st.matched){ const k=m.unit.id+'|'+m.rec.reversalNo; (byRev[k]=byRev[k]||{unit:m.unit,lines:[]}).lines.push(m.rec); }
+    for(const k of Object.keys(byRev)){
+      const {unit,lines}=byRev[k];
+      const {error:ue}=await sb.schema('cust').from('receipt_reversals').update({is_current:false})
+        .eq('unit_id',unit.id).eq('receipt_reversal_no',lines[0].reversalNo).eq('is_current',true);
+      if(ue)throw ue;
+      const {error}=await sb.schema('cust').from('receipt_reversals').insert(lines.map(r=>({
+        unit_id:unit.id,receipt_reversal_no:r.reversalNo,receipt_reversal_date:r.reversalDate,
         receipt_no:r.receiptNo,receipt_date:r.receiptDate,
         instrument_no:r.instrumentNo,instrument_date:r.instrumentDate,
         reversal_amount:r.reversalAmount,total_reversal_amount:r.totalReversalAmount,
         narration:r.narration,bank_description:r.bankDescription,reason:r.reason,
-        is_current:true,import_batch_id:batchId});
+        is_current:true,import_batch_id:batchId})));
       if(error)throw error;
     }
   }else if(st.type==='booking_register'){
@@ -18497,7 +19261,16 @@ async function custLoadData(customerId,force){
     contacts=data||[];
   }
   const contactByUnit={};contacts.forEach(c=>{contactByUnit[c.unit_id]=c;});
-  CUST_DATA={customerId,units:list,contactByUnit};
+  // Whether this customer has ever submitted a referral, across all their units (the sidebar is
+  // shared across units, not per-unit) - drives the "Earn" badge in custSidebarTabs. Left undefined
+  // rather than defaulted to false until this resolves, so the sidebar's very first paint (before
+  // any data has loaded) never flashes a badge it might have to immediately take back.
+  let hasReferred;
+  if(unitIds.length){
+    const {data:ref}=await sb.schema('cust').from('referrals').select('id').in('unit_id',unitIds).limit(1);
+    hasReferred=!!(ref&&ref.length);
+  }else hasReferred=false;
+  CUST_DATA={customerId,units:list,contactByUnit,hasReferred};
   return CUST_DATA;
 }
 window.custSwitchUnit=function(id){CUST_SELECTED_UNIT=Number(id);route();};
@@ -18536,22 +19309,65 @@ function custGreeting(fullName,unit){
   const proj=projShortName((unit&&unit.projects&&unit.projects.name)||'');
   const where=[unit&&unit.unit_code,unit&&unit.tower].filter(Boolean).join(' · ');
   return '<div class="cust-greet">'+
+    (proj?'<div class="cust-greet-kicker">The Jain Group · '+esc(proj)+'</div>':'')+
     '<div class="cust-greet-hi">'+hi+(name?', '+esc(name):'')+'</div>'+
     '<div class="cust-greet-sub">Welcome back'+
       (proj?' — your home at <b>'+esc(proj)+'</b>'+(where?', '+esc(where):''):'')+'.</div>'+
   '</div>';
 }
-/* The landing page: a greeting over the animated construction scene, and nothing else. It is the
-   first thing a customer sees, before they choose Statement or anything else from the sidebar. */
+/* Jain Group's own official renders, hotlinked from each project's own marketing microsite - not a
+   generic stock photo, the actual building the customer bought into. Same company, same asset,
+   reused on its own customer portal: no licensing question the way an arbitrary web image would
+   raise. Keyed on cust.projects.name exactly as Farvision sends it, same as everywhere else in this
+   file that reads a project by name. A project with no entry here (Dream Ananta has no dedicated
+   microsite yet) falls back to the plain navy card - never another project's building. */
+const CUST_PROJECT_HERO_IMG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://thejaingroup.com/dreamgurukul/assets/images/elevation/Dream%20Gurukul%20elevation%20vertical%201.webp'
+};
+/* A looping site/elevation video, Home page only - not the rest of the portal, which stays plain
+   white so ledgers, statements and cost sheets keep the readability a moving video behind them
+   would cost. Hosted in its own public `project-hero` Storage bucket rather than hotlinked, since
+   it did not already live on a public URL the way the hero photos above do - it is a one-off file,
+   not an asset already published on Jain Group's own site. (Landed in its own bucket rather than a
+   folder inside `branding` as first set up - Storage's "Create folder" in the dashboard can create
+   a sibling bucket instead depending on which button is used; verified with a live curl against the
+   public URL before treating either the path or the bucket's public flag as correct.)
+   Used as the `poster` too: the still frame shown before the video can play, and what renders for
+   anyone with prefers-reduced-motion set (see custLanding below - reduced motion falls back to the
+   plain photo card entirely, not a paused video frame in a full-viewport layout it was never using). */
+const CUST_PROJECT_HERO_VIDEO={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/project-hero/dream-gurukul.mp4'
+};
+/* A faint (see .cust-tab-bg's opacity in nexus.css) version of the project's own render sits behind
+   every non-Home tab - Statement, Ledger, Cost Sheet etc. - so the portal doesn't go flat and blank
+   the moment a customer leaves the hero. Deliberately its own map, not a reuse of CUST_PROJECT_HERO_IMG:
+   the Home hero and this backdrop are different renders of the same project (dusk elevation vs. a
+   daytime shot with the playground/garden), so a project could in principle only have one of the two. */
+const CUST_PROJECT_TAB_BG={
+  'DREAM GURUKUL(DOLTALA MADHYAMGRAM)':'https://rkxsgtauigjrpcjkmccu.supabase.co/storage/v1/object/public/branding/dream%20gurukul%20statement.webp'
+};
+/* The landing page: a greeting standing on the project's own hero media, and nothing else. It is
+   the first thing a customer sees, before they choose Statement or anything else from the sidebar. */
 function custLanding(fullName,unit){
-  return '<div class="cust-landing">'+
-    '<div class="cust-bg-scene cust-bg-scene--hero">'+
-      '<div class="cbg-b cbg-b1"></div><div class="cbg-b cbg-b2"></div><div class="cbg-b cbg-b3"></div><div class="cbg-b cbg-b4"></div>'+
-      '<div class="cbg-b cbg-b5"></div><div class="cbg-b cbg-b6"></div><div class="cbg-b cbg-b7"></div><div class="cbg-b cbg-b8"></div>'+
-      '<div class="cbg-crane cbg-crane1"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
-      '<div class="cbg-crane cbg-crane2"><div class="cbg-cm"></div><div class="cbg-cj"></div><div class="cbg-cc"></div><div class="cbg-ch"></div></div>'+
-      '<div class="cbg-ground"></div>'+
-    '</div>'+
+  const projName=(unit&&unit.projects&&unit.projects.name)||'';
+  const heroImg=CUST_PROJECT_HERO_IMG[projName];
+  const heroVideo=CUST_PROJECT_HERO_VIDEO[projName];
+  const reducedMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(heroVideo&&!reducedMotion){
+    return '<div class="cust-landing cust-landing--video">'+
+      '<video class="cust-landing-video" autoplay muted loop playsinline preload="auto"'+
+        (heroImg?' poster="'+esc(heroImg)+'"':'')+'>'+
+        '<source src="'+esc(heroVideo)+'" type="video/mp4">'+
+      '</video>'+
+      '<div class="cust-landing-scrim"></div>'+
+      '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
+    '</div>';
+  }
+  // A dark scrim under the greeting text, fading to nearly nothing toward the top so the render
+  // itself stays the star of the panel rather than being blanketed. Gives white/gold text on the
+  // photo the same contrast a solid card would, without needing one.
+  const style=heroImg?' style="background-image:linear-gradient(180deg,rgba(9,15,30,.05) 0%,rgba(9,15,30,.35) 45%,rgba(7,12,25,.92) 100%),url(\''+heroImg+'\')"':'';
+  return '<div class="cust-landing'+(heroImg?' cust-landing--photo':'')+'"'+style+'>'+
     '<div class="cust-landing-inner">'+custGreeting(fullName,unit)+'</div>'+
   '</div>';
 }
@@ -18775,7 +19591,7 @@ async function custTabOverview(data,unit){
      not a payment position. */
   const moneySections=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px"><div class="sec-title" style="margin:0">Recent transactions</div>'+
-    '<a href="javascript:void(0)" onclick="navTo(\'customer/2\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
+    '<a href="javascript:void(0)" onclick="navTo(\'customer/3\')" style="font-size:12.5px;font-weight:600">View full ledger →</a></div>'+
     (recentRows.length?mTable(['Date','Type','Details','Debit','Credit'],recentRows):
       '<div class="card card-pad empty">No demand or receipt records yet for this unit.</div>')+
     costSheetSection+
@@ -19054,7 +19870,7 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
       '<tfoot><tr><td colspan="7">Total Receipt Amount</td><td class="amt">'+custInr(total)+'</td></tr>'+
       '<tr><td colspan="8" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(total))+'</td></tr></tfoot>'+
       '</table></div>'+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
     '</div>';
 }
 // Styles are shared by the on-screen modal and the printable window.
@@ -19085,7 +19901,6 @@ const CUST_RECEIPT_CSS=
   '.rcpt-terms p{margin:0 0 6px;text-align:justify}'+
   '.rcpt-terms ul{margin:0 0 6px;padding-left:16px}.rcpt-terms li{margin-bottom:3px}'+
   '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
-  '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
   // On a phone the two header columns cannot sit side by side without clipping the right one.
   '@media(max-width:640px){.rcpt-grid{grid-template-columns:1fr;gap:12px}'+
   '.rcpt-f span{min-width:82px;flex:0 0 82px}.rcpt-title{font-size:13px}}';
@@ -19389,7 +20204,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
       '<tbody>'+(rowsHtml||'<tr><td colspan="6" style="text-align:center;color:#64748b">No charge lines recorded.</td></tr>')+'</tbody>'+
       '<tfoot>'+foot+'</tfoot></table></div>'+
       tail+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
       '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
       '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
     '</div>';
@@ -19967,14 +20782,176 @@ window.custSetSubmeterPaymentRefSave=async function(requestId){
   if(error){toast('Could not save: '+error.message,'err');return;}
   closeModal();toast('Payment reference saved','ok');route();
 };
-const CUST_REFERRAL_STATUSES={submitted:'Submitted',contacted:'Contacted',interested:'Interested',visited_site:'Visited Site',booked:'Booked',not_interested:'Not Interested'};
+/* Each stage gets its own colour, and the same colour everywhere it appears - the pill, the
+   progress rail, the stat tile. A referral's whole story is "how far along is it", so the stages
+   run cool-to-warm-to-green and a reader can tell where one has reached without reading a word.
+   Not-interested is deliberately the only grey: it is the one outcome that has stopped moving. */
+const CUST_REFERRAL_STAGES=[
+  {k:'submitted',     label:'Submitted',      ink:'#3730a3', bg:'#eef2ff', dot:'#6366f1', icon:'fa-paper-plane'},
+  {k:'contacted',     label:'Contacted',      ink:'#075985', bg:'#e0f2fe', dot:'#0284c7', icon:'fa-phone-volume'},
+  {k:'interested',    label:'Interested',     ink:'#92400e', bg:'#fef3c7', dot:'#d97706', icon:'fa-star'},
+  {k:'visited_site',  label:'Visited Site',   ink:'#6b21a8', bg:'#f5f3ff', dot:'#9333ea', icon:'fa-location-dot'},
+  {k:'booked',        label:'Booked',         ink:'#166534', bg:'#dcfce7', dot:'#16a34a', icon:'fa-circle-check'},
+  {k:'not_interested',label:'Not Interested', ink:'#475569', bg:'#f1f5f9', dot:'#94a3b8', icon:'fa-circle-minus'}
+];
+const CUST_REFERRAL_STATUSES=CUST_REFERRAL_STAGES.reduce(function(a,s){a[s.k]=s.label;return a;},{});
+function custRefStage(k){ return CUST_REFERRAL_STAGES.filter(function(s){return s.k===k;})[0]||CUST_REFERRAL_STAGES[0]; }
+
+/* The styles live here rather than in nexus.css because they are this one tab's and nothing else
+   reads them. Injected once; the id is the guard. */
+function custReferralCss(){
+  if(document.getElementById('custRefCss')) return;
+  const s=document.createElement('style'); s.id='custRefCss';
+  s.textContent=`
+  .cref-hero{position:relative;overflow:hidden;border-radius:16px;padding:30px 32px;margin-bottom:18px;
+    background:linear-gradient(125deg,#0f1e3d 0%,#16294f 38%,#1d4ed8 100%);color:#fff;
+    box-shadow:0 14px 34px -14px rgba(15,30,61,.55)}
+  /* A slow sheen travelling across the banner. It is the only moving thing on the page, which is
+     what makes it read as "look here" rather than as decoration competing with the content. */
+  .cref-hero::after{content:'';position:absolute;top:-60%;left:-30%;width:40%;height:220%;
+    background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.16) 50%,rgba(255,255,255,0) 100%);
+    transform:rotate(18deg);animation:crefSheen 5.5s ease-in-out infinite}
+  @keyframes crefSheen{0%{left:-35%}55%{left:115%}100%{left:115%}}
+  .cref-hero-in{position:relative;z-index:1;display:flex;gap:26px;align-items:center;flex-wrap:wrap}
+  .cref-hero-txt{flex:1 1 320px;min-width:0}
+  .cref-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;
+    letter-spacing:.14em;text-transform:uppercase;color:#f0c964;margin-bottom:11px}
+  .cref-hero h2{font-size:26px;line-height:1.2;font-weight:800;margin:0 0 9px;letter-spacing:-.02em;text-wrap:balance}
+  .cref-hero p{font-size:14.5px;line-height:1.6;color:#c9d6f0;margin:0;max-width:52ch}
+  .cref-cta{display:inline-flex;align-items:center;gap:10px;border:0;cursor:pointer;
+    font-family:inherit;font-size:15px;font-weight:800;letter-spacing:.01em;color:#25324a;
+    padding:15px 28px;border-radius:999px;white-space:nowrap;
+    background:linear-gradient(135deg,#ffd97a 0%,#f0c964 45%,#dCA93a 100%);
+    box-shadow:0 8px 22px -6px rgba(240,201,100,.65);transition:transform .16s,box-shadow .16s}
+  .cref-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px -6px rgba(240,201,100,.8)}
+  .cref-cta:active{transform:translateY(0)}
+  .cref-cta i{font-size:14px}
+  /* The pulse stops the moment there is anything in the list - it is there to get a first referral
+     out of somebody, not to keep nagging a customer who has already used the thing. */
+  .cref-cta.pulse{animation:crefPulse 2.4s ease-out infinite}
+  @keyframes crefPulse{
+    0%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,.55)}
+    70%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 16px rgba(240,201,100,0)}
+    100%{box-shadow:0 8px 22px -6px rgba(240,201,100,.65),0 0 0 0 rgba(240,201,100,0)}}
+
+  .cref-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  .cref-stat{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:13px;
+    padding:15px 17px;position:relative;overflow:hidden}
+  .cref-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--cref-c,#1d4ed8)}
+  .cref-stat b{display:block;font-size:27px;font-weight:800;line-height:1.1;color:var(--cref-c,#1d4ed8);
+    font-variant-numeric:tabular-nums}
+  .cref-stat span{display:block;font-size:12px;color:var(--slate);margin-top:3px;font-weight:600}
+
+  .cref-steps{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+  .cref-step{flex:1 1 200px;display:flex;gap:12px;align-items:flex-start;background:var(--card);
+    border:1px solid var(--line);border-radius:13px;padding:15px 16px}
+  .cref-step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+    background:var(--brand-50);color:var(--brand);font-weight:800;font-size:13px}
+  .cref-step b{display:block;font-size:13.5px;margin-bottom:2px}
+  .cref-step span{font-size:12.5px;color:var(--slate);line-height:1.5}
+
+  .cref-list{display:flex;flex-direction:column;gap:11px}
+  .cref-card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--cref-c,#6366f1);
+    border-radius:13px;padding:15px 17px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+    transition:box-shadow .16s,transform .16s}
+  .cref-card:hover{box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+  .cref-who{flex:1 1 220px;min-width:0}
+  .cref-name{font-size:15.5px;font-weight:700;letter-spacing:-.01em}
+  .cref-meta{font-size:12.5px;color:var(--slate);margin-top:3px;display:flex;gap:14px;flex-wrap:wrap}
+  .cref-meta i{width:12px;text-align:center;margin-right:4px;opacity:.75}
+  .cref-pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;
+    padding:7px 14px;border-radius:999px;white-space:nowrap}
+  .cref-pill i{font-size:11px}
+  /* The whole journey on every row, so a customer can see there are stages beyond the one they are
+     at - a referral sitting at "Contacted" reads as progress rather than as nothing happening. */
+  .cref-rail{display:flex;gap:5px;align-items:center;flex:1 1 150px;min-width:120px}
+  .cref-seg{height:5px;border-radius:99px;flex:1;background:var(--line)}
+  .cref-seg.on{background:var(--cref-c,#6366f1)}
+  .cref-when{font-size:12px;color:var(--slate);white-space:nowrap}
+
+  .cref-empty{text-align:center;padding:38px 24px;background:var(--card);border:1px dashed var(--line-2);
+    border-radius:14px}
+  .cref-empty i{font-size:30px;color:var(--brand);opacity:.35}
+  .cref-empty b{display:block;margin-top:12px;font-size:16px}
+  .cref-empty span{display:block;margin-top:5px;font-size:13px;color:var(--slate)}
+  @media(max-width:620px){
+    .cref-hero{padding:24px 20px}
+    .cref-hero h2{font-size:21px}
+    .cref-cta{width:100%;justify-content:center}
+  }
+  /* Somebody who has asked the operating system to stop animations gets a page that still works and
+     still looks like this - only the sheen and the pulse go. */
+  @media(prefers-reduced-motion:reduce){
+    .cref-hero::after{animation:none;display:none}
+    .cref-cta.pulse{animation:none}
+    .cref-card,.cref-cta{transition:none}
+  }`;
+  document.head.appendChild(s);
+}
+
 async function custTabReferrals(unit){
+  custReferralCss();
   const {data:referrals}=await sb.schema('cust').from('referrals').select('*').eq('unit_id',unit.id).order('created_at',{ascending:false});
-  const rows=(referrals||[]).map(r=>[esc(r.prospect_name),esc(r.prospect_phone||'—'),esc(r.prospect_email||'—'),
-    `<select onchange="custReferralStatusChange(${r.id},this.value)">${Object.keys(CUST_REFERRAL_STATUSES).map(k=>`<option value="${k}" ${k===r.status?'selected':''}>${CUST_REFERRAL_STATUSES[k]}</option>`).join('')}</select>`,
-    fmtDate(r.created_at)]);
-  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Referrals</div><button class="btn btn-primary" onclick="custNewReferralModal()"><i class="fa-solid fa-plus"></i> Refer someone</button></div>`+
-    (rows.length?cpaTable(['Name','Phone','Email','Status','Referred on'],rows):'<div class="card card-pad empty">You haven’t referred anyone yet.</div>');
+  const list=referrals||[];
+  const stageIndex=function(k){ const i=CUST_REFERRAL_STAGES.findIndex(function(s){return s.k===k;}); return i<0?0:i; };
+  const booked=list.filter(function(r){return r.status==='booked';}).length;
+  const moving=list.filter(function(r){return ['contacted','interested','visited_site'].indexOf(r.status)!==-1;}).length;
+
+  const hero=`<div class="cref-hero"><div class="cref-hero-in">
+      <div class="cref-hero-txt">
+        <div class="cref-eyebrow"><i class="fa-solid fa-gift"></i> Refer &amp; earn</div>
+        <h2>Know someone looking for a home?</h2>
+        <p>Tell us who they are and our sales team takes it from there — you can watch every
+           referral move along right here, from first call to booking.</p>
+      </div>
+      <button class="cref-cta${list.length?'':' pulse'}" onclick="custNewReferralModal()">
+        <i class="fa-solid fa-user-plus"></i> Refer someone
+      </button>
+    </div></div>`;
+
+  /* The counts only appear once there is something to count. On an empty tab they would be three
+     zeroes, which says "this is not worth using" at exactly the moment it needs to say the
+     opposite. */
+  const stats=list.length?`<div class="cref-stats">
+      <div class="cref-stat" style="--cref-c:#1d4ed8"><b>${list.length}</b><span>Referred by you</span></div>
+      <div class="cref-stat" style="--cref-c:#d97706"><b>${moving}</b><span>Being followed up</span></div>
+      <div class="cref-stat" style="--cref-c:#16a34a"><b>${booked}</b><span>Booked</span></div>
+    </div>`:'';
+
+  const steps=`<div class="cref-steps">
+      <div class="cref-step"><div class="cref-step-n">1</div><div><b>You refer</b>
+        <span>Their name and a phone number is all we need.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">2</div><div><b>We reach out</b>
+        <span>Our sales team calls them and shows them around.</span></div></div>
+      <div class="cref-step"><div class="cref-step-n">3</div><div><b>You follow along</b>
+        <span>Every stage shows up on this page as it happens.</span></div></div>
+    </div>`;
+
+  const body=list.length
+    ? `<div class="cref-list">`+list.map(function(r){
+        const st=custRefStage(r.status), at=stageIndex(r.status);
+        // Not-interested fills nothing: the rail is about progress, and that outcome is not progress.
+        const done=(r.status==='not_interested')?0:at+1;
+        const rail=CUST_REFERRAL_STAGES.slice(0,5).map(function(_,i){
+          return '<div class="cref-seg'+(i<done?' on':'')+'"></div>'; }).join('');
+        const phone=r.prospect_phone?`<span><i class="fa-solid fa-phone"></i>${esc(r.prospect_phone)}</span>`:'';
+        const mail=r.prospect_email?`<span><i class="fa-solid fa-envelope"></i>${esc(r.prospect_email)}</span>`:'';
+        return `<div class="cref-card" style="--cref-c:${st.dot}">
+            <div class="cref-who">
+              <div class="cref-name">${esc(r.prospect_name)}</div>
+              <div class="cref-meta">${phone}${mail}${(phone||mail)?'':'<span>No contact details given</span>'}</div>
+            </div>
+            <div class="cref-rail">${rail}</div>
+            <span class="cref-pill" style="background:${st.bg};color:${st.ink}">
+              <i class="fa-solid ${st.icon}"></i>${esc(st.label)}</span>
+            <span class="cref-when">${esc(fmtDate(r.created_at))}</span>
+          </div>`;
+      }).join('')+`</div>`
+    : `<div class="cref-empty"><i class="fa-solid fa-user-group"></i>
+         <b>No referrals yet</b>
+         <span>Be the first — it takes about ten seconds.</span></div>`;
+
+  return hero+stats+steps+body;
 }
 window.custNewReferralModal=function(){
   openModal(`<div class="modal-head"><h3>Refer a prospect</h3><span class="x" onclick="closeModal()">&times;</span></div>
@@ -19989,6 +20966,10 @@ window.custNewReferralSave=async function(){
   const unit=CUST_DATA.units.find(u=>u.id===CUST_SELECTED_UNIT);
   const {error}=await sb.schema('cust').from('referrals').insert({unit_id:unit.id,prospect_name,prospect_phone,prospect_email,created_by:state.email});
   if(error){toast('Could not submit: '+error.message,'err');return;}
+  // Set directly rather than re-fetched: custLoadData's cache would otherwise hand route() the same
+  // pre-submit CUST_DATA (same customerId, no force), and the sidebar's "Earn" badge would survive
+  // the very referral that should have removed it.
+  if(CUST_DATA)CUST_DATA.hasReferred=true;
   closeModal();toast('Referral submitted — thank you!','ok');route();
 };
 window.custReferralStatusChange=async function(id,status){
@@ -20119,10 +21100,15 @@ VIEWS.customer=async function(v,seg){
   const ti=mTab(seg,tabs.length);
   // The sidebar is rebuilt on every render (not just once at boot) so its active item tracks
   // whichever section is actually showing, including a same-page link like the Statement tab's
-  // "View full ledger" jumping straight to navTo('customer/1').
+  // "View full ledger" jumping straight to navTo('customer/3') (was already stale here at '1'
+  // before this comment was corrected - the literal itself is what actually runs, not this note).
   custSidebarTabs(ti);
   setCrumb(['Customer Portal',tabs[ti]]);
   const data=await custLoadData(state.customer&&state.customer.id);
+  // Rebuilt again now that CUST_DATA.hasReferred is known, so the Referrals "Earn" badge can appear
+  // (it stays off on the call above rather than risk flashing on for a customer who's already
+  // referred someone). A no-op redraw for every tab except Referrals.
+  custSidebarTabs(ti);
   // The impersonation banner stays - it's the only thing on screen telling a staff member WHO
   // they're previewing, and it's how they get back out. The plain "signed in as you" banner for a
   // customer's own real session said nothing they don't already know from the profile menu, so it's
@@ -20139,9 +21125,9 @@ VIEWS.customer=async function(v,seg){
   let body;
   if(ti===0)body='';
   else if(ti===1)body=await custTabOverview(data,unit);
-  else if(ti===2)body=await custTabLedger(unit);
-  else if(ti===3)body=await custTabCostSheet(data,unit);
-  else if(ti===4)body=await custTabProgress(unit);
+  else if(ti===2)body=await custTabProgress(unit);
+  else if(ti===3)body=await custTabLedger(unit);
+  else if(ti===4)body=await custTabCostSheet(data,unit);
   else if(ti===5)body=await custTabInspection(unit);
   else if(ti===6)body=await custTabDocuments(unit);
   else if(ti===7)body=await custTabVideos();
@@ -20151,11 +21137,14 @@ VIEWS.customer=async function(v,seg){
   else if(ti===11)body=await custTabReferrals(unit);
   else if(ti===12)body=await custTabMaintenance(unit);
   else body=await custTabModificationRequests(unit);
-  /* The landing page is the greeting over the construction scene and nothing else - no page head, no
-     unit picker, no body. Every other tab keeps the normal chrome. */
+  /* The landing page is the greeting over the project's hero photo and nothing else - no page head,
+     no unit picker, no body. Every other tab keeps the normal chrome, plus a faint backdrop of the
+     same project's render (CUST_PROJECT_TAB_BG) so it isn't flat once the hero is behind them. */
+  const tabBg=CUST_PROJECT_TAB_BG[(unit.projects&&unit.projects.name)||''];
   v.innerHTML=ti===0
     ? '<div class="cust-view-fade">'+banner+custLanding((state.customer&&state.customer.full_name)||'',unit)+'</div>'
-    : '<div class="cust-view-fade">'+mHead('fa-user-tie','#1d4ed8','Customer Portal')+
+    : '<div class="cust-view-fade">'+(tabBg?'<div class="cust-tab-bg" style="background-image:url(\''+esc(tabBg)+'\')"></div>':'')+
+      mHead('fa-user-tie','#1d4ed8','Customer Portal')+
       banner+
       custUnitPicker(data.units,unit.id)+
       '<div style="margin-top:14px">'+body+'</div></div>';
@@ -21851,6 +22840,13 @@ async function trcPrefetchHistories(leadIds){
          for itself on click. A failed chunk simply stays uncached. */
     }
   }
+  /* Added so trcLeads' cadence/callbackTat (see its own note) stop reading the range-limited rows the
+     moment each lead's real history lands - a soft repaint, same as trcEnrichVisiblePage/
+     trcBackfillLastJudgement already do on their own completion. Gated on the same generation check as
+     everything above: a newer prefetch (or a page/filter change) means this one's result is stale and
+     must not repaint over whatever now owns the screen. Only reached at all when todo was non-empty,
+     so this never fires on a page that was already fully cached. */
+  if(gen===TRC_PREFETCH_GEN)trcRender(false,true);
 }
 
 /* THE ONE PLACE A LEAD'S HISTORY IS FETCHED, for the click and for the prefetch alike.
@@ -21902,7 +22898,7 @@ function trcSortHistory(rows){
      that transition is visible - which resets TRC_F back to these same defaults and clears this same
      key, so a reload caught right after landing here restores THIS visit, not the one before it. */
 const TRC_F=(function(){
-  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all'};
+  const fallback={from:traYesterday(),to:traYesterday(),proc:'all',match:'all',crm:'all',bu:'all',q:'',mismatch:'all',personnel:'all',fdate:'all',remarks:'all',pitch:'all',overdue:'all',cadence:'all',callbackTat:'all',etiquette:'all',queryHandling:'all',retention:'all',lostReason:'all',personalMobile:'all'};
   try{
     const saved=JSON.parse(sessionStorage.getItem('trc_filters_state')||'null');
     if(saved&&typeof saved==='object')return Object.assign(fallback,saved);
@@ -21921,6 +22917,8 @@ function trcResetFilters(){
   const y=traYesterday();
   TRC_F.from=y;TRC_F.to=y;TRC_F.proc='all';TRC_F.match='all';TRC_F.mismatch='all';
   TRC_F.crm='all';TRC_F.bu='all';TRC_F.personnel='all';TRC_F.q='';
+  TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_PAGE=0;
   TRC_ROWS=null;TRC_ROWS_RANGE=null;TRC_ROWS_ENRICHED=false;TRC_QA_MERGED_RANGE=null;
   TRC_KPI_FAST=null;TRC_KPI_FAST_RANGE=null;
@@ -21993,6 +22991,15 @@ function trcDailyPlainCell(n){
   const shown=n||0;
   return '<td style="text-align:center'+(shown?'':';color:var(--slate)')+'">'+shown+'</td>';
 }
+/* Reconciliation, point 2: not just the raw Transcribed/Failed counts already in the row (both were
+   already columns in acc.daily_qa_summary, just never surfaced here as a rate) - the PROPORTION of the
+   day's calls each one accounts for, so a day of 4 failed out of 6 calls reads as the crisis it is
+   instead of looking the same as 4 failed out of 400. */
+function trcDailyRateCell(n,total){
+  if(!total)return '<td style="text-align:center;color:var(--slate)">—</td>';
+  const pct=Math.round((Number(n||0)/Number(total))*1000)/10;
+  return '<td style="text-align:center;font-variant-numeric:tabular-nums">'+pct+'%</td>';
+}
 function trcRenderDaily(){
   const el=$('trcDaily');if(!el)return;
   if(!TRC_DAILY_OPEN){el.innerHTML='';return;}
@@ -22003,13 +23010,19 @@ function trcRenderDaily(){
       +'<td style="white-space:nowrap;font-weight:600">'+esc(trcWall(r.date,true)||r.date)+'</td>'
       +trcDailyCell(r.date,'all','all',r.total_leads)
       +trcDailyCell(r.date,'all','all',r.total_followups)
+      +trcDailyCell(r.date,'proc','no_recording',Math.max(0,Number(r.total_followups||0)-Number(r.recordings_available||0)))
+      +trcDailyCell(r.date,'proc','non_transcribable',r.non_transcribable)
       +trcDailyCell(r.date,'proc','completed',r.transcribed)
+      +trcDailyRateCell(r.transcribed,r.total_followups)
+      +trcDailyPlainCell(r.already_transcribed)
+      +trcDailyCell(r.date,'proc','failed',r.transcription_failed)
+      +trcDailyRateCell(r.transcription_failed,r.total_followups)
       +trcDailyCell(r.date,'match','MATCH',r.status_match)
       +trcDailyCell(r.date,'match','MISMATCH',r.status_mismatch)
       +trcDailyPlainCell(r.historical_status_mismatch)
       +TRC_MISMATCH_KEYS.map(function(k){return trcDailyCell(r.date,'mismatch',k,r[k]);}).join('')
     +'</tr>';
-  }).join(''):'<tr><td colspan="'+(7+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
+  }).join(''):'<tr><td colspan="'+(13+TRC_MISMATCH_KEYS.length)+'" style="text-align:center;color:var(--slate);padding:18px">No days in this range yet</td></tr>';
   el.innerHTML='<div class="card card-pad" style="margin-top:14px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
       +'<div class="sec-title" style="margin:0"><i class="fa-solid fa-table-list" style="color:#0d9488"></i> Daily breakdown</div>'
@@ -22022,7 +23035,13 @@ function trcRenderDaily(){
       +'</div>'
     +'</div>'
     +'<div style="overflow-x:auto;margin-top:12px"><table class="tbl" style="width:100%">'
-      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th><th>Transcribed</th>'
+      +'<thead><tr><th>Date</th><th>Total leads</th><th>Total calls</th>'
+        +'<th title="Total calls ÷ recordings available - calls with no recording at all to transcribe">No recording</th>'
+        +'<th title="Had a recording, but nothing usable came out of it (silence, wrong number, too short, etc)">No conversation</th>'
+        +'<th>Transcribed</th>'
+        +'<th title="Transcribed ÷ Total calls">Success rate</th>'
+        +'<th title="Of the Transcribed count, how many reused a recording already transcribed earlier - no repeat model call, no second bill. Not a link: this counts a fact about already-completed rows, not a separate status to filter the table by.">Reused (old transcript)</th>'
+        +'<th>Failed</th><th title="Transcription failed ÷ Total calls">Failure rate</th>'
         +'<th>Matched</th><th title="Of this day\'s leads, how many are STILL a mismatch based on '
         +'each lead\'s latest assessed call - a lead corrected by a later call drops out of this the '
         +'moment that later call is judged.">Mismatched</th>'
@@ -22155,10 +23174,10 @@ function trcRecallRow(sl){
    call - see trcLeadDetail below. */
 const TRC_LIGHT = 'follow_up_id,lead_id,lead_name,business_unit_name,communication_time,call_date,'
   +'call_start_text,next_follow_up_text,crm_status,crm_status_raw,status_detail,crm_remarks,'
-  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_current_status,'
+  +'crm_lost_reason,recording_url,callid,has_recording,call_duration,lead_first_seen_date,lead_current_status,'
   +'lead_current_lost_reason,transcript_id,transcription_status,turn_count,languages,duration_seconds,'
   +'non_transcribable_reason,transcription_model,qa_id,pitch_score,pitch_status,followup_date_status,'
-  +'lost_reason_status,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+  +'lost_reason_status,retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
   +'qa_error,reused_transcription,queue_status,fail_phase,queue_error,attempt_count,qa_attempt_count,'
   +'personnel_id,personnel_name,personnel_email,personnel_role,personnel_team,is_latest_assessed';
 const TRC_LIGHT_FIELDS=TRC_LIGHT.split(',');
@@ -22368,7 +23387,7 @@ async function trcEnsureQaFieldsMerged(){
   try{
     let q=sb.schema('acc').from('followup_qa').select(
       'follow_up_id,qa_id:id,pitch_score,pitch_status,followup_date_status,lost_reason_status,'
-      +'remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
+      +'retention_status,etiquette_status,query_handling_status,personal_mobile_status,personal_mobile_number,remarks_status,ai_assessed_status,visit_pending,status_match,mismatch_type,qa_score,qa_model,'
       +'qa_error,reused_transcription,is_latest_assessed');
     if(TRC_F.from)q=q.gte('call_date',TRC_F.from);
     if(TRC_F.to)q=q.lte('call_date',TRC_F.to);
@@ -22605,6 +23624,42 @@ function trcApply(rows,skipCards){
        casing the CRM happened to send. Matching those exactly is how a selected caller's own calls
        end up filtered out from under them. */
     if(TRC_F.personnel!=='all'&&String(r.personnel_email||'').toLowerCase()!==String(TRC_F.personnel).toLowerCase())return false;
+    // Same shape as crm/bu above - an independent lens on the follow-up's own two accuracy verdicts,
+    // combined by AND with every other filter rather than acting as a fourth KPI-card tab. 'NONE'
+    // means "not assessed at all" (no QA row yet, or transcribed with nothing to judge), not a status
+    // value the model ever returns.
+    if(TRC_F.fdate!=='all'){
+      if(TRC_F.fdate==='NONE'){ if(r.followup_date_status)return false; }
+      else if(String(r.followup_date_status||'')!==TRC_F.fdate)return false;
+    }
+    if(TRC_F.remarks!=='all'){
+      if(TRC_F.remarks==='NONE'){ if(r.remarks_status)return false; }
+      else if(String(r.remarks_status||'')!==TRC_F.remarks)return false;
+    }
+    if(TRC_F.pitch!=='all'){
+      if(TRC_F.pitch==='NONE'){ if(r.pitch_status)return false; }
+      else if(String(r.pitch_status||'')!==TRC_F.pitch)return false;
+    }
+    if(TRC_F.etiquette!=='all'){
+      if(TRC_F.etiquette==='NONE'){ if(r.etiquette_status)return false; }
+      else if(String(r.etiquette_status||'')!==TRC_F.etiquette)return false;
+    }
+    if(TRC_F.queryHandling!=='all'){
+      if(TRC_F.queryHandling==='NONE'){ if(r.query_handling_status)return false; }
+      else if(String(r.query_handling_status||'')!==TRC_F.queryHandling)return false;
+    }
+    if(TRC_F.retention!=='all'){
+      if(TRC_F.retention==='NONE'){ if(r.retention_status)return false; }
+      else if(String(r.retention_status||'')!==TRC_F.retention)return false;
+    }
+    if(TRC_F.lostReason!=='all'){
+      if(TRC_F.lostReason==='NONE'){ if(r.lost_reason_status)return false; }
+      else if(String(r.lost_reason_status||'')!==TRC_F.lostReason)return false;
+    }
+    if(TRC_F.personalMobile!=='all'){
+      if(TRC_F.personalMobile==='NONE'){ if(r.personal_mobile_status)return false; }
+      else if(String(r.personal_mobile_status||'')!==TRC_F.personalMobile)return false;
+    }
     if(!skipCards){
       if(TRC_F.proc==='failed'){ if(!trcProcFailed(r))return false; }
       else if(TRC_F.proc!=='all'&&trcTrStatus(r)!==TRC_F.proc)return false;
@@ -22673,6 +23728,20 @@ function trcLeads(rows){
     g.mismatches=g.rows.filter(trcCountsMismatch).length;
     g.regressions=g.rows.filter(trcIsRegression).length;
     g.ovHealth=trcOvHealth(g.status,g.rows);
+    g.callbackOverdue=trcCallbackOverdue(g.status,g.rows);
+    /* Cadence and callback TAT judge a lead's WHOLE follow-up history, not just whatever slice of it
+       falls inside the selected date range - g.rows is range-limited, so judging off it directly would
+       silently score a lead only on the one call that happened to land in the window (which is why
+       these two used to read exactly like g.callbackOverdue - both collapsing to "the latest call in
+       range" when the range is a single day). The full history is exactly what trcPrefetchHistories
+       already warms in the background for click-through (see trcAfterListRender) - reuse it once it
+       has arrived; a lead not yet warmed simply falls back to the range-limited rows for this one
+       render, same as every other lazily-enriched field here, until trcPrefetchHistories' own
+       completion re-render (see its own note) picks it up. */
+    const cachedHistory=trcLeadCacheRead(g.lead_id);
+    const historyRows=cachedHistory?cachedHistory.rows:g.rows;
+    g.cadence=trcCadenceIssues(g.status,historyRows);
+    g.callbackTat=trcFirstCallbackTat(historyRows);
     g.trail=[];
     g.rows.forEach(function(r){
       const s=r.crm_status;
@@ -22852,6 +23921,13 @@ function trcKpiHtml(rows){
   ];
   const assessed=fast?fast.qa_assessed:rows.filter(function(r){return r.qa_id;}).length;
   const reused=fast?fast.reused_transcription:rows.filter(function(r){return r.reused_transcription;}).length;
+  /* Missed callback needs lead_current_status (to exclude Lost leads), which only the full join
+     carries (see TRC_LIGHT) - same enrichment tier the 'proc' cards already require. Computed by
+     actually rolling `rows` up into leads (trcLeads), not a flat count, because "overdue" is a
+     property of a LEAD's latest call, not of any one row. */
+  const overdueLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackOverdue;}).length:null;
+  const cadenceLeads=haveDetail?trcLeads(rows).filter(function(g){return g.cadence;}).length:null;
+  const callbackTatLeads=haveDetail?trcLeads(rows).filter(function(g){return g.callbackTat;}).length:null;
   return '<div class="grid kpis" style="grid-template-columns:repeat(4,1fr)">'+cards.map(function(c){
       const active=(c[5]==='proc'?TRC_F.proc:TRC_F.match)===c[4];
       return '<div class="kpi" style="cursor:pointer'+(active?';box-shadow:inset 0 0 0 2px '+c[3]:'')+'" onclick="trcCard(\''+c[5]+'\',\''+c[4]+'\')">'
@@ -22864,6 +23940,13 @@ function trcKpiHtml(rows){
       return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="trcCard(\'proc\',\''+s[1]+'\')">'
         +'<i class="fa-solid '+s[3]+'"></i> '+esc(s[0])+' <b>'+s[2]+'</b></button>';
     }).join('')
+    +'<span style="width:1px;height:22px;background:var(--line)"></span>'
+    +'<button class="btn btn-sm'+(TRC_F.overdue==='1'?' btn-primary':'')+'" onclick="trcToggleOverdue()" title="A promised next-follow-up date that has passed with nothing logged since - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-slash"></i> Missed callback'+(overdueLeads===null?'':' <b>'+overdueLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.cadence==='1'?' btn-primary':'')+'" onclick="trcToggleCadence()" title="At least one follow-up gap where the recontact was late - a scheduled date missed, or no date and more than 3 days passed. Not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-hourglass-half"></i> Cadence issues'+(cadenceLeads===null?'':' <b>'+cadenceLeads+'</b>')+'</button>'
+    +'<button class="btn btn-sm'+(TRC_F.callbackTat==='1'?' btn-primary':'')+'" onclick="trcToggleCallbackTat()" title="The first call on this lead happened after the day it first appeared in the CRM - not counted until the fuller lead data has loaded">'
+      +'<i class="fa-solid fa-phone-volume"></i> Slow first callback'+(callbackTatLeads===null?'':' <b>'+callbackTatLeads+'</b>')+'</button>'
     +'<span style="width:1px;height:22px;background:var(--line)"></span>'
     +'<span style="font-size:12.5px;color:var(--slate)">QA assessed <b style="color:var(--ink)">'+assessed+'</b></span>'
     /* Deduplication is invisible unless it is counted. This is the number of follow-ups that reused a
@@ -22947,6 +24030,32 @@ window.trcCard=async function(kind,val){
   trcRender(true);
 };
 
+/* An independent toggle, not a fourth tab in the group above - it narrows whichever set of leads is
+   already on screen (a card, a mismatch category, a search) down to the ones with a missed callback,
+   the same way the accuracy dropdowns in the filter bar narrow it, rather than replacing that set.
+   Needs lead_current_status (to exclude Lost leads) - only the full join carries that, same as the
+   'proc' cards. */
+window.trcToggleOverdue=async function(){
+  TRC_F.overdue=(TRC_F.overdue==='1'?'all':'1');
+  if(TRC_F.overdue==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea as trcToggleOverdue, narrowing to leads with at least one late follow-up gap (see
+   trcCadenceIssues) instead of only the current open one. Needs the full join for the same reason -
+   the check is skipped for Lost leads, which only lead_current_status (TRC_LIGHT) can tell it. */
+window.trcToggleCadence=async function(){
+  TRC_F.cadence=(TRC_F.cadence==='1'?'all':'1');
+  if(TRC_F.cadence==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+/* Same idea again, narrowing to leads whose first-ever call landed later than lead_first_seen_date
+   (see trcFirstCallbackTat). Needs the full join too - lead_first_seen_date only travels with it. */
+window.trcToggleCallbackTat=async function(){
+  TRC_F.callbackTat=(TRC_F.callbackTat==='1'?'all':'1');
+  if(TRC_F.callbackTat==='1')await trcEnsureFullEnrichment();
+  trcRender(true);
+};
+
 /* "All time" is gone - it asked Postgres to sort and hand back the whole table (11k+ rows and
    climbing) in one shot, the single most expensive shape of this query, and it only got slower as the
    table grew. Previous day plus a manual From/To range covers the same ground a click at a time
@@ -22960,12 +24069,28 @@ function trcDateBar(){
      either box does the same thing a click on the button would.
      No preset buttons any more - the boxes already open on Previous day (see TRC_F's own initial
      state), so a one-click shortcut back to it would only ever restate what's already showing. */
+  const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
+  const personnelValues=trcPersonnelOptionsList(TRC_ROWS);
+  /* Moved up from the filter bar below (by request), same row as All personnel - the two are the
+     "who/which team" pair someone reaches for first, so they sit beside each other rather than one at
+     the top and one a row down. Same buValues logic trcFilterBar used to run itself: Durbaar Banquets
+     dropped (see trcFilterBar's own note - it no longer queues at all), everything else sorted. */
+  const buValues=Array.from(new Set((TRC_ROWS||[]).map(function(r){return r.business_unit_name;})
+    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
   return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<label style="font-size:12px;color:var(--slate)">From</label>'
     +'<input type="date" id="trcFrom" value="'+esc(TRC_F.from||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
     +'<label style="font-size:12px;color:var(--slate)">To</label>'
     +'<input type="date" id="trcTo" value="'+esc(TRC_F.to||'')+'" onkeydown="if(event.key===\'Enter\')trcApplyRange()" style="padding:5px 8px">'
-    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Apply range</button>'
+    +'<button class="btn btn-sm btn-primary" onclick="trcApplyRange()"><i class="fa-solid fa-magnifying-glass"></i> Search</button>'
+    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
+      +opt('all','All personnel',TRC_F.personnel)
+      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'</select>'
+    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
+      +opt('all','All business units',TRC_F.bu)
+      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
+    +'</select>'
   +'</div>';
 }
 window.trcApplyRange=function(){
@@ -22985,19 +24110,14 @@ window.trcSetRange=async function(f,t){
   trcAfterListRender();
 };
 
-function trcFilterBar(all){
-  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
-    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
-  /* Durbaar Banquets runs a different funnel entirely and no longer queues at all (see
-     crm_build_queue, 20260917120000) - dropped from the picker too, rather than left sitting there
-     offering to filter down to a project this pipeline no longer transcribes. */
-  const buValues=Array.from(new Set((all||[]).map(function(r){return r.business_unit_name;})
-    .filter(function(k){return k&&!/^durbaar banquet/i.test(k);}))).sort();
-  /* The whole team first, in the roster's own order (the manager, then the callers), so every
-     pre-sales caller is selectable whether or not they have a call in this date range. Anyone
-     pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
-     dropped: that combination means the CRM sent a caller the roster has not caught up with, and
-     hiding their calls behind a filter that cannot name them is the worse of the two failures. */
+/* The whole team first, in the roster's own order (the manager, then the callers), so every
+   pre-sales caller is selectable whether or not they have a call in this date range. Anyone
+   pre-sales in the fetched rows who is NOT on the roster is appended after them rather than
+   dropped: that combination means the CRM sent a caller the roster has not caught up with, and
+   hiding their calls behind a filter that cannot name them is the worse of the two failures.
+   Shared by the date bar's quick filter and the full filter row below it, so picking a caller in
+   either one offers the exact same names in the exact same order. */
+function trcPersonnelOptionsList(all){
   const seenP={};
   const personnelValues=(TRC_PERSONNEL||[]).map(function(p){
     seenP[p.email]=1;return {email:p.email,name:p.name};
@@ -23008,6 +24128,11 @@ function trcFilterBar(all){
     seenP[email]=1;
     personnelValues.push({email:email,name:(r.personnel_name||email)+' (not on the roster)'});
   });
+  return personnelValues;
+}
+function trcFilterBar(all){
+  const crmValues=Array.from(new Set((all||[]).map(function(r){return r.crm_status;})
+    .filter(function(k){return k&&!trIsRepeatVisitStatus(k);}))).sort();
   const opt=function(v,label,cur){return '<option value="'+esc(v)+'"'+(cur===v?' selected':'')+'>'+esc(label)+'</option>';};
   return '<div class="toolbar" style="margin:14px 0 0;flex-wrap:wrap;gap:10px;align-items:center">'
     +'<select onchange="trcSet(\'match\',this.value)" style="padding:6px 8px">'
@@ -23020,13 +24145,65 @@ function trcFilterBar(all){
       +opt('all','All CRM statuses',TRC_F.crm)
       +crmValues.map(function(k){return opt(k,k,TRC_F.crm);}).join('')
     +'</select>'
-    +'<select onchange="trcSet(\'bu\',this.value)" style="padding:6px 8px">'
-      +opt('all','All business units',TRC_F.bu)
-      +buValues.map(function(k){return opt(k,k,TRC_F.bu);}).join('')
+    +'<select onchange="trcSet(\'pitch\',this.value)" style="padding:6px 8px">'
+      +opt('all','Pitch accuracy: all',TRC_F.pitch)
+      +opt('Accurate','Pitch: Accurate',TRC_F.pitch)
+      +opt('Partially Accurate','Pitch: Partially Accurate',TRC_F.pitch)
+      +opt('Inaccurate','Pitch: Inaccurate',TRC_F.pitch)
+      +opt('Not Verifiable','Pitch: Not Verifiable',TRC_F.pitch)
+      +opt('NONE','Pitch: Not yet assessed',TRC_F.pitch)
     +'</select>'
-    +'<select onchange="trcSet(\'personnel\',this.value)" style="padding:6px 8px">'
-      +opt('all','All personnel',TRC_F.personnel)
-      +personnelValues.map(function(p){return opt(p.email,p.name,TRC_F.personnel);}).join('')
+    +'<select onchange="trcSet(\'fdate\',this.value)" style="padding:6px 8px">'
+      +opt('all','Follow-up date accuracy: all',TRC_F.fdate)
+      +opt('Accurate','Follow-up date: Accurate',TRC_F.fdate)
+      +opt('Inaccurate','Follow-up date: Inaccurate',TRC_F.fdate)
+      +opt('Not Verifiable','Follow-up date: Not Verifiable',TRC_F.fdate)
+      +opt('NONE','Follow-up date: Not yet assessed',TRC_F.fdate)
+    +'</select>'
+    +'<select onchange="trcSet(\'remarks\',this.value)" style="padding:6px 8px">'
+      +opt('all','Remarks accuracy: all',TRC_F.remarks)
+      +opt('Accurate','Remarks: Accurate',TRC_F.remarks)
+      +opt('Partially Accurate','Remarks: Partially Accurate',TRC_F.remarks)
+      +opt('Inaccurate','Remarks: Inaccurate',TRC_F.remarks)
+      +opt('Not Verifiable','Remarks: Not Verifiable',TRC_F.remarks)
+      +opt('NONE','Remarks: Not yet assessed',TRC_F.remarks)
+    +'</select>'
+    +'<select onchange="trcSet(\'etiquette\',this.value)" style="padding:6px 8px">'
+      +opt('all','Etiquette: all',TRC_F.etiquette)
+      +opt('Pass','Etiquette: Pass',TRC_F.etiquette)
+      +opt('Partial','Etiquette: Partial',TRC_F.etiquette)
+      +opt('Fail','Etiquette: Fail',TRC_F.etiquette)
+      +opt('Not Applicable','Etiquette: Not Applicable',TRC_F.etiquette)
+      +opt('NONE','Etiquette: Not yet assessed',TRC_F.etiquette)
+    +'</select>'
+    +'<select onchange="trcSet(\'queryHandling\',this.value)" style="padding:6px 8px">'
+      +opt('all','Query handling: all',TRC_F.queryHandling)
+      +opt('Pass','Query handling: Pass',TRC_F.queryHandling)
+      +opt('Partial','Query handling: Partial',TRC_F.queryHandling)
+      +opt('Fail','Query handling: Fail',TRC_F.queryHandling)
+      +opt('Not Applicable','Query handling: Not Applicable',TRC_F.queryHandling)
+      +opt('NONE','Query handling: Not yet assessed',TRC_F.queryHandling)
+    +'</select>'
+    +'<select onchange="trcSet(\'retention\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Applicable everywhere else">'
+      +opt('all','Retention effort: all',TRC_F.retention)
+      +opt('Pass','Retention: Pass',TRC_F.retention)
+      +opt('Partial','Retention: Partial',TRC_F.retention)
+      +opt('Fail','Retention: Fail',TRC_F.retention)
+      +opt('Not Applicable','Retention: Not Applicable',TRC_F.retention)
+      +opt('NONE','Retention: Not yet assessed',TRC_F.retention)
+    +'</select>'
+    +'<select onchange="trcSet(\'lostReason\',this.value)" style="padding:6px 8px" title="Only meaningful on Lost calls - Not Verifiable everywhere else">'
+      +opt('all','Lost reason accuracy: all',TRC_F.lostReason)
+      +opt('Accurate','Lost reason: Accurate',TRC_F.lostReason)
+      +opt('Inaccurate','Lost reason: Inaccurate',TRC_F.lostReason)
+      +opt('Not Verifiable','Lost reason: Not Verifiable',TRC_F.lostReason)
+      +opt('NONE','Lost reason: Not yet assessed',TRC_F.lostReason)
+    +'</select>'
+    +'<select onchange="trcSet(\'personalMobile\',this.value)" style="padding:6px 8px" title="Did the agent ask for a personal mobile number additional to the one already on file">'
+      +opt('all','Personal mobile asked: all',TRC_F.personalMobile)
+      +opt('Yes','Personal mobile asked: Yes',TRC_F.personalMobile)
+      +opt('No','Personal mobile asked: No',TRC_F.personalMobile)
+      +opt('NONE','Personal mobile asked: Not yet assessed',TRC_F.personalMobile)
     +'</select>'
     +'<input id="trcQ" placeholder="Search lead ID, name, personnel or follow-up ID…" value="'+esc(TRC_F.q||'')+'" oninput="trcSet(\'q\',this.value)" style="padding:6px 10px;min-width:250px">'
     +'<div class="grow"></div>'
@@ -23040,12 +24217,16 @@ window.trcSet=async function(k,v){
   // required at least the qa-fields merge to be showing at all - this is a no-op in that case, and a
   // safety net otherwise, not the normal way this gets triggered (see trcCard).
   if(k==='mismatch'&&v!=='all')await trcEnsureQaFieldsMerged();
+  // followup_date_status/remarks_status live on acc.followup_qa exactly like match/mismatch do - same
+  // light merge, no join to call_transcripts/transcription_queue needed.
+  if((k==='fdate'||k==='remarks'||k==='pitch'||k==='etiquette'||k==='queryHandling'||k==='retention'||k==='lostReason'||k==='personalMobile')&&v!=='all')await trcEnsureQaFieldsMerged();
   // The search box must not lose focus on every keystroke, so text filtering repaints the table only.
   trcRender(k!=='q');
 };
 window.trcClear=async function(){
   TRC_F.proc='all';TRC_F.match='all';TRC_F.crm='all';TRC_F.bu='all';TRC_F.mismatch='all';
-  TRC_F.personnel='all';
+  TRC_F.personnel='all';TRC_F.fdate='all';TRC_F.remarks='all';TRC_F.pitch='all';TRC_F.overdue='all';
+  TRC_F.cadence='all';TRC_F.callbackTat='all';TRC_F.etiquette='all';TRC_F.queryHandling='all';TRC_F.retention='all';TRC_F.lostReason='all';TRC_F.personalMobile='all';
   TRC_F.q='';
   // Not null/null - that was "All time". Clearing the filters resets the date range to the same
   // Previous day default the page opens with, rather than reopening that door.
@@ -23084,7 +24265,7 @@ function trcClipCell(inner){
 /* ---- the two tables. A lead has many conversations, so which row means what depends on the
    question being asked: "show me the day's leads" is a lead per row, and "show me the mismatches" is
    a CALL per row, because that is the level a mismatch exists at. ---- */
-const TRC_LEAD_COLS=10, TRC_CALL_COLS=7;
+const TRC_LEAD_COLS=11, TRC_CALL_COLS=7;
 
 /* sl is display-only - the row's position in the currently rendered, currently filtered list, purely
    so someone can say "row 12" out loud when talking to a colleague. Not stored anywhere: it is
@@ -23122,7 +24303,10 @@ function trcLeadRowHtml(g,sl){
     +trcClipCell((g.status?trcTag('t-blue','',g.status):'<span style="color:var(--slate)">—</span>')
       +(g.ovHealth&&!g.ovHealth.ok?' '+trcTag('t-red','fa-triangle-exclamation','','Danger: '+g.ovHealth.reasons.join('; ')):'')
       +(g.regressions?' '+trcTag('t-red','fa-arrow-turn-down',g.regressions>1?String(g.regressions):'',
-          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):''))
+          (g.regressions>1?g.regressions+' status regressions':'Status regressed')):'')
+      +(g.callbackOverdue?' '+trcTag('t-red','fa-phone-slash','',
+          'Missed callback - promised '+(trcWall(g.callbackOverdue.dueDate)||g.callbackOverdue.dueDate)
+          +', '+g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue'):''))
     /* g.lastAssessedOutside only ever fires once g.lastAssessed itself is null (see trcLeads) - a
        carried-over verdict from another date, not this range's own, so it is labelled with exactly
        that date (trcBackfillLastJudgement) rather than left indistinguishable from a same-range one.
@@ -23139,7 +24323,15 @@ function trcLeadRowHtml(g,sl){
         ? trcTag('t-red','fa-not-equal',g.mismatches+' mismatch'+(g.mismatches===1?'':'es'))
         : (g.assessed?trcTag('t-green','fa-equals','Agrees'):'<span style="color:var(--slate)">not checked</span>'))
     +trcTextCell(g.bu,160)
-    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px">'+esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
+    /* Whoever was on the phone for the LATEST call, not the lead as a whole - a lead's calls can move
+       between Pre-Sales and Sales (or between people on the same team), so the personnel column is
+       g.last's, matching what "latest call recording" means everywhere else on this row (g.lastDate,
+       g.lastAssessed). */
+    +trcTextCell(last.personnel_name,140)
+    +'<td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px'
+      +(g.callbackOverdue?';color:#dc2626;font-weight:600':'')+'"'
+      +(g.callbackOverdue?' title="'+esc(g.callbackOverdue.daysLate+' day'+(g.callbackOverdue.daysLate===1?'':'s')+' overdue')+'"':'')+'>'
+      +esc(trcWall(g.nextFollowUp,true)||'—')+'</td>'
     +trcTextCell(g.lost_reason,180)
     +trcTextCell(last.crm_remarks,220)
     /* No Recording column. A per-lead download only ever offered the LATEST call's audio, which is
@@ -23182,7 +24374,7 @@ function trcHeadHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<tr><th>Lead ID</th><th>Lead</th><th>Call</th><th>CRM says</th><th>Call says</th><th>Disagreement</th><th>CRM remarks</th></tr>'
     : '<tr><th style="text-align:center">SL No</th><th>Lead ID</th><th>Lead</th><th>CRM Status</th><th>AI Status</th><th>Status check</th>'
-      +'<th>Business Unit</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
+      +'<th>Business Unit</th><th>Personnel</th><th>Next follow-up</th><th>Lost reason</th><th>Remarks</th></tr>';
 }
 /* Fixed proportions per column, matched 1:1 to trcHeadHtml's columns - paired with table-layout:fixed
    on the table itself (see trcView), this is what actually stops one long value (a badge holding an
@@ -23193,9 +24385,9 @@ function trcColsHtml(){
   return TRC_F.match==='MISMATCH'
     ? '<col style="width:9%"><col style="width:20%"><col style="width:15%"><col style="width:11%">'
       +'<col style="width:15%"><col style="width:16%"><col style="width:14%">'
-    : '<col style="width:4%"><col style="width:7%"><col style="width:16%"><col style="width:10%">'
-      +'<col style="width:10%"><col style="width:11%"><col style="width:11%"><col style="width:8%">'
-      +'<col style="width:10%"><col style="width:13%">';
+    : '<col style="width:4%"><col style="width:7%"><col style="width:15%"><col style="width:9%">'
+      +'<col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%">'
+      +'<col style="width:7%"><col style="width:9%"><col style="width:11%">';
 }
 
 /* keepPage: true for a plain page-turn (Prev/Next), which must not reset back to page 1 or fight the
@@ -23222,7 +24414,12 @@ function trcRender(full,keepPage){
      &&!rows.some(function(r){return String(r.lead_id)===String(TRC_LAST_LEAD_ID);})){
     rows=rows.concat(TRC_PIN_ROWS);
   }
-  const items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  let items=callLevel?rows.slice().sort(function(a,b){return trcChrono(b,a);}):trcLeads(rows);
+  // Missed callback is a per-LEAD fact (see trcCallbackOverdue) - it only narrows the lead rollup, not
+  // the call-level Mismatch table, which trcLeads never runs over in the first place.
+  if(!callLevel&&TRC_F.overdue==='1')items=items.filter(function(g){return g.callbackOverdue;});
+  if(!callLevel&&TRC_F.cadence==='1')items=items.filter(function(g){return g.cadence;});
+  if(!callLevel&&TRC_F.callbackTat==='1')items=items.filter(function(g){return g.callbackTat;});
   const totalItems=items.length;
   const totalPages=Math.max(1,Math.ceil(totalItems/TRC_PAGE_SIZE));
   if(!keepPage){
@@ -23477,7 +24674,8 @@ function trcQaTableHtml(r,m){
             : 'No QA assessment - this call has no usable transcript to judge against.')+'</div>';
   }
   const pitch=r.pitch_accuracy||{}, fdate=r.followup_date_accuracy||{}, lreason=r.lost_reason_accuracy||{},
-        rem=r.remarks_accuracy||{}, sa=r.status_assessment||{};
+        retention=r.retention_effort||{}, rem=r.remarks_accuracy||{}, sa=r.status_assessment||{},
+        mobileAsk=r.personal_mobile_requested||{};
   const join=function(parts){return parts.filter(function(x){return x;}).join(' — ');};
   const topics=[
     {topic:'Pitch accuracy',status:r.pitch_status,score:pitch.score,
@@ -23487,8 +24685,16 @@ function trcQaTableHtml(r,m){
                fdate.customer_agreed_date?'Customer agreed: '+fdate.customer_agreed_date:null])},
     {topic:'Lost reason accuracy',status:r.lost_reason_status,score:lreason.score,
      why:join([lreason.reason,lreason.actual_reason?'The call actually supports: '+lreason.actual_reason:null])},
+    // Only meaningful when the CRM status for THIS follow-up is Lost (see qa-prompt.ts section 4) -
+    // every other call gets "Not Applicable" from the model, which is a correct answer but not one
+    // worth a row on every single call, so the row itself is left out rather than shown as N/A.
+    r.crm_status==='Lost'?{topic:'Retention effort (lost leads)',status:r.retention_status,score:retention.score,
+     why:join([retention.reason,retention.evidence?'"'+retention.evidence+'"':null])}:null,
     {topic:'Remarks accuracy',status:r.remarks_status,score:rem.score,
      why:join([rem.reason,rem.actual_conversation_summary])},
+    {topic:'Personal mobile number requested',status:r.personal_mobile_status,score:null,
+     why:join([mobileAsk.reason,(r.personal_mobile_number||mobileAsk.number_shared)?'Number given: '+(r.personal_mobile_number||mobileAsk.number_shared):null,
+               mobileAsk.evidence?'"'+mobileAsk.evidence+'"':null])},
     {topic:'Status check',status:r.ai_assessed_status,score:sa.score,
      /* Visit-pending only excuses the CRM's In Follow Up when this lead had ALREADY qualified on an
         earlier call (2026-09-21 gate) - on a first-time qualification it's still flagged, so this note
@@ -23500,7 +24706,7 @@ function trcQaTableHtml(r,m){
                (r.ai_assessed_status==='Qualified'&&r.visit_pending&&r.status_match===false)
                  ?'Qualified and wants to buy, but this is the FIRST call that qualifies this lead - the site visit being unsettled does not excuse it, so the CRM genuinely needs to be told.':null,
                m?m.label:null,sa.reason])}
-  ];
+  ].filter(Boolean);
   if(Array.isArray(r.agent_qa)){
     r.agent_qa.forEach(function(a){
       topics.push({topic:a&&a.point,status:a&&a.status,
@@ -23662,6 +24868,114 @@ function trcAddDays(dateStr,delta){
   const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]));
   dt.setUTCDate(dt.getUTCDate()+delta);
   return dt.getUTCFullYear()+'-'+String(dt.getUTCMonth()+1).padStart(2,'0')+'-'+String(dt.getUTCDate()).padStart(2,'0');
+}
+/* Same UTC-noon arithmetic as trcAddDays, the subtraction direction instead of the addition - how many
+   whole days sit between two YYYY-MM-DD strings. */
+function trcDaysBetween(fromStr,toStr){
+  const p=function(s){const a=String(s).split('-').map(Number);return Date.UTC(a[0],a[1]-1,a[2]);};
+  return Math.round((p(toStr)-p(fromStr))/86400000);
+}
+/* A promised callback date that has passed with nothing logged since is a missed callback - the agent
+   said "I'll call back on X" and X came and went in silence. Computed the same way trcOvHealth checks
+   its own promised date: against traToday(), over whichever rows the caller hands in - the lead's full
+   history on the detail page (see trcLeadDetail), or only the selected range's rows on the list (see
+   trcLeads) - a call outside that set is invisible here exactly as everywhere else this page rolls up
+   a lead's calls. Not applicable to a lead that has closed the door (Lost) - there is nothing left to
+   call back about. "Lost, then Reopened" is deliberately NOT treated as Lost, same reasoning as
+   everywhere else on this page (see the status_assessment prompt): the "then Reopened" half means the
+   lead is live again. Only the LATEST call's own promise matters - rows arrives chronological
+   (oldest-first, the same order trcLeads and trcLeadDetail already sort it into), so an earlier call's
+   promise was superseded the moment a later call happened, on time or not. */
+function trcCallbackOverdue(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const last=(rows||[])[(rows||[]).length-1];
+  if(!last||!last.next_follow_up_text)return null;
+  const dueDate=String(last.next_follow_up_text).slice(0,10);
+  const today=traToday();
+  if(!(dueDate<today))return null;
+  return {dueDate:dueDate,daysLate:trcDaysBetween(dueDate,today)};
+}
+function trcCallbackOverdueHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #dc2626">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-slash" style="color:#dc2626"></i> Missed callback</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">A callback was promised for '
+    +esc(trcWall(o.dueDate)||o.dueDate)+' and nothing has been logged against this lead since - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' overdue.</div>'
+  +'</div>';
+}
+/* Follow-up frequency/cadence - was the recontact after each call made on time?
+   Scheduled   - the call named a next_follow_up_text date; late if the FOLLOWING call (or, for the
+                 lead's own still-open gap, today) falls after that date.
+   Unscheduled - the call named no date at all; late if more than TRC_CADENCE_UNSCHEDULED_DAYS days
+                 pass before the next call (or today, for the still-open gap).
+   Not evaluated once a lead is Lost - same reasoning as trcCallbackOverdue, there is nothing left to
+   call back about. rows must already be chronological, oldest-first (trcLeads/trcLeadDetail's own
+   order), since each gap is judged against the call that comes right after it. */
+const TRC_CADENCE_UNSCHEDULED_DAYS=3;
+function trcCadenceIssues(status,rows){
+  if(String(status||'')==='Lost')return null;
+  const list=rows||[];
+  const today=traToday();
+  const gaps=[];
+  for(let i=0;i<list.length;i++){
+    const prev=list[i];
+    const nextRow=list[i+1]||null;
+    const actualDate=nextRow?trcRowDate(nextRow):today;
+    if(!actualDate)continue;
+    const scheduled=!!prev.next_follow_up_text;
+    const prevDate=trcRowDate(prev);
+    const limitDate=scheduled?String(prev.next_follow_up_text).slice(0,10)
+                             :(prevDate?trcAddDays(prevDate,TRC_CADENCE_UNSCHEDULED_DAYS):null);
+    if(!limitDate||!(actualDate>limitDate))continue;
+    gaps.push({follow_up_id:prev.follow_up_id,scheduled:scheduled,limitDate:limitDate,
+      actualDate:nextRow?actualDate:null,daysLate:trcDaysBetween(limitDate,actualDate),open:!nextRow});
+  }
+  if(!gaps.length)return null;
+  return {lateCount:gaps.length,totalGaps:list.length,gaps:gaps};
+}
+function trcCadenceIssuesHtml(o){
+  if(!o)return '';
+  /* trcCadenceIssues builds gaps walking the history oldest-first, since each one is judged against
+     whatever call came right after it - display order is the opposite: the most recent gap is the one
+     someone actually needs to act on today, so it reads top of the card, newest first. */
+  const rows=o.gaps.slice().reverse().map(function(g){
+    return '<div style="margin-top:6px;font-size:12.5px;color:var(--slate)">'
+      +(g.scheduled?'Promised for ':'No date promised - overdue past ')+esc(trcWall(g.limitDate)||g.limitDate)
+      +(g.open?', nothing logged since':', next call on '+esc(trcWall(g.actualDate)||g.actualDate))
+      +' - '+g.daysLate+' day'+(g.daysLate===1?'':'s')+' late.</div>';
+  }).join('');
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-hourglass-half" style="color:#d97706"></i> Follow-up cadence - '
+    +o.lateCount+' late of '+o.totalGaps+'</div>'
+    +rows
+  +'</div>';
+}
+/* Inbound lead -> first callback turnaround: how long after this lead first appeared in the CRM the
+   first logged call actually happened. lead_first_seen_date (acc.crm_leads, not the per-follow-up
+   f.first_seen_date - see the view's own note) carries no time-of-day, so this is a calendar-day
+   proxy for a 24-hour target, not an hour-level measurement - same day counts as on time, anything
+   later is flagged. rows must be chronological, oldest-first. Only available where the row came from
+   the full join (TRC_LIGHT/followup_timeline_v) - on the fast crm_followups-only path this field is
+   simply absent and the function returns null, the same way trcIsRegression treats a light row. */
+function trcFirstCallbackTat(rows){
+  const list=rows||[];
+  const first=list[0];
+  if(!first||!first.lead_first_seen_date)return null;
+  const firstCallDate=trcRowDate(first);
+  if(!firstCallDate)return null;
+  const daysLate=trcDaysBetween(first.lead_first_seen_date,firstCallDate);
+  if(!(daysLate>0))return null;
+  return {leadSeenDate:first.lead_first_seen_date,firstCallDate:firstCallDate,daysLate:daysLate};
+}
+function trcFirstCallbackTatHtml(o){
+  if(!o)return '';
+  return '<div class="card card-pad" style="margin-top:16px;border-left:3px solid #d97706">'
+    +'<div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-phone-volume" style="color:#d97706"></i> First callback turnaround</div>'
+    +'<div style="font-size:12.5px;color:var(--slate)">Lead first seen '+esc(trcWall(o.leadSeenDate)||o.leadSeenDate)
+    +', first call logged '+esc(trcWall(o.firstCallDate)||o.firstCallDate)+' - '
+    +o.daysLate+' day'+(o.daysLate===1?'':'s')+' after.</div>'
+  +'</div>';
 }
 /* The two-part OV rule: enforced here, not just checked by hand.
    (1) each of the two days immediately BEFORE the visit day needs its own follow-up call logged on
@@ -23899,10 +25213,16 @@ async function trcLeadDetail(v,leadId,targetFollowUpId,rowHint){
     : '<div class="card card-pad empty" style="margin-top:14px"><i class="fa-solid fa-inbox"></i>'
       +'<div>The CRM sent no follow-up history for this lead</div></div>';
   const ovHealth=trcOvHealthHtml(trcOvHealth(lead&&lead.status,rows));
+  const callbackOverdue=trcCallbackOverdueHtml(trcCallbackOverdue(lead&&lead.status,rows));
+  const cadenceIssues=trcCadenceIssuesHtml(trcCadenceIssues(lead&&lead.status,rows));
+  const callbackTat=trcFirstCallbackTatHtml(trcFirstCallbackTat(rows));
 
   v.innerHTML=head+strip
     +'<div style="margin-top:16px">'+leadCard+'</div>'
     +ovHealth
+    +callbackOverdue
+    +cadenceIssues
+    +callbackTat
     +calls;
 
   if(!document.getElementById('trcTwoCss')){
