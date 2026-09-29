@@ -1289,7 +1289,6 @@ function s3KeyForFlowEvent(flowId,filename){return `accountability/flow-events/$
 function s3KeyForProjectPhoto(projectId,filename){return `customer-portal/projects/${projectId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProjectDoc(projectId,docType,filename){return `customer-portal/projects/${projectId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForUnitPhoto(unitId,filename){return `customer-portal/units/${unitId}/photos/${s3Stamp()}_${s3SafeName(filename)}`;}
-function s3KeyForFloorPhoto(projectId,floorNo,filename){return `customer-portal/projects/${projectId}/floors/${s3SafeSeg(floorNo)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForTowerPhoto(projectId,tower,filename){return `customer-portal/projects/${projectId}/towers/${s3SafeSeg(tower)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForCustomerDoc(unitId,docType,filename){return `customer-portal/units/${unitId}/${s3SafeSeg(docType)}/${s3Stamp()}_${s3SafeName(filename)}`;}
 function s3KeyForProcessVideo(category,filename){return `customer-portal/process-videos/${s3SafeSeg(category)}/${s3Stamp()}_${s3SafeName(filename)}`;}
@@ -18562,210 +18561,578 @@ window.cpaUndoImport=async function(id){
    images and videos together, multiple files at once, and lists what's already there with a
    Delete button so staff can remove anything wrongly uploaded) ---------- */
 function cpaTowersForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)&&u.tower).map(u=>u.tower))].sort();}
-function cpaFloorsForProject(units,projectId){return [...new Set(units.filter(u=>u.project_id===Number(projectId)).map(u=>custDeriveFloor(u.unit_code)).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));}
-// A cancelled booking's unit row stays in cust.units for audit history (see the
-// units_project_tower_code_active_uq migration) - fine for financial records, but it means the
-// same physical flat can appear 2-4 times in a flat unit list (one 'booked' row plus every
-// historical 'cancelled' one). For picking WHICH flat to upload photos against, only the
-// currently-occupied row is ever relevant, so this list drops cancelled rows entirely - which
-// also removes every duplicate, since no physical unit has more than one non-cancelled row.
-// Grouped by tower (Farvision's own Project >> Block >> Unit hierarchy) so the list reads like
-// a floor plan instead of 90+ flat, unsorted options.
-function cpaUnitOptionsGrouped(units){
-  const active=units.filter(u=>u.status!=='cancelled');
-  const byTower={};
-  active.forEach(u=>{(byTower[u.tower||'Ungrouped']=byTower[u.tower||'Ungrouped']||[]).push(u);});
-  return Object.keys(byTower).sort().map(tower=>{
-    const group=byTower[tower];
-    const projName=(group[0].projects&&group[0].projects.name)||'';
-    const opts=group.slice().sort((a,b)=>{
-      const fa=Number(custDeriveFloor(a.unit_code))||0,fb=Number(custDeriveFloor(b.unit_code))||0;
-      return fa-fb||String(a.unit_code).localeCompare(String(b.unit_code));
-    }).map(u=>`<option value="${u.id}">Unit ${esc(u.unit_code)}${u.floor_casting_completed_at?'':' · casting pending'}</option>`).join('');
-    return `<optgroup label="${esc(projName)} » ${esc(tower)}">${opts}</optgroup>`;
-  }).join('');
-}
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   CONSTRUCTION PHOTOS & VIDEOS — one screen, three levels, one place to say where.
+
+   What was here before: four near-identical forms stacked two-by-two, every one of them on
+   screen at once, each with its own project picker, its own date, its own caption and its own
+   list of what had already been uploaded. To put photos against a flat you scrolled past three
+   forms you were not using, then hunted the flat in a single dropdown holding every unit in
+   every tower of every project. The most frequent job on the screen was the hardest one to do.
+
+   What it is now. WHERE is asked once, at the top, and it cascades: Project, then Block, then
+   Flat, with a search box because a block can hold ninety flats. WHAT LEVEL is a row of three
+   buttons, and only that level's form is on screen. Below, one panel to upload into and one
+   panel showing what is already there.
+
+   THE FLAT LEVEL TAKES THREE SETS OF FILES AT ONCE - common area, bathroom, kitchen - because
+   that is how somebody walks a flat and how a customer asks about it. Any one, any two, or all
+   three; whatever is filled in goes up together on one press.
+
+   FLOOR LEVEL IS GONE, by request. It held nothing (the table was empty), it sat between two
+   levels people actually use, and deriving a floor from a unit code was a guess.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+
+const CPA_PH_AREAS=[['common','Common area','fa-couch'],
+                    ['bathroom','Bathroom','fa-bath'],
+                    ['kitchen','Kitchen','fa-kitchen-set']];
+// level -> which of the three pickers it needs. Flat needs all three; the project level needs
+// only the project, so the pickers it does not use are hidden rather than left there to be
+// filled in pointlessly.
+const CPA_PH_LEVELS=[['project','Whole project','fa-city'],
+                     ['tower','Block / Tower','fa-building'],
+                     ['unit','Flat','fa-door-open']];
+let CPA_PH={level:'project',project:'',tower:'',unit:'',files:{all:[],common:[],bathroom:[],kitchen:[]}};
+/* What the review panel is showing. It starts wherever the upload pickers are pointing, because
+   that is almost always what you want to check straight after uploading - but '' means "all", so
+   it can be widened to a whole block or a whole project without disturbing the upload target. */
+let CPA_PHF={project:'',tower:'',unit:'',area:''};
+
+function cpaPhCss(){return `<style>
+  /* Everything here is sized so the whole screen - pick, upload, review - fits a laptop
+     without scrolling. The first version let the chosen-files list grow under the drop zones,
+     so each batch pushed the Upload button further down and by the third area it was off the
+     bottom of the screen. Nothing on this screen grows now: the zones are a fixed height and
+     the file list scrolls inside the zone it belongs to. */
+  .cph-wrap{display:flex;flex-direction:column;gap:12px}
+  .cph-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .cph-h{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--slate);
+    margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  .cph-h::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* level buttons and the pickers share one row on a wide screen */
+  .cph-bar{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
+  .cph-levels{display:flex;gap:6px;background:#f1f5f9;padding:4px;border-radius:10px;flex:none}
+  .cph-lv{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border:0;border-radius:7px;
+    background:transparent;cursor:pointer;font:600 13px Segoe UI,Arial,sans-serif;color:var(--slate);transition:.12s}
+  .cph-lv:hover{color:var(--ink)}
+  .cph-lv.on{background:#fff;color:var(--brand);box-shadow:0 1px 2px rgba(15,23,42,.12)}
+
+  .cph-pick{display:flex;gap:12px;flex-wrap:wrap;flex:1;min-width:0}
+  .cph-f{display:flex;flex-direction:column;gap:5px;min-width:150px;flex:1}
+  .cph-f>label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--slate)}
+  /* A real menu control rather than the browser's default: fixed height, its own caret, and a
+     focus ring that matches the rest of JainE. */
+  .cph-sel{position:relative;display:block}
+  .cph-sel select,.cph-in{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;
+    padding:0 30px 0 11px;font:13.5px Segoe UI,Arial,sans-serif;background:#fff;color:var(--ink);
+    appearance:none;-webkit-appearance:none;cursor:pointer;text-overflow:ellipsis}
+  .cph-in{padding-right:11px;cursor:text}
+  .cph-sel::after{content:"";position:absolute;right:11px;top:50%;margin-top:-2px;pointer-events:none;
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #64748b}
+  .cph-sel select:hover{border-color:#94a3b8}
+  .cph-sel select:focus,.cph-in:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  /* The open list itself - a long block of flats should scroll, not run off the screen. */
+  .cph-sel select option{padding:6px 8px}
+
+  /* ── drop zones: FIXED height, whatever is in them ── */
+  .cph-zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+  .cph-zone{border:1.5px dashed var(--line);border-radius:10px;background:#fafcff;cursor:pointer;
+    transition:.12s;height:132px;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden}
+  .cph-zone:hover{border-color:var(--brand);background:#eff6ff}
+  .cph-zone.over{border-color:var(--brand);background:#dbeafe;border-style:solid}
+  .cph-zone.has{border-style:solid;border-color:#86efac;background:#fff}
+  .cph-zhead{display:flex;align-items:center;gap:7px;padding:0 11px;height:36px;flex:none;box-sizing:border-box}
+  .cph-zhead i{font-size:14px;color:var(--slate)}
+  .cph-zone.has .cph-zhead i{color:#16a34a}
+  .cph-zt{font-size:12.5px;font-weight:700;color:var(--ink)}
+  .cph-zn{margin-left:auto;font-size:11px;font-weight:700;color:#16a34a;background:#f0fdf4;
+    border:1px solid #bbf7d0;border-radius:999px;padding:1px 7px}
+  .cph-zbody{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:4px;color:var(--slate);font-size:11.5px;padding:0 10px;text-align:center}
+  /* the only scrolling part of the screen */
+  /* ── what you have chosen but not yet sent: pictures, not filenames ──
+     A filename tells you nothing about whether you picked the right photo. These are the real
+     images, read straight off the disk before anything is uploaded. The strip sits under the
+     zones rather than inside them, and scrolls once it is three rows deep so the Upload button
+     never walks off the bottom of the screen. */
+  .cph-staged{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+  .cph-sgroup{margin-bottom:10px}
+  .cph-sgroup:last-child{margin-bottom:0}
+  .cph-sh{font-size:11px;font-weight:700;color:var(--slate);margin:0 0 6px;display:flex;align-items:center;gap:6px}
+  .cph-sh i{color:#16a34a;font-size:11px}
+  .cph-sh .n{font-weight:500}
+  .cph-strip{display:flex;flex-wrap:wrap;gap:7px;max-height:186px;overflow-y:auto}
+  .cph-sthumb{position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line);background:#f1f5f9;flex:none}
+  .cph-sthumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .cph-sthumb .vid{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#64748b}
+  .cph-sx{position:absolute;top:3px;right:3px;width:19px;height:19px;border-radius:5px;border:0;
+    background:rgba(15,23,42,.66);color:#fff;cursor:pointer;font-size:10px;line-height:1;padding:0}
+  .cph-sx:hover{background:var(--err)}
+
+  .cph-acts{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+
+  /* ── already uploaded: one row each, so a date, a flat and a caption can be read across ── */
+  .cph-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  /* The headers sat hard against the top of their strip and hard against the title above it.
+     A fixed height with vertical-align:middle centres the text in the strip whatever the font
+     does, and the strip itself is pushed clear of the section title. */
+  .cph-tbl{margin-top:4px}
+  .cph-tbl thead th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--slate);padding:0 10px;height:36px;vertical-align:middle;background:#f8fafc;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);white-space:nowrap}
+  .cph-tbl thead th:first-child{border-radius:8px 0 0 8px;border-left:1px solid var(--line)}
+  .cph-tbl thead th:last-child{border-radius:0 8px 8px 0;border-right:1px solid var(--line)}
+  .cph-tbl td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .cph-tbl tr:last-child td{border-bottom:0}
+  .cph-tbl tbody tr:hover{background:#f8fafc}
+  .cph-th{width:46px;height:46px;border-radius:7px;object-fit:cover;display:block;cursor:pointer;border:1px solid var(--line)}
+  .cph-th.vid{background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b}
+  .cph-when{white-space:nowrap;font-weight:600;color:var(--ink)}
+  .cph-area{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;
+    background:#eff6ff;color:#1e40af;white-space:nowrap}
+  .cph-rm{border:1px solid var(--line);background:#fff;color:var(--slate);border-radius:7px;
+    width:28px;height:28px;cursor:pointer;font-size:11px}
+  .cph-rm:hover{border-color:var(--err);color:var(--err)}
+
+  /* Filters for what is already there. Separate from the pickers at the top: those say where the
+     next upload goes, these say what you want to look at, and the two are not always the same
+     question - "show me every kitchen in Block E" is not an upload target. */
+  .cph-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;
+    padding-bottom:14px;border-bottom:1px solid var(--line)}
+  .cph-filters .cph-f{min-width:130px}
+  .cph-fcount{font-size:11.5px;color:var(--slate);margin-left:auto;padding-bottom:8px;white-space:nowrap}
+
+  /* A staged photo, full size, before it goes anywhere. */
+  .cph-box{position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.82);display:flex;
+    align-items:center;justify-content:center;padding:32px}
+  .cph-box img,.cph-box video{max-width:92vw;max-height:84vh;border-radius:10px;display:block;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);background:#000}
+  .cph-boxbar{position:absolute;top:0;left:0;right:0;padding:14px 18px;display:flex;align-items:center;
+    gap:12px;color:#e8eaed;font-size:13px;background:linear-gradient(rgba(0,0,0,.55),transparent)}
+  .cph-boxbar .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cph-boxx{margin-left:auto;border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:8px;
+    width:32px;height:32px;cursor:pointer;font-size:16px;line-height:1;flex:none}
+  .cph-boxx:hover{background:rgba(255,255,255,.28)}
+  .cph-sthumb{cursor:zoom-in}
+  .cph-empty{padding:18px;text-align:center;color:var(--slate);font-size:12.5px;
+    border:1px dashed var(--line);border-radius:10px}
+  /* the review panel is the one thing allowed to be long, and it scrolls on its own */
+  .cph-review{max-height:330px;overflow-y:auto}
+  .cph-areahead{font-size:11.5px;font-weight:700;color:var(--ink);margin:12px 0 7px;display:flex;align-items:center;gap:7px}
+  .cph-areahead .n{font-weight:500;color:var(--slate)}
+  @media(max-width:820px){.cph-bar{align-items:stretch}.cph-pick{width:100%}}
+</style>`;}
+
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
-  const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const unitOpts=cpaUnitOptionsGrouped(units);
+  if(!CPA_PH.project&&projects.length) CPA_PH.project=String(projects[0].id);
+  host.innerHTML=cpaPhCss()+'<div class="cph-wrap" id="cphWrap"></div>';
+  cpaPhPaint(projects,units);
+}
+
+// Everything on screen is redrawn from CPA_PH, so there is one description of the state and no
+// way for the pickers, the form and the list to disagree about which flat is being looked at.
+async function cpaPhPaint(projects,units){
+  projects=projects||await cpaProjects(); units=units||await cpaUnits();
+  const wrap=$('cphWrap'); if(!wrap) return;
+  const lvl=CPA_PH.level;
+  const needTower=(lvl==='tower'||lvl==='unit'), needUnit=(lvl==='unit');
+
+  const towers=cpaTowersForProject(units,CPA_PH.project);
+  if(needTower&&towers.length&&towers.indexOf(CPA_PH.tower)<0) CPA_PH.tower=towers[0];
+  const flats=cpaPhFlats(units);
+  if(needUnit&&flats.length&&!flats.some(u=>String(u.id)===String(CPA_PH.unit))) CPA_PH.unit=String(flats[0].id);
+
   const today=new Date().toISOString().slice(0,10);
-  const firstProjectId=projects[0]?projects[0].id:null;
-  const towerOpts=firstProjectId?cpaTowersForProject(units,firstProjectId).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(''):'';
-  const floorOpts=firstProjectId?cpaFloorsForProject(units,firstProjectId).map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join(''):'';
-  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos/videos</div>
-    <label>Project</label><select id="cpaPhProject" onchange="cpaRenderProjectPhotoList()">${projOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaPhCaption">
-    <label>Photos / videos</label><input type="file" id="cpaPhFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaPhList" style="margin-top:14px"></div>
-    </div>
-    <div class="card card-pad frm"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
-    <label>Project</label><select id="cpaTwProject" onchange="cpaOnTwProjectChange()">${projOpts}</select>
-    <label>Tower / Block</label><select id="cpaTwTower" onchange="cpaRenderTowerPhotoList()">${towerOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaTwDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaTwCaption">
-    <label>Photos / videos</label><input type="file" id="cpaTwFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaTwList" style="margin-top:14px"></div>
-    </div>
-    <div class="card card-pad frm"><div class="sec-title">Floor-wise construction photos/videos</div>
-    <label>Project</label><select id="cpaFlProject" onchange="cpaOnFlProjectChange()">${projOpts}</select>
-    <label>Floor</label><select id="cpaFlFloor" onchange="cpaRenderFloorPhotoList()">${floorOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaFlDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaFlCaption">
-    <label>Photos / videos</label><input type="file" id="cpaFlFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaFlList" style="margin-top:14px"></div>
-    </div>
-    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos/videos</div>
-    <label>Unit</label><select id="cpaUhUnit" onchange="cpaRenderUnitPhotoList()">${unitOpts}</select>
-    <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
-    <label>Caption (optional)</label><input id="cpaUhCaption">
-    <label>Photos / videos</label><input type="file" id="cpaUhFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaUhList" style="margin-top:14px"></div>
-    </div></div>`;
-  cpaRenderProjectPhotoList();cpaRenderTowerPhotoList();cpaRenderFloorPhotoList();cpaRenderUnitPhotoList();
+  wrap.innerHTML=
+    '<div class="cph-card">'
+      +'<div class="cph-bar">'
+        +'<div class="cph-levels">'
+          +CPA_PH_LEVELS.map(l=>'<button class="cph-lv'+(lvl===l[0]?' on':'')+'" onclick="cpaPhSetLevel(\''+l[0]+'\')">'
+             +'<i class="fa-solid '+l[2]+'"></i>'+esc(l[1])+'</button>').join('')
+        +'</div>'
+        +'<div class="cph-pick">'
+          +'<div class="cph-f"><label>Project</label><div class="cph-sel"><select onchange="cpaPhSet(\'project\',this.value)">'
+            +projects.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(CPA_PH.project)?' selected':'')+'>'+esc(p.name)+'</option>').join('')
+          +'</select></div></div>'
+          +(needTower?'<div class="cph-f"><label>Block</label><div class="cph-sel"><select id="cphTower" onchange="cpaPhSet(\'tower\',this.value)">'
+            +(towers.length?towers.map(t=>'<option'+(t===CPA_PH.tower?' selected':'')+'>'+esc(t)+'</option>').join('')
+                           :'<option value="">No blocks on record</option>')
+          +'</select></div></div>':'')
+          +(needUnit?'<div class="cph-f"><label>Flat</label><div class="cph-sel"><select id="cphUnit" onchange="cpaPhSet(\'unit\',this.value)">'
+            +(flats.length?flats.map(u=>'<option value="'+u.id+'"'+(String(u.id)===String(CPA_PH.unit)?' selected':'')+'>'+esc(u.unit_code)+'</option>').join('')
+                          :'<option value="">No flats in this block</option>')
+          +'</select></div></div>':'')
+        +'</div>'
+      +'</div>'
+    +'</div>'
+
+    +'<div class="cph-card">'
+      +'<div class="cph-bar" style="margin-bottom:12px">'
+        +'<div class="cph-f" style="max-width:190px"><label>Date shown to customers</label>'
+          +'<input type="date" class="cph-in" id="cphDate" value="'+today+'"></div>'
+      +'</div>'
+      +(lvl==='unit'
+        ? '<div class="cph-zones">'+CPA_PH_AREAS.map(a=>cpaPhZone(a[0],a[1],a[2])).join('')+'</div>'
+        : '<div class="cph-zones" style="grid-template-columns:1fr">'+cpaPhZone('all','Photos or videos','fa-images')+'</div>')
+      +'<div class="cph-staged" id="cphStaged" style="display:none"></div>'
+      +'<div class="cph-acts">'
+        +'<button class="btn btn-primary" id="cphGo" onclick="cpaPhUpload()">'
+          +'<i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>'
+        +'<button class="btn" id="cphClear" onclick="cpaPhClear()">Clear all</button>'
+        +(lvl==='unit'?'<span style="font-size:11.5px;color:var(--slate)">Any one, two or all three \u2014 they go up together.</span>':'')
+      +'</div>'
+    +'</div>'
+
+    +'<div class="cph-card">'
+      +'<div class="cph-h"><i class="fa-solid fa-images"></i>Already uploaded</div>'
+      +'<div id="cphList" class="cph-review"><div class="cph-empty">Loading\u2026</div></div>'
+    +'</div>';
+
+  cpaPhWireZones();
+  cpaPhStaged();
+  cpaPhSyncActions();
+  cpaPhList();
 }
-window.cpaOnTwProjectChange=async function(){
-  const units=await cpaUnits();
-  const towers=cpaTowersForProject(units,$('cpaTwProject').value);
-  $('cpaTwTower').innerHTML=towers.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  cpaRenderTowerPhotoList();
+
+// The flats of the chosen project and block, cancelled rows dropped (a cancelled booking keeps
+// its row for audit, which is why the same physical flat could appear two to four times), and
+// filtered by whatever has been typed.
+function cpaPhFlats(units){
+  return (units||[]).filter(u=>
+      u.status!=='cancelled'
+      && String(u.project_id)===String(CPA_PH.project)
+      && (!CPA_PH.tower||String(u.tower||'')===String(CPA_PH.tower)))
+    .sort((a,b)=>String(a.unit_code).localeCompare(String(b.unit_code),undefined,{numeric:true}));
+}
+/* The zone says what it is for and how much is in it. What was actually chosen is shown as
+   pictures underneath, where there is room for them - a filename in a narrow box told you
+   nothing about whether you had picked the right photo. */
+function cpaPhZone(key,title,icon){
+  const n=(CPA_PH.files[key]||[]).length;
+  return '<div class="cph-zone'+(n?' has':'')+'" data-zone="'+key+'" tabindex="0">'
+    +'<div class="cph-zhead"><i class="fa-solid '+(n?'fa-circle-check':icon)+'"></i>'
+      +'<span class="cph-zt">'+esc(title)+'</span>'
+      +(n?'<span class="cph-zn">'+n+'</span>':'')
+    +'</div>'
+    +'<div class="cph-zbody"><i class="fa-solid fa-arrow-down-to-line" style="font-size:15px"></i>'
+      +'<div>'+(n?'Drop more, or click':'Drop files here, or click')+'</div></div>'
+    +'</div>';
+}
+
+/* A preview for something that has not left the computer yet. The object URL is kept on the
+   file and revoked when it is taken back out, so choosing forty photos and changing your mind
+   does not leave forty images pinned in memory. */
+function cpaPhPreview(f){
+  if(!f.__u){ try{ f.__u=URL.createObjectURL(f); }catch(_e){ f.__u=''; } }
+  return f.__u;
+}
+function cpaPhForget(f){
+  if(f&&f.__u){ try{ URL.revokeObjectURL(f.__u); }catch(_e){} f.__u=null; }
+}
+/* Full size, before it is uploaded. A 74px tile is enough to see that you picked a photo and
+   not enough to see whether it is the right one or whether it came out blurred - which is the
+   moment to find out, not after it is in front of a customer. Video plays in place with the
+   browser's own controls. */
+window.cpaPhZoom=function(key,idx){
+  const f=(CPA_PH.files[key]||[])[idx]; if(!f) return;
+  const isVid=/^video\//.test(f.type||'');
+  const url=cpaPhPreview(f);
+  const box=document.createElement('div');
+  box.className='cph-box';
+  box.innerHTML='<div class="cph-boxbar"><i class="fa-solid '+(isVid?'fa-circle-play':'fa-image')+'"></i>'
+    +'<span class="nm">'+esc(f.name)+'</span>'
+    +'<button class="cph-boxx" title="Close (Esc)">&times;</button></div>'
+    +(isVid?'<video src="'+url+'" controls autoplay playsinline></video>'
+           :'<img src="'+url+'" alt="">');
+  const shut=function(){
+    try{ document.removeEventListener('keydown',onKey); }catch(_e){}
+    if(box.parentNode) box.parentNode.removeChild(box);
+  };
+  const onKey=function(e){ if(e.key==='Escape') shut(); };
+  // Clicking the picture itself must not close it - only the backdrop or the button.
+  box.onclick=function(e){ if(e.target===box) shut(); };
+  box.querySelector('.cph-boxx').onclick=shut;
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(box);
 };
-window.cpaOnFlProjectChange=async function(){
-  const units=await cpaUnits();
-  const floors=cpaFloorsForProject(units,$('cpaFlProject').value);
-  $('cpaFlFloor').innerHTML=floors.map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join('');
-  cpaRenderFloorPhotoList();
+function cpaPhStaged(){
+  const host=$('cphStaged'); if(!host) return;
+  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  let html='';
+  keys.forEach(function(k){
+    const fs=CPA_PH.files[k]||[]; if(!fs.length) return;
+    const meta=CPA_PH_AREAS.concat([['all','Chosen','fa-images']]).find(a=>a[0]===k);
+    html+='<div class="cph-sgroup">'
+      +(CPA_PH.level==='unit'
+        ? '<div class="cph-sh"><i class="fa-solid fa-circle-check"></i>'+esc(meta[1])
+          +' <span class="n">\u00b7 '+fs.length+'</span></div>' : '')
+      +'<div class="cph-strip">'
+      +fs.map(function(f,i){
+          const isVid=/^video\//.test(f.type||'');
+          const inner=isVid
+            ? '<div class="vid"><i class="fa-solid fa-circle-play fa-lg"></i></div>'
+            : '<img src="'+cpaPhPreview(f)+'" alt="">';
+          return '<div class="cph-sthumb" title="'+esc(f.name)+'" onclick="cpaPhZoom(\''+k+'\','+i+')">'+inner
+            +'<button class="cph-sx" title="Remove" onclick="event.stopPropagation();cpaPhDrop(\''+k+'\','+i+')">&times;</button></div>';
+        }).join('')
+      +'</div></div>';
+  });
+  host.innerHTML=html;
+  host.style.display=html?'':'none';
+}
+
+/* Click and drag-and-drop both, on every zone. The file input is made here rather than living in
+   the markup so that choosing a second batch ADDS to the first instead of replacing it - a plain
+   <input type=file> forgets everything it held the moment you pick again, which is why adding
+   "just one more photo" used to silently drop the rest. */
+function cpaPhWireZones(){
+  Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
+    const key=z.getAttribute('data-zone');
+    const open=function(){
+      const inp=document.createElement('input');
+      inp.type='file'; inp.multiple=true; inp.accept='image/*,video/*';
+      inp.onchange=function(){ cpaPhAdd(key,[...inp.files]); };
+      inp.click();
+    };
+    z.onclick=open;
+    z.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } };
+    z.ondragover=function(e){ e.preventDefault(); z.classList.add('over'); };
+    z.ondragleave=function(){ z.classList.remove('over'); };
+    z.ondrop=function(e){
+      e.preventDefault(); z.classList.remove('over');
+      cpaPhAdd(key,[...(e.dataTransfer&&e.dataTransfer.files||[])]);
+    };
+  });
+}
+function cpaPhAdd(key,files){
+  const keep=(files||[]).filter(f=>/^(image|video)\//.test(f.type||''));
+  const dropped=(files||[]).length-keep.length;
+  if(dropped) toast(dropped+' file'+(dropped===1?' was':'s were')+' not a photo or video and '+(dropped===1?'was':'were')+' skipped','warn');
+  if(!keep.length) return;
+  // Same file picked twice is the same file once.
+  const have=new Set((CPA_PH.files[key]||[]).map(f=>f.name+'|'+f.size));
+  CPA_PH.files[key]=(CPA_PH.files[key]||[]).concat(keep.filter(f=>!have.has(f.name+'|'+f.size)));
+  cpaPhRepaintZones();
+}
+window.cpaPhDrop=function(key,idx){
+  cpaPhForget(CPA_PH.files[key][idx]);
+  CPA_PH.files[key].splice(idx,1);
+  cpaPhRepaintZones();
 };
-// A real thumbnail (not just a generic file-type icon) so staff can see at a glance that the
-// right photo actually made it in, right after uploading - videos get a play-icon tile since
-// signing a video URL just to build a thumbnail isn't worth the round trip, only opened on click.
-async function cpaMediaThumb(p){
-  // Every branch below needs exactly one style="" attribute - a second style attribute on the
-  // same tag is silently dropped by the browser (first one wins), which is why the sizing here
-  // used to be ignored entirely and thumbnails rendered at their native full size.
-  const isVideo=(p.file_type||'').indexOf('video')===0;
-  const onclickAttr=`onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')"`;
-  if(isVideo)return `<div ${onclickAttr} title="Open video" style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#64748b;cursor:pointer"><i class="fa-solid fa-circle-play"></i></div>`;
-  const url=await s3SignedUrl(p.storage_path);
-  return url
-    ?`<img src="${url}" alt="" ${onclickAttr} title="Open full size" style="width:52px;height:52px;object-fit:cover;border-radius:6px;display:block;cursor:pointer">`
-    :`<div ${onclickAttr} style="width:52px;height:52px;border-radius:6px;background:#eef2f7;display:flex;align-items:center;justify-content:center;color:#94a3b8;cursor:pointer"><i class="fa-solid fa-image"></i></div>`;
+window.cpaPhClear=function(){
+  Object.keys(CPA_PH.files).forEach(k=>(CPA_PH.files[k]||[]).forEach(cpaPhForget));
+  CPA_PH.files={all:[],common:[],bathroom:[],kitchen:[]};
+  cpaPhRepaintZones();
+};
+/* Redrawing one zone in place keeps the caret and the scroll position of the others, which
+   matters when three of them are on screen. */
+function cpaPhRepaintZones(){
+  Array.prototype.forEach.call(document.querySelectorAll('.cph-zone'),function(z){
+    const key=z.getAttribute('data-zone');
+    const meta=CPA_PH_AREAS.concat([['all','Photos or videos','fa-images']]).find(a=>a[0]===key);
+    const holder=document.createElement('div');
+    holder.innerHTML=cpaPhZone(key,meta?meta[1]:'Files',meta?meta[2]:'fa-images');
+    const fresh=holder.firstChild;
+    z.className=fresh.className;
+    z.innerHTML=fresh.innerHTML;
+  });
+  cpaPhStaged();
+  cpaPhSyncActions();
 }
-async function cpaMediaRow(p){return [await cpaMediaThumb(p),fmtDate(p.taken_on),esc(p.caption||p.file_name||'—')];}
-// Caps each "Existing uploads" panel at roughly 5 rows tall (thumbnail rows run ~64px incl.
-// padding) and scrolls internally past that, so uploading a dozen photos to one scope doesn't
-// push the Upload button and every panel after it down the page - only this list scrolls.
-function cpaMediaListWrap(label,tableHtml){
-  return '<div style="font-size:12.5px;color:var(--slate);margin-bottom:6px">'+label+'</div>'+
-    '<div style="max-height:320px;overflow-y:auto">'+tableHtml+'</div>';
+// The two buttons that act on what has been chosen sit together and know how much there is.
+function cpaPhSyncActions(){
+  const keys=CPA_PH.level==='unit'?CPA_PH_AREAS.map(a=>a[0]):['all'];
+  const total=keys.reduce((t,k)=>t+((CPA_PH.files[k]||[]).length),0);
+  const go=$('cphGo'), clr=$('cphClear');
+  if(go){
+    go.disabled=!total; go.style.opacity=total?'':'.5';
+    go.innerHTML='<i class="fa-solid fa-cloud-arrow-up"></i> '+(total?('Upload '+total+' file'+(total===1?'':'s')):'Upload');
+  }
+  if(clr){ clr.disabled=!total; clr.style.opacity=total?'':'.4'; }
 }
-async function cpaRenderProjectPhotoList(){
-  const host=$('cpaPhList');if(!host)return;
-  const projectId=Number($('cpaPhProject').value);
-  const {data}=await sb.schema('cust').from('project_photos').select('*').eq('project_id',projectId).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('project_photos',${p.id},'cpaRenderProjectPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+
+window.cpaPhSetLevel=function(l){ CPA_PH.level=l; cpaPhFollowPickers(); cpaPhPaint(); };
+// The filters snap back to the upload target whenever that target moves, so the panel always
+// opens on "what I am about to add to" rather than on a stale view of somewhere else.
+function cpaPhFollowPickers(){
+  CPA_PHF={project:CPA_PH.project,tower:CPA_PH.tower,unit:CPA_PH.unit,area:''};
 }
-async function cpaRenderTowerPhotoList(){
-  const host=$('cpaTwList');if(!host)return;
-  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value;
-  if(!tower){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no towers on record.</div>';return;}
-  const {data}=await sb.schema('cust').from('tower_photos').select('*').eq('project_id',projectId).eq('tower',tower).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('tower_photos',${p.id},'cpaRenderTowerPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for '+esc(tower),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+window.cpaPhFilter=function(k,v){ CPA_PHF[k]=v; if(k==='project'){CPA_PHF.tower='';CPA_PHF.unit='';} if(k==='tower'){CPA_PHF.unit='';} cpaPhList(); };
+window.cpaPhSet=function(k,v){
+  CPA_PH[k]=v;
+  // Changing the project invalidates the block and the flat under it.
+  if(k==='project'){ CPA_PH.tower=''; CPA_PH.unit=''; }
+  if(k==='tower'){ CPA_PH.unit=''; }
+  cpaPhFollowPickers();
+  cpaPhPaint();
+};
+window.cpaPhUpload=async function(){
+  const takenOn=($('cphDate')||{}).value;
+  // Captions were asked for on every upload and almost never written; the date, the flat and
+  // the section already say what a photo is. The column is left on the tables so anything
+  // written before today is not lost - it is simply no longer asked for or shown.
+  const caption=null;
+  const lvl=CPA_PH.level;
+  const jobs=[];
+  if(lvl==='unit'){
+    const unitId=Number(CPA_PH.unit);
+    if(!unitId){ toast('Choose a flat first','err'); return; }
+    CPA_PH_AREAS.forEach(a=>(CPA_PH.files[a[0]]||[]).forEach(f=>jobs.push({f,area:a[0]})));
+  } else {
+    (CPA_PH.files.all||[]).forEach(f=>jobs.push({f,area:null}));
+  }
+  if(!jobs.length){ toast('Add at least one photo or video','err'); return; }
+  if(lvl==='tower'&&!CPA_PH.tower){ toast('Choose a block first','err'); return; }
+
+  const go=$('cphGo'); go.disabled=true;
+  let ok=0; const failed=[];
+  for(let i=0;i<jobs.length;i++){
+    const {f,area}=jobs[i];
+    go.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Uploading '+(i+1)+' of '+jobs.length+'…';
+    try{
+      let key,table,row;
+      if(lvl==='project'){
+        key=s3KeyForProjectPhoto(CPA_PH.project,f.name); table='project_photos';
+        row={project_id:Number(CPA_PH.project)};
+      }else if(lvl==='tower'){
+        key=s3KeyForTowerPhoto(CPA_PH.project,CPA_PH.tower,f.name); table='tower_photos';
+        row={project_id:Number(CPA_PH.project),tower:CPA_PH.tower};
+      }else{
+        key=s3KeyForUnitPhoto(CPA_PH.unit,f.name); table='unit_photos';
+        row={unit_id:Number(CPA_PH.unit),area:area};
+      }
+      const {data,error}=await uploadFileToS3(key,f);
+      if(error) throw new Error(error.message);
+      const {error:insErr}=await sb.schema('cust').from(table).insert(Object.assign(row,{
+        taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,
+        file_size:f.size,file_type:f.type,uploaded_by:state.email}));
+      if(insErr) throw new Error(insErr.message);
+      ok++;
+    }catch(e){ failed.push(f.name+' — '+((e&&e.message)||e)); }
+  }
+  go.disabled=false;
+  /* Only what actually went up is cleared. A failed file stays in the list so it can be tried
+     again, instead of being quietly dropped along with the ones that worked. */
+  if(!failed.length) cpaPhClear(); else cpaPhRepaintZones();
+  if(ok) toast(ok+' file'+(ok===1?'':'s')+' uploaded','ok');
+  if(failed.length) toast(failed.length+' could not be uploaded: '+failed[0],'err');
+  cpaPhList();
+};
+
+/* What is already there, as thumbnails rather than a table of 52px squares. At flat level it is
+   split by area, because that is the question being asked of it. */
+/* WHAT IS ALREADY THERE, AS ROWS, WITH ITS OWN FILTERS.
+
+   The columns follow the level - a project-wide photo has no block or flat to name, and only a
+   flat photo has a section - and so do the filters. They start on whatever the upload pickers
+   are pointing at and can then be widened: every block in the project, every flat in a block,
+   one section across all of them. That is a different question from "where does the next upload
+   go", which is why it is asked separately here rather than driven by the strip at the top. */
+async function cpaPhList(){
+  const host=$('cphList'); if(!host) return;
+  const lvl=CPA_PH.level;
+  host.innerHTML='<div class="cph-empty">Loading\u2026</div>';
+  try{
+    const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
+    const live=(units||[]).filter(u=>u.status!=='cancelled');
+    const nameOf=id=>{const x=(projects||[]).find(y=>String(y.id)===String(id));return (x&&x.name)||'\u2014';};
+
+    // ── the filter bar, showing only what this level can be filtered by ──
+    const towers=[...new Set(live.filter(u=>String(u.project_id)===String(CPA_PHF.project)&&u.tower)
+                                 .map(u=>u.tower))].sort();
+    const flats=live.filter(u=>String(u.project_id)===String(CPA_PHF.project)
+                             &&(!CPA_PHF.tower||String(u.tower||'')===String(CPA_PHF.tower)))
+                    .sort((x,y)=>String(x.unit_code).localeCompare(String(y.unit_code),undefined,{numeric:true}));
+    const sel=(id,label,opts,val,allLabel)=>
+      '<div class="cph-f"><label>'+esc(label)+'</label><div class="cph-sel">'
+      +'<select onchange="cpaPhFilter(\''+id+'\',this.value)">'
+      +(allLabel?'<option value=""'+(val?'':' selected')+'>'+esc(allLabel)+'</option>':'')
+      +opts.map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===String(val)?' selected':'')+'>'+esc(o[1])+'</option>').join('')
+      +'</select></div></div>';
+
+    let bar='<div class="cph-filters">'
+      +sel('project','Project',(projects||[]).map(x=>[x.id,x.name]),CPA_PHF.project,'');
+    if(lvl!=='project') bar+=sel('tower','Block',towers.map(t=>[t,t]),CPA_PHF.tower,'All blocks');
+    if(lvl==='unit'){
+      bar+=sel('unit','Flat',flats.map(u=>[u.id,u.unit_code]),CPA_PHF.unit,'All flats');
+      bar+=sel('area','Section',CPA_PH_AREAS.map(x=>[x[0],x[1]]),CPA_PHF.area,'All sections');
+    }
+    bar+='<span class="cph-fcount" id="cphCount"></span></div>';
+
+    // ── the rows ──
+    let rowsHtml,count=0;
+    if(lvl==='project'){
+      const {data}=await sb.schema('cust').from('project_photos').select('*')
+        .eq('project_id',Number(CPA_PHF.project)).is('deleted_at',null).order('taken_on',{ascending:false});
+      const list=data||[]; count=list.length;
+      rowsHtml=await cpaPhRows(list,'project_photos',['Project'],
+        ()=>[esc(nameOf(CPA_PHF.project))],'Nothing uploaded for this project yet.');
+    }else if(lvl==='tower'){
+      let q=sb.schema('cust').from('tower_photos').select('*').eq('project_id',Number(CPA_PHF.project));
+      if(CPA_PHF.tower) q=q.eq('tower',CPA_PHF.tower);
+      const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
+      const list=data||[]; count=list.length;
+      rowsHtml=await cpaPhRows(list,'tower_photos',['Project','Block'],
+        p=>[esc(nameOf(CPA_PHF.project)),esc(p.tower||'\u2014')],
+        CPA_PHF.tower?'Nothing uploaded for this block yet.':'Nothing uploaded for any block on this project yet.');
+    }else{
+      // "All flats" means every flat in scope, so the ids are gathered and asked for together
+      // rather than one query per flat.
+      const ids=CPA_PHF.unit?[Number(CPA_PHF.unit)]:flats.map(u=>u.id);
+      if(!ids.length){
+        rowsHtml='<div class="cph-empty">There are no flats in this block.</div>';
+      }else{
+        let q=sb.schema('cust').from('unit_photos').select('*').in('unit_id',ids);
+        if(CPA_PHF.area) q=q.eq('area',CPA_PHF.area);
+        const {data}=await q.is('deleted_at',null).order('taken_on',{ascending:false});
+        const list=data||[]; count=list.length;
+        const byId={}; live.forEach(u=>{byId[u.id]=u;});
+        rowsHtml=await cpaPhRows(list,'unit_photos',['Project','Block','Flat','Section'],
+          function(p){
+            const u=byId[p.unit_id]||{};
+            const ar=CPA_PH_AREAS.find(x=>x[0]===(p.area||'common'));
+            return [esc(nameOf(u.project_id||CPA_PHF.project)),esc(u.tower||'\u2014'),esc(u.unit_code||'\u2014'),
+                    '<span class="cph-area">'+esc(ar?ar[1]:p.area)+'</span>'];
+          },'Nothing uploaded here yet.');
+      }
+    }
+    host.innerHTML=bar+rowsHtml;
+    const c=$('cphCount'); if(c) c.textContent=count?(count+(count===1?' item':' items')):'';
+  }catch(e){ host.innerHTML='<div class="cph-empty" style="color:var(--err)">'+esc((e&&e.message)||String(e))+'</div>'; }
 }
-async function cpaRenderFloorPhotoList(){
-  const host=$('cpaFlList');if(!host)return;
-  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value;
-  if(!floorNo){host.innerHTML='<div style="font-size:12.5px;color:var(--slate)">This project has no units to derive floors from.</div>';return;}
-  const {data}=await sb.schema('cust').from('floor_photos').select('*').eq('project_id',projectId).eq('floor_no',floorNo).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('floor_photos',${p.id},'cpaRenderFloorPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for Floor '+esc(floorNo),cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
+// `cols` names the middle columns and `vals` fills them for one row, so the three levels share
+// one table rather than three that could drift apart.
+async function cpaPhRows(list,table,cols,vals,emptyMsg){
+  if(!list.length) return '<div class="cph-empty">'+esc(emptyMsg)+'</div>';
+  const rows=await Promise.all(list.map(async function(p){
+    const isVideo=(p.file_type||'').indexOf('video')===0;
+    const open="s3OpenSigned('"+p.storage_path.replace(/'/g,"\\'")+"')";
+    let thumb;
+    if(isVideo){ thumb='<div class="cph-th vid" onclick="'+open+'" title="Open video"><i class="fa-solid fa-circle-play"></i></div>'; }
+    else{
+      const url=await s3SignedUrl(p.storage_path);
+      thumb=url?'<img class="cph-th" src="'+url+'" alt="" onclick="'+open+'" title="Open full size">'
+               :'<div class="cph-th vid" onclick="'+open+'"><i class="fa-solid fa-image"></i></div>';
+    }
+    return '<tr><td>'+thumb+'</td>'
+      +'<td class="cph-when">'+esc(fmtDate(p.taken_on))+'</td>'
+      +vals(p).map(v=>'<td>'+v+'</td>').join('')
+      +'<td style="text-align:right"><button class="cph-rm" title="Remove from the customer portal" '
+        +'onclick="cpaPhDelete(\''+table+'\','+p.id+')"><i class="fa-solid fa-trash"></i></button></td></tr>';
+  }));
+  return '<table class="cph-tbl"><thead><tr><th style="width:56px"></th><th>Date</th>'
+    +cols.map(c=>'<th>'+esc(c)+'</th>').join('')
+    +'<th style="width:44px"></th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
 }
-async function cpaRenderUnitPhotoList(){
-  const host=$('cpaUhList');if(!host)return;
-  const unitId=Number($('cpaUhUnit').value);
-  const {data}=await sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unitId).is('deleted_at',null).order('taken_on',{ascending:false});
-  const rows=await Promise.all((data||[]).map(async p=>[...await cpaMediaRow(p),`<button class="btn btn-sm btn-danger" onclick="cpaDeletePhoto('unit_photos',${p.id},'cpaRenderUnitPhotoList')">Delete</button>`]));
-  host.innerHTML=cpaMediaListWrap('Existing uploads for this flat',cpaTable(['','Date','Caption / file','Delete'],rows.length?rows:[['—','No uploads yet','','']]));
-}
-window.cpaDeletePhoto=async function(table,id,refreshFn){
-  if(!await confirmDialog('Remove this photo/video from the customer portal?',{okLabel:'Delete'}))return;
+window.cpaPhDelete=async function(table,id){
+  if(!await confirmDialog('Remove this from the customer portal? The customer will no longer see it.',
+     {title:'Remove', okLabel:'Remove', icon:'fa-trash', danger:true})) return;
   const {error}=await sb.schema('cust').from(table).update({deleted_at:new Date().toISOString(),deleted_by:state.email}).eq('id',id);
-  if(error){toast('Delete failed: '+error.message,'err');return;}
-  toast('Removed','ok');window[refreshFn]();
-};
-window.cpaUploadProjectPhotos=async function(){
-  const projectId=Number($('cpaPhProject').value),takenOn=$('cpaPhDate').value,caption=$('cpaPhCaption').value.trim()||null;
-  const files=[...$('cpaPhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaPhBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForProjectPhoto(projectId,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('project_photos').insert({project_id:projectId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaPhFiles').value='';
-  cpaRenderProjectPhotoList();
-};
-window.cpaUploadTowerPhotos=async function(){
-  const projectId=Number($('cpaTwProject').value),tower=$('cpaTwTower').value,takenOn=$('cpaTwDate').value,caption=$('cpaTwCaption').value.trim()||null;
-  if(!tower){toast('This project has no towers on record','err');return;}
-  const files=[...$('cpaTwFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaTwBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForTowerPhoto(projectId,tower,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('tower_photos').insert({project_id:projectId,tower,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaTwFiles').value='';
-  cpaRenderTowerPhotoList();
-};
-window.cpaUploadFloorPhotos=async function(){
-  const projectId=Number($('cpaFlProject').value),floorNo=$('cpaFlFloor').value,takenOn=$('cpaFlDate').value,caption=$('cpaFlCaption').value.trim()||null;
-  if(!floorNo){toast('This project has no units to derive floors from','err');return;}
-  const files=[...$('cpaFlFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaFlBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForFloorPhoto(projectId,floorNo,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('floor_photos').insert({project_id:projectId,floor_no:floorNo,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaFlFiles').value='';
-  cpaRenderFloorPhotoList();
-};
-window.cpaUploadUnitPhotos=async function(){
-  const unitId=Number($('cpaUhUnit').value),takenOn=$('cpaUhDate').value,caption=$('cpaUhCaption').value.trim()||null;
-  const files=[...$('cpaUhFiles').files];if(!files.length){toast('Choose at least one photo or video','err');return;}
-  const btn=$('cpaUhBtn');btn.disabled=true;let ok=0;
-  for(const f of files){
-    btn.innerHTML=`<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${ok+1}/${files.length}…`;
-    const {data,error}=await uploadFileToS3(s3KeyForUnitPhoto(unitId,f.name),f);
-    if(error){toast('Upload failed: '+error.message,'err');continue;}
-    const {error:insErr}=await sb.schema('cust').from('unit_photos').insert({unit_id:unitId,taken_on:takenOn,caption,storage_path:data.path,file_name:f.name,file_size:f.size,file_type:f.type,uploaded_by:state.email});
-    if(insErr){toast('Saved file but metadata failed: '+insErr.message,'err');}else ok++;
-  }
-  btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
-  if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaUhFiles').value='';
-  cpaRenderUnitPhotoList();
+  if(error){ toast('Could not remove it: '+error.message,'err'); return; }
+  toast('Removed','ok'); cpaPhList();
 };
 
 /* ---------- Tab 5: Inspection (checklist scan + dated photo/video update trail, per unit) ---------- */
@@ -19283,14 +19650,6 @@ function custFormatUnitType(t){
   const m=String(t).trim().match(/^(\d+(?:\.\d+)?)\s*BHK$/i);
   if(!m)return t;
   return (parseFloat(m[1]))+' BHK';
-}
-// Floor number derived from the leading digits of unit_code (e.g. "5" from "5A", "12" from
-// "12C") - the same Farvision <floor><unit-letter> convention the RLS policy on
-// cust.floor_photos matches against (substring(unit_code from '^[0-9]+')), so a customer's own
-// derived floor always lines up with what the admin picks when uploading floor-wise media.
-function custDeriveFloor(unitCode){
-  const m=String(unitCode||'').match(/^\d+/);
-  return m?m[0]:null;
 }
 /* Farvision stores names as "Mr. AKSHAY DEBNATH" - shouted back at a customer that reads like a
    demand letter, so the greeting uses just the given name, title-cased. */
@@ -20500,25 +20859,44 @@ async function custMediaGrid(list){
       return `<div class="card" style="padding:8px"><div style="cursor:pointer" onclick="s3OpenSigned('${p.storage_path.replace(/'/g,"\\'")}')">${thumb}</div>
     <div style="font-size:12px;margin-top:6px;font-weight:600">${fmtDate(p.taken_on)}</div>${p.caption?`<div style="font-size:11.5px;color:var(--slate)">${esc(p.caption)}</div>`:''}</div>`;}).join('')+'</div>';
 }
+/* THREE LEVELS, NOT FOUR, AND THE FLAT IS SPLIT BY ROOM.
+
+   The floor level is gone. It sat between the block and the flat, it was worked out by reading
+   digits off a unit code rather than from anything anybody recorded, and in the whole life of
+   the portal not one photo was ever put against it.
+
+   The flat's photos no longer wait for the slab to be cast. That gate meant a customer whose
+   photos HAD been taken was shown a message saying there would be none until casting finished -
+   the photos existed and were being withheld by a date field nobody kept up. If there are
+   photos of your flat you see them; if there are none you are told that, which is the honest
+   version of the same sentence.
+
+   Within the flat they are grouped common area / bathroom / kitchen, because that is how people
+   ask: "is my kitchen done yet" is not answerable by one long reverse-chronological pile. */
 async function custTabProgress(unit){
-  const floorNo=custDeriveFloor(unit.unit_code);
-  const [{data:pPhotos},{data:tPhotos},{data:fPhotos},{data:uPhotos}]=await Promise.all([
+  const [{data:pPhotos},{data:tPhotos},{data:uPhotos}]=await Promise.all([
     sb.schema('cust').from('project_photos').select('*').eq('project_id',unit.project_id).order('taken_on',{ascending:false}),
     unit.tower?sb.schema('cust').from('tower_photos').select('*').eq('project_id',unit.project_id).eq('tower',unit.tower).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    floorNo?sb.schema('cust').from('floor_photos').select('*').eq('project_id',unit.project_id).eq('floor_no',floorNo).order('taken_on',{ascending:false}):Promise.resolve({data:[]}),
-    unit.floor_casting_completed_at?sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false}):Promise.resolve({data:[]})
+    sb.schema('cust').from('unit_photos').select('*').eq('unit_id',unit.id).order('taken_on',{ascending:false})
   ]);
   let out='<div class="sec-title" style="margin:0 0 10px">Project progress</div>'+
     ((pPhotos&&pPhotos.length)?await custMediaGrid(pPhotos):'<div class="card card-pad empty">No project photos yet — check back soon, these are added roughly every two weeks.</div>');
   out+='<div class="sec-title" style="margin:20px 0 10px">Your tower'+(unit.tower?' — '+esc(unit.tower):'')+'</div>';
   out+=(tPhotos&&tPhotos.length)?await custMediaGrid(tPhotos):'<div class="card card-pad empty">No tower-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your floor'+(floorNo?' — Floor '+esc(floorNo):'')+'</div>';
-  out+=(fPhotos&&fPhotos.length)?await custMediaGrid(fPhotos):'<div class="card card-pad empty">No floor-wide updates yet — check back soon.</div>';
-  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat</div>';
-  if(!unit.floor_casting_completed_at){
-    out+='<div class="card card-pad empty"><i class="fa-solid fa-clock"></i><div style="margin-top:6px">Photos of your flat’s construction will appear here once the floor slab for your unit has been cast.</div></div>';
+  out+='<div class="sec-title" style="margin:20px 0 10px">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div>';
+  const mine=uPhotos||[];
+  if(!mine.length){
+    out+='<div class="card card-pad empty">No photos of your flat yet — check back soon, these are added roughly every two weeks.</div>';
   }else{
-    out+=(uPhotos&&uPhotos.length)?await custMediaGrid(uPhotos):'<div class="card card-pad empty">No flat-specific photos yet — check back soon, these are added roughly every two weeks once casting is complete.</div>';
+    // Only the rooms that actually have something are given a heading; three headings with two
+    // "nothing yet" messages under them reads as a fault rather than as a stage of the build.
+    const AREAS=[['common','Common area'],['bathroom','Bathroom'],['kitchen','Kitchen']];
+    for(const a of AREAS){
+      const list=mine.filter(function(x){return (x.area||'common')===a[0];});
+      if(!list.length) continue;
+      out+='<div style="font-size:13px;font-weight:700;color:var(--ink);margin:14px 0 8px">'+esc(a[1])+'</div>';
+      out+=await custMediaGrid(list);
+    }
   }
   return out;
 }
