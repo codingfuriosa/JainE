@@ -1293,3 +1293,36 @@ tr:hover .rcpt-ref .rcpt-view,.rcpt-ref .rcpt-view:focus-visible{opacity:1}
   opacity:.11;pointer-events:none;transition:left .22s ease;
 }
 @media(max-width:1024px){.cust-tab-bg{left:0}}
+
+/* ---------- Customer Portal Admin > Photos & Videos ----------
+   Used mostly by site staff on a phone at the site, so the phone layout is the primary one:
+   one card per column, full-width controls, 16px inputs (smaller makes iOS zoom on focus), and
+   the "Existing uploads" table reflowed into thumbnail rows instead of a sideways-scrolling table. */
+.cpa-media-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.cpa-media-card{min-width:0}
+.cpa-media-actions{margin-top:12px}
+.cpa-media-list{margin-top:14px}
+.cpa-file{position:relative;display:flex!important;align-items:center;gap:10px;margin:0!important;padding:12px 14px;border:1.5px dashed var(--line);border-radius:10px;background:#fafbfd;cursor:pointer;font-weight:500!important;color:var(--slate)!important;font-size:13.5px!important;min-width:0}
+.cpa-file i{font-size:18px;color:var(--brand);flex:none}
+.cpa-file .cpa-file-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cpa-file input{position:absolute!important;inset:0;opacity:0;width:100%!important;height:100%;cursor:pointer;padding:0!important;border:0!important}
+.cpa-file.has-files{border-style:solid;border-color:var(--brand);background:rgba(29,78,216,.05);color:var(--ink)!important}
+@media(max-width:900px){.cpa-media-grid{grid-template-columns:1fr}}
+@media(max-width:760px){
+  .cpa-media-card input:not([type=file]),.cpa-media-card select{font-size:16px;min-height:46px}
+  .cpa-file{padding:16px 14px;font-size:15px!important}
+  .cpa-media-actions .btn{width:100%;justify-content:center;min-height:48px;font-size:15px}
+  .cpa-media-list .qc-table-card{border-radius:10px}
+  .cpa-media-list .card table,.cpa-media-list table,.cpa-media-list tbody{display:block;width:100%;min-width:0}
+  .cpa-media-list .qc-table-card>div{overflow:visible!important}
+  .cpa-media-list thead{display:none}
+  .cpa-media-list tr{display:grid;grid-template-columns:64px minmax(0,1fr) auto;grid-template-areas:"thumb date del" "thumb cap del";column-gap:12px;row-gap:2px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .cpa-media-list tr:last-child{border-bottom:0}
+  .cpa-media-list td{display:block;padding:0!important;border:0!important;background:none!important;min-width:0}
+  .cpa-media-list td:nth-child(1){grid-area:thumb}
+  .cpa-media-list td:nth-child(2){grid-area:date;font-size:12px;color:var(--slate)}
+  .cpa-media-list td:nth-child(3){grid-area:cap;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cpa-media-list td:nth-child(4){grid-area:del}
+  .cpa-media-list td:nth-child(4) .btn{min-height:40px;padding:0 14px}
+  .cpa-media-list td:nth-child(1)>img,.cpa-media-list td:nth-child(1)>div{width:64px!important;height:64px!important;border-radius:8px!important}
+}

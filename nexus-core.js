@@ -16475,6 +16475,19 @@ function cpaUnitOptionsGrouped(units){
     return `<optgroup label="${esc(projName)} » ${esc(tower)}">${opts}</optgroup>`;
   }).join('');
 }
+// A full-width, tappable picker instead of the browser's small native file button - on a phone
+// that button is a thumb-sized target with no feedback. The real <input> stays inside the label,
+// so every upload function keeps reading $(id).files unchanged.
+function cpaMediaFilePicker(id){
+  return `<label class="cpa-file" for="${id}"><i class="fa-solid fa-camera"></i><span class="cpa-file-txt">Tap to add photos / videos</span>`+
+    `<input type="file" id="${id}" accept="image/*,video/*" multiple onchange="cpaMediaFileChosen(this)"></label>`;
+}
+window.cpaMediaFileChosen=function(el){
+  const lab=el&&el.closest('.cpa-file');if(!lab)return;
+  const n=el.files?el.files.length:0;
+  lab.classList.toggle('has-files',n>0);
+  lab.querySelector('.cpa-file-txt').textContent=n?(n===1?el.files[0].name:n+' files selected'):'Tap to add photos / videos';
+};
 async function cpaRenderPhotos(host){
   const [projects,units]=await Promise.all([cpaProjects(),cpaUnits()]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
@@ -16483,40 +16496,40 @@ async function cpaRenderPhotos(host){
   const firstProjectId=projects[0]?projects[0].id:null;
   const towerOpts=firstProjectId?cpaTowersForProject(units,firstProjectId).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join(''):'';
   const floorOpts=firstProjectId?cpaFloorsForProject(units,firstProjectId).map(f=>`<option value="${esc(f)}">Floor ${esc(f)}</option>`).join(''):'';
-  host.innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-    <div class="card card-pad frm"><div class="sec-title">Project-wide construction photos/videos</div>
+  host.innerHTML=`<div class="cpa-media-grid">
+    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Project-wide construction photos/videos</div>
     <label>Project</label><select id="cpaPhProject" onchange="cpaRenderProjectPhotoList()">${projOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaPhDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaPhCaption">
-    <label>Photos / videos</label><input type="file" id="cpaPhFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaPhList" style="margin-top:14px"></div>
+    <label>Photos / videos</label>${cpaMediaFilePicker('cpaPhFiles')}
+    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaPhBtn" onclick="cpaUploadProjectPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaPhList" class="cpa-media-list"></div>
     </div>
-    <div class="card card-pad frm"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
+    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Tower / Block-wise construction photos/videos</div>
     <label>Project</label><select id="cpaTwProject" onchange="cpaOnTwProjectChange()">${projOpts}</select>
     <label>Tower / Block</label><select id="cpaTwTower" onchange="cpaRenderTowerPhotoList()">${towerOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaTwDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaTwCaption">
-    <label>Photos / videos</label><input type="file" id="cpaTwFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaTwList" style="margin-top:14px"></div>
+    <label>Photos / videos</label>${cpaMediaFilePicker('cpaTwFiles')}
+    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaTwBtn" onclick="cpaUploadTowerPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaTwList" class="cpa-media-list"></div>
     </div>
-    <div class="card card-pad frm"><div class="sec-title">Floor-wise construction photos/videos</div>
+    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Floor-wise construction photos/videos</div>
     <label>Project</label><select id="cpaFlProject" onchange="cpaOnFlProjectChange()">${projOpts}</select>
     <label>Floor</label><select id="cpaFlFloor" onchange="cpaRenderFloorPhotoList()">${floorOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaFlDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaFlCaption">
-    <label>Photos / videos</label><input type="file" id="cpaFlFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaFlList" style="margin-top:14px"></div>
+    <label>Photos / videos</label>${cpaMediaFilePicker('cpaFlFiles')}
+    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaFlBtn" onclick="cpaUploadFloorPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaFlList" class="cpa-media-list"></div>
     </div>
-    <div class="card card-pad frm"><div class="sec-title">Per-flat construction photos/videos</div>
+    <div class="card card-pad frm cpa-media-card"><div class="sec-title">Per-flat construction photos/videos</div>
     <label>Unit</label><select id="cpaUhUnit" onchange="cpaRenderUnitPhotoList()">${unitOpts}</select>
     <label>Date shown to customers</label><input type="date" id="cpaUhDate" value="${today}">
     <label>Caption (optional)</label><input id="cpaUhCaption">
-    <label>Photos / videos</label><input type="file" id="cpaUhFiles" accept="image/*,video/*" multiple>
-    <div style="margin-top:12px"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
-    <div id="cpaUhList" style="margin-top:14px"></div>
+    <label>Photos / videos</label>${cpaMediaFilePicker('cpaUhFiles')}
+    <div class="cpa-media-actions"><button class="btn btn-primary" id="cpaUhBtn" onclick="cpaUploadUnitPhotos()"><i class="fa-solid fa-upload"></i> Upload</button></div>
+    <div id="cpaUhList" class="cpa-media-list"></div>
     </div></div>`;
   cpaRenderProjectPhotoList();cpaRenderTowerPhotoList();cpaRenderFloorPhotoList();cpaRenderUnitPhotoList();
 }
@@ -16604,7 +16617,7 @@ window.cpaUploadProjectPhotos=async function(){
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
   if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaPhFiles').value='';
+  $('cpaPhFiles').value='';cpaMediaFileChosen($('cpaPhFiles'));
   cpaRenderProjectPhotoList();
 };
 window.cpaUploadTowerPhotos=async function(){
@@ -16621,7 +16634,7 @@ window.cpaUploadTowerPhotos=async function(){
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
   if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaTwFiles').value='';
+  $('cpaTwFiles').value='';cpaMediaFileChosen($('cpaTwFiles'));
   cpaRenderTowerPhotoList();
 };
 window.cpaUploadFloorPhotos=async function(){
@@ -16638,7 +16651,7 @@ window.cpaUploadFloorPhotos=async function(){
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
   if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaFlFiles').value='';
+  $('cpaFlFiles').value='';cpaMediaFileChosen($('cpaFlFiles'));
   cpaRenderFloorPhotoList();
 };
 window.cpaUploadUnitPhotos=async function(){
@@ -16654,7 +16667,7 @@ window.cpaUploadUnitPhotos=async function(){
   }
   btn.disabled=false;btn.innerHTML='<i class="fa-solid fa-upload"></i> Upload';
   if(ok)toast(ok+' file(s) uploaded','ok');
-  $('cpaUhFiles').value='';
+  $('cpaUhFiles').value='';cpaMediaFileChosen($('cpaUhFiles'));
   cpaRenderUnitPhotoList();
 };
 
