@@ -18695,9 +18695,14 @@ function xlsxMergedLabel(ws,rows,r,c){
   for(const m of merges){ if(r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c){ const a=rows[m.s.r]&&rows[m.s.r][m.s.c]; return a!=null?a:null; } }
   return direct;
 }
+// A Date cell is read off its LOCAL calendar day, nudged half a minute forward first - never via
+// toISOString(). The reader builds a cell's Date at local midnight minus a few seconds, so in India
+// the UTC string is the previous day: every invoice, receipt and transfer the Gmail queue imported
+// was landing one day early (Farvision 14 Jul, portal 13 Jul). Same trap as misCellDate above.
 function xlsxExcelDate(v){
   if(v==null||v==='') return null;
-  if(v instanceof Date) return v.toISOString().slice(0,10);
+  if(v instanceof Date){ if(isNaN(v)) return null; const t=new Date(v.getTime()+30000);
+    return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); }
   if(typeof v==='number'){ const d=window.XLSX&&XLSX.SSF&&XLSX.SSF.parse_date_code(v); if(d) return d.y+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0'); }
   if(typeof v==='string'){ const d=new Date(v); if(!isNaN(d)) return d.toISOString().slice(0,10); }
   return null;
@@ -18808,13 +18813,18 @@ function cpaParseReceiptReversal(wb){
     narration:get('Narration'),bankDescription:get('Bank Description'),reason:get('Reason'),
   }));
 }
+// Farvision's Booking Register Summary names these columns "Booking Status", "Unit" and "Document
+// Date". This used to read "Status", "Unit Code" and "Booking Date", which the report does not have,
+// so every row came back with no status and a booking cancelled or transferred in Farvision (Arup
+// Bhawal's D/8G -> D/8H, 26.09.2026) stayed live in the portal. "Booking Status" is now required, so
+// a renamed column stops the import instead of quietly reading nothing.
 function cpaParseBookingRegister(wb){
-  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit']).map(get=>({
+  return cpaParseFlatSheet(wb,'Booking Id',['Booking Id','Business Unit','Booking Status']).map(get=>({
     businessUnit:get('Business Unit'),bookingId:get('Booking Id'),
     bookingNo:get('Booking No')!=null?String(get('Booking No')):null,
-    customerName:get('Customer Name'),status:get('Status'),
-    unitCode:get('Unit Code'),tower:get('Level3'),
-    bookingDate:xlsxExcelDate(get('Booking Date')),
+    customerName:get('Customer Name'),status:String(get('Booking Status')||'').trim()||null,
+    unitCode:get('Unit')!=null?String(get('Unit')):null,tower:get('Level3'),
+    bookingDate:xlsxExcelDate(get('Document Date')),
   }));
 }
 // Farvision's PTC (Payment To Customer) register - booking transfers and refunds. Filed under the
@@ -18915,7 +18925,8 @@ window.cpaQueueImport=async function(queueId){
     const {data:blob,error:dlErr}=await sb.storage.from('farvision-imports').download(q.storage_path);
     if(dlErr||!blob)throw new Error(dlErr?.message||'Download failed');
     const buf=await blob.arrayBuffer();
-    const wb=XL.read(new Uint8Array(buf),{cellDates:true});
+    // Serials, not Dates - the same as a manual upload, and read to the exact day by xlsxExcelDate.
+    const wb=XL.read(new Uint8Array(buf),{type:'array'});
     // Detect type
     const {rows}=xlsxSheetRows(wb);
     let type=null;
@@ -19339,10 +19350,16 @@ async function cpaImportConfirmXlsx(st){
       if(error)throw error;
     }
   }else if(st.type==='booking_register'){
+    // Only the two moves this report actually knows about: Cancel cancels, and Active brings back a
+    // unit wrongly left cancelled. 'registered' / 'possession' are set by staff and are not this
+    // report's to overwrite, and a row with no readable status changes nothing.
     for(const m of st.matched){
       const r=m.rec;
-      const newStatus=r.status==='Cancel'?'cancelled':'booked';
-      await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+      const newStatus=r.status==='Cancel'?'cancelled'
+        :(r.status==='Active'&&m.unit.status==='cancelled')?'booked':null;
+      if(!newStatus||newStatus===m.unit.status) continue;
+      const {error}=await sb.schema('cust').from('units').update({status:newStatus,updated_at:new Date().toISOString()}).eq('id',m.unit.id);
+      if(error)throw error;
     }
   }else if(st.type==='ptc_transfer'){
     // ptc_transfers_doc_uq is a PARTIAL unique index (WHERE deleted_at is null) - same reason
