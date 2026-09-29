@@ -2565,7 +2565,19 @@
     pageSize = pageSize || 1000;
     const out=[];
     for(let from=0;;from+=pageSize){
-      const {data,error}=await build().range(from, from+pageSize-1);
+      // A page can fail on a transient blip - a dropped connection, a momentary auth hiccup - and
+      // giving up on the first error used to return whatever had already loaded as if it were
+      // everything, with no error shown anywhere: a fully-progressed bill's tracker row rendered
+      // as the blank "not yet" dot over every step, because ONE page out of several silently
+      // failed to load. Three attempts with a short, growing pause give a blip a real chance to
+      // clear before this falls back to the old behaviour of just stopping where it is.
+      let data=null, error=null;
+      for(let attempt=0; attempt<3; attempt++){
+        const r=await build().range(from, from+pageSize-1);
+        data=r.data; error=r.error;
+        if(!error) break;
+        if(attempt<2) await new Promise(function(res){ setTimeout(res, 500*(attempt+1)); });
+      }
       if(error||!data) break;
       out.push.apply(out,data);
       if(data.length<pageSize) break;   // a short page is the last page
@@ -8003,10 +8015,11 @@
     } else if(amAssignee && caseActive){
       /* Send back is on offer at any point the step is yours - on arrival, and also after you have
          received it, because a problem is as often spotted while working through something as at
-         first glance. It goes to whoever raised the instance rather than one step back: they are the
-         only person who can actually correct it. Not styled as a destructive action any more, since
-         nothing is destroyed - it is a return. */
-      const rejectBtn='<button class="ac-btn" title="Send the whole '+esc2(wfNounOf(flow).lc)+' back to whoever raised it" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
+         first glance. It goes to the PERSON BEFORE YOU on this instance's route - or all the way to
+         reject_to_seq where a flow sets one, as Invoice Processing does. The confirmation names
+         whoever that turns out to be before anything happens. Not styled as a destructive action,
+         since nothing is destroyed - it is a return. */
+      const rejectBtn='<button class="ac-btn" title="Send this '+esc2(wfNounOf(flow).lc)+' back to the person before you to correct" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
@@ -8356,30 +8369,58 @@
      instance (Reimbursement), that reason is the only thing the claimant gets to work from — the
      claim itself is deleted — so it is required there, and it is emailed to them along with what
      they submitted and a note that a corrected one has to be raised. */
+  /* Where "Send back" actually sends it, mirroring acc.wf_reject exactly: a flow with
+     reject_to_seq set jumps all the way to that step (Invoice Processing sends it to the front);
+     otherwise it is ONE POSITION BACK along this instance's own route, which is not the same as
+     "the step with the next lowest number" once a flow branches. null means there is nothing
+     before it, which ends the instance. */
+  function wfRejectTargetSeq(mySeq, rejectTo, routeSeqs, steps){
+    if(mySeq==null) return null;
+    if(rejectTo!=null && mySeq>rejectTo) return rejectTo;
+    const route=(Array.isArray(routeSeqs)&&routeSeqs.length)?routeSeqs:null;
+    if(route){
+      const pos=route.indexOf(mySeq);
+      if(pos>0) return route[pos-1];
+      if(pos===0) return null;
+    }
+    let best=null;
+    (steps||[]).forEach(function(s){ if(s.seq<mySeq && (best==null||s.seq>best)) best=s.seq; });
+    return best;
+  }
   window.wfRejectStart=async function(fcsId, caseId){
-    let noun='instance', wantsReason=false, isFirst=false, raisedBy='';
+    let noun='instance', wantsReason=false, raisedBy='', toNames='', endsInstance=false;
     try{
       const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
       const cid=(mine&&mine.case_id)||caseId;
       if(cid){
-        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by').eq('id',cid).maybeSingle();
+        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by,route_seqs').eq('id',cid).maybeSingle();
         raisedBy=(c&&c.created_by)||'';
+        let rejectTo=null;
         if(c&&c.flow_id){
-          const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
+          const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun,reject_to_seq').eq('id',c.flow_id).maybeSingle();
           wantsReason=!!(f&&f.reject_deletes_instance);
           noun=(f&&f.instance_noun)||'instance';
+          rejectTo=(f&&f.reject_to_seq!=null)?f.reject_to_seq:null;
         }
-        // nothing sits behind the first step, so rejecting it ends the instance in ANY workflow
-        const {data:sib}=await ACC().from('flow_case_steps').select('seq').eq('case_id',cid);
-        if(mine&&Array.isArray(sib)) isFirst=!sib.some(function(x){ return x.seq<mine.seq; });
+        const {data:sib}=await ACC().from('flow_case_steps').select('seq,person,candidates').eq('case_id',cid);
+        const target=wfRejectTargetSeq(mine&&mine.seq, rejectTo, (c&&c.route_seqs)||null, sib||[]);
+        if(target==null) endsInstance=true;
+        else{
+          const st=(sib||[]).find(function(x){ return x.seq===target; });
+          const list=(st&&Array.isArray(st.candidates)&&st.candidates.length)?st.candidates:((st&&st.person)?[st.person]:[]);
+          toNames=list.map(function(e){ return wfNm(e)||e; }).join(' or ');
+        }
       }
     }catch(e){}
-    /* Every rejection now goes the same way: the whole thing returns to whoever raised it, every
-       task on it stops, and it only moves again once they have corrected it. Nothing is deleted, so
-       there is no longer anything to warn about - just a plain statement of what happens next. */
-    const who=raisedBy?wfNm(raisedBy):('whoever raised this '+noun);
-    const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
-      +' goes back to <b>'+esc2(who)+'</b> to correct. It stops here until they have — nobody else can act on it in the meantime.</span></div>';
+    /* NAME THE PERSON IT IS ACTUALLY GOING TO. This used to say it went back to whoever raised the
+       instance, which was never what happened — and now that it goes to the previous step's owner,
+       saying "the raiser" would be wrong in a way that matters: the point of the sentence is to
+       tell you who is about to be interrupted. */
+    const warn = endsInstance
+      ? ('<div class="wf-rej-note"><i class="fa-solid fa-triangle-exclamation"></i> <span>Nothing comes before this step, so sending it back <b>ends this '+esc2(noun)
+         +'</b>. '+esc2(raisedBy?wfNm(raisedBy):'Whoever raised it')+' is told, and can raise a new one if it still needs doing.</span></div>')
+      : ('<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
+         +' goes back to <b>'+esc2(toNames||'the previous step')+'</b> to correct. Everything after their step is cleared, and it only moves forward again once they send it on.</span></div>');
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
