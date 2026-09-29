@@ -17689,7 +17689,7 @@ function custReceiptDocHtml(r,items,unit,contact,forPrint){
       '<tfoot><tr><td colspan="7">Total Receipt Amount</td><td class="amt">'+custInr(total)+'</td></tr>'+
       '<tr><td colspan="8" class="rcpt-words">Amount in Words : '+esc(custAmountInWords(total))+'</td></tr></tfoot>'+
       '</table></div>'+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
     '</div>';
 }
 // Styles are shared by the on-screen modal and the printable window.
@@ -17720,7 +17720,6 @@ const CUST_RECEIPT_CSS=
   '.rcpt-terms p{margin:0 0 6px;text-align:justify}'+
   '.rcpt-terms ul{margin:0 0 6px;padding-left:16px}.rcpt-terms li{margin-bottom:3px}'+
   '.rcpt-sign{margin-top:26px;text-align:right;font-weight:700;font-size:12px}'+
-  '.rcpt-sign span{display:block;margin-top:26px;font-weight:600;color:#475569}'+
   // On a phone the two header columns cannot sit side by side without clipping the right one.
   '@media(max-width:640px){.rcpt-grid{grid-template-columns:1fr;gap:12px}'+
   '.rcpt-f span{min-width:82px;flex:0 0 82px}.rcpt-title{font-size:13px}}';
@@ -18024,7 +18023,7 @@ function custInvoiceDocHtml(ctx,fmt,forPrint){
       '<tbody>'+(rowsHtml||'<tr><td colspan="6" style="text-align:center;color:#64748b">No charge lines recorded.</td></tr>')+'</tbody>'+
       '<tfoot>'+foot+'</tfoot></table></div>'+
       tail+
-      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'<span>Authorized Signatory</span></div>'+
+      '<div class="rcpt-sign">For, '+esc(CUST_RECEIPT_ISSUER.name)+'</div>'+
       '<div class="rcpt-addr" style="margin-top:14px">PAN NO : '+esc(CUST_RECEIPT_ISSUER.pan)+' &nbsp;·&nbsp; GSTIN : '+esc(CUST_RECEIPT_ISSUER.gstin)+'</div>'+
       '<div class="rcpt-addr">This is a system generated document. No signature required.</div>'+
     '</div>';
