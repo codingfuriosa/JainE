@@ -21982,24 +21982,27 @@ async function custTabProgress(unit){
       +(total?'<span class="cpg-chip"><i class="fa-solid fa-images"></i>'+[pics?pics+' photo'+(pics===1?'':'s'):'',vids?vids+' video'+(vids===1?'':'s'):''].filter(Boolean).join(' · ')+'</span>':'')
     +'</div></div>';
 
-  out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-building"></i></div>'
+  // A section with nothing in it is not shown at all - no "No photos yet" boxes. Only when there is
+  // nothing anywhere does the customer get one short line, so the tab is never blank.
+  if(blockIdx.length) out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-building"></i></div>'
     +'<div><div class="cpg-st">Your block'+(unit.tower?' — '+esc(unit.tower):'')+'</div><div class="cpg-ss">How your building is coming along</div></div>'
-    +(blockIdx.length?'<span class="cpg-count">'+upd(blockIdx.length)+'</span>':'')+'</div>'
-    +(blockIdx.length?custPgByDay(blockIdx,false):custPgEmpty('fa-building','No block updates yet','Our site team adds photos of your building as work progresses.'))
-    +'</div>';
+    +'<span class="cpg-count">'+upd(blockIdx.length)+'</span></div>'
+    +custPgByDay(blockIdx,false)+'</div>';
 
-  const counts={}; CUST_PG.flat.forEach(i=>{const k=CUST_PG.items[i].roomKey;counts[k]=(counts[k]||0)+1;});
-  const rooms=CUST_PG_AREAS.filter(a=>counts[a[0]]);
-  out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-door-open"></i></div>'
-    +'<div><div class="cpg-st">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div><div class="cpg-ss">Room by room, as it is built</div></div>'
-    +(CUST_PG.flat.length?'<span class="cpg-count">'+upd(CUST_PG.flat.length)+'</span>':'')+'</div>';
   if(CUST_PG.flat.length){
+    const counts={}; CUST_PG.flat.forEach(i=>{const k=CUST_PG.items[i].roomKey;counts[k]=(counts[k]||0)+1;});
+    const rooms=CUST_PG_AREAS.filter(a=>counts[a[0]]);
+    out+='<div class="cpg-sec"><div class="cpg-sh"><div class="cpg-ic"><i class="fa-solid fa-door-open"></i></div>'
+      +'<div><div class="cpg-st">Your flat'+(unit.unit_code?' — '+esc(unit.unit_code):'')+'</div><div class="cpg-ss">Room by room, as it is built</div></div>'
+      +'<span class="cpg-count">'+upd(CUST_PG.flat.length)+'</span></div>';
     // Only rooms that have something get a button, and the row only appears when there is a choice.
     if(rooms.length>1) out+='<div class="cpg-rooms"><button type="button" class="cpg-room on" data-k="all" onclick="custPgRoom(\'all\')">All <span class="n">'+CUST_PG.flat.length+'</span></button>'
       +rooms.map(a=>'<button type="button" class="cpg-room" data-k="'+a[0]+'" onclick="custPgRoom(\''+a[0]+'\')"><i class="fa-solid '+a[2]+'"></i>'+esc(a[1])+' <span class="n">'+counts[a[0]]+'</span></button>').join('')+'</div>';
-    out+='<div id="cpgFlatBody">'+custPgFlatBody()+'</div>';
-  }else out+=custPgEmpty('fa-door-open','No photos of your flat yet','You will see your common area, bathroom and kitchen here as each one is built.');
-  out+='</div></div>';
+    out+='<div id="cpgFlatBody">'+custPgFlatBody()+'</div></div>';
+  }
+
+  if(!total) out+='<div class="cpg-sec">'+custPgEmpty('fa-helmet-safety','Photos are on their way','Our site team will share photos of your block and your flat here as construction progresses.')+'</div>';
+  out+='</div>';
   return out;
 }
 
