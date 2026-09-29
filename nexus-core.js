@@ -19094,6 +19094,12 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
     matched.push({rec,project,unit});
   });
   CPA_IMPORT_STATE={type,fileName:file.name,parsedCount:parsed.length,matched,unmatched,outOfScope};
+  // Shown before Confirm: flats whose customer the import will deliberately NOT change.
+  let sdNote='';
+  if(type==='sales_details'){
+    const sdCustomers=await cpaCustomers(true);
+    sdNote=cpaSdFlagNote(matched.map(m=>cpaSdCustomerGuard(m.rec,units,sdCustomers).flag).filter(Boolean));
+  }
   const sampleCols=type==='sales_details'?['Booking No','Customer','Unit','Tower','Project','Cost items']
     :type==='outstanding'?['Booking No','Customer','Unit','Net Outstanding','On Account']
     :type==='invoice_register'?['Doc No','Date','Booking No','Customer','Unit','Schedule','Amount']
@@ -19111,6 +19117,7 @@ async function cpaImportPreviewXlsx(type,file,preloadedWb){
   $('cpaImpPreview').innerHTML=`<div class="card card-pad">
     <div class="sec-title" style="margin:0 0 10px">Preview — ${parsed.length} row(s), ${matched.length} ready to import${unmatched.length?`, <span style="color:#c83232">${unmatched.length} unmatched</span>`:''}${outOfScope.length?`, ${outOfScope.length} for a project not yet in the portal`:''}</div>
     ${unmatched.length?`<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">Could not resolve a unit for: ${esc(unmatched.slice(0,15).map(r=>r.bookingNo||r.unitCode).join(', '))}${unmatched.length>15?' …':''} — run a Sales Details import for these first.</div>`:''}
+    ${sdNote}
     ${matched.length?mTable(sampleCols,sampleRows):''}
     <div style="margin-top:12px;display:flex;gap:10px"><button class="btn" onclick="$('cpaImpPreview').innerHTML=''">Cancel</button>
     ${matched.length?`<button class="btn btn-primary" onclick="cpaImportConfirm(this)"><i class="fa-solid fa-check"></i> Confirm import (${matched.length} row${matched.length>1?'s':''})</button>`:''}
@@ -19199,6 +19206,33 @@ async function cpaCurrentByKey(table,keyCol,matched){
   }
   return map;
 }
+/* Who a Sales Details row's flat should belong to, without letting a routine re-import move an
+   existing flat away from the customer who already logs in to it.
+     * Same booking, email left blank in Farvision -> keep the flat's current customer. (It used to be
+       set to nobody, and the customer lost the flat from their portal.)
+     * Same booking, email different from the current customer's -> keep the current customer and
+       flag it. A new email on the SAME booking is an edit in Farvision, not a new buyer - moving the
+       flat would create a second customer and leave the real one's login empty. Staff decide.
+     * A different booking on the flat (a rebooking - the old buyer's row matched by tower/unit) or a
+       brand-new flat -> the file's email decides, as before: that is a genuinely different buyer.
+   Returns {keep: customerId|null, flag: null|{bookingNo, name, current, file}}; keep=null means
+   "resolve by the file's email". */
+function cpaSdCustomerGuard(r,units,customers){
+  const byBooking=r.bookingNo?units.find(u=>u.booking_no===r.bookingNo):null;
+  if(!byBooking||!byBooking.customer_id) return {keep:null,flag:null};
+  const norm=s=>String(s||'').trim().toLowerCase();
+  if(!norm(r.email)) return {keep:byBooking.customer_id,flag:null};
+  const cur=customers.find(c=>c.id===byBooking.customer_id);
+  if(!cur||norm(cur.email)===norm(r.email)) return {keep:null,flag:null};
+  return {keep:byBooking.customer_id,flag:{bookingNo:r.bookingNo,name:r.customerName,unit:byBooking.unit_code,current:cur.email,file:r.email}};
+}
+function cpaSdFlagNote(flags){
+  if(!flags.length) return '';
+  return '<div style="font-size:12.5px;color:#92400e;background:#fffbeb;border:1px solid #f0dfa8;border-radius:8px;padding:8px 10px;margin-bottom:10px">'
+    +'<b>Email changed in Farvision - please check.</b> These flats were kept with their current customer so nobody loses access: '
+    +flags.map(f=>esc(f.name)+' ('+esc(f.unit||f.bookingNo)+'): portal '+esc(f.current)+' → Farvision '+esc(f.file)).join('; ')
+    +'. If the new email is right, update it on the customer in Customer Portal Admin.</div>';
+}
 async function cpaImportConfirmXlsx(st){
   // No project_id: an .xlsx report resolves a project per row from its own Business Unit column, so
   // one file can span several projects at once. project_names records the set it actually touched.
@@ -19212,12 +19246,16 @@ async function cpaImportConfirmXlsx(st){
   const batchId=batch.id;
 
   if(st.type==='sales_details'){
+    const sdCustomers=await cpaCustomers(true), sdFlags=[];
     for(const m of st.matched){
       const r=m.rec;
       // Customers are matched by email — the only field guaranteed to identify one person across
       // bookings; a row with no email can't be created here (it also couldn't get a portal login).
-      let customerId=null;
-      if(r.email){
+      // cpaSdCustomerGuard first: an existing flat never loses its customer to a blank or edited email.
+      const guard=cpaSdCustomerGuard(r,await cpaUnits(),sdCustomers);
+      if(guard.flag) sdFlags.push(guard.flag);
+      let customerId=guard.keep;
+      if(customerId==null&&r.email){
         const {data:existing}=await sb.schema('cust').from('customers').select('id').ilike('email',r.email).is('deleted_at',null).maybeSingle();
         if(existing) customerId=existing.id;
         else{
@@ -19249,6 +19287,13 @@ async function cpaImportConfirmXlsx(st){
         contact_name:r.customerName,contact_phone:r.mobile,contact_email:r.email,contact_address:r.address,
         booking_date:r.bookingDate,agreement_date:r.agreementDate,is_current:true,import_batch_id:batchId});
       if(ceErr)throw ceErr;
+    }
+    // The queue import has no preview screen, so the warning has to reach staff here as well.
+    st.sdFlags=sdFlags;
+    if(sdFlags.length){
+      console.warn('Sales Details: email changed in Farvision, flat kept with its current customer',sdFlags);
+      toast(sdFlags.length+' flat'+(sdFlags.length===1?'':'s')+' kept with the current customer - email changed in Farvision ('
+        +sdFlags.map(f=>f.name+' '+(f.unit||f.bookingNo)).join(', ')+'). Please check.','warn');
     }
   }else if(st.type==='outstanding'){
     for(const m of st.matched){
