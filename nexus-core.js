@@ -9829,6 +9829,13 @@ const USB_COL4={
   'organic.overview.view_engagement_overview_by_type_and_page':        {header:null, keys:[], hideDetails:true},
   'campaigns.overview.drill_into_a_project_s_campaigns':               {header:null, keys:[], hideDetails:true},
   'postsales.adhoc.upload_document_for_adhoc_replacement':             {header:null, keys:[]},
+  /* MIS carries its own date in Details and how complete the day's set was in the column, which
+     is the thing worth knowing about a run: a report built off eight files is not the same
+     report as one built off twenty-four. */
+  'postsales.mis.build_mis_report_from_farvision_files':               {header:'Business units', keys:['status']},
+  'postsales.mis.preview_an_mis_report':                               {header:null, keys:[], hideDetails:true},
+  'postsales.mis.download_mis_report_as_excel':                        {header:null, keys:[], hideDetails:true},
+  'postsales.mis.download_mis_report_as_pdf':                          {header:null, keys:[], hideDetails:true},
   'postsales.adhoc.preview_a_document':                                {header:null, keys:[], hideDetails:true},
   'postsales.adhoc.download_all_documents_as_zip':                     {header:null, keys:[], hideDetails:true},
   'scaling.priorities_rocks.view_quarterly_rocks_progress':            {header:null, keys:[], hideDetails:true},
@@ -10124,13 +10131,845 @@ async function psaFetchAll(){
     });
   }catch(e){ return []; }
 }
+/* ============================== POST SALES — MIS REPORT ==============================
+   Outstanding against Collection, project by project, kept as a dated record.
+
+   HOW THE FIGURES GET HERE. FarVision is on the office network and JAIN-E is not, so nothing
+   here reaches into the ERP. What it does is take the files the morning extraction already
+   produces - one Receipt Register Summary and one Customer Outstanding Summary per business
+   unit - read them in the browser, and apply the same three rules that were being applied by
+   hand in Excel:
+
+     Current / Previous month collection : Money Receipt Date falls in that month,
+                                           AND Unit Status is Active, AND Is Reversed is No.
+     Outstanding                         : Customer Status is Active AND Net Outstanding > 0.
+
+   Nothing is typed in. Every figure on the report is a sum the browser did off the ERP's own
+   file, and every one of them keeps the file it came from and the number of receipts behind
+   it, so a line can be questioned later without re-running the extraction.
+
+   THE ORDER OF THE ROWS IS FIXED and lives in postsales.mis_bus, because the report is read
+   against last week's - a row that moved would make two dates uncomparable. A business unit
+   with no file that day is not dropped, it is shown blank, which is the honest answer.
+
+   The date comes out of the files themselves (the "To" of the receipt range, the "As On" of
+   the outstanding), not off the clock, so a set extracted yesterday and loaded today is filed
+   under the day it actually describes. */
+
+const MIS = { bus: [], reports: [], staged: null, busy: false };
+
+function misIN(n, dash) {
+  if (n === null || n === undefined || n === '') return dash ? '—' : '0';
+  n = Math.round(Number(n) || 0);
+  if (!n) return dash ? '—' : '0';
+  const neg = n < 0;
+  let s = String(Math.abs(n));
+  const last3 = s.slice(-3);
+  let rest = s.slice(0, -3);
+  const parts = [];
+  while (rest.length > 2) { parts.push(rest.slice(-2)); rest = rest.slice(0, -2); }
+  if (rest) parts.push(rest);
+  parts.reverse();
+  return (neg ? '-' : '') + (parts.length ? parts.join(',') + ',' + last3 : last3);
+}
+const MIS_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function misMonthLabel(y, m /* 1-12 */) { return MIS_MON[m - 1] + "'" + String(y).slice(2); }
+// `instanceof Date` is not asked here. A Date that arrived from another realm - the sheet
+// reader's, a worker's - is still a Date in every way that matters, and it answers false.
+function misIsDate(v) { return Object.prototype.toString.call(v) === '[object Date]' && isFinite(v.getTime()); }
+function misDMY(d) {
+  const dt = misIsDate(d) ? d : new Date(d + 'T00:00:00');
+  return String(dt.getDate()).padStart(2, '0') + '.' + String(dt.getMonth() + 1).padStart(2, '0')
+       + '.' + dt.getFullYear();
+}
+function misISO(dt) {
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-'
+       + String(dt.getDate()).padStart(2, '0');
+}
+// The month before a given one, rolling the year back in January.
+function misPrevMonth(y, m) { return m > 1 ? { y: y, m: m - 1 } : { y: y - 1, m: 12 }; }
+
+/* Business unit names are compared with the punctuation taken out. The ERP writes
+   "DREAM DIAMOND." with a full stop and "DREAM ONE BLK 3 \ 4" with a backslash, and whether
+   those survive a download, a rename and a re-save is not something worth betting a match on. */
+function misNorm(s) {
+  return String(s || '').toUpperCase().replace(/[\\\/]/g, ' ')
+    .replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/* ── reading one FarVision file ────────────────────────────────────────────────────────── */
+
+function misSheetRows(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+}
+// The header is not on a fixed row: Receipt Register puts it on 11, Customer Outstanding on 12,
+// and a future report banner would move both. It is found by the column that must be there.
+function misHeaderRow(rows, anchor) {
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (typeof row[c] === 'string' && row[c].trim() === anchor) return r;
+    }
+  }
+  return -1;
+}
+function misIndex(row) {
+  const idx = {};
+  (row || []).forEach(function (h, i) { if (h != null) idx[String(h).trim()] = i; });
+  return idx;
+}
+function misBannerLine(rows, prefix) {
+  for (let r = 0; r < Math.min(rows.length, 12); r++) {
+    const v = (rows[r] || [])[0];
+    if (typeof v === 'string' && v.trim().toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+      return v.trim().slice(prefix.length).trim();
+    }
+  }
+  return '';
+}
+// d/m/yy or dd/mm/yyyy, the two spellings the banners use. Day first, always - these are
+// Indian ERP dates and "3/4" is the third of April.
+function misParseDMY(s) {
+  const m = String(s || '').match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{2,4})/);
+  if (!m) return null;
+  let y = +m[3];
+  if (y < 100) y += 2000;
+  const d = new Date(y, +m[2] - 1, +m[1]);
+  return isFinite(d.getTime()) ? d : null;
+}
+/* THE SHEET IS READ WITHOUT cellDates, AND THIS IS WHY.
+
+   Asking the reader for Date objects looks like the obvious thing and quietly moves money
+   between months. Excel serial 46266 is the 1st of September; the reader hands back
+   2026-08-31T18:29:50Z, which in Indian time is the 31st of August at 23:59:50 - ten seconds
+   short of midnight, because the serial-to-Date conversion loses a fraction. Read the month
+   off that and every receipt dated the 1st is counted in the month before. On the 28.09.2026
+   set that was 12.4 lakh landing in the wrong month across three projects, with the totals
+   still adding up, which is the worst kind of wrong.
+
+   The serial is an integer day count with no clock and no timezone in it. The reader's own
+   SSF.parse_date_code turns it into the year, month and day the cell actually shows. Nothing
+   to drift.
+
+   A Date is still accepted, because a file saved elsewhere can arrive with real ones, and it
+   is nudged half a minute forward first so the same ten-second deficit cannot bite. These are
+   date-only columns; nothing in them is a genuine timestamp thirty seconds before midnight. */
+function misCellDate(v) {
+  if (v == null) return null;
+  if (typeof v === 'number' && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
+    const p = XLSX.SSF.parse_date_code(v);
+    if (p && p.y) return new Date(p.y, p.m - 1, p.d);
+  }
+  if (misIsDate(v)) { const t = new Date(v.getTime() + 30000); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
+  return misParseDMY(v);
+}
+function misNum(v) {
+  if (v == null || v === '') return 0;
+  const n = Number(String(v).replace(/[,₹\s]/g, ''));
+  return isFinite(n) ? n : 0;
+}
+function misIsA(v, want) { return String(v == null ? '' : v).trim().toLowerCase() === want; }
+
+/* One Receipt Register Summary. Totals are worked out for whichever two months are asked for,
+   in a single pass, and the rows that were left out are counted rather than discarded - that
+   count is the difference between "this project collected nothing" and "the file was wrong". */
+function misReadCollection(wb, curr, prev) {
+  const rows = misSheetRows(wb);
+  const hr = misHeaderRow(rows, 'Money Receipt Date');
+  if (hr < 0) throw new Error('This does not look like a Receipt Register Summary — no "Money Receipt Date" column.');
+  const ix = misIndex(rows[hr]);
+  const cDate = ix['Money Receipt Date'], cAmt = ix['Amount'],
+        cUnit = ix['Unit Status'], cRev = ix['Is Reversed'];
+  if (cAmt == null) throw new Error('No "Amount" column in this Receipt Register Summary.');
+  const out = { curr: 0, prev: 0, nCurr: 0, nPrev: 0, excluded: 0, nRows: 0 };
+  for (let r = hr + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const d = misCellDate(row[cDate]);
+    if (!d) continue;
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    const isCurr = (y === curr.y && m === curr.m), isPrev = (y === prev.y && m === prev.m);
+    if (!isCurr && !isPrev) continue;
+    out.nRows++;
+    const keep = (cUnit == null || misIsA(row[cUnit], 'active'))
+              && (cRev == null || misIsA(row[cRev], 'no'));
+    if (!keep) { out.excluded++; continue; }
+    const amt = misNum(row[cAmt]);
+    if (isCurr) { out.curr += amt; out.nCurr++; } else { out.prev += amt; out.nPrev++; }
+  }
+  out.buName = misBannerLine(rows, 'Business Unit:');
+  out.range = misBannerLine(rows, 'Custom Date:');
+  out.asOn = misParseDMY((out.range.split(/\bTo\b/i)[1] || ''));
+  return out;
+}
+
+/* One Customer Outstanding Summary. Net Outstanding is what the report has always used, and
+   credit balances are left out with the cancelled bookings rather than netted off against
+   somebody else's dues - a project does not owe less because one customer paid ahead. */
+function misReadOutstanding(wb) {
+  const rows = misSheetRows(wb);
+  const hr = misHeaderRow(rows, 'Net Outstanding');
+  if (hr < 0) throw new Error('This does not look like a Customer Outstanding Summary — no "Net Outstanding" column.');
+  const ix = misIndex(rows[hr]);
+  const cNet = ix['Net Outstanding'], cSt = ix['Customer Status'];
+  const out = { total: 0, n: 0, excluded: 0, nRows: 0 };
+  for (let r = hr + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    if (row[cNet] == null || row[cNet] === '') continue;
+    const v = misNum(row[cNet]);
+    out.nRows++;
+    if ((cSt == null || misIsA(row[cSt], 'active')) && v > 0) { out.total += v; out.n++; }
+    else out.excluded++;
+  }
+  out.buName = misBannerLine(rows, 'Business Unit:');
+  const asOn = misBannerLine(rows, 'As On Date:');
+  out.asOn = misParseDMY(asOn);
+  return out;
+}
+
+function misKindOf(rows) {
+  const head = String((rows[0] || [])[0] || '').toLowerCase();
+  if (head.indexOf('receipt register') >= 0) return 'collection';
+  if (head.indexOf('customer outstanding') >= 0) return 'outstanding';
+  if (misHeaderRow(rows, 'Money Receipt Date') >= 0) return 'collection';
+  if (misHeaderRow(rows, 'Net Outstanding') >= 0) return 'outstanding';
+  return null;
+}
+
+/* ── loading and drawing the tab ───────────────────────────────────────────────────────── */
+
+let MIS_CSS_DONE = false;
+function misCss() {
+  if (MIS_CSS_DONE) return;
+  MIS_CSS_DONE = true;
+  const st = document.createElement('style');
+  st.textContent = `
+  .mis-hint{flex:1;font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:8px;min-width:200px}
+  .mis-tbl td,.mis-tbl th{white-space:nowrap}
+  .mis-num{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .mis-tot td{font-weight:700;background:#f8fafc;border-top:2px solid var(--line)}
+  .mis-blank{color:#94a3b8}
+  .mis-prevwrap{max-height:62vh;overflow:auto}
+  .mis-doc{border:1px solid var(--line);border-radius:10px;padding:18px 20px;background:#fff}
+  .mis-doc h4{margin:0 0 2px;font-size:15px}
+  .mis-doc .sub{font-size:12.5px;color:var(--slate);margin-bottom:14px}
+  .mis-doc table{width:100%;border-collapse:collapse;font-size:13px}
+  .mis-doc th{background:#7e22ce;color:#fff;font-size:11px;letter-spacing:.4px;text-transform:uppercase;
+    padding:9px 10px;text-align:left;vertical-align:middle}
+  .mis-doc td{padding:8px 10px;border-bottom:1px solid var(--line)}
+  .mis-stage{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:9px}
+  .mis-stage table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .mis-stage th{position:sticky;top:0;background:#f8fafc;padding:8px 10px;text-align:left;
+    font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--slate);
+    border-bottom:1px solid var(--line);z-index:1}
+  .mis-stage td{padding:7px 10px;border-bottom:1px solid var(--line)}
+  .mis-ok{color:#16a34a}.mis-miss{color:#94a3b8}
+  .mis-badfile{font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;
+    border-radius:8px;padding:9px 11px;margin-top:10px}
+  .mis-when{font-size:12px;color:var(--slate)}
+  `;
+  document.head.appendChild(st);
+}
+
+async function misLoadBus() {
+  const { data } = await sb.schema('postsales').from('mis_bus').select('*')
+    .eq('active', true).order('sort_order');
+  MIS.bus = data || [];
+}
+async function misLoadReports() {
+  const { data } = await sb.schema('postsales').from('mis_reports').select('*')
+    .order('report_date', { ascending: false }).limit(200);
+  MIS.reports = data || [];
+}
+
+function misRender() {
+  const host = $('misBody'); if (!host) return;
+  const latest = MIS.reports[0];
+  const kpis = mKpis([
+    ['Latest report', latest ? misDMY(latest.report_date) : '—',
+      latest ? (latest.bu_count + ' of ' + MIS.bus.length + ' business units') : 'nothing recorded yet'],
+    ['Outstanding', latest ? misIN(latest.total_outstanding) : '—',
+      latest ? ('as at ' + misDMY(latest.report_date)) : ''],
+    [latest ? ('Collection · ' + latest.curr_month_label) : 'Collection',
+      latest ? misIN(latest.total_curr) : '—',
+      latest ? (latest.prev_month_label + ': ' + misIN(latest.total_prev)) : ''],
+    ['Records', String(MIS.reports.length), MIS.reports.length === 1 ? 'report kept' : 'reports kept'],
+  ]);
+  const toolbar = '<div class="toolbar">'
+    + '<div class="mis-hint"><i class="fa-solid fa-file-invoice"></i> Drop the day’s Receipt Register and Customer Outstanding files and the report builds itself — Outstanding, this month’s collection and last month’s, per project.</div>'
+    + '<button class="btn btn-primary" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> New MIS Report</button>'
+    + '</div>';
+  const body = MIS.reports.length ? MIS.reports.map(function (r) {
+    return '<tr>'
+      + '<td><b>' + esc(misDMY(r.report_date)) + '</b>'
+        + (r.bu_count < MIS.bus.length
+            ? '<div class="mis-when" style="color:#b45309">' + (MIS.bus.length - r.bu_count) + ' business unit' + ((MIS.bus.length - r.bu_count) === 1 ? '' : 's') + ' had no file</div>'
+            : '')
+        + '</td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_outstanding)) + '</td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_curr)) + '<div class="mis-when">' + esc(r.curr_month_label) + '</div></td>'
+      + '<td class="mis-num">' + esc(misIN(r.total_prev)) + '<div class="mis-when">' + esc(r.prev_month_label) + '</div></td>'
+      + '<td>' + esc((r.created_by || '').split('@')[0] || '—')
+        + '<div class="mis-when">' + esc(fmtDate(r.created_at)) + '</div></td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn btn-sm btn-ghost" title="Preview" onclick="misPreview(' + r.id + ')"><i class="fa-solid fa-eye"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Download as Excel" onclick="misExportXlsx(' + r.id + ',this)"><i class="fa-solid fa-file-excel"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Download as PDF" onclick="misExportPdf(' + r.id + ',this)"><i class="fa-solid fa-file-pdf"></i></button>'
+        + '<button class="btn btn-sm btn-ghost" title="Delete this record" onclick="misDelete(' + r.id + ')"><i class="fa-solid fa-trash"></i></button>'
+      + '</td></tr>';
+  }).join('')
+  : '<tr><td colspan="6"><div class="empty"><i class="fa-regular fa-file-lines"></i><div>No MIS report recorded yet</div>'
+    + '<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="misNewModal()"><i class="fa-solid fa-plus"></i> Build the first one</button></div></td></tr>';
+  host.innerHTML = kpis + toolbar
+    + '<div class="card"><div style="overflow-x:auto"><table class="tbl mis-tbl"><thead><tr>'
+    + '<th>Report date</th><th class="mis-num">Outstanding</th><th class="mis-num">Current month</th>'
+    + '<th class="mis-num">Previous month</th><th>Made by</th><th></th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+}
+
+/* ── building a new one ────────────────────────────────────────────────────────────────── */
+
+window.misNewModal = function () {
+  MIS.staged = null;
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-file-invoice" style="color:#7e22ce"></i> New MIS Report</h3></div>'
+    + '<div class="modal-body">'
+      + '<div style="font-size:13px;color:var(--slate);margin-bottom:12px">Select every file the extraction produced for the day — the <b>Receipt Register Summary</b> and the <b>Customer Outstanding Summary</b> for each business unit. They are read here in your browser; nothing is uploaded. A business unit with no file is left blank rather than counted as nil.</div>'
+      + '<div class="dropzone" ondragover="event.preventDefault()" ondrop="misDrop(event)" onclick="document.getElementById(\'misFiles\').click()">'
+        + '<i class="fa-solid fa-file-arrow-up"></i><div id="misPickName">Drag &amp; drop the files, or click to choose them</div>'
+        + '<div style="font-size:12px;margin-top:4px">.xlsx or .xls · up to ' + (MIS.bus.length * 2) + ' files · exactly as they download from FarVision</div>'
+      + '</div>'
+      + '<input type="file" id="misFiles" multiple accept=".xlsx,.xls" style="display:none" onchange="misFilesPicked(this.files)">'
+      + '<div id="misStageHost" style="margin-top:14px"></div>'
+    + '</div>'
+    + '<div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button>'
+      + '<button class="btn btn-primary" id="misSaveBtn" disabled onclick="misSave(this)"><i class="fa-solid fa-floppy-disk"></i> Save this report</button></div>', 'lg');
+};
+window.misDrop = function (e) {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files;
+  if (f && f.length) misFilesPicked(f);
+};
+
+window.misFilesPicked = async function (fileList) {
+  const files = Array.prototype.slice.call(fileList || []);
+  if (!files.length) return;
+  const host = $('misStageHost'); if (!host) return;
+  const pick = $('misPickName'); if (pick) pick.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') + ' selected';
+  host.innerHTML = '<div class="loader"><div class="spin"></div></div>';
+  try {
+    if (!(await loadXLSX())) throw new Error('Could not load the spreadsheet reader. Check the connection and try again.');
+
+    /* WHICH DAY IS THIS. Every file carries its own as-at date, and they should agree because
+       they came out of one extraction run. The latest is taken as the report's date and any
+       disagreement is shown rather than hidden, because a stale file mixed into a fresh set is
+       exactly the mistake worth catching before it is filed. */
+    const read = [];
+    const bad = [];
+    for (const f of files) {
+      try {
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });   // serials, not Dates - see misCellDate
+        const rows = misSheetRows(wb);
+        const kind = misKindOf(rows);
+        if (!kind) { bad.push([f.name, 'not a Receipt Register or Customer Outstanding summary']); continue; }
+        read.push({ file: f, wb: wb, kind: kind, buName: misBannerLine(rows, 'Business Unit:') });
+      } catch (e) { bad.push([f.name, (e && e.message) || String(e)]); }
+    }
+    if (!read.length) throw new Error('None of those files could be read as a FarVision summary.');
+
+    const dates = [];
+    read.forEach(function (r) {
+      try {
+        const rows = misSheetRows(r.wb);
+        const d = r.kind === 'collection'
+          ? misParseDMY((misBannerLine(rows, 'Custom Date:').split(/\bTo\b/i)[1] || ''))
+          : misParseDMY(misBannerLine(rows, 'As On Date:'));
+        if (d) { r.asOn = d; dates.push(d.getTime()); }
+      } catch (e) { /* a file with no readable banner still contributes its figures */ }
+    });
+    const reportDate = dates.length ? new Date(Math.max.apply(null, dates)) : new Date();
+    const spread = dates.length ? (Math.max.apply(null, dates) - Math.min.apply(null, dates)) : 0;
+    const curr = { y: reportDate.getFullYear(), m: reportDate.getMonth() + 1 };
+    const prev = misPrevMonth(curr.y, curr.m);
+
+    // Each file lands on its business unit by the name the ERP wrote inside it, not the filename.
+    const byBu = {};
+    MIS.bus.forEach(function (b) { byBu[b.bu_name] = { bu: b, coll: null, out: null, cf: '', of: '' }; });
+    read.forEach(function (r) {
+      const key = misNorm(r.buName);
+      const match = MIS.bus.find(function (b) { return misNorm(b.bu_name) === key; });
+      if (!match) { bad.push([r.file.name, 'business unit "' + (r.buName || 'unnamed') + '" is not on the report']); return; }
+      const slot = byBu[match.bu_name];
+      try {
+        if (r.kind === 'collection') { slot.coll = misReadCollection(r.wb, curr, prev); slot.cf = r.file.name; }
+        else { slot.out = misReadOutstanding(r.wb); slot.of = r.file.name; }
+      } catch (e) { bad.push([r.file.name, (e && e.message) || String(e)]); }
+    });
+
+    MIS.staged = {
+      date: reportDate, curr: curr, prev: prev,
+      currLabel: misMonthLabel(curr.y, curr.m), prevLabel: misMonthLabel(prev.y, prev.m),
+      byBu: byBu, bad: bad, spreadDays: Math.round(spread / 86400000)
+    };
+    misStageRender();
+  } catch (e) {
+    host.innerHTML = '<div class="mis-badfile"><i class="fa-solid fa-circle-exclamation"></i> '
+      + esc((e && e.message) || String(e)) + '</div>';
+    const b = $('misSaveBtn'); if (b) b.disabled = true;
+  }
+};
+
+function misStageRows() {
+  const s = MIS.staged; if (!s) return [];
+  return MIS.bus.map(function (b) {
+    const slot = s.byBu[b.bu_name];
+    return {
+      bu: b,
+      outstanding: slot.out ? slot.out.total : null,
+      curr: slot.coll ? slot.coll.curr : null,
+      prev: slot.coll ? slot.coll.prev : null,
+      nCurr: slot.coll ? slot.coll.nCurr : null,
+      nPrev: slot.coll ? slot.coll.nPrev : null,
+      nOut: slot.out ? slot.out.n : null,
+      nExcl: (slot.coll ? slot.coll.excluded : 0) + (slot.out ? slot.out.excluded : 0),
+      cf: slot.cf, of: slot.of,
+      has: !!(slot.coll || slot.out)
+    };
+  });
+}
+
+function misStageRender() {
+  const host = $('misStageHost'); const s = MIS.staged;
+  if (!host || !s) return;
+  const rows = misStageRows();
+  const have = rows.filter(function (r) { return r.has; }).length;
+  const tot = rows.reduce(function (a, r) {
+    a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
+  }, { o: 0, c: 0, p: 0 });
+
+  const tick = function (yes, fname) {
+    return yes ? '<i class="fa-solid fa-circle-check mis-ok" title="' + esc(fname) + '"></i>'
+               : '<i class="fa-regular fa-circle mis-miss" title="no file"></i>';
+  };
+  const cell = function (v, n, unit) {
+    if (v === null) return '<td class="mis-num mis-blank">—</td>';
+    return '<td class="mis-num">' + esc(misIN(v, true))
+      + (n ? '<div class="mis-when">' + n + ' ' + unit + (n === 1 ? '' : 's') + '</div>' : '') + '</td>';
+  };
+
+  const warn = [];
+  if (s.spreadDays > 0) warn.push('The files are not all from the same day — they span ' + s.spreadDays + ' day' + (s.spreadDays === 1 ? '' : 's') + '. The latest, ' + misDMY(s.date) + ', is being used.');
+  if (have < MIS.bus.length) warn.push((MIS.bus.length - have) + ' business unit' + ((MIS.bus.length - have) === 1 ? ' has' : 's have') + ' no file and will be left blank.');
+  const clash = MIS.reports.find(function (r) { return r.report_date === misISO(s.date); });
+  if (clash) warn.push('A report for ' + misDMY(s.date) + ' already exists. Saving will replace it.');
+
+  host.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<div style="font-size:13px"><b>' + esc(misDMY(s.date)) + '</b> · current month <b>' + esc(s.currLabel)
+        + '</b> · previous <b>' + esc(s.prevLabel) + '</b></div>'
+      + '<div style="margin-left:auto;font-size:12.5px;color:var(--slate)">' + have + ' of ' + MIS.bus.length + ' business units matched</div>'
+    + '</div>'
+    + (warn.length ? '<div class="mis-badfile" style="margin-top:0;margin-bottom:10px"><i class="fa-solid fa-triangle-exclamation"></i> ' + warn.map(esc).join('<br>') + '</div>' : '')
+    + '<div class="mis-stage"><table><thead><tr>'
+      + '<th>Business unit</th><th style="text-align:center">Coll.</th><th style="text-align:center">Outst.</th>'
+      + '<th class="mis-num">Outstanding</th><th class="mis-num">' + esc(s.currLabel) + '</th><th class="mis-num">' + esc(s.prevLabel) + '</th>'
+      + '</tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr' + (r.has ? '' : ' style="opacity:.55"') + '>'
+            + '<td>' + esc(r.bu.bu_name) + '<div class="mis-when">' + esc(r.bu.project_name) + '</div></td>'
+            + '<td style="text-align:center">' + tick(!!r.cf, r.cf) + '</td>'
+            + '<td style="text-align:center">' + tick(!!r.of, r.of) + '</td>'
+            + cell(r.outstanding, r.nOut, 'customer')
+            + cell(r.curr, r.nCurr, 'receipt')
+            + cell(r.prev, r.nPrev, 'receipt')
+            + '</tr>';
+        }).join('')
+      + '<tr class="mis-tot"><td colspan="3">TOTAL</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
+      + '</tbody></table></div>'
+    + (s.bad.length
+        ? '<div class="mis-badfile"><b>' + s.bad.length + ' file' + (s.bad.length === 1 ? '' : 's') + ' not used:</b><br>'
+          + s.bad.map(function (b) { return esc(b[0]) + ' — ' + esc(b[1]); }).join('<br>') + '</div>'
+        : '');
+  const btn = $('misSaveBtn'); if (btn) btn.disabled = !have;
+}
+
+window.misSave = async function (btn) {
+  const s = MIS.staged;
+  if (!s) return;
+  const rows = misStageRows().filter(function (r) { return r.has; });
+  if (!rows.length) { toast('Nothing matched — there is no report to save', 'warn'); return; }
+  const iso = misISO(s.date);
+  const clash = MIS.reports.find(function (r) { return r.report_date === iso; });
+  if (clash && !(await confirmDialog('A report for ' + misDMY(s.date) + ' is already on record. Replace it with this one?',
+      { title: 'Replace that day’s report?', okLabel: 'Replace', icon: 'fa-rotate' }))) return;
+
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…'; }
+  try {
+    // The old record goes first, so a replaced day can never end up with two sets of rows.
+    if (clash) await sb.schema('postsales').from('mis_reports').delete().eq('id', clash.id);
+    const tot = rows.reduce(function (a, r) {
+      a.o += r.outstanding || 0; a.c += r.curr || 0; a.p += r.prev || 0; return a;
+    }, { o: 0, c: 0, p: 0 });
+    const { data: rep, error } = await sb.schema('postsales').from('mis_reports').insert({
+      report_date: iso, curr_month_label: s.currLabel, prev_month_label: s.prevLabel,
+      total_outstanding: Math.round(tot.o), total_curr: Math.round(tot.c), total_prev: Math.round(tot.p),
+      bu_count: rows.length,
+      note: s.bad.length ? (s.bad.length + ' file(s) were not used') : null,
+      created_by: (typeof state !== 'undefined' && state.email) || null
+    }).select('*').single();
+    if (error) throw error;
+    const payload = rows.map(function (r) {
+      return {
+        report_id: rep.id, sort_order: r.bu.sort_order,
+        project_name: r.bu.project_name, bu_name: r.bu.bu_name,
+        outstanding: r.outstanding === null ? null : Math.round(r.outstanding),
+        curr_collection: r.curr === null ? null : Math.round(r.curr),
+        prev_collection: r.prev === null ? null : Math.round(r.prev),
+        src_collection: r.cf || null, src_outstanding: r.of || null,
+        n_curr: r.nCurr, n_prev: r.nPrev, n_out: r.nOut, n_excluded: r.nExcl
+      };
+    });
+    const { error: re } = await sb.schema('postsales').from('mis_rows').insert(payload);
+    if (re) throw re;
+    try { usageQueue('postsales.mis.build_mis_report_from_farvision_files', 'create',
+      { title: misDMY(s.date), status: rows.length + ' of ' + MIS.bus.length + ' business units' }); } catch (e) {}
+    closeModal();
+    await misLoadReports();
+    misRender();
+    toast('MIS report for ' + misDMY(s.date) + ' saved', 'ok');
+  } catch (e) {
+    toast('Could not save the report: ' + ((e && e.message) || e), 'err');
+    if (btn) { btn.disabled = false; btn.innerHTML = restore; }
+  }
+};
+
+window.misDelete = async function (id) {
+  const r = MIS.reports.find(function (x) { return x.id === id; });
+  if (!r) return;
+  if (!(await confirmDialog('Delete the MIS report for ' + misDMY(r.report_date) + '? It is removed for everyone.',
+    { title: 'Delete this record?' }))) return;
+  try {
+    const { error } = await sb.schema('postsales').from('mis_reports').delete().eq('id', id);
+    if (error) throw error;
+    await misLoadReports();
+    misRender();
+    toast('Report deleted', 'ok');
+  } catch (e) { toast('Could not delete: ' + ((e && e.message) || e), 'err'); }
+};
+
+/* ── one saved report, read back ───────────────────────────────────────────────────────── */
+
+/* Always read from the database, never from whatever happens to be in memory. A record is a
+   record: preview, Excel and PDF must all be showing the same thing, and the only way to be
+   sure of that is for all three to fetch it the same way. */
+async function misFetch(id) {
+  const rep = MIS.reports.find(function (x) { return x.id === id; });
+  const { data, error } = await sb.schema('postsales').from('mis_rows').select('*')
+    .eq('report_id', id).order('sort_order');
+  if (error) throw error;
+  // Every business unit gets a line whether or not it had a file that day, in the fixed order.
+  const byBu = {};
+  (data || []).forEach(function (r) { byBu[r.bu_name] = r; });
+  const rows = MIS.bus.map(function (b) {
+    const r = byBu[b.bu_name];
+    return {
+      project_name: b.project_name, bu_name: b.bu_name,
+      outstanding: r ? r.outstanding : null,
+      curr: r ? r.curr_collection : null,
+      prev: r ? r.prev_collection : null
+    };
+  });
+  // A business unit retired from the list but present in an old report still belongs to it.
+  (data || []).forEach(function (r) {
+    if (!MIS.bus.some(function (b) { return b.bu_name === r.bu_name; })) {
+      rows.push({ project_name: r.project_name, bu_name: r.bu_name,
+        outstanding: r.outstanding, curr: r.curr_collection, prev: r.prev_collection });
+    }
+  });
+  return { rep: rep, rows: rows };
+}
+function misTotals(rows) {
+  return rows.reduce(function (a, r) {
+    a.o += Number(r.outstanding || 0); a.c += Number(r.curr || 0); a.p += Number(r.prev || 0); return a;
+  }, { o: 0, c: 0, p: 0 });
+}
+function misTitleLines(rep) {
+  const d = misDMY(rep.report_date);
+  return {
+    heading: 'Project Wise Outstanding Status VS Collection Status As Per ERP',
+    sub: 'Weekly Basis MIS Report - Date: ' + d,
+    cOut: 'Current Outstanding Amount Till Date ' + d,
+    cCur: 'Current Month Collection Amount Upto - ' + rep.curr_month_label,
+    cPrv: 'Previous Month Collection Amount Upto - ' + rep.prev_month_label
+  };
+}
+
+window.misPreview = async function (id) {
+  openModal('<div class="modal-head"><h3><i class="fa-solid fa-eye" style="color:#7e22ce"></i> MIS Report</h3></div>'
+    + '<div class="modal-body"><div class="loader"><div class="spin"></div></div></div>', 'xl');
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    const host = document.querySelector('#modalHost .modal-body');
+    if (!host) return;
+    host.innerHTML = '<div class="mis-prevwrap"><div class="mis-doc">'
+      + '<h4>' + esc(t.heading) + '</h4>'
+      + '<div class="sub">' + esc(t.sub) + '</div>'
+      + '<table><thead><tr><th>Project Name</th><th>Business Unit Name</th>'
+        + '<th style="text-align:right">' + esc(t.cOut) + '</th>'
+        + '<th style="text-align:right">' + esc(t.cCur) + '</th>'
+        + '<th style="text-align:right">' + esc(t.cPrv) + '</th></tr></thead><tbody>'
+      + rows.map(function (r) {
+          return '<tr><td>' + esc(r.project_name) + '</td><td>' + esc(r.bu_name) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.outstanding, true)) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.curr, true)) + '</td>'
+            + '<td class="mis-num">' + esc(misIN(r.prev, true)) + '</td></tr>';
+        }).join('')
+      + '<tr class="mis-tot"><td>TOTAL</td><td></td>'
+        + '<td class="mis-num">' + esc(misIN(tot.o)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.c)) + '</td>'
+        + '<td class="mis-num">' + esc(misIN(tot.p)) + '</td></tr>'
+      + '</tbody></table></div></div>';
+    const foot = document.querySelector('#modalHost .modal-foot');
+    if (!foot) {
+      document.querySelector('#modalHost .modal').insertAdjacentHTML('beforeend',
+        '<div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button>'
+        + '<button class="btn" onclick="misExportXlsx(' + id + ',this)"><i class="fa-solid fa-file-excel"></i> Excel</button>'
+        + '<button class="btn btn-primary" onclick="misExportPdf(' + id + ',this)"><i class="fa-solid fa-file-pdf"></i> PDF</button></div>');
+    }
+    try { usageQueue('postsales.mis.preview_an_mis_report', 'view', { title: misDMY(rep.report_date) }); } catch (e) {}
+  } catch (e) {
+    const host = document.querySelector('#modalHost .modal-body');
+    if (host) host.innerHTML = '<div class="mis-badfile">' + esc((e && e.message) || String(e)) + '</div>';
+  }
+};
+
+/* ── Excel ─────────────────────────────────────────────────────────────────────────────── */
+
+/* The figures go out as NUMBERS, not as the "2,13,84,025" strings the report is read in. The
+   template has always carried them as text, which is why the total at the bottom had to be
+   typed rather than summed - anybody who wanted to check a column had to retype it first.
+   The Indian grouping is a number format here, so it looks identical and still adds up. */
+const MIS_XL_FMT = '[>=10000000]##\\,##\\,##\\,##0;[>=100000]##\\,##\\,##0;##,##0';
+
+window.misExportXlsx = async function (id, btn) {
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    if (!(await usbLoadXlsx())) throw new Error('Could not load the spreadsheet library.');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'JAIN-E'; wb.created = new Date();
+    const ws = wb.addWorksheet('Sheet1');
+    ws.columns = [{ width: 26 }, { width: 38 }, { width: 22 }, { width: 22 }, { width: 22 }];
+
+    ws.mergeCells('A2:E2');
+    ws.getCell('A2').value = t.heading;
+    ws.getCell('A2').font = { size: 13, bold: true };
+    ws.getCell('A2').alignment = { horizontal: 'center' };
+    ws.getRow(2).height = 22;
+    ws.mergeCells('A3:E3');
+    ws.getCell('A3').value = t.sub;
+    ws.getCell('A3').font = { size: 11, bold: true, color: { argb: 'FF7E22CE' } };
+    ws.getCell('A3').alignment = { horizontal: 'center' };
+
+    const head = ws.getRow(4);
+    head.values = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+    head.height = 42;
+    head.eachCell(function (c) {
+      c.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10.5 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7E22CE' } };
+      c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    });
+
+    /* A dash, not a nought. Nothing collected and no file to say so both read as a dash on the
+       screen and in the PDF, and a spreadsheet that showed 0 for the same line would look like a
+       different report. SUM steps over text, so a dash costs the total nothing. */
+    const cellVal = function (v) { return (v == null || Number(v) === 0) ? null : Number(v); };
+    rows.forEach(function (r) {
+      const row = ws.addRow([r.project_name, r.bu_name,
+        cellVal(r.outstanding), cellVal(r.curr), cellVal(r.prev)]);
+      [3, 4, 5].forEach(function (i) {
+        const c = row.getCell(i);
+        c.numFmt = MIS_XL_FMT;
+        c.alignment = { horizontal: 'right' };
+        if (c.value == null) { c.value = '—'; c.alignment = { horizontal: 'center' }; c.font = { color: { argb: 'FF94A3B8' } }; }
+      });
+      row.eachCell(function (c) { c.border = { top: { style: 'hair' }, left: { style: 'hair' }, bottom: { style: 'hair' }, right: { style: 'hair' } }; });
+    });
+
+    /* The total is a live SUM over the rows above it, so the sheet checks itself - and it
+       carries the answer with it. A formula written without a cached result is blank until
+       something recalculates the file; Excel does, a phone viewer and Google Sheets' preview
+       do not, and this report is forwarded more often than it is opened in Excel. */
+    const first = 5, last = 4 + rows.length;
+    const tr = ws.addRow(['TOTAL', null,
+      { formula: 'SUM(C' + first + ':C' + last + ')', result: Math.round(tot.o) },
+      { formula: 'SUM(D' + first + ':D' + last + ')', result: Math.round(tot.c) },
+      { formula: 'SUM(E' + first + ':E' + last + ')', result: Math.round(tot.p) }]);
+    tr.height = 20;
+    tr.eachCell(function (c, i) {
+      c.font = { bold: true, size: 11 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+      c.border = { top: { style: 'medium' }, left: { style: 'thin' }, bottom: { style: 'double' }, right: { style: 'thin' } };
+      if (i >= 3) { c.numFmt = MIS_XL_FMT; c.alignment = { horizontal: 'right' }; }
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    usbSaveBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      'MIS_Report_' + misDMY(rep.report_date) + '.xlsx');
+    try { usageQueue('postsales.mis.download_mis_report_as_excel', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
+    toast('Excel downloaded', 'ok');
+  } catch (e) {
+    toast('Could not build the spreadsheet: ' + ((e && e.message) || e), 'err');
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
+};
+
+/* ── PDF ───────────────────────────────────────────────────────────────────────────────── */
+
+/* Landscape, because five columns with rupee figures and two headings that each run to a line
+   of prose do not fit across a portrait page without being squeezed into something nobody
+   wants to read off a phone. The Jain Group letterhead goes on every page - this one leaves
+   the building. */
+window.misExportPdf = async function (id, btn) {
+  const restore = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+  try {
+    const { rep, rows } = await misFetch(id);
+    const t = misTitleLines(rep), tot = misTotals(rows);
+    const L = await loadPdfLib();
+    if (!L) throw new Error('Could not load the PDF library.');
+    const doc = await L.PDFDocument.create();
+    const reg = await doc.embedFont(L.StandardFonts.Helvetica);
+    const bold = await doc.embedFont(L.StandardFonts.HelveticaBold);
+    let logo = null;
+    try { const b = await jgLogoPngBytes(); if (b) logo = await doc.embedPng(b); } catch (e) {}
+
+    const W = 841.89, H = 595.28, M = 40;
+    const ink = L.rgb(0.09, 0.11, 0.15), soft = L.rgb(0.42, 0.45, 0.50),
+          brand = L.rgb(0.494, 0.133, 0.808), line = L.rgb(0.85, 0.87, 0.90),
+          zebra = L.rgb(0.976, 0.980, 0.988);
+    // Project, Business unit, then three money columns of equal width.
+    const COL = [150, 215, 132, 132, 132];
+    const X = []; { let x = M; COL.forEach(function (w) { X.push(x); x += w; }); }
+    const RIGHT = M + COL.reduce(function (a, b) { return a + b; }, 0);
+
+    let page, y;
+    const headerHeight = function () { return logo ? (150 * logo.height / logo.width) + 16 : 0; };
+    const newPage = function () {
+      page = doc.addPage([W, H]);
+      y = H - M;
+      if (logo) {
+        const lw = 150, lh = lw * logo.height / logo.width;
+        page.drawImage(logo, { x: M, y: y - lh, width: lw, height: lh });
+        y -= lh + 10;
+        page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 1.4, color: L.rgb(0.78, 0.09, 0.14) });
+        y -= 18;
+      }
+    };
+    // The column headings repeat on every page; a continued table with no headings is a wall of
+    // numbers whose meaning is on a sheet somebody already turned over.
+    const drawHead = function () {
+      const hh = 34;
+      page.drawRectangle({ x: M, y: y - hh, width: RIGHT - M, height: hh, color: brand });
+      const labels = ['Project Name', 'Business Unit Name', t.cOut, t.cCur, t.cPrv];
+      labels.forEach(function (lab, i) {
+        const size = 7.6;
+        // Two short lines beat one clipped one for the three long money headings.
+        const words = lab.split(' ');
+        const lines = [];
+        let cur = '';
+        words.forEach(function (w) {
+          const test = cur ? cur + ' ' + w : w;
+          if (bold.widthOfTextAtSize(test, size) > COL[i] - 12 && cur) { lines.push(cur); cur = w; }
+          else cur = test;
+        });
+        if (cur) lines.push(cur);
+        const startY = y - hh / 2 + (lines.length * 9) / 2 - 7;
+        lines.forEach(function (ln, k) {
+          const w = bold.widthOfTextAtSize(ln, size);
+          const cx = i < 2 ? X[i] + 6 : X[i] + COL[i] - 6 - w;
+          page.drawText(ln, { x: cx, y: startY - k * 9, size: size, font: bold, color: L.rgb(1, 1, 1) });
+        });
+      });
+      y -= hh;
+    };
+
+    newPage();
+    page.drawText(t.heading, { x: M, y: y - 12, size: 12.5, font: bold, color: ink });
+    y -= 12 + 15;
+    page.drawText(t.sub, { x: M, y: y - 10, size: 10, font: bold, color: brand });
+    y -= 10 + 16;
+    drawHead();
+
+    const RH = 20;
+    const money = function (v, x, w, yy, f, col) {
+      const s = misIN(v, true);
+      const tw = f.widthOfTextAtSize(s, 9);
+      page.drawText(s, { x: x + w - 6 - tw, y: yy, size: 9, font: f, color: col });
+    };
+    rows.forEach(function (r, i) {
+      if (y - RH < M + 26) { newPage(); drawHead(); }
+      if (i % 2) page.drawRectangle({ x: M, y: y - RH, width: RIGHT - M, height: RH, color: zebra });
+      const ty = y - RH + 6.5;
+      page.drawText(String(r.project_name || ''), { x: X[0] + 6, y: ty, size: 9, font: reg, color: ink });
+      page.drawText(String(r.bu_name || ''), { x: X[1] + 6, y: ty, size: 9, font: reg, color: ink });
+      const blank = function (v) { return v == null || Number(v) === 0; };
+      money(r.outstanding, X[2], COL[2], ty, reg, blank(r.outstanding) ? soft : ink);
+      money(r.curr, X[3], COL[3], ty, reg, blank(r.curr) ? soft : ink);
+      money(r.prev, X[4], COL[4], ty, reg, blank(r.prev) ? soft : ink);
+      page.drawLine({ start: { x: M, y: y - RH }, end: { x: RIGHT, y: y - RH }, thickness: 0.5, color: line });
+      y -= RH;
+    });
+
+    if (y - 24 < M + 26) { newPage(); drawHead(); }
+    page.drawRectangle({ x: M, y: y - 24, width: RIGHT - M, height: 24, color: L.rgb(0.945, 0.957, 0.973) });
+    page.drawText('TOTAL', { x: X[0] + 6, y: y - 24 + 8, size: 10, font: bold, color: ink });
+    money(tot.o, X[2], COL[2], y - 24 + 8, bold, ink);
+    money(tot.c, X[3], COL[3], y - 24 + 8, bold, ink);
+    money(tot.p, X[4], COL[4], y - 24 + 8, bold, ink);
+    page.drawLine({ start: { x: M, y: y }, end: { x: RIGHT, y: y }, thickness: 1.2, color: ink });
+    y -= 24;
+
+    // Page numbers last, once the count is known.
+    const pages = doc.getPages();
+    pages.forEach(function (p, i) {
+      const s = 'Page ' + (i + 1) + ' of ' + pages.length + '  ·  Generated from FarVision extracts on ' + misDMY(rep.report_date);
+      p.drawText(s, { x: M, y: M - 16, size: 7.5, font: reg, color: soft });
+    });
+
+    const bytes = await doc.save();
+    usbSaveBlob(new Blob([bytes], { type: 'application/pdf' }),
+      'MIS_Report_' + misDMY(rep.report_date) + '.pdf');
+    try { usageQueue('postsales.mis.download_mis_report_as_pdf', 'export', { title: misDMY(rep.report_date) }); } catch (e) {}
+    toast('PDF downloaded', 'ok');
+  } catch (e) {
+    toast('Could not build the PDF: ' + ((e && e.message) || e), 'err');
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = restore; } }
+};
+
 VIEWS.postsales=async function(v,seg){
   setCrumb(['Sales','Post Sales']);
-  const tabs=[['adhoc','ADHOC']];
+  const tabs=[['adhoc','ADHOC'],['mis','MIS']];
   const tab=(seg&&seg[0])||'adhoc';
+  // One body div per tab rather than one shared one: the two are rendered by different code
+  // that each look up their own host by id, and a shared id would have them fighting over it.
   v.innerHTML=mHead('fa-headset','#7e22ce','Post Sales')
     +'<div class="tabs" style="margin-top:14px">'+tabs.map(function(t){return '<div class="tab '+(tab===t[0]?'active':'')+'" onclick="navTo(\'postsales/'+t[0]+'\')">'+t[1]+'</div>';}).join('')+'</div>'
-    +'<div id="psaBody" style="margin-top:16px"></div>';
+    +'<div id="'+(tab==='mis'?'misBody':'psaBody')+'" style="margin-top:16px"></div>';
+  if(tab==='mis'){
+    misCss();
+    const host=$('misBody'); if(host) loader(host);
+    await misLoadBus();
+    await misLoadReports();
+    misRender();
+    return;
+  }
   if(tab==='adhoc'){
     const host=$('psaBody'); if(host) loader(host);
     PSA.queue=await psaFetchAll();
