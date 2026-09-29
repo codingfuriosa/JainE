@@ -8019,7 +8019,7 @@
          reject_to_seq where a flow sets one, as Invoice Processing does. The confirmation names
          whoever that turns out to be before anything happens. Not styled as a destructive action,
          since nothing is destroyed - it is a return. */
-      const rejectBtn='<button class="ac-btn" title="Send this '+esc2(wfNounOf(flow).lc)+' back to the person before you to correct" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
+      const rejectBtn='<button class="ac-btn" title="Mark this '+esc2(wfNounOf(flow).lc)+' Sent Back and hold it yourself until it is corrected" onclick="wfRejectStart('+fcs.id+','+fcs.case_id+')"><i class="fa-solid fa-rotate-left"></i> Send back</button>';
       if(!received){
         A='<button class="ac-btn primary" onclick="wfReceive('+fcs.id+')"><i class="fa-solid fa-inbox"></i> Receive</button>'+rejectBtn;
       } else {
@@ -8374,6 +8374,9 @@
      otherwise it is ONE POSITION BACK along this instance's own route, which is not the same as
      "the step with the next lowest number" once a flow branches. null means there is nothing
      before it, which ends the instance. */
+  /* Kept, uncalled, as the client-side mirror of acc.wf_prev_seq, which is likewise kept in the
+     database: both are correct and both are what would be needed if Send back is ever changed
+     back to passing the instance up the route. Neither is referenced while it holds instead. */
   function wfRejectTargetSeq(mySeq, rejectTo, routeSeqs, steps){
     if(mySeq==null) return null;
     if(rejectTo!=null && mySeq>rejectTo) return rejectTo;
@@ -8388,39 +8391,26 @@
     return best;
   }
   window.wfRejectStart=async function(fcsId, caseId){
-    let noun='instance', wantsReason=false, raisedBy='', toNames='', endsInstance=false;
+    let noun='instance', wantsReason=false;
     try{
-      const {data:mine}=await ACC().from('flow_case_steps').select('case_id,seq').eq('id',fcsId).maybeSingle();
+      const {data:mine}=await ACC().from('flow_case_steps').select('case_id').eq('id',fcsId).maybeSingle();
       const cid=(mine&&mine.case_id)||caseId;
       if(cid){
-        const {data:c}=await ACC().from('flow_cases').select('flow_id,created_by,route_seqs').eq('id',cid).maybeSingle();
-        raisedBy=(c&&c.created_by)||'';
-        let rejectTo=null;
+        const {data:c}=await ACC().from('flow_cases').select('flow_id').eq('id',cid).maybeSingle();
         if(c&&c.flow_id){
-          const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun,reject_to_seq').eq('id',c.flow_id).maybeSingle();
+          const {data:f}=await ACC().from('flows').select('reject_deletes_instance,instance_noun').eq('id',c.flow_id).maybeSingle();
           wantsReason=!!(f&&f.reject_deletes_instance);
           noun=(f&&f.instance_noun)||'instance';
-          rejectTo=(f&&f.reject_to_seq!=null)?f.reject_to_seq:null;
-        }
-        const {data:sib}=await ACC().from('flow_case_steps').select('seq,person,candidates').eq('case_id',cid);
-        const target=wfRejectTargetSeq(mine&&mine.seq, rejectTo, (c&&c.route_seqs)||null, sib||[]);
-        if(target==null) endsInstance=true;
-        else{
-          const st=(sib||[]).find(function(x){ return x.seq===target; });
-          const list=(st&&Array.isArray(st.candidates)&&st.candidates.length)?st.candidates:((st&&st.person)?[st.person]:[]);
-          toNames=list.map(function(e){ return wfNm(e)||e; }).join(' or ');
         }
       }
     }catch(e){}
-    /* NAME THE PERSON IT IS ACTUALLY GOING TO. This used to say it went back to whoever raised the
-       instance, which was never what happened — and now that it goes to the previous step's owner,
-       saying "the raiser" would be wrong in a way that matters: the point of the sentence is to
-       tell you who is about to be interrupted. */
-    const warn = endsInstance
-      ? ('<div class="wf-rej-note"><i class="fa-solid fa-triangle-exclamation"></i> <span>Nothing comes before this step, so sending it back <b>ends this '+esc2(noun)
-         +'</b>. '+esc2(raisedBy?wfNm(raisedBy):'Whoever raised it')+' is told, and can raise a new one if it still needs doing.</span></div>')
-      : ('<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
-         +' goes back to <b>'+esc2(toNames||'the previous step')+'</b> to correct. Everything after their step is cleared, and it only moves forward again once they send it on.</span></div>');
+    /* IT STAYS WITH YOU, so there is no destination to work out and nobody to name. The person
+       who says a bill is wrong is the person who knows what is wrong with it; it is marked Sent
+       Back and held here until that is settled, then forwarded like any other step. */
+    const warn='<div class="wf-rej-note"><i class="fa-solid fa-rotate-left"></i> <span>This '+esc2(noun)
+      +' is marked <b>Sent Back</b> and stays with <b>you</b> as a received task. Nothing after it '
+      +'is touched, nothing moves on until you forward it, and the reason is recorded on the '
+      +esc2(noun)+'.</span></div>';
     openModal('<div class="modal-head"><h3><i class="fa-solid fa-rotate-left" style="color:var(--brand)"></i> Send this back</h3><span class="x" onclick="closeModal()">&times;</span></div>'
       +'<div class="modal-body frm" style="width:min(94vw,520px)">'
         +warn
