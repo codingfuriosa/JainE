@@ -117,10 +117,10 @@ const SUPABASE_URL='https://rkxsgtauigjrpcjkmccu.supabase.co';
 const SUPABASE_KEY='sb_publishable_16E3r7KtxA7RMVdtm08gkA_DSEAo94n';
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
-// Sign-in is a 6-digit code emailed by the customer-otp edge function - there are no customer
+// Sign-in is a 6-digit code emailed by the customer-invite edge function - there are no customer
 // passwords. The function checks the email belongs to a customer with a live flat in a project whose
 // customer login is on, and on the right code hands back a one-time token that becomes the session.
-const OTP_URL=SUPABASE_URL+'/functions/v1/customer-otp';
+const OTP_URL=SUPABASE_URL+'/functions/v1/customer-invite';
 let SENT_EMAIL='',resendTimer=null;
 function msg(t,type,box){const m=$(box||(SENT_EMAIL?'msg2':'msg'));m.className='msg show '+type;m.innerHTML='<i class="fa-solid fa-'+(type==='ok'?'circle-check':'circle-exclamation')+'"></i><span></span>';m.lastChild.textContent=t;}
 function hideMsg(){$('msg').className='msg';$('msg2').className='msg';}

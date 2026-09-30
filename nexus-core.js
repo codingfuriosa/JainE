@@ -18488,7 +18488,7 @@ function cpaUnitList(){
   $('cpaUnitList').innerHTML=cpaTable(['Unit code','Project','Tower','Category','Sub-type','Status','Customer','Floor casting',''],
     rows.length?rows:[['No units match this filter','','','','','','','','']]);
 }
-/* Which projects' customers may sign in (email code, see customer-otp). Switching a project on is all
+/* Which projects' customers may sign in (email code, see the customer-invite edge function). Switching a project on is all
    it takes for every customer holding a live flat there - there are no logins to create. Switching
    off stops new sign-ins; anyone already signed in stays so until their session ends. */
 window.cpaProjectLogin=async function(id,on){
@@ -18629,7 +18629,7 @@ function cpaCustList(){
   const rows=list.map(c=>{
     const mine=byCustomer[c.id]||[];
     const projNames=[...new Set(mine.map(u=>(u.projects&&u.projects.name)||'').filter(Boolean))];
-    // Customers sign in with an emailed code (customer-otp), so there is nothing for staff to create:
+    // Customers sign in with an emailed code (customer-invite edge function), so there is nothing for staff to create:
     // this only says whether they can, and whether they have.
     const canSignIn=mine.some(u=>u.status!=='cancelled'&&liveProj.has(u.project_id));
     const loginTag=c.auth_user_id&&canSignIn?'<span class="tag t-green" title="Has signed in with an email code">Signed in</span>'
