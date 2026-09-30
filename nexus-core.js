@@ -18577,23 +18577,55 @@ window.cpaMarkCasting=async function(id){
 // A customer's project is not a column on the customer - it comes from the unit(s) they hold, and a
 // customer can legitimately hold units in more than one project. So both are derived per row rather
 // than stored, and the project filter asks "does this customer hold a unit HERE".
-let CPA_CUST_FILTER={proj:'',q:''};
+let CPA_CUST_FILTER={proj:'',block:'',q:''};
+/* Block = the unit's tower ("BLOCK B", "BLOCK-1"). Two projects can both have a "BLOCK A", so a block
+   is always kept together with its project: the option value is "<projectId>|<tower>", and with no
+   project picked the blocks are grouped under each project's name. */
+function cpaCustBlockKey(u){ return u.project_id+'|'+(u.tower||''); }
+function cpaCustBlockOpts(proj){
+  if(proj==='none') return '<option value="">All blocks</option>';
+  const natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
+  const byProj={};
+  (CPA.units||[]).forEach(u=>{
+    if(!u.tower||!u.customer_id||u.status==='cancelled')return;
+    if(proj&&String(u.project_id)!==proj)return;
+    (byProj[u.project_id]=byProj[u.project_id]||new Set()).add(u.tower);
+  });
+  const opt=(pid,t)=>`<option value="${esc(pid+'|'+t)}">${esc(t)}</option>`;
+  const projects=(CPA.projects||[]).filter(p=>byProj[p.id]);
+  const body=proj
+    ?[...(byProj[proj]||[])].sort(natural).map(t=>opt(proj,t)).join('')
+    :projects.map(p=>`<optgroup label="${esc(projShortName(p.name))}">${[...byProj[p.id]].sort(natural).map(t=>opt(p.id,t)).join('')}</optgroup>`).join('');
+  return '<option value="">All blocks</option>'+body;
+}
 async function cpaRenderCustomers(host){
   const [customers,,projects]=await Promise.all([cpaCustomers(true),cpaUnits(true),cpaProjects(true)]);
   const projOpts=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="sec-title" style="margin:0">Customers</div><button class="btn btn-primary" onclick="cpaCustomerModal()"><i class="fa-solid fa-plus"></i> New customer</button></div>
     <div class="mu-filters">
-      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter()" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
+      <select id="cpaCustProj" class="mu-sel" onchange="cpaCustFilter(true)" style="max-width:320px"><option value="">All projects</option>${projOpts}<option value="none">— Cancelled / no unit (hidden by default) —</option></select>
+      <select id="cpaCustBlock" class="mu-sel" onchange="cpaCustFilter()" style="max-width:200px" title="Customers holding a flat in this block">${cpaCustBlockOpts(CPA_CUST_FILTER.proj)}</select>
       <span class="mu-sw"><i class="fa-solid fa-magnifying-glass"></i><input id="cpaCustQ" placeholder="Search name, email, phone or unit code" oninput="cpaCustFilter()"></span>
       <span class="mu-count" id="cpaCustCount"></span>
     </div>
     <div id="cpaCustList"></div>`;
-  cpaCustList();
   if(CPA_CUST_FILTER.proj)$('cpaCustProj').value=CPA_CUST_FILTER.proj;
+  if(CPA_CUST_FILTER.block){ $('cpaCustBlock').value=CPA_CUST_FILTER.block; if($('cpaCustBlock').value!==CPA_CUST_FILTER.block)CPA_CUST_FILTER.block=''; }
   if(CPA_CUST_FILTER.q)$('cpaCustQ').value=CPA_CUST_FILTER.q;
+  $('cpaCustBlock').disabled=CPA_CUST_FILTER.proj==='none';
+  cpaCustList();
 }
-window.cpaCustFilter=function(){
+window.cpaCustFilter=function(projChanged){
   CPA_CUST_FILTER.proj=$('cpaCustProj').value;
+  const sel=$('cpaCustBlock');
+  if(projChanged){
+    // A new project brings its own blocks; keep the chosen one only if it belongs to that project.
+    const keep=CPA_CUST_FILTER.block;
+    sel.innerHTML=cpaCustBlockOpts(CPA_CUST_FILTER.proj);
+    sel.value=keep; if(sel.value!==keep)sel.value='';
+    sel.disabled=CPA_CUST_FILTER.proj==='none';
+  }
+  CPA_CUST_FILTER.block=sel.value;
   CPA_CUST_FILTER.q=$('cpaCustQ').value.trim().toLowerCase();
   cpaCustList();
 };
@@ -18612,7 +18644,7 @@ function cpaCustUnitsByCustomer(){
   return by;
 }
 function cpaCustList(){
-  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,q}=CPA_CUST_FILTER;
+  const all=CPA.customers||[],byCustomer=cpaCustUnitsByCustomer(),{proj,block,q}=CPA_CUST_FILTER;
   /* A customer with no unit holds no flat with us - a cancelled booking (Sales Details imports only
      Active rows, so cancellation leaves the customer behind without one) or a duplicate record left
      by an email that differed between exports. Neither belongs in the working list, so the default
@@ -18622,6 +18654,8 @@ function cpaCustList(){
     const mine=byCustomer[c.id]||[];
     if(proj==='none'){if(mine.length)return false;}
     else if(proj&&!mine.some(u=>String(u.project_id)===proj))return false;
+    // A flat they have cancelled does not put them in that block.
+    if(block&&proj!=='none'&&!mine.some(u=>u.status!=='cancelled'&&cpaCustBlockKey(u)===block))return false;
     if(q&&![c.full_name,c.email,c.phone].concat(mine.map(u=>u.unit_code)).join(' ').toLowerCase().includes(q))return false;
     return true;
   });
